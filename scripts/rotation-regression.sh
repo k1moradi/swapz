@@ -2,7 +2,7 @@
 set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in cmp dd dmsetup losetup modprobe tr truncate; do
+for tool in cmp dd dmsetup losetup modprobe python3 truncate; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 
@@ -31,14 +31,12 @@ run_case() {
   truncate -s 8M "$backing"
   LOOP=$(losetup --find --show "$backing")
 
-  # One logical 4 KiB page backed by 8 MiB gives four 2 MiB arenas.
-  # With one container emitted per synchronous write, the 513th overwrite
-  # forces the first rotation: 512 writes fill arena 0, compaction copies
-  # the current live page into arena 1, then the triggering foreground write
-  # must remain intact.
+  # V2 uses 1 MiB / 256-block log segments.  With one container emitted per
+  # synchronous write, the 257th overwrite closes segment 0 and switches to
+  # segment 1.  The foreground write must remain intact across that boundary.
   dmsetup create "$NAME" --table "0 8 swapz $LOOP"
 
-  for ((write_number = 1; write_number <= 513; ++write_number)); do
+  for ((write_number = 1; write_number <= 257; ++write_number)); do
     if ((write_number % 2)); then
       SOURCE="$page_a"
     else
@@ -57,7 +55,7 @@ run_case() {
   echo "$case_name status: $STATUS"
 
   grep -Eq 'rotations=[1-9][0-9]*' <<<"$STATUS" || {
-    echo "$case_name case did not trigger arena rotation" >&2
+    echo "$case_name case did not trigger a segment switch" >&2
     exit 1
   }
 
@@ -86,7 +84,11 @@ run_case raw "$TMP/raw-a" "$TMP/raw-b" raw_pages
 # Highly compressible but different pages verify that the foreground
 # compressed result also survives compaction's use of its separate scratch.
 dd if=/dev/zero of="$TMP/compressed-a" bs=4096 count=1 status=none
-tr '\000' '\377' < /dev/zero | dd of="$TMP/compressed-b" bs=4096 count=1 status=none
+python3 - "$TMP/compressed-b" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b"\\xff" * 4096)
+PY
 run_case compressed "$TMP/compressed-a" "$TMP/compressed-b" compressed_pages
 
-echo "arena rotation foreground-write regressions: PASS"
+echo "segment-switch foreground-write regressions: PASS"
