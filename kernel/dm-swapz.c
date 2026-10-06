@@ -107,7 +107,9 @@ struct swapz_stats {
 	u64 compressed_pages;
 	u64 raw_pages;
 	u64 upper_discards;
-	u64 arena_rotations;
+	u64 segment_switches;
+	u64 gc_victims;
+	u64 gc_scanned_mappings;
 	u64 compaction_pages;
 	u64 compaction_read_bytes;
 	u64 compaction_write_bytes;
