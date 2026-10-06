@@ -51,7 +51,7 @@ done
 
 [[ -b "$BACKING" ]] || { echo "$BACKING is not a block device" >&2; exit 1; }
 
-if grep -qE "^\${BACKING//\//\\/}[[:space:]]" /proc/swaps; then
+if grep -qE "^${BACKING//\//\\/}[[:space:]]" /proc/swaps; then
   echo "$BACKING is active swap" >&2
   exit 1
 fi
@@ -145,17 +145,17 @@ printf 'Queue: logical=%s physical=%s minimum_io=%s discard_granularity=%s disca
 modprobe dm-swapz
 
 for spec in "compressible:100" "partial:50" "incompressible:0"; do
-  workload=\${spec%%:*}
-  compression=\${spec##*:}
+  workload=${spec%%:*}
+  compression=${spec##*:}
 
   echo
   echo "=== $workload: raw baseline ==="
-  run_fio "$BACKING" "\${workload}-raw" "$compression"
+  run_fio "$BACKING" "${workload}-raw" "$compression"
 
   dmsetup create "$NAME" --table "0 $SECTORS swapz $BACKING"
 
   echo "=== $workload: swapz ==="
-  run_fio "/dev/mapper/$NAME" "\${workload}-swapz" "$compression"
+  run_fio "/dev/mapper/$NAME" "${workload}-swapz" "$compression"
   echo "STATUS workload=$workload $(dmsetup status "$NAME")"
 
   dmsetup remove "$NAME"
