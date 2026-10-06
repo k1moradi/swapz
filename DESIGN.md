@@ -125,16 +125,27 @@ The cleaner:
 
 1. marks the victim CLEANING;
 2. scans the compact logical map once;
-3. ignores mappings outside the victim;
-4. reads and re-encodes only victim-resident live pages;
-5. installs new mappings only after successful lower writes;
-6. verifies the victim has zero live physical blocks;
-7. optionally discards the old high-water range;
-8. marks the victim FREE.
+3. builds a bounded reverse scratch index for only that 1 MiB victim;
+4. groups live logical mappings by their source physical block;
+5. reads each live source block once;
+6. repacks only that source block's still-live records;
+7. installs new mappings only after successful lower writes;
+8. verifies the victim has zero live physical blocks;
+9. optionally discards the old high-water range;
+10. marks the victim FREE.
 
-The scan is deliberate.  It avoids doubling the logical mapping with intrusive reverse-list
-pointers.  On the intended slow-media target, the design hypothesis is that scanning RAM is
-cheaper than unnecessary flash/HDD traffic.  V2 benchmarking must prove this assumption.
+The reverse scratch is fixed-size: 256 blocks x 8 logical-page IDs plus one byte of count
+per block, about 8.25 KiB per target.  It is not a persistent or global reverse map.
+
+Preserving source-container grouping is important: a live source container is relocated as
+one unit, so GC should not expand one live source physical block into an arbitrary number of
+destination blocks.  It also prevents rereading the same packed source block once per
+logical record.
+
+The logical-map scan is deliberate.  It avoids doubling every logical mapping with
+intrusive reverse-list pointers.  On the intended slow-media target, the design hypothesis
+is that scanning RAM is cheaper than unnecessary flash/HDD traffic.  V2 benchmarking must
+prove this assumption.
 
 ## Victim policy
 
