@@ -6,7 +6,7 @@ usage() {
 Usage:
   sudo ./bench/block-benchmark.sh \
       --backing /dev/DEVICE --size 1G --destroy \
-      [--runtime 30] [--iodepth 1]
+      [--io-size 2G] [--iodepth 1]
 
 DESTRUCTIVE: overwrites the selected backing device.
 Use only an explicitly disposable dedicated partition/device.
@@ -26,7 +26,7 @@ USAGE
 
 BACKING=""
 SIZE=""
-RUNTIME=30
+IO_SIZE=""
 IODEPTH=1
 DESTROY=0
 NAME=swapzbench
@@ -35,7 +35,7 @@ while (($#)); do
   case "$1" in
     --backing) BACKING=$2; shift 2;;
     --size) SIZE=$2; shift 2;;
-    --runtime) RUNTIME=$2; shift 2;;
+    --io-size) IO_SIZE=$2; shift 2;;
     --iodepth) IODEPTH=$2; shift 2;;
     --destroy) DESTROY=1; shift;;
     *) usage;;
@@ -64,6 +64,14 @@ fi
 SIZE_BYTES=$(numfmt --from=iec "$SIZE")
 SIZE_BYTES=$((SIZE_BYTES / 4096 * 4096))
 ((SIZE_BYTES > 0)) || { echo "invalid logical size" >&2; exit 1; }
+
+if [[ -n "$IO_SIZE" ]]; then
+  IO_BYTES=$(numfmt --from=iec "$IO_SIZE")
+else
+  IO_BYTES=$((SIZE_BYTES * 2))
+fi
+IO_BYTES=$((IO_BYTES / 4096 * 4096))
+((IO_BYTES > 0)) || { echo "invalid I/O size" >&2; exit 1; }
 
 BACKING_BYTES=$(blockdev --getsize64 "$BACKING")
 RATIO_RESERVE=$(((SIZE_BYTES + 3) / 4))
@@ -109,10 +117,11 @@ run_fio() {
   before_r=$(sectors_read)
   start=$(date +%s%N)
 
-  fio --name="$label" --filename="$target" --size="$SIZE" --direct=1 \
+  fio --name="$label" --filename="$target" --size="$SIZE_BYTES" \
+      --io_size="$IO_BYTES" --direct=1 \
       --ioengine=libaio --iodepth="$IODEPTH" --numjobs=1 --bs=4k \
-      --rw=randwrite --time_based=1 --runtime="$RUNTIME" \
-      --group_reporting=1 --refill_buffers=1 --randrepeat=0 \
+      --rw=randwrite --group_reporting=1 --refill_buffers=1 \
+      --randseed=1517953062 --randrepeat=1 \
       --buffer_compress_percentage="$compress" --buffer_compress_chunk=512 \
       --output-format=normal
 
@@ -133,8 +142,8 @@ run_fio() {
 
 SECTORS=$((SIZE_BYTES / 512))
 
-printf 'Backing: %s (%s) physical_bytes=%s logical_bytes=%s runtime=%ss iodepth=%s\n' \
-    "$BACKING" "$KNAME" "$BACKING_BYTES" "$SIZE_BYTES" "$RUNTIME" "$IODEPTH"
+printf 'Backing: %s (%s) physical_bytes=%s logical_bytes=%s io_bytes=%s iodepth=%s\n' \
+    "$BACKING" "$KNAME" "$BACKING_BYTES" "$SIZE_BYTES" "$IO_BYTES" "$IODEPTH"
 printf 'Queue: logical=%s physical=%s minimum_io=%s discard_granularity=%s discard_max=%s\n' \
     "$(cat "/sys/class/block/$KNAME/queue/logical_block_size" 2>/dev/null || echo unknown)" \
     "$(cat "/sys/class/block/$KNAME/queue/physical_block_size" 2>/dev/null || echo unknown)" \
