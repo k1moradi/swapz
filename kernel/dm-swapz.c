@@ -567,6 +567,48 @@ static int swapz_store_page(struct swapz_context *context, struct bio *bio,
 				    compaction, allow_rotation);
 }
 
+static int swapz_decode_loaded_mapping(struct swapz_context *context,
+				       u32 logical_page,
+				       const struct swapz_mapping *mapping,
+				       void *destination)
+{
+	if (!(mapping->flags & SWAPZ_MAP_COMPRESSED)) {
+		memcpy(destination, context->io_buffer, SWAPZ_BLOCK_BYTES);
+		return 0;
+	}
+
+	{
+		const struct swapz_container_disk *container = context->io_buffer;
+		const struct swapz_record_disk *record;
+		u16 offset;
+		u16 length;
+		int decompressed;
+
+		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
+		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    mapping->record_index >= le16_to_cpu(container->record_count) ||
+		    mapping->record_index >= SWAPZ_MAX_PACKED_RECORDS)
+			return -EIO;
+
+		record = &container->records[mapping->record_index];
+		offset = le16_to_cpu(record->offset);
+		length = le16_to_cpu(record->length);
+		if (le32_to_cpu(record->logical_page) != logical_page ||
+		    length != mapping->stored_length ||
+		    offset < SWAPZ_CONTAINER_HEADER_BYTES ||
+		    offset + length > SWAPZ_BLOCK_BYTES)
+			return -EIO;
+
+		decompressed = LZ4_decompress_safe((const char *)context->io_buffer + offset,
+						   destination, length,
+						   SWAPZ_BLOCK_BYTES);
+		if (decompressed != SWAPZ_BLOCK_BYTES)
+			return -EIO;
+	}
+
+	return 0;
+}
+
 static int swapz_read_mapping(struct swapz_context *context, u32 logical_page,
 			      void *destination, bool compaction)
 {
@@ -585,41 +627,8 @@ static int swapz_read_mapping(struct swapz_context *context, u32 logical_page,
 	if (compaction)
 		context->stats.compaction_read_bytes += SWAPZ_BLOCK_BYTES;
 
-	if (!(mapping.flags & SWAPZ_MAP_COMPRESSED)) {
-		memcpy(destination, context->io_buffer, SWAPZ_BLOCK_BYTES);
-		return 0;
-	}
-
-	{
-		const struct swapz_container_disk *container = context->io_buffer;
-		const struct swapz_record_disk *record;
-		u16 offset;
-		u16 length;
-		int decompressed;
-
-		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
-		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
-		    mapping.record_index >= le16_to_cpu(container->record_count) ||
-		    mapping.record_index >= SWAPZ_MAX_PACKED_RECORDS)
-			return -EIO;
-
-		record = &container->records[mapping.record_index];
-		offset = le16_to_cpu(record->offset);
-		length = le16_to_cpu(record->length);
-		if (le32_to_cpu(record->logical_page) != logical_page ||
-		    length != mapping.stored_length ||
-		    offset < SWAPZ_CONTAINER_HEADER_BYTES ||
-		    offset + length > SWAPZ_BLOCK_BYTES)
-			return -EIO;
-
-		decompressed = LZ4_decompress_safe((const char *)context->io_buffer + offset,
-						   destination, length,
-						   SWAPZ_BLOCK_BYTES);
-		if (decompressed != SWAPZ_BLOCK_BYTES)
-			return -EIO;
-	}
-
-	return 0;
+	return swapz_decode_loaded_mapping(context, logical_page, &mapping,
+					   destination);
 }
 
 static void swapz_try_discard_segment(struct swapz_context *context, u32 segment)
