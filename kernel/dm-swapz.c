@@ -716,6 +716,7 @@ static int swapz_choose_gc_victim(struct swapz_context *context, u32 *segment_ou
 
 static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 {
+	u32 block_offset;
 	u32 logical_page;
 	int error;
 
@@ -729,37 +730,82 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 	context->segment_state[victim] = SWAPZ_SEGMENT_CLEANING;
 	context->stats.gc_victims++;
 	context->stats.gc_scanned_mappings += context->logical_pages;
+	memset(context->gc_block_counts, 0,
+	       SWAPZ_SEGMENT_BLOCKS * sizeof(*context->gc_block_counts));
 
 	/*
-	 * V2 deliberately keeps the 8-byte logical mapping table and avoids a
-	 * large reverse map.  GC scans mappings once, but relocates only mappings
-	 * that still point into this victim segment.  On the intended slow-media
-	 * target, avoiding device I/O dominates this RAM scan; benchmark it.
+	 * Build a bounded reverse index for this victim only.  The global logical
+	 * mapping remains 8 bytes/page; scratch is fixed at 256 * 8 u32 entries
+	 * plus one byte count per physical block.
 	 */
 	for (logical_page = 0; logical_page < context->logical_pages; ++logical_page) {
 		const struct swapz_mapping mapping = context->mappings[logical_page];
+		u32 count;
 
 		if (!swapz_mapping_valid(&mapping) ||
 		    swapz_mapping_segment(&mapping) != victim)
 			continue;
 
-		error = swapz_read_mapping(context, logical_page,
-					   context->input_buffer, true);
-		if (error)
+		block_offset = mapping.physical_block % SWAPZ_SEGMENT_BLOCKS;
+		count = context->gc_block_counts[block_offset];
+		if (WARN_ON_ONCE(count >= SWAPZ_MAX_PACKED_RECORDS)) {
+			error = -EUCLEAN;
 			goto fail;
+		}
 
-		error = swapz_store_page(context, NULL, logical_page,
-					 context->input_buffer,
-					 context->compressed_buffer, true, false);
-		if (error)
-			goto fail;
-
-		context->stats.compaction_pages++;
+		context->gc_logical_pages[
+			block_offset * SWAPZ_MAX_PACKED_RECORDS + count] = logical_page;
+		context->gc_block_counts[block_offset] = count + 1;
 	}
 
-	error = swapz_flush_pack(context, true, false);
-	if (error)
-		goto fail;
+	/*
+	 * Preserve source-container grouping.  Read each live source block once,
+	 * then repack only its live records before moving to the next source block.
+	 */
+	for (block_offset = 0; block_offset < SWAPZ_SEGMENT_BLOCKS; ++block_offset) {
+		u32 record_count = context->gc_block_counts[block_offset];
+		u32 record_index;
+		u32 physical_block;
+
+		if (!record_count)
+			continue;
+
+		physical_block = victim * SWAPZ_SEGMENT_BLOCKS + block_offset;
+		error = swapz_read_block(context, physical_block, context->io_buffer);
+		if (error)
+			goto fail;
+		context->stats.compaction_read_bytes += SWAPZ_BLOCK_BYTES;
+
+		for (record_index = 0; record_index < record_count; ++record_index) {
+			const u32 index =
+				block_offset * SWAPZ_MAX_PACKED_RECORDS + record_index;
+			const u32 page = context->gc_logical_pages[index];
+			const struct swapz_mapping mapping = context->mappings[page];
+
+			if (WARN_ON_ONCE(!swapz_mapping_valid(&mapping) ||
+					 mapping.physical_block != physical_block)) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+
+			error = swapz_decode_loaded_mapping(context, page, &mapping,
+							 context->input_buffer);
+			if (error)
+				goto fail;
+
+			error = swapz_store_page(context, NULL, page,
+						 context->input_buffer,
+						 context->compressed_buffer, true, false);
+			if (error)
+				goto fail;
+			context->stats.compaction_pages++;
+		}
+
+		/* Keep one destination block group per live source block. */
+		error = swapz_flush_pack(context, true, false);
+		if (error)
+			goto fail;
+	}
 
 	if (WARN_ON_ONCE(context->segment_live_blocks[victim] != 0)) {
 		error = -EUCLEAN;
