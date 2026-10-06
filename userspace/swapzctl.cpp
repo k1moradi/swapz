@@ -154,8 +154,13 @@ void start(const StartOptions &options) {
     std::uint64_t logical_bytes = options.logical_bytes.value_or(round_down_page(physical_bytes / 3));
     logical_bytes = round_down_page(logical_bytes);
     if (logical_bytes < 64ULL * 1024ULL * 1024ULL) fail("logical swap size must be at least 64 MiB");
-    if (logical_bytes > UINT64_MAX / 5 || physical_bytes / 5 < logical_bytes / 2) {
-        fail("V1 requires roughly 2.5x physical backing; choose a smaller --size");
+
+    constexpr std::uint64_t kSegmentBytes = 1024ULL * 1024ULL;
+    const std::uint64_t ratio_reserve = (logical_bytes + 3ULL) / 4ULL;
+    const std::uint64_t minimum_reserve =
+        ratio_reserve > 2ULL * kSegmentBytes ? ratio_reserve : 2ULL * kSegmentBytes;
+    if (logical_bytes > physical_bytes || minimum_reserve > physical_bytes - logical_bytes) {
+        fail("V2 requires >=25% logical-size reserve and at least two 1 MiB segments");
     }
 
     const std::uint64_t logical_sectors = logical_bytes / 512;
