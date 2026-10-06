@@ -333,7 +333,7 @@ static void swapz_install_mapping(struct swapz_context *context, u32 logical_pag
 
 	if (WARN_ON_ONCE(physical_block >= context->physical_blocks ||
 			 segment >= context->segment_count ||
-			 context->block_live_records[physical_block] == U8_MAX)) {
+			 context->block_live_records[physical_block] >= SWAPZ_MAX_PACKED_RECORDS)) {
 		swapz_set_failed(context, -EUCLEAN);
 		return;
 	}
@@ -755,7 +755,7 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 
 		context->gc_logical_pages[
 			block_offset * SWAPZ_MAX_PACKED_RECORDS + count] = logical_page;
-		context->gc_block_counts[block_offset] = count + 1;
+		context->gc_block_counts[block_offset] = (u8)(count + 1);
 	}
 
 	/*
@@ -833,6 +833,11 @@ static int swapz_open_free_segment(struct swapz_context *context)
 	if (error)
 		return error;
 
+	if (WARN_ON_ONCE(context->segment_live_blocks[segment] != 0)) {
+		swapz_set_failed(context, -EUCLEAN);
+		return -EUCLEAN;
+	}
+
 	context->segment_state[segment] = SWAPZ_SEGMENT_OPEN;
 	context->free_segments--;
 	context->current_segment = segment;
@@ -896,7 +901,7 @@ static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 	/*
 	 * Keep the current BIO isolated from compaction scratch.  A store can
 	 * trigger segment advance after flushing the final pending container, and
-	 * rotation reuses input_buffer/compressed_buffer while copying live pages.
+	 * GC reuses input_buffer/compressed_buffer while copying victim live pages.
 	 */
 	swapz_copy_from_bio(bio, context->write_buffer);
 	context->stats.logical_write_bytes += SWAPZ_BLOCK_BYTES;
