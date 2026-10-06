@@ -2,7 +2,7 @@
 set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in cmp dd dmsetup losetup modprobe truncate; do
+for tool in cmp dd dmsetup losetup modprobe tr truncate; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 
