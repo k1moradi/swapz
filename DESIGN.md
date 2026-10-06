@@ -1,20 +1,37 @@
-# swapz V1 design notes
+# swapz V2 design notes
+
+## Why V2 exists
+
+V1 proved the core block path can be correct on Linux 7.0.x: LZ4 packing, raw fallback,
+logical discard, flush handling, fault propagation, repeated target lifecycle, randomized
+rewrites, and real swap pressure all passed validation.
+
+Its allocator did not meet the performance/endurance goal.  V1 copied the complete live
+logical set into the next arena whenever the current arena filled.  The validation run
+showed that partially-compressible and incompressible churn could write about 2.86x the
+raw baseline and that a rotation-triggering write could stall for about one second on the
+1 ms delayed test device.
+
+V2 keeps the proven I/O/mapping path but replaces whole-live-set arena rotation with
+segment-local garbage collection.
 
 ## Primary objectives
 
 1. Improve swap throughput on roughly 10-100 MB/s serialized storage.
-2. Reduce host bytes written when pages are LZ4-compressible.
-3. Avoid repeatedly rewriting the same LBA range on flash-backed swap media.
-4. Remain correct on devices with no DISCARD support.
-5. Keep the kernel implementation small enough to reason about under memory pressure.
+2. Reduce actual lower-device host bytes written when pages are LZ4-compressible.
+3. Avoid catastrophic write amplification on partially-compressible or raw workloads.
+4. Keep writes append-only inside small segments and rotate allocation across the device.
+5. Remain correct on devices with no DISCARD support.
+6. Keep the reclaim path allocation-free and simple enough to reason about.
 
 ## Non-goals
 
-Persistent metadata, crash recovery, deduplication, encryption, filesystem-backed swap, hibernation, multi-queue NVMe performance, and capacity overcommit.
+Persistent metadata, crash recovery, deduplication, encryption, filesystem-backed swap,
+hibernation, multi-queue NVMe tuning, and capacity overcommit.
 
-## Mapping
+## Logical mapping
 
-One 8-byte mapping entry per logical 4 KiB page:
+The logical map remains one 8-byte entry per logical 4 KiB page:
 
 ```text
 u32 physical_block
@@ -23,67 +40,178 @@ u8  record_index
 u8  flags
 ```
 
-Memory cost is 2 MiB per GiB of logical swap.  This is intentionally simple and allocation-free during I/O.
+This costs 2 MiB per GiB of logical swap.
+
+V2 adds one byte of live-record accounting per physical 4 KiB block and small per-segment
+arrays.  A 1 GiB physical backing device therefore needs about 256 KiB for the per-block
+reverse accounting, plus the logical map.
+
+The per-block counter is enough to know exactly when a physical block no longer contains
+any live logical mappings.  It avoids a much larger full reverse-map structure.
+
+## Physical segments
+
+The usable backing device is divided into fixed 1 MiB segments:
+
+```text
+256 x 4 KiB blocks
+```
+
+Segment states are:
+
+```text
+FREE
+OPEN
+CLOSED
+CLEANING
+```
+
+There is exactly one OPEN append segment.  New containers and raw pages are appended
+sequentially to it.
+
+FREE segments are selected using a rotating allocation cursor so unused/free host LBA
+regions are traversed broadly instead of always choosing the lowest address.
+
+## Capacity reserve
+
+Compression is never required for capacity.
+
+V2 requires physical backing of at least:
+
+```text
+logical_pages + max(logical_pages / 4, two segments)
+```
+
+So the device has at least 25% GC reserve and never depends on a promised compression
+ratio.
+
+`swapzctl` may remain more conservative than this minimum; large physical/logical ratios
+are useful on SD/USB media because they provide more append space between reuses.
 
 ## Packed container
 
-A compressed lower block contains a fixed header and up to eight records.  Each record identifies its logical page, offset, and LZ4 payload length.  The header is not persistent metadata in the recovery sense; it is only used to validate/read the block during the current boot.
+Compressed pages still use the V1 4 KiB container format with up to eight logical records.
+Each record contains its logical page, payload offset, and compressed length.
 
-Incompressible pages use one raw 4 KiB lower block and are identified by the RAM mapping flag.
+Poorly-compressible pages fall back to a raw 4 KiB block.
+
+No on-disk metadata is needed for recovery.  All state is intentionally volatile and the
+target starts empty each boot.
+
+## Mapping accounting
+
+When a mapping is installed:
+
+1. its previous physical record is unaccounted;
+2. the new physical block's live-record counter is incremented;
+3. if that block transitions from zero to one live record, the segment live-block count is
+   incremented;
+4. the logical mapping is published only after the lower write succeeded.
+
+Overwrite and logical DISCARD perform the inverse accounting.
+
+Thus each CLOSED segment has an exact count of physical blocks that still contain at least
+one live mapping.
+
+## Segment garbage collection
+
+Normal writes consume FREE segments sequentially.
+
+One FREE segment is kept as a reserve.  When allocation opens the last FREE segment, V2
+selects a CLOSED victim with the smallest live-block count and copies only logical mappings
+that still point into that victim.
+
+The cleaner:
+
+1. marks the victim CLEANING;
+2. scans the compact logical map once;
+3. ignores mappings outside the victim;
+4. reads and re-encodes only victim-resident live pages;
+5. installs new mappings only after successful lower writes;
+6. verifies the victim has zero live physical blocks;
+7. optionally discards the old high-water range;
+8. marks the victim FREE.
+
+The scan is deliberate.  It avoids doubling the logical mapping with intrusive reverse-list
+pointers.  On the intended slow-media target, the design hypothesis is that scanning RAM is
+cheaper than unnecessary flash/HDD traffic.  V2 benchmarking must prove this assumption.
+
+## Victim policy
+
+V2 initially chooses the CLOSED segment with the fewest live physical blocks.
+
+A candidate must leave GC headroom in the destination segment.  This is intentionally much
+simpler than F2FS cost-benefit cleaning or hot/cold logs.
+
+If benchmarks later show repeated hot-segment reuse or poor host-LBA distribution, hot/cold
+classification is a possible V2.x optimization rather than a reason to reintroduce V1
+whole-live-set copying.
 
 ## Write atomicity
 
-A logical mapping is changed only after the new lower 4 KiB block completes successfully.  Until then the previous mapping remains readable.  Packed write BIOs are completed only after their shared container reaches the backing device.
+The logical mapping is changed only after the replacement lower block succeeds.
 
-A lower read/write failure marks the target failed.  DISCARD failures are explicitly excluded from this rule and only disable the optional lower-discard optimization.
+A failed foreground write therefore leaves the previous known-good mapping intact.  GC uses
+the same rule.
 
-## Arenas
+A lower read/write failure marks the target failed.  Lower DISCARD failure does not: it
+only disables physical discard for that target.
 
-The device is split into equally sized arenas.  Minimum arena size is:
+## Buffer ownership
 
-```text
-logical_pages + max(logical_pages / 4, 256 blocks)
-```
+Foreground writes have dedicated preallocated input/compression pages.
 
-At least two arenas are required.  If the physical device is much larger, additional arenas are created so rotations traverse most of the backing device.
+GC uses separate input/compression scratch pages.
 
-Invariant after a successful rotation:
+This separation is required because a foreground store can trigger segment advance and GC;
+the cleaner must never overwrite the foreground payload that caused the transition.
 
-> Every valid logical mapping points into the current arena.
-
-Normal rewrites append new versions to that same arena.  On rotation, all currently valid mappings are re-read and appended into the next arena.  The old arena then contains no live mappings.
-
-This is deliberately less efficient than segment GC but dramatically easier to validate.  V2 should replace it only if benchmarks show the core compression/packing/endurance premise succeeds.
-
-## Feature fallback policy
+## DISCARD fallback
 
 ### Upper DISCARD
 
-The mapper advertises discard independent of the backing device.  Logical discard clears the RAM mapping.  If userspace/kernel swap activation cannot request page discards, the target still works; freed pages may be copied during compaction until they are overwritten.
+The mapper advertises logical discard independently of the lower device.  Logical discard
+invalidates the mapping and updates segment live-block accounting.
+
+If swap page discard is unavailable, correctness is unchanged.  GC simply treats more old
+mappings conservatively until they are overwritten.
 
 ### Lower DISCARD
 
-At target creation:
+Lower discard is enabled only if the actual backing queue reports nonzero discard capability.
+It is issued only for a fully cleaned segment's prior high-water range.
 
-```text
-max_discard_sectors != 0 && discard_granularity != 0
-```
-
-allows lower discard.  Before an old arena is reused, only its previous high-water range is discarded.  Any runtime discard error permanently disables lower discard for that target and normal overwrite continues.
-
-### Compression
-
-If LZ4 cannot save at least 512 bytes, store the page raw.  There is no dependency on a minimum compression ratio for correctness.
+The first runtime discard failure disables lower discard permanently for that target.
+Ordinary reads/writes and segment reuse continue.
 
 ## Memory-pressure behavior
 
-- mapping and arena arrays are allocated at target creation;
-- four 4 KiB working buffers and LZ4 workspace are preallocated;
-- target I/O is processed on a `WQ_MEM_RECLAIM` workqueue with `max_active=1`;
-- lower I/O uses a private `dm_io_client`;
-- no per-request heap allocation is performed by `swapz` itself; Device Mapper provides per-BIO target storage;
-- lower discard uses `GFP_NOIO`.
+All state needed for normal I/O and GC is allocated at target creation:
 
-## Why arena rotation instead of V1 segment GC
+- logical mapping array;
+- one-byte per-physical-block live-record array;
+- segment state/live/high-water/cycle arrays;
+- foreground input/compression pages;
+- GC input/compression pages;
+- I/O and pack pages;
+- LZ4 workspace;
+- private `dm_io_client`;
+- serialized `WQ_MEM_RECLAIM` workqueue.
 
-Segment GC needs reverse mappings or self-describing metadata for raw blocks, victim selection, free-segment accounting, and more failure paths.  Arena rotation costs compaction bandwidth but gives a much smaller correctness surface and naturally sweeps writes over the backing partition.  It is appropriate for proving whether the basic I/O/endurance idea is worth a V2 allocator.
+No swap I/O requires a `swapz` heap allocation.
+
+## Required V2 measurements
+
+V2 is successful only if testing shows:
+
+- V1 correctness coverage remains green;
+- partially-compressible and incompressible churn no longer produces V1-style multi-x write
+  amplification;
+- GC copies only the chosen victim's live data;
+- GC latency is substantially below V1 full-live-set rotation latency;
+- compressible workloads still reduce actual lower-device sectors written;
+- host-LBA allocation traverses the available segments broadly;
+- QD1 and realistic Linux swap workloads remain acceptable on slow devices.
+
+If the logical-map scan itself becomes a measurable bottleneck, the next optimization is a
+bounded reverse index, not whole-live-set arena copying.
