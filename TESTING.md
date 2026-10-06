@@ -1,4 +1,4 @@
-# swapz V1 testing plan
+# swapz V2 testing plan
 
 ## 1. Build/static gates
 
@@ -27,8 +27,8 @@ The model covers:
 - incompressible raw fallback;
 - latest-write-wins rewrites;
 - logical discard;
-- forced arena rotations;
-- mixed raw/compressed pack-boundary rotations;
+- forced segment switches and victim GC;
+- mixed raw/compressed pack-boundary segment switches;
 - 5,000 randomized write/read/discard operations checked against an in-memory reference.
 
 Sanitizer gate:
@@ -88,16 +88,18 @@ Record:
 - backing `sectors written` delta from `/sys/class/block/.../stat`;
 - `dmsetup status` logical/physical byte counters;
 - CPU utilization;
-- arena rotations and compaction bytes.
+- segment switches/GC and compaction bytes.
 
-### V1 proof thresholds
+### V2 proof thresholds
 
-The project should not graduate from proof-of-concept unless, on at least one slow SD/USB target:
+V1 correctness passed, but its whole-live-set allocator failed the write-amplification target. V2 should not graduate unless, on at least one slow SD/USB target:
 
 - compressible swap-like workload shows **>=1.5x lower backing host bytes written** at a realistic queue depth;
 - wall-clock throughput improves or is at least neutral after CPU cost;
 - incompressible control is correct and does not catastrophically regress throughput;
-- arena compaction write amplification stays low enough that total physical writes remain below the raw baseline over a long churn test.
+- victim-segment GC keeps total physical writes below the raw baseline over a long partially-compressible churn test;
+- a GC-triggering write no longer exhibits V1-scale whole-live-set latency spikes;
+- `gc_pages` is proportional to victim live data rather than the entire logical live set.
 
 These are initial engineering thresholds, not promises.
 
@@ -118,6 +120,6 @@ Use a repeatable memory-pressure workload that exceeds RAM but remains below log
 
 ## 7. Endurance interpretation
 
-For SD/USB devices without health telemetry, use host sectors written plus arena-cycle distribution as the measurable proxy.  Do **not** claim the same percentage reduction in NAND P/E cycles: controller FTL write amplification is opaque.
+For SD/USB devices without health telemetry, use host sectors written plus segment-cycle distribution as the measurable proxy.  Do **not** claim the same percentage reduction in NAND P/E cycles: controller FTL write amplification is opaque.
 
 Where SATA SMART exposes lifetime writes/host writes, record those counters across long runs as an additional validation point.
