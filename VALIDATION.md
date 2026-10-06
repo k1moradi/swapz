@@ -1,38 +1,60 @@
-# Validation performed in the build environment
+# swapz validation status
 
 Date: 2026-10-06
 
-The environment did not provide Linux 7.0.x headers or permission to boot/load a matching test kernel, so kernel runtime validation remains outstanding.
+## V1 historical result
 
-Completed successfully:
+V1 is preserved on branch `v1` at commit:
 
 ```text
-Kernel module GCC build:
-  Linux headers: Debian 6.12.96+deb13-amd64
-  flags: W=1
-  result: PASS, no compiler warnings emitted
-
-Kernel module Clang build:
-  Linux headers: Debian 6.12.96+deb13-amd64
-  flags: W=1 LLVM=1
-  result: PASS, no compiler warnings emitted
-
-swapzctl:
-  C++23, -O2 -Wall -Wextra -Wpedantic -Wconversion -Wshadow
-  result: PASS, no compiler warnings emitted
-
-Allocator/storage model:
-  C++23 + liblz4
-  deterministic tests: PASS
-  randomized 5,000-operation rewrite/read/discard test: PASS
-  forced arena rotation tests: PASS
-
-Sanitizers:
-  AddressSanitizer + UndefinedBehaviorSanitizer
-  allocator/storage model: PASS
-
-Shell scripts:
-  bash -n: PASS
+025edff9fbe1d402cf6eab294e3ce1627e49a1e9
 ```
 
-Linux 7.0 source review confirmed that the public interfaces this target is designed around are present there, including Device Mapper per-BIO data, `discards_supported`, `dm_set_target_max_io_len`, `dm-io`, and the kernel LZ4 interface.  An exact 7.0.x module build is still a required first gate on the real test systems.
+It was validated on Ubuntu 26.04.1 with Linux 7.0.0-34-generic x86_64.
+
+Passed V1 gates included the Linux 7.0 GCC W=1 build, userspace/model tests,
+ASan/UBSan, flush handling, five 100,000-operation randomized block runs,
+120-rotation mixed stress, 100 lifecycle cycles, DISCARD fallback, lower-I/O
+error propagation, bounded real swap pressure, swapoff, and a second swapon.
+
+## Why V1 stopped
+
+V1 copied the complete live set whenever its append arena filled.
+
+The validation benchmark showed that highly compressible QD8 traffic packed well,
+but 50%-compressible and incompressible churn wrote about 2.86x the raw
+lower-device bytes after compaction. A separate latency probe measured normal
+writes around 0.90 ms and rotation-triggering writes around 1.03 seconds on the
+same delayed test stack.
+
+Those are allocator-architecture problems, so development moved to V2 instead of
+trying to tune V1 into V1.1.
+
+The test device was virtual and slower than the eventual physical-media target,
+so its absolute throughput is not a physical-device claim.
+
+## V2 current status
+
+`main` now contains the V2 allocator:
+
+- fixed 1 MiB append segments;
+- per-physical-block live-record accounting;
+- per-segment live-block counts;
+- rotating FREE-segment allocation;
+- at least 25% logical-size GC reserve plus two segments;
+- lowest-live CLOSED-segment selection;
+- bounded victim-local reverse scratch;
+- one lower read per live victim source block;
+- relocation of only mappings resident in the selected victim;
+- source-container grouping during GC;
+- foreground and GC scratch separation;
+- existing LZ4 packed-container and raw fallback paths retained.
+
+V2 has not yet completed the Linux 7.0.x runtime validation pass.
+
+The next validation must cover build/model gates, segment-boundary regressions,
+long randomized multi-GC correctness, DISCARD fallback, lower-I/O errors, real
+swap pressure, and paired fixed-I/O raw/swapz benchmarks.
+
+Raw and swapz benchmarks must submit the same logical byte count. The primary
+endurance proxy remains actual lower-device sectors written.
