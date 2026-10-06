@@ -75,19 +75,19 @@ run_case() {
   LOOP=""
 }
 
-# Incompressible pages exercise raw fallback while rotation compaction reuses
+# Incompressible pages exercise raw fallback while segment GC reuses
 # its own input/compression scratch.
 dd if=/dev/urandom of="$TMP/raw-a" bs=4096 count=1 status=none
 dd if=/dev/urandom of="$TMP/raw-b" bs=4096 count=1 status=none
 run_case raw "$TMP/raw-a" "$TMP/raw-b" raw_pages
 
 # Highly compressible but different pages verify that the foreground
-# compressed result also survives compaction's use of its separate scratch.
+# compressed result also survives GC's use of its separate scratch.
 dd if=/dev/zero of="$TMP/compressed-a" bs=4096 count=1 status=none
 python3 - "$TMP/compressed-b" <<'PY'
 from pathlib import Path
 import sys
-Path(sys.argv[1]).write_bytes(b"\\xff" * 4096)
+Path(sys.argv[1]).write_bytes(bytes([0xff]) * 4096)
 PY
 run_case compressed "$TMP/compressed-a" "$TMP/compressed-b" compressed_pages
 
