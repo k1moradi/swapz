@@ -145,6 +145,8 @@ struct swapz_context {
 	u16 *segment_live_blocks;
 	u8 *segment_state;
 	u8 *block_live_records;
+	u32 *gc_logical_pages;
+	u8 *gc_block_counts;
 
 	bool lower_discard_enabled;
 
@@ -1176,6 +1178,8 @@ static void swapz_free_context(struct swapz_context *context)
 	kvfree(context->segment_live_blocks);
 	kvfree(context->segment_state);
 	kvfree(context->block_live_records);
+	kvfree(context->gc_logical_pages);
+	kvfree(context->gc_block_counts);
 	kfree(context);
 }
 
@@ -1296,9 +1300,15 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 					 sizeof(*context->segment_state), GFP_KERNEL);
 	context->block_live_records = kvcalloc(context->physical_blocks,
 					       sizeof(*context->block_live_records), GFP_KERNEL);
+	context->gc_logical_pages = kvcalloc(
+		SWAPZ_SEGMENT_BLOCKS * SWAPZ_MAX_PACKED_RECORDS,
+		sizeof(*context->gc_logical_pages), GFP_KERNEL);
+	context->gc_block_counts = kvcalloc(SWAPZ_SEGMENT_BLOCKS,
+					   sizeof(*context->gc_block_counts), GFP_KERNEL);
 	if (!context->mappings || !context->segment_high_water ||
 	    !context->segment_cycles || !context->segment_live_blocks ||
-	    !context->segment_state || !context->block_live_records) {
+	    !context->segment_state || !context->block_live_records ||
+	    !context->gc_logical_pages || !context->gc_block_counts) {
 		target->error = "Cannot allocate mapping/segment metadata";
 		error = -ENOMEM;
 		goto fail;
