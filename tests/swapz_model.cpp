@@ -355,6 +355,6 @@ int main() {
     test_rotation_preserves_latest_data();
     test_pack_boundary_rotation();
     test_randomized_rewrite_discard_read();
-    std::cout << "swapz model tests: PASS\\n";
+    std::cout << "swapz model tests: PASS\n";
     return 0;
 }
