@@ -35,8 +35,8 @@
 #endif
 
 #define SWAPZ_VERSION_MAJOR 0
-#define SWAPZ_VERSION_MINOR 1
-#define SWAPZ_VERSION_PATCH 1
+#define SWAPZ_VERSION_MINOR 2
+#define SWAPZ_VERSION_PATCH 0
 
 #define SWAPZ_BLOCK_BYTES PAGE_SIZE
 #define SWAPZ_BLOCK_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
@@ -44,9 +44,13 @@
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U /* 'SPWZ' little-endian on disk */
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_EMPTY_BLOCK U32_MAX
-#define SWAPZ_ARENA_ALIGNMENT_BLOCKS 256U /* 1 MiB at 4 KiB/block. */
-#define SWAPZ_ARENA_SLACK_DIVISOR 4U     /* 25% worst-case raw slack. */
-#define SWAPZ_MIN_ARENA_SLACK_BLOCKS SWAPZ_ARENA_ALIGNMENT_BLOCKS
+#define SWAPZ_SEGMENT_BLOCKS 256U        /* 1 MiB at 4 KiB/block. */
+#define SWAPZ_GC_HEADROOM_BLOCKS 8U      /* Keep 32 KiB free after cleaning. */
+#define SWAPZ_MIN_RESERVE_DIVISOR 4U     /* At least 25% physical GC reserve. */
+#define SWAPZ_SEGMENT_FREE 0U
+#define SWAPZ_SEGMENT_OPEN 1U
+#define SWAPZ_SEGMENT_CLOSED 2U
+#define SWAPZ_SEGMENT_CLEANING 3U
 #define SWAPZ_PACK_WAIT_MIN_US 500U
 #define SWAPZ_PACK_WAIT_MAX_US 1000U
 #define SWAPZ_MIN_COMPRESS_SAVING 512U
@@ -126,13 +130,17 @@ struct swapz_context {
 	u32 logical_pages;
 
 	u32 physical_blocks;
-	u32 minimum_arena_blocks;
-	u32 arena_blocks;
-	u32 arena_count;
-	u32 current_arena;
-	u32 arena_write_block;
-	u32 *arena_high_water;
-	u32 *arena_cycles;
+	u32 segment_count;
+	u32 current_segment;
+	u32 segment_write_block;
+	u32 allocation_cursor;
+	u32 gc_cursor;
+	u32 free_segments;
+	u32 *segment_high_water;
+	u32 *segment_cycles;
+	u16 *segment_live_blocks;
+	u8 *segment_state;
+	u8 *block_live_records;
 
 	bool lower_discard_enabled;
 
@@ -163,10 +171,9 @@ static inline bool swapz_mapping_valid(const struct swapz_mapping *mapping)
 	return mapping->flags & SWAPZ_MAP_VALID;
 }
 
-static inline u32 swapz_mapping_arena(const struct swapz_context *context,
-				      const struct swapz_mapping *mapping)
+static inline u32 swapz_mapping_segment(const struct swapz_mapping *mapping)
 {
-	return mapping->physical_block / context->arena_blocks;
+	return mapping->physical_block / SWAPZ_SEGMENT_BLOCKS;
 }
 
 static inline sector_t swapz_physical_sector(u32 physical_block)
@@ -271,11 +278,36 @@ static void swapz_complete_bio(struct bio *bio, int error)
 	bio_endio(bio);
 }
 
+static void swapz_unaccount_mapping(struct swapz_context *context,
+				    const struct swapz_mapping *mapping)
+{
+	u32 physical_block;
+	u32 segment;
+
+	if (!swapz_mapping_valid(mapping))
+		return;
+
+	physical_block = mapping->physical_block;
+	segment = swapz_mapping_segment(mapping);
+	if (WARN_ON_ONCE(physical_block >= context->physical_blocks ||
+			 context->block_live_records[physical_block] == 0 ||
+			 segment >= context->segment_count ||
+			 context->segment_live_blocks[segment] == 0)) {
+		swapz_set_failed(context, -EUCLEAN);
+		return;
+	}
+
+	context->block_live_records[physical_block]--;
+	if (!context->block_live_records[physical_block])
+		context->segment_live_blocks[segment]--;
+}
+
 static void swapz_invalidate_mapping(struct swapz_context *context,
 				     u32 logical_page)
 {
 	struct swapz_mapping *mapping = &context->mappings[logical_page];
 
+	swapz_unaccount_mapping(context, mapping);
 	mapping->physical_block = SWAPZ_EMPTY_BLOCK;
 	mapping->stored_length = 0;
 	mapping->record_index = 0;
@@ -287,6 +319,22 @@ static void swapz_install_mapping(struct swapz_context *context, u32 logical_pag
 				  u8 record_index, u8 flags)
 {
 	struct swapz_mapping *mapping = &context->mappings[logical_page];
+	u32 segment = physical_block / SWAPZ_SEGMENT_BLOCKS;
+
+	swapz_unaccount_mapping(context, mapping);
+	if (unlikely(context->failed))
+		return;
+
+	if (WARN_ON_ONCE(physical_block >= context->physical_blocks ||
+			 segment >= context->segment_count ||
+			 context->block_live_records[physical_block] == U8_MAX)) {
+		swapz_set_failed(context, -EUCLEAN);
+		return;
+	}
+
+	if (!context->block_live_records[physical_block])
+		context->segment_live_blocks[segment]++;
+	context->block_live_records[physical_block]++;
 
 	mapping->physical_block = physical_block;
 	mapping->stored_length = stored_length;
@@ -296,13 +344,13 @@ static void swapz_install_mapping(struct swapz_context *context, u32 logical_pag
 
 static u32 swapz_current_physical_block(const struct swapz_context *context)
 {
-	return context->current_arena * context->arena_blocks +
-	       context->arena_write_block;
+	return context->current_segment * SWAPZ_SEGMENT_BLOCKS +
+	       context->segment_write_block;
 }
 
-static bool swapz_current_arena_has_block(const struct swapz_context *context)
+static bool swapz_current_segment_has_block(const struct swapz_context *context)
 {
-	return context->arena_write_block < context->arena_blocks;
+	return context->segment_write_block < SWAPZ_SEGMENT_BLOCKS;
 }
 
 static void swapz_reset_pack(struct swapz_context *context)
@@ -312,23 +360,25 @@ static void swapz_reset_pack(struct swapz_context *context)
 	context->pack_record_count = 0;
 }
 
-static int swapz_rotate_arena(struct swapz_context *context);
+static int swapz_advance_segment(struct swapz_context *context);
 
 static int swapz_ensure_physical_block(struct swapz_context *context,
 				       bool allow_rotation)
 {
-	if (swapz_current_arena_has_block(context))
+	if (swapz_current_segment_has_block(context))
 		return 0;
 	if (!allow_rotation)
 		return -ENOSPC;
-	return swapz_rotate_arena(context);
+	return swapz_advance_segment(context);
 }
 
 static void swapz_note_block_written(struct swapz_context *context)
 {
-	context->arena_write_block++;
-	if (context->arena_write_block > context->arena_high_water[context->current_arena])
-		context->arena_high_water[context->current_arena] = context->arena_write_block;
+	context->segment_write_block++;
+	if (context->segment_write_block >
+	    context->segment_high_water[context->current_segment])
+		context->segment_high_water[context->current_segment] =
+			context->segment_write_block;
 }
 
 static int swapz_flush_pack(struct swapz_context *context, bool compaction,
