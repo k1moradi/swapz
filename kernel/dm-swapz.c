@@ -714,6 +714,8 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 	}
 
 	context->segment_state[victim] = SWAPZ_SEGMENT_CLEANING;
+	context->stats.gc_victims++;
+	context->stats.gc_scanned_mappings += context->logical_pages;
 
 	/*
 	 * V2 deliberately keeps the 8-byte logical mapping table and avoids a
@@ -778,7 +780,7 @@ static int swapz_open_free_segment(struct swapz_context *context)
 	context->segment_write_block = 0;
 	context->segment_high_water[segment] = 0;
 	context->segment_cycles[segment]++;
-	context->stats.arena_rotations++;
+	context->stats.segment_switches++;
 	return 0;
 }
 
@@ -1107,8 +1109,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       "logical_read=%llu physical_read=%llu compressed_payload=%llu "
 		       "compressed_pages=%llu raw_pages=%llu upper_discards=%llu rotations=%llu "
 		       "segment_cycle_min=%u segment_cycle_max=%u "
-		       "gc_pages=%llu gc_read=%llu gc_write=%llu lower_discard=%s discard_bytes=%llu "
-		       "discard_failures=%llu failed=%u",
+		       "gc_victims=%llu gc_scanned=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
+		       "lower_discard=%s discard_bytes=%llu discard_failures=%llu failed=%u",
 		       context->current_segment, context->segment_count,
 		       context->segment_write_block, context->free_segments,
 		       context->segment_live_blocks[context->current_segment],
@@ -1120,9 +1122,11 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->stats.compressed_pages,
 		       context->stats.raw_pages,
 		       context->stats.upper_discards,
-		       context->stats.arena_rotations,
+		       context->stats.segment_switches,
 		       segment_cycle_min,
 		       segment_cycle_max,
+		       context->stats.gc_victims,
+		       context->stats.gc_scanned_mappings,
 		       context->stats.compaction_pages,
 		       context->stats.compaction_read_bytes,
 		       context->stats.compaction_write_bytes,
