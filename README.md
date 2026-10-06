@@ -1,14 +1,14 @@
-# swapz V1 (experimental)
+# swapz V2 (experimental)
 
 `swapz` is an experimental Device Mapper target for **dedicated swap partitions on slow storage**.  It targets old HDDs, USB flash drives, SD/eMMC media, and SATA SSDs where storage bandwidth and flash write endurance matter more than high queue-depth NVMe throughput.
 
-The V1 hypothesis is intentionally narrow:
+The V2 hypothesis is intentionally narrow:
 
-> LZ4-compress 4 KiB swap pages, pack multiple compressed pages into 4 KiB lower-device writes, and rotate append-only write arenas across the backing partition.  This should reduce host bytes written and turn repeated logical swap rewrites into broad sequential LBA writes.
+> LZ4-compress 4 KiB swap pages, pack multiple compressed pages into 4 KiB lower-device writes, append sequentially through 1 MiB segments, and garbage-collect only low-live victim segments.  This should reduce host bytes written without V1's whole-live-set compaction penalty.
 
 This is a proof-of-concept, not production storage software yet.
 
-## V1 scope
+## V2 scope
 
 - Linux Device Mapper target name: `swapz`
 - module: `dm-swapz.ko`
@@ -19,8 +19,10 @@ This is a proof-of-concept, not production storage software yet.
 - volatile in-RAM mapping table; no persistent metadata
 - 4 KiB physical packed containers, up to 8 compressed logical pages per container
 - raw 4 KiB fallback for pages that do not save at least 512 bytes with LZ4
-- append-only arenas rotated over the backing device
-- arena compaction is deliberately simple: re-copy live mappings into the next arena
+- append-only 1 MiB segments rotated over the backing device
+- per-block live-record accounting plus low-live victim-segment garbage collection
+- one FREE segment is maintained as GC reserve
+- GC scans the compact logical map but relocates only mappings resident in the chosen victim segment
 - upper discard is consumed internally when available
 - lower discard is auto-detected, optional, and permanently disabled after a runtime failure
 - hibernation/resume is unsupported
@@ -29,16 +31,18 @@ This is a proof-of-concept, not production storage software yet.
 
 ## Why the physical partition is larger than logical swap
 
-V1 reserves 25% raw-page slack inside each arena and requires at least two arenas.  In practice the backing device therefore needs about **2.5x the requested logical swap size**.  `swapzctl` defaults to logical swap equal to one third of the physical device.
+V2 requires at least **25% of logical capacity plus two 1 MiB segments** as physical GC reserve.  Compression is never required for capacity.
+
+`swapzctl` intentionally keeps the more conservative default of logical swap equal to one third of the backing device.  On SD/USB media, extra physical space means more append distance before a host-LBA region is reused.
 
 Example:
 
 ```text
-12 GiB dedicated partition -> ~4 GiB logical swapz device
-128 GiB SD partition       -> choose 16-32 GiB logical swap for much stronger wear spreading
+12 GiB dedicated partition -> default ~4 GiB logical swapz device
+128 GiB SD partition       -> 16-32 GiB logical swap remains a useful endurance-oriented choice
 ```
 
-This strong overprovisioning is intentional for the proof-of-concept.  It guarantees that an all-incompressible live set still fits during arena rotation and avoids implementing a complex segment garbage collector before the performance/endurance premise is proven.
+V2 can operate with much less overprovisioning than V1, but conservative sizing is still recommended until physical-media benchmarks establish the best endurance/performance tradeoff.
 
 ## Storage layout
 
@@ -53,15 +57,15 @@ Linux swap 4 KiB logical writes
         +-- raw 4 KiB fallback
         |
         v
-append-only current arena
+append-only current segment
         |
         v
 backing partition
 
-arena 0 -> arena 1 -> arena 2 -> ... -> arena N -> arena 0
+segment 0 -> segment 1 -> ... -> segment N; low-live closed segments are cleaned and reused
 ```
 
-When an arena fills, live logical pages are compacted into the next arena.  All mappings are RAM-only and a reboot starts with an empty target.
+When a segment fills, allocation advances to a FREE segment.  When the reserve is consumed, only the live mappings in one low-live CLOSED segment are copied into the current segment and that victim becomes FREE.  All mappings are RAM-only and a reboot starts with an empty target.
 
 ## Build
 
@@ -79,16 +83,16 @@ make -C userspace
 make -C tests test
 ```
 
-The current source has been compile-tested with both GCC and Clang against Debian Linux 6.12.96 headers using `W=1`.  The interfaces used (`device-mapper.h`, `dm-io.h`, kernel LZ4, block discard helpers) also exist in Linux 7.0.  Exact 7.0.x build/runtime testing still needs to be done on a 7.0.x machine or VM.
+V1 was validated on Ubuntu Linux 7.0.0-34 with GCC, randomized block tests, fault injection, lifecycle testing, and bounded real swap pressure.  V2 changes the allocator and therefore requires a fresh Linux 7.0.x validation pass before use.
 
 ## DKMS
 
-From a source tree installed under `/usr/src/swapz-0.1.0`:
+From a source tree installed under `/usr/src/swapz-0.2.0`:
 
 ```bash
-dkms add -m swapz -v 0.1.0
-dkms build -m swapz -v 0.1.0
-dkms install -m swapz -v 0.1.0
+dkms add -m swapz -v 0.2.0
+dkms build -m swapz -v 0.2.0
+dkms install -m swapz -v 0.2.0
 ```
 
 ## Manual activation
