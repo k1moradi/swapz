@@ -604,7 +604,7 @@ static int swapz_read_mapping(struct swapz_context *context, u32 logical_page,
 	return 0;
 }
 
-static void swapz_try_discard_arena(struct swapz_context *context, u32 arena)
+static void swapz_try_discard_segment(struct swapz_context *context, u32 segment)
 {
 	sector_t sectors;
 	sector_t start;
@@ -614,11 +614,11 @@ static void swapz_try_discard_arena(struct swapz_context *context, u32 arena)
 	if (!context->lower_discard_enabled)
 		return;
 
-	high_water = context->arena_high_water[arena];
+	high_water = context->segment_high_water[segment];
 	if (!high_water)
 		return;
 
-	start = swapz_physical_sector(arena * context->arena_blocks);
+	start = swapz_physical_sector(segment * SWAPZ_SEGMENT_BLOCKS);
 	sectors = (sector_t)high_water * SWAPZ_BLOCK_SECTORS;
 	error = blkdev_issue_discard(context->backing->bdev, start, sectors, GFP_NOIO);
 	if (error) {
@@ -631,64 +631,183 @@ static void swapz_try_discard_arena(struct swapz_context *context, u32 arena)
 	context->stats.lower_discard_bytes += (u64)sectors << SECTOR_SHIFT;
 }
 
-static int swapz_rotate_arena(struct swapz_context *context)
+static int swapz_find_free_segment(struct swapz_context *context, u32 *segment_out)
 {
-	u32 old_arena = context->current_arena;
-	u32 next_arena = (old_arena + 1) % context->arena_count;
+	u32 offset;
+
+	for (offset = 0; offset < context->segment_count; ++offset) {
+		u32 segment = (context->allocation_cursor + offset) % context->segment_count;
+
+		if (context->segment_state[segment] != SWAPZ_SEGMENT_FREE)
+			continue;
+
+		*segment_out = segment;
+		context->allocation_cursor = (segment + 1) % context->segment_count;
+		return 0;
+	}
+
+	return -ENOSPC;
+}
+
+static int swapz_choose_gc_victim(struct swapz_context *context, u32 *segment_out)
+{
+	u32 best_segment = U32_MAX;
+	u32 best_live_blocks = U32_MAX;
+	u32 offset;
+
+	/*
+	 * Prefer the closed segment with the fewest live physical blocks.  The
+	 * headroom requirement prevents cleaning from consuming the whole
+	 * destination segment, guaranteeing foreground progress after GC.
+	 */
+	for (offset = 0; offset < context->segment_count; ++offset) {
+		u32 segment = (context->gc_cursor + offset) % context->segment_count;
+		u32 live_blocks;
+
+		if (context->segment_state[segment] != SWAPZ_SEGMENT_CLOSED)
+			continue;
+
+		live_blocks = context->segment_live_blocks[segment];
+		if (live_blocks > SWAPZ_SEGMENT_BLOCKS - SWAPZ_GC_HEADROOM_BLOCKS)
+			continue;
+		if (live_blocks >= best_live_blocks)
+			continue;
+
+		best_segment = segment;
+		best_live_blocks = live_blocks;
+		if (!live_blocks)
+			break;
+	}
+
+	if (best_segment == U32_MAX)
+		return -ENOSPC;
+
+	*segment_out = best_segment;
+	context->gc_cursor = (best_segment + 1) % context->segment_count;
+	return 0;
+}
+
+static int swapz_clean_segment(struct swapz_context *context, u32 victim)
+{
 	u32 logical_page;
+	int error;
+
+	if (WARN_ON_ONCE(context->segment_state[victim] != SWAPZ_SEGMENT_CLOSED ||
+			 context->segment_state[context->current_segment] != SWAPZ_SEGMENT_OPEN ||
+			 context->pack_record_count)) {
+		swapz_set_failed(context, -EUCLEAN);
+		return -EUCLEAN;
+	}
+
+	context->segment_state[victim] = SWAPZ_SEGMENT_CLEANING;
+
+	/*
+	 * V2 deliberately keeps the 8-byte logical mapping table and avoids a
+	 * large reverse map.  GC scans mappings once, but relocates only mappings
+	 * that still point into this victim segment.  On the intended slow-media
+	 * target, avoiding device I/O dominates this RAM scan; benchmark it.
+	 */
+	for (logical_page = 0; logical_page < context->logical_pages; ++logical_page) {
+		const struct swapz_mapping mapping = context->mappings[logical_page];
+
+		if (!swapz_mapping_valid(&mapping) ||
+		    swapz_mapping_segment(&mapping) != victim)
+			continue;
+
+		error = swapz_read_mapping(context, logical_page,
+					   context->input_buffer, true);
+		if (error)
+			goto fail;
+
+		error = swapz_store_page(context, NULL, logical_page,
+					 context->input_buffer,
+					 context->compressed_buffer, true, false);
+		if (error)
+			goto fail;
+
+		context->stats.compaction_pages++;
+	}
+
+	error = swapz_flush_pack(context, true, false);
+	if (error)
+		goto fail;
+
+	if (WARN_ON_ONCE(context->segment_live_blocks[victim] != 0)) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+
+	swapz_try_discard_segment(context, victim);
+	context->segment_high_water[victim] = 0;
+	context->segment_state[victim] = SWAPZ_SEGMENT_FREE;
+	context->free_segments++;
+	return 0;
+
+fail:
+	context->segment_state[victim] = SWAPZ_SEGMENT_CLOSED;
+	swapz_set_failed(context, error);
+	return error;
+}
+
+static int swapz_open_free_segment(struct swapz_context *context)
+{
+	u32 segment;
+	int error;
+
+	error = swapz_find_free_segment(context, &segment);
+	if (error)
+		return error;
+
+	context->segment_state[segment] = SWAPZ_SEGMENT_OPEN;
+	context->free_segments--;
+	context->current_segment = segment;
+	context->segment_write_block = 0;
+	context->segment_high_water[segment] = 0;
+	context->segment_cycles[segment]++;
+	context->stats.arena_rotations++;
+	return 0;
+}
+
+static int swapz_advance_segment(struct swapz_context *context)
+{
 	int error;
 
 	if (context->pack_record_count)
 		return -EDEADLK;
 
-	swapz_try_discard_arena(context, next_arena);
-	context->current_arena = next_arena;
-	context->arena_write_block = 0;
-	context->arena_high_water[next_arena] = 0;
-	context->arena_cycles[next_arena]++;
-	context->stats.arena_rotations++;
+	if (context->segment_state[context->current_segment] == SWAPZ_SEGMENT_OPEN)
+		context->segment_state[context->current_segment] = SWAPZ_SEGMENT_CLOSED;
 
-	/*
-	 * Invariant: after every successful rotation all live mappings reside in
-	 * the current arena.  Therefore next_arena contains no live data when we
-	 * select it.  Re-copy each live logical page into the new arena.  This is
-	 * intentionally simple for V1; physical-order compaction is a later
-	 * optimization if benchmarks justify the complexity.
-	 */
-	for (logical_page = 0; logical_page < context->logical_pages; ++logical_page) {
-		struct swapz_mapping old_mapping = context->mappings[logical_page];
+	for (;;) {
+		u32 victim;
 
-		if (!swapz_mapping_valid(&old_mapping))
-			continue;
-		if (swapz_mapping_arena(context, &old_mapping) != old_arena) {
-			DMERR("mapping invariant broken at logical page %u", logical_page);
-			swapz_set_failed(context, -EUCLEAN);
-			return -EUCLEAN;
-		}
+		if (!context->free_segments)
+			return -ENOSPC;
 
-		error = swapz_read_mapping(context, logical_page, context->input_buffer, true);
-		if (error) {
-			swapz_set_failed(context, error);
+		error = swapz_open_free_segment(context);
+		if (error)
 			return error;
+
+		/*
+		 * Keep one free segment in reserve.  When opening the last free
+		 * segment, clean one low-live closed segment into the new current
+		 * segment immediately.  The victim becomes the next reserve segment.
+		 */
+		if (!context->free_segments) {
+			error = swapz_choose_gc_victim(context, &victim);
+			if (error)
+				return error;
+			error = swapz_clean_segment(context, victim);
+			if (error)
+				return error;
 		}
 
-		error = swapz_store_page(context, NULL, logical_page,
-					 context->input_buffer,
-					 context->compressed_buffer, true, false);
-		if (error) {
-			swapz_set_failed(context, error);
-			return error;
-		}
-		context->stats.compaction_pages++;
-	}
+		if (swapz_current_segment_has_block(context))
+			return 0;
 
-	error = swapz_flush_pack(context, true, false);
-	if (error) {
-		swapz_set_failed(context, error);
-		return error;
+		/* GC exactly filled the destination; continue with the freed victim. */
+		context->segment_state[context->current_segment] = SWAPZ_SEGMENT_CLOSED;
 	}
-
-	return 0;
 }
 
 static int swapz_process_write(struct swapz_context *context, struct bio *bio)
