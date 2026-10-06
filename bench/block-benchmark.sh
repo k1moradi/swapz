@@ -3,11 +3,23 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: sudo ./bench/block-benchmark.sh --backing /dev/DEVICE --size 1G --destroy [--runtime 30] [--iodepth 8]
+Usage:
+  sudo ./bench/block-benchmark.sh \
+      --backing /dev/DEVICE --size 1G --destroy \
+      [--runtime 30] [--iodepth 1]
 
-DESTRUCTIVE: overwrites the backing device. Use only a dedicated test partition.
-Compares direct raw 4 KiB writes with dm-swapz using the same fio workload and
-reports backing-device sectors written. The backing device must be >= ~2.5x SIZE.
+DESTRUCTIVE: overwrites the selected backing device.
+Use only an explicitly disposable dedicated partition/device.
+
+The backing device must hold the requested logical size plus the V2 reserve:
+max(25% of logical size, 2 MiB).
+
+The script runs paired raw-device and swapz workloads for:
+  compressible (100%)
+  partially compressible (50%)
+  incompressible (0%)
+
+It reports actual lower-device sectors written for every run.
 USAGE
   exit 2
 }
@@ -15,9 +27,10 @@ USAGE
 BACKING=""
 SIZE=""
 RUNTIME=30
-IODEPTH=8
+IODEPTH=1
 DESTROY=0
 NAME=swapzbench
+
 while (($#)); do
   case "$1" in
     --backing) BACKING=$2; shift 2;;
@@ -28,62 +41,126 @@ while (($#)); do
     *) usage;;
   esac
 done
+
 [[ -n "$BACKING" && -n "$SIZE" && $DESTROY -eq 1 ]] || usage
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in fio dmsetup modprobe blockdev lsblk awk numfmt; do command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }; done
+
+for tool in awk blockdev dmsetup fio lsblk modprobe numfmt; do
+  command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
+done
+
 [[ -b "$BACKING" ]] || { echo "$BACKING is not a block device" >&2; exit 1; }
-if grep -qE "^${BACKING//\//\\/}[[:space:]]" /proc/swaps; then echo "$BACKING is active swap" >&2; exit 1; fi
-if [[ -n "$(lsblk -nro MOUNTPOINTS "$BACKING" | tr -d '[:space:]')" ]]; then echo "$BACKING is mounted" >&2; exit 1; fi
+
+if grep -qE "^\${BACKING//\//\\/}[[:space:]]" /proc/swaps; then
+  echo "$BACKING is active swap" >&2
+  exit 1
+fi
+
+if lsblk -nrpo MOUNTPOINTS "$BACKING" | grep -q '[^[:space:]]'; then
+  echo "$BACKING or a descendant is mounted" >&2
+  exit 1
+fi
+
+SIZE_BYTES=$(numfmt --from=iec "$SIZE")
+SIZE_BYTES=$((SIZE_BYTES / 4096 * 4096))
+((SIZE_BYTES > 0)) || { echo "invalid logical size" >&2; exit 1; }
+
+BACKING_BYTES=$(blockdev --getsize64 "$BACKING")
+RATIO_RESERVE=$(((SIZE_BYTES + 3) / 4))
+MIN_RESERVE=$((2 * 1024 * 1024))
+if ((RATIO_RESERVE > MIN_RESERVE)); then
+  MIN_RESERVE=$RATIO_RESERVE
+fi
+if ((SIZE_BYTES > BACKING_BYTES || MIN_RESERVE > BACKING_BYTES - SIZE_BYTES)); then
+  echo "backing device does not satisfy V2 logical size + GC reserve" >&2
+  exit 1
+fi
 
 KNAME=$(lsblk -nro KNAME "$BACKING" | head -1)
 STAT=/sys/class/block/$KNAME/stat
 [[ -r "$STAT" ]] || { echo "cannot read $STAT" >&2; exit 1; }
-sectors_written() { awk '{print $7}' "$STAT"; }
-bytes_from_sectors() { awk -v s="$1" 'BEGIN { printf "%.0f", s * 512 }'; }
-cleanup() { dmsetup remove "$NAME" >/dev/null 2>&1 || true; }
+
+sectors_written() {
+  awk '{print $7}' "$STAT"
+}
+
+sectors_read() {
+  awk '{print $3}' "$STAT"
+}
+
+bytes_from_sectors() {
+  awk -v s="$1" 'BEGIN { printf "%.0f", s * 512 }'
+}
+
+cleanup() {
+  dmsetup remove "$NAME" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 run_fio() {
-  local target=$1 label=$2 compress=$3
-  local before after delta start end elapsed
-  blockdev --flushbufs "$BACKING" || true
-  before=$(sectors_written)
+  local target=$1
+  local label=$2
+  local compress=$3
+  local before_w after_w before_r after_r
+  local start end
+
+  blockdev --flushbufs "$target" || true
+  before_w=$(sectors_written)
+  before_r=$(sectors_read)
   start=$(date +%s%N)
+
   fio --name="$label" --filename="$target" --size="$SIZE" --direct=1 \
-      --ioengine=libaio --iodepth="$IODEPTH" --numjobs=1 --bs=4k --rw=randwrite \
-      --time_based=1 --runtime="$RUNTIME" --group_reporting=1 --refill_buffers=1 \
-      --randrepeat=0 --buffer_compress_percentage="$compress" --output-format=normal
+      --ioengine=libaio --iodepth="$IODEPTH" --numjobs=1 --bs=4k \
+      --rw=randwrite --time_based=1 --runtime="$RUNTIME" \
+      --group_reporting=1 --refill_buffers=1 --randrepeat=0 \
+      --buffer_compress_percentage="$compress" --buffer_compress_chunk=512 \
+      --output-format=normal
+
+  blockdev --flushbufs "$target" || true
   end=$(date +%s%N)
-  blockdev --flushbufs "$BACKING" || true
-  after=$(sectors_written)
-  delta=$((after-before))
-  elapsed=$((end-start))
-  printf '%s backing_sectors_written=%s backing_bytes_written=%s elapsed_ns=%s\n' \
-    "$label" "$delta" "$(bytes_from_sectors "$delta")" "$elapsed"
+  after_w=$(sectors_written)
+  after_r=$(sectors_read)
+
+  local delta_w=$((after_w - before_w))
+  local delta_r=$((after_r - before_r))
+
+  printf 'RESULT label=%s compress_pct=%s qd=%s lower_write_sectors=%s lower_write_bytes=%s lower_read_sectors=%s lower_read_bytes=%s elapsed_ns=%s\n' \
+      "$label" "$compress" "$IODEPTH" \
+      "$delta_w" "$(bytes_from_sectors "$delta_w")" \
+      "$delta_r" "$(bytes_from_sectors "$delta_r")" \
+      "$((end - start))"
 }
 
-printf 'Backing: %s (%s) logical test size=%s runtime=%ss iodepth=%s\n' "$BACKING" "$KNAME" "$SIZE" "$RUNTIME" "$IODEPTH"
-echo '=== Baseline: 75% compressible buffers, raw device ==='
-BASELINE=$(run_fio "$BACKING" baseline 75 | tee /dev/stderr | tail -1)
+SECTORS=$((SIZE_BYTES / 512))
+
+printf 'Backing: %s (%s) physical_bytes=%s logical_bytes=%s runtime=%ss iodepth=%s\n' \
+    "$BACKING" "$KNAME" "$BACKING_BYTES" "$SIZE_BYTES" "$RUNTIME" "$IODEPTH"
+printf 'Queue: logical=%s physical=%s minimum_io=%s discard_granularity=%s discard_max=%s\n' \
+    "$(cat "/sys/class/block/$KNAME/queue/logical_block_size" 2>/dev/null || echo unknown)" \
+    "$(cat "/sys/class/block/$KNAME/queue/physical_block_size" 2>/dev/null || echo unknown)" \
+    "$(cat "/sys/class/block/$KNAME/queue/minimum_io_size" 2>/dev/null || echo unknown)" \
+    "$(cat "/sys/class/block/$KNAME/queue/discard_granularity" 2>/dev/null || echo unknown)" \
+    "$(cat "/sys/class/block/$KNAME/queue/discard_max_bytes" 2>/dev/null || echo unknown)"
 
 modprobe dm-swapz
-SIZE_BYTES=$(numfmt --from=iec "$SIZE")
-SIZE_BYTES=$((SIZE_BYTES / 4096 * 4096))
-SECTORS=$((SIZE_BYTES / 512))
-dmsetup create "$NAME" --table "0 $SECTORS swapz $BACKING"
 
-echo '=== swapz: same 75% compressible workload ==='
-SWAPZ=$(run_fio "/dev/mapper/$NAME" swapz 75 | tee /dev/stderr | tail -1)
-echo "dm status: $(dmsetup status "$NAME")"
+for spec in "compressible:100" "partial:50" "incompressible:0"; do
+  workload=\${spec%%:*}
+  compression=\${spec##*:}
 
-# Recreate the volatile target so the incompressible control starts with an
-# empty mapping and fresh arena head rather than inheriting the compressible run.
-dmsetup remove "$NAME"
-dmsetup create "$NAME" --table "0 $SECTORS swapz $BACKING"
+  echo
+  echo "=== $workload: raw baseline ==="
+  run_fio "$BACKING" "\${workload}-raw" "$compression"
 
-echo '=== Control: incompressible workload through fresh swapz target ==='
-CONTROL=$(run_fio "/dev/mapper/$NAME" swapz-incompressible 0 | tee /dev/stderr | tail -1)
+  dmsetup create "$NAME" --table "0 $SECTORS swapz $BACKING"
+
+  echo "=== $workload: swapz ==="
+  run_fio "/dev/mapper/$NAME" "\${workload}-swapz" "$compression"
+  echo "STATUS workload=$workload $(dmsetup status "$NAME")"
+
+  dmsetup remove "$NAME"
+done
 
 echo
-printf '%s\n%s\n%s\n' "$BASELINE" "$SWAPZ" "$CONTROL"
-echo 'Interpretation: compare backing_bytes_written and fio bandwidth. Host-write reduction is the endurance proxy; NAND wear itself remains controller-dependent.'
+echo 'Interpretation: compare paired lower_write_sectors and fio throughput/latency.'
+echo 'Host-write reduction is an endurance proxy; NAND wear remains FTL-dependent.'
