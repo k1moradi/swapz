@@ -36,7 +36,7 @@
 
 #define SWAPZ_VERSION_MAJOR 0
 #define SWAPZ_VERSION_MINOR 1
-#define SWAPZ_VERSION_PATCH 0
+#define SWAPZ_VERSION_PATCH 1
 
 #define SWAPZ_BLOCK_BYTES PAGE_SIZE
 #define SWAPZ_BLOCK_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
@@ -136,6 +136,15 @@ struct swapz_context {
 
 	bool lower_discard_enabled;
 
+	/*
+	 * Foreground writes must survive arena rotation.  Rotation compaction uses
+	 * input_buffer/compressed_buffer, so keep the current BIO payload and its
+	 * compressed form in separate preallocated pages.
+	 */
+	void *write_buffer;
+	void *write_compressed_buffer;
+
+	/* Compaction/read scratch buffers. */
 	void *input_buffer;
 	void *io_buffer;
 	void *compressed_buffer;
@@ -471,19 +480,19 @@ static int swapz_write_raw_page(struct swapz_context *context, struct bio *bio,
 
 static int swapz_store_page(struct swapz_context *context, struct bio *bio,
 			    u32 logical_page, const void *page_data,
-			    bool compaction, bool allow_rotation)
+			    void *compression_buffer, bool compaction,
+			    bool allow_rotation)
 {
 	int compressed_length;
 
-	compressed_length = LZ4_compress_fast(page_data, context->compressed_buffer,
+	compressed_length = LZ4_compress_fast(page_data, compression_buffer,
 					      SWAPZ_BLOCK_BYTES,
 					      SWAPZ_MAX_COMPRESSED_BYTES,
 					      1, context->lz4_workmem);
 	if (compressed_length > 0) {
 		return swapz_add_compressed_record(context, bio, logical_page,
-					   context->compressed_buffer,
-					   compressed_length, compaction,
-					   allow_rotation);
+					   compression_buffer, compressed_length,
+					   compaction, allow_rotation);
 	}
 
 	return swapz_write_raw_page(context, bio, logical_page, page_data,
@@ -614,7 +623,8 @@ static int swapz_rotate_arena(struct swapz_context *context)
 		}
 
 		error = swapz_store_page(context, NULL, logical_page,
-					 context->input_buffer, true, false);
+					 context->input_buffer,
+					 context->compressed_buffer, true, false);
 		if (error) {
 			swapz_set_failed(context, error);
 			return error;
@@ -639,10 +649,15 @@ static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 	if (logical_page >= context->logical_pages)
 		return -ERANGE;
 
-	swapz_copy_from_bio(bio, context->input_buffer);
+	/*
+	 * Keep the current BIO isolated from compaction scratch.  A store can
+	 * trigger arena rotation after flushing the final pending container, and
+	 * rotation reuses input_buffer/compressed_buffer while copying live pages.
+	 */
+	swapz_copy_from_bio(bio, context->write_buffer);
 	context->stats.logical_write_bytes += SWAPZ_BLOCK_BYTES;
-	error = swapz_store_page(context, bio, logical_page, context->input_buffer,
-				 false, true);
+	error = swapz_store_page(context, bio, logical_page, context->write_buffer,
+				 context->write_compressed_buffer, false, true);
 	return error;
 }
 
@@ -949,6 +964,10 @@ static void swapz_free_context(struct swapz_context *context)
 		dm_io_client_destroy(context->io_client);
 	if (context->backing)
 		dm_put_device(context->target, context->backing);
+	if (context->write_buffer)
+		free_page((unsigned long)context->write_buffer);
+	if (context->write_compressed_buffer)
+		free_page((unsigned long)context->write_compressed_buffer);
 	if (context->input_buffer)
 		free_page((unsigned long)context->input_buffer);
 	if (context->io_buffer)
@@ -1082,12 +1101,15 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		context->mappings[index].physical_block = SWAPZ_EMPTY_BLOCK;
 	context->arena_cycles[0] = 1;
 
+	context->write_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->write_compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->input_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
-	if (!context->input_buffer || !context->io_buffer ||
+	if (!context->write_buffer || !context->write_compressed_buffer ||
+	    !context->input_buffer || !context->io_buffer ||
 	    !context->compressed_buffer || !context->pack_buffer || !context->lz4_workmem) {
 		target->error = "Cannot allocate preallocated I/O buffers";
 		error = -ENOMEM;
