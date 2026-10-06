@@ -135,15 +135,15 @@ Linux swap --discard=pages
           v
        swapz              always safe to consume internally
           |
-          +---- backing DISCARD supported? ---- yes -> use before arena reuse
+          +---- backing DISCARD supported? ---- yes -> use after victim cleaning / before segment reuse
           |                                  \\-- no -> sequential overwrite
 ```
 
-The lower device is probed using its block queue limits.  A lower discard error does **not** fail swap I/O; `swapz` logs it once, disables lower discard for the lifetime of that target, and continues with ordinary arena overwrite.
+The lower device is probed using its block queue limits.  A lower discard error does **not** fail swap I/O; `swapz` logs it once, disables lower discard for the lifetime of that target, and continues with ordinary sequential segment overwrite.
 
 Correctness never depends on lower DISCARD.
 
-If upper discard is unavailable, stale logical mappings remain conservatively live until overwritten.  This can increase arena-compaction traffic but does not change correctness.
+If upper discard is unavailable, stale logical mappings remain conservatively live until overwritten.  This can increase victim-GC traffic but does not change correctness.
 
 ## systemd
 
@@ -170,7 +170,7 @@ sudo ./scripts/loop-smoke.sh
 The loop smoke test requires a kernel built for the installed module and uses a temporary 1 GiB loop device; it does not touch a real disk.
 
 For a secondary Codex/test-agent handoff, use [`CODEX_VALIDATION.md`](CODEX_VALIDATION.md).
-It defines the V1 invariants, destructive-test safety rules, feature-detection/fallback
+It defines the current V2 invariants, destructive-test safety rules, feature-detection/fallback
 requirements, benchmark metrics, and the exact report expected back for primary-fixer
 review.  The tester is intentionally not authorized to redesign or push substantive
 kernel changes.
@@ -192,14 +192,14 @@ sudo ./bench/block-benchmark.sh \
 
 The benchmark runs a raw-device baseline, the same compressible workload through `swapz`, and an incompressible control.  It samples `/sys/class/block/<device>/stat` before/after each run.
 
-For the first SD/USB tests, run both `--iodepth 1` and `--iodepth 8`.  V1 gets host-byte reduction by **packing concurrently queued compressed pages into one 4 KiB write**, so QD1 is an important negative/control case rather than something to hide.
+For the first SD/USB tests, run both `--iodepth 1` and `--iodepth 8`.  swapz gets host-byte reduction by **packing concurrently queued compressed pages into one 4 KiB write**, so QD1 is an important negative/control case rather than something to hide.
 
 ## Important limitations
 
 - Do not use `swapz` for hibernation/resume.
 - Do not put a filesystem on the mapper device.
 - Power-loss persistence is deliberately not provided; swap is recreated each boot.
-- V1 serializes all target I/O.  This is intentional for slow devices but inappropriate for fast NVMe.
-- FUA-specific persistence semantics are not a V1 goal; the target is only intended for disposable swap data.
-- Arena rotation can pause while live pages are compacted.  Measuring that tail latency is part of the V1 experiment.
+- V2 still serializes target I/O.  This is intentional for slow devices but inappropriate for fast NVMe.
+- FUA-specific persistence semantics are not a V2 goal; the target is only intended for disposable swap data.
+- Segment GC can pause a foreground write while one low-live victim is cleaned.  Measuring that tail latency is a primary V2 test.
 - Host-sector reduction is an endurance proxy.  Actual NAND write amplification is controlled by the device FTL and must be measured with device telemetry where available.
