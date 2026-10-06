@@ -1011,3 +1011,148 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 
 	physical_sectors = bdev_nr_sectors(context->backing->bdev);
 	physical_blocks64 = div_u64(physical_sectors, SWAPZ_BLOCK_SECTORS);
+	logical_pages64 = div_u64(target->len, SWAPZ_BLOCK_SECTORS);
+	if (!logical_pages64 || logical_pages64 > U32_MAX || physical_blocks64 > U32_MAX) {
+		target->error = "V1 supports at most 16 TiB physical/logical space";
+		error = -E2BIG;
+		goto fail;
+	}
+
+	slack_blocks = max_t(u64, DIV_ROUND_UP_ULL(logical_pages64,
+						      SWAPZ_ARENA_SLACK_DIVISOR),
+			     SWAPZ_MIN_ARENA_SLACK_BLOCKS);
+	minimum_arena_blocks = round_up(logical_pages64 + slack_blocks,
+					SWAPZ_ARENA_ALIGNMENT_BLOCKS);
+	arena_count64 = div_u64(physical_blocks64, minimum_arena_blocks);
+	if (arena_count64 < 2) {
+		target->error = "Backing device must be at least ~2.5x logical swap size in V1";
+		error = -ENOSPC;
+		goto fail;
+	}
+	if (arena_count64 > U32_MAX)
+		arena_count64 = U32_MAX;
+	arena_blocks64 = round_down(div_u64(physical_blocks64, arena_count64),
+				    SWAPZ_ARENA_ALIGNMENT_BLOCKS);
+	if (arena_blocks64 < minimum_arena_blocks || arena_blocks64 > U32_MAX) {
+		target->error = "Cannot derive safe arena geometry";
+		error = -EINVAL;
+		goto fail;
+	}
+
+	context->logical_pages = (u32)logical_pages64;
+	context->physical_blocks = (u32)physical_blocks64;
+	context->minimum_arena_blocks = (u32)minimum_arena_blocks;
+	context->arena_blocks = (u32)arena_blocks64;
+	context->arena_count = (u32)arena_count64;
+	context->current_arena = 0;
+	context->arena_write_block = 0;
+
+	context->mappings = vzalloc(array_size(context->logical_pages,
+					       sizeof(*context->mappings)));
+	context->arena_high_water = kvcalloc(context->arena_count,
+					     sizeof(*context->arena_high_water), GFP_KERNEL);
+	context->arena_cycles = kvcalloc(context->arena_count,
+					 sizeof(*context->arena_cycles), GFP_KERNEL);
+	if (!context->mappings || !context->arena_high_water || !context->arena_cycles) {
+		target->error = "Cannot allocate mapping/arena metadata";
+		error = -ENOMEM;
+		goto fail;
+	}
+	for (index = 0; index < context->logical_pages; ++index)
+		context->mappings[index].physical_block = SWAPZ_EMPTY_BLOCK;
+	context->arena_cycles[0] = 1;
+
+	context->input_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
+	if (!context->input_buffer || !context->io_buffer ||
+	    !context->compressed_buffer || !context->pack_buffer || !context->lz4_workmem) {
+		target->error = "Cannot allocate preallocated I/O buffers";
+		error = -ENOMEM;
+		goto fail;
+	}
+	swapz_reset_pack(context);
+
+	context->io_client = dm_io_client_create();
+	if (IS_ERR(context->io_client)) {
+		error = PTR_ERR(context->io_client);
+		context->io_client = NULL;
+		target->error = "Cannot create dm-io client";
+		goto fail;
+	}
+
+	spin_lock_init(&context->queue_lock);
+	INIT_LIST_HEAD(&context->queued_bios);
+	INIT_WORK(&context->io_work, swapz_io_worker);
+	context->workqueue = alloc_workqueue("swapz-%s",
+					     WQ_MEM_RECLAIM | WQ_UNBOUND, 1,
+					     dm_table_device_name(target->table));
+	if (!context->workqueue) {
+		target->error = "Cannot allocate reclaim-safe workqueue";
+		error = -ENOMEM;
+		goto fail;
+	}
+
+	context->lower_discard_enabled =
+		bdev_max_discard_sectors(context->backing->bdev) != 0 &&
+		bdev_discard_granularity(context->backing->bdev) != 0;
+	context->accepting_io = true;
+
+	target->per_io_data_size = sizeof(struct swapz_per_bio);
+	target->num_flush_bios = 1;
+	target->flush_supported = true;
+	target->num_discard_bios = 1;
+	target->discards_supported = true;
+	target->limit_swap_bios = true;
+	error = dm_set_target_max_io_len(target, SWAPZ_BLOCK_SECTORS);
+	if (error) {
+		target->error = "Cannot set 4 KiB maximum I/O size";
+		goto fail;
+	}
+
+	DMINFO("logical=%u pages physical=%u blocks arenas=%u arena_blocks=%u lower_discard=%s",
+	       context->logical_pages, context->physical_blocks,
+	       context->arena_count, context->arena_blocks,
+	       context->lower_discard_enabled ? "on" : "off");
+	return 0;
+
+fail:
+	swapz_free_context(context);
+	target->private = NULL;
+	return error;
+}
+
+static struct target_type swapz_target = {
+	.name = "swapz",
+	.version = { SWAPZ_VERSION_MAJOR, SWAPZ_VERSION_MINOR, SWAPZ_VERSION_PATCH },
+	.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE,
+	.module = THIS_MODULE,
+	.ctr = swapz_ctr,
+	.dtr = swapz_dtr,
+	.map = swapz_map,
+	.presuspend = swapz_presuspend,
+	.resume = swapz_resume,
+	.status = swapz_status,
+	.iterate_devices = swapz_iterate_devices,
+	.io_hints = swapz_io_hints,
+};
+
+static int __init swapz_init(void)
+{
+	return dm_register_target(&swapz_target);
+}
+
+static void __exit swapz_exit(void)
+{
+	dm_unregister_target(&swapz_target);
+}
+
+module_init(swapz_init);
+module_exit(swapz_exit);
+
+MODULE_AUTHOR("OpenAI / experimental swapz project");
+MODULE_DESCRIPTION("Volatile LZ4-compressed log-structured swap device-mapper target");
+MODULE_LICENSE("GPL");
+MODULE_ALIAS("dm-swapz");
