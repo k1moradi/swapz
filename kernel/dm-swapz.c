@@ -726,6 +726,16 @@ static void swapz_process_bio(struct swapz_context *context, struct bio *bio)
 			swapz_complete_bio(bio, error);
 			return;
 		}
+
+		/*
+		 * Linux 7.0 represents an empty flush as a zero-length
+		 * REQ_OP_WRITE | REQ_PREFLUSH bio.  The preflush above is the whole
+		 * operation; do not fall through to the normal 4 KiB write path.
+		 */
+		if (bio_op(bio) == REQ_OP_WRITE && !bio_sectors(bio)) {
+			swapz_complete_bio(bio, 0);
+			return;
+		}
 	}
 
 	switch (bio_op(bio)) {
@@ -812,10 +822,20 @@ static int swapz_map(struct dm_target *target, struct bio *bio)
 	if (unlikely(!READ_ONCE(context->accepting_io) || READ_ONCE(context->failed)))
 		return DM_MAPIO_KILL;
 
-	if ((bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_WRITE) &&
+	if (bio_op(bio) == REQ_OP_READ &&
 	    (bio->bi_iter.bi_sector % SWAPZ_BLOCK_SECTORS ||
 	     bio_sectors(bio) != SWAPZ_BLOCK_SECTORS))
 		return DM_MAPIO_KILL;
+
+	if (bio_op(bio) == REQ_OP_WRITE) {
+		const bool empty_preflush =
+			!bio_sectors(bio) && (bio->bi_opf & REQ_PREFLUSH);
+
+		if (!empty_preflush &&
+		    (bio->bi_iter.bi_sector % SWAPZ_BLOCK_SECTORS ||
+		     bio_sectors(bio) != SWAPZ_BLOCK_SECTORS))
+			return DM_MAPIO_KILL;
+	}
 
 	entry = dm_per_bio_data(bio, sizeof(*entry));
 	INIT_LIST_HEAD(&entry->list);
