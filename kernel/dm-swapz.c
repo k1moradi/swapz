@@ -6,8 +6,10 @@
  *  - dedicated block-device backing only;
  *  - serialize I/O through one reclaim-capable worker;
  *  - pack several LZ4-compressed 4 KiB logical pages into 4 KiB writes;
- *  - append sequentially inside large arenas and rotate arenas to spread LBAs;
- *  - keep all mappings in RAM; no persistent metadata or recovery format;
+ *  - append sequentially inside 1 MiB log segments and rotate across the device;
+ *  - clean only live records from low-live victim segments instead of copying
+ *    the whole live set;
+ *  - keep all mappings/GC metadata in RAM; no persistent recovery format;
  *  - consume upper discard notifications even when the backing device cannot
  *    discard; lower discard is an optional optimization with fail-open fallback.
  *
@@ -414,6 +416,15 @@ static int swapz_flush_pack(struct swapz_context *context, bool compaction,
 		swapz_install_mapping(context, pending->logical_page, physical_block,
 				      pending->stored_length, pending->record_index,
 				      SWAPZ_MAP_COMPRESSED);
+		if (unlikely(context->failed)) {
+			error = -EUCLEAN;
+			goto fail_pending;
+		}
+	}
+
+	for (record_index = 0; record_index < context->pack_record_count; ++record_index) {
+		struct swapz_pending_record *pending = &context->pending[record_index];
+
 		if (pending->bio)
 			swapz_complete_bio(pending->bio, 0);
 	}
@@ -521,6 +532,9 @@ static int swapz_write_raw_page(struct swapz_context *context, struct bio *bio,
 
 	swapz_install_mapping(context, logical_page, physical_block, SWAPZ_BLOCK_BYTES,
 			      0, 0);
+	if (unlikely(context->failed))
+		return -EUCLEAN;
+
 	context->stats.raw_pages++;
 	swapz_note_block_written(context);
 	if (bio)
