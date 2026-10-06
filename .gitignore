@@ -1,0 +1,11 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+.*.cmd
+.tmp_versions/
+userspace/swapzctl
+tests/swapz-model-tests
+tests/swapz-model-tests-asan
