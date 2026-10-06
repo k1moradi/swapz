@@ -1054,7 +1054,7 @@ static int swapz_iterate_devices(struct dm_target *target,
 	struct swapz_context *context = target->private;
 
 	return function(target, context->backing, 0,
-			(sector_t)context->arena_count * context->arena_blocks *
+			(sector_t)context->segment_count * SWAPZ_SEGMENT_BLOCKS *
 			SWAPZ_BLOCK_SECTORS, data);
 }
 
@@ -1072,28 +1072,32 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 			 unsigned int status_flags, char *result, unsigned int maxlen)
 {
 	struct swapz_context *context = target->private;
-	u32 arena_cycle_min = U32_MAX;
-	u32 arena_cycle_max = 0;
-	u32 arena;
+	u32 segment_cycle_min = U32_MAX;
+	u32 segment_cycle_max = 0;
+	u32 segment;
 	unsigned int sz = 0;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
-		for (arena = 0; arena < context->arena_count; ++arena) {
-			arena_cycle_min = min(arena_cycle_min, context->arena_cycles[arena]);
-			arena_cycle_max = max(arena_cycle_max, context->arena_cycles[arena]);
+		for (segment = 0; segment < context->segment_count; ++segment) {
+			segment_cycle_min = min(segment_cycle_min,
+						context->segment_cycles[segment]);
+			segment_cycle_max = max(segment_cycle_max,
+						context->segment_cycles[segment]);
 		}
-		if (arena_cycle_min == U32_MAX)
-			arena_cycle_min = 0;
+		if (segment_cycle_min == U32_MAX)
+			segment_cycle_min = 0;
 
-		DMEMIT("arena=%u/%u head_blocks=%u logical_write=%llu physical_write=%llu "
+		DMEMIT("segment=%u/%u head_blocks=%u free_segments=%u live_blocks=%u "
+		       "logical_write=%llu physical_write=%llu "
 		       "logical_read=%llu physical_read=%llu compressed_payload=%llu "
 		       "compressed_pages=%llu raw_pages=%llu upper_discards=%llu rotations=%llu "
-		       "arena_cycle_min=%u arena_cycle_max=%u "
+		       "segment_cycle_min=%u segment_cycle_max=%u "
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu lower_discard=%s discard_bytes=%llu "
 		       "discard_failures=%llu failed=%u",
-		       context->current_arena, context->arena_count,
-		       context->arena_write_block,
+		       context->current_segment, context->segment_count,
+		       context->segment_write_block, context->free_segments,
+		       context->segment_live_blocks[context->current_segment],
 		       context->stats.logical_write_bytes,
 		       context->stats.physical_write_bytes,
 		       context->stats.logical_read_bytes,
@@ -1103,8 +1107,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->stats.raw_pages,
 		       context->stats.upper_discards,
 		       context->stats.arena_rotations,
-		       arena_cycle_min,
-		       arena_cycle_max,
+		       segment_cycle_min,
+		       segment_cycle_max,
 		       context->stats.compaction_pages,
 		       context->stats.compaction_read_bytes,
 		       context->stats.compaction_write_bytes,
@@ -1147,8 +1151,11 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->pack_buffer);
 	kfree(context->lz4_workmem);
 	vfree(context->mappings);
-	kvfree(context->arena_high_water);
-	kvfree(context->arena_cycles);
+	kvfree(context->segment_high_water);
+	kvfree(context->segment_cycles);
+	kvfree(context->segment_live_blocks);
+	kvfree(context->segment_state);
+	kvfree(context->block_live_records);
 	kfree(context);
 }
 
@@ -1169,11 +1176,10 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	struct swapz_context *context;
 	sector_t physical_sectors;
 	u64 physical_blocks64;
+	u64 usable_blocks64;
 	u64 logical_pages64;
-	u64 slack_blocks;
-	u64 minimum_arena_blocks;
-	u64 arena_count64;
-	u64 arena_blocks64;
+	u64 reserve_blocks64;
+	u64 segment_count64;
 	u32 index;
 	int error;
 
@@ -1219,56 +1225,68 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 
 	physical_sectors = bdev_nr_sectors(context->backing->bdev);
 	physical_blocks64 = div_u64(physical_sectors, SWAPZ_BLOCK_SECTORS);
+	segment_count64 = div_u64(physical_blocks64, SWAPZ_SEGMENT_BLOCKS);
+	usable_blocks64 = segment_count64 * SWAPZ_SEGMENT_BLOCKS;
 	logical_pages64 = div_u64(target->len, SWAPZ_BLOCK_SECTORS);
-	if (!logical_pages64 || logical_pages64 > U32_MAX || physical_blocks64 > U32_MAX) {
-		target->error = "V1 supports at most 16 TiB physical/logical space";
+	if (!logical_pages64 || logical_pages64 > U32_MAX ||
+	    usable_blocks64 > U32_MAX) {
+		target->error = "V2 supports at most 16 TiB physical/logical space";
 		error = -E2BIG;
 		goto fail;
 	}
-
-	slack_blocks = max_t(u64, DIV_ROUND_UP_ULL(logical_pages64,
-						      SWAPZ_ARENA_SLACK_DIVISOR),
-			     SWAPZ_MIN_ARENA_SLACK_BLOCKS);
-	minimum_arena_blocks = round_up(logical_pages64 + slack_blocks,
-					SWAPZ_ARENA_ALIGNMENT_BLOCKS);
-	arena_count64 = div_u64(physical_blocks64, minimum_arena_blocks);
-	if (arena_count64 < 2) {
-		target->error = "Backing device must be at least ~2.5x logical swap size in V1";
+	if (segment_count64 < 3) {
+		target->error = "Backing device needs at least three 1 MiB segments";
 		error = -ENOSPC;
 		goto fail;
 	}
-	if (arena_count64 > U32_MAX)
-		arena_count64 = U32_MAX;
-	arena_blocks64 = round_down(div_u64(physical_blocks64, arena_count64),
-				    SWAPZ_ARENA_ALIGNMENT_BLOCKS);
-	if (arena_blocks64 < minimum_arena_blocks || arena_blocks64 > U32_MAX) {
-		target->error = "Cannot derive safe arena geometry";
-		error = -EINVAL;
+
+	/*
+	 * V2 never relies on compression for capacity.  Keep at least 25% of the
+	 * logical size (and at least two segments) as physical GC reserve.  This
+	 * makes a low-live victim available even when every logical page is raw.
+	 */
+	reserve_blocks64 = max_t(u64,
+				   DIV_ROUND_UP_ULL(logical_pages64,
+						    SWAPZ_MIN_RESERVE_DIVISOR),
+				   2ULL * SWAPZ_SEGMENT_BLOCKS);
+	if (usable_blocks64 < logical_pages64 + reserve_blocks64) {
+		target->error = "Backing device needs >=25% plus two segments of GC reserve";
+		error = -ENOSPC;
 		goto fail;
 	}
 
 	context->logical_pages = (u32)logical_pages64;
-	context->physical_blocks = (u32)physical_blocks64;
-	context->minimum_arena_blocks = (u32)minimum_arena_blocks;
-	context->arena_blocks = (u32)arena_blocks64;
-	context->arena_count = (u32)arena_count64;
-	context->current_arena = 0;
-	context->arena_write_block = 0;
+	context->physical_blocks = (u32)usable_blocks64;
+	context->segment_count = (u32)segment_count64;
+	context->current_segment = 0;
+	context->segment_write_block = 0;
+	context->allocation_cursor = 1 % context->segment_count;
+	context->gc_cursor = 0;
+	context->free_segments = context->segment_count - 1;
 
 	context->mappings = vzalloc(array_size(context->logical_pages,
 					       sizeof(*context->mappings)));
-	context->arena_high_water = kvcalloc(context->arena_count,
-					     sizeof(*context->arena_high_water), GFP_KERNEL);
-	context->arena_cycles = kvcalloc(context->arena_count,
-					 sizeof(*context->arena_cycles), GFP_KERNEL);
-	if (!context->mappings || !context->arena_high_water || !context->arena_cycles) {
-		target->error = "Cannot allocate mapping/arena metadata";
+	context->segment_high_water = kvcalloc(context->segment_count,
+					       sizeof(*context->segment_high_water), GFP_KERNEL);
+	context->segment_cycles = kvcalloc(context->segment_count,
+					   sizeof(*context->segment_cycles), GFP_KERNEL);
+	context->segment_live_blocks = kvcalloc(context->segment_count,
+						sizeof(*context->segment_live_blocks), GFP_KERNEL);
+	context->segment_state = kvcalloc(context->segment_count,
+					 sizeof(*context->segment_state), GFP_KERNEL);
+	context->block_live_records = kvcalloc(context->physical_blocks,
+					       sizeof(*context->block_live_records), GFP_KERNEL);
+	if (!context->mappings || !context->segment_high_water ||
+	    !context->segment_cycles || !context->segment_live_blocks ||
+	    !context->segment_state || !context->block_live_records) {
+		target->error = "Cannot allocate mapping/segment metadata";
 		error = -ENOMEM;
 		goto fail;
 	}
 	for (index = 0; index < context->logical_pages; ++index)
 		context->mappings[index].physical_block = SWAPZ_EMPTY_BLOCK;
-	context->arena_cycles[0] = 1;
+	context->segment_state[0] = SWAPZ_SEGMENT_OPEN;
+	context->segment_cycles[0] = 1;
 
 	context->write_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->write_compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
@@ -1323,9 +1341,10 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		goto fail;
 	}
 
-	DMINFO("logical=%u pages physical=%u blocks arenas=%u arena_blocks=%u lower_discard=%s",
+	DMINFO("logical=%u pages physical=%u blocks segments=%u segment_blocks=%u free=%u lower_discard=%s",
 	       context->logical_pages, context->physical_blocks,
-	       context->arena_count, context->arena_blocks,
+	       context->segment_count, SWAPZ_SEGMENT_BLOCKS,
+	       context->free_segments,
 	       context->lower_discard_enabled ? "on" : "off");
 	return 0;
 
