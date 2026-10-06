@@ -2,7 +2,7 @@
 /*
  * dm-swapz.c - volatile LZ4-compressed swap target for slow block devices.
  *
- * V1 goals:
+ * V2 goals:
  *  - dedicated block-device backing only;
  *  - serialize I/O through one reclaim-capable worker;
  *  - pack several LZ4-compressed 4 KiB logical pages into 4 KiB writes;
@@ -33,7 +33,7 @@
 #include <linux/delay.h>
 
 #if PAGE_SIZE != 4096
-#error "swapz V1 currently requires 4 KiB PAGE_SIZE"
+#error "swapz V2 currently requires 4 KiB PAGE_SIZE"
 #endif
 
 #define SWAPZ_VERSION_MAJOR 0
@@ -149,7 +149,7 @@ struct swapz_context {
 	bool lower_discard_enabled;
 
 	/*
-	 * Foreground writes must survive arena rotation.  Rotation compaction uses
+	 * Foreground writes must survive segment advance.  Segment GC uses
 	 * input_buffer/compressed_buffer, so keep the current BIO payload and its
 	 * compressed form in separate preallocated pages.
 	 */
@@ -464,7 +464,7 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 	unsigned int record_index;
 
 	/* Rotate before a new pack starts.  A non-empty pack must always have a
-	 * physical block reserved in the current arena, otherwise rotation would
+	 * physical block reserved in the current segment, otherwise segment advance would
 	 * need a second pack buffer while compacting. */
 	if (!context->pack_record_count) {
 		error = swapz_ensure_physical_block(context, allow_rotation);
@@ -838,7 +838,7 @@ static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 
 	/*
 	 * Keep the current BIO isolated from compaction scratch.  A store can
-	 * trigger arena rotation after flushing the final pending container, and
+	 * trigger segment advance after flushing the final pending container, and
 	 * rotation reuses input_buffer/compressed_buffer while copying live pages.
 	 */
 	swapz_copy_from_bio(bio, context->write_buffer);
@@ -1227,7 +1227,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		goto fail;
 	}
 	if (bdev_is_zoned(context->backing->bdev)) {
-		target->error = "Zoned backing devices are unsupported in V1";
+		target->error = "Zoned backing devices are unsupported in V2";
 		error = -EOPNOTSUPP;
 		goto fail;
 	}
@@ -1238,7 +1238,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 	if (bdev_logical_block_size(context->backing->bdev) > SWAPZ_BLOCK_BYTES ||
 	    SWAPZ_BLOCK_BYTES % bdev_logical_block_size(context->backing->bdev)) {
-		target->error = "Backing logical block size is incompatible with 4 KiB V1 blocks";
+		target->error = "Backing logical block size is incompatible with 4 KiB V2 blocks";
 		error = -EINVAL;
 		goto fail;
 	}
