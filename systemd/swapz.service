@@ -1,0 +1,14 @@
+[Unit]
+Description=swapz compressed swap
+After=local-fs.target
+Before=swap.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/swapz.conf
+ExecStart=/usr/local/sbin/swapzctl start ${SWAPZ_DEVICE} --size ${SWAPZ_SIZE} --name ${SWAPZ_NAME} --priority ${SWAPZ_PRIORITY}
+ExecStop=/usr/local/sbin/swapzctl stop ${SWAPZ_NAME}
+
+[Install]
+WantedBy=swap.target

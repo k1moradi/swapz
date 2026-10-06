@@ -1,0 +1,7 @@
+# Prefer a stable /dev/disk/by-partuuid/... path.
+SWAPZ_DEVICE=/dev/disk/by-partuuid/REPLACE-ME
+# V1 intentionally uses strong physical overprovisioning.  A good starting
+# point is one third or less of the physical partition size.
+SWAPZ_SIZE=4G
+SWAPZ_NAME=swapz0
+SWAPZ_PRIORITY=100
