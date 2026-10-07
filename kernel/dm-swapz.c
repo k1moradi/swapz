@@ -156,7 +156,6 @@ struct swapz_stream_buffer {
 	u32 block_count;
 	u8 id;
 	u8 state;
-	bool io_done;
 	int io_error;
 	struct completion completion;
 };
@@ -358,12 +357,18 @@ static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 	struct swapz_context *context = buffer->context;
 
 	buffer->io_error = error_bits ? -EIO : 0;
-	WRITE_ONCE(buffer->io_done, true);
+
+	/*
+	 * The completion object is the sole publication point for lower-I/O
+	 * completion.  No buffer state may become reapable before complete()
+	 * finishes, otherwise the worker could reset/reuse this buffer while this
+	 * callback is still touching its old completion instance.
+	 */
 	complete(&buffer->completion);
 
 	/*
-	 * Do not rely on requeueing io_work itself from a completion that may race
-	 * io_work's final nonblocking reap.  Queue a distinct kick item instead.
+	 * No buffer fields are accessed after complete().  A worker which consumes
+	 * the completion may therefore finalize and reuse the buffer safely.
 	 */
 	if (context->workqueue)
 		queue_work(context->workqueue, &context->completion_work);
@@ -397,7 +402,6 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 
 	reinit_completion(&buffer->completion);
 	buffer->io_error = 0;
-	WRITE_ONCE(buffer->io_done, false);
 	buffer->state = SWAPZ_BUFFER_INFLIGHT;
 	context->inflight_buffer_id = buffer->id;
 
@@ -409,7 +413,6 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 		 * recovery decisions exactly once.
 		 */
 		buffer->io_error = error;
-		WRITE_ONCE(buffer->io_done, true);
 		complete(&buffer->completion);
 		if (context->workqueue)
 			queue_work(context->workqueue, &context->completion_work);
@@ -548,7 +551,6 @@ static void swapz_reset_stream_buffer(struct swapz_context *context,
 	buffer->block_count = 0;
 	buffer->state = state;
 	buffer->io_error = 0;
-	WRITE_ONCE(buffer->io_done, false);
 	memset(buffer->blocks, 0,
 	       array_size(context->max_batch_blocks, sizeof(*buffer->blocks)));
 }
@@ -937,12 +939,16 @@ static int swapz_reap_inflight(struct swapz_context *context, bool wait)
 		return 0;
 
 	buffer = &context->stream_buffers[id];
-	if (!READ_ONCE(buffer->io_done)) {
-		if (!wait)
-			return -EAGAIN;
+	if (wait) {
 		wait_for_completion(&buffer->completion);
+	} else if (!try_wait_for_completion(&buffer->completion)) {
+		return -EAGAIN;
 	}
 
+	/*
+	 * Acquiring the completion token guarantees the callback has finished all
+	 * accesses to this buffer before it can be finalized, reset, or reused.
+	 */
 	context->inflight_buffer_id = -1;
 	error = swapz_finalize_stream_buffer(context, buffer);
 	return error;
