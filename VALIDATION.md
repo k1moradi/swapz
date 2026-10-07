@@ -424,3 +424,43 @@ published completion through the kernel completion primitive.
 This race is a stronger candidate root cause for the live-GC hang than the earlier
 same-workqueue wakeup theory. It is still not proven until the post-reboot focused regression
 passes repeatedly.
+
+
+## Pre-reboot V2.2 hardening pass
+
+Before asking the operator to spend another reboot on runtime validation, `main` received
+an additional source-audit hardening pass.
+
+Concrete correctness fixes in this pass include:
+
+1. **Late completion after unrelated failure must preserve the old mapping.**
+   `swapz_install_mapping()` now checks `context->failed` before unaccounting the
+   previously authoritative mapping.
+
+2. **Same-slot staged replacement atomicity.**
+   If the current generation of a logical page still exists in the compression pack or
+   either stream buffer, a rewrite of that same logical page first drains the previous
+   generation to disk before advancing the generation. This prevents an acknowledged
+   RAM-only generation from becoming unreachable if its replacement later fails.
+
+3. **Independent async watchdog.**
+   Each in-flight stream buffer now has a delayed watchdog running on a separate
+   reclaim-safe ordered workqueue. If the lower callback fails to arrive within the
+   watchdog interval, the state worker fails outstanding non-early upper BIOs exactly once
+   and freezes the target without recycling the lower-owned data buffer.
+
+4. **Completion token consumed exactly once.**
+   The blocking timeout path treats a successful `wait_for_completion_timeout()` as the
+   consumed completion token and does not call `try_wait_for_completion()` again.
+
+The same-slot failure regression is:
+
+```text
+tests/runtime/staged-rewrite-fault.sh
+```
+
+The source-only invariant gate was expanded so these properties can be checked while an
+older module is still pinned and reboot permission is unavailable.
+
+These changes remain runtime-unvalidated until a freshly built module is loaded after an
+explicitly authorized reboot.
