@@ -528,3 +528,48 @@ v2.2-stale-fill-blocked
 
 This is a strong root-cause match but remains runtime-unvalidated until the freshly built
 post-fix module passes the focused live-GC progress test.
+
+
+## V2.2 stale-fill focused validation PASS
+
+The stale fill-buffer ownership fix was runtime-tested on
+`0f40f52956ff0b4ffc18549b916a54ce55847c02` with a freshly built and directly loaded
+`dm-swapz.ko`. Module `srcversion` matched the build artifact.
+
+The focused `tests/runtime/async-progress.sh` gate passed three independent runs:
+
+```text
+run 1: 6.835 s
+run 2: 6.563 s
+run 3: 6.596 s
+```
+
+Every run reported exact live-set readback, `failed=0`, `gc_victims=38`,
+`gc_pages=38`, and fully drained stream ownership:
+
+```text
+inflight_id=-1
+async_cb=0
+fill_blocks=0
+pack_records=0
+```
+
+This is strong runtime confirmation that reacquiring the fill buffer after
+`swapz_ensure_physical_block()` fixed the previously reproduced lost-BIO/live-GC hang.
+
+A run-3 kernel-log delta included:
+
+```text
+perf: interrupt took too long (...), lowering kernel.perf_event_max_sample_rate ...
+```
+
+This message came from the perf subsystem, not swapz/DM/block I/O, and the swapz test itself
+completed correctly. It is recorded as unrelated host noise, not a correctness blocker.
+
+Status now:
+
+```text
+FOCUSED ASYNC/LIVE-GC PASS — BROADER CORRECTNESS STILL REQUIRED
+```
+
+No performance conclusion should be drawn until the broader correctness suite passes.
