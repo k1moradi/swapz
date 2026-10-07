@@ -65,6 +65,115 @@ TESTED_HEAD=<actual origin/main SHA>
 CANDIDATE=V2.2_STREAMING
 ```
 
+## BLOCKER-FIRST rerun
+
+The previous V2.2 run stopped correctly on a live-GC forward-progress failure. Before any
+performance work, validate the candidate completion-wakeup fix.
+
+The failing pre-fix state is preserved on branch:
+
+```text
+v2.2-blocked
+8b7c519f05e4d03cbb269c4080e6707866b843c1
+```
+
+That branch includes only the staged-recall fixture correction after the original V2.2
+kernel candidate. The old failing kernel itself is unchanged from
+`b66e1d31de473b224744c50698305a312b8f888e`.
+
+### If the old blocked mapping/module is still loaded
+
+The prior tester intentionally left the stuck live-GC mapping and module untouched.
+
+Before replacing it, take one final read-only snapshot:
+
+```bash
+date --iso-8601=seconds
+ps -eo pid,stat,wchan:32,comm,args | grep -E 'reference|swapz|submit_bio_wait' || true
+sudo dmsetup ls --tree
+sudo dmsetup status 2>/dev/null || true
+sudo dmsetup table 2>/dev/null || true
+cat /proc/pressure/io
+cat /proc/pressure/memory
+dmesg | tail -200
+```
+
+If the blocked writer PID is identifiable, also record:
+
+```bash
+sudo cat /proc/<PID>/stack
+```
+
+Do not spend more time waiting for the old run.
+
+Then terminate only the disposable validation writer/targets created by the prior test,
+remove the corresponding temporary swapz/loop stack, unload the old `dm_swapz` module,
+and confirm no V2.2 test mapping remains. Do not touch unrelated system swap or physical
+devices.
+
+### Candidate progress fix
+
+The kernel fix under test introduces a distinct `completion_work` item for lower
+asynchronous completion. The lower callback no longer depends on directly requeueing the
+currently executing `io_work` item. On the max-active-1 reclaim-safe workqueue, the
+completion kick is ordered after the current worker and then queues `io_work` to reap,
+publish mappings, and complete upper BIOs.
+
+This is a forward-progress fix only. It must not change packing, GC policy, or benchmark
+semantics.
+
+### Focused gate
+
+After building the current `origin/main`, run:
+
+```bash
+sudo bash tests/runtime/async-progress.sh
+```
+
+Run it **three times**.
+
+Each run must:
+
+```text
+finish within 120 seconds
+failed=0
+gc_victims > 0
+gc_pages > 0
+exact live-set readback PASS
+no hung upper BIO
+no residual lower/upper request after completion
+```
+
+Inspect kernel logs after every run.
+
+If any run times out or hangs:
+
+```text
+BLOCKED — CORRECTNESS FAILURE
+```
+
+Stop. Do not benchmark.
+
+### Broader correctness gate after focused PASS
+
+Only after all three focused runs pass:
+
+```bash
+sudo bash tests/runtime/correctness.sh
+sudo bash tests/runtime/buffer-recall.sh
+sudo bash tests/runtime/staged-write-fault.sh
+sudo bash tests/runtime/no-discard-livegc.sh
+sudo bash tests/runtime/read-fault.sh
+sudo bash tests/runtime/lifecycle.sh
+sudo bash tests/runtime/pressure.sh
+```
+
+The nine-page staged-recall fixture is now the checked-in fixture. Do not revert it to 96
+pages merely to recreate the old timing miss.
+
+Only after these correctness gates pass may the strategy/plateau performance phases below
+resume.
+
 ## V2.1 reference
 
 The last software-validated baseline is branch:
