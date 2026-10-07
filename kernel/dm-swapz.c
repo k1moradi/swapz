@@ -2,7 +2,7 @@
 /*
  * dm-swapz.c - volatile LZ4-compressed swap target for slow block devices.
  *
- * V2 goals:
+ * V2.1 goals:
  *  - dedicated block-device backing only;
  *  - serialize I/O through one reclaim-capable worker;
  *  - pack several LZ4-compressed 4 KiB logical pages into 4 KiB writes;
@@ -33,7 +33,7 @@
 #include <linux/delay.h>
 
 #if PAGE_SIZE != 4096
-#error "swapz V2 currently requires 4 KiB PAGE_SIZE"
+#error "swapz V2.1 currently requires 4 KiB PAGE_SIZE"
 #endif
 
 #define SWAPZ_VERSION_MAJOR 0
@@ -1509,7 +1509,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		goto fail;
 	}
 	if (bdev_is_zoned(context->backing->bdev)) {
-		target->error = "Zoned backing devices are unsupported in V2";
+		target->error = "Zoned backing devices are unsupported in V2.1";
 		error = -EOPNOTSUPP;
 		goto fail;
 	}
@@ -1520,7 +1520,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 	if (bdev_logical_block_size(context->backing->bdev) > SWAPZ_BLOCK_BYTES ||
 	    SWAPZ_BLOCK_BYTES % bdev_logical_block_size(context->backing->bdev)) {
-		target->error = "Backing logical block size is incompatible with 4 KiB V2 blocks";
+		target->error = "Backing logical block size is incompatible with 4 KiB V2.1 blocks";
 		error = -EINVAL;
 		goto fail;
 	}
@@ -1532,7 +1532,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	logical_pages64 = div_u64(target->len, SWAPZ_BLOCK_SECTORS);
 	if (!logical_pages64 || logical_pages64 > U32_MAX ||
 	    usable_blocks64 > U32_MAX) {
-		target->error = "V2 supports at most 16 TiB physical/logical space";
+		target->error = "V2.1 supports at most 16 TiB physical/logical space";
 		error = -E2BIG;
 		goto fail;
 	}
@@ -1543,7 +1543,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 
 	/*
-	 * V2 never relies on compression for capacity.  Keep at least 25% of the
+	 * V2.1 never relies on compression for capacity.  Keep at least 25% of the
 	 * logical size (and at least two segments) as physical GC reserve.  This
 	 * makes a low-live victim available even when every logical page is raw.
 	 */
@@ -1652,10 +1652,10 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		goto fail;
 	}
 
-	DMINFO("logical=%u pages physical=%u blocks segments=%u segment_blocks=%u free=%u lower_discard=%s",
+	DMINFO("logical=%u pages physical=%u blocks segments=%u segment_blocks=%u free=%u batch_blocks=%u lower_discard=%s",
 	       context->logical_pages, context->physical_blocks,
 	       context->segment_count, SWAPZ_SEGMENT_BLOCKS,
-	       context->free_segments,
+	       context->free_segments, SWAPZ_WRITE_BATCH_BLOCKS,
 	       context->lower_discard_enabled ? "on" : "off");
 	return 0;
 
