@@ -2176,7 +2176,9 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		if (segment_cycle_min == U32_MAX)
 			segment_cycle_min = 0;
 
-		DMEMIT("strategy=%s batch_kib=%u inflight_blocks=%u fill_blocks=%u "
+		DMEMIT("strategy=%s batch_kib=%u fill_id=%u inflight_id=%d "
+		       "inflight_blocks=%u fill_blocks=%u pack_records=%u async_cb=%d "
+		       "buf0_state=%u buf0_blocks=%u buf1_state=%u buf1_blocks=%u "
 		       "segment=%u/%u head_blocks=%u free_segments=%u live_blocks=%u "
 		       "logical_write=%llu physical_write=%llu physical_write_reqs=%llu "
 		       "multi_write_reqs=%llu max_write_batch=%llu stream_submit=%llu "
@@ -2190,9 +2192,17 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       swapz_strategy_name(context->strategy),
 		       (unsigned int)(context->max_batch_blocks *
 			      (SWAPZ_BLOCK_BYTES / 1024)),
+		       (unsigned int)context->fill_buffer_id,
+		       context->inflight_buffer_id,
 		       context->inflight_buffer_id >= 0 ?
 			context->stream_buffers[context->inflight_buffer_id].block_count : 0,
 		       swapz_fill_buffer(context)->block_count,
+		       context->pack_record_count,
+		       atomic_read(&context->async_callbacks),
+		       (unsigned int)context->stream_buffers[0].state,
+		       context->stream_buffers[0].block_count,
+		       (unsigned int)context->stream_buffers[1].state,
+		       context->stream_buffers[1].block_count,
 		       context->current_segment, context->segment_count,
 		       context->segment_write_block, context->free_segments,
 		       (unsigned int)
