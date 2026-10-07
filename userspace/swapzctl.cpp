@@ -142,6 +142,8 @@ struct StartOptions {
     std::optional<std::uint64_t> logical_bytes;
     int priority{100};
     bool upper_discard{true};
+    std::string strategy{"opportunistic"};
+    std::uint32_t batch_kib{256};
 };
 
 void start(const StartOptions &options) {
@@ -163,8 +165,21 @@ void start(const StartOptions &options) {
         fail("V2 requires >=25% logical-size reserve and at least two 1 MiB segments");
     }
 
+    if (options.strategy != "immediate" &&
+        options.strategy != "opportunistic" &&
+        options.strategy != "staged") {
+        fail("strategy must be immediate, opportunistic, or staged");
+    }
+    if (options.batch_kib < 4 || options.batch_kib > 1024 ||
+        options.batch_kib % 4 != 0) {
+        fail("batch size must be a 4 KiB multiple from 4 through 1024 KiB");
+    }
+
     const std::uint64_t logical_sectors = logical_bytes / 512;
-    const std::string table = "0 " + std::to_string(logical_sectors) + " swapz " + options.backing.string();
+    const std::string table =
+        "0 " + std::to_string(logical_sectors) + " swapz " +
+        options.backing.string() + " " + options.strategy + " " +
+        std::to_string(options.batch_kib);
 
     require_success({"modprobe", "dm-swapz"}, "loading dm-swapz");
     require_success({"dmsetup", "create", options.name, "--table", table}, "creating swapz mapping");
@@ -193,7 +208,9 @@ void start(const StartOptions &options) {
     }
 
     std::cout << "swapzctl: " << mapped << " active: logical=" << logical_bytes
-              << " physical=" << physical_bytes << " priority=" << options.priority << '\n';
+              << " physical=" << physical_bytes << " priority=" << options.priority
+              << " strategy=" << options.strategy
+              << " batch_kib=" << options.batch_kib << '\n';
 }
 
 void stop(std::string_view name) {
@@ -213,7 +230,8 @@ void status(std::string_view name) {
 void usage() {
     std::cerr <<
         "Usage:\n"
-        "  swapzctl start <block-device> [--size 4G] [--name swapz0] [--priority 100] [--no-discard]\n"
+        "  swapzctl start <block-device> [--size 4G] [--name swapz0] [--priority 100]\n"
+        "      [--strategy immediate|opportunistic|staged] [--batch-kib 256] [--no-discard]\n"
         "  swapzctl stop [name]\n"
         "  swapzctl status [name]\n";
 }
@@ -236,6 +254,15 @@ int main(int argc, char **argv) {
                     const std::string_view value = argv[++index];
                     const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), options.priority);
                     if (error != std::errc{} || end != value.data() + value.size()) fail("invalid priority");
+                } else if (argument == "--strategy" && index + 1 < argc) {
+                    options.strategy = argv[++index];
+                } else if (argument == "--batch-kib" && index + 1 < argc) {
+                    const std::string_view value = argv[++index];
+                    const auto [end, error] =
+                        std::from_chars(value.data(), value.data() + value.size(),
+                                        options.batch_kib);
+                    if (error != std::errc{} || end != value.data() + value.size())
+                        fail("invalid batch KiB");
                 } else if (argument == "--no-discard") options.upper_discard = false;
                 else fail("unknown start option: " + std::string(argument));
             }
