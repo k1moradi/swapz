@@ -248,6 +248,7 @@ struct swapz_context {
 	void *pack_buffer;
 	void *repack_buffer;
 	struct swapz_write_batch_block repack_block;
+	struct swapz_write_batch_block compact_source_block;
 	void *lz4_workmem;
 
 	enum swapz_stream_strategy strategy;
@@ -685,8 +686,11 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 	memset(&context->repack_block, 0, sizeof(context->repack_block));
 
 	for (read_index = 0; read_index < old_count; ++read_index) {
-		struct swapz_write_batch_block source = buffer->blocks[read_index];
+		struct swapz_write_batch_block *source =
+			&context->compact_source_block;
 		u32 record_index;
+
+		*source = buffer->blocks[read_index];
 
 		/*
 		 * Output may move left over already-consumed source blocks.  Snapshot
@@ -697,9 +701,9 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 		       (u8 *)buffer->data + read_index * SWAPZ_BLOCK_BYTES,
 		       SWAPZ_BLOCK_BYTES);
 
-		if (source.record_count == 1 &&
-		    !(source.records[0].flags & SWAPZ_MAP_COMPRESSED)) {
-			struct swapz_write_batch_record *record = &source.records[0];
+		if (source->record_count == 1 &&
+		    !(source->records[0].flags & SWAPZ_MAP_COMPRESSED)) {
+			struct swapz_write_batch_record *record = &source->records[0];
 			bool keep = record->bio ||
 				swapz_stream_record_current(context, record);
 
@@ -724,7 +728,7 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 
 			memcpy((u8 *)buffer->data + write_index * SWAPZ_BLOCK_BYTES,
 			       context->io_buffer, SWAPZ_BLOCK_BYTES);
-			buffer->blocks[write_index] = source;
+			buffer->blocks[write_index] = *source;
 			swapz_update_repacked_ref(context, buffer, record,
 						 write_index, 0);
 			write_index++;
@@ -732,9 +736,9 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 		}
 
 		/* Compressed container: merge all still-needed records across blocks. */
-		for (record_index = 0; record_index < source.record_count;
+		for (record_index = 0; record_index < source->record_count;
 		     ++record_index) {
-			struct swapz_write_batch_record record = source.records[record_index];
+			struct swapz_write_batch_record record = source->records[record_index];
 			const struct swapz_container_disk *source_container =
 				context->io_buffer;
 			const struct swapz_record_disk *source_disk_record;
@@ -2081,6 +2085,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 			 unsigned int status_flags, char *result, unsigned int maxlen)
 {
 	struct swapz_context *context = target->private;
+
+	(void)status_flags;
 	u32 segment_cycle_min = U32_MAX;
 	u32 segment_cycle_max = 0;
 	u32 segment;
@@ -2115,7 +2121,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       swapz_fill_buffer(context)->block_count,
 		       context->current_segment, context->segment_count,
 		       context->segment_write_block, context->free_segments,
-		       context->segment_live_blocks[context->current_segment],
+		       (unsigned int)
+			context->segment_live_blocks[context->current_segment],
 		       context->stats.logical_write_bytes,
 		       context->stats.physical_write_bytes,
 		       context->stats.physical_write_requests,
