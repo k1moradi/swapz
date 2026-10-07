@@ -1124,15 +1124,12 @@ retry:
 	 * which preserves a true one-operation-at-a-time baseline without
 	 * transferring completion ownership twice through this helper.
 	 */
-	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
-		return 0;
-
-	if (buffer->block_count >= context->max_batch_blocks) {
-		error = swapz_maybe_submit_fill(context);
-		if (error)
-			return error;
-	}
-
+	/*
+	 * Once copied here, completion ownership belongs to this stream buffer.
+	 * Submission/reaping happens in the worker or before the next block is
+	 * staged, so an unrelated older I/O error can never be returned through
+	 * the just-transferred BIO's call stack.
+	 */
 	return 0;
 }
 
