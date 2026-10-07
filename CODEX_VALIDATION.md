@@ -143,7 +143,7 @@ Load the newly built module and run:
 ```bash
 sudo ./scripts/loop-smoke.sh
 sudo ./scripts/rotation-regression.sh
-sudo ./scripts/write-batch-regression.sh
+sudo bash ./scripts/write-batch-regression.sh
 ```
 
 The new batching regression must show:
