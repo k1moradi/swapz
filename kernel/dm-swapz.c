@@ -253,8 +253,6 @@ static int swapz_backing_io(struct swapz_context *context, enum req_op operation
 
 	if (operation == REQ_OP_READ)
 		context->stats.physical_read_bytes += SWAPZ_BLOCK_BYTES;
-	else if (operation == REQ_OP_WRITE)
-		context->stats.physical_write_bytes += SWAPZ_BLOCK_BYTES;
 
 	return 0;
 }
@@ -265,10 +263,46 @@ static int swapz_read_block(struct swapz_context *context, u32 physical_block,
 	return swapz_backing_io(context, REQ_OP_READ, physical_block, buffer);
 }
 
-static int swapz_write_block(struct swapz_context *context, u32 physical_block,
-			     void *buffer)
+static int swapz_write_batch_io(struct swapz_context *context,
+				u32 physical_block, unsigned int block_count)
 {
-	return swapz_backing_io(context, REQ_OP_WRITE, physical_block, buffer);
+	struct dm_io_region region = {
+		.bdev = context->backing->bdev,
+		.sector = swapz_physical_sector(physical_block),
+		.count = (sector_t)block_count * SWAPZ_BLOCK_SECTORS,
+	};
+	struct dm_io_request request = {
+		.bi_opf = REQ_OP_WRITE,
+		.mem = {
+			.type = DM_IO_VMA,
+			.offset = 0,
+			.ptr.vma = context->write_batch_buffer,
+		},
+		.notify = {
+			.fn = NULL,
+			.context = NULL,
+		},
+		.client = context->io_client,
+	};
+	unsigned long error_bits = 0;
+	int error;
+
+	error = dm_io(&request, 1, &region, &error_bits, IOPRIO_DEFAULT);
+	if (error || error_bits) {
+		if (!error)
+			error = -EIO;
+		swapz_set_failed(context, error);
+		return error;
+	}
+
+	context->stats.physical_write_bytes +=
+		(u64)block_count * SWAPZ_BLOCK_BYTES;
+	context->stats.physical_write_requests++;
+	if (block_count > 1)
+		context->stats.multi_block_write_requests++;
+	context->stats.max_write_batch_blocks =
+		max_t(u64, context->stats.max_write_batch_blocks, block_count);
+	return 0;
 }
 
 static void swapz_copy_from_bio(struct bio *bio, void *destination)
