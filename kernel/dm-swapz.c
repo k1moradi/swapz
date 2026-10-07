@@ -58,7 +58,7 @@
 #define SWAPZ_DEFAULT_WRITE_BATCH_BLOCKS 64U /* 256 KiB; benchmark may override. */
 #define SWAPZ_MAX_WRITE_BATCH_BYTES \
 	(SWAPZ_MAX_WRITE_BATCH_BLOCKS * SWAPZ_BLOCK_BYTES)
-#define SWAPZ_STREAM_RECORD_ALIGN 32U
+#define SWAPZ_STREAM_RECORDS_PER_BLOCK 128U
 #define SWAPZ_MIN_COMPRESS_SAVING 512U
 
 #define SWAPZ_RECORD_COMPRESSED BIT(0)
@@ -226,7 +226,7 @@ struct swapz_context {
 	u32 *segment_cycles;
 	u16 *segment_live_blocks;
 	u8 *segment_state;
-	u8 *block_live_records;
+	u16 *block_live_records;
 	u32 *gc_logical_pages;
 	u8 *gc_block_counts;
 
@@ -470,7 +470,7 @@ static int swapz_account_block(struct swapz_context *context, u32 physical_block
 
 	if (physical_block >= context->physical_blocks ||
 	    segment >= context->segment_count ||
-	    context->block_live_records[physical_block] == U8_MAX)
+	    context->block_live_records[physical_block] == U16_MAX)
 		return -EUCLEAN;
 
 	if (!context->block_live_records[physical_block])
