@@ -1,4 +1,4 @@
-# swapz V2 testing plan
+# swapz V2.1 testing plan
 
 ## 1. Build/static gates
 
@@ -90,7 +90,7 @@ Record:
 - CPU utilization;
 - segment switches/GC and compaction bytes.
 
-### V2 proof thresholds
+### V2.1 proof thresholds
 
 V1 correctness passed, but its whole-live-set allocator failed the write-amplification target. V2 should not graduate unless, on at least one slow SD/USB target:
 
@@ -123,3 +123,26 @@ Use a repeatable memory-pressure workload that exceeds RAM but remains below log
 For SD/USB devices without health telemetry, use host sectors written plus segment-cycle distribution as the measurable proxy.  Do **not** claim the same percentage reduction in NAND P/E cycles: controller FTL write amplification is opaque.
 
 Where SATA SMART exposes lifetime writes/host writes, record those counters across long runs as an additional validation point.
+
+## V2.1 physical-write batching checks
+
+V2.1 must additionally report:
+
+```text
+physical_write
+physical_write_reqs
+multi_write_reqs
+max_write_batch
+lower-device write I/O count
+lower-device sectors written
+```
+
+For queued partial/incompressible writes, the intended behavior is several consecutive
+4 KiB physical outputs per serialized lower request, with `max_write_batch > 1` and a
+substantial reduction in lower request count.
+
+QD1 remains important. A single outstanding write may still require one lower request, so
+V2.1 must verify that the shorter 50-100 us compression wait materially reduces the V2 QD1
+penalty without destroying useful packing under concurrent swap-out.
+
+The V2 branch at `1e3a0c71b4e514bccae58d79be9f319640478b5c` is the required A/B reference.
