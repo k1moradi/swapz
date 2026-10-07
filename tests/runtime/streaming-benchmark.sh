@@ -83,8 +83,14 @@ setup_nullblk() {
     sleep 0.05
   done
   [[ -n "$BACKING" && -b "$BACKING" ]] || return 1
-  BACKING_KNAME=$(basename "$(readlink -f "/sys/class/block/$(basename "$BACKING")")")
-  [[ -e "/sys/class/block/$BACKING_KNAME/stat" ]] || return 1
+  BACKING_KNAME=""
+  for candidate in "$(basename "$BACKING")" "$NULL_NAME" "nullb$index"; do
+    if [[ -e "/sys/class/block/$candidate/stat" ]]; then
+      BACKING_KNAME="$candidate"
+      break
+    fi
+  done
+  [[ -n "$BACKING_KNAME" ]] || return 1
   if (( BANDWIDTH > 0 )); then
     BACKEND="null_blk-${BANDWIDTH}MiBps-${LATENCY_NS}ns-QD1"
   else
