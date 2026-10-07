@@ -1930,8 +1930,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		if (segment_cycle_min == U32_MAX)
 			segment_cycle_min = 0;
 
-		DMEMIT("strategy=%s batch_kib=%u segment=%u/%u head_blocks=%u "
-		       "free_segments=%u live_blocks=%u "
+		DMEMIT("strategy=%s batch_kib=%u inflight_blocks=%u fill_blocks=%u "
+		       "segment=%u/%u head_blocks=%u free_segments=%u live_blocks=%u "
 		       "logical_write=%llu physical_write=%llu physical_write_reqs=%llu "
 		       "multi_write_reqs=%llu max_write_batch=%llu stream_submit=%llu "
 		       "staged_hits=%llu staged_early=%llu staged_cancel=%llu "
@@ -1943,6 +1943,9 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       "lower_discard=%s discard_bytes=%llu discard_failures=%llu failed=%u",
 		       swapz_strategy_name(context->strategy),
 		       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024),
+		       context->inflight_buffer_id >= 0 ?
+			context->stream_buffers[context->inflight_buffer_id].block_count : 0,
+		       swapz_fill_buffer(context)->block_count,
 		       context->current_segment, context->segment_count,
 		       context->segment_write_block, context->free_segments,
 		       context->segment_live_blocks[context->current_segment],
