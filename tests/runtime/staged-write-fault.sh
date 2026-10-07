@@ -18,7 +18,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-modprobe dm-error
+if ! dmsetup targets | awk '$1 == "error" { found=1 } END { exit !found }'; then
+  modprobe dm-error
+fi
+dmsetup targets | awk '$1 == "error" { found=1 } END { exit !found }' || {
+  echo "device-mapper error target unavailable" >&2
+  exit 1
+}
 modprobe dm-swapz
 
 # Entire lower target rejects I/O. The staged compressed upper write must still
