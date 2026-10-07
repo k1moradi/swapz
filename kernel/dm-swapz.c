@@ -2163,12 +2163,12 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 			 unsigned int status_flags, char *result, unsigned int maxlen)
 {
 	struct swapz_context *context = target->private;
-
-	(void)status_flags;
 	u32 segment_cycle_min = U32_MAX;
 	u32 segment_cycle_max = 0;
 	u32 segment;
 	unsigned int sz = 0;
+
+	(void)status_flags;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
