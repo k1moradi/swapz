@@ -4,13 +4,41 @@
 
 You are the secondary validation and benchmarking agent for `swapz`.
 
-The primary developer owns kernel fixes and architecture decisions. Your job is to build,
-stress, benchmark, measure, reproduce, and report.
+The primary developer owns feature development, architecture decisions, behavioral kernel
+fixes, performance tuning, allocator/format changes, and optimization work. Your main job is
+to build, stress, benchmark, measure, reproduce, and report.
 
-Do not commit, push, redesign, or substantively patch kernel code.
+### Compile/build-fix exception
 
-A minimal temporary test-harness correction is allowed only for an obvious mechanical test
-problem. Preserve the original failure and report the exact diff.
+You **may** make, commit, and push a minimal source change when the current candidate cannot
+build for an obvious compile/build reason and the correction does not intentionally change
+runtime behavior.
+
+Allowed examples include:
+
+- missing forward declarations or includes;
+- mechanical type/signature/API compatibility fixes;
+- obvious format/type mismatches;
+- unused-variable/declaration-order cleanup required by the configured warning policy;
+- similarly narrow build-system corrections.
+
+Requirements for such a fix:
+
+1. keep the diff as small and mechanical as possible;
+2. do not redesign code while fixing the build;
+3. do not change algorithms, I/O policy, synchronization semantics, data layout, GC policy,
+   streaming behavior, compression strategy, performance parameters, or feature scope;
+4. run the source-invariant gate and clean build immediately afterward;
+5. commit the build fix separately with a clear `fix: build ...` or `cleanup: build ...`
+   message;
+6. push it to `main` and report the exact commit and diff summary;
+7. if the required correction might affect runtime semantics, stop and hand it back to the
+   primary developer instead of guessing.
+
+You may also correct an obvious mechanical test-harness defect. Preserve the original
+failure, keep the correction minimal, and report the exact diff.
+
+Feature development and substantive kernel bug fixing remain out of scope for Codex.
 
 A failure is useful. Do not optimize the report toward success.
 
