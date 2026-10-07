@@ -160,7 +160,10 @@ struct swapz_stream_buffer {
 	u8 id;
 	u8 state;
 	int io_error;
+	bool watchdog_expired;
+	bool watchdog_reported;
 	struct completion completion;
+	struct delayed_work watchdog_work;
 };
 
 struct swapz_staged_ref {
@@ -185,6 +188,7 @@ struct swapz_stats {
 	u64 staged_cancellations;
 	u64 staged_cancelled_blocks;
 	u64 stream_submit_bytes;
+	u64 async_watchdog_timeouts;
 	u64 compressed_payload_bytes;
 	u64 compressed_pages;
 	u64 raw_pages;
@@ -205,6 +209,7 @@ struct swapz_context {
 	struct dm_dev *backing;
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
+	struct workqueue_struct *watchdog_workqueue;
 	struct work_struct io_work;
 	atomic_t async_callbacks;
 	wait_queue_head_t async_callback_wait;
@@ -340,6 +345,27 @@ static int swapz_read_block(struct swapz_context *context, u32 physical_block,
 	return swapz_backing_io(context, REQ_OP_READ, physical_block, buffer);
 }
 
+static void swapz_stream_watchdog(struct work_struct *work)
+{
+	struct swapz_stream_buffer *buffer =
+		container_of(to_delayed_work(work), struct swapz_stream_buffer,
+			     watchdog_work);
+	struct swapz_context *context = buffer->context;
+
+	/*
+	 * This work item runs on a separate reclaim-safe queue so it can fire even
+	 * if the serialized state worker is sleeping in a blocking reap.  It never
+	 * modifies stream data or mapping state.  The main worker owns failure
+	 * publication and upper-BIO completion.
+	 */
+	if (completion_done(&buffer->completion))
+		return;
+
+	WRITE_ONCE(buffer->watchdog_expired, true);
+	if (context->workqueue)
+		queue_work(context->workqueue, &context->io_work);
+}
+
 static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 {
 	struct swapz_stream_buffer *buffer = data;
@@ -402,7 +428,11 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 	buffer->io_error = 0;
 	buffer->state = SWAPZ_BUFFER_INFLIGHT;
 	context->inflight_buffer_id = buffer->id;
+	WRITE_ONCE(buffer->watchdog_expired, false);
+	buffer->watchdog_reported = false;
 	atomic_inc(&context->async_callbacks);
+	mod_delayed_work(context->watchdog_workqueue, &buffer->watchdog_work,
+			 msecs_to_jiffies(SWAPZ_ASYNC_WATCHDOG_MS));
 
 	error = dm_io(&request, 1, &region, NULL, IOPRIO_DEFAULT);
 	if (error) {
@@ -562,6 +592,8 @@ static void swapz_reset_stream_buffer(struct swapz_context *context,
 	buffer->write_flags = 0;
 	buffer->state = state;
 	buffer->io_error = 0;
+	WRITE_ONCE(buffer->watchdog_expired, false);
+	buffer->watchdog_reported = false;
 	memset(buffer->blocks, 0,
 	       array_size(context->max_batch_blocks, sizeof(*buffer->blocks)));
 }
@@ -1025,26 +1057,42 @@ static int swapz_reap_inflight(struct swapz_context *context, bool wait)
 	if (wait) {
 		unsigned long completed;
 
+		if (buffer->watchdog_reported)
+			return -ETIMEDOUT;
 		completed = wait_for_completion_timeout(
 			&buffer->completion,
 			msecs_to_jiffies(SWAPZ_ASYNC_WATCHDOG_MS));
-		if (!completed) {
-			/*
-			 * Never recycle or modify the in-flight data buffer on timeout:
-			 * the lower device may still own it.  Fail any upper BIOs which
-			 * have not already completed, freeze the target, and retain the
-			 * buffer until the real dm-io callback eventually publishes its
-			 * completion token.  This converts a lost/late completion into a
-			 * diagnosable I/O failure instead of an indefinitely stuck upper
-			 * writer.
-			 */
-			swapz_set_failed(context, -ETIMEDOUT);
-			swapz_complete_buffer_bios(context, buffer, -ETIMEDOUT);
-			return -ETIMEDOUT;
-		}
+		if (!completed)
+			WRITE_ONCE(buffer->watchdog_expired, true);
 	} else if (!try_wait_for_completion(&buffer->completion)) {
-		return -EAGAIN;
+		if (!READ_ONCE(buffer->watchdog_expired) ||
+		    buffer->watchdog_reported)
+			return -EAGAIN;
+		goto report_timeout;
+	} else {
+		goto completed;
 	}
+
+	if (!try_wait_for_completion(&buffer->completion)) {
+report_timeout:
+		/*
+		 * Never recycle or modify the in-flight data buffer on timeout:
+		 * the lower device may still own it.  Fail any upper BIOs which
+		 * have not already completed, freeze the target, and retain the
+		 * buffer until the real dm-io callback eventually publishes its
+		 * completion token.
+		 */
+		buffer->watchdog_reported = true;
+		context->stats.async_watchdog_timeouts++;
+		swapz_set_failed(context, -ETIMEDOUT);
+		swapz_complete_buffer_bios(context, buffer, -ETIMEDOUT);
+		return -ETIMEDOUT;
+	}
+
+completed:
+	cancel_delayed_work_sync(&buffer->watchdog_work);
+	WRITE_ONCE(buffer->watchdog_expired, false);
+	buffer->watchdog_reported = false;
 
 	/*
 	 * Acquiring the completion token guarantees the callback has finished all
@@ -2316,7 +2364,7 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       "segment=%u/%u head_blocks=%u free_segments=%u live_blocks=%u "
 		       "logical_write=%llu physical_write=%llu physical_write_reqs=%llu "
 		       "multi_write_reqs=%llu max_write_batch=%llu stream_submit=%llu "
-		       "staged_hits=%llu staged_early=%llu staged_cancel=%llu "
+		       "async_timeouts=%llu staged_hits=%llu staged_early=%llu staged_cancel=%llu "
 		       "staged_cancel_blocks=%llu "
 		       "logical_read=%llu physical_read=%llu compressed_payload=%llu "
 		       "compressed_pages=%llu raw_pages=%llu upper_discards=%llu rotations=%llu "
@@ -2347,6 +2395,7 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->stats.multi_block_write_requests,
 		       context->stats.max_write_batch_blocks,
 		       context->stats.stream_submit_bytes,
+		       context->stats.async_watchdog_timeouts,
 		       context->stats.staged_read_hits,
 		       context->stats.staged_early_completions,
 		       context->stats.staged_cancellations,
@@ -2391,6 +2440,15 @@ static void swapz_free_context(struct swapz_context *context)
 	if (!context)
 		return;
 	WARN_ON_ONCE(atomic_read(&context->async_callbacks) != 0);
+	if (context->watchdog_workqueue) {
+		unsigned int index;
+
+		for (index = 0; index < ARRAY_SIZE(context->stream_buffers); ++index)
+			cancel_delayed_work_sync(
+				&context->stream_buffers[index].watchdog_work);
+		flush_workqueue(context->watchdog_workqueue);
+		destroy_workqueue(context->watchdog_workqueue);
+	}
 	if (context->workqueue) {
 		flush_workqueue(context->workqueue);
 		destroy_workqueue(context->workqueue);
@@ -2657,6 +2715,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 			goto fail;
 		}
 		init_completion(&buffer->completion);
+		INIT_DELAYED_WORK(&buffer->watchdog_work, swapz_stream_watchdog);
 		swapz_reset_stream_buffer(context, buffer,
 			index ? SWAPZ_BUFFER_FREE : SWAPZ_BUFFER_FILL);
 	}
@@ -2688,6 +2747,14 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 						   dm_table_device_name(target->table));
 	if (!context->workqueue) {
 		target->error = "Cannot allocate reclaim-safe workqueue";
+		error = -ENOMEM;
+		goto fail;
+	}
+	context->watchdog_workqueue =
+		alloc_ordered_workqueue("swapz-watchdog-%s", WQ_MEM_RECLAIM,
+					dm_table_device_name(target->table));
+	if (!context->watchdog_workqueue) {
+		target->error = "Cannot allocate reclaim-safe watchdog workqueue";
 		error = -ENOMEM;
 		goto fail;
 	}
