@@ -350,3 +350,21 @@ diagnostics instead of hanging indefinitely.
 
 This fix is **not yet validated**. Performance testing must remain stopped until the focused
 progress regression and the broader correctness suite pass.
+
+
+### Post-blocker candidate revision
+
+After the blocked run, `main` also received a warning-cleanup change that moves the
+fill-buffer compaction source snapshot out of the kernel stack and into preallocated target
+context scratch, explicitly promotes the live-block status field for formatting, and marks
+the Device Mapper status flag argument intentionally unused.
+
+Current candidate:
+
+```text
+5f89799344aa1bd28bee535f706b60c4f07303bd
+```
+
+This cleanup is intended to be behavior-neutral, but because it touches the compaction
+scratch implementation it is part of the next full Linux 7.0.x correctness rerun. No
+performance result may be attributed to it before that rerun.
