@@ -496,23 +496,39 @@ void test_segment_gc_preserves_latest_data() {
 }
 
 void test_mixed_raw_compressed_gc() {
-    SwapzModel model(16, 96, 8);
-    std::vector<Page> expected(16);
+    /*
+     * Seed three segments with raw pages, then repeatedly rewrite one page
+     * from each segment.  The first victim cannot be completely dead: it
+     * still contains long-lived pages, so this fixture exercises live-page
+     * relocation instead of only selecting empty victims.
+     */
+    SwapzModel model(24, 48, 8);
+    std::vector<Page> expected(24);
     std::mt19937 generator(0xabcdef01U);
 
+    for (std::uint32_t page = 0; page < 24; ++page) {
+        expected[page] = random_page(generator);
+        model.write(page, expected[page]);
+    }
+    model.flush();
+
+    constexpr std::array<std::uint32_t, 3> hot_pages{0, 8, 16};
     for (std::uint32_t round = 0; round < 80; ++round) {
-        for (std::uint32_t page = 0; page < 16; ++page) {
-            expected[page] = (page % 3U == 0U)
-                                 ? random_page(generator)
-                                 : compressible_page(round + page);
+        for (std::uint32_t page : hot_pages) {
+            expected[page] = (round % 2U == 0U)
+                                 ? compressible_page(round + page)
+                                 : random_page(generator);
             model.write(page, expected[page]);
         }
         model.flush();
     }
 
     assert(model.segment_switches() > 10);
+    assert(model.gc_victims() > 0);
     assert(model.gc_pages() > 0);
-    for (std::uint32_t page = 0; page < 16; ++page)
+    assert(model.raw_pages() > 0);
+    assert(model.compressed_pages() > 0);
+    for (std::uint32_t page = 0; page < 24; ++page)
         assert(model.read(page) == expected[page]);
 }
 
