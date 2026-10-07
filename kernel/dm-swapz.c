@@ -533,6 +533,7 @@ static bool swapz_current_segment_has_block(const struct swapz_context *context)
 static void swapz_reset_pack(struct swapz_context *context)
 {
 	memset(context->pack_buffer, 0, SWAPZ_BLOCK_BYTES);
+	memset(context->pending, 0, sizeof(context->pending));
 	context->pack_payload_start = SWAPZ_BLOCK_BYTES;
 	context->pack_record_count = 0;
 }
