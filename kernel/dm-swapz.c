@@ -1271,6 +1271,17 @@ retry:
 	if (error)
 		return error;
 
+	/*
+	 * Segment advance/GC may drain stream buffers and switch fill_buffer_id.
+	 * Never retain a fill-buffer pointer across swapz_ensure_physical_block().
+	 * Reacquire the current owner before staging the foreground/GC record.
+	 */
+	buffer = swapz_fill_buffer(context);
+	if (WARN_ON_ONCE(buffer->state != SWAPZ_BUFFER_FILL)) {
+		swapz_set_failed(context, -EUCLEAN);
+		return -EUCLEAN;
+	}
+
 	physical_block = swapz_current_physical_block(context);
 	if (buffer->block_count &&
 	    physical_block != buffer->start_block + buffer->block_count) {
