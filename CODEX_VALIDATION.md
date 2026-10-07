@@ -322,6 +322,52 @@ sudo bash tests/runtime/staged-rewrite-fault.sh
 It must prove that an early-completed staged generation survives a failed replacement of
 the same logical page.
 
+### Stale fill-buffer root-cause gate
+
+The focused run on the pre-fix candidate reproduced the hang with:
+
+```text
+failed=0
+gc_victims=1
+gc_pages=1
+inflight_id=-1
+async_cb=0
+fill_blocks=0
+pack_records=0
+```
+
+The tested failing tree is preserved as:
+
+```text
+v2.2-stale-fill-blocked
+3751bfb714c5aba77cdf987740b3bc60bcf6713e
+```
+
+Root cause found in `swapz_stage_write_block()`:
+
+- it cached the current fill-buffer pointer;
+- `swapz_ensure_physical_block()` could rotate segments/run GC and change
+  `fill_buffer_id`;
+- the function then staged the current BIO into the stale old buffer.
+
+The post-fix source must reacquire `swapz_fill_buffer(context)` after
+`swapz_ensure_physical_block()` and before using `buffer->block_count` or writing the
+record.
+
+Run:
+
+```bash
+bash tests/runtime/source-invariants.sh
+```
+
+and confirm the stale-fill ownership invariant passes.
+
+If an older module/target is pinned from the failing run, do not reboot without explicit
+operator authorization. Source/build/model checks may continue against current `main`.
+
+After a freshly built post-fix module is loadable, run `async-progress.sh` first. One
+failure is enough to stop; do not proceed to broader correctness or performance.
+
 ### Focused gate
 
 After building the current `origin/main`, run:
