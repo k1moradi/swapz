@@ -1842,6 +1842,50 @@ static int swapz_read_staged(struct swapz_context *context,
 	return 0;
 }
 
+static bool swapz_page_has_uncommitted_generation(
+					struct swapz_context *context,
+					u32 logical_page)
+{
+	u32 generation = context->generations[logical_page];
+	unsigned int record_index;
+	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
+
+	if (ref->valid && ref->generation == generation)
+		return true;
+
+	for (record_index = 0; record_index < context->pack_record_count;
+	     ++record_index) {
+		const struct swapz_pending_record *pending =
+			&context->pending[record_index];
+
+		if (pending->logical_page == logical_page &&
+		    pending->generation == generation)
+			return true;
+	}
+
+	return false;
+}
+
+static int swapz_commit_previous_generation(struct swapz_context *context,
+					    u32 logical_page)
+{
+	int error;
+
+	if (!swapz_page_has_uncommitted_generation(context, logical_page))
+		return 0;
+
+	/*
+	 * A replacement must never make an already-accepted RAM-only generation
+	 * unreachable.  Persist the previous generation before advancing this
+	 * slot's generation.  This only serializes rewrites of the same logical
+	 * page; unrelated pages continue to use the normal streaming pipeline.
+	 */
+	error = swapz_flush_pack(context, false, true);
+	if (!error)
+		error = swapz_flush_write_batch(context);
+	return error;
+}
+
 static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 {
 	u32 logical_page = (u32)(bio->bi_iter.bi_sector / SWAPZ_BLOCK_SECTORS);
@@ -1851,6 +1895,10 @@ static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 
 	if (logical_page >= context->logical_pages)
 		return -ERANGE;
+
+	error = swapz_commit_previous_generation(context, logical_page);
+	if (error)
+		return error;
 
 	previous_generation = context->generations[logical_page];
 	generation = previous_generation + 1;
