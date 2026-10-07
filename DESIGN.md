@@ -1,6 +1,6 @@
-# swapz V2 design notes
+# swapz V2.1 design notes
 
-## Why V2 exists
+## Why V2 exists and why V2.1 follows it
 
 V1 proved the core block path can be correct on Linux 7.0.x: LZ4 packing, raw fallback,
 logical discard, flush handling, fault propagation, repeated target lifecycle, randomized
@@ -28,6 +28,64 @@ segment-local garbage collection.
 
 Persistent metadata, crash recovery, deduplication, encryption, filesystem-backed swap,
 hibernation, multi-queue NVMe tuning, and capacity overcommit.
+
+
+
+## V2.1 serialized physical-write batching
+
+Validated V2 fixed whole-live-set compaction but still issued each physical 4 KiB output as
+one synchronous lower request.  On a 1 ms/request test stack that request granularity was
+the dominant QD8 bottleneck.
+
+V2.1 keeps lower queue depth equal to one and adds a preallocated 32 KiB physical output
+batch:
+
+```text
+logical writes
+    |
+LZ4 pack / raw fallback
+    |
+4 KiB physical output blocks
+    |
+up to 8 consecutive blocks
+    |
+one synchronous lower write (up to 32 KiB)
+```
+
+This is request coalescing, not parallel lower I/O.
+
+A staged physical block carries the logical mapping records that should become authoritative
+only after the lower batch succeeds.  On success, mappings are installed in staged order
+and the upper BIOs are completed.  On lower write failure, every upper BIO in the batch
+fails and none of the batch mappings are published.
+
+The batch is forcibly committed before:
+
+- advancing to another segment;
+- a logical read;
+- upper DISCARD;
+- FLUSH or PREFLUSH;
+- declaring a GC victim fully relocated and reusable.
+
+GC uses the same batching path.  Foreground and GC data are copied into the dedicated
+preallocated batch buffer before their source scratch buffers can be reused.
+
+The batch buffer is allocated when the target is created.  V2.1 does not add runtime heap
+allocation to the reclaim path.
+
+The single-record pack-coalescing delay is shortened from 500-1000 us to 50-100 us.  The
+intent is to reduce V2's QD1 latency penalty while still allowing nearby concurrent swap-out
+requests to form compressed containers.
+
+New status counters are:
+
+```text
+physical_write_reqs
+multi_write_reqs
+max_write_batch
+```
+
+Validation must compare these with actual lower block-device write-I/O counts.
 
 ## Logical mapping
 
