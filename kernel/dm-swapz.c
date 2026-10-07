@@ -794,12 +794,15 @@ static int swapz_decode_loaded_mapping(struct swapz_context *context,
 		    mapping->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 			return -EIO;
 
-		record = &container->records[mapping->record_index];
+		record = swapz_container_record_const(context->io_buffer,
+						      mapping->record_index);
 		offset = le16_to_cpu(record->offset);
 		length = le16_to_cpu(record->length);
 		if (le32_to_cpu(record->logical_page) != logical_page ||
 		    length != mapping->stored_length ||
-		    offset < SWAPZ_CONTAINER_HEADER_BYTES ||
+		    offset < SWAPZ_CONTAINER_BASE_BYTES +
+			     le16_to_cpu(container->record_count) *
+			     sizeof(struct swapz_record_disk) ||
 		    offset + length > SWAPZ_BLOCK_BYTES)
 			return -EIO;
 
