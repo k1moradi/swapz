@@ -497,10 +497,10 @@ void test_segment_gc_preserves_latest_data() {
 
 void test_mixed_raw_compressed_gc() {
     /*
-     * Seed three segments with raw pages, then repeatedly rewrite one page
-     * from each segment.  The first victim cannot be completely dead: it
-     * still contains long-lived pages, so this fixture exercises live-page
-     * relocation instead of only selecting empty victims.
+     * Fill three segments with raw pages.  Then rewrite 16 pages distributed
+     * across all three source segments (6 + 5 + 5), so no closed source
+     * segment is completely dead.  The following compressed write must open
+     * the last FREE segment and clean a victim that still contains live data.
      */
     SwapzModel model(24, 48, 8);
     std::vector<Page> expected(24);
@@ -512,18 +512,23 @@ void test_mixed_raw_compressed_gc() {
     }
     model.flush();
 
-    constexpr std::array<std::uint32_t, 3> hot_pages{0, 8, 16};
-    for (std::uint32_t round = 0; round < 80; ++round) {
-        for (std::uint32_t page : hot_pages) {
-            expected[page] = (round % 2U == 0U)
-                                 ? compressible_page(round + page)
-                                 : random_page(generator);
-            model.write(page, expected[page]);
-        }
-        model.flush();
+    constexpr std::array<std::uint32_t, 16> rewrite_pages{
+        0, 1, 2, 3, 4, 5,
+        8, 9, 10, 11, 12,
+        16, 17, 18, 19, 20,
+    };
+    for (std::uint32_t page : rewrite_pages) {
+        expected[page] = random_page(generator);
+        model.write(page, expected[page]);
     }
+    model.flush();
 
-    assert(model.segment_switches() > 10);
+    /* This write triggers the first GC and also exercises compression. */
+    expected[6] = compressible_page(0x61U);
+    model.write(6, expected[6]);
+    model.flush();
+
+    assert(model.segment_switches() >= 3);
     assert(model.gc_victims() > 0);
     assert(model.gc_pages() > 0);
     assert(model.raw_pages() > 0);
