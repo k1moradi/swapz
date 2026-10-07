@@ -1382,7 +1382,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 			segment_cycle_min = 0;
 
 		DMEMIT("segment=%u/%u head_blocks=%u free_segments=%u live_blocks=%u "
-		       "logical_write=%llu physical_write=%llu "
+		       "logical_write=%llu physical_write=%llu physical_write_reqs=%llu "
+		       "multi_write_reqs=%llu max_write_batch=%llu "
 		       "logical_read=%llu physical_read=%llu compressed_payload=%llu "
 		       "compressed_pages=%llu raw_pages=%llu upper_discards=%llu rotations=%llu "
 		       "segment_cycle_min=%u segment_cycle_max=%u "
@@ -1393,6 +1394,9 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->segment_live_blocks[context->current_segment],
 		       context->stats.logical_write_bytes,
 		       context->stats.physical_write_bytes,
+		       context->stats.physical_write_requests,
+		       context->stats.multi_block_write_requests,
+		       context->stats.max_write_batch_blocks,
 		       context->stats.logical_read_bytes,
 		       context->stats.physical_read_bytes,
 		       context->stats.compressed_payload_bytes,
@@ -1444,6 +1448,7 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->compressed_buffer);
 	if (context->pack_buffer)
 		free_page((unsigned long)context->pack_buffer);
+	vfree(context->write_batch_buffer);
 	kfree(context->lz4_workmem);
 	vfree(context->mappings);
 	kvfree(context->segment_high_water);
@@ -1597,15 +1602,18 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->write_batch_buffer = vzalloc(SWAPZ_WRITE_BATCH_BYTES);
 	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!context->write_buffer || !context->write_compressed_buffer ||
 	    !context->input_buffer || !context->io_buffer ||
-	    !context->compressed_buffer || !context->pack_buffer || !context->lz4_workmem) {
+	    !context->compressed_buffer || !context->pack_buffer ||
+	    !context->write_batch_buffer || !context->lz4_workmem) {
 		target->error = "Cannot allocate preallocated I/O buffers";
 		error = -ENOMEM;
 		goto fail;
 	}
 	swapz_reset_pack(context);
+	swapz_reset_write_batch(context);
 
 	context->io_client = dm_io_client_create();
 	if (IS_ERR(context->io_client)) {
