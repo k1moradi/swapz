@@ -392,7 +392,21 @@ no residual lower/upper request after completion
 
 Inspect kernel logs after every run.
 
-If any run times out or hangs:
+Treat a log message as a correctness blocker only when it is plausibly related to swapz,
+Device Mapper, block I/O, memory corruption, lockups, hung tasks, WARN/BUG/Oops/panic, or
+the test stack itself.
+
+Do **not** stop solely for unrelated host-noise messages such as:
+
+```text
+perf: interrupt took too long (...), lowering kernel.perf_event_max_sample_rate ...
+```
+
+unless they coincide with a swapz failure, kernel lockup, or reproducible test anomaly.
+Record unrelated messages in the report, but continue the gate.
+
+If any focused run itself times out, hangs, corrupts data, leaves owned I/O behind, or
+produces a swapz-relevant kernel warning:
 
 ```text
 BLOCKED — CORRECTNESS FAILURE
@@ -1015,3 +1029,39 @@ On the next run:
 
 Do not load the older installed module from
 `/lib/modules/.../updates/dm-swapz.ko` as a substitute for the freshly built artifact.
+
+
+### Focused stale-fill fix result
+
+The post-fix candidate at:
+
+```text
+0f40f52956ff0b4ffc18549b916a54ce55847c02
+```
+
+has now passed the focused async/live-GC progress gate three independent times on Linux
+7.0.0-34 with the freshly built module identity verified.
+
+Observed results:
+
+```text
+run 1: 6.835 s, readback PASS, gc_victims=38, gc_pages=38, failed=0
+run 2: 6.563 s, readback PASS, gc_victims=38, gc_pages=38, failed=0
+run 3: 6.596 s, readback PASS, gc_victims=38, gc_pages=38, failed=0
+```
+
+Each run finished with:
+
+```text
+inflight_id=-1
+async_cb=0
+fill_blocks=0
+pack_records=0
+```
+
+The run-3 dmesg delta contained only an unrelated perf sample-rate adjustment message.
+That message is not a swapz correctness failure.
+
+Therefore the next validation step is the broader correctness suite. No reboot is required
+solely because of this focused result, provided the currently loaded module still matches
+the tested kernel artifact and no stale swapz target remains.
