@@ -42,7 +42,7 @@
 
 #define SWAPZ_BLOCK_BYTES PAGE_SIZE
 #define SWAPZ_BLOCK_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
-#define SWAPZ_MAX_PACKED_RECORDS 8U
+#define SWAPZ_MAX_PACKED_RECORDS 64U
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U /* 'SPWZ' little-endian on disk */
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_EMPTY_BLOCK U32_MAX
@@ -72,13 +72,29 @@ struct swapz_container_disk {
 	__le32 magic;
 	__le16 version;
 	__le16 record_count;
-	struct swapz_record_disk records[SWAPZ_MAX_PACKED_RECORDS];
-	u8 payload[];
+	u8 data[];
 } __packed;
 
-#define SWAPZ_CONTAINER_HEADER_BYTES ((unsigned int)sizeof(struct swapz_container_disk))
+#define SWAPZ_CONTAINER_BASE_BYTES ((unsigned int)sizeof(struct swapz_container_disk))
 #define SWAPZ_MAX_COMPRESSED_BYTES \
-	(SWAPZ_BLOCK_BYTES - SWAPZ_CONTAINER_HEADER_BYTES - SWAPZ_MIN_COMPRESS_SAVING)
+	(SWAPZ_BLOCK_BYTES - SWAPZ_CONTAINER_BASE_BYTES - \
+	 sizeof(struct swapz_record_disk) - SWAPZ_MIN_COMPRESS_SAVING)
+
+static inline struct swapz_record_disk *
+swapz_container_record(void *buffer, unsigned int index)
+{
+	return (struct swapz_record_disk *)
+		((u8 *)buffer + SWAPZ_CONTAINER_BASE_BYTES +
+		 index * sizeof(struct swapz_record_disk));
+}
+
+static inline const struct swapz_record_disk *
+swapz_container_record_const(const void *buffer, unsigned int index)
+{
+	return (const struct swapz_record_disk *)
+		((const u8 *)buffer + SWAPZ_CONTAINER_BASE_BYTES +
+		 index * sizeof(struct swapz_record_disk));
+}
 
 struct swapz_mapping {
 	u32 physical_block;
@@ -189,7 +205,7 @@ struct swapz_context {
 	unsigned int write_batch_block_count;
 	struct swapz_write_batch_block write_batch[SWAPZ_WRITE_BATCH_BLOCKS];
 
-	unsigned int pack_payload_end;
+	unsigned int pack_payload_start;
 	unsigned int pack_record_count;
 	struct swapz_pending_record pending[SWAPZ_MAX_PACKED_RECORDS];
 
@@ -419,8 +435,8 @@ static bool swapz_current_segment_has_block(const struct swapz_context *context)
 
 static void swapz_reset_pack(struct swapz_context *context)
 {
-	memset(context->pack_buffer, 0, SWAPZ_CONTAINER_HEADER_BYTES);
-	context->pack_payload_end = SWAPZ_CONTAINER_HEADER_BYTES;
+	memset(context->pack_buffer, 0, SWAPZ_BLOCK_BYTES);
+	context->pack_payload_start = SWAPZ_BLOCK_BYTES;
 	context->pack_record_count = 0;
 }
 
@@ -640,9 +656,17 @@ fail_pending:
 static bool swapz_pack_can_fit(const struct swapz_context *context,
 			       unsigned int compressed_length)
 {
-	if (context->pack_record_count >= SWAPZ_MAX_PACKED_RECORDS)
+	unsigned int next_header_end;
+	unsigned int next_payload_start;
+
+	if (context->pack_record_count >= SWAPZ_MAX_PACKED_RECORDS ||
+	    compressed_length > context->pack_payload_start)
 		return false;
-	return compressed_length <= SWAPZ_BLOCK_BYTES - context->pack_payload_end;
+
+	next_header_end = SWAPZ_CONTAINER_BASE_BYTES +
+		(context->pack_record_count + 1) * sizeof(struct swapz_record_disk);
+	next_payload_start = context->pack_payload_start - compressed_length;
+	return next_header_end <= next_payload_start;
 }
 
 static int swapz_add_compressed_record(struct swapz_context *context,
@@ -678,11 +702,12 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 		return -E2BIG;
 
 	record_index = context->pack_record_count;
-	record = &container->records[record_index];
+	context->pack_payload_start -= compressed_length;
+	record = swapz_container_record(context->pack_buffer, record_index);
 	record->logical_page = cpu_to_le32(logical_page);
-	record->offset = cpu_to_le16(context->pack_payload_end);
+	record->offset = cpu_to_le16(context->pack_payload_start);
 	record->length = cpu_to_le16(compressed_length);
-	memcpy((u8 *)context->pack_buffer + context->pack_payload_end,
+	memcpy((u8 *)context->pack_buffer + context->pack_payload_start,
 	       compressed, compressed_length);
 
 	pending = &context->pending[record_index];
@@ -690,8 +715,6 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 	pending->logical_page = logical_page;
 	pending->stored_length = compressed_length;
 	pending->record_index = record_index;
-
-	context->pack_payload_end += compressed_length;
 	context->pack_record_count++;
 	context->stats.compressed_payload_bytes += compressed_length;
 	context->stats.compressed_pages++;
