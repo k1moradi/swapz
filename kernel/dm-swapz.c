@@ -988,6 +988,14 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 			goto fail;
 	}
 
+	/*
+	 * Staged replacement mappings are not published until their contiguous
+	 * lower write succeeds.  Commit them before deciding the victim is dead.
+	 */
+	error = swapz_flush_write_batch(context);
+	if (error)
+		goto fail;
+
 	if (WARN_ON_ONCE(context->segment_live_blocks[victim] != 0)) {
 		error = -EUCLEAN;
 		goto fail;
@@ -1033,7 +1041,7 @@ static int swapz_advance_segment(struct swapz_context *context)
 {
 	int error;
 
-	if (context->pack_record_count)
+	if (context->pack_record_count || context->write_batch_block_count)
 		return -EDEADLK;
 
 	if (context->segment_state[context->current_segment] == SWAPZ_SEGMENT_OPEN)
@@ -1100,6 +1108,8 @@ static int swapz_process_read(struct swapz_context *context, struct bio *bio)
 		return -ERANGE;
 
 	error = swapz_flush_pack(context, false, true);
+	if (!error)
+		error = swapz_flush_write_batch(context);
 	if (error)
 		return error;
 
@@ -1120,6 +1130,8 @@ static int swapz_process_discard(struct swapz_context *context, struct bio *bio)
 	int error;
 
 	error = swapz_flush_pack(context, false, true);
+	if (!error)
+		error = swapz_flush_write_batch(context);
 	if (error)
 		return error;
 
@@ -1147,6 +1159,8 @@ static void swapz_process_flush(struct swapz_context *context, struct bio *bio)
 
 	error = swapz_flush_pack(context, false, true);
 	if (!error)
+		error = swapz_flush_write_batch(context);
+	if (!error)
 		error = blkdev_issue_flush(context->backing->bdev);
 	if (error)
 		swapz_set_failed(context, error);
@@ -1164,6 +1178,8 @@ static void swapz_process_bio(struct swapz_context *context, struct bio *bio)
 
 	if (bio->bi_opf & REQ_PREFLUSH) {
 		error = swapz_flush_pack(context, false, true);
+		if (!error)
+			error = swapz_flush_write_batch(context);
 		if (!error)
 			error = blkdev_issue_flush(context->backing->bdev);
 		if (error) {
@@ -1201,9 +1217,9 @@ static void swapz_process_bio(struct swapz_context *context, struct bio *bio)
 		break;
 	}
 
-	/* Packed writes are completed later when their containing block is
-	 * flushed.  Any error returned here happened before the current bio was
-	 * handed to a lower I/O, so this function still owns the bio. */
+	/* Staged writes are completed later when their contiguous physical batch
+	 * is committed.  Any error returned here happened before the current bio
+	 * transferred ownership to that batch, so this function still owns it. */
 	if (error)
 		swapz_complete_bio(bio, error);
 }
@@ -1240,16 +1256,32 @@ static void swapz_io_worker(struct work_struct *work)
 		}
 
 		/*
-		 * Give concurrent swap-out submissions a very small chance to join
-		 * the current 4 KiB pack.  This targets slow serialized media: the
-		 * added sub-millisecond latency is small compared with device latency,
-		 * while packing two or more pages is what reduces host write bytes.
+		 * A single compressed record can benefit from a short coalescing
+		 * window, but V2's original 0.5-1 ms delay was too expensive on QD1.
+		 * Multiple records have already achieved useful packing and are
+		 * flushed without an added sleep.
 		 */
 		if (context->pack_record_count && !context->failed) {
-			usleep_range(SWAPZ_PACK_WAIT_MIN_US, SWAPZ_PACK_WAIT_MAX_US);
+			if (context->pack_record_count == 1)
+				usleep_range(SWAPZ_PACK_WAIT_MIN_US,
+					     SWAPZ_PACK_WAIT_MAX_US);
 			if (!swapz_queue_is_empty(context))
 				continue;
 			if (swapz_flush_pack(context, false, true))
+				context->failed = true;
+			continue;
+		}
+
+		/*
+		 * Raw pages and ready compressed containers share one serialized
+		 * lower request.  Do not delay here: any BIOs already available were
+		 * drained above, so a QD1 issuer cannot provide another request until
+		 * this batch completes.
+		 */
+		if (context->write_batch_block_count && !context->failed) {
+			if (!swapz_queue_is_empty(context))
+				continue;
+			if (swapz_flush_write_batch(context))
 				context->failed = true;
 			continue;
 		}
