@@ -58,3 +58,75 @@ These helpers validate the running kernel and local toolchain; they do not
 change module source or install a module. Use the repository's build and
 fixed-regression instructions before running them, and inspect kernel logs for
 errors after fault-injection tests.
+
+
+## V2.2 streaming tests
+
+V2.2 adds two reusable runtime tests.
+
+### Buffer recall / cancellation
+
+```bash
+sudo bash tests/runtime/buffer-recall.sh
+```
+
+This uses a deliberately slow `dm-delay` lower device and staged mode. It verifies:
+
+1. a page in the in-flight stream buffer can be read while the second buffer is filling;
+2. a page in the filling buffer can be read while the first is being written;
+3. pages from both buffers can be recalled while one lower write remains active;
+4. all reads return exact data from staged RAM rather than waiting for the delayed lower
+   device;
+5. a later logical DISCARD makes an unsent generation stale and triggers staged
+   cancellation/repacking.
+
+The test intentionally does **not** treat a READ as permission to discard swap data.
+
+### Streaming strategy / plateau benchmark
+
+```bash
+sudo bash tests/runtime/streaming-benchmark.sh
+```
+
+The benchmark requires configurable `null_blk` controls for memory backing, completion
+latency, QD1, maximum sectors, and bandwidth throttling.
+
+Defaults model a 20 MiB/s serialized device with 0.5 ms completion latency and sweep:
+
+```text
+strategies:
+    immediate
+    opportunistic
+    staged
+
+batch ceilings:
+    4 8 16 32 64 128 256 512 1024 KiB
+```
+
+Environment overrides include:
+
+```text
+SWAPZ_BENCH_MBPS
+SWAPZ_BENCH_LATENCY_NS
+SWAPZ_BENCH_RUNTIME
+SWAPZ_BENCH_QD
+SWAPZ_BENCH_COMPRESS
+SWAPZ_BENCH_BATCHES
+SWAPZ_BENCH_STRATEGIES
+```
+
+A writer and a low-rate QD1 reader run concurrently. The script reports both fio's upper
+write-completion bandwidth and end-to-end drain bandwidth after explicitly flushing staged
+data. It also records concurrent read latency and lower-device I/O counters.
+
+The summary identifies the first point at >=97% of each strategy's best measured drain
+throughput and then chooses the smallest plateau point whose read p99 remains within 10% of
+the best read p99 among plateau candidates.
+
+The analytical companion is:
+
+```bash
+python3 bench/request-plateau.py --bandwidth 20
+```
+
+It is only a sweep-sizing model; it never substitutes for the runtime benchmark.
