@@ -2,7 +2,7 @@
 /*
  * dm-swapz.c - volatile LZ4-compressed swap target for slow block devices.
  *
- * V2.1 goals:
+ * V2.2 goals:
  *  - dedicated block-device backing only;
  *  - serialize I/O through one reclaim-capable worker;
  *  - pack several LZ4-compressed 4 KiB logical pages into 4 KiB writes;
@@ -21,6 +21,7 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/device-mapper.h>
+#include <linux/completion.h>
 #include <linux/dm-io.h>
 #include <linux/highmem.h>
 #include <linux/ioprio.h>
@@ -33,12 +34,12 @@
 #include <linux/delay.h>
 
 #if PAGE_SIZE != 4096
-#error "swapz V2.1 currently requires 4 KiB PAGE_SIZE"
+#error "swapz V2.2 currently requires 4 KiB PAGE_SIZE"
 #endif
 
 #define SWAPZ_VERSION_MAJOR 0
 #define SWAPZ_VERSION_MINOR 2
-#define SWAPZ_VERSION_PATCH 1
+#define SWAPZ_VERSION_PATCH 2
 
 #define SWAPZ_BLOCK_BYTES PAGE_SIZE
 #define SWAPZ_BLOCK_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
