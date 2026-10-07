@@ -354,7 +354,13 @@ static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 	 * an existing io_work instance.
 	 */
 	complete(&buffer->completion);
-	if (context->workqueue)
+	/*
+	 * Normal operation needs another worker pass to reap/publish the completed
+	 * lower write.  Suspend/teardown first clears accepting_io and then drains
+	 * the stream synchronously outside the workqueue; queuing io_work in that
+	 * phase would race two owners of the same state machine.
+	 */
+	if (READ_ONCE(context->accepting_io) && context->workqueue)
 		queue_work(context->workqueue, &context->io_work);
 
 	/*
@@ -409,7 +415,7 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 		 */
 		buffer->io_error = error;
 		complete(&buffer->completion);
-		if (context->workqueue)
+		if (READ_ONCE(context->accepting_io) && context->workqueue)
 			queue_work(context->workqueue, &context->io_work);
 		return 0;
 	}
