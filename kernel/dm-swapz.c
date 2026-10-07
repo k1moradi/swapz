@@ -832,6 +832,59 @@ fail:
 	swapz_set_failed(context, error);
 }
 
+static void swapz_complete_buffer_bios(struct swapz_context *context,
+				       struct swapz_stream_buffer *buffer,
+				       int error)
+{
+	u32 block_index;
+
+	for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+		struct swapz_write_batch_block *block = &buffer->blocks[block_index];
+		u32 record_index;
+
+		for (record_index = 0; record_index < block->record_count;
+		     ++record_index) {
+			struct swapz_write_batch_record *record =
+				&block->records[record_index];
+
+			if (!record->bio)
+				continue;
+			swapz_clear_staged_ref(context, record->logical_page,
+					       record->generation, buffer->id,
+					       block_index, record->record_index);
+			swapz_complete_bio(record->bio, error);
+			record->bio = NULL;
+		}
+	}
+}
+
+static void swapz_fail_unsent_upper_bios(struct swapz_context *context, int error)
+{
+	struct swapz_stream_buffer *buffer = swapz_fill_buffer(context);
+	u32 record_index;
+
+	/*
+	 * pack_buffer records have not transferred into a stream buffer yet.
+	 * Complete those upper BIOs directly, then drop the pack.
+	 */
+	for (record_index = 0; record_index < context->pack_record_count;
+	     ++record_index) {
+		if (!context->pending[record_index].bio)
+			continue;
+		swapz_complete_bio(context->pending[record_index].bio, error);
+		context->pending[record_index].bio = NULL;
+	}
+	if (context->pack_record_count)
+		swapz_reset_pack(context);
+
+	/*
+	 * A failed target must not leave non-early-completed upper writes owned by
+	 * an unsent fill buffer.  Early-completed staged records have bio == NULL
+	 * and remain resident for recovery.
+	 */
+	swapz_complete_buffer_bios(context, buffer, error);
+}
+
 static int swapz_finalize_stream_buffer(struct swapz_context *context,
 					struct swapz_stream_buffer *buffer)
 {
@@ -854,8 +907,10 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 				if (record->upper_completed &&
 				    swapz_stream_record_current(context, record))
 					retain = true;
-				if (record->bio)
+				if (record->bio) {
 					swapz_complete_bio(record->bio, error);
+					record->bio = NULL;
+				}
 			}
 		}
 
@@ -909,8 +964,10 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 				context->stats.staged_cancellations++;
 			}
 
-			if (record->bio)
+			if (record->bio) {
 				swapz_complete_bio(record->bio, 0);
+				record->bio = NULL;
+			}
 		}
 
 		if (block->compaction)
@@ -943,6 +1000,8 @@ static int swapz_reap_inflight(struct swapz_context *context, bool wait)
 	 */
 	context->inflight_buffer_id = -1;
 	error = swapz_finalize_stream_buffer(context, buffer);
+	if (error)
+		swapz_complete_buffer_bios(context, buffer, error);
 	return error;
 }
 
@@ -1913,6 +1972,8 @@ static void swapz_io_worker(struct work_struct *work)
 		error = swapz_reap_inflight(context, false);
 		if (error && error != -EAGAIN && !context->failed)
 			swapz_set_failed(context, error);
+		if (unlikely(context->failed))
+			swapz_fail_unsent_upper_bios(context, -EIO);
 
 		spin_lock_irq(&context->queue_lock);
 		list_splice_init(&context->queued_bios, &local_bios);
