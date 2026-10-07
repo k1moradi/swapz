@@ -19,6 +19,9 @@ sudo bash tests/runtime/write-fault.sh
 sudo bash tests/runtime/read-fault.sh
 sudo bash tests/runtime/lifecycle.sh
 sudo bash tests/runtime/pressure.sh
+sudo bash tests/runtime/staged-write-fault.sh
+sudo bash tests/runtime/buffer-recall.sh
+sudo bash tests/runtime/streaming-benchmark.sh
 sudo bash tests/runtime/ab-benchmark.sh | tee swapz-v21-ab.log
 ```
 
@@ -130,3 +133,15 @@ python3 bench/request-plateau.py --bandwidth 20
 ```
 
 It is only a sweep-sizing model; it never substitutes for the runtime benchmark.
+
+
+### Staged asynchronous write-failure recovery
+
+```bash
+sudo bash tests/runtime/staged-write-fault.sh
+```
+
+This places a staged compressed write over a lower `dm-error` target. The upper write must
+early-complete from bounded RAM, the asynchronous lower write must then fail, and the exact
+page must still be readable from retained staged RAM while new writes are rejected. This is
+the critical safety test for early completion.
