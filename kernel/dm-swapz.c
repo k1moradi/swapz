@@ -31,6 +31,7 @@
 #include <linux/spinlock.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
+#include <linux/wait.h>
 #include <linux/delay.h>
 
 #if PAGE_SIZE != 4096
@@ -203,7 +204,8 @@ struct swapz_context {
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
 	struct work_struct io_work;
-	struct work_struct completion_work;
+	atomic_t async_callbacks;
+	wait_queue_head_t async_callback_wait;
 
 	spinlock_t queue_lock;
 	struct list_head queued_bios;
@@ -335,22 +337,6 @@ static int swapz_read_block(struct swapz_context *context, u32 physical_block,
 	return swapz_backing_io(context, REQ_OP_READ, physical_block, buffer);
 }
 
-static void swapz_stream_completion_kick(struct work_struct *work)
-{
-	struct swapz_context *context =
-		container_of(work, struct swapz_context, completion_work);
-
-	/*
-	 * completion_work is deliberately distinct from io_work.  The workqueue
-	 * has max_active=1, so if a lower completion races the tail of io_work,
-	 * this kick remains queued behind it.  Once the kick runs, io_work is no
-	 * longer executing and can be queued unambiguously to reap the completed
-	 * buffer and finish any waiting upper BIOs.
-	 */
-	if (context->workqueue)
-		queue_work(context->workqueue, &context->io_work);
-}
-
 static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 {
 	struct swapz_stream_buffer *buffer = data;
@@ -359,19 +345,22 @@ static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 	buffer->io_error = error_bits ? -EIO : 0;
 
 	/*
-	 * The completion object is the sole publication point for lower-I/O
-	 * completion.  No buffer state may become reapable before complete()
-	 * finishes, otherwise the worker could reset/reuse this buffer while this
-	 * callback is still touching its old completion instance.
+	 * Publish lower-I/O completion before requesting another worker pass.
+	 * Requeueing the same work item is supported by the workqueue API; the
+	 * explicitly ordered workqueue guarantees it cannot run concurrently with
+	 * an existing io_work instance.
 	 */
 	complete(&buffer->completion);
+	if (context->workqueue)
+		queue_work(context->workqueue, &context->io_work);
 
 	/*
-	 * No buffer fields are accessed after complete().  A worker which consumes
-	 * the completion may therefore finalize and reuse the buffer safely.
+	 * Context teardown waits for this reference to reach zero.  This is the
+	 * final callback access to context, so a target cannot destroy the
+	 * workqueue or free the callback context while dm-io is still returning.
 	 */
-	if (context->workqueue)
-		queue_work(context->workqueue, &context->completion_work);
+	if (atomic_dec_and_test(&context->async_callbacks))
+		wake_up_all(&context->async_callback_wait);
 }
 
 static int swapz_submit_stream_buffer(struct swapz_context *context,
@@ -404,9 +393,12 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 	buffer->io_error = 0;
 	buffer->state = SWAPZ_BUFFER_INFLIGHT;
 	context->inflight_buffer_id = buffer->id;
+	atomic_inc(&context->async_callbacks);
 
 	error = dm_io(&request, 1, &region, NULL, IOPRIO_DEFAULT);
 	if (error) {
+		if (atomic_dec_and_test(&context->async_callbacks))
+			wake_up_all(&context->async_callback_wait);
 		/*
 		 * Normalize synchronous submission rejection into the asynchronous
 		 * completion path.  The reaper then owns all BIO completion and staged
@@ -415,7 +407,7 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 		buffer->io_error = error;
 		complete(&buffer->completion);
 		if (context->workqueue)
-			queue_work(context->workqueue, &context->completion_work);
+			queue_work(context->workqueue, &context->io_work);
 		return 0;
 	}
 
@@ -2259,6 +2251,8 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 	context->target = target;
 	target->private = context;
+	atomic_set(&context->async_callbacks, 0);
+	init_waitqueue_head(&context->async_callback_wait);
 	context->strategy = SWAPZ_STRATEGY_OPPORTUNISTIC;
 	context->max_batch_blocks = SWAPZ_DEFAULT_WRITE_BATCH_BLOCKS;
 	context->inflight_buffer_id = -1;
@@ -2444,7 +2438,6 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	spin_lock_init(&context->queue_lock);
 	INIT_LIST_HEAD(&context->queued_bios);
 	INIT_WORK(&context->io_work, swapz_io_worker);
-	INIT_WORK(&context->completion_work, swapz_stream_completion_kick);
 	/*
 	 * The swapz state machine is intentionally single-threaded.  Do not use
 	 * WQ_UNBOUND + max_active=1 as a serialization primitive: modern kernels
