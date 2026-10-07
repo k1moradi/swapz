@@ -328,45 +328,66 @@ static int swapz_read_block(struct swapz_context *context, u32 physical_block,
 	return swapz_backing_io(context, REQ_OP_READ, physical_block, buffer);
 }
 
-static int swapz_write_batch_io(struct swapz_context *context,
-				u32 physical_block, unsigned int block_count)
+static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 {
-	struct dm_io_region region = {
-		.bdev = context->backing->bdev,
-		.sector = swapz_physical_sector(physical_block),
-		.count = (sector_t)block_count * SWAPZ_BLOCK_SECTORS,
-	};
-	struct dm_io_request request = {
-		.bi_opf = REQ_OP_WRITE,
-		.mem = {
-			.type = DM_IO_VMA,
-			.offset = 0,
-			.ptr.vma = context->write_batch_buffer,
-		},
-		.notify = {
-			.fn = NULL,
-			.context = NULL,
-		},
-		.client = context->io_client,
-	};
-	unsigned long error_bits = 0;
+	struct swapz_stream_buffer *buffer = data;
+	struct swapz_context *context = buffer->context;
+
+	buffer->io_error = error_bits ? -EIO : 0;
+	WRITE_ONCE(buffer->io_done, true);
+	complete(&buffer->completion);
+
+	/*
+	 * dm-io callbacks may run outside process context.  The worker owns all
+	 * mapping publication, BIO completion, and buffer reuse.
+	 */
+	if (context->workqueue)
+		queue_work(context->workqueue, &context->io_work);
+}
+
+static int swapz_submit_stream_buffer(struct swapz_context *context,
+				      struct swapz_stream_buffer *buffer)
+{
+	struct dm_io_region region;
+	struct dm_io_request request;
 	int error;
 
-	error = dm_io(&request, 1, &region, &error_bits, IOPRIO_DEFAULT);
-	if (error || error_bits) {
-		if (!error)
-			error = -EIO;
-		swapz_set_failed(context, error);
+	if (!buffer->block_count)
+		return 0;
+	if (WARN_ON_ONCE(buffer->state != SWAPZ_BUFFER_FILL ||
+			 context->inflight_buffer_id >= 0))
+		return -EUCLEAN;
+
+	region.bdev = context->backing->bdev;
+	region.sector = swapz_physical_sector(buffer->start_block);
+	region.count = (sector_t)buffer->block_count * SWAPZ_BLOCK_SECTORS;
+
+	memset(&request, 0, sizeof(request));
+	request.bi_opf = REQ_OP_WRITE;
+	request.mem.type = DM_IO_VMA;
+	request.mem.offset = 0;
+	request.mem.ptr.vma = buffer->data;
+	request.notify.fn = swapz_stream_io_complete;
+	request.notify.context = buffer;
+	request.client = context->io_client;
+
+	reinit_completion(&buffer->completion);
+	buffer->io_error = 0;
+	WRITE_ONCE(buffer->io_done, false);
+	buffer->state = SWAPZ_BUFFER_INFLIGHT;
+	context->inflight_buffer_id = buffer->id;
+
+	error = dm_io(&request, 1, &region, NULL, IOPRIO_DEFAULT);
+	if (error) {
+		context->inflight_buffer_id = -1;
+		buffer->state = SWAPZ_BUFFER_FILL;
+		buffer->io_error = error;
+		WRITE_ONCE(buffer->io_done, true);
 		return error;
 	}
 
-	context->stats.physical_write_bytes +=
-		(u64)block_count * SWAPZ_BLOCK_BYTES;
-	context->stats.physical_write_requests++;
-	if (block_count > 1)
-		context->stats.multi_block_write_requests++;
-	context->stats.max_write_batch_blocks =
-		max_t(u64, context->stats.max_write_batch_blocks, block_count);
+	context->stats.stream_submit_bytes +=
+		(u64)buffer->block_count * SWAPZ_BLOCK_BYTES;
 	return 0;
 }
 
