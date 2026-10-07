@@ -663,3 +663,55 @@ Therefore the final-version milestone must include, at minimum:
 Until that final milestone begins, Codex and current V2.x development must treat
 hibernate/resume as deferred and must not change the current volatile architecture merely
 to approximate future resume support.
+
+
+## V2.2 null_blk bandwidth-backend limitation
+
+The first controlled V2.2 streaming sweep did **not** establish a swapz performance failure.
+
+The run used Linux `null_blk` with:
+
+```text
+mbps=20
+completion_nsec=500000
+hw_queue_depth=1
+```
+
+and reached the staged 512 KiB case. The target then timed out with one 128-block lower
+request still outstanding.
+
+Source review of Linux `null_blk` explains the failure:
+
+- the `mbps` throttle replenishes a byte budget 50 times per second;
+- its per-tick budget is `(1 MiB / 50) * mbps`;
+- at 20 MiB/s this is about 419,420 bytes (~409.6 KiB);
+- if a single request is larger than the current budget, null_blk stops the hardware queue
+  and returns `BLK_STS_DEV_RESOURCE`;
+- the next tick restores the same ~409.6 KiB budget;
+- therefore a 512 KiB request can never become admissible and is requeued indefinitely.
+
+The observed 30-second swapz watchdog therefore detected a synthetic lower-device livelock
+caused by the benchmark backend. It must not be used as evidence that swapz cannot issue or
+complete 512 KiB writes on a real device.
+
+The checked-in benchmark now:
+
+1. discovers configfs null_blk device/sysfs names portably;
+2. computes the null_blk per-tick byte budget;
+3. rejects unsafe batch ceilings before creating a workload that can wedge the host;
+4. allows `SWAPZ_BENCH_MBPS=0` for latency-only large-request testing, clearly labeled as
+   unthrottled.
+
+At 20 MiB/s, null_blk-mbps measurements are therefore limited to batch ceilings no larger
+than the backend budget. The standard powers-of-two sweep is safely measurable only through
+256 KiB.
+
+Status:
+
+```text
+CORRECTNESS PASS — PERFORMANCE BACKEND LIMIT, NOT SWAPZ PERFORMANCE FAIL
+```
+
+A size-aware synthetic backend or explicitly authorized physical media is required to
+measure the 512 KiB / 1 MiB plateau at an actual ~20 MiB/s transfer rate without null_blk's
+token-bucket artifact.
