@@ -811,7 +811,7 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 			record.record_index = new_record_index;
 			context->repack_block.records[new_record_index] = record;
 			context->repack_block.record_count++;
-			context->repack_block.compaction |= source.compaction;
+			context->repack_block.compaction |= source->compaction;
 		}
 	}
 
