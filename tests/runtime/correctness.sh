@@ -8,6 +8,12 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TMP=$(mktemp -d /dev/shm/swapz-v21-correctness.XXXXXX)
 TAG="$$-$RANDOM"
 REF="$TMP/reference"
+LONG_STRATEGY=${SWAPZ_LONG_STRATEGY:-opportunistic}
+LONG_BATCH_KIB=${SWAPZ_LONG_BATCH_KIB:-256}
+case "$LONG_STRATEGY" in
+  opportunistic|staged) ;;
+  *) echo "SWAPZ_LONG_STRATEGY must be opportunistic or staged" >&2; exit 1 ;;
+esac
 LOOPS=()
 NAMES=()
 cleanup() {
@@ -23,11 +29,12 @@ modprobe dm-swapz
 run_target() {
   local name=$1 backing_mib=$2 sectors=$3 mode=$4
   shift 4
-  local image="$TMP/$name.img" loop status
+  local image="$TMP/$name.img" loop status strategy="opportunistic"
+  [[ $mode != random && $mode != live ]] || strategy="$LONG_STRATEGY"
   truncate -s "${backing_mib}M" "$image"
   loop=$(losetup --find --show "$image")
   LOOPS+=("$loop")
-  dmsetup create "$name" --table "0 $sectors swapz $loop"
+  dmsetup create "$name" --table "0 $sectors swapz $loop $strategy $LONG_BATCH_KIB"
   NAMES+=("$name")
   "$REF" "$mode" "/dev/mapper/$name" "$@"
   status=$(dmsetup status "$name")
@@ -56,7 +63,7 @@ run_packed_gc() {
   truncate -s 4M "$image"
   loop=$(losetup --find --show "$image")
   LOOPS+=("$loop")
-  dmsetup create "$name" --table "0 4096 swapz $loop"
+  dmsetup create "$name" --table "0 4096 swapz $loop opportunistic $LONG_BATCH_KIB"
   NAMES+=("$name")
   fio --name="pack-$live" --filename="/dev/mapper/$name" --size=32K --io_size=32K \
     --bs=4k --rw=write --ioengine=libaio --iodepth=8 --iodepth_batch_submit=8 \
