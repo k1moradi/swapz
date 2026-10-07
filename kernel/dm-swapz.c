@@ -648,7 +648,8 @@ static int swapz_emit_repack_container(struct swapz_context *context,
 
 	memcpy((u8 *)buffer->data + *write_index * SWAPZ_BLOCK_BYTES,
 	       context->repack_buffer, SWAPZ_BLOCK_BYTES);
-	buffer->blocks[*write_index] = context->repack_block;
+	memcpy(&buffer->blocks[*write_index], &context->repack_block,
+	       sizeof(context->repack_block));
 
 	for (record_index = 0;
 	     record_index < context->repack_block.record_count;
@@ -687,7 +688,7 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 			&context->compact_source_block;
 		u32 record_index;
 
-		*source = buffer->blocks[read_index];
+		memcpy(source, &buffer->blocks[read_index], sizeof(*source));
 
 		/*
 		 * Output may move left over already-consumed source blocks.  Snapshot
@@ -725,7 +726,7 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 
 			memcpy((u8 *)buffer->data + write_index * SWAPZ_BLOCK_BYTES,
 			       context->io_buffer, SWAPZ_BLOCK_BYTES);
-			buffer->blocks[write_index] = *source;
+			memcpy(&buffer->blocks[write_index], source, sizeof(*source));
 			swapz_update_repacked_ref(context, buffer, record,
 						 write_index, 0);
 			write_index++;
