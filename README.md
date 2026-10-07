@@ -1,4 +1,4 @@
-# swapz V2.1 (experimental)
+# swapz V2.1 (software-validated experimental)
 
 `swapz` is an experimental Device Mapper target for **dedicated swap partitions on slow storage**.  It targets old HDDs, USB flash drives, SD/eMMC media, and SATA SSDs where storage bandwidth and flash write endurance matter more than high queue-depth NVMe throughput.
 
@@ -6,7 +6,7 @@ The V2.1 hypothesis is intentionally narrow:
 
 > LZ4-compress 4 KiB swap pages, pack multiple compressed pages into 4 KiB lower-device writes, append sequentially through 1 MiB segments, and garbage-collect only low-live victim segments.  This should reduce host bytes written without V1's whole-live-set compaction penalty.
 
-This is a proof-of-concept, not production storage software yet.
+This is a proof-of-concept, not production storage software yet. V2.1 has passed Linux 7.0.x software/runtime validation; physical HDD/USB/SD/SATA qualification is still pending.
 
 ## V2.1 scope
 
@@ -87,7 +87,7 @@ make -C userspace
 make -C tests test
 ```
 
-V2 was validated on Ubuntu Linux 7.0.0-34 with randomized block tests, live-GC stress, fault injection, lifecycle testing, and bounded real swap pressure. V2.1 keeps that allocator and adds serialized multi-block lower-write batching; this new write path requires a fresh Linux 7.0.x validation pass.
+V2.1 has now passed Linux 7.0.0-34 validation including model/sanitizer tests, randomized block tests, live-GC stress, multi-block lower-write fault injection, lifecycle testing, and bounded real swap pressure. On the 1 ms/request virtual stack, V2.1 cut QD8 lower write-I/O count by about 87% for partial/incompressible workloads and improved throughput by about 5.6-6x versus V2. Physical-media benchmarking is still required.
 
 ## DKMS
 
