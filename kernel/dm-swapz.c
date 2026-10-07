@@ -908,10 +908,20 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 			     ++record_index) {
 				struct swapz_write_batch_record *record =
 					&block->records[record_index];
+				bool authoritative =
+					record->upper_completed &&
+					swapz_stream_record_current(context, record);
 
-				if (record->upper_completed &&
-				    swapz_stream_record_current(context, record))
+				if (authoritative) {
 					retain = true;
+				} else {
+					swapz_clear_staged_ref(context,
+						       record->logical_page,
+						       record->generation,
+						       buffer->id,
+						       block_index,
+						       record->record_index);
+				}
 				if (record->bio) {
 					swapz_complete_bio(record->bio, error);
 					record->bio = NULL;
@@ -965,8 +975,12 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 				swapz_clear_staged_ref(context, record->logical_page,
 						       record->generation, buffer->id,
 						       block_index, record->record_index);
-			} else if (record->upper_completed) {
-				context->stats.staged_cancellations++;
+			} else {
+				swapz_clear_staged_ref(context, record->logical_page,
+						       record->generation, buffer->id,
+						       block_index, record->record_index);
+				if (record->upper_completed)
+					context->stats.staged_cancellations++;
 			}
 
 			if (record->bio) {
