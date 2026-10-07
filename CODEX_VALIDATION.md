@@ -1065,3 +1065,58 @@ That message is not a swapz correctness failure.
 Therefore the next validation step is the broader correctness suite. No reboot is required
 solely because of this focused result, provided the currently loaded module still matches
 the tested kernel artifact and no stale swapz target remains.
+
+
+## Performance gate is now open
+
+The kernel source at:
+
+```text
+0f40f52956ff0b4ffc18549b916a54ce55847c02
+```
+
+has passed the full correctness campaign and is preserved on:
+
+```text
+v2.2-correctness-pass
+```
+
+Current `main` contains only test/documentation changes after that kernel source.
+
+Before starting benchmarks, verify the permanent harness cleanups against the already loaded
+matching module:
+
+```bash
+git pull --ff-only origin main
+sudo bash tests/runtime/staged-rewrite-fault.sh
+sudo bash tests/runtime/staged-write-fault.sh
+sudo env SWAPZ_LONG_STRATEGY=staged bash tests/runtime/correctness.sh
+```
+
+The staged correctness command intentionally changes only the randomized and live-GC target
+strategy. Selectivity and packed-GC remain opportunistic inside the harness.
+
+If those pass, performance work is authorized under the existing benchmark plan:
+
+1. analytical request plateau;
+2. immediate/opportunistic/staged streaming benchmark sweep;
+3. 4, 8, 16, 32, 64, 128, 256, 512, 1024 KiB batch sizes;
+4. latency matrix 0.25/0.5/1/2 ms;
+5. queue depths 1/8/32/64;
+6. compressibility 100/50/0;
+7. throughput versus swap-in-latency Pareto frontier;
+8. staging cancellation effectiveness;
+9. GC regression;
+10. bounded real swap pressure.
+
+Do not use physical media without explicit exact-device authorization.
+
+If 512 -> 1024 KiB still improves drain throughput by more than 3% with acceptable read
+latency, report:
+
+```text
+PLATEAU NOT REACHED — BATCH/SEGMENT CEILING NEEDS TO INCREASE
+```
+
+Do not modify kernel performance policy while benchmarking. Report measurements first; the
+primary developer decides the next architecture/performance change.
