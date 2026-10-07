@@ -464,3 +464,67 @@ older module is still pinned and reboot permission is unavailable.
 
 These changes remain runtime-unvalidated until a freshly built module is loaded after an
 explicitly authorized reboot.
+
+
+## V2.2 stale fill-buffer ownership root cause
+
+The focused post-reboot run on
+`3751bfb714c5aba77cdf987740b3bc60bcf6713e` reproduced the live-GC hang with a
+much sharper ownership snapshot:
+
+```text
+writer: D / submit_bio_wait
+failed=0
+gc_victims=1
+gc_pages=1
+inflight_id=-1
+inflight_blocks=0
+async_cb=0
+fill_blocks=0
+pack_records=0
+lower loop unchanged
+```
+
+This ruled out a simple lower-I/O completion wait: the upper BIO was no longer represented
+by the compression pack, current fill buffer, in-flight buffer, or async callback state.
+
+Source review found the concrete ownership bug in `swapz_stage_write_block()`:
+
+1. it cached `buffer = swapz_fill_buffer(context)`;
+2. it called `swapz_ensure_physical_block()`;
+3. at a segment boundary that helper can drain stream buffers, advance the segment, and
+   run GC, all of which may change `fill_buffer_id`;
+4. after returning, the function continued staging into the stale cached buffer pointer.
+
+If the old buffer had become FREE, the current upper BIO could be copied into that FREE
+buffer and disappear from all state-machine ownership. That exactly matches the runtime
+snapshot above.
+
+Fix:
+
+```text
+120d752f690fb8cc3b2d1c94155c95f0cad2c545
+```
+
+`swapz_stage_write_block()` now reacquires `swapz_fill_buffer(context)` immediately after
+`swapz_ensure_physical_block()` and asserts that the reacquired buffer is in FILL state
+before staging any record.
+
+Source regression:
+
+```text
+7bb3d5d9527c262d4dd0046b0ea6c0b5466bc192
+```
+
+The source-invariant test now requires the fill-buffer reacquisition to occur after the
+physical-block ensure and before the physical block is staged.
+
+The exact failing tree is preserved as branch:
+
+```text
+v2.2-stale-fill-blocked
+3751bfb714c5aba77cdf987740b3bc60bcf6713e
+```
+
+This is a strong root-cause match but remains runtime-unvalidated until the freshly built
+post-fix module passes the focused live-GC progress test.
