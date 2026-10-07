@@ -580,90 +580,235 @@ static bool swapz_stream_record_current(struct swapz_context *context,
 	return record->generation == context->generations[record->logical_page];
 }
 
+static bool swapz_repack_can_fit(unsigned int record_count,
+				  unsigned int payload_start,
+				  unsigned int length)
+{
+	unsigned int header_end;
+
+	if (record_count >= SWAPZ_MAX_PACKED_RECORDS || length > payload_start)
+		return false;
+	header_end = SWAPZ_CONTAINER_BASE_BYTES +
+		(record_count + 1) * sizeof(struct swapz_record_disk);
+	return header_end <= payload_start - length;
+}
+
+static void swapz_update_repacked_ref(struct swapz_context *context,
+				      struct swapz_stream_buffer *buffer,
+				      struct swapz_write_batch_record *record,
+				      u16 block_index, u8 record_index)
+{
+	struct swapz_staged_ref *ref = &context->staged_refs[record->logical_page];
+
+	if (ref->valid && ref->generation == record->generation &&
+	    ref->buffer_id == buffer->id) {
+		ref->block_index = block_index;
+		ref->record_index = record_index;
+	}
+}
+
+static int swapz_emit_repack_container(struct swapz_context *context,
+				       struct swapz_stream_buffer *buffer,
+				       u32 *write_index,
+				       unsigned int *payload_start)
+{
+	struct swapz_container_disk *container = context->repack_buffer;
+	u32 record_index;
+
+	if (!context->repack_block.record_count)
+		return 0;
+	if (*write_index >= context->max_batch_blocks)
+		return -ENOSPC;
+
+	container->magic = cpu_to_le32(SWAPZ_CONTAINER_MAGIC);
+	container->version = cpu_to_le16(SWAPZ_CONTAINER_VERSION);
+	container->record_count =
+		cpu_to_le16(context->repack_block.record_count);
+
+	memcpy((u8 *)buffer->data + *write_index * SWAPZ_BLOCK_BYTES,
+	       context->repack_buffer, SWAPZ_BLOCK_BYTES);
+	buffer->blocks[*write_index] = context->repack_block;
+
+	for (record_index = 0;
+	     record_index < context->repack_block.record_count;
+	     ++record_index) {
+		struct swapz_write_batch_record *record =
+			&buffer->blocks[*write_index].records[record_index];
+
+		swapz_update_repacked_ref(context, buffer, record,
+					 *write_index, record_index);
+	}
+
+	(*write_index)++;
+	memset(context->repack_buffer, 0, SWAPZ_BLOCK_BYTES);
+	memset(&context->repack_block, 0, sizeof(context->repack_block));
+	*payload_start = SWAPZ_BLOCK_BYTES;
+	return 0;
+}
+
 static void swapz_compact_fill_buffer(struct swapz_context *context,
 				      struct swapz_stream_buffer *buffer)
 {
 	u32 read_index;
 	u32 write_index = 0;
 	u32 old_count = buffer->block_count;
+	unsigned int repack_payload_start = SWAPZ_BLOCK_BYTES;
+	int error = 0;
 
 	if (!old_count)
 		return;
 
+	memset(context->repack_buffer, 0, SWAPZ_BLOCK_BYTES);
+	memset(&context->repack_block, 0, sizeof(context->repack_block));
+
 	for (read_index = 0; read_index < old_count; ++read_index) {
-		struct swapz_write_batch_block *source = &buffer->blocks[read_index];
-		bool keep = false;
+		struct swapz_write_batch_block source = buffer->blocks[read_index];
 		u32 record_index;
 
-		for (record_index = 0; record_index < source->record_count;
-		     ++record_index) {
-			struct swapz_write_batch_record *record =
-				&source->records[record_index];
+		/*
+		 * Output may move left over already-consumed source blocks.  Snapshot
+		 * this 4 KiB source first so merging cannot overwrite data still needed
+		 * from the current block.
+		 */
+		memcpy(context->io_buffer,
+		       (u8 *)buffer->data + read_index * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
 
-			/*
-			 * A pending upper BIO has not yet been acknowledged, so keep its
-			 * block even if a later operation already superseded it.  Staged
-			 * early-completed records may be omitted once their generation is
-			 * stale (normally after DISCARD or overwrite).
-			 */
-			if (record->bio || swapz_stream_record_current(context, record))
-				keep = true;
-		}
+		if (source.record_count == 1 &&
+		    !(source.records[0].flags & SWAPZ_MAP_COMPRESSED)) {
+			struct swapz_write_batch_record *record = &source.records[0];
+			bool keep = record->bio ||
+				swapz_stream_record_current(context, record);
 
-		if (!keep) {
-			for (record_index = 0; record_index < source->record_count;
-			     ++record_index) {
-				struct swapz_write_batch_record *record =
-					&source->records[record_index];
-
+			if (!keep) {
 				swapz_clear_staged_ref(context, record->logical_page,
 						       record->generation, buffer->id,
 						       read_index, record->record_index);
 				context->stats.staged_cancellations++;
+				continue;
 			}
-			context->stats.staged_cancelled_blocks++;
+
+			error = swapz_emit_repack_container(context, buffer,
+						    &write_index,
+						    &repack_payload_start);
+			if (error)
+				goto fail;
+
+			if (write_index >= context->max_batch_blocks) {
+				error = -ENOSPC;
+				goto fail;
+			}
+
+			memcpy((u8 *)buffer->data + write_index * SWAPZ_BLOCK_BYTES,
+			       context->io_buffer, SWAPZ_BLOCK_BYTES);
+			buffer->blocks[write_index] = source;
+			swapz_update_repacked_ref(context, buffer, record,
+						 write_index, 0);
+			write_index++;
 			continue;
 		}
 
-		if (write_index != read_index) {
-			memmove((u8 *)buffer->data + write_index * SWAPZ_BLOCK_BYTES,
-				(u8 *)buffer->data + read_index * SWAPZ_BLOCK_BYTES,
-				SWAPZ_BLOCK_BYTES);
-			buffer->blocks[write_index] = *source;
+		/* Compressed container: merge all still-needed records across blocks. */
+		for (record_index = 0; record_index < source.record_count;
+		     ++record_index) {
+			struct swapz_write_batch_record record = source.records[record_index];
+			const struct swapz_container_disk *source_container =
+				context->io_buffer;
+			const struct swapz_record_disk *source_disk_record;
+			struct swapz_record_disk *dest_disk_record;
+			u16 offset;
+			u16 length;
+			u8 new_record_index;
+			bool keep = record.bio ||
+				swapz_stream_record_current(context, &record);
 
-			for (record_index = 0;
-			     record_index < buffer->blocks[write_index].record_count;
-			     ++record_index) {
-				struct swapz_write_batch_record *record =
-					&buffer->blocks[write_index].records[record_index];
-				struct swapz_staged_ref *ref =
-					&context->staged_refs[record->logical_page];
-
-				if (ref->valid && ref->generation == record->generation &&
-				    ref->buffer_id == buffer->id &&
-				    ref->block_index == read_index &&
-				    ref->record_index == record->record_index)
-					ref->block_index = write_index;
+			if (!keep) {
+				swapz_clear_staged_ref(context, record.logical_page,
+						       record.generation, buffer->id,
+						       read_index, record.record_index);
+				context->stats.staged_cancellations++;
+				continue;
 			}
+
+			if (le32_to_cpu(source_container->magic) !=
+					SWAPZ_CONTAINER_MAGIC ||
+			    record.record_index >=
+					le16_to_cpu(source_container->record_count)) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+
+			source_disk_record =
+				swapz_container_record_const(context->io_buffer,
+							     record.record_index);
+			offset = le16_to_cpu(source_disk_record->offset);
+			length = le16_to_cpu(source_disk_record->length);
+			if (le32_to_cpu(source_disk_record->logical_page) !=
+					record.logical_page ||
+			    length != record.stored_length ||
+			    offset + length > SWAPZ_BLOCK_BYTES) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+
+			memcpy(context->compressed_buffer,
+			       (u8 *)context->io_buffer + offset, length);
+
+			if (!swapz_repack_can_fit(context->repack_block.record_count,
+						   repack_payload_start, length)) {
+				error = swapz_emit_repack_container(context, buffer,
+							    &write_index,
+							    &repack_payload_start);
+				if (error)
+					goto fail;
+			}
+
+			if (!swapz_repack_can_fit(context->repack_block.record_count,
+						   repack_payload_start, length)) {
+				error = -E2BIG;
+				goto fail;
+			}
+
+			repack_payload_start -= length;
+			new_record_index = context->repack_block.record_count;
+			dest_disk_record =
+				swapz_container_record(context->repack_buffer,
+						       new_record_index);
+			dest_disk_record->logical_page =
+				cpu_to_le32(record.logical_page);
+			dest_disk_record->offset = cpu_to_le16(repack_payload_start);
+			dest_disk_record->length = cpu_to_le16(length);
+			memcpy((u8 *)context->repack_buffer + repack_payload_start,
+			       context->compressed_buffer, length);
+
+			record.record_index = new_record_index;
+			context->repack_block.records[new_record_index] = record;
+			context->repack_block.record_count++;
+			context->repack_block.compaction |= source.compaction;
 		}
-		write_index++;
 	}
+
+	error = swapz_emit_repack_container(context, buffer, &write_index,
+					    &repack_payload_start);
+	if (error)
+		goto fail;
 
 	if (write_index < old_count) {
 		u32 reclaimed = old_count - write_index;
 
-		/*
-		 * The fill buffer owns the newest reservations in the current
-		 * segment; no later physical blocks can have been reserved behind it.
-		 */
 		if (WARN_ON_ONCE(context->segment_write_block < reclaimed)) {
 			swapz_set_failed(context, -EUCLEAN);
 			return;
 		}
 		context->segment_write_block -= reclaimed;
+		context->stats.staged_cancelled_blocks += reclaimed;
 	}
 
 	buffer->block_count = write_index;
+	return;
+
+fail:
+	swapz_set_failed(context, error);
 }
 
 static int swapz_finalize_stream_buffer(struct swapz_context *context,
