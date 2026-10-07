@@ -2028,8 +2028,15 @@ static void swapz_io_worker(struct work_struct *work)
 			error = swapz_reap_inflight(context, false);
 			if (!error)
 				continue;
-			if (error != -EAGAIN)
-				context->failed = true;
+			if (error != -EAGAIN) {
+				if (!context->failed)
+					swapz_set_failed(context, error);
+				/*
+				 * Re-enter the loop so all unsent BIOs owned by the
+				 * pack/fill buffer are failed exactly once.
+				 */
+				continue;
+			}
 		}
 
 		break;
