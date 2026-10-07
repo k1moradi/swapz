@@ -303,3 +303,50 @@ maximizes pages/reclaim completion while preserving acceptable swap-in latency a
 RAM usage.
 
 No V2.2 physical-device claim should be made until this software suite passes.
+
+
+## V2.2 blocker: asynchronous live-GC forward progress
+
+The first Linux 7.0.x V2.2 validation attempt remains:
+
+```text
+BLOCKED — CORRECTNESS FAILURE
+```
+
+The checked-in staged-buffer recall fixture originally used 96 pages and could miss the
+intended A/B timing window. Codex reduced that **test-only** fixture to nine pages while
+retaining the assertions. The corrected fixture passed with approximately 15 ms recall
+from each buffer and approximately 44 ms for the concurrent two-buffer read, including
+staged cancellation. That test-only change is commit
+`8b7c519f05e4d03cbb269c4080e6707866b843c1`.
+
+The actual blocker occurred in the 3 MiB backing / 1 MiB logical live-GC correctness case.
+A synchronous upper writer remained blocked in `submit_bio_wait` for more than 42 minutes.
+The snapshot showed one upper BIO outstanding while no backing-loop I/O remained active.
+Benchmarks and later correctness phases were correctly stopped.
+
+Source review identified an unsafe progress dependency in the V2.2 asynchronous handoff:
+the lower `dm-io` callback directly queued the same `io_work` item whose tail performs a
+nonblocking reap. The candidate fix no longer relies on that same-work wakeup. A distinct
+`completion_work` item is queued by lower completion; because the workqueue has
+`max_active=1`, that kick remains ordered behind any currently executing `io_work` and
+then queues `io_work` to reap/publish/complete upper BIOs.
+
+Candidate fix:
+
+```text
+5596b8a01336c4d6853f83e90814540ccb98929d
+```
+
+Focused regression:
+
+```text
+tests/runtime/async-progress.sh
+```
+
+It reproduces the same 3 MiB / 1 MiB live-GC geometry with opportunistic 256 KiB streaming,
+requires real live GC, and terminates after 120 seconds with target/table/lower-stat
+diagnostics instead of hanging indefinitely.
+
+This fix is **not yet validated**. Performance testing must remain stopped until the focused
+progress regression and the broader correctness suite pass.
