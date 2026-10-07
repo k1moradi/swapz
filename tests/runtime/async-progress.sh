@@ -32,9 +32,12 @@ modprobe dm-swapz
 dmsetup create "$TARGET" --table "0 2048 swapz $LOOP opportunistic 256"
 
 BEFORE=$(cat "/sys/class/block/$(basename "$LOOP")/stat")
-if ! timeout --signal=TERM --kill-after=5s 120s \
-    "$REF" live "/dev/mapper/$TARGET" 10000; then
-  rc=$?
+set +e
+timeout --signal=TERM --kill-after=5s 120s \
+  "$REF" live "/dev/mapper/$TARGET" 10000
+rc=$?
+set -e
+if (( rc != 0 )); then
   echo "live-GC progress regression failed/timed out rc=$rc" >&2
   echo "target status:" >&2
   dmsetup status "$TARGET" >&2 || true
@@ -44,7 +47,7 @@ if ! timeout --signal=TERM --kill-after=5s 120s \
   echo "loop stat after:  $(cat "/sys/class/block/$(basename "$LOOP")/stat")" >&2
   echo "dm tree:" >&2
   dmsetup ls --tree >&2 || true
-  exit 1
+  exit "$rc"
 fi
 
 STATUS=$(dmsetup status "$TARGET")
