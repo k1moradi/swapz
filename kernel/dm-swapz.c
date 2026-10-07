@@ -2445,9 +2445,17 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	INIT_LIST_HEAD(&context->queued_bios);
 	INIT_WORK(&context->io_work, swapz_io_worker);
 	INIT_WORK(&context->completion_work, swapz_stream_completion_kick);
-	context->workqueue = alloc_workqueue("swapz-%s",
-					     WQ_MEM_RECLAIM | WQ_UNBOUND, 1,
-					     dm_table_device_name(target->table));
+	/*
+	 * The swapz state machine is intentionally single-threaded.  Do not use
+	 * WQ_UNBOUND + max_active=1 as a serialization primitive: modern kernels
+	 * do not guarantee global ordering for that combination.  An explicitly
+	 * ordered workqueue is required because io_work and completion_work both
+	 * mutate mappings, stream-buffer ownership, allocator state, and BIO
+	 * completion state.
+	 */
+	context->workqueue = alloc_ordered_workqueue("swapz-%s",
+						   WQ_MEM_RECLAIM,
+						   dm_table_device_name(target->table));
 	if (!context->workqueue) {
 		target->error = "Cannot allocate reclaim-safe workqueue";
 		error = -ENOMEM;
