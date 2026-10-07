@@ -1120,3 +1120,25 @@ PLATEAU NOT REACHED — BATCH/SEGMENT CEILING NEEDS TO INCREASE
 
 Do not modify kernel performance policy while benchmarking. Report measurements first; the
 primary developer decides the next architecture/performance change.
+
+
+## Deferred final-version resume/hibernate scope
+
+Resume and hibernation are **not part of the current V2.x implementation or validation
+scope**, but they are planned requirements for the final version of `swapz`.
+
+For current V2.x work:
+
+- do not add hibernation/resume features;
+- do not change the volatile mapping format for speculative future resume support;
+- do not treat lack of hibernation/resume support as a V2.x correctness failure;
+- do not add initramfs/dracut activation solely for hibernation yet.
+
+For the final-version phase, hibernation/resume becomes an explicit feature-development
+milestone owned by the primary developer. It will require a persistent, versioned,
+power-loss-safe metadata/data design plus boot-time activation and end-to-end reboot/resume
+validation.
+
+Codex must not independently design or implement that feature. When the project reaches the
+final-version resume/hibernate milestone, follow the then-current repository specification
+and validation contract.
