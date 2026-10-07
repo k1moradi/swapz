@@ -15,7 +15,7 @@
 
 namespace {
 constexpr std::size_t kBlockBytes = 4096;
-constexpr std::size_t kMaxRecords = 8;
+constexpr std::size_t kMaxRecords = 64;
 constexpr std::uint32_t kInvalidBlock = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint8_t kValid = 1U << 0;
 constexpr std::uint8_t kCompressed = 1U << 1;
@@ -36,14 +36,26 @@ struct ContainerDisk {
     std::uint32_t magic;
     std::uint16_t version;
     std::uint16_t count;
-    RecordDisk records[kMaxRecords];
 };
 #pragma pack(pop)
 
 constexpr std::uint32_t kMagic = 0x5a575053U;
-constexpr std::size_t kHeaderBytes = sizeof(ContainerDisk);
-constexpr int kCompressLimit = static_cast<int>(kBlockBytes - kHeaderBytes - kMinSaving);
+constexpr std::size_t kBaseBytes = sizeof(ContainerDisk);
+constexpr int kCompressLimit =
+    static_cast<int>(kBlockBytes - kBaseBytes - sizeof(RecordDisk) - kMinSaving);
 using Page = std::array<char, kBlockBytes>;
+
+RecordDisk &record_at(Page &page, std::size_t index) {
+    auto *base = reinterpret_cast<unsigned char *>(page.data());
+    return *reinterpret_cast<RecordDisk *>(
+        base + kBaseBytes + index * sizeof(RecordDisk));
+}
+
+const RecordDisk &record_at(const Page &page, std::size_t index) {
+    auto *base = reinterpret_cast<const unsigned char *>(page.data());
+    return *reinterpret_cast<const RecordDisk *>(
+        base + kBaseBytes + index * sizeof(RecordDisk));
+}
 
 struct Mapping {
     std::uint32_t block{kInvalidBlock};
@@ -117,7 +129,7 @@ public:
 private:
     void reset_pack() {
         pack_.fill(0);
-        pack_end_ = kHeaderBytes;
+        pack_payload_start_ = kBlockBytes;
         pack_count_ = 0;
         pending_.clear();
     }
@@ -206,7 +218,7 @@ private:
         physical_.at(block) = pack_;
 
         for (std::size_t index = 0; index < pending_.size(); ++index) {
-            const auto &record = header->records[index];
+            const auto &record = record_at(pack_, index);
             install_mapping(pending_[index], block, record.length,
                             static_cast<std::uint8_t>(index), kCompressed);
         }
@@ -226,21 +238,31 @@ private:
             if (pack_count_ == 0)
                 ensure_block(allow_rotation);
 
-            if (pack_count_ == kMaxRecords ||
-                pack_end_ + static_cast<std::size_t>(length) > kBlockBytes) {
+            const auto can_fit = [this](std::size_t payload_length) {
+                if (pack_count_ >= kMaxRecords ||
+                    payload_length > pack_payload_start_)
+                    return false;
+                const std::size_t header_end =
+                    kBaseBytes + (pack_count_ + 1) * sizeof(RecordDisk);
+                return header_end <= pack_payload_start_ - payload_length;
+            };
+
+            if (!can_fit(static_cast<std::size_t>(length))) {
                 flush_pack(compaction, allow_rotation);
                 ensure_block(allow_rotation);
             }
+            if (!can_fit(static_cast<std::size_t>(length)))
+                throw std::runtime_error("compressed record cannot fit");
 
-            auto *header = reinterpret_cast<ContainerDisk *>(pack_.data());
             const std::size_t index = pack_count_;
-            header->records[index] =
-                RecordDisk{logical_page, static_cast<std::uint16_t>(pack_end_),
+            pack_payload_start_ -= static_cast<std::size_t>(length);
+            record_at(pack_, index) =
+                RecordDisk{logical_page,
+                           static_cast<std::uint16_t>(pack_payload_start_),
                            static_cast<std::uint16_t>(length)};
-            std::memcpy(pack_.data() + pack_end_, compressed.data(),
+            std::memcpy(pack_.data() + pack_payload_start_, compressed.data(),
                         static_cast<std::size_t>(length));
             pending_.push_back(logical_page);
-            pack_end_ += static_cast<std::size_t>(length);
             ++pack_count_;
             ++compressed_pages_;
             return;
@@ -275,8 +297,13 @@ private:
         if (header->magic != kMagic || mapping.record >= header->count)
             throw std::runtime_error("bad container");
 
-        const RecordDisk &record = header->records[mapping.record];
-        if (record.logical_page != logical_page || record.length != mapping.length)
+        const RecordDisk &record = record_at(container_page, mapping.record);
+        const std::size_t header_end =
+            kBaseBytes + static_cast<std::size_t>(header->count) * sizeof(RecordDisk);
+        if (record.logical_page != logical_page ||
+            record.length != mapping.length ||
+            record.offset < header_end ||
+            static_cast<std::size_t>(record.offset) + record.length > kBlockBytes)
             throw std::runtime_error("bad record");
 
         const int decoded =
@@ -405,7 +432,7 @@ private:
     std::uint32_t free_segments_{};
 
     Page pack_{};
-    std::size_t pack_end_{};
+    std::size_t pack_payload_start_{};
     std::size_t pack_count_{};
     std::vector<std::uint32_t> pending_;
 
