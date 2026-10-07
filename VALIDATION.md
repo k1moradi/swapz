@@ -368,3 +368,59 @@ Current candidate:
 This cleanup is intended to be behavior-neutral, but because it touches the compaction
 scratch implementation it is part of the next full Linux 7.0.x correctness rerun. No
 performance result may be attributed to it before that rerun.
+
+
+### Second async bug found during blocker re-audit
+
+A deeper audit after the blocked run found a concrete stream-buffer lifetime race not fixed by
+the first completion-kick change.
+
+The old lower-I/O callback performed:
+
+```text
+write io_error
+publish io_done = true
+complete(completion)
+```
+
+while the nonblocking reaper treated `io_done=true` as permission to finalize, reset, and
+reuse that stream buffer.
+
+Therefore this interleaving was possible:
+
+```text
+lower callback                      io worker
+
+io_error = ...
+io_done = true
+                                    observes io_done
+                                    finalizes old buffer
+                                    resets/reuses buffer
+                                    reinit_completion()
+complete(old buffer completion)
+```
+
+The final `complete()` could then act on a completion object already reinitialized for a
+new lower request. Besides lacking a proper acquire/release synchronization edge for
+`io_error`, this can cause premature completion of a later request or lost ownership of an
+upper BIO.
+
+Candidate fix:
+
+```text
+92753030d2783d7927816b5bcbce71592322fe30
+```
+
+The separate `io_done` flag has been removed. The completion object is now the sole lower
+I/O completion state:
+
+- blocking reap uses `wait_for_completion()`;
+- nonblocking reap uses `try_wait_for_completion()`;
+- the callback touches no stream-buffer state after `complete()`.
+
+This ensures a buffer cannot be finalized/reinitialized until the callback has actually
+published completion through the kernel completion primitive.
+
+This race is a stronger candidate root cause for the live-GC hang than the earlier
+same-workqueue wakeup theory. It is still not proven until the post-reboot focused regression
+passes repeatedly.
