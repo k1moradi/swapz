@@ -1,520 +1,595 @@
-# swapz V2.1 — Physical Media Qualification Goal
+# swapz V2.2 — Streaming Strategy Validation and Plateau Benchmark
 
 ## Role
 
 You are the secondary validation and benchmarking agent for `swapz`.
 
-The kernel/userspace implementation is frozen for this qualification unless a correctness
-failure is found.
+The primary developer owns kernel fixes and architecture decisions. Your job is to build,
+stress, benchmark, measure, reproduce, and report.
 
-Your job is to:
+Do not commit, push, redesign, or substantively patch kernel code.
 
-- identify the explicitly authorized disposable device;
-- record its real queue/capability properties;
-- run controlled raw-versus-swapz physical benchmarks;
-- measure actual lower-device I/O;
-- exercise sustained GC;
-- test real Linux swap pressure;
-- report the evidence.
+A minimal temporary test-harness correction is allowed only for an obvious mechanical test
+problem. Preserve the original failure and report the exact diff.
 
-Do not commit, push, redesign, retune, or patch kernel code during this qualification.
+A failure is useful. Do not optimize the report toward success.
 
-The primary developer will review the physical evidence and decide whether another software
-iteration is justified.
+## Mandatory checkout gate
 
-## Software baseline
-
-Validated kernel/userspace revision:
-
-```text
-branch: v2.1
-commit: c841a589a44ada3561a8bbed83a4db86e530ee1c
-version: 0.2.1
-```
-
-Current `main` also contains the reusable runtime suite under:
-
-```text
-tests/runtime/
-```
-
-Before physical testing, build and rerun the fixed smoke/batching regressions from current
-`main`, but ensure the kernel/userspace source under qualification matches the validated
-V2.1 code.
-
-Read:
-
-```text
-README.md
-DESIGN.md
-VALIDATION.md
-docs/validation/v2.1-runtime-report.md
-tests/runtime/README.md
-```
-
-## Hard physical-device authorization gate
-
-Physical tests are destructive.
-
-Codex must not choose a device by inference.
-
-The operator must explicitly provide the exact test device/partition, preferably a stable
-path such as:
-
-```text
-/dev/disk/by-id/...
-/dev/disk/by-partuuid/...
-```
-
-Set:
+Start with:
 
 ```bash
-export SWAPZ_TEST_DEVICE=/dev/disk/by-id/EXPLICITLY-AUTHORIZED-DEVICE
-export SWAPZ_TEST_DEVICE_ACK=DESTROY_CONTENTS
+cd ~/swapz
+git restore .
+git fetch origin --prune
+git switch main
+git reset --hard origin/main
+git status --short
+git rev-parse HEAD
+git rev-parse origin/main
+git branch --show-current
+grep 'PACKAGE_VERSION="0.2.2"' dkms.conf
 ```
 
-If either variable is absent, stop with:
+Requirements:
 
 ```text
-NEEDS_DEVICE_AUTHORIZATION
+branch = main
+HEAD = origin/main
+PACKAGE_VERSION = 0.2.2
 ```
 
-and do not write any physical device.
-
-Do not substitute another path.
-
-## Mandatory safety inspection
-
-Before any destructive write record:
+Verify V2.2 features are present:
 
 ```bash
-readlink -f "$SWAPZ_TEST_DEVICE"
-lsblk -o NAME,KNAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,ROTA,MODEL,SERIAL
-lsblk -D
-findmnt
-cat /proc/swaps
-udevadm info --query=property --name="$SWAPZ_TEST_DEVICE" 2>/dev/null || true
-blockdev --getsize64 "$SWAPZ_TEST_DEVICE"
-blockdev --getss "$SWAPZ_TEST_DEVICE"
-blockdev --getpbsz "$SWAPZ_TEST_DEVICE"
+grep -n 'SWAPZ_STRATEGY_IMMEDIATE' kernel/dm-swapz.c
+grep -n 'SWAPZ_STRATEGY_OPPORTUNISTIC' kernel/dm-swapz.c
+grep -n 'SWAPZ_STRATEGY_STAGED' kernel/dm-swapz.c
+grep -n 'swapz_stream_io_complete' kernel/dm-swapz.c
+grep -n 'staged_read_hits' kernel/dm-swapz.c
+grep -n 'staged_early_completions' kernel/dm-swapz.c
+grep -n 'staged_cancellations' kernel/dm-swapz.c
 ```
 
-Abort if the authorized device is:
-
-- the root device or an ancestor/descendant of root;
-- mounted;
-- active swap;
-- a boot/system partition;
-- read-only;
-- smaller than the intended test window;
-- ambiguous relative to the operator's authorization.
-
-Do not guess.
-
-Record model/serial where available.
-
-## Device feature detection
-
-Do not assume capabilities from media type.
-
-Record the actual queue:
-
-```bash
-KNAME=$(lsblk -nro KNAME "$SWAPZ_TEST_DEVICE" | head -1)
-Q=/sys/class/block/$KNAME/queue
-
-cat "$Q/logical_block_size"
-cat "$Q/physical_block_size"
-cat "$Q/minimum_io_size"
-cat "$Q/optimal_io_size"
-cat "$Q/rotational"
-cat "$Q/nr_requests"
-cat "$Q/read_ahead_kb"
-cat "$Q/discard_granularity"
-cat "$Q/discard_max_bytes"
-cat "$Q/max_sectors_kb" 2>/dev/null || true
-cat "$Q/max_hw_sectors_kb" 2>/dev/null || true
-```
-
-If DISCARD is unavailable, continue normally.
-
-If SMART/NVMe/MMC/SD health telemetry is genuinely available, record it before testing. Do
-not fail qualification merely because the device exposes no health counters.
-
-## Bounded physical test window
-
-Do not automatically consume the entire physical device for the first qualification.
-
-Prefer a bounded test window on the explicitly authorized device.
-
-Default:
+If the checkout does not match, stop with:
 
 ```text
-physical test window: 4 GiB
-logical swapz target:  2 GiB
+STOP — WRONG CHECKOUT
 ```
 
-If the authorized device is smaller, reduce both proportionally while preserving V2.1's
-capacity reserve.
+Your final report must begin:
 
-Create the bounded window with a disposable Device Mapper linear target over the beginning
-of the authorized device. Raw and swapz benchmarks must both use this exact same physical
-window.
+```text
+TESTED_BRANCH=main
+TESTED_HEAD=<actual origin/main SHA>
+CANDIDATE=V2.2_STREAMING
+```
 
-This deliberately limits test wear while retaining real controller/media behavior.
+## V2.1 reference
 
-Report the exact sector range used.
+The last software-validated baseline is branch:
 
-## Phase 1 — Fresh software gate
+```text
+v2.1
+c841a589a44ada3561a8bbed83a4db86e530ee1c
+```
 
-Before touching physical media:
+Do not modify it.
+
+## What V2.2 is testing
+
+V2.2 keeps the V2/V2.1 1 MiB segment-local GC architecture.
+
+It compares three upper-write policies:
+
+```text
+immediate
+    no useful streaming
+    control path
+
+opportunistic
+    at most one asynchronous lower write in flight
+    fill the second preallocated buffer while the first is writing
+    do not intentionally sleep merely to make a batch larger
+    upper write completes after physical persistence
+
+staged
+    same double-buffer pipeline
+    compressed foreground writes may complete after their authoritative
+    compressed copy is resident in a bounded stream buffer
+    reads may be satisfied from filling or in-flight RAM
+```
+
+The physical batch ceiling is configurable from 4 KiB through 1 MiB.
+
+There is no assumed 128 KiB or 256 KiB sweet spot. The test must find the throughput/latency
+plateau empirically.
+
+The current V2.2 candidate deliberately keeps the V2.1 4 KiB on-disk compressed-container
+format. A separate byte-tight extent-format experiment was removed from the candidate so
+streaming strategy and disk-format effects are not confounded.
+
+## Important staged-mode semantic rule
+
+A READ does not imply the swap slot is free.
+
+If a page is demanded while its current generation resides in either stream buffer, swapz
+may return it immediately from RAM. The record remains authoritative until logical DISCARD
+or overwrite makes that generation stale.
+
+Only a genuinely stale unsent generation may be removed/repacked before disk submission.
+
+If an early-completed compressed write later suffers lower I/O failure, staged RAM must
+remain readable so swap-in/swapoff can recover it. New writes may be rejected.
+
+## Phase 1 — Environment and build
+
+Record:
+
+```bash
+uname -a
+cat /proc/version
+getconf PAGESIZE
+gcc --version
+clang --version
+ld --version
+fio --version
+dmsetup version
+```
+
+Build:
 
 ```bash
 make -C kernel clean KDIR=/lib/modules/$(uname -r)/build
 make -C kernel KDIR=/lib/modules/$(uname -r)/build W=1
+
 make -C userspace clean
 make -C userspace
+
 make -C tests clean
 make -C tests test
 ```
 
-Run model ASan/UBSan if practical.
+Run the model under ASan + UBSan.
 
-Then run disposable RAM/loop regressions:
+Zero swapz source warnings are expected from the GCC build.
+
+If the module does not compile, stop kernel runtime testing and report the first meaningful
+diagnostic.
+
+## Phase 2 — Static strategy sanity
+
+Create small disposable loop targets for:
+
+```text
+immediate 4
+opportunistic 4
+opportunistic 64
+opportunistic 256
+opportunistic 1024
+staged 4
+staged 64
+staged 256
+staged 1024
+```
+
+Verify target creation and status fields:
+
+```text
+strategy=
+batch_kib=
+inflight_blocks=
+fill_blocks=
+staged_hits=
+staged_early=
+staged_cancel=
+failed=
+```
+
+Invalid strategy names and batch sizes outside 4..1024 KiB or not 4 KiB aligned must be
+rejected.
+
+## Phase 3 — Re-run V2.1 correctness gates
+
+Before judging performance, run the established software coverage on V2.2:
 
 ```bash
 sudo ./scripts/loop-smoke.sh
 sudo ./scripts/rotation-regression.sh
 sudo bash ./scripts/write-batch-regression.sh
+
+sudo bash tests/runtime/correctness.sh
+sudo bash tests/runtime/no-discard-livegc.sh
+sudo bash tests/runtime/read-fault.sh
+sudo bash tests/runtime/lifecycle.sh
+sudo bash tests/runtime/pressure.sh
 ```
 
-Do not begin physical tests if these fail.
+Adapt only invocation arguments when required to select a V2.2 strategy; do not alter
+correctness assertions.
 
-## Phase 2 — Measure raw physical characteristics
+Run the long/randomized coverage at least once for `opportunistic` and once for `staged`.
 
-Before raw fio tests, capture lower-device `stat`.
+Any stale read, corruption, WARN, BUG, Oops, hung task, deadlock, refcount failure, or
+swapoff failure is a correctness blocker.
 
-Run non-swap raw tests on the bounded physical window.
+## Phase 4 — Required staged-buffer race test
 
-Use fixed logical byte counts, not fixed duration.
+Run:
 
-At minimum measure:
-
-```text
-sequential write QD1
-4 KiB random write QD1
-4 KiB random write QD8
-4 KiB random read QD1
+```bash
+sudo bash tests/runtime/buffer-recall.sh
 ```
 
-Record:
+It must prove all three user-requested cases:
 
-- MiB/s;
-- IOPS;
-- average latency;
-- p95/p99/max latency;
-- CPU;
-- completed lower reads/writes;
-- lower sectors read/written.
+1. demand data from Buffer A while Buffer B is filling;
+2. demand data from Buffer B while Buffer A is being written;
+3. demand data from both buffers while one lower write remains active.
 
-This establishes whether the device is bandwidth-limited, command-latency-limited, or both.
-
-## Phase 3 — Matched raw versus swapz short benchmark
-
-Use the exact same physical window.
-
-Logical swapz size:
+Requirements:
 
 ```text
-2 GiB by default
+exact readback
+staged_hits increases for each staged recall
+recall latency remains clearly below delayed lower-read latency
+failed=0
 ```
 
-Short benchmark logical I/O volume:
+The test also performs a later logical DISCARD of a buffered generation.
+
+Requirements:
 
 ```text
-1 GiB per case
+staged_cancel > 0
+stale unsent data is not later published
+remaining live records are still correct
 ```
 
-or a smaller volume only when required by device size.
+A READ by itself must not be treated as invalidation.
 
-Run identical fixed-seed workloads:
+## Phase 5 — Early-completion lower-failure safety
 
-```text
-100% compressible QD1
-100% compressible QD8
+Run:
 
-50% compressible QD1
-50% compressible QD8
-
-0% compressible QD1
-0% compressible QD8
+```bash
+sudo bash tests/runtime/staged-write-fault.sh
 ```
 
-For every case run raw first, then recreate swapz cleanly and run the identical workload.
+This is mandatory.
 
-Record actual lower-device statistics around each individual case.
+The lower device intentionally rejects the asynchronous write after the compressed upper
+write has already early-completed.
 
-For swapz also record:
+Requirements:
 
 ```text
-logical_write
-physical_write
+upper compressed write initially succeeds
+lower asynchronous failure is later observed
+failed=1
+staged_early > 0
+the exact early-completed page remains readable from staged RAM
+staged_hits > 0 after readback
+new writes are rejected after failure
+no crash/deadlock/use-after-free
+```
+
+If early-completed data is lost after lower failure:
+
+```text
+BLOCKED — CORRECTNESS FAILURE
+```
+
+## Phase 6 — Analytical plateau sizing
+
+Run:
+
+```bash
+python3 bench/request-plateau.py --bandwidth 20
+```
+
+Record the complete output.
+
+The expected qualitative result is that the plateau moves upward as command latency rises;
+there is no fixed universal 128 KiB sweet spot.
+
+Do not use the analytical model as the final performance result.
+
+## Phase 7 — Controlled streaming plateau benchmark
+
+Run:
+
+```bash
+sudo bash tests/runtime/streaming-benchmark.sh
+```
+
+First run the default controlled device:
+
+```text
+20 MiB/s
+0.5 ms completion latency
+lower QD1
+50% compressibility
+writer QD64
+```
+
+Sweep:
+
+```text
+immediate:      4 KiB
+opportunistic:  4 8 16 32 64 128 256 512 1024 KiB
+staged:         4 8 16 32 64 128 256 512 1024 KiB
+```
+
+The benchmark already runs a low-rate QD1 reader concurrently with the writer.
+
+Record for every case:
+
+```text
+upper write/completion MiB/s
+end-to-end drained write MiB/s
+write avg/p99
+read avg/p95/p99/max
+lower read I/Os/sectors
+lower write I/Os/sectors
 physical_write_reqs
-multi_write_reqs
 max_write_batch
-compressed_payload
-compressed_pages
-raw_pages
-gc_victims
-gc_read
-gc_write
-segment_cycle_min
-segment_cycle_max
-failed
+staged_hits
+staged_early
+staged_cancel
+CPU
 ```
 
-## Phase 4 — Sustained GC benchmark
+The explicit final flush belongs inside the drain clock for staged mode.
 
-Short tests may not invoke GC.
+## Phase 8 — Command-latency plateau matrix
 
-Use the same 4 GiB physical / 2 GiB logical test geometry.
-
-Run one sustained 50%-compressible QD1 workload and one incompressible QD1 workload long
-enough to force repeated victim cleaning.
-
-Target:
+Repeat the strategy/batch sweep at 20 MiB/s with:
 
 ```text
->= 20 GC victims
+0.25 ms
+0.50 ms
+1.00 ms
+2.00 ms
 ```
 
-Use the smallest fixed logical I/O volume that reliably reaches that condition.
+For example:
 
-Record periodically and at completion:
+```bash
+sudo env SWAPZ_BENCH_MBPS=20 SWAPZ_BENCH_LATENCY_NS=250000  bash tests/runtime/streaming-benchmark.sh
+sudo env SWAPZ_BENCH_MBPS=20 SWAPZ_BENCH_LATENCY_NS=500000  bash tests/runtime/streaming-benchmark.sh
+sudo env SWAPZ_BENCH_MBPS=20 SWAPZ_BENCH_LATENCY_NS=1000000 bash tests/runtime/streaming-benchmark.sh
+sudo env SWAPZ_BENCH_MBPS=20 SWAPZ_BENCH_LATENCY_NS=2000000 bash tests/runtime/streaming-benchmark.sh
+```
+
+For each strategy/latency, identify:
+
+```text
+best measured drain throughput
+smallest batch >=97% of best drain throughput
+read p99 at every plateau candidate
+latency-guarded winner
+incremental gain from the largest previous step
+```
+
+If 512 -> 1024 KiB still improves drained throughput by more than 3% and read latency remains
+acceptable, report:
+
+```text
+PLATEAU NOT REACHED — BATCH/SEGMENT CEILING NEEDS TO INCREASE
+```
+
+Do not falsely call 1 MiB the sweet spot in that case.
+
+## Phase 9 — Queue-depth / reclaim-pressure matrix
+
+Repeat the 20 MiB/s, 0.5 and 1.0 ms tests at:
+
+```text
+writer QD1
+writer QD8
+writer QD32
+writer QD64
+```
+
+At minimum test:
+
+```text
+immediate 4 KiB
+opportunistic at its latency-guarded plateau
+staged at its latency-guarded plateau
+```
+
+Why this matters:
+
+- QD1 shows whether staged early completion lets the producer continue without waiting on
+  media;
+- higher QD shows pipeline saturation;
+- upper completion rate is a proxy for how fast original swapout pages can become
+  reclaimable;
+- drained throughput proves the device is actually keeping up rather than merely buffering.
+
+Report both upper and drained throughput. Never report only upper staged throughput.
+
+## Phase 10 — Compressibility matrix
+
+At the selected plateau sizes, repeat:
+
+```text
+100% compressible
+50% compressible
+0% compressible
+```
+
+for immediate, opportunistic, and staged where practical.
+
+Report:
+
+```text
+logical bytes
+compressed payload bytes
+physical bytes
+lower write I/Os
+upper completion throughput
+drained throughput
+read p99
+CPU
+```
+
+The 60-80 MiB/s stretch target on ~20 MiB/s media requires approximately 3-4x effective
+physical-byte reduction while keeping lower throughput close to its sequential plateau.
+
+Do not claim 60-80 MiB/s for workloads whose measured byte reduction cannot support it.
+
+## Phase 11 — Throughput versus swap-in latency frontier
+
+This is a primary decision result.
+
+For every strategy and batch size plot or tabulate:
+
+```text
+x = end-to-end drained write MiB/s
+y = concurrent read p99 ms
+secondary = upper completion/reclaim MiB/s
+RAM cost = two stream buffers at configured batch ceiling
+```
+
+Identify Pareto-dominated points.
+
+The candidate batch sweet spot is:
+
+1. on the >=97% physical-drain plateau;
+2. smallest practical buffer size;
+3. read p99 no worse than 10% above the best read p99 among plateau candidates;
+4. no correctness or GC regression.
+
+The candidate strategy winner is not simply the highest write bandwidth. It should maximize
+reclaim/upper completion rate while meeting drain, read-latency, memory-bound, and
+correctness constraints.
+
+## Phase 12 — Staging/cancellation effectiveness
+
+Create a churn workload where recently written compressed pages are read back and then
+actually invalidated/overwritten before submission.
+
+Measure:
+
+```text
+staged_hits
+staged_early
+staged_cancel
+staged_cancelled_blocks
+lower bytes avoided
+lower I/Os avoided
+read latency from staged RAM
+```
+
+Compare staged versus opportunistic.
+
+Do not count a read alone as cancellation.
+
+## Phase 13 — GC regression
+
+At the chosen opportunistic and staged plateaus, run sustained churn long enough to force
+at least 20 live victims.
+
+Report:
 
 ```text
 gc_victims
 gc_pages
 gc_read
 gc_write
-physical_write
-physical_write_reqs
-segment_cycle_min
-segment_cycle_max
-lower write I/Os
-lower sectors written
+GC-trigger p95/p99/max
+total lower bytes including GC
+failed
 ```
 
-Verify:
+V2.2 must not reintroduce V1-style write amplification or long GC stalls.
+
+## Phase 14 — Real bounded Linux swap pressure
+
+Only after block correctness passes.
+
+Run the existing bounded pressure harness for both:
 
 ```text
-failed=0
-total lower bytes including GC do not exhibit runaway amplification
-GC-triggering latency stays bounded
+opportunistic at its chosen plateau
+staged at its chosen plateau
 ```
 
-## Phase 5 — GC latency on physical media
-
-Measure individual foreground write latency around:
+Measure:
 
 ```text
-steady write
-segment switch without GC
-empty-victim GC
-live-victim GC
-```
-
-Report average/p95/p99/max where sample counts permit.
-
-Do not compare one-sample events as if they were stable percentiles.
-
-## Phase 6 — Real Linux swap pressure on physical media
-
-Only after block-level benchmarks pass.
-
-Create swapz over the bounded physical window.
-
-Run:
-
-```text
-mkswap
-swapon --discard=pages if upper discard is supported
-bounded memory pressure
-swap-out
-swap-in/readback
-working-set churn
-swapoff
+actual swap usage
+pswpout / pswpin deltas
+upper swapout completion rate if practical
+staged_early
+staged_hits
+staged_cancel
+swapoff time
 second swapon/readback
+kernel logs
 ```
 
-If page discard cannot be enabled, run without it and record that fallback.
+The key question is whether staged mode releases useful RAM materially faster under actual
+memory pressure without causing swap-in latency or drain instability.
 
-Monitor:
+## Phase 15 — Physical media
 
-```bash
-vmstat 1
-cat /proc/vmstat
-cat /proc/swaps
-dmsetup status <target>
-dmesg -w
-```
+Do not use any real physical device unless the operator explicitly authorizes that exact
+device/partition as disposable.
 
-Do not deliberately OOM the host.
-
-## Phase 7 — Physical DISCARD behavior
-
-If the actual device reports no lower DISCARD:
+If none is authorized:
 
 ```text
-PASS if swapz operates normally with lower_discard=off
+PHYSICAL MEDIA: NOT RUN
 ```
 
-If it reports DISCARD:
+Virtual results are sufficient to choose the strategy for the next physical test, but not
+to claim real-device success.
 
-- verify swapz enables it;
-- record discard byte counters;
-- record whether device behavior/errors appear normal.
+## Required strategy comparison
 
-Do not force destructive vendor-specific trim operations outside swapz simply to prove the
-feature exists.
+Return one summary table:
 
-## Phase 8 — Endurance evidence
+| Strategy | Cmd latency | QD | Compressibility | Batch KiB | Upper MiB/s | Drain MiB/s | Read p99 ms | Read max ms | Lower write I/Os | Lower MiB | Staged hits | Early completions | Cancellations |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 
-Do not claim NAND wear reduction directly.
+Then explicitly answer:
 
-Report:
-
-```text
-logical bytes
-actual lower host bytes
-lower write-I/O count
-GC bytes
-segment-cycle spread
-SMART/device host-write deltas if available
-device health counters if available
-```
-
-For flash, state explicitly that the FTL controls physical NAND placement.
-
-The intended evidence is reduced host writes plus broad sequential host-LBA reuse, not a
-direct NAND erase-count claim.
-
-## Performance targets
-
-Use these as engineering goals, not pass/fail assumptions.
-
-### Worst-case / incompressible
-
-Primary QD1 floor:
-
-```text
-swapz >= 0.90x raw throughput
-```
-
-Stretch:
-
-```text
-swapz >= 0.95x raw
-```
-
-Lower bytes should remain close to raw rather than amplify substantially.
-
-### Representative compressible workload
-
-A useful physical success target:
-
-```text
->= 1.5x raw logical throughput
-and materially fewer lower bytes written
-```
-
-Strong target:
-
-```text
->= 2x raw logical throughput
-```
-
-Excellent:
-
-```text
-3-4x raw logical throughput
-```
-
-### Highly compressible
-
-Expect several-fold lower-device byte reduction if packing opportunities exist.
-
-A strong throughput result is:
-
-```text
->= 2x raw
-```
-
-A stretch target is:
-
-```text
->= 4x raw
-```
-
-The ~8x packed-page ratio is an architectural upper bound, not a realistic required
-throughput result.
-
-## Required benchmark table
-
-Return:
-
-| Pattern | Path | QD | Logical MiB | MiB/s | IOPS | Avg ms | p95 | p99 | Max | CPU | Lower write I/Os | Lower write MiB | Lower read MiB | GC write MiB |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-
-For swapz add:
-
-```text
-physical_write_reqs
-multi_write_reqs
-max_write_batch
-compressed_payload
-gc_victims
-segment_cycle_min/max
-```
-
-## Required conclusions
-
-Answer explicitly:
-
-1. What are the device's real raw QD1/QD8 characteristics?
-2. Is incompressible swapz within 90% of raw at QD1?
-3. Does 50%-compressible traffic beat raw throughput?
-4. Does highly compressible traffic achieve multiple-x logical throughput?
-5. By how much are actual lower host bytes reduced?
-6. Does physical write batching still form useful multi-block requests?
-7. Is QD8 batching useful on this real controller?
-8. Does GC preserve the write-reduction benefit over sustained churn?
-9. What is the worst observed GC latency?
-10. Does DISCARD work, fail, or remain unavailable?
-11. Do real swap-out/swap-in and swapoff work correctly?
-12. Are host writes distributed broadly across the bounded physical window?
-13. What health/endurance telemetry, if any, changed during the test?
+1. Where is the measured batch-size plateau at each command latency?
+2. Was the 1 MiB ceiling sufficient, or is the plateau still rising?
+3. Which policy wins: immediate, opportunistic, or staged?
+4. Does asynchronous double buffering materially improve drain throughput?
+5. Does staged early completion materially improve QD1/real-pressure reclaim progress?
+6. Can reads from A, B, and both buffers be served without waiting for the lower write?
+7. How much lower I/O is avoided by stale unsent-record cancellation?
+8. What is the read-p99 penalty as batch size grows?
+9. What is the RAM cost of the winning point?
+10. Does GC behavior remain acceptable?
+11. Is the measured compression/packing ratio sufficient to make 60-80 MiB/s logical
+    throughput physically plausible on 20 MiB/s media?
+12. What should the next physical test use for strategy and batch ceiling?
 
 ## Final status
 
 Choose exactly one:
 
 ```text
-BLOCKED — PHYSICAL CORRECTNESS FAILURE
+BLOCKED — CORRECTNESS FAILURE
 
-PHYSICAL CORRECTNESS PASS, PERFORMANCE FAIL
+CORRECTNESS PASS, STREAMING PERFORMANCE FAIL
 
-PHYSICAL CORRECTNESS PASS, PERFORMANCE PROMISING — MORE ENDURANCE RUN NEEDED
+CORRECTNESS PASS, PLATEAU NOT REACHED
 
-V2.1 PHYSICAL PROOF-OF-CONCEPT SUCCESS
+CORRECTNESS PASS, STRATEGY WINNER IDENTIFIED — PHYSICAL BENCHMARK NEEDED
+
+V2.2 SOFTWARE PROOF-OF-CONCEPT SUCCESS
 ```
 
-Use `V2.1 PHYSICAL PROOF-OF-CONCEPT SUCCESS` only if:
+Use `V2.2 SOFTWARE PROOF-OF-CONCEPT SUCCESS` only if the strategy winner is clear,
+correctness is solid, the batch plateau is actually identified within the supported range,
+and the throughput/read-latency tradeoff is quantitatively acceptable.
 
-- block and real-swap correctness pass;
-- incompressible QD1 is at least approximately 0.9x raw;
-- a representative compressible workload materially reduces lower writes;
-- sustained GC does not erase the write benefit;
-- no serious tail-latency or kernel-safety problem appears.
-
-Do not commit or push changes during qualification.
+Do not commit or push changes.
