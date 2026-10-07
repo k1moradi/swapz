@@ -1161,3 +1161,46 @@ In particular, do not independently begin:
 
 Future roadmap items may be read to understand intent, but feature implementation remains
 owned by the primary developer.
+
+## null_blk mbps backend safety rule
+
+Linux `null_blk`'s `mbps` control has a fixed 50 Hz byte budget. A request larger than
+one tick's budget is requeued forever and can pin the validation stack.
+
+The repository benchmark now detects this condition and exits before running it.
+
+For a bandwidth-limited null_blk run:
+
+```text
+safe_request_bytes <= (1048576 / 50) * SWAPZ_BENCH_MBPS
+```
+
+At 20 MiB/s this means the powers-of-two batch sweep is safe only through 256 KiB.
+
+Do not classify a rejected 512 KiB or 1024 KiB null_blk-mbps case as a swapz performance
+failure.
+
+After the currently pinned failed test state is cleared by an **explicitly authorized**
+reboot, the next performance work should be:
+
+```bash
+# Real 20 MiB/s null_blk throttle, only backend-safe sizes.
+sudo env SWAPZ_BENCH_MBPS=20   SWAPZ_BENCH_BATCHES="4 8 16 32 64 128 256"   bash tests/runtime/streaming-benchmark.sh
+
+# Full request-size sweep with fixed command latency only.
+# This is NOT a 20 MiB/s drain benchmark.
+sudo env SWAPZ_BENCH_MBPS=0   SWAPZ_BENCH_BATCHES="4 8 16 32 64 128 256 512 1024"   bash tests/runtime/streaming-benchmark.sh
+```
+
+The unthrottled run may be used to study request-overhead and read-latency effects, but it
+must never be reported as the 20 MiB/s physical-drain plateau.
+
+If the 20 MiB/s result is still rising at 256 KiB, report:
+
+```text
+CONTROLLED BACKEND LIMIT — 20 MiB/s PLATEAU NOT MEASURABLE ABOVE 256 KiB WITH null_blk mbps
+```
+
+Do not modify swapz kernel policy merely to accommodate this null_blk limitation.
+A separate size-aware benchmark backend is a test-infrastructure task owned by the primary
+developer.
