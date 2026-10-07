@@ -24,6 +24,14 @@ grep -q 'wait_for_completion_timeout' "$SRC" ||
   fail "blocking stream reap is not bounded by the async watchdog"
 grep -q 'SWAPZ_ASYNC_WATCHDOG_MS' "$SRC" ||
   fail "async stream watchdog constant missing"
+grep -q 'struct delayed_work watchdog_work' "$SRC" ||
+  fail "per-buffer delayed watchdog missing"
+grep -q 'watchdog_workqueue' "$SRC" ||
+  fail "independent reclaim-safe watchdog workqueue missing"
+grep -q 'swapz_stream_watchdog' "$SRC" ||
+  fail "async watchdog callback missing"
+grep -q 'async_watchdog_timeouts' "$SRC" ||
+  fail "async watchdog timeout counter missing"
 if grep -Eq '\bio_done\b' "$SRC"; then
   fail "parallel io_done completion state remains"
 fi
