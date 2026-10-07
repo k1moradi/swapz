@@ -1992,9 +1992,11 @@ static void swapz_io_worker(struct work_struct *work)
 				swapz_process_bio(context, entry->bio);
 				if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE &&
 				    !context->failed) {
-					if (swapz_flush_pack(context, false, true) ||
-					    swapz_flush_write_batch(context))
-						context->failed = true;
+					error = swapz_flush_pack(context, false, true);
+					if (!error)
+						error = swapz_flush_write_batch(context);
+					if (error && !context->failed)
+						swapz_set_failed(context, error);
 				}
 			}
 			continue;
@@ -2006,8 +2008,9 @@ static void swapz_io_worker(struct work_struct *work)
 		 * keep the lower device continuously busy.
 		 */
 		if (context->pack_record_count && !context->failed) {
-			if (swapz_flush_pack(context, false, true))
-				context->failed = true;
+			error = swapz_flush_pack(context, false, true);
+			if (error && !context->failed)
+				swapz_set_failed(context, error);
 			continue;
 		}
 
@@ -2019,7 +2022,8 @@ static void swapz_io_worker(struct work_struct *work)
 		if (!context->failed && swapz_fill_buffer(context)->block_count) {
 			error = swapz_maybe_submit_fill(context);
 			if (error && error != -EAGAIN) {
-				context->failed = true;
+				if (!context->failed)
+					swapz_set_failed(context, error);
 				continue;
 			}
 		}
