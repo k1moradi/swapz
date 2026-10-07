@@ -1479,6 +1479,71 @@ static int swapz_advance_segment(struct swapz_context *context)
 	}
 }
 
+static int swapz_read_staged(struct swapz_context *context,
+			     u32 logical_page, void *destination)
+{
+	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
+	struct swapz_stream_buffer *buffer;
+	struct swapz_write_batch_block *block;
+	struct swapz_write_batch_record *record;
+	const void *block_data;
+
+	if (!ref->valid || ref->generation != context->generations[logical_page])
+		return -ENOENT;
+	if (ref->buffer_id >= ARRAY_SIZE(context->stream_buffers))
+		return -EUCLEAN;
+
+	buffer = &context->stream_buffers[ref->buffer_id];
+	if (ref->block_index >= buffer->block_count)
+		return -EUCLEAN;
+	block = &buffer->blocks[ref->block_index];
+	if (ref->record_index >= block->record_count)
+		return -EUCLEAN;
+	record = &block->records[ref->record_index];
+	if (record->logical_page != logical_page ||
+	    record->generation != ref->generation ||
+	    !swapz_stream_record_current(context, record))
+		return -EUCLEAN;
+
+	block_data = (const u8 *)buffer->data +
+		ref->block_index * SWAPZ_BLOCK_BYTES;
+	if (!(record->flags & SWAPZ_MAP_COMPRESSED)) {
+		memcpy(destination, block_data, SWAPZ_BLOCK_BYTES);
+	} else {
+		const struct swapz_container_disk *container = block_data;
+		const struct swapz_record_disk *disk_record;
+		u16 offset;
+		u16 length;
+		int decompressed;
+
+		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
+		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    record->record_index >= le16_to_cpu(container->record_count))
+			return -EIO;
+
+		disk_record = swapz_container_record_const(block_data,
+							 record->record_index);
+		offset = le16_to_cpu(disk_record->offset);
+		length = le16_to_cpu(disk_record->length);
+		if (le32_to_cpu(disk_record->logical_page) != logical_page ||
+		    length != record->stored_length ||
+		    offset < SWAPZ_CONTAINER_BASE_BYTES +
+			     le16_to_cpu(container->record_count) *
+			     sizeof(struct swapz_record_disk) ||
+		    offset + length > SWAPZ_BLOCK_BYTES)
+			return -EIO;
+
+		decompressed = LZ4_decompress_safe((const char *)block_data + offset,
+						   destination, length,
+						   SWAPZ_BLOCK_BYTES);
+		if (decompressed != SWAPZ_BLOCK_BYTES)
+			return -EIO;
+	}
+
+	context->stats.staged_read_hits++;
+	return 0;
+}
+
 static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 {
 	u32 logical_page = (u32)(bio->bi_iter.bi_sector / SWAPZ_BLOCK_SECTORS);
@@ -1513,13 +1578,19 @@ static int swapz_process_read(struct swapz_context *context, struct bio *bio)
 	if (logical_page >= context->logical_pages)
 		return -ERANGE;
 
+	/*
+	 * Move any just-compressed foreground record into the fill buffer, but do
+	 * not force either stream buffer to disk.  A matching buffered generation
+	 * is authoritative and can satisfy swap-in directly from RAM.
+	 */
 	error = swapz_flush_pack(context, false, true);
-	if (!error)
-		error = swapz_flush_write_batch(context);
 	if (error)
 		return error;
 
-	error = swapz_read_mapping(context, logical_page, context->input_buffer, false);
+	error = swapz_read_staged(context, logical_page, context->input_buffer);
+	if (error == -ENOENT)
+		error = swapz_read_mapping(context, logical_page,
+					   context->input_buffer, false);
 	if (error)
 		return error;
 
@@ -1535,20 +1606,30 @@ static int swapz_process_discard(struct swapz_context *context, struct bio *bio)
 	sector_t remaining = bio_sectors(bio);
 	int error;
 
+	/*
+	 * Stage any current pack so generation invalidation can suppress its later
+	 * publication.  Do not drain stream buffers: an unsent staged block whose
+	 * every record becomes stale can be removed before lower I/O.
+	 */
 	error = swapz_flush_pack(context, false, true);
-	if (!error)
-		error = swapz_flush_write_batch(context);
 	if (error)
 		return error;
 
 	while (remaining) {
 		u32 logical_page;
+		u32 generation;
 
 		if (sector % SWAPZ_BLOCK_SECTORS || remaining < SWAPZ_BLOCK_SECTORS)
 			return -EINVAL;
 		logical_page = (u32)(sector / SWAPZ_BLOCK_SECTORS);
 		if (logical_page >= context->logical_pages)
 			return -ERANGE;
+
+		generation = ++context->generations[logical_page];
+		if (unlikely(!generation))
+			generation = ++context->generations[logical_page];
+		memset(&context->staged_refs[logical_page], 0,
+		       sizeof(context->staged_refs[logical_page]));
 		swapz_invalidate_mapping(context, logical_page);
 		sector += SWAPZ_BLOCK_SECTORS;
 		remaining -= SWAPZ_BLOCK_SECTORS;
