@@ -879,3 +879,35 @@ A current candidate may receive `BLOCKED — CORRECTNESS FAILURE` only after tha
 module was actually loaded and reproduced a correctness failure.
 
 Never reboot automatically; wait for explicit operator authorization.
+
+
+## Current post-reboot compile-recovery gate
+
+The first post-reboot attempt on `4dbde71100ed6e82682e8071c16b9c1bc116ee2f`
+did not reach runtime because the kernel source called
+`swapz_wait_async_callbacks()` before its static declaration/definition.
+
+That compile blocker has been fixed on current `origin/main`.
+
+The host snapshot from that attempt showed:
+
+```text
+no swapz DM devices
+dm_swapz not loaded
+normal /swapfile and /dev/sda1 swap only
+```
+
+Therefore **another reboot is not required** merely to test the compile fix.
+
+On the next run:
+
+1. fetch/reset to current `origin/main`;
+2. run `tests/runtime/source-invariants.sh`;
+3. clean-build the kernel with `W=1`;
+4. if and only if the build succeeds, load `kernel/dm-swapz.ko` directly;
+5. verify the loaded `srcversion` matches the freshly built module;
+6. run the focused `async-progress.sh` gate three times;
+7. continue broader correctness only after 3/3 focused passes.
+
+Do not load the older installed module from
+`/lib/modules/.../updates/dm-swapz.ko` as a substitute for the freshly built artifact.
