@@ -1037,8 +1037,9 @@ static bool swapz_pack_can_fit(const struct swapz_context *context,
 
 static int swapz_add_compressed_record(struct swapz_context *context,
 				       struct bio *bio, u32 logical_page,
-				       const void *compressed, u16 compressed_length,
-				       bool compaction, bool allow_rotation)
+				       u32 generation, const void *compressed,
+				       u16 compressed_length, bool compaction,
+				       bool allow_rotation)
 {
 	int error;
 	struct swapz_container_disk *container = context->pack_buffer;
@@ -1079,6 +1080,7 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 	pending = &context->pending[record_index];
 	pending->bio = bio;
 	pending->logical_page = logical_page;
+	pending->generation = generation;
 	pending->stored_length = compressed_length;
 	pending->record_index = record_index;
 	context->pack_record_count++;
@@ -1092,12 +1094,14 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 }
 
 static int swapz_write_raw_page(struct swapz_context *context, struct bio *bio,
-				u32 logical_page, const void *page_data,
-				bool compaction, bool allow_rotation)
+				u32 logical_page, u32 generation,
+				const void *page_data, bool compaction,
+				bool allow_rotation)
 {
 	struct swapz_pending_record pending = {
 		.bio = bio,
 		.logical_page = logical_page,
+		.generation = generation,
 		.stored_length = SWAPZ_BLOCK_BYTES,
 		.record_index = 0,
 	};
@@ -1117,9 +1121,9 @@ static int swapz_write_raw_page(struct swapz_context *context, struct bio *bio,
 }
 
 static int swapz_store_page(struct swapz_context *context, struct bio *bio,
-			    u32 logical_page, const void *page_data,
-			    void *compression_buffer, bool compaction,
-			    bool allow_rotation)
+			    u32 logical_page, u32 generation,
+			    const void *page_data, void *compression_buffer,
+			    bool compaction, bool allow_rotation)
 {
 	int compressed_length;
 
@@ -1129,12 +1133,13 @@ static int swapz_store_page(struct swapz_context *context, struct bio *bio,
 					      1, context->lz4_workmem);
 	if (compressed_length > 0) {
 		return swapz_add_compressed_record(context, bio, logical_page,
-					   compression_buffer, compressed_length,
-					   compaction, allow_rotation);
+					   generation, compression_buffer,
+					   compressed_length, compaction,
+					   allow_rotation);
 	}
 
-	return swapz_write_raw_page(context, bio, logical_page, page_data,
-				    compaction, allow_rotation);
+	return swapz_write_raw_page(context, bio, logical_page, generation,
+				    page_data, compaction, allow_rotation);
 }
 
 static int swapz_decode_loaded_mapping(struct swapz_context *context,
