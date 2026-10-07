@@ -111,16 +111,44 @@ remove the corresponding temporary swapz/loop stack, unload the old `dm_swapz` m
 and confirm no V2.2 test mapping remains. Do not touch unrelated system swap or physical
 devices.
 
-### Candidate progress fix
+### Current asynchronous ownership hardening
 
-The kernel fix under test introduces a distinct `completion_work` item for lower
-asynchronous completion. The lower callback no longer depends on directly requeueing the
-currently executing `io_work` item. On the max-active-1 reclaim-safe workqueue, the
-completion kick is ordered after the current worker and then queues `io_work` to reap,
-publish mappings, and complete upper BIOs.
+The earlier `completion_work` experiment is obsolete and must **not** be present in the
+current candidate.
 
-This is a forward-progress fix only. It must not change packing, GC policy, or benchmark
-semantics.
+The current V2.2 candidate combines these ownership/progress fixes:
+
+- `alloc_ordered_workqueue(..., WQ_MEM_RECLAIM, ...)` is used for the serialized
+  swapz state machine; `WQ_UNBOUND` is forbidden.
+- the kernel `struct completion` is the sole lower-I/O completion token;
+  `io_done` is forbidden.
+- the dm-io callback directly requeues `io_work`; no separate
+  `completion_work` object remains.
+- every async dm-io callback holds an `async_callbacks` lifetime reference until its
+  final access to the target context; suspend/teardown waits for that count to reach zero.
+- fatal target paths explicitly complete every non-early-completed upper BIO still owned
+  by the compression pack or unsent fill buffer instead of silently stranding it.
+- the final worker reap failure loops back through that failure-drain path instead of
+  exiting with an owned BIO.
+- lower swap traffic preserves `REQ_SWAP`; staged early completion is forbidden for
+  `REQ_FUA` writes, and a batch containing FUA propagates it to the lower request.
+- a write which fails before transferring into a stream buffer restores the previous
+  logical generation.
+
+Run the source-only invariant gate whenever the current module cannot yet be loaded:
+
+```bash
+bash tests/runtime/source-invariants.sh
+```
+
+It must report:
+
+```text
+V2.2 async/source invariants: PASS
+```
+
+These changes are still unvalidated until the freshly built module passes the focused
+runtime progress gate after an explicitly authorized reboot.
 
 ### Reboot authorization policy
 
@@ -178,29 +206,26 @@ If both source-version values are non-empty, they must match. Also record the ex
 Do not run the focused regression until the old mapping is gone and the loaded module is
 unambiguously the freshly built candidate.
 
-### Completion-token lifetime fix gate
+### Static async-ownership gate
 
-The previous completion-kick patch was not sufficient to establish the live-GC root cause.
-A second concrete race was found in stream-buffer completion ownership.
-
-The old callback published a separate `io_done=true` flag before calling `complete()`.
-The worker could observe that flag, finalize/reset/reinitialize the buffer, and then the old
-callback could call `complete()` on a completion object already reused for a new request.
-
-The current candidate removes `io_done` entirely.
-
-Verify:
+Before runtime testing, verify:
 
 ```bash
+bash tests/runtime/source-invariants.sh
+grep -n 'alloc_ordered_workqueue' kernel/dm-swapz.c
 grep -n 'try_wait_for_completion' kernel/dm-swapz.c
+grep -n 'async_callbacks' kernel/dm-swapz.c
+grep -n 'swapz_fail_unsent_upper_bios' kernel/dm-swapz.c
 ! grep -n '\bio_done\b' kernel/dm-swapz.c
+! grep -n '\bcompletion_work\b' kernel/dm-swapz.c
+! grep -n 'WQ_UNBOUND' kernel/dm-swapz.c
 ```
 
-The callback must use the kernel completion object as the sole publication point, and the
-worker must acquire that completion token before buffer reuse.
+Also capture every swapz warning from the fresh `W=1` build verbatim, including file,
+line, option, and diagnostic text. Do not summarize warnings only by category.
 
-Do not claim the bug fixed from source review alone. The focused runtime regression below is
-the proof gate.
+Do not claim any source-reviewed race fixed until the focused runtime regression below
+passes on a freshly loaded module.
 
 ### Focused gate
 
@@ -367,8 +392,16 @@ Verify target creation and status fields:
 ```text
 strategy=
 batch_kib=
+fill_id=
+inflight_id=
 inflight_blocks=
 fill_blocks=
+pack_records=
+async_cb=
+buf0_state=
+buf0_blocks=
+buf1_state=
+buf1_blocks=
 staged_hits=
 staged_early=
 staged_cancel=
