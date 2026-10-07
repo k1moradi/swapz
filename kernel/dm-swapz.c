@@ -155,6 +155,7 @@ struct swapz_stream_buffer {
 	struct swapz_write_batch_block *blocks;
 	u32 start_block;
 	u32 block_count;
+	blk_opf_t write_flags;
 	u8 id;
 	u8 state;
 	int io_error;
@@ -302,7 +303,8 @@ static int swapz_backing_io(struct swapz_context *context, enum req_op operation
 		 * write stream.  Mark lower reads synchronous so block schedulers may
 		 * prioritize them over background drain traffic when supported.
 		 */
-		.bi_opf = operation | (operation == REQ_OP_READ ? REQ_SYNC : 0),
+		.bi_opf = operation | REQ_SWAP |
+			(operation == REQ_OP_READ ? REQ_SYNC : 0),
 		.mem = {
 			.type = DM_IO_KMEM,
 			.offset = 0,
@@ -381,7 +383,7 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 	region.count = (sector_t)buffer->block_count * SWAPZ_BLOCK_SECTORS;
 
 	memset(&request, 0, sizeof(request));
-	request.bi_opf = REQ_OP_WRITE;
+	request.bi_opf = REQ_OP_WRITE | REQ_SWAP | buffer->write_flags;
 	request.mem.type = DM_IO_VMA;
 	request.mem.offset = 0;
 	request.mem.ptr.vma = buffer->data;
@@ -541,6 +543,7 @@ static void swapz_reset_stream_buffer(struct swapz_context *context,
 {
 	buffer->start_block = 0;
 	buffer->block_count = 0;
+	buffer->write_flags = 0;
 	buffer->state = state;
 	buffer->io_error = 0;
 	memset(buffer->blocks, 0,
@@ -1186,13 +1189,17 @@ retry:
 		target->flags = flags;
 		target->upper_completed = false;
 
+		if (source->bio)
+			buffer->write_flags |= source->bio->bi_opf &
+				(REQ_FUA | REQ_SYNC | REQ_META | REQ_PRIO | REQ_SWAP);
+
 		swapz_set_staged_ref(context, source->logical_page,
 				     source->generation, buffer->id,
 				     block_index, source->record_index);
 
 		if (context->strategy == SWAPZ_STRATEGY_STAGED &&
 		    !compaction && (flags & SWAPZ_MAP_COMPRESSED) &&
-		    target->bio) {
+		    target->bio && !(target->bio->bi_opf & REQ_FUA)) {
 			swapz_complete_bio(target->bio, 0);
 			target->bio = NULL;
 			target->upper_completed = true;
