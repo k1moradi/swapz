@@ -293,7 +293,12 @@ static int swapz_backing_io(struct swapz_context *context, enum req_op operation
 		.count = SWAPZ_BLOCK_SECTORS,
 	};
 	struct dm_io_request request = {
-		.bi_opf = operation,
+		/*
+		 * Swap-in latency is user-visible and competes with the asynchronous
+		 * write stream.  Mark lower reads synchronous so block schedulers may
+		 * prioritize them over background drain traffic when supported.
+		 */
+		.bi_opf = operation | (operation == REQ_OP_READ ? REQ_SYNC : 0),
 		.mem = {
 			.type = DM_IO_KMEM,
 			.offset = 0,
