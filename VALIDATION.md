@@ -624,3 +624,42 @@ Status:
 ```text
 FULL CORRECTNESS PASS — PERFORMANCE GATE OPEN
 ```
+
+
+## Final-version resume/hibernate milestone
+
+Resume and hibernation are intentionally excluded from the current V2.x correctness and
+performance gates, but they are **not permanently out of scope**.
+
+Project intent is:
+
+```text
+V2.x:
+  volatile compressed swap
+  correctness
+  streaming/performance
+  physical-media qualification
+  deployment/boot integration
+
+final version:
+  persistent hibernation/resume support
+```
+
+The final implementation must not reuse the current volatile RAM-only mapping model without
+a dedicated persistence design. Hibernation requires the swap contents and all metadata
+needed to decode and locate them to survive power loss/reboot and to be available early
+enough in boot for resume.
+
+Therefore the final-version milestone must include, at minimum:
+
+- an explicitly versioned persistent on-disk metadata/data format suitable for resume;
+- crash/power-loss-safe publication rules for hibernation state;
+- boot-time discovery and activation, likely including initramfs/dracut integration;
+- validation that resume never consumes ordinary volatile swap state by mistake;
+- compatibility/version rejection behavior;
+- end-to-end hibernate/resume tests across reboot;
+- recovery/failure tests for incomplete or corrupted persistent state.
+
+Until that final milestone begins, Codex and current V2.x development must treat
+hibernate/resume as deferred and must not change the current volatile architecture merely
+to approximate future resume support.
