@@ -96,6 +96,14 @@ sectors_read() {
   awk '{print $3}' "$STAT"
 }
 
+writes_completed() {
+  awk '{print $5}' "$STAT"
+}
+
+reads_completed() {
+  awk '{print $1}' "$STAT"
+}
+
 bytes_from_sectors() {
   awk -v s="$1" 'BEGIN { printf "%.0f", s * 512 }'
 }
@@ -110,11 +118,14 @@ run_fio() {
   local label=$2
   local compress=$3
   local before_w after_w before_r after_r
+  local before_w_ios after_w_ios before_r_ios after_r_ios
   local start end
 
   blockdev --flushbufs "$target" || true
   before_w=$(sectors_written)
   before_r=$(sectors_read)
+  before_w_ios=$(writes_completed)
+  before_r_ios=$(reads_completed)
   start=$(date +%s%N)
 
   fio --name="$label" --filename="$target" --size="$SIZE_BYTES" \
@@ -129,14 +140,18 @@ run_fio() {
   end=$(date +%s%N)
   after_w=$(sectors_written)
   after_r=$(sectors_read)
+  after_w_ios=$(writes_completed)
+  after_r_ios=$(reads_completed)
 
   local delta_w=$((after_w - before_w))
   local delta_r=$((after_r - before_r))
+  local delta_w_ios=$((after_w_ios - before_w_ios))
+  local delta_r_ios=$((after_r_ios - before_r_ios))
 
-  printf 'RESULT label=%s compress_pct=%s qd=%s lower_write_sectors=%s lower_write_bytes=%s lower_read_sectors=%s lower_read_bytes=%s elapsed_ns=%s\n' \
+  printf 'RESULT label=%s compress_pct=%s qd=%s lower_write_ios=%s lower_write_sectors=%s lower_write_bytes=%s lower_read_ios=%s lower_read_sectors=%s lower_read_bytes=%s elapsed_ns=%s\n' \
       "$label" "$compress" "$IODEPTH" \
-      "$delta_w" "$(bytes_from_sectors "$delta_w")" \
-      "$delta_r" "$(bytes_from_sectors "$delta_r")" \
+      "$delta_w_ios" "$delta_w" "$(bytes_from_sectors "$delta_w")" \
+      "$delta_r_ios" "$delta_r" "$(bytes_from_sectors "$delta_r")" \
       "$((end - start))"
 }
 
@@ -171,5 +186,5 @@ for spec in "compressible:100" "partial:50" "incompressible:0"; do
 done
 
 echo
-echo 'Interpretation: compare paired lower_write_sectors and fio throughput/latency.'
+echo 'Interpretation: compare paired lower_write_sectors, lower_write_ios, and fio throughput/latency.'
 echo 'Host-write reduction is an endurance proxy; NAND wear remains FTL-dependent.'
