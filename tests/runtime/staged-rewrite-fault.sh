@@ -21,7 +21,13 @@ cleanup() {
 trap cleanup EXIT
 
 modprobe dm-delay
-modprobe dm-error
+if ! dmsetup targets | awk '$1 == "error" { found=1 } END { exit !found }'; then
+  modprobe dm-error
+fi
+dmsetup targets | awk '$1 == "error" { found=1 } END { exit !found }' || {
+  echo "device-mapper error target unavailable" >&2
+  exit 1
+}
 modprobe dm-swapz
 
 truncate -s 16M "$TMP/backing.img"
@@ -37,9 +43,17 @@ dmsetup create "$TARGET" --table "0 4096 swapz /dev/mapper/$LOWER staged 128"
 
 python3 - "$TMP/old.bin" "$TMP/new.bin" <<'PY'
 from pathlib import Path
+import random
 import sys
-Path(sys.argv[1]).write_bytes((b"OLD-STAGED-GENERATION-" * 220)[:4096].ljust(4096, b"O"))
-Path(sys.argv[2]).write_bytes((b"NEW-FAILED-GENERATION-" * 220)[:4096].ljust(4096, b"N"))
+
+Path(sys.argv[1]).write_bytes(
+    (b"OLD-STAGED-GENERATION-" * 220)[:4096].ljust(4096, b"O")
+)
+
+# Deterministic high-entropy payload: this replacement must take the raw
+# fallback path so its upper BIO cannot early-complete from staged RAM.
+rng = random.Random(0x5A7A2026)
+Path(sys.argv[2]).write_bytes(bytes(rng.getrandbits(8) for _ in range(4096)))
 PY
 
 start_ns=$(date +%s%N)
@@ -75,6 +89,10 @@ status=$(dmsetup status "$TARGET")
 echo "after failed replacement (${rewrite_ms}ms): $status"
 grep -q 'failed=1' <<<"$status"
 grep -q 'physical_write=4096' <<<"$status"
+grep -Eq 'raw_pages=[1-9][0-9]*' <<<"$status" || {
+  echo "replacement did not exercise raw fallback" >&2
+  exit 1
+}
 
 dd if="/dev/mapper/$TARGET" of="$TMP/readback.bin" bs=4096 count=1    iflag=direct status=none
 cmp "$TMP/old.bin" "$TMP/readback.bin"
