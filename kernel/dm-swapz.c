@@ -1220,7 +1220,6 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 				       bool allow_rotation)
 {
 	int error;
-	struct swapz_container_disk *container = context->pack_buffer;
 	struct swapz_record_disk *record;
 	struct swapz_pending_record *pending;
 	unsigned int record_index;
@@ -2114,7 +2113,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       "gc_victims=%llu gc_scanned=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "lower_discard=%s discard_bytes=%llu discard_failures=%llu failed=%u",
 		       swapz_strategy_name(context->strategy),
-		       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024),
+		       (unsigned int)(context->max_batch_blocks *
+			      (SWAPZ_BLOCK_BYTES / 1024)),
 		       context->inflight_buffer_id >= 0 ?
 			context->stream_buffers[context->inflight_buffer_id].block_count : 0,
 		       swapz_fill_buffer(context)->block_count,
@@ -2153,7 +2153,8 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %s %u", context->backing->name,
 		       swapz_strategy_name(context->strategy),
-		       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024));
+		       (unsigned int)(context->max_batch_blocks *
+			      (SWAPZ_BLOCK_BYTES / 1024)));
 		break;
 	case STATUSTYPE_IMA:
 		break;
@@ -2485,7 +2486,8 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	       context->logical_pages, context->physical_blocks,
 	       context->segment_count, SWAPZ_SEGMENT_BLOCKS,
 	       context->free_segments, swapz_strategy_name(context->strategy),
-	       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024),
+	       (unsigned int)(context->max_batch_blocks *
+			      (SWAPZ_BLOCK_BYTES / 1024)),
 	       context->lower_discard_enabled ? "on" : "off");
 	return 0;
 
