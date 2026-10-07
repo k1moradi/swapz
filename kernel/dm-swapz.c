@@ -204,6 +204,7 @@ struct swapz_context {
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
 	struct work_struct io_work;
+	struct work_struct completion_work;
 
 	spinlock_t queue_lock;
 	struct list_head queued_bios;
@@ -334,6 +335,22 @@ static int swapz_read_block(struct swapz_context *context, u32 physical_block,
 	return swapz_backing_io(context, REQ_OP_READ, physical_block, buffer);
 }
 
+static void swapz_stream_completion_kick(struct work_struct *work)
+{
+	struct swapz_context *context =
+		container_of(work, struct swapz_context, completion_work);
+
+	/*
+	 * completion_work is deliberately distinct from io_work.  The workqueue
+	 * has max_active=1, so if a lower completion races the tail of io_work,
+	 * this kick remains queued behind it.  Once the kick runs, io_work is no
+	 * longer executing and can be queued unambiguously to reap the completed
+	 * buffer and finish any waiting upper BIOs.
+	 */
+	if (context->workqueue)
+		queue_work(context->workqueue, &context->io_work);
+}
+
 static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 {
 	struct swapz_stream_buffer *buffer = data;
@@ -344,11 +361,11 @@ static void swapz_stream_io_complete(unsigned long error_bits, void *data)
 	complete(&buffer->completion);
 
 	/*
-	 * dm-io callbacks may run outside process context.  The worker owns all
-	 * mapping publication, BIO completion, and buffer reuse.
+	 * Do not rely on requeueing io_work itself from a completion that may race
+	 * io_work's final nonblocking reap.  Queue a distinct kick item instead.
 	 */
 	if (context->workqueue)
-		queue_work(context->workqueue, &context->io_work);
+		queue_work(context->workqueue, &context->completion_work);
 }
 
 static int swapz_submit_stream_buffer(struct swapz_context *context,
@@ -394,7 +411,7 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 		WRITE_ONCE(buffer->io_done, true);
 		complete(&buffer->completion);
 		if (context->workqueue)
-			queue_work(context->workqueue, &context->io_work);
+			queue_work(context->workqueue, &context->completion_work);
 		return 0;
 	}
 
@@ -2414,6 +2431,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	spin_lock_init(&context->queue_lock);
 	INIT_LIST_HEAD(&context->queued_bios);
 	INIT_WORK(&context->io_work, swapz_io_worker);
+	INIT_WORK(&context->completion_work, swapz_stream_completion_kick);
 	context->workqueue = alloc_workqueue("swapz-%s",
 					     WQ_MEM_RECLAIM | WQ_UNBOUND, 1,
 					     dm_table_device_name(target->table));
