@@ -1047,6 +1047,18 @@ static int swapz_submit_fill_buffer(struct swapz_context *context)
 		return error;
 
 	error = swapz_choose_new_fill_buffer(context);
+	if (error == -EAGAIN) {
+		/*
+		 * With two buffers and at most one lower write in flight there should
+		 * always be one FREE buffer here.  If state recovery ever violates
+		 * that invariant, reap the just-submitted request before exposing an
+		 * INFLIGHT buffer through fill_buffer_id.
+		 */
+		error = swapz_reap_inflight(context, true);
+		if (error)
+			return error;
+		error = swapz_choose_new_fill_buffer(context);
+	}
 	if (error)
 		return error;
 
