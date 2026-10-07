@@ -782,3 +782,30 @@ correctness is solid, the batch plateau is actually identified within the suppor
 and the throughput/read-latency tradeoff is quantitatively acceptable.
 
 Do not commit or push changes.
+
+
+## Reporting a pinned stale-module gate
+
+If the module currently loaded in the kernel does not match the freshly built candidate
+and a stuck D-state BIO prevents unloading/replacing it, do **not** attribute that old
+runtime failure to the current source candidate.
+
+Use:
+
+```text
+NEEDS_EXPLICIT_REBOOT_AUTHORIZATION — CURRENT CANDIDATE NOT RUNTIME TESTED
+```
+
+and report both identities:
+
+```text
+CURRENT_SOURCE_HEAD=<git HEAD>
+BUILT_MODULE_SRCVERSION=<new module srcversion>
+LOADED_MODULE_SRCVERSION=<pinned old module srcversion>
+PINNED_RUNTIME_SOURCE=<known old commit if established>
+```
+
+A current candidate may receive `BLOCKED — CORRECTNESS FAILURE` only after that candidate's
+module was actually loaded and reproduced a correctness failure.
+
+Never reboot automatically; wait for explicit operator authorization.
