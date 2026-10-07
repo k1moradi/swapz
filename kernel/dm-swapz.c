@@ -60,8 +60,11 @@
 	(SWAPZ_MAX_WRITE_BATCH_BLOCKS * SWAPZ_BLOCK_BYTES)
 #define SWAPZ_MIN_COMPRESS_SAVING 512U
 
-#define SWAPZ_MAP_VALID      BIT(0)
-#define SWAPZ_MAP_COMPRESSED BIT(1)
+#define SWAPZ_RECORD_COMPRESSED BIT(0)
+
+#define SWAPZ_MAP_LENGTH_MASK 0x0fffU
+#define SWAPZ_MAP_VALID_BIT   BIT(12)
+#define SWAPZ_MAP_COMPRESSED_BIT BIT(13)
 
 struct swapz_record_disk {
 	__le32 logical_page;
@@ -99,9 +102,8 @@ swapz_container_record_const(const void *buffer, unsigned int index)
 
 struct swapz_mapping {
 	u32 physical_block;
-	u16 stored_length;
-	u8 record_index;
-	u8 flags;
+	u16 offset;
+	u16 meta;
 };
 static_assert(sizeof(struct swapz_mapping) == 8);
 
@@ -118,20 +120,15 @@ struct swapz_pending_record {
 	u8 record_index;
 };
 
-struct swapz_write_batch_record {
+struct swapz_stream_record {
 	struct bio *bio;
 	u32 logical_page;
 	u32 generation;
+	u32 byte_offset;
 	u16 stored_length;
-	u8 record_index;
 	u8 flags;
-	bool upper_completed;
-};
-
-struct swapz_write_batch_block {
-	u8 record_count;
-	bool compaction;
-	struct swapz_write_batch_record records[SWAPZ_MAX_PACKED_RECORDS];
+	u8 upper_completed;
+	u8 compaction;
 };
 
 enum swapz_stream_strategy {
@@ -151,9 +148,12 @@ struct swapz_context;
 struct swapz_stream_buffer {
 	struct swapz_context *context;
 	void *data;
-	struct swapz_write_batch_block *blocks;
+	struct swapz_stream_record *records;
 	u32 start_block;
+	u32 data_bytes;
 	u32 block_count;
+	u32 record_count;
+	u32 record_capacity;
 	u8 id;
 	u8 state;
 	bool io_done;
@@ -163,8 +163,7 @@ struct swapz_stream_buffer {
 
 struct swapz_staged_ref {
 	u32 generation;
-	u8 block_index;
-	u8 record_index;
+	u16 record_index;
 	u8 buffer_id;
 	u8 valid;
 };
@@ -246,7 +245,6 @@ struct swapz_context {
 	void *compressed_buffer;
 	void *pack_buffer;
 	void *repack_buffer;
-	struct swapz_write_batch_block repack_block;
 	void *lz4_workmem;
 
 	enum swapz_stream_strategy strategy;
