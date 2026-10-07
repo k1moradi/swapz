@@ -54,8 +54,6 @@
 #define SWAPZ_SEGMENT_OPEN 1U
 #define SWAPZ_SEGMENT_CLOSED 2U
 #define SWAPZ_SEGMENT_CLEANING 3U
-#define SWAPZ_PACK_WAIT_MIN_US 50U
-#define SWAPZ_PACK_WAIT_MAX_US 100U
 #define SWAPZ_MAX_WRITE_BATCH_BLOCKS SWAPZ_SEGMENT_BLOCKS
 #define SWAPZ_DEFAULT_WRITE_BATCH_BLOCKS 64U /* 256 KiB; benchmark may override. */
 #define SWAPZ_MAX_WRITE_BATCH_BYTES \
@@ -379,11 +377,17 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 
 	error = dm_io(&request, 1, &region, NULL, IOPRIO_DEFAULT);
 	if (error) {
-		context->inflight_buffer_id = -1;
-		buffer->state = SWAPZ_BUFFER_FILL;
+		/*
+		 * Normalize synchronous submission rejection into the asynchronous
+		 * completion path.  The reaper then owns all BIO completion and staged
+		 * recovery decisions exactly once.
+		 */
 		buffer->io_error = error;
 		WRITE_ONCE(buffer->io_done, true);
-		return error;
+		complete(&buffer->completion);
+		if (context->workqueue)
+			queue_work(context->workqueue, &context->io_work);
+		return 0;
 	}
 
 	context->stats.stream_submit_bytes +=
