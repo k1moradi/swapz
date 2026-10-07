@@ -510,86 +510,345 @@ static void swapz_reset_pack(struct swapz_context *context)
 	context->pack_record_count = 0;
 }
 
-static void swapz_reset_write_batch(struct swapz_context *context)
+static void swapz_reset_stream_buffer(struct swapz_context *context,
+				      struct swapz_stream_buffer *buffer,
+				      u8 state)
 {
-	context->write_batch_start_block = 0;
-	context->write_batch_block_count = 0;
-	memset(context->write_batch, 0, sizeof(context->write_batch));
+	buffer->start_block = 0;
+	buffer->block_count = 0;
+	buffer->state = state;
+	buffer->io_error = 0;
+	WRITE_ONCE(buffer->io_done, false);
+	memset(buffer->blocks, 0,
+	       array_size(context->max_batch_blocks, sizeof(*buffer->blocks)));
 }
 
-static int swapz_advance_segment(struct swapz_context *context);
-
-static int swapz_flush_write_batch(struct swapz_context *context)
+static struct swapz_stream_buffer *
+swapz_fill_buffer(struct swapz_context *context)
 {
-	unsigned int block_index;
-	unsigned int record_index;
-	unsigned int block_count = context->write_batch_block_count;
-	int error;
+	return &context->stream_buffers[context->fill_buffer_id];
+}
 
-	if (!block_count)
-		return 0;
+static bool swapz_staged_ref_matches(struct swapz_context *context,
+				     u32 logical_page,
+				     u32 generation, u8 buffer_id,
+				     u16 block_index, u8 record_index)
+{
+	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
 
-	error = swapz_write_batch_io(context, context->write_batch_start_block,
-				    block_count);
-	if (error)
-		goto fail_pending;
+	return ref->valid && ref->generation == generation &&
+	       ref->buffer_id == buffer_id && ref->block_index == block_index &&
+	       ref->record_index == record_index;
+}
 
-	for (block_index = 0; block_index < block_count; ++block_index) {
-		struct swapz_write_batch_block *block =
-			&context->write_batch[block_index];
-		u32 physical_block = context->write_batch_start_block + block_index;
+static void swapz_clear_staged_ref(struct swapz_context *context,
+				   u32 logical_page, u32 generation,
+				   u8 buffer_id, u16 block_index,
+				   u8 record_index)
+{
+	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
+
+	if (swapz_staged_ref_matches(context, logical_page, generation,
+					    buffer_id, block_index,
+					    record_index))
+		memset(ref, 0, sizeof(*ref));
+}
+
+static void swapz_set_staged_ref(struct swapz_context *context,
+				 u32 logical_page, u32 generation,
+				 u8 buffer_id, u16 block_index,
+				 u8 record_index)
+{
+	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
+
+	ref->generation = generation;
+	ref->buffer_id = buffer_id;
+	ref->block_index = block_index;
+	ref->record_index = record_index;
+	ref->valid = true;
+}
+
+static bool swapz_stream_record_current(struct swapz_context *context,
+					const struct swapz_write_batch_record *record)
+{
+	return record->generation == context->generations[record->logical_page];
+}
+
+static void swapz_compact_fill_buffer(struct swapz_context *context,
+				      struct swapz_stream_buffer *buffer)
+{
+	u32 read_index;
+	u32 write_index = 0;
+	u32 old_count = buffer->block_count;
+
+	if (!old_count)
+		return;
+
+	for (read_index = 0; read_index < old_count; ++read_index) {
+		struct swapz_write_batch_block *source = &buffer->blocks[read_index];
+		bool keep = false;
+		u32 record_index;
+
+		for (record_index = 0; record_index < source->record_count;
+		     ++record_index) {
+			struct swapz_write_batch_record *record =
+				&source->records[record_index];
+
+			/*
+			 * A pending upper BIO has not yet been acknowledged, so keep its
+			 * block even if a later operation already superseded it.  Staged
+			 * early-completed records may be omitted once their generation is
+			 * stale (normally after DISCARD or overwrite).
+			 */
+			if (record->bio || swapz_stream_record_current(context, record))
+				keep = true;
+		}
+
+		if (!keep) {
+			for (record_index = 0; record_index < source->record_count;
+			     ++record_index) {
+				struct swapz_write_batch_record *record =
+					&source->records[record_index];
+
+				swapz_clear_staged_ref(context, record->logical_page,
+						       record->generation, buffer->id,
+						       read_index, record->record_index);
+				context->stats.staged_cancellations++;
+			}
+			context->stats.staged_cancelled_blocks++;
+			continue;
+		}
+
+		if (write_index != read_index) {
+			memmove((u8 *)buffer->data + write_index * SWAPZ_BLOCK_BYTES,
+				(u8 *)buffer->data + read_index * SWAPZ_BLOCK_BYTES,
+				SWAPZ_BLOCK_BYTES);
+			buffer->blocks[write_index] = *source;
+
+			for (record_index = 0;
+			     record_index < buffer->blocks[write_index].record_count;
+			     ++record_index) {
+				struct swapz_write_batch_record *record =
+					&buffer->blocks[write_index].records[record_index];
+				struct swapz_staged_ref *ref =
+					&context->staged_refs[record->logical_page];
+
+				if (ref->valid && ref->generation == record->generation &&
+				    ref->buffer_id == buffer->id &&
+				    ref->block_index == read_index &&
+				    ref->record_index == record->record_index)
+					ref->block_index = write_index;
+			}
+		}
+		write_index++;
+	}
+
+	if (write_index < old_count) {
+		u32 reclaimed = old_count - write_index;
+
+		/*
+		 * The fill buffer owns the newest reservations in the current
+		 * segment; no later physical blocks can have been reserved behind it.
+		 */
+		if (WARN_ON_ONCE(context->segment_write_block < reclaimed)) {
+			swapz_set_failed(context, -EUCLEAN);
+			return;
+		}
+		context->segment_write_block -= reclaimed;
+	}
+
+	buffer->block_count = write_index;
+}
+
+static int swapz_finalize_stream_buffer(struct swapz_context *context,
+					struct swapz_stream_buffer *buffer)
+{
+	u32 block_index;
+	int error = buffer->io_error;
+
+	if (error) {
+		bool retain = false;
+
+		for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+			struct swapz_write_batch_block *block =
+				&buffer->blocks[block_index];
+			u32 record_index;
+
+			for (record_index = 0; record_index < block->record_count;
+			     ++record_index) {
+				struct swapz_write_batch_record *record =
+					&block->records[record_index];
+
+				if (record->upper_completed &&
+				    swapz_stream_record_current(context, record))
+					retain = true;
+				if (record->bio)
+					swapz_complete_bio(record->bio, error);
+			}
+		}
+
+		swapz_set_failed(context, error);
+
+		/*
+		 * In staged mode a compressed upper write may already have completed.
+		 * Keep the failed buffer resident so swapoff/readback can still recover
+		 * that authoritative staged data.  New writes are rejected.
+		 */
+		if (retain) {
+			buffer->state = SWAPZ_BUFFER_INFLIGHT;
+			return error;
+		}
+
+		swapz_reset_stream_buffer(context, buffer, SWAPZ_BUFFER_FREE);
+		return error;
+	}
+
+	context->stats.physical_write_bytes +=
+		(u64)buffer->block_count * SWAPZ_BLOCK_BYTES;
+	context->stats.physical_write_requests++;
+	if (buffer->block_count > 1)
+		context->stats.multi_block_write_requests++;
+	context->stats.max_write_batch_blocks =
+		max_t(u64, context->stats.max_write_batch_blocks,
+		      buffer->block_count);
+
+	for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+		struct swapz_write_batch_block *block = &buffer->blocks[block_index];
+		u32 physical_block = buffer->start_block + block_index;
+		u32 record_index;
 
 		for (record_index = 0; record_index < block->record_count;
 		     ++record_index) {
 			struct swapz_write_batch_record *record =
 				&block->records[record_index];
 
-			swapz_install_mapping(context, record->logical_page,
-					      physical_block, record->stored_length,
-					      record->record_index, record->flags);
-			if (unlikely(context->failed)) {
-				error = -EUCLEAN;
-				goto fail_pending;
+			if (swapz_stream_record_current(context, record)) {
+				swapz_install_mapping(context, record->logical_page,
+						      physical_block,
+						      record->stored_length,
+						      record->record_index,
+						      record->flags);
+				if (unlikely(context->failed))
+					return -EUCLEAN;
+				swapz_clear_staged_ref(context, record->logical_page,
+						       record->generation, buffer->id,
+						       block_index, record->record_index);
+			} else if (record->upper_completed) {
+				context->stats.staged_cancellations++;
 			}
+
+			if (record->bio)
+				swapz_complete_bio(record->bio, 0);
 		}
 
 		if (block->compaction)
 			context->stats.compaction_write_bytes += SWAPZ_BLOCK_BYTES;
 	}
 
-	for (block_index = 0; block_index < block_count; ++block_index) {
-		struct swapz_write_batch_block *block =
-			&context->write_batch[block_index];
-
-		for (record_index = 0; record_index < block->record_count;
-		     ++record_index) {
-			struct bio *bio = block->records[record_index].bio;
-
-			if (bio)
-				swapz_complete_bio(bio, 0);
-		}
-	}
-
-	swapz_reset_write_batch(context);
+	swapz_reset_stream_buffer(context, buffer, SWAPZ_BUFFER_FREE);
 	return 0;
+}
 
-fail_pending:
-	for (block_index = 0; block_index < block_count; ++block_index) {
-		struct swapz_write_batch_block *block =
-			&context->write_batch[block_index];
+static int swapz_reap_inflight(struct swapz_context *context, bool wait)
+{
+	struct swapz_stream_buffer *buffer;
+	int id = context->inflight_buffer_id;
+	int error;
 
-		for (record_index = 0; record_index < block->record_count;
-		     ++record_index) {
-			struct bio *bio = block->records[record_index].bio;
+	if (id < 0)
+		return 0;
 
-			if (bio)
-				swapz_complete_bio(bio, error);
-		}
+	buffer = &context->stream_buffers[id];
+	if (!READ_ONCE(buffer->io_done)) {
+		if (!wait)
+			return -EAGAIN;
+		wait_for_completion(&buffer->completion);
 	}
 
-	swapz_reset_write_batch(context);
+	context->inflight_buffer_id = -1;
+	error = swapz_finalize_stream_buffer(context, buffer);
 	return error;
 }
+
+static int swapz_choose_new_fill_buffer(struct swapz_context *context)
+{
+	u8 id;
+
+	for (id = 0; id < ARRAY_SIZE(context->stream_buffers); ++id) {
+		struct swapz_stream_buffer *buffer = &context->stream_buffers[id];
+
+		if (buffer->state != SWAPZ_BUFFER_FREE)
+			continue;
+		swapz_reset_stream_buffer(context, buffer, SWAPZ_BUFFER_FILL);
+		context->fill_buffer_id = id;
+		return 0;
+	}
+
+	return -EAGAIN;
+}
+
+static int swapz_submit_fill_buffer(struct swapz_context *context)
+{
+	struct swapz_stream_buffer *buffer = swapz_fill_buffer(context);
+	int error;
+
+	if (!buffer->block_count)
+		return 0;
+	if (context->inflight_buffer_id >= 0)
+		return -EAGAIN;
+
+	swapz_compact_fill_buffer(context, buffer);
+	if (unlikely(context->failed))
+		return -EIO;
+	if (!buffer->block_count)
+		return 0;
+
+	error = swapz_submit_stream_buffer(context, buffer);
+	if (error)
+		return error;
+
+	error = swapz_choose_new_fill_buffer(context);
+	if (error)
+		return error;
+
+	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
+		return swapz_reap_inflight(context, true);
+	return 0;
+}
+
+static int swapz_flush_write_batch(struct swapz_context *context)
+{
+	int error;
+
+	for (;;) {
+		error = swapz_reap_inflight(context, true);
+		if (error)
+			return error;
+
+		if (!swapz_fill_buffer(context)->block_count)
+			return 0;
+
+		error = swapz_submit_fill_buffer(context);
+		if (error)
+			return error;
+	}
+}
+
+static int swapz_maybe_submit_fill(struct swapz_context *context)
+{
+	int error;
+
+	error = swapz_reap_inflight(context, false);
+	if (error && error != -EAGAIN)
+		return error;
+
+	if (context->inflight_buffer_id >= 0)
+		return 0;
+
+	return swapz_submit_fill_buffer(context);
+}
+
+static int swapz_advance_segment(struct swapz_context *context);
 
 static int swapz_ensure_physical_block(struct swapz_context *context,
 				       bool allow_rotation)
@@ -600,8 +859,8 @@ static int swapz_ensure_physical_block(struct swapz_context *context,
 		return 0;
 
 	/*
-	 * Reserved batch blocks belong to the segment that just filled.  Commit
-	 * them before moving the append head to another segment.
+	 * Segment state and victim selection depend on published mappings.
+	 * Drain both stream buffers before changing segments or running GC.
 	 */
 	error = swapz_flush_write_batch(context);
 	if (error)
@@ -627,20 +886,30 @@ static int swapz_stage_write_block(struct swapz_context *context,
 				   unsigned int record_count, u8 flags,
 				   bool compaction, bool allow_rotation)
 {
+	struct swapz_stream_buffer *buffer;
 	struct swapz_write_batch_block *batch_block;
 	u32 physical_block;
-	unsigned int block_index;
-	unsigned int record_index;
+	u32 block_index;
+	u32 record_index;
 	int error;
 
 	if (WARN_ON_ONCE(!record_count ||
 			 record_count > SWAPZ_MAX_PACKED_RECORDS))
 		return -EUCLEAN;
 
-	if (context->write_batch_block_count >= SWAPZ_WRITE_BATCH_BLOCKS) {
-		error = swapz_flush_write_batch(context);
+retry:
+	buffer = swapz_fill_buffer(context);
+	if (buffer->block_count >= context->max_batch_blocks) {
+		error = swapz_submit_fill_buffer(context);
+		if (error == -EAGAIN) {
+			error = swapz_reap_inflight(context, true);
+			if (error)
+				return error;
+			goto retry;
+		}
 		if (error)
 			return error;
+		buffer = swapz_fill_buffer(context);
 	}
 
 	error = swapz_ensure_physical_block(context, allow_rotation);
@@ -648,25 +917,27 @@ static int swapz_stage_write_block(struct swapz_context *context,
 		return error;
 
 	physical_block = swapz_current_physical_block(context);
-	if (context->write_batch_block_count &&
-	    physical_block != context->write_batch_start_block +
-			      context->write_batch_block_count) {
+	if (buffer->block_count &&
+	    physical_block != buffer->start_block + buffer->block_count) {
 		error = swapz_flush_write_batch(context);
 		if (error)
 			return error;
+		buffer = swapz_fill_buffer(context);
 		physical_block = swapz_current_physical_block(context);
 	}
 
-	block_index = context->write_batch_block_count;
+	block_index = buffer->block_count;
 	if (!block_index)
-		context->write_batch_start_block = physical_block;
+		buffer->start_block = physical_block;
 
-	memcpy((u8 *)context->write_batch_buffer +
-		block_index * SWAPZ_BLOCK_BYTES, block_data, SWAPZ_BLOCK_BYTES);
+	memcpy((u8 *)buffer->data + block_index * SWAPZ_BLOCK_BYTES,
+	       block_data, SWAPZ_BLOCK_BYTES);
 
-	batch_block = &context->write_batch[block_index];
+	batch_block = &buffer->blocks[block_index];
+	memset(batch_block, 0, sizeof(*batch_block));
 	batch_block->record_count = (u8)record_count;
 	batch_block->compaction = compaction;
+
 	for (record_index = 0; record_index < record_count; ++record_index) {
 		const struct swapz_pending_record *source = &records[record_index];
 		struct swapz_write_batch_record *target =
@@ -674,13 +945,38 @@ static int swapz_stage_write_block(struct swapz_context *context,
 
 		target->bio = source->bio;
 		target->logical_page = source->logical_page;
+		target->generation = source->generation;
 		target->stored_length = source->stored_length;
 		target->record_index = source->record_index;
 		target->flags = flags;
+		target->upper_completed = false;
+
+		swapz_set_staged_ref(context, source->logical_page,
+				     source->generation, buffer->id,
+				     block_index, source->record_index);
+
+		if (context->strategy == SWAPZ_STRATEGY_STAGED &&
+		    !compaction && (flags & SWAPZ_MAP_COMPRESSED) &&
+		    target->bio) {
+			swapz_complete_bio(target->bio, 0);
+			target->bio = NULL;
+			target->upper_completed = true;
+			context->stats.staged_early_completions++;
+		}
 	}
 
-	context->write_batch_block_count++;
+	buffer->block_count++;
 	swapz_note_block_written(context);
+
+	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
+		return swapz_flush_write_batch(context);
+
+	if (buffer->block_count >= context->max_batch_blocks) {
+		error = swapz_maybe_submit_fill(context);
+		if (error)
+			return error;
+	}
+
 	return 0;
 }
 
