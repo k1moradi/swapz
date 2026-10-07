@@ -55,8 +55,10 @@
 #define SWAPZ_SEGMENT_CLEANING 3U
 #define SWAPZ_PACK_WAIT_MIN_US 50U
 #define SWAPZ_PACK_WAIT_MAX_US 100U
-#define SWAPZ_WRITE_BATCH_BLOCKS 8U
-#define SWAPZ_WRITE_BATCH_BYTES (SWAPZ_WRITE_BATCH_BLOCKS * SWAPZ_BLOCK_BYTES)
+#define SWAPZ_MAX_WRITE_BATCH_BLOCKS SWAPZ_SEGMENT_BLOCKS
+#define SWAPZ_DEFAULT_WRITE_BATCH_BLOCKS 64U /* 256 KiB; benchmark may override. */
+#define SWAPZ_MAX_WRITE_BATCH_BYTES \
+	(SWAPZ_MAX_WRITE_BATCH_BLOCKS * SWAPZ_BLOCK_BYTES)
 #define SWAPZ_MIN_COMPRESS_SAVING 512U
 
 #define SWAPZ_MAP_VALID      BIT(0)
@@ -112,6 +114,7 @@ struct swapz_per_bio {
 struct swapz_pending_record {
 	struct bio *bio;
 	u32 logical_page;
+	u32 generation;
 	u16 stored_length;
 	u8 record_index;
 };
@@ -119,15 +122,52 @@ struct swapz_pending_record {
 struct swapz_write_batch_record {
 	struct bio *bio;
 	u32 logical_page;
+	u32 generation;
 	u16 stored_length;
 	u8 record_index;
 	u8 flags;
+	bool upper_completed;
 };
 
 struct swapz_write_batch_block {
 	u8 record_count;
 	bool compaction;
 	struct swapz_write_batch_record records[SWAPZ_MAX_PACKED_RECORDS];
+};
+
+enum swapz_stream_strategy {
+	SWAPZ_STRATEGY_IMMEDIATE = 0,
+	SWAPZ_STRATEGY_OPPORTUNISTIC,
+	SWAPZ_STRATEGY_STAGED,
+};
+
+enum swapz_stream_buffer_state {
+	SWAPZ_BUFFER_FREE = 0,
+	SWAPZ_BUFFER_FILL,
+	SWAPZ_BUFFER_INFLIGHT,
+};
+
+struct swapz_context;
+
+struct swapz_stream_buffer {
+	struct swapz_context *context;
+	void *data;
+	struct swapz_write_batch_block *blocks;
+	u32 start_block;
+	u32 block_count;
+	u8 id;
+	u8 state;
+	bool io_done;
+	int io_error;
+	struct completion completion;
+};
+
+struct swapz_staged_ref {
+	u32 generation;
+	u16 block_index;
+	u8 record_index;
+	u8 buffer_id;
+	bool valid;
 };
 
 struct swapz_stats {
@@ -138,6 +178,11 @@ struct swapz_stats {
 	u64 physical_write_requests;
 	u64 multi_block_write_requests;
 	u64 max_write_batch_blocks;
+	u64 staged_read_hits;
+	u64 staged_early_completions;
+	u64 staged_cancellations;
+	u64 staged_cancelled_blocks;
+	u64 stream_submit_bytes;
 	u64 compressed_payload_bytes;
 	u64 compressed_pages;
 	u64 raw_pages;
@@ -166,6 +211,8 @@ struct swapz_context {
 	bool failed;
 
 	struct swapz_mapping *mappings;
+	u32 *generations;
+	struct swapz_staged_ref *staged_refs;
 	u32 logical_pages;
 
 	u32 physical_blocks;
@@ -198,12 +245,13 @@ struct swapz_context {
 	void *io_buffer;
 	void *compressed_buffer;
 	void *pack_buffer;
-	void *write_batch_buffer;
 	void *lz4_workmem;
 
-	u32 write_batch_start_block;
-	unsigned int write_batch_block_count;
-	struct swapz_write_batch_block write_batch[SWAPZ_WRITE_BATCH_BLOCKS];
+	enum swapz_stream_strategy strategy;
+	u32 max_batch_blocks;
+	struct swapz_stream_buffer stream_buffers[2];
+	u8 fill_buffer_id;
+	int inflight_buffer_id;
 
 	unsigned int pack_payload_start;
 	unsigned int pack_record_count;
