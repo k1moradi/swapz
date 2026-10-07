@@ -2564,8 +2564,9 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	INIT_WORK(&context->io_work, swapz_io_worker);
 	/*
 	 * The swapz state machine is intentionally single-threaded.  Do not use
-	 * WQ_UNBOUND + max_active=1 as a serialization primitive: modern kernels
-	 * do not guarantee strict global ordering for that combination.  An
+	 * a generic unbound queue plus max_active=1 as a serialization primitive:
+	 * modern kernels do not guarantee strict global ordering for that
+	 * combination.  An
 	 * explicitly ordered reclaim-safe workqueue keeps every io_work pass in the
 	 * single serialized state-machine domain used for mappings, stream-buffer
 	 * ownership, allocator state, and upper BIO completion.
