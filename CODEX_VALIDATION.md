@@ -122,9 +122,29 @@ publish mappings, and complete upper BIOs.
 This is a forward-progress fix only. It must not change packing, GC policy, or benchmark
 semantics.
 
+### Reboot authorization policy
+
+A host reboot is **never implicitly authorized** by this validation plan.
+
+If a stuck `D`-state process, pinned Device Mapper target, or pinned `dm_swapz` module
+cannot be safely removed without rebooting, Codex must:
+
+1. preserve a read-only diagnostic snapshot;
+2. stop destructive/runtime cleanup attempts;
+3. leave unrelated system swap and physical devices untouched;
+4. report `NEEDS_EXPLICIT_REBOOT_AUTHORIZATION`;
+5. wait for the operator's explicit permission before issuing any reboot command.
+
+Other agents or workloads may be active on this host. Do not infer reboot permission from
+the fact that the machine is a test host, from prior validation instructions, or from an
+earlier generic authorization to run tests.
+
+Source-only build, model, sanitizer, and repository checks may continue while waiting, as
+long as they do not replace or unload the pinned runtime module.
+
 ### Post-reboot module identity gate
 
-After reboot, first confirm the stale disposable state is gone:
+Only after the operator has explicitly authorized and completed the reboot, first confirm the stale disposable state is gone:
 
 ```bash
 sudo dmsetup ls --tree
