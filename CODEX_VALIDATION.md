@@ -1142,3 +1142,22 @@ validation.
 Codex must not independently design or implement that feature. When the project reaches the
 final-version resume/hibernate milestone, follow the then-current repository specification
 and validation contract.
+
+## Roadmap scope guard
+
+`ROADMAP.md` and `TODO.md` contain future-version planning. They are not authorization
+for Codex to begin future feature work.
+
+Codex must work only on the currently active validation/performance phase described in
+this file unless the primary developer explicitly advances the project milestone.
+
+In particular, do not independently begin:
+
+- V2.3 physical-device testing without exact-device authorization;
+- V2.4 byte-tight format development;
+- V2.5 deployment/Dracut feature development;
+- V2.6 release-hardening changes beyond requested validation;
+- V3.0 persistent hibernation/resume design or implementation.
+
+Future roadmap items may be read to understand intent, but feature implementation remains
+owned by the primary developer.
