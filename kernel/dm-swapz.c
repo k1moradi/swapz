@@ -244,6 +244,8 @@ struct swapz_context {
 	void *io_buffer;
 	void *compressed_buffer;
 	void *pack_buffer;
+	void *repack_buffer;
+	struct swapz_write_batch_block repack_block;
 	void *lz4_workmem;
 
 	enum swapz_stream_strategy strategy;
@@ -2011,6 +2013,8 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->compressed_buffer);
 	if (context->pack_buffer)
 		free_page((unsigned long)context->pack_buffer);
+	if (context->repack_buffer)
+		free_page((unsigned long)context->repack_buffer);
 	vfree(context->stream_buffers[0].data);
 	vfree(context->stream_buffers[1].data);
 	kvfree(context->stream_buffers[0].blocks);
@@ -2219,11 +2223,12 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->repack_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!context->write_buffer || !context->write_compressed_buffer ||
 	    !context->input_buffer || !context->io_buffer ||
 	    !context->compressed_buffer || !context->pack_buffer ||
-	    !context->lz4_workmem) {
+	    !context->repack_buffer || !context->lz4_workmem) {
 		target->error = "Cannot allocate preallocated I/O buffers";
 		error = -ENOMEM;
 		goto fail;
