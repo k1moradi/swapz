@@ -2565,10 +2565,10 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	/*
 	 * The swapz state machine is intentionally single-threaded.  Do not use
 	 * WQ_UNBOUND + max_active=1 as a serialization primitive: modern kernels
-	 * do not guarantee global ordering for that combination.  An explicitly
-	 * ordered workqueue is required because io_work and completion_work both
-	 * mutate mappings, stream-buffer ownership, allocator state, and BIO
-	 * completion state.
+	 * do not guarantee strict global ordering for that combination.  An
+	 * explicitly ordered reclaim-safe workqueue keeps every io_work pass in the
+	 * single serialized state-machine domain used for mappings, stream-buffer
+	 * ownership, allocator state, and upper BIO completion.
 	 */
 	context->workqueue = alloc_ordered_workqueue("swapz-%s",
 						   WQ_MEM_RECLAIM,
