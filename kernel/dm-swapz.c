@@ -424,13 +424,103 @@ static void swapz_reset_pack(struct swapz_context *context)
 	context->pack_record_count = 0;
 }
 
+static void swapz_reset_write_batch(struct swapz_context *context)
+{
+	context->write_batch_start_block = 0;
+	context->write_batch_block_count = 0;
+	memset(context->write_batch, 0, sizeof(context->write_batch));
+}
+
 static int swapz_advance_segment(struct swapz_context *context);
+
+static int swapz_flush_write_batch(struct swapz_context *context)
+{
+	unsigned int block_index;
+	unsigned int record_index;
+	unsigned int block_count = context->write_batch_block_count;
+	int error;
+
+	if (!block_count)
+		return 0;
+
+	error = swapz_write_batch_io(context, context->write_batch_start_block,
+				    block_count);
+	if (error)
+		goto fail_pending;
+
+	for (block_index = 0; block_index < block_count; ++block_index) {
+		struct swapz_write_batch_block *block =
+			&context->write_batch[block_index];
+		u32 physical_block = context->write_batch_start_block + block_index;
+
+		for (record_index = 0; record_index < block->record_count;
+		     ++record_index) {
+			struct swapz_write_batch_record *record =
+				&block->records[record_index];
+
+			swapz_install_mapping(context, record->logical_page,
+					      physical_block, record->stored_length,
+					      record->record_index, record->flags);
+			if (unlikely(context->failed)) {
+				error = -EUCLEAN;
+				goto fail_pending;
+			}
+		}
+
+		if (block->compaction)
+			context->stats.compaction_write_bytes += SWAPZ_BLOCK_BYTES;
+	}
+
+	for (block_index = 0; block_index < block_count; ++block_index) {
+		struct swapz_write_batch_block *block =
+			&context->write_batch[block_index];
+
+		for (record_index = 0; record_index < block->record_count;
+		     ++record_index) {
+			struct bio *bio = block->records[record_index].bio;
+
+			if (bio)
+				swapz_complete_bio(bio, 0);
+		}
+	}
+
+	swapz_reset_write_batch(context);
+	return 0;
+
+fail_pending:
+	for (block_index = 0; block_index < block_count; ++block_index) {
+		struct swapz_write_batch_block *block =
+			&context->write_batch[block_index];
+
+		for (record_index = 0; record_index < block->record_count;
+		     ++record_index) {
+			struct bio *bio = block->records[record_index].bio;
+
+			if (bio)
+				swapz_complete_bio(bio, error);
+		}
+	}
+
+	swapz_reset_write_batch(context);
+	return error;
+}
 
 static int swapz_ensure_physical_block(struct swapz_context *context,
 				       bool allow_rotation)
 {
+	int error;
+
 	if (swapz_current_segment_has_block(context))
 		return 0;
+
+	/*
+	 * Reserved batch blocks belong to the segment that just filled.  Commit
+	 * them before moving the append head to another segment.
+	 */
+	error = swapz_flush_write_batch(context);
+	if (error)
+		return error;
+
 	if (!allow_rotation)
 		return -ENOSPC;
 	return swapz_advance_segment(context);
@@ -443,6 +533,69 @@ static void swapz_note_block_written(struct swapz_context *context)
 	    context->segment_high_water[context->current_segment])
 		context->segment_high_water[context->current_segment] =
 			context->segment_write_block;
+}
+
+static int swapz_stage_write_block(struct swapz_context *context,
+				   const void *block_data,
+				   const struct swapz_pending_record *records,
+				   unsigned int record_count, u8 flags,
+				   bool compaction, bool allow_rotation)
+{
+	struct swapz_write_batch_block *batch_block;
+	u32 physical_block;
+	unsigned int block_index;
+	unsigned int record_index;
+	int error;
+
+	if (WARN_ON_ONCE(!record_count ||
+			 record_count > SWAPZ_MAX_PACKED_RECORDS))
+		return -EUCLEAN;
+
+	if (context->write_batch_block_count >= SWAPZ_WRITE_BATCH_BLOCKS) {
+		error = swapz_flush_write_batch(context);
+		if (error)
+			return error;
+	}
+
+	error = swapz_ensure_physical_block(context, allow_rotation);
+	if (error)
+		return error;
+
+	physical_block = swapz_current_physical_block(context);
+	if (context->write_batch_block_count &&
+	    physical_block != context->write_batch_start_block +
+			      context->write_batch_block_count) {
+		error = swapz_flush_write_batch(context);
+		if (error)
+			return error;
+		physical_block = swapz_current_physical_block(context);
+	}
+
+	block_index = context->write_batch_block_count;
+	if (!block_index)
+		context->write_batch_start_block = physical_block;
+
+	memcpy((u8 *)context->write_batch_buffer +
+		block_index * SWAPZ_BLOCK_BYTES, block_data, SWAPZ_BLOCK_BYTES);
+
+	batch_block = &context->write_batch[block_index];
+	batch_block->record_count = (u8)record_count;
+	batch_block->compaction = compaction;
+	for (record_index = 0; record_index < record_count; ++record_index) {
+		const struct swapz_pending_record *source = &records[record_index];
+		struct swapz_write_batch_record *target =
+			&batch_block->records[record_index];
+
+		target->bio = source->bio;
+		target->logical_page = source->logical_page;
+		target->stored_length = source->stored_length;
+		target->record_index = source->record_index;
+		target->flags = flags;
+	}
+
+	context->write_batch_block_count++;
+	swapz_note_block_written(context);
+	return 0;
 }
 
 static int swapz_flush_pack(struct swapz_context *context, bool compaction,
