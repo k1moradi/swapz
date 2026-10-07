@@ -1,0 +1,5 @@
+kprobe:dm_io
+{
+    printf("DM_IO opf=%u sectors=%llu comm=%s\n",
+           *(uint32 *)arg0, *(uint64 *)(arg2 + 16), comm);
+}
