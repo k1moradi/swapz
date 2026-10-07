@@ -2,7 +2,7 @@
 set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in blockdev cmp dd dmsetup losetup modprobe python3 timeout truncate; do
+for tool in blockdev cmp dd dmsetup losetup modprobe python3 truncate; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 
@@ -12,8 +12,13 @@ IMG="$TMP/backing.img"
 LOWER="swapz-v22-repl-lower-$TAG"
 TARGET="swapz-v22-repl-$TAG"
 LOOP=""
+KEEP_STATE=0
 
 cleanup() {
+  if (( KEEP_STATE )); then
+    echo "preserving failed state: target=$TARGET lower=$LOWER loop=$LOOP tmp=$TMP" >&2
+    return
+  fi
   dmsetup remove "$TARGET" >/dev/null 2>&1 || true
   dmsetup remove "$LOWER" >/dev/null 2>&1 || true
   [[ -z "$LOOP" ]] || losetup -d "$LOOP" >/dev/null 2>&1 || true
@@ -40,30 +45,48 @@ Path(sys.argv[1]).write_bytes((b"swapz-old-authoritative-" * 200)[:4096].ljust(4
 Path(sys.argv[2]).write_bytes(os.urandom(4096))
 PY
 
-dd if="$TMP/old.bin" of="/dev/mapper/$TARGET" bs=4096 count=1    oflag=direct conv=notrunc status=none
-# Force the staged old record to persistent lower storage.
-blockdev --flushbufs "/dev/mapper/$TARGET"
+dd if="$TMP/old.bin" of="/dev/mapper/$TARGET" bs=4096 count=1 \
+   oflag=direct conv=notrunc,fsync status=none
 
-dd if="/dev/mapper/$TARGET" of="$TMP/old-read.bin" bs=4096 count=1    iflag=direct status=none
+dd if="/dev/mapper/$TARGET" of="$TMP/old-read.bin" bs=4096 count=1 \
+   iflag=direct status=none
 cmp "$TMP/old.bin" "$TMP/old-read.bin"
 
-# Turn the already-open lower mapped device into a deterministic write/read failure.
+# Turn the already-open lower mapped device into a deterministic failure.
 dmsetup suspend "$LOWER"
 dmsetup load "$LOWER" --table "0 $SECTORS error"
 dmsetup resume "$LOWER"
 
 # The raw replacement must fail rather than early-complete.
+dd if="$TMP/new.bin" of="/dev/mapper/$TARGET" bs=4096 count=1 \
+   oflag=direct conv=notrunc status=none 2>"$TMP/replacement.err" &
+WRITER_PID=$!
+DEADLINE=$((SECONDS + 30))
+while kill -0 "$WRITER_PID" 2>/dev/null; do
+  if (( SECONDS >= DEADLINE )); then
+    echo "raw replacement hung instead of failing; writer_pid=$WRITER_PID" >&2
+    ps -p "$WRITER_PID" -o pid,ppid,stat,wchan:32,etime,cmd >&2 || true
+    if [[ -r "/proc/$WRITER_PID/stack" ]]; then
+      cat "/proc/$WRITER_PID/stack" >&2 || true
+    fi
+    dmsetup status "$TARGET" >&2 || true
+    dmsetup table "$TARGET" >&2 || true
+    kill -TERM "$WRITER_PID" 2>/dev/null || true
+    sleep 1
+    kill -KILL "$WRITER_PID" 2>/dev/null || true
+    disown "$WRITER_PID" 2>/dev/null || true
+    KEEP_STATE=1
+    exit 124
+  fi
+  sleep 0.1
+done
+
 set +e
-timeout --signal=TERM --kill-after=5s 30s   dd if="$TMP/new.bin" of="/dev/mapper/$TARGET" bs=4096 count=1      oflag=direct conv=notrunc status=none 2>"$TMP/replacement.err"
+wait "$WRITER_PID"
 RC=$?
 set -e
 if (( RC == 0 )); then
   echo "raw replacement unexpectedly succeeded over failing lower device" >&2
-  exit 1
-fi
-if (( RC == 124 || RC == 137 )); then
-  echo "raw replacement hung instead of failing" >&2
-  dmsetup status "$TARGET" >&2 || true
   exit 1
 fi
 
@@ -75,12 +98,13 @@ grep -q 'failed=1' <<<"$STATUS" || {
 }
 
 # Restore the lower path without touching swapz.  A staged-mode READ is allowed after
-# target failure specifically so swapoff/recovery can retrieve the last good data.
+# target failure so swapoff/recovery can retrieve the last good persistent data.
 dmsetup suspend "$LOWER"
 dmsetup load "$LOWER" --table "0 $SECTORS linear $LOOP 0"
 dmsetup resume "$LOWER"
 
-dd if="/dev/mapper/$TARGET" of="$TMP/recovered.bin" bs=4096 count=1    iflag=direct status=none
+dd if="/dev/mapper/$TARGET" of="$TMP/recovered.bin" bs=4096 count=1 \
+   iflag=direct status=none
 cmp "$TMP/old.bin" "$TMP/recovered.bin"
 
 STATUS2=$(dmsetup status "$TARGET")
