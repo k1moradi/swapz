@@ -1658,7 +1658,9 @@ static void swapz_process_bio(struct swapz_context *context, struct bio *bio)
 {
 	int error = 0;
 
-	if (unlikely(context->failed)) {
+	if (unlikely(context->failed) &&
+	    !(context->strategy == SWAPZ_STRATEGY_STAGED &&
+	      (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_DISCARD))) {
 		swapz_complete_bio(bio, -EIO);
 		return;
 	}
@@ -1729,6 +1731,11 @@ static void swapz_io_worker(struct work_struct *work)
 	for (;;) {
 		struct swapz_per_bio *entry;
 		struct swapz_per_bio *next;
+		int error;
+
+		error = swapz_reap_inflight(context, false);
+		if (error && error != -EAGAIN && !context->failed)
+			swapz_set_failed(context, error);
 
 		spin_lock_irq(&context->queue_lock);
 		list_splice_init(&context->queued_bios, &local_bios);
@@ -1743,35 +1750,41 @@ static void swapz_io_worker(struct work_struct *work)
 		}
 
 		/*
-		 * A single compressed record can benefit from a short coalescing
-		 * window, but V2's original 0.5-1 ms delay was too expensive on QD1.
-		 * Multiple records have already achieved useful packing and are
-		 * flushed without an added sleep.
+		 * V2.2 does not sleep merely to make a pack larger.  All BIOs already
+		 * available to the worker were consumed above, so seal what exists and
+		 * keep the lower device continuously busy.
 		 */
 		if (context->pack_record_count && !context->failed) {
-			if (context->pack_record_count == 1)
-				usleep_range(SWAPZ_PACK_WAIT_MIN_US,
-					     SWAPZ_PACK_WAIT_MAX_US);
-			if (!swapz_queue_is_empty(context))
-				continue;
 			if (swapz_flush_pack(context, false, true))
 				context->failed = true;
 			continue;
 		}
 
 		/*
-		 * Raw pages and ready compressed containers share one serialized
-		 * lower request.  Do not delay here: any BIOs already available were
-		 * drained above, so a QD1 issuer cannot provide another request until
-		 * this batch completes.
+		 * If no lower write is active, submit whatever the fill buffer already
+		 * contains.  If a write is active, leave the second buffer available for
+		 * newly arriving BIOs; the dm-io completion callback requeues this worker.
 		 */
-		if (context->write_batch_block_count && !context->failed) {
-			if (!swapz_queue_is_empty(context))
-				continue;
-			if (swapz_flush_write_batch(context))
+		if (!context->failed && swapz_fill_buffer(context)->block_count) {
+			error = swapz_maybe_submit_fill(context);
+			if (error && error != -EAGAIN) {
 				context->failed = true;
-			continue;
+				continue;
+			}
 		}
+
+		if (!swapz_queue_is_empty(context))
+			continue;
+
+		/*
+		 * Completion can race the final queue check.  Reap once more before
+		 * returning; queue_work() from the callback covers completions after it.
+		 */
+		error = swapz_reap_inflight(context, false);
+		if (!error)
+			continue;
+		if (error != -EAGAIN)
+			context->failed = true;
 
 		break;
 	}
@@ -1783,7 +1796,11 @@ static int swapz_map(struct dm_target *target, struct bio *bio)
 	struct swapz_per_bio *entry;
 	unsigned long flags;
 
-	if (unlikely(!READ_ONCE(context->accepting_io) || READ_ONCE(context->failed)))
+	if (unlikely(!READ_ONCE(context->accepting_io)))
+		return DM_MAPIO_KILL;
+	if (unlikely(READ_ONCE(context->failed)) &&
+	    !(context->strategy == SWAPZ_STRATEGY_STAGED &&
+	      (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_DISCARD)))
 		return DM_MAPIO_KILL;
 
 	if (bio_op(bio) == REQ_OP_READ &&
