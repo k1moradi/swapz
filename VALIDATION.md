@@ -573,3 +573,54 @@ FOCUSED ASYNC/LIVE-GC PASS — BROADER CORRECTNESS STILL REQUIRED
 ```
 
 No performance conclusion should be drawn until the broader correctness suite passes.
+
+
+## V2.2 full correctness PASS
+
+The stale fill-buffer fix kernel source
+`0f40f52956ff0b4ffc18549b916a54ce55847c02` has now passed the complete virtual
+correctness campaign with the freshly built module identity verified.
+
+Passed coverage includes:
+
+- five 100,000-operation randomized seeds in opportunistic mode;
+- 30,000-operation live-GC readback;
+- selectivity and packed-GC checks;
+- five 100,000-operation randomized seeds in staged mode;
+- staged 30,000-operation live-GC readback;
+- staged A/B buffer recall and cancellation;
+- staged lower-write failure recovery;
+- same-slot staged replacement preservation with an incompressible replacement payload;
+- no-DISCARD live-GC;
+- lower read-fault and batched write-fault propagation;
+- 100 create/use/destroy lifecycle cycles;
+- loop smoke and segment-rotation regressions;
+- physical-write batching regression;
+- bounded real swap pressure including swapoff, second swapon, and readback.
+
+No swapz/Device Mapper WARN, BUG, Oops, hung task, lockup, or deadlock was observed.
+Expected injected lower-I/O errors and unrelated perf sample-rate adjustment messages were
+recorded but are not correctness failures.
+
+The exact tested kernel baseline is preserved as:
+
+```text
+v2.2-correctness-pass
+0f40f52956ff0b4ffc18549b916a54ce55847c02
+```
+
+Post-validation harness cleanup on `main` made two test-only improvements without changing
+the kernel source:
+
+1. `staged-rewrite-fault.sh` now uses a deterministic high-entropy replacement payload and
+   asserts raw fallback, matching the synchronous-failure scenario the test intends to cover.
+2. staged fault tests accept either a built-in Device Mapper `error` target or a loadable
+   `dm-error` module.
+3. `correctness.sh` now accepts `SWAPZ_LONG_STRATEGY=staged` for the long randomized/live-GC
+   gates while keeping selectivity and packed-GC opportunistic.
+
+Status:
+
+```text
+FULL CORRECTNESS PASS — PERFORMANCE GATE OPEN
+```
