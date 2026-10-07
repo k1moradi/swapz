@@ -30,7 +30,10 @@ import random, sys
 
 rng = random.Random(0x5A7A2202)
 out = bytearray()
-for page in range(96):
+# Keep the writer short enough that the shell reaches the recall checks while
+# the first 500 ms lower write is still active. A larger fixture can advance
+# past the intended A/B staged-buffer window before the checks begin.
+for page in range(9):
     random_half = bytes(rng.randrange(256) for _ in range(2048))
     repeated = bytes([(page * 17 + 3) & 0xff]) * 2048
     out += random_half + repeated
@@ -89,7 +92,7 @@ read_page() {
 # With staged compressed writes, the first page can become Buffer A and be
 # submitted immediately; while its 500 ms lower write is active, later pages
 # early-complete into Buffer B.
-dd if="$TMP/pages.bin" of="/dev/mapper/$TARGET" bs=4096 count=96 oflag=direct conv=notrunc status=none &
+dd if="$TMP/pages.bin" of="/dev/mapper/$TARGET" bs=4096 count=9 oflag=direct conv=notrunc status=none &
 WRITER=$!
 
 wait_state 8
