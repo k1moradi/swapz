@@ -8,6 +8,14 @@ The V2.2 hypothesis is intentionally narrow:
 
 This is a proof-of-concept, not production storage software. V2.1 is the last software-validated baseline. V2.2 is an unvalidated experiment for comparing immediate, opportunistic streaming, and staged streaming policies plus the throughput/latency batch-size plateau.
 
+## Project planning
+
+- [`ROADMAP.md`](ROADMAP.md) defines the version sequence, milestone boundaries, and exit criteria.
+- [`TODO.md`](TODO.md) is the actionable checklist for the current and future milestones.
+- [`VALIDATION.md`](VALIDATION.md) records completed evidence and validated baselines.
+- [`CODEX_VALIDATION.md`](CODEX_VALIDATION.md) is the active secondary-tester contract.
+
+Future roadmap entries are planning context, not authorization to start them early.
 ## V2.2 scope
 
 - Linux Device Mapper target name: `swapz`
