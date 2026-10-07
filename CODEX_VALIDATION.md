@@ -227,6 +227,43 @@ line, option, and diagnostic text. Do not summarize warnings only by category.
 Do not claim any source-reviewed race fixed until the focused runtime regression below
 passes on a freshly loaded module.
 
+### Pre-reboot source-only hardening gate
+
+While an older module is pinned and reboot permission has not been granted, run only:
+
+```bash
+git fetch origin --prune
+git reset --hard origin/main
+bash tests/runtime/source-invariants.sh
+make -C kernel clean KDIR=/lib/modules/$(uname -r)/build
+make -C kernel KDIR=/lib/modules/$(uname -r)/build W=1
+make -C userspace clean && make -C userspace
+make -C tests clean && make -C tests test
+```
+
+Also run the model under ASan/UBSan.
+
+Do not attempt to unload/replace the pinned module and do not reboot without explicit
+operator authorization.
+
+The current source must contain all of these pre-reboot hardening properties:
+
+- completion token is consumed exactly once;
+- no `io_done` or obsolete `completion_work` path remains;
+- async lower writes have an independent reclaim-safe delayed watchdog;
+- a timed-out lower write fails non-early upper BIOs without recycling the physical buffer;
+- a late completion after target failure cannot unaccount/destroy the previous good mapping;
+- a same-slot rewrite persists any uncommitted previous generation before advancing the slot generation.
+
+After a future explicitly authorized reboot, add this regression to the correctness gate:
+
+```bash
+sudo bash tests/runtime/staged-rewrite-fault.sh
+```
+
+It must prove that an early-completed staged generation survives a failed replacement of
+the same logical page.
+
 ### Focused gate
 
 After building the current `origin/main`, run:
