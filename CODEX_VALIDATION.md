@@ -40,6 +40,36 @@ failure, keep the correction minimal, and report the exact diff.
 
 Feature development and substantive kernel bug fixing remain out of scope for Codex.
 
+### Review-after-fix workflow
+
+When Codex makes an allowed minimal compile/build or mechanical test-harness fix, the
+workflow is:
+
+1. make the smallest possible fix;
+2. run the source-invariant gate and the focused test(s) relevant to that fix;
+3. if those pass, commit and push the fix as a separate commit;
+4. report:
+   - exact commit SHA;
+   - exact files changed;
+   - concise rationale;
+   - focused tests run and their results;
+   - whether any runtime semantics were intentionally changed;
+5. stop feature work and hand the result back to the primary developer.
+
+The primary developer will then review the exact diff **and the surrounding code**, not only
+the commit message or test result. The primary developer may keep, narrow, correct, or
+revert the Codex fix if it:
+
+- is broader than necessary;
+- changes runtime semantics unexpectedly;
+- alters synchronization/ownership behavior;
+- weakens an assertion or test fixture;
+- hides a real failure;
+- changes architecture, performance policy, or feature scope.
+
+A Codex fix passing its focused test is therefore **provisional until primary-developer
+review**.
+
 A failure is useful. Do not optimize the report toward success.
 
 ## Mandatory checkout gate
