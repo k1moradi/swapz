@@ -2034,6 +2034,7 @@ static void swapz_presuspend(struct dm_target *target)
 	} else if (context->inflight_buffer_id >= 0) {
 		swapz_reap_inflight(context, true);
 	}
+	swapz_wait_async_callbacks(context);
 	flush_workqueue(context->workqueue);
 }
 
@@ -2159,10 +2160,17 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 	}
 }
 
+static void swapz_wait_async_callbacks(struct swapz_context *context)
+{
+	wait_event(context->async_callback_wait,
+		   atomic_read(&context->async_callbacks) == 0);
+}
+
 static void swapz_free_context(struct swapz_context *context)
 {
 	if (!context)
 		return;
+	WARN_ON_ONCE(atomic_read(&context->async_callbacks) != 0);
 	if (context->workqueue) {
 		flush_workqueue(context->workqueue);
 		destroy_workqueue(context->workqueue);
@@ -2218,6 +2226,7 @@ static void swapz_dtr(struct dm_target *target)
 		} else if (context->inflight_buffer_id >= 0) {
 			swapz_reap_inflight(context, true);
 		}
+		swapz_wait_async_callbacks(context);
 		flush_workqueue(context->workqueue);
 	}
 	swapz_free_context(context);
