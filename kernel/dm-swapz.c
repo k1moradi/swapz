@@ -968,8 +968,13 @@ retry:
 	buffer->block_count++;
 	swapz_note_block_written(context);
 
+	/*
+	 * Immediate mode is drained by the worker directly after each upper BIO,
+	 * which preserves a true one-operation-at-a-time baseline without
+	 * transferring completion ownership twice through this helper.
+	 */
 	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
-		return swapz_flush_write_batch(context);
+		return 0;
 
 	if (buffer->block_count >= context->max_batch_blocks) {
 		error = swapz_maybe_submit_fill(context);
@@ -1745,6 +1750,12 @@ static void swapz_io_worker(struct work_struct *work)
 			list_for_each_entry_safe(entry, next, &local_bios, list) {
 				list_del_init(&entry->list);
 				swapz_process_bio(context, entry->bio);
+				if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE &&
+				    !context->failed) {
+					if (swapz_flush_pack(context, false, true) ||
+					    swapz_flush_write_batch(context))
+						context->failed = true;
+				}
 			}
 			continue;
 		}
@@ -1780,11 +1791,13 @@ static void swapz_io_worker(struct work_struct *work)
 		 * Completion can race the final queue check.  Reap once more before
 		 * returning; queue_work() from the callback covers completions after it.
 		 */
-		error = swapz_reap_inflight(context, false);
-		if (!error)
-			continue;
-		if (error != -EAGAIN)
-			context->failed = true;
+		if (context->inflight_buffer_id >= 0) {
+			error = swapz_reap_inflight(context, false);
+			if (!error)
+				continue;
+			if (error != -EAGAIN)
+				context->failed = true;
+		}
 
 		break;
 	}
@@ -1834,6 +1847,20 @@ static void swapz_presuspend(struct dm_target *target)
 	struct swapz_context *context = target->private;
 
 	WRITE_ONCE(context->accepting_io, false);
+	flush_workqueue(context->workqueue);
+
+	/*
+	 * No new upper BIO can enter now.  Seal the current pack and synchronously
+	 * drain both stream buffers so dm suspend never leaves a lower write using
+	 * memory that teardown could free.
+	 */
+	if (!context->failed) {
+		if (swapz_flush_pack(context, false, true) ||
+		    swapz_flush_write_batch(context))
+			context->failed = true;
+	} else if (context->inflight_buffer_id >= 0) {
+		swapz_reap_inflight(context, true);
+	}
 	flush_workqueue(context->workqueue);
 }
 
@@ -2002,8 +2029,16 @@ static void swapz_dtr(struct dm_target *target)
 	if (!context)
 		return;
 	WRITE_ONCE(context->accepting_io, false);
-	if (context->workqueue)
+	if (context->workqueue) {
 		flush_workqueue(context->workqueue);
+		if (!context->failed) {
+			swapz_flush_pack(context, false, true);
+			swapz_flush_write_batch(context);
+		} else if (context->inflight_buffer_id >= 0) {
+			swapz_reap_inflight(context, true);
+		}
+		flush_workqueue(context->workqueue);
+	}
 	swapz_free_context(context);
 }
 
