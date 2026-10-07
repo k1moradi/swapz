@@ -178,6 +178,30 @@ If both source-version values are non-empty, they must match. Also record the ex
 Do not run the focused regression until the old mapping is gone and the loaded module is
 unambiguously the freshly built candidate.
 
+### Completion-token lifetime fix gate
+
+The previous completion-kick patch was not sufficient to establish the live-GC root cause.
+A second concrete race was found in stream-buffer completion ownership.
+
+The old callback published a separate `io_done=true` flag before calling `complete()`.
+The worker could observe that flag, finalize/reset/reinitialize the buffer, and then the old
+callback could call `complete()` on a completion object already reused for a new request.
+
+The current candidate removes `io_done` entirely.
+
+Verify:
+
+```bash
+grep -n 'try_wait_for_completion' kernel/dm-swapz.c
+! grep -n '\bio_done\b' kernel/dm-swapz.c
+```
+
+The callback must use the kernel completion object as the sole publication point, and the
+worker must acquire that completion token before buffer reuse.
+
+Do not claim the bug fixed from source review alone. The focused runtime regression below is
+the proof gate.
+
 ### Focused gate
 
 After building the current `origin/main`, run:
