@@ -1,14 +1,14 @@
-# swapz V2 (experimental)
+# swapz V2.1 (experimental)
 
 `swapz` is an experimental Device Mapper target for **dedicated swap partitions on slow storage**.  It targets old HDDs, USB flash drives, SD/eMMC media, and SATA SSDs where storage bandwidth and flash write endurance matter more than high queue-depth NVMe throughput.
 
-The V2 hypothesis is intentionally narrow:
+The V2.1 hypothesis is intentionally narrow:
 
 > LZ4-compress 4 KiB swap pages, pack multiple compressed pages into 4 KiB lower-device writes, append sequentially through 1 MiB segments, and garbage-collect only low-live victim segments.  This should reduce host bytes written without V1's whole-live-set compaction penalty.
 
 This is a proof-of-concept, not production storage software yet.
 
-## V2 scope
+## V2.1 scope
 
 - Linux Device Mapper target name: `swapz`
 - module: `dm-swapz.ko`
@@ -16,6 +16,7 @@ This is a proof-of-concept, not production storage software yet.
 - dedicated block partition/device only
 - LZ4 only
 - one serialized `WQ_MEM_RECLAIM` worker
+- up to 8 consecutive physical 4 KiB output blocks are coalesced into one serialized 32 KiB lower request
 - volatile in-RAM mapping table; no persistent metadata
 - 4 KiB physical packed containers, up to 8 compressed logical pages per container
 - raw 4 KiB fallback for pages that do not save at least 512 bytes with LZ4
@@ -27,7 +28,7 @@ This is a proof-of-concept, not production storage software yet.
 - lower discard is auto-detected, optional, and permanently disabled after a runtime failure
 - hibernation/resume is unsupported
 - encryption and swap-file backing are out of scope
-- NVMe/high-concurrency tuning is out of scope
+- NVMe/high-concurrency tuning is out of scope; batching is intended to improve slow serialized media without adding lower queue depth
 
 ## Why the physical partition is larger than logical swap
 
@@ -42,7 +43,7 @@ Example:
 128 GiB SD partition       -> 16-32 GiB logical swap remains a useful endurance-oriented choice
 ```
 
-V2 can operate with much less overprovisioning than V1, but conservative sizing is still recommended until physical-media benchmarks establish the best endurance/performance tradeoff.
+V2.1 can operate with much less overprovisioning than V1, but conservative sizing is still recommended until physical-media benchmarks establish the best endurance/performance tradeoff.
 
 ## Storage layout
 
@@ -55,6 +56,9 @@ Linux swap 4 KiB logical writes
         +-- LZ4 compress
         +-- pack <= 8 records into a 4 KiB container
         +-- raw 4 KiB fallback
+        |
+        +-- coalesce <= 8 consecutive physical blocks
+        |   into one <= 32 KiB serialized lower write
         |
         v
 append-only current segment
@@ -83,16 +87,16 @@ make -C userspace
 make -C tests test
 ```
 
-V1 was validated on Ubuntu Linux 7.0.0-34 with GCC, randomized block tests, fault injection, lifecycle testing, and bounded real swap pressure.  V2 changes the allocator and therefore requires a fresh Linux 7.0.x validation pass before use.
+V2 was validated on Ubuntu Linux 7.0.0-34 with randomized block tests, live-GC stress, fault injection, lifecycle testing, and bounded real swap pressure. V2.1 keeps that allocator and adds serialized multi-block lower-write batching; this new write path requires a fresh Linux 7.0.x validation pass.
 
 ## DKMS
 
-From a source tree installed under `/usr/src/swapz-0.2.0`:
+From a source tree installed under `/usr/src/swapz-0.2.1`:
 
 ```bash
-dkms add -m swapz -v 0.2.0
-dkms build -m swapz -v 0.2.0
-dkms install -m swapz -v 0.2.0
+dkms add -m swapz -v 0.2.1
+dkms build -m swapz -v 0.2.1
+dkms install -m swapz -v 0.2.1
 ```
 
 ## Manual activation
