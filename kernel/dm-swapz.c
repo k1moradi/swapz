@@ -262,12 +262,32 @@ struct swapz_context {
 
 static inline bool swapz_mapping_valid(const struct swapz_mapping *mapping)
 {
-	return mapping->flags & SWAPZ_MAP_VALID;
+	return mapping->meta & SWAPZ_MAP_VALID_BIT;
+}
+
+static inline bool swapz_mapping_compressed(const struct swapz_mapping *mapping)
+{
+	return mapping->meta & SWAPZ_MAP_COMPRESSED_BIT;
+}
+
+static inline u16 swapz_mapping_length(const struct swapz_mapping *mapping)
+{
+	return mapping->meta & SWAPZ_MAP_LENGTH_MASK;
 }
 
 static inline u32 swapz_mapping_segment(const struct swapz_mapping *mapping)
 {
 	return mapping->physical_block / SWAPZ_SEGMENT_BLOCKS;
+}
+
+static inline u32 swapz_mapping_last_block(const struct swapz_mapping *mapping)
+{
+	u32 bytes;
+
+	if (!swapz_mapping_compressed(mapping))
+		return mapping->physical_block;
+	bytes = mapping->offset + swapz_mapping_length(mapping);
+	return mapping->physical_block + (bytes > SWAPZ_BLOCK_BYTES ? 1 : 0);
 }
 
 static inline sector_t swapz_physical_sector(u32 physical_block)
@@ -283,13 +303,15 @@ static void swapz_set_failed(struct swapz_context *context, int error)
 	context->stats.io_errors++;
 }
 
-static int swapz_backing_io(struct swapz_context *context, enum req_op operation,
-			    u32 physical_block, void *buffer)
+static int swapz_backing_io_blocks(struct swapz_context *context,
+				   enum req_op operation,
+				   u32 physical_block, u32 block_count,
+				   void *buffer)
 {
 	struct dm_io_region region = {
 		.bdev = context->backing->bdev,
 		.sector = swapz_physical_sector(physical_block),
-		.count = SWAPZ_BLOCK_SECTORS,
+		.count = (sector_t)block_count * SWAPZ_BLOCK_SECTORS,
 	};
 	struct dm_io_request request = {
 		/*
@@ -299,9 +321,9 @@ static int swapz_backing_io(struct swapz_context *context, enum req_op operation
 		 */
 		.bi_opf = operation | (operation == REQ_OP_READ ? REQ_SYNC : 0),
 		.mem = {
-			.type = DM_IO_KMEM,
+			.type = DM_IO_VMA,
 			.offset = 0,
-			.ptr.addr = buffer,
+			.ptr.vma = buffer,
 		},
 		.notify = {
 			.fn = NULL,
@@ -321,15 +343,23 @@ static int swapz_backing_io(struct swapz_context *context, enum req_op operation
 	}
 
 	if (operation == REQ_OP_READ)
-		context->stats.physical_read_bytes += SWAPZ_BLOCK_BYTES;
+		context->stats.physical_read_bytes +=
+			(u64)block_count * SWAPZ_BLOCK_BYTES;
 
 	return 0;
+}
+
+static int swapz_read_blocks(struct swapz_context *context, u32 physical_block,
+			     u32 block_count, void *buffer)
+{
+	return swapz_backing_io_blocks(context, REQ_OP_READ, physical_block,
+				       block_count, buffer);
 }
 
 static int swapz_read_block(struct swapz_context *context, u32 physical_block,
 			    void *buffer)
 {
-	return swapz_backing_io(context, REQ_OP_READ, physical_block, buffer);
+	return swapz_read_blocks(context, physical_block, 1, buffer);
 }
 
 static void swapz_stream_io_complete(unsigned long error_bits, void *data)
@@ -383,11 +413,6 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 
 	error = dm_io(&request, 1, &region, NULL, IOPRIO_DEFAULT);
 	if (error) {
-		/*
-		 * Normalize synchronous submission rejection into the asynchronous
-		 * completion path.  The reaper then owns all BIO completion and staged
-		 * recovery decisions exactly once.
-		 */
 		buffer->io_error = error;
 		WRITE_ONCE(buffer->io_done, true);
 		complete(&buffer->completion);
@@ -438,28 +463,52 @@ static void swapz_complete_bio(struct bio *bio, int error)
 	bio_endio(bio);
 }
 
-static void swapz_unaccount_mapping(struct swapz_context *context,
-				    const struct swapz_mapping *mapping)
+static int swapz_account_block(struct swapz_context *context, u32 physical_block)
 {
-	u32 physical_block;
-	u32 segment;
+	u32 segment = physical_block / SWAPZ_SEGMENT_BLOCKS;
 
-	if (!swapz_mapping_valid(mapping))
-		return;
+	if (physical_block >= context->physical_blocks ||
+	    segment >= context->segment_count ||
+	    context->block_live_records[physical_block] == U8_MAX)
+		return -EUCLEAN;
 
-	physical_block = mapping->physical_block;
-	segment = swapz_mapping_segment(mapping);
-	if (WARN_ON_ONCE(physical_block >= context->physical_blocks ||
-			 context->block_live_records[physical_block] == 0 ||
-			 segment >= context->segment_count ||
-			 context->segment_live_blocks[segment] == 0)) {
-		swapz_set_failed(context, -EUCLEAN);
-		return;
-	}
+	if (!context->block_live_records[physical_block])
+		context->segment_live_blocks[segment]++;
+	context->block_live_records[physical_block]++;
+	return 0;
+}
+
+static int swapz_unaccount_block(struct swapz_context *context, u32 physical_block)
+{
+	u32 segment = physical_block / SWAPZ_SEGMENT_BLOCKS;
+
+	if (physical_block >= context->physical_blocks ||
+	    segment >= context->segment_count ||
+	    !context->block_live_records[physical_block] ||
+	    !context->segment_live_blocks[segment])
+		return -EUCLEAN;
 
 	context->block_live_records[physical_block]--;
 	if (!context->block_live_records[physical_block])
 		context->segment_live_blocks[segment]--;
+	return 0;
+}
+
+static void swapz_unaccount_mapping(struct swapz_context *context,
+				    const struct swapz_mapping *mapping)
+{
+	u32 last_block;
+	int error;
+
+	if (!swapz_mapping_valid(mapping))
+		return;
+
+	last_block = swapz_mapping_last_block(mapping);
+	error = swapz_unaccount_block(context, mapping->physical_block);
+	if (!error && last_block != mapping->physical_block)
+		error = swapz_unaccount_block(context, last_block);
+	if (WARN_ON_ONCE(error))
+		swapz_set_failed(context, error);
 }
 
 static void swapz_invalidate_mapping(struct swapz_context *context,
@@ -469,37 +518,50 @@ static void swapz_invalidate_mapping(struct swapz_context *context,
 
 	swapz_unaccount_mapping(context, mapping);
 	mapping->physical_block = SWAPZ_EMPTY_BLOCK;
-	mapping->stored_length = 0;
-	mapping->record_index = 0;
-	mapping->flags = 0;
+	mapping->offset = 0;
+	mapping->meta = 0;
 }
 
 static void swapz_install_mapping(struct swapz_context *context, u32 logical_page,
-				  u32 physical_block, u16 stored_length,
-				  u8 record_index, u8 flags)
+				  u32 physical_block, u16 offset,
+				  u16 stored_length, u8 flags)
 {
 	struct swapz_mapping *mapping = &context->mappings[logical_page];
-	u32 segment = physical_block / SWAPZ_SEGMENT_BLOCKS;
+	u32 last_block = physical_block;
+	u16 meta = SWAPZ_MAP_VALID_BIT;
+	int error;
+
+	if (flags & SWAPZ_RECORD_COMPRESSED) {
+		if (!stored_length || stored_length > SWAPZ_MAP_LENGTH_MASK ||
+		    offset >= SWAPZ_BLOCK_BYTES)
+			goto corrupt;
+		last_block = physical_block +
+			(offset + stored_length > SWAPZ_BLOCK_BYTES ? 1 : 0);
+		if (physical_block / SWAPZ_SEGMENT_BLOCKS !=
+		    last_block / SWAPZ_SEGMENT_BLOCKS)
+			goto corrupt;
+		meta |= SWAPZ_MAP_COMPRESSED_BIT | stored_length;
+	} else if (offset || stored_length) {
+		goto corrupt;
+	}
 
 	swapz_unaccount_mapping(context, mapping);
 	if (unlikely(context->failed))
 		return;
 
-	if (WARN_ON_ONCE(physical_block >= context->physical_blocks ||
-			 segment >= context->segment_count ||
-			 context->block_live_records[physical_block] >= SWAPZ_MAX_PACKED_RECORDS)) {
-		swapz_set_failed(context, -EUCLEAN);
-		return;
-	}
-
-	if (!context->block_live_records[physical_block])
-		context->segment_live_blocks[segment]++;
-	context->block_live_records[physical_block]++;
+	error = swapz_account_block(context, physical_block);
+	if (!error && last_block != physical_block)
+		error = swapz_account_block(context, last_block);
+	if (error)
+		goto corrupt;
 
 	mapping->physical_block = physical_block;
-	mapping->stored_length = stored_length;
-	mapping->record_index = record_index;
-	mapping->flags = flags | SWAPZ_MAP_VALID;
+	mapping->offset = offset;
+	mapping->meta = meta;
+	return;
+
+corrupt:
+	swapz_set_failed(context, -EUCLEAN);
 }
 
 static u32 swapz_current_physical_block(const struct swapz_context *context)
