@@ -1372,6 +1372,7 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 				goto fail;
 
 			error = swapz_store_page(context, NULL, page,
+						 context->generations[page],
 						 context->input_buffer,
 						 context->compressed_buffer, true, false);
 			if (error)
@@ -1438,7 +1439,9 @@ static int swapz_advance_segment(struct swapz_context *context)
 {
 	int error;
 
-	if (context->pack_record_count || context->write_batch_block_count)
+	if (context->pack_record_count ||
+	    swapz_fill_buffer(context)->block_count ||
+	    context->inflight_buffer_id >= 0)
 		return -EDEADLK;
 
 	if (context->segment_state[context->current_segment] == SWAPZ_SEGMENT_OPEN)
@@ -1479,19 +1482,25 @@ static int swapz_advance_segment(struct swapz_context *context)
 static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 {
 	u32 logical_page = (u32)(bio->bi_iter.bi_sector / SWAPZ_BLOCK_SECTORS);
+	u32 generation;
 	int error;
 
 	if (logical_page >= context->logical_pages)
 		return -ERANGE;
 
+	generation = ++context->generations[logical_page];
+	if (unlikely(!generation))
+		generation = ++context->generations[logical_page];
+
 	/*
-	 * Keep the current BIO isolated from compaction scratch.  A store can
-	 * trigger segment advance after flushing the final pending container, and
-	 * GC reuses input_buffer/compressed_buffer while copying victim live pages.
+	 * Keep the current BIO isolated from GC scratch.  The resulting compressed
+	 * or raw record is copied into a bounded stream buffer before this scratch
+	 * page is reused.
 	 */
 	swapz_copy_from_bio(bio, context->write_buffer);
 	context->stats.logical_write_bytes += SWAPZ_BLOCK_BYTES;
-	error = swapz_store_page(context, bio, logical_page, context->write_buffer,
+	error = swapz_store_page(context, bio, logical_page, generation,
+				 context->write_buffer,
 				 context->write_compressed_buffer, false, true);
 	return error;
 }
