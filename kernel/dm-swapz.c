@@ -1865,6 +1865,20 @@ static void swapz_io_hints(struct dm_target *target, struct queue_limits *limits
 	limits->max_discard_sectors = UINT_MAX;
 }
 
+static const char *swapz_strategy_name(enum swapz_stream_strategy strategy)
+{
+	switch (strategy) {
+	case SWAPZ_STRATEGY_IMMEDIATE:
+		return "immediate";
+	case SWAPZ_STRATEGY_OPPORTUNISTIC:
+		return "opportunistic";
+	case SWAPZ_STRATEGY_STAGED:
+		return "staged";
+	default:
+		return "unknown";
+	}
+}
+
 static void swapz_status(struct dm_target *target, status_type_t type,
 			 unsigned int status_flags, char *result, unsigned int maxlen)
 {
@@ -1885,14 +1899,19 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		if (segment_cycle_min == U32_MAX)
 			segment_cycle_min = 0;
 
-		DMEMIT("segment=%u/%u head_blocks=%u free_segments=%u live_blocks=%u "
+		DMEMIT("strategy=%s batch_kib=%u segment=%u/%u head_blocks=%u "
+		       "free_segments=%u live_blocks=%u "
 		       "logical_write=%llu physical_write=%llu physical_write_reqs=%llu "
-		       "multi_write_reqs=%llu max_write_batch=%llu "
+		       "multi_write_reqs=%llu max_write_batch=%llu stream_submit=%llu "
+		       "staged_hits=%llu staged_early=%llu staged_cancel=%llu "
+		       "staged_cancel_blocks=%llu "
 		       "logical_read=%llu physical_read=%llu compressed_payload=%llu "
 		       "compressed_pages=%llu raw_pages=%llu upper_discards=%llu rotations=%llu "
 		       "segment_cycle_min=%u segment_cycle_max=%u "
 		       "gc_victims=%llu gc_scanned=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "lower_discard=%s discard_bytes=%llu discard_failures=%llu failed=%u",
+		       swapz_strategy_name(context->strategy),
+		       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024),
 		       context->current_segment, context->segment_count,
 		       context->segment_write_block, context->free_segments,
 		       context->segment_live_blocks[context->current_segment],
@@ -1901,6 +1920,11 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->stats.physical_write_requests,
 		       context->stats.multi_block_write_requests,
 		       context->stats.max_write_batch_blocks,
+		       context->stats.stream_submit_bytes,
+		       context->stats.staged_read_hits,
+		       context->stats.staged_early_completions,
+		       context->stats.staged_cancellations,
+		       context->stats.staged_cancelled_blocks,
 		       context->stats.logical_read_bytes,
 		       context->stats.physical_read_bytes,
 		       context->stats.compressed_payload_bytes,
@@ -1908,8 +1932,7 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->stats.raw_pages,
 		       context->stats.upper_discards,
 		       context->stats.segment_switches,
-		       segment_cycle_min,
-		       segment_cycle_max,
+		       segment_cycle_min, segment_cycle_max,
 		       context->stats.gc_victims,
 		       context->stats.gc_scanned_mappings,
 		       context->stats.compaction_pages,
@@ -1921,7 +1944,9 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       context->failed ? 1U : 0U);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s", context->backing->name);
+		DMEMIT("%s %s %u", context->backing->name,
+		       swapz_strategy_name(context->strategy),
+		       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024));
 		break;
 	case STATUSTYPE_IMA:
 		break;
@@ -1952,9 +1977,14 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->compressed_buffer);
 	if (context->pack_buffer)
 		free_page((unsigned long)context->pack_buffer);
-	vfree(context->write_batch_buffer);
+	vfree(context->stream_buffers[0].data);
+	vfree(context->stream_buffers[1].data);
+	kvfree(context->stream_buffers[0].blocks);
+	kvfree(context->stream_buffers[1].blocks);
 	kfree(context->lz4_workmem);
 	vfree(context->mappings);
+	kvfree(context->generations);
+	kvfree(context->staged_refs);
 	kvfree(context->segment_high_water);
 	kvfree(context->segment_cycles);
 	kvfree(context->segment_live_blocks);
