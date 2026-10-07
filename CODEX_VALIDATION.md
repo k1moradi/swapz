@@ -122,6 +122,42 @@ publish mappings, and complete upper BIOs.
 This is a forward-progress fix only. It must not change packing, GC policy, or benchmark
 semantics.
 
+### Post-reboot module identity gate
+
+After reboot, first confirm the stale disposable state is gone:
+
+```bash
+sudo dmsetup ls --tree
+lsmod | grep '^dm_swapz' || true
+losetup -a | grep 'swapz-v21-live-gc' || true
+swapon --show
+```
+
+Do not remove or modify unrelated system swap.
+
+Fetch/reset to current `origin/main`, rebuild the kernel module, and load the freshly built
+artifact directly rather than relying on an older installed copy:
+
+```bash
+sudo rmmod dm_swapz 2>/dev/null || true
+sudo insmod kernel/dm-swapz.ko
+```
+
+Record:
+
+```bash
+sha256sum kernel/dm-swapz.ko
+modinfo -F version kernel/dm-swapz.ko
+modinfo -F srcversion kernel/dm-swapz.ko
+cat /sys/module/dm_swapz/srcversion 2>/dev/null || true
+```
+
+If both source-version values are non-empty, they must match. Also record the exact
+`git rev-parse HEAD` used to build the module.
+
+Do not run the focused regression until the old mapping is gone and the loaded module is
+unambiguously the freshly built candidate.
+
 ### Focused gate
 
 After building the current `origin/main`, run:
