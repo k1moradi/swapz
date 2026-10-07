@@ -2019,8 +2019,8 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	u32 index;
 	int error;
 
-	if (argc != 1) {
-		target->error = "Usage: <backing_block_device>";
+	if (argc < 1 || argc > 3) {
+		target->error = "Usage: <backing> [immediate|opportunistic|staged] [batch_kib]";
 		return -EINVAL;
 	}
 	if (target->len % SWAPZ_BLOCK_SECTORS) {
@@ -2035,6 +2035,40 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 	context->target = target;
 	target->private = context;
+	context->strategy = SWAPZ_STRATEGY_OPPORTUNISTIC;
+	context->max_batch_blocks = SWAPZ_DEFAULT_WRITE_BATCH_BLOCKS;
+	context->inflight_buffer_id = -1;
+
+	if (argc >= 2) {
+		if (!strcmp(argv[1], "immediate"))
+			context->strategy = SWAPZ_STRATEGY_IMMEDIATE;
+		else if (!strcmp(argv[1], "opportunistic"))
+			context->strategy = SWAPZ_STRATEGY_OPPORTUNISTIC;
+		else if (!strcmp(argv[1], "staged"))
+			context->strategy = SWAPZ_STRATEGY_STAGED;
+		else {
+			target->error = "Unknown swapz streaming strategy";
+			error = -EINVAL;
+			goto fail;
+		}
+	}
+
+	if (argc >= 3) {
+		u32 batch_kib;
+
+		error = kstrtou32(argv[2], 10, &batch_kib);
+		if (error || batch_kib < 4 || batch_kib > 1024 ||
+		    batch_kib % (SWAPZ_BLOCK_BYTES / 1024)) {
+			target->error = "batch_kib must be a 4 KiB multiple from 4 through 1024";
+			error = -EINVAL;
+			goto fail;
+		}
+		context->max_batch_blocks =
+			batch_kib / (SWAPZ_BLOCK_BYTES / 1024);
+	}
+
+	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
+		context->max_batch_blocks = 1;
 
 	error = dm_get_device(target, argv[0], dm_table_get_mode(target->table),
 			      &context->backing);
@@ -2043,7 +2077,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		goto fail;
 	}
 	if (bdev_is_zoned(context->backing->bdev)) {
-		target->error = "Zoned backing devices are unsupported in V2.1";
+		target->error = "Zoned backing devices are unsupported in V2.2";
 		error = -EOPNOTSUPP;
 		goto fail;
 	}
@@ -2054,7 +2088,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 	if (bdev_logical_block_size(context->backing->bdev) > SWAPZ_BLOCK_BYTES ||
 	    SWAPZ_BLOCK_BYTES % bdev_logical_block_size(context->backing->bdev)) {
-		target->error = "Backing logical block size is incompatible with 4 KiB V2.1 blocks";
+		target->error = "Backing logical block size is incompatible with 4 KiB V2.2 blocks";
 		error = -EINVAL;
 		goto fail;
 	}
@@ -2066,7 +2100,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	logical_pages64 = div_u64(target->len, SWAPZ_BLOCK_SECTORS);
 	if (!logical_pages64 || logical_pages64 > U32_MAX ||
 	    usable_blocks64 > U32_MAX) {
-		target->error = "V2.1 supports at most 16 TiB physical/logical space";
+		target->error = "V2.2 supports at most 16 TiB physical/logical space";
 		error = -E2BIG;
 		goto fail;
 	}
@@ -2077,7 +2111,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	}
 
 	/*
-	 * V2.1 never relies on compression for capacity.  Keep at least 25% of the
+	 * V2.2 never relies on compression for capacity.  Keep at least 25% of the
 	 * logical size (and at least two segments) as physical GC reserve.  This
 	 * makes a low-live victim available even when every logical page is raw.
 	 */
@@ -2102,6 +2136,10 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 
 	context->mappings = vzalloc(array_size(context->logical_pages,
 					       sizeof(*context->mappings)));
+	context->generations = kvcalloc(context->logical_pages,
+				       sizeof(*context->generations), GFP_KERNEL);
+	context->staged_refs = kvcalloc(context->logical_pages,
+				       sizeof(*context->staged_refs), GFP_KERNEL);
 	context->segment_high_water = kvcalloc(context->segment_count,
 					       sizeof(*context->segment_high_water), GFP_KERNEL);
 	context->segment_cycles = kvcalloc(context->segment_count,
@@ -2117,7 +2155,8 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		sizeof(*context->gc_logical_pages), GFP_KERNEL);
 	context->gc_block_counts = kvcalloc(SWAPZ_SEGMENT_BLOCKS,
 					   sizeof(*context->gc_block_counts), GFP_KERNEL);
-	if (!context->mappings || !context->segment_high_water ||
+	if (!context->mappings || !context->generations || !context->staged_refs ||
+	    !context->segment_high_water ||
 	    !context->segment_cycles || !context->segment_live_blocks ||
 	    !context->segment_state || !context->block_live_records ||
 	    !context->gc_logical_pages || !context->gc_block_counts) {
@@ -2125,8 +2164,10 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		error = -ENOMEM;
 		goto fail;
 	}
-	for (index = 0; index < context->logical_pages; ++index)
+	for (index = 0; index < context->logical_pages; ++index) {
 		context->mappings[index].physical_block = SWAPZ_EMPTY_BLOCK;
+		context->generations[index] = 1;
+	}
 	context->segment_state[0] = SWAPZ_SEGMENT_OPEN;
 	context->segment_cycles[0] = 1;
 
@@ -2136,18 +2177,36 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
-	context->write_batch_buffer = vzalloc(SWAPZ_WRITE_BATCH_BYTES);
 	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!context->write_buffer || !context->write_compressed_buffer ||
 	    !context->input_buffer || !context->io_buffer ||
 	    !context->compressed_buffer || !context->pack_buffer ||
-	    !context->write_batch_buffer || !context->lz4_workmem) {
+	    !context->lz4_workmem) {
 		target->error = "Cannot allocate preallocated I/O buffers";
 		error = -ENOMEM;
 		goto fail;
 	}
+
+	for (index = 0; index < ARRAY_SIZE(context->stream_buffers); ++index) {
+		struct swapz_stream_buffer *buffer = &context->stream_buffers[index];
+
+		buffer->context = context;
+		buffer->id = index;
+		buffer->data = vzalloc((size_t)context->max_batch_blocks *
+				      SWAPZ_BLOCK_BYTES);
+		buffer->blocks = kvcalloc(context->max_batch_blocks,
+					 sizeof(*buffer->blocks), GFP_KERNEL);
+		if (!buffer->data || !buffer->blocks) {
+			target->error = "Cannot allocate V2.2 stream buffers";
+			error = -ENOMEM;
+			goto fail;
+		}
+		init_completion(&buffer->completion);
+		swapz_reset_stream_buffer(context, buffer,
+			index ? SWAPZ_BUFFER_FREE : SWAPZ_BUFFER_FILL);
+	}
+	context->fill_buffer_id = 0;
 	swapz_reset_pack(context);
-	swapz_reset_write_batch(context);
 
 	context->io_client = dm_io_client_create();
 	if (IS_ERR(context->io_client)) {
@@ -2186,10 +2245,11 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		goto fail;
 	}
 
-	DMINFO("logical=%u pages physical=%u blocks segments=%u segment_blocks=%u free=%u batch_blocks=%u lower_discard=%s",
+	DMINFO("logical=%u pages physical=%u blocks segments=%u segment_blocks=%u free=%u strategy=%s batch_kib=%u lower_discard=%s",
 	       context->logical_pages, context->physical_blocks,
 	       context->segment_count, SWAPZ_SEGMENT_BLOCKS,
-	       context->free_segments, SWAPZ_WRITE_BATCH_BLOCKS,
+	       context->free_segments, swapz_strategy_name(context->strategy),
+	       context->max_batch_blocks * (SWAPZ_BLOCK_BYTES / 1024),
 	       context->lower_discard_enabled ? "on" : "off");
 	return 0;
 
