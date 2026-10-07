@@ -14,6 +14,12 @@ WRITE_QD=${SWAPZ_BENCH_QD:-64}
 COMPRESS=${SWAPZ_BENCH_COMPRESS:-50}
 BATCHES=${SWAPZ_BENCH_BATCHES:-"4 8 16 32 64 128 256 512 1024"}
 STRATEGIES=${SWAPZ_BENCH_STRATEGIES:-"immediate opportunistic staged"}
+# null_blk's mbps throttle replenishes bytes at 50 ticks/second. A request
+# larger than one tick's byte budget is permanently requeued by null_blk and
+# can never complete. Keep this backend limitation explicit so a large swapz
+# batch cannot be misreported as a swapz timeout.
+NULLBLK_TICKS_PER_SEC=50
+NULLBLK_TICK_BYTES=$(( BANDWIDTH > 0 ? (1048576 / NULLBLK_TICKS_PER_SEC) * BANDWIDTH : 0 ))
 LOGICAL_MIB=32
 COLD_MIB=4
 WRITER_MIB=$((LOGICAL_MIB - COLD_MIB))
@@ -62,16 +68,28 @@ setup_nullblk() {
   echo "$BANDWIDTH" >"$NULL_CFG/mbps"
   [[ -e "$NULL_CFG/discard" ]] && echo 1 >"$NULL_CFG/discard" || true
   echo 1 >"$NULL_CFG/power"
-  local index
+  local index candidate
   index=$(cat "$NULL_CFG/index")
-  BACKING="/dev/nullb$index"
+  BACKING=""
+  # Configfs null_blk naming differs across kernel versions. Newer kernels may
+  # expose /dev/<configfs-name>; older ones commonly expose /dev/nullb<index>.
   for _ in $(seq 1 50); do
-    [[ -b "$BACKING" ]] && break
+    for candidate in "/dev/$NULL_NAME" "/dev/nullb$index"; do
+      if [[ -b "$candidate" ]]; then
+        BACKING="$candidate"
+        break 2
+      fi
+    done
     sleep 0.05
   done
-  [[ -b "$BACKING" ]] || return 1
-  BACKING_KNAME=$(basename "$BACKING")
-  BACKEND="null_blk-${BANDWIDTH}MiBps-${LATENCY_NS}ns-QD1"
+  [[ -n "$BACKING" && -b "$BACKING" ]] || return 1
+  BACKING_KNAME=$(basename "$(readlink -f "/sys/class/block/$(basename "$BACKING")")")
+  [[ -e "/sys/class/block/$BACKING_KNAME/stat" ]] || return 1
+  if (( BANDWIDTH > 0 )); then
+    BACKEND="null_blk-${BANDWIDTH}MiBps-${LATENCY_NS}ns-QD1"
+  else
+    BACKEND="null_blk-unthrottled-${LATENCY_NS}ns-QD1"
+  fi
   return 0
 }
 
@@ -79,6 +97,22 @@ if ! setup_nullblk; then
   echo "ERROR: null_blk with memory_backed+mbps+completion_nsec is required for the controlled V2.2 sweep." >&2
   echo "Use bench/request-plateau.py for a model-only sweep or install a kernel with null_blk controls." >&2
   exit 2
+fi
+
+if (( BANDWIDTH > 0 )); then
+  unsafe=()
+  for batch in $BATCHES; do
+    if (( batch * 1024 > NULLBLK_TICK_BYTES )); then
+      unsafe+=("$batch")
+    fi
+  done
+  if (( ${#unsafe[@]} )); then
+    safe_kib=$(( NULLBLK_TICK_BYTES / 1024 ))
+    echo "ERROR: null_blk mbps backend cannot complete a single request larger than its per-tick byte budget." >&2
+    echo "At ${BANDWIDTH} MiB/s the budget is ${NULLBLK_TICK_BYTES} bytes (~${safe_kib} KiB); unsafe batch ceiling(s): ${unsafe[*]} KiB." >&2
+    echo "Restrict SWAPZ_BENCH_BATCHES to safe values, use SWAPZ_BENCH_MBPS=0 for latency-only large-request testing, or use a different size-aware bandwidth backend." >&2
+    exit 3
+  fi
 fi
 
 STAT="/sys/class/block/$BACKING_KNAME/stat"
