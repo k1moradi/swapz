@@ -1,4 +1,4 @@
-# swapz V2.1 design notes
+# swapz V2.2 design notes
 
 ## Why V2 exists and why V2.1 follows it
 
@@ -86,6 +86,98 @@ max_write_batch
 ```
 
 Validation must compare these with actual lower block-device write-I/O counts.
+
+## V2.2 streaming experiment
+
+V2.1 proved that larger serialized lower requests remove much of the 4 KiB command overhead,
+but it still prepared and submitted physical output synchronously. V2.2 separates upper
+swap processing from lower drain with exactly two bounded preallocated stream buffers.
+
+Three policies are selectable per target:
+
+```text
+immediate
+    stage one physical block and synchronously drain it
+    control/baseline
+
+opportunistic
+    one asynchronous lower write may be in flight
+    fill the other buffer while it writes
+    do not intentionally sleep to make a batch larger
+
+staged
+    same double-buffer pipeline
+    compressed foreground writes may complete after their authoritative
+    compressed representation is copied into a stream buffer
+```
+
+At most one lower write is in flight. The goal is not lower queue-depth parallelism; it is
+to overlap CPU compression/packing with media latency while keeping append order simple.
+
+The target accepts a configurable physical batch ceiling from 4 KiB through 1 MiB. The
+ceiling is an experiment parameter, not a hard-coded sweet spot. The benchmark sweeps
+upward until physical drain throughput reaches a plateau and then uses concurrent swap-in
+p99 latency to choose the smallest acceptable plateau point.
+
+### Staged authority and recall
+
+A staged foreground record is identified by:
+
+```text
+logical page
+generation
+buffer id
+block index
+record index
+```
+
+Generation changes on overwrite or logical DISCARD. Completion of an older asynchronous
+write therefore cannot publish stale data.
+
+A logical READ first checks the staged reference. If the current generation still resides
+in either the FILL or INFLIGHT buffer, swapz decompresses/copies it directly from RAM and
+does not wait for the lower device.
+
+A READ does **not** itself make the swap slot dead. The buffered record remains valid until
+the upper layer later sends DISCARD or overwrites the slot. Only then may an unsent record
+be removed during fill-buffer compaction. This avoids assuming Linux frees a swap slot at
+read completion.
+
+Before an unsent buffer is submitted, stale generations are removed and the remaining
+compressed records are repacked across 4 KiB containers. This can avoid lower writes for
+records invalidated before submission. An already-submitted lower write cannot be surgically
+retracted; if its record became stale, completion simply declines to publish that obsolete
+generation.
+
+### Early completion safety
+
+Early upper completion is currently restricted to compressed, non-GC foreground records in
+`staged` mode. Raw 4 KiB pages are not early-completed because retaining a full-size copy
+would not materially release RAM.
+
+If an asynchronous lower write fails after an early completion, the target enters a failed
+write state but retains the affected stream buffer so staged reads/swapoff can still recover
+the authoritative compressed data. New writes are rejected; staged/on-disk reads and
+logical invalidation remain available.
+
+### Ordering barriers
+
+The stream is drained before operations that require persistent ordering or allocator
+state to be fully published, including:
+
+- FLUSH/PREFLUSH;
+- segment transition and victim GC;
+- suspend/teardown;
+- other places where physical mapping publication is required.
+
+Normal staged reads intentionally do not drain the stream.
+
+### Memory bound
+
+Both stream buffers and their metadata are preallocated at target creation. No reclaim-path
+heap allocation is needed. The maximum buffer size is bounded by the configured batch
+ceiling and by the 1 MiB segment size.
+
 
 ## Logical mapping
 
