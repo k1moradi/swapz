@@ -57,6 +57,7 @@
 #define SWAPZ_SEGMENT_CLEANING 3U
 #define SWAPZ_MAX_WRITE_BATCH_BLOCKS SWAPZ_SEGMENT_BLOCKS
 #define SWAPZ_DEFAULT_WRITE_BATCH_BLOCKS 64U /* 256 KiB; benchmark may override. */
+#define SWAPZ_ASYNC_WATCHDOG_MS 30000U
 #define SWAPZ_MAX_WRITE_BATCH_BYTES \
 	(SWAPZ_MAX_WRITE_BATCH_BLOCKS * SWAPZ_BLOCK_BYTES)
 #define SWAPZ_MIN_COMPRESS_SAVING 512U
@@ -498,6 +499,14 @@ static void swapz_install_mapping(struct swapz_context *context, u32 logical_pag
 	struct swapz_mapping *mapping = &context->mappings[logical_page];
 	u32 segment = physical_block / SWAPZ_SEGMENT_BLOCKS;
 
+	/*
+	 * A lower completion may arrive after an unrelated error has failed the
+	 * target.  In that case the replacement must not disturb the previously
+	 * authoritative mapping.  Check failure before unaccounting the old map,
+	 * then check again in case unaccounting itself detects corruption.
+	 */
+	if (unlikely(context->failed))
+		return;
 	swapz_unaccount_mapping(context, mapping);
 	if (unlikely(context->failed))
 		return;
@@ -1008,7 +1017,25 @@ static int swapz_reap_inflight(struct swapz_context *context, bool wait)
 
 	buffer = &context->stream_buffers[id];
 	if (wait) {
-		wait_for_completion(&buffer->completion);
+		unsigned long completed;
+
+		completed = wait_for_completion_timeout(
+			&buffer->completion,
+			msecs_to_jiffies(SWAPZ_ASYNC_WATCHDOG_MS));
+		if (!completed) {
+			/*
+			 * Never recycle or modify the in-flight data buffer on timeout:
+			 * the lower device may still own it.  Fail any upper BIOs which
+			 * have not already completed, freeze the target, and retain the
+			 * buffer until the real dm-io callback eventually publishes its
+			 * completion token.  This converts a lost/late completion into a
+			 * diagnosable I/O failure instead of an indefinitely stuck upper
+			 * writer.
+			 */
+			swapz_set_failed(context, -ETIMEDOUT);
+			swapz_complete_buffer_bios(context, buffer, -ETIMEDOUT);
+			return -ETIMEDOUT;
+		}
 	} else if (!try_wait_for_completion(&buffer->completion)) {
 		return -EAGAIN;
 	}
