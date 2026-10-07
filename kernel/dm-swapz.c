@@ -1940,9 +1940,11 @@ static int swapz_process_read(struct swapz_context *context, struct bio *bio)
 	 * not force either stream buffer to disk.  A matching buffered generation
 	 * is authoritative and can satisfy swap-in directly from RAM.
 	 */
-	error = swapz_flush_pack(context, false, true);
-	if (error)
-		return error;
+	if (!context->failed) {
+		error = swapz_flush_pack(context, false, true);
+		if (error)
+			return error;
+	}
 
 	error = swapz_read_staged(context, logical_page, context->input_buffer);
 	if (error == -ENOENT)
@@ -1968,9 +1970,11 @@ static int swapz_process_discard(struct swapz_context *context, struct bio *bio)
 	 * publication.  Do not drain stream buffers: an unsent staged block whose
 	 * every record becomes stale can be removed before lower I/O.
 	 */
-	error = swapz_flush_pack(context, false, true);
-	if (error)
-		return error;
+	if (!context->failed) {
+		error = swapz_flush_pack(context, false, true);
+		if (error)
+			return error;
+	}
 
 	while (remaining) {
 		u32 logical_page;
