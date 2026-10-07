@@ -602,49 +602,29 @@ static int swapz_flush_pack(struct swapz_context *context, bool compaction,
 			    bool allow_rotation)
 {
 	struct swapz_container_disk *container = context->pack_buffer;
-	u32 physical_block;
 	unsigned int record_index;
 	int error;
 
 	if (!context->pack_record_count)
 		return 0;
 
-	error = swapz_ensure_physical_block(context, allow_rotation);
-	if (error)
-		goto fail_pending;
-
 	container->magic = cpu_to_le32(SWAPZ_CONTAINER_MAGIC);
 	container->version = cpu_to_le16(SWAPZ_CONTAINER_VERSION);
 	container->record_count = cpu_to_le16(context->pack_record_count);
-	physical_block = swapz_current_physical_block(context);
 
-	error = swapz_write_block(context, physical_block, context->pack_buffer);
+	/*
+	 * Ownership of the pending BIOs transfers to the physical write batch
+	 * only after staging succeeds.  Mapping publication and BIO completion
+	 * happen after the lower multi-block write completes.
+	 */
+	error = swapz_stage_write_block(context, context->pack_buffer,
+				       context->pending,
+				       context->pack_record_count,
+				       SWAPZ_MAP_COMPRESSED,
+				       compaction, allow_rotation);
 	if (error)
 		goto fail_pending;
 
-	if (compaction)
-		context->stats.compaction_write_bytes += SWAPZ_BLOCK_BYTES;
-
-	for (record_index = 0; record_index < context->pack_record_count; ++record_index) {
-		struct swapz_pending_record *pending = &context->pending[record_index];
-
-		swapz_install_mapping(context, pending->logical_page, physical_block,
-				      pending->stored_length, pending->record_index,
-				      SWAPZ_MAP_COMPRESSED);
-		if (unlikely(context->failed)) {
-			error = -EUCLEAN;
-			goto fail_pending;
-		}
-	}
-
-	for (record_index = 0; record_index < context->pack_record_count; ++record_index) {
-		struct swapz_pending_record *pending = &context->pending[record_index];
-
-		if (pending->bio)
-			swapz_complete_bio(pending->bio, 0);
-	}
-
-	swapz_note_block_written(context);
 	swapz_reset_pack(context);
 	return 0;
 
@@ -726,34 +706,24 @@ static int swapz_write_raw_page(struct swapz_context *context, struct bio *bio,
 				u32 logical_page, const void *page_data,
 				bool compaction, bool allow_rotation)
 {
-	u32 physical_block;
+	struct swapz_pending_record pending = {
+		.bio = bio,
+		.logical_page = logical_page,
+		.stored_length = SWAPZ_BLOCK_BYTES,
+		.record_index = 0,
+	};
 	int error;
 
 	error = swapz_flush_pack(context, compaction, allow_rotation);
 	if (error)
 		return error;
 
-	error = swapz_ensure_physical_block(context, allow_rotation);
+	error = swapz_stage_write_block(context, page_data, &pending, 1, 0,
+				       compaction, allow_rotation);
 	if (error)
 		return error;
-
-	physical_block = swapz_current_physical_block(context);
-	error = swapz_write_block(context, physical_block, (void *)page_data);
-	if (error)
-		return error;
-
-	if (compaction)
-		context->stats.compaction_write_bytes += SWAPZ_BLOCK_BYTES;
-
-	swapz_install_mapping(context, logical_page, physical_block, SWAPZ_BLOCK_BYTES,
-			      0, 0);
-	if (unlikely(context->failed))
-		return -EUCLEAN;
 
 	context->stats.raw_pages++;
-	swapz_note_block_written(context);
-	if (bio)
-		swapz_complete_bio(bio, 0);
 	return 0;
 }
 
