@@ -163,11 +163,12 @@ struct swapz_stream_buffer {
 
 struct swapz_staged_ref {
 	u32 generation;
-	u16 block_index;
+	u8 block_index;
 	u8 record_index;
 	u8 buffer_id;
-	bool valid;
+	u8 valid;
 };
+static_assert(sizeof(struct swapz_staged_ref) == 8);
 
 struct swapz_stats {
 	u64 logical_read_bytes;
@@ -543,7 +544,7 @@ swapz_fill_buffer(struct swapz_context *context)
 static bool swapz_staged_ref_matches(struct swapz_context *context,
 				     u32 logical_page,
 				     u32 generation, u8 buffer_id,
-				     u16 block_index, u8 record_index)
+				     u8 block_index, u8 record_index)
 {
 	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
 
@@ -554,7 +555,7 @@ static bool swapz_staged_ref_matches(struct swapz_context *context,
 
 static void swapz_clear_staged_ref(struct swapz_context *context,
 				   u32 logical_page, u32 generation,
-				   u8 buffer_id, u16 block_index,
+				   u8 buffer_id, u8 block_index,
 				   u8 record_index)
 {
 	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
@@ -567,7 +568,7 @@ static void swapz_clear_staged_ref(struct swapz_context *context,
 
 static void swapz_set_staged_ref(struct swapz_context *context,
 				 u32 logical_page, u32 generation,
-				 u8 buffer_id, u16 block_index,
+				 u8 buffer_id, u8 block_index,
 				 u8 record_index)
 {
 	struct swapz_staged_ref *ref = &context->staged_refs[logical_page];
@@ -576,7 +577,7 @@ static void swapz_set_staged_ref(struct swapz_context *context,
 	ref->buffer_id = buffer_id;
 	ref->block_index = block_index;
 	ref->record_index = record_index;
-	ref->valid = true;
+	ref->valid = 1;
 }
 
 static bool swapz_stream_record_current(struct swapz_context *context,
@@ -601,7 +602,7 @@ static bool swapz_repack_can_fit(unsigned int record_count,
 static void swapz_update_repacked_ref(struct swapz_context *context,
 				      struct swapz_stream_buffer *buffer,
 				      struct swapz_write_batch_record *record,
-				      u16 block_index, u8 record_index)
+				      u8 block_index, u8 record_index)
 {
 	struct swapz_staged_ref *ref = &context->staged_refs[record->logical_page];
 
