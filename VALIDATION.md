@@ -207,3 +207,99 @@ excellent compressible result: 3-4x logical throughput
 highly compressible lower-write reduction: several-fold, potentially approaching the packing ceiling
 total lower writes including GC: below raw for workloads where swapz claims an endurance benefit
 ```
+
+
+## V2.2 current candidate
+
+V2.1 remains the last software-validated baseline on branch `v2.1`.
+
+`main` is now V2.2 / DKMS 0.2.2 and is intentionally **unvalidated** until the new
+streaming/cancellation paths complete the Linux 7.0.x correctness and performance suite.
+
+V2.2 adds three selectable policies:
+
+```text
+immediate
+opportunistic
+staged
+```
+
+and a configurable batch ceiling from 4 KiB through 1 MiB.
+
+The important architectural differences from V2.1 are:
+
+- asynchronous lower `dm-io` submission;
+- exactly two preallocated stream buffers;
+- one lower write may be in flight while the second buffer fills;
+- no deliberate sleep merely to fill a batch;
+- direct swap-in from either FILL or INFLIGHT RAM buffers;
+- generation-based suppression of stale asynchronous completion;
+- compressed staged foreground writes may complete before lower submission;
+- logical DISCARD/overwrite can make an unsent staged record stale;
+- the fill buffer is compacted/repacked before submission to avoid writing stale records;
+- failed lower writes retain authoritative early-completed staged data for readback/swapoff;
+- selectable batch size so the real throughput/latency plateau can be measured.
+
+The current V2.2 implementation deliberately keeps the existing 4 KiB compressed-container
+format while comparing streaming policies. A later byte-tight on-disk extent format must be
+treated as a separate experimental variable; an incomplete intermediate conversion was
+removed before this validation candidate was frozen.
+
+### Request-size sizing result
+
+The analytical 20 MiB/s command-latency model shows that there is no universal 128 KiB
+sweet spot:
+
+```text
+0.25 ms fixed latency -> strict 97% point around 256 KiB
+0.50 ms               -> around 512 KiB
+1.00 ms               -> around 1 MiB
+2.00 ms               -> strict 97% point above 1 MiB
+```
+
+At 2 ms, however, the modeled incremental gain from 1 MiB to 2 MiB is only about 2%, so the
+measured latency-aware plateau may still prefer 1 MiB.
+
+See `docs/benchmarks/v2.2-request-plateau-model.md`.
+
+### Required buffer-recall regression
+
+`tests/runtime/buffer-recall.sh` must prove:
+
+1. a read from Buffer A while Buffer B is filling is served from staged RAM;
+2. a read from Buffer B while Buffer A is being written is served from staged RAM;
+3. reads from both buffers while one lower write is active are both served correctly;
+4. a later logical invalidation of an unsent record allows repacking/cancellation;
+5. read latency remains well below the deliberately delayed lower-device read latency.
+
+A READ alone must not invalidate swap data.
+
+### Required strategy/plateau benchmark
+
+`tests/runtime/streaming-benchmark.sh` sweeps the three strategies and batch ceilings on a
+controlled QD1 `null_blk` device while a concurrent reader generates swap-in pressure.
+
+It records:
+
+```text
+upper write/completion throughput
+end-to-end physical drain throughput
+write avg/p99
+read avg/p95/p99/max
+lower read/write I/O counts and sectors
+staged reads
+staged early completions
+staged cancellations
+physical write requests
+maximum write batch
+CPU
+```
+
+For each strategy, the candidate sweet spot is the smallest batch at >=97% of the best
+measured drain throughput, subject to a read-p99 latency guard.
+
+The primary V2.2 decision is not simply which policy writes fastest. It is which policy
+maximizes pages/reclaim completion while preserving acceptable swap-in latency and bounded
+RAM usage.
+
+No V2.2 physical-device claim should be made until this software suite passes.
