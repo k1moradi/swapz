@@ -2102,6 +2102,7 @@ static int swapz_map(struct dm_target *target, struct bio *bio)
 static void swapz_presuspend(struct dm_target *target)
 {
 	struct swapz_context *context = target->private;
+	int error = 0;
 
 	WRITE_ONCE(context->accepting_io, false);
 	flush_workqueue(context->workqueue);
@@ -2112,12 +2113,23 @@ static void swapz_presuspend(struct dm_target *target)
 	 * memory that teardown could free.
 	 */
 	if (!context->failed) {
-		if (swapz_flush_pack(context, false, true) ||
-		    swapz_flush_write_batch(context))
-			context->failed = true;
+		error = swapz_flush_pack(context, false, true);
+		if (!error)
+			error = swapz_flush_write_batch(context);
+		if (error && !context->failed)
+			swapz_set_failed(context, error);
 	} else if (context->inflight_buffer_id >= 0) {
-		swapz_reap_inflight(context, true);
+		error = swapz_reap_inflight(context, true);
 	}
+
+	if (context->failed || error)
+		swapz_fail_unsent_upper_bios(context, error ? error : -EIO);
+
+	/*
+	 * A lower callback may have published its completion token while still
+	 * returning through dm-io.  Wait for that final callback reference before
+	 * the last workqueue drain or target teardown.
+	 */
 	swapz_wait_async_callbacks(context);
 	flush_workqueue(context->workqueue);
 }
@@ -2310,6 +2322,7 @@ static void swapz_free_context(struct swapz_context *context)
 static void swapz_dtr(struct dm_target *target)
 {
 	struct swapz_context *context = target->private;
+	int error = 0;
 
 	if (!context)
 		return;
@@ -2317,11 +2330,17 @@ static void swapz_dtr(struct dm_target *target)
 	if (context->workqueue) {
 		flush_workqueue(context->workqueue);
 		if (!context->failed) {
-			swapz_flush_pack(context, false, true);
-			swapz_flush_write_batch(context);
+			error = swapz_flush_pack(context, false, true);
+			if (!error)
+				error = swapz_flush_write_batch(context);
+			if (error && !context->failed)
+				swapz_set_failed(context, error);
 		} else if (context->inflight_buffer_id >= 0) {
-			swapz_reap_inflight(context, true);
+			error = swapz_reap_inflight(context, true);
 		}
+		if (context->failed || error)
+			swapz_fail_unsent_upper_bios(context,
+						 error ? error : -EIO);
 		swapz_wait_async_callbacks(context);
 		flush_workqueue(context->workqueue);
 	}
