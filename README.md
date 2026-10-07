@@ -28,7 +28,7 @@ This is a proof-of-concept, not production storage software. V2.1 is the last so
 - GC scans the compact logical map but relocates only mappings resident in the chosen victim segment
 - upper discard is consumed internally when available
 - lower discard is auto-detected, optional, and permanently disabled after a runtime failure
-- hibernation/resume is unsupported
+- hibernation/resume is intentionally deferred for V2.x; it is a required final-version milestone after correctness, performance, deployment, and persistence design are stable
 - encryption and swap-file backing are out of scope
 - NVMe/high-concurrency tuning is out of scope; the lower stream intentionally keeps physical queue depth near one while overlapping CPU work with device latency
 
@@ -263,10 +263,31 @@ For the first SD/USB tests, run both `--iodepth 1` and `--iodepth 8`.  swapz get
 
 ## Important limitations
 
-- Do not use `swapz` for hibernation/resume.
+- Do not use current V2.x `swapz` for hibernation/resume. Resume/hibernate support is deferred, not abandoned: it is planned as a final-version milestone once the core design is stable.
 - Do not put a filesystem on the mapper device.
 - Power-loss persistence is deliberately not provided; swap is recreated each boot.
 - V2.2 keeps at most one lower write in flight but pipelines CPU compression/packing with that write. This is intended for slow serialized devices and is not an NVMe design.
 - FUA-specific persistence semantics are not a V2 goal; the target is only intended for disposable swap data.
 - Segment GC can still pause foreground progress while a live victim is cleaned; V2.2 must measure GC latency together with staged-read and stream-drain latency.
 - Host-sector reduction is an endurance proxy.  Actual NAND write amplification is controlled by the device FTL and must be measured with device telemetry where available.
+
+## Final-version roadmap
+
+Resume and hibernation are **not in scope for V2.x**, but they are part of the intended
+final version of `swapz`.
+
+They are deliberately deferred until the volatile swap path has completed:
+
+1. correctness validation;
+2. streaming/performance tuning;
+3. physical-media qualification;
+4. deployment and boot integration;
+5. final persistent-state/resume architecture.
+
+The current volatile RAM-only mapping cannot by itself support resume after power loss or a
+normal reboot. Final hibernation support will therefore require an explicitly designed and
+validated persistence/resume format and boot-time activation path rather than simply
+placing the current module in initramfs.
+
+Until that final milestone is implemented and validated, current releases must continue to
+reject any claim of hibernation/resume support.
