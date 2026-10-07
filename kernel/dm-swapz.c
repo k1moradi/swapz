@@ -1791,15 +1791,18 @@ static int swapz_read_staged(struct swapz_context *context,
 static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 {
 	u32 logical_page = (u32)(bio->bi_iter.bi_sector / SWAPZ_BLOCK_SECTORS);
+	u32 previous_generation;
 	u32 generation;
 	int error;
 
 	if (logical_page >= context->logical_pages)
 		return -ERANGE;
 
-	generation = ++context->generations[logical_page];
+	previous_generation = context->generations[logical_page];
+	generation = previous_generation + 1;
 	if (unlikely(!generation))
-		generation = ++context->generations[logical_page];
+		generation++;
+	context->generations[logical_page] = generation;
 
 	/*
 	 * Keep the current BIO isolated from GC scratch.  The resulting compressed
@@ -1811,6 +1814,8 @@ static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 	error = swapz_store_page(context, bio, logical_page, generation,
 				 context->write_buffer,
 				 context->write_compressed_buffer, false, true);
+	if (error && context->generations[logical_page] == generation)
+		context->generations[logical_page] = previous_generation;
 	return error;
 }
 
