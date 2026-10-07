@@ -1,24 +1,26 @@
-# swapz V2.1 (software-validated experimental)
+# swapz V2.2 (streaming experiment)
 
 `swapz` is an experimental Device Mapper target for **dedicated swap partitions on slow storage**.  It targets old HDDs, USB flash drives, SD/eMMC media, and SATA SSDs where storage bandwidth and flash write endurance matter more than high queue-depth NVMe throughput.
 
-The V2.1 hypothesis is intentionally narrow:
+The V2.2 hypothesis is intentionally narrow:
 
-> LZ4-compress 4 KiB swap pages, pack multiple compressed pages into 4 KiB lower-device writes, append sequentially through 1 MiB segments, and garbage-collect only low-live victim segments.  This should reduce host bytes written without V1's whole-live-set compaction penalty.
+> LZ4-compress 4 KiB swap pages immediately, keep at most two bounded preallocated stream buffers, overlap compression/packing with one asynchronous lower write, and submit whatever is ready instead of sleeping to fill a batch. In staged mode, compressed upper writes may complete from the RAM buffer before disk submission so reclaim can release the original page sooner; swap-in can read directly from either filling or in-flight RAM buffer.
 
-This is a proof-of-concept, not production storage software yet. V2.1 has passed Linux 7.0.x software/runtime validation; physical HDD/USB/SD/SATA qualification is still pending.
+This is a proof-of-concept, not production storage software. V2.1 is the last software-validated baseline. V2.2 is an unvalidated experiment for comparing immediate, opportunistic streaming, and staged streaming policies plus the throughput/latency batch-size plateau.
 
-## V2.1 scope
+## V2.2 scope
 
 - Linux Device Mapper target name: `swapz`
 - module: `dm-swapz.ko`
 - **4 KiB PAGE_SIZE only**
 - dedicated block partition/device only
 - LZ4 only
-- one serialized `WQ_MEM_RECLAIM` worker
-- up to 8 consecutive physical 4 KiB output blocks are coalesced into one serialized 32 KiB lower request
-- volatile in-RAM mapping table; no persistent metadata
-- 4 KiB physical packed containers, up to 8 compressed logical pages per container
+- one serialized `WQ_MEM_RECLAIM` worker for upper mapping/state changes
+- two preallocated stream buffers; at most one asynchronous lower write is in flight while the other buffer can fill
+- selectable policies: `immediate`, `opportunistic`, and `staged`
+- configurable batch ceiling from 4 KiB through 1 MiB; the benchmark chooses the plateau rather than assuming a fixed sweet spot
+- volatile in-RAM mapping plus generation/staged-reference metadata; no persistent metadata
+- compressed records are packed into 4 KiB physical containers; filling buffers can repack live unsent records before submission
 - raw 4 KiB fallback for pages that do not save at least 512 bytes with LZ4
 - append-only 1 MiB segments rotated over the backing device
 - per-block live-record accounting plus low-live victim-segment garbage collection
@@ -28,7 +30,7 @@ This is a proof-of-concept, not production storage software yet. V2.1 has passed
 - lower discard is auto-detected, optional, and permanently disabled after a runtime failure
 - hibernation/resume is unsupported
 - encryption and swap-file backing are out of scope
-- NVMe/high-concurrency tuning is out of scope; batching is intended to improve slow serialized media without adding lower queue depth
+- NVMe/high-concurrency tuning is out of scope; the lower stream intentionally keeps physical queue depth near one while overlapping CPU work with device latency
 
 ## Why the physical partition is larger than logical swap
 
@@ -51,14 +53,22 @@ V2.1 can operate with much less overprovisioning than V1, but conservative sizin
 Linux swap 4 KiB logical writes
         |
         v
-      swapz
+      swapz worker
         |
-        +-- LZ4 compress
-        +-- pack <= 8 records into a 4 KiB container
-        +-- raw 4 KiB fallback
+        +-- LZ4 compress immediately
+        +-- pack compressed records / raw fallback
         |
-        +-- coalesce <= 8 consecutive physical blocks
-        |   into one <= 32 KiB serialized lower write
+        +--> Buffer A: lower write IN_FLIGHT
+        |
+        \--> Buffer B: FILLING concurrently
+                 |
+                 +-- read may be satisfied directly from RAM
+                 +-- discard/overwrite may invalidate an unsent record
+                 +-- repack live records before submission
+        |
+        v
+one asynchronous sequential lower write
+(up to configured 4 KiB..1 MiB ceiling)
         |
         v
 append-only current segment
@@ -87,7 +97,7 @@ make -C userspace
 make -C tests test
 ```
 
-V2.1 has now passed Linux 7.0.0-34 validation including model/sanitizer tests, randomized block tests, live-GC stress, multi-block lower-write fault injection, lifecycle testing, and bounded real swap pressure. On the 1 ms/request virtual stack, V2.1 cut QD8 lower write-I/O count by about 87% for partial/incompressible workloads and improved throughput by about 5.6-6x versus V2. Physical-media benchmarking is still required.
+V2.1 passed Linux 7.0.0-34 validation including model/sanitizer tests, randomized block tests, live-GC stress, fault injection, lifecycle testing, and bounded real swap pressure. V2.2 has not yet passed that gate. Its purpose is to determine whether overlapping compression with asynchronous lower I/O and bounded staged completion improves reclaim speed and reaches the real throughput/latency plateau.
 
 ## DKMS
 
@@ -179,6 +189,59 @@ requirements, benchmark metrics, and the exact report expected back for primary-
 review.  The tester is intentionally not authorized to redesign or push substantive
 kernel changes.
 
+## V2.2 strategy experiment
+
+Device Mapper table syntax accepts optional policy and batch ceiling:
+
+```text
+0 <sectors> swapz <backing> [immediate|opportunistic|staged] [batch_kib]
+```
+
+Examples:
+
+```text
+... swapz /dev/loop0 immediate 4
+... swapz /dev/loop0 opportunistic 256
+... swapz /dev/loop0 staged 512
+```
+
+`immediate` is the no-streaming control. `opportunistic` overlaps one asynchronous lower
+write with filling the second buffer but does not early-complete compressed upper writes.
+`staged` additionally lets a compressed page become authoritative in the bounded RAM
+buffer before lower submission. Reads can be served from either filling or in-flight
+buffers. A READ does not free the swap slot; cancellation/repacking happens only after
+DISCARD or overwrite makes that generation stale.
+
+Run the controlled strategy/batch sweep on a kernel with configurable `null_blk`:
+
+```bash
+sudo bash tests/runtime/streaming-benchmark.sh
+```
+
+The sweep reports both upper-completion throughput and end-to-end physical drain throughput,
+plus concurrent read p95/p99/max. It defines the batch plateau as >=97% of the best observed
+drain throughput, then chooses the smallest plateau point whose read p99 is within 10% of
+the best latency inside that plateau.
+
+The analytical command-latency model is:
+
+```bash
+python3 bench/request-plateau.py --bandwidth 20
+```
+
+It exists only to determine how far upward the real sweep must go; measured `null_blk` and
+physical-device results decide the actual sweet spot.
+
+The staged-buffer race/cancellation regression is:
+
+```bash
+sudo bash tests/runtime/buffer-recall.sh
+```
+
+It covers reads from the in-flight buffer while the second fills, reads from the filling
+buffer while the first is being written, simultaneous reads from both, and invalidation of
+an unsent record before lower submission.
+
 ## Benchmarking
 
 The key success metric is **lower-device sectors written**, not LZ4 ratio.
@@ -203,7 +266,7 @@ For the first SD/USB tests, run both `--iodepth 1` and `--iodepth 8`.  swapz get
 - Do not use `swapz` for hibernation/resume.
 - Do not put a filesystem on the mapper device.
 - Power-loss persistence is deliberately not provided; swap is recreated each boot.
-- V2 still serializes target I/O.  This is intentional for slow devices but inappropriate for fast NVMe.
+- V2.2 keeps at most one lower write in flight but pipelines CPU compression/packing with that write. This is intended for slow serialized devices and is not an NVMe design.
 - FUA-specific persistence semantics are not a V2 goal; the target is only intended for disposable swap data.
-- Segment GC can pause a foreground write while one low-live victim is cleaned.  Measuring that tail latency is a primary V2 test.
+- Segment GC can still pause foreground progress while a live victim is cleaned; V2.2 must measure GC latency together with staged-read and stream-drain latency.
 - Host-sector reduction is an endurance proxy.  Actual NAND write amplification is controlled by the device FTL and must be measured with device telemetry where available.
