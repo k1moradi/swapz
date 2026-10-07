@@ -105,3 +105,28 @@ for field in fill_id inflight_id pack_records async_cb buf0_state buf1_state; do
 done
 
 echo "V2.2 async/source invariants: PASS"
+
+
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1]).read_text()
+decl = src.find("static void swapz_wait_async_callbacks(struct swapz_context *context);")
+use = src.find("static void swapz_presuspend(struct dm_target *target)")
+definition = src.find("static void swapz_wait_async_callbacks(struct swapz_context *context)\n{")
+
+if decl < 0:
+    raise SystemExit(
+        "V2.2 source invariant failure: async callback barrier declaration missing"
+    )
+if use < 0 or definition < 0:
+    raise SystemExit(
+        "V2.2 source invariant failure: async callback barrier use/definition missing"
+    )
+if not (decl < use < definition):
+    raise SystemExit(
+        "V2.2 source invariant failure: async callback barrier declaration ordering invalid"
+    )
+PY
+# async callback barrier declaration ordering
