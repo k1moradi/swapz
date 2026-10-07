@@ -130,3 +130,30 @@ if not (decl < use < definition):
     )
 PY
 # async callback barrier declaration ordering
+
+
+python3 - "$SRC" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+src = Path(sys.argv[1]).read_text()
+m = re.search(
+    r"static int swapz_stage_write_block\(.*?\n\}",
+    src,
+    flags=re.S,
+)
+if not m:
+    raise SystemExit("V2.2 source invariant failure: swapz_stage_write_block not found")
+body = m.group(0)
+
+ensure = body.find("error = swapz_ensure_physical_block(context, allow_rotation)")
+reacquire = body.find("buffer = swapz_fill_buffer(context)", ensure + 1)
+physical = body.find("physical_block = swapz_current_physical_block(context)", ensure + 1)
+
+if ensure < 0 or reacquire < 0 or physical < 0 or not (ensure < reacquire < physical):
+    raise SystemExit(
+        "V2.2 source invariant failure: fill buffer must be reacquired after physical-block ensure"
+    )
+PY
+# fill buffer must be reacquired after physical-block ensure
