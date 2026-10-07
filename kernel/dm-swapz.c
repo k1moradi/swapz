@@ -1062,32 +1062,40 @@ static int swapz_reap_inflight(struct swapz_context *context, bool wait)
 		completed = wait_for_completion_timeout(
 			&buffer->completion,
 			msecs_to_jiffies(SWAPZ_ASYNC_WATCHDOG_MS));
-		if (!completed)
-			WRITE_ONCE(buffer->watchdog_expired, true);
-	} else if (!try_wait_for_completion(&buffer->completion)) {
-		if (!READ_ONCE(buffer->watchdog_expired) ||
-		    buffer->watchdog_reported)
-			return -EAGAIN;
+		if (completed)
+			goto completed;
+
+		/*
+		 * Catch a completion racing the timeout boundary.  Unlike
+		 * wait_for_completion_timeout(), try_wait_for_completion() is only
+		 * attempted here after the timed wait returned zero, so a successful
+		 * timed wait is never consumed twice.
+		 */
+		if (try_wait_for_completion(&buffer->completion))
+			goto completed;
+		WRITE_ONCE(buffer->watchdog_expired, true);
 		goto report_timeout;
-	} else {
-		goto completed;
 	}
 
-	if (!try_wait_for_completion(&buffer->completion)) {
+	if (try_wait_for_completion(&buffer->completion))
+		goto completed;
+	if (!READ_ONCE(buffer->watchdog_expired) ||
+	    buffer->watchdog_reported)
+		return -EAGAIN;
+
 report_timeout:
-		/*
-		 * Never recycle or modify the in-flight data buffer on timeout:
-		 * the lower device may still own it.  Fail any upper BIOs which
-		 * have not already completed, freeze the target, and retain the
-		 * buffer until the real dm-io callback eventually publishes its
-		 * completion token.
-		 */
-		buffer->watchdog_reported = true;
-		context->stats.async_watchdog_timeouts++;
-		swapz_set_failed(context, -ETIMEDOUT);
-		swapz_complete_buffer_bios(context, buffer, -ETIMEDOUT);
-		return -ETIMEDOUT;
-	}
+	/*
+	 * Never recycle or modify the in-flight data buffer on timeout:
+	 * the lower device may still own it.  Fail any upper BIOs which
+	 * have not already completed, freeze the target, and retain the
+	 * buffer until the real dm-io callback eventually publishes its
+	 * completion token.
+	 */
+	buffer->watchdog_reported = true;
+	context->stats.async_watchdog_timeouts++;
+	swapz_set_failed(context, -ETIMEDOUT);
+	swapz_complete_buffer_bios(context, buffer, -ETIMEDOUT);
+	return -ETIMEDOUT;
 
 completed:
 	cancel_delayed_work_sync(&buffer->watchdog_work);
