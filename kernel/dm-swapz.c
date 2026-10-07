@@ -13,7 +13,8 @@
  *  - consume upper discard notifications even when the backing device cannot
  *    discard; lower discard is an optional optimization with fail-open fallback.
  *
- * This is experimental software. Hibernation/resume is intentionally unsupported.
+ * This is experimental V2.x software. Hibernation/resume is intentionally deferred
+ * to the final-version persistence/resume milestone.
  */
 
 #define DM_MSG_PREFIX "swapz"
