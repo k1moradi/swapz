@@ -2267,6 +2267,8 @@ static int swapz_map(struct dm_target *target, struct bio *bio)
 	return DM_MAPIO_SUBMITTED;
 }
 
+static void swapz_wait_async_callbacks(struct swapz_context *context);
+
 static void swapz_presuspend(struct dm_target *target)
 {
 	struct swapz_context *context = target->private;
