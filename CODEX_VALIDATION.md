@@ -1,4 +1,4 @@
-# swapz V2 — Codex Validation and Benchmark Goal
+# swapz V2.1 — Codex Validation and Benchmark Goal
 
 ## Role
 
@@ -9,115 +9,108 @@ execute, stress, reproduce, measure, and report.
 
 Do not commit, push, redesign, or broadly refactor kernel code.
 
-You may make a minimal temporary local change only when a test harness or build script has
-an obvious mechanical defect that blocks testing. Preserve the original failure and report
-the exact diff and before/after result.
+A minimal temporary local change is allowed only for an obvious mechanical test-harness or
+build-script defect that blocks testing. Preserve the original failure and report the exact
+diff plus before/after results.
 
-A failure is useful. Do not optimize the report toward success.
+## Mandatory checkout gate
 
-## Read first
-
-Read:
-
-```text
-README.md
-DESIGN.md
-TESTING.md
-VALIDATION.md
-kernel/dm-swapz.c
-userspace/swapzctl.cpp
-tests/swapz_model.cpp
-scripts/loop-smoke.sh
-scripts/rotation-regression.sh
-bench/block-benchmark.sh
-```
-
-Record the exact `origin/main` commit tested. Do not test a stale checkout.
-
-## V2 purpose
-
-V1 correctness passed on Linux 7.0.x, but its whole-live-set arena compaction failed the
-performance/endurance objective.
-
-The historical V1 result is preserved on branch `v1`.
-
-V2 replaces V1 arena copying with:
-
-- fixed 1 MiB / 256-block append segments;
-- one OPEN segment;
-- FREE, OPEN, CLOSED, and CLEANING states;
-- rotating FREE-segment allocation;
-- per-physical-block live-record counters;
-- per-segment live-block counts;
-- a 25% logical-size GC reserve plus at least two segments;
-- lowest-live CLOSED victim selection;
-- bounded victim-local reverse scratch;
-- source-physical-block grouping during GC;
-- relocation of only mappings still resident in the victim;
-- one lower read per live source block;
-- a serialized `WQ_MEM_RECLAIM` worker;
-- no runtime heap allocation by swapz;
-- LZ4 packed containers and raw fallback retained;
-- no persistent metadata;
-- no hibernation;
-- no swapfile backing;
-- no encryption.
-
-The primary target remains old serialized storage: HDD, USB flash, SD/eMMC, and old SATA
-SSD, not high-performance NVMe.
-
-## Critical V2 hypotheses
-
-Prove or disprove:
-
-1. V2 preserves the V1 correctness result.
-2. GC moves only victim-resident live mappings, never the full logical live set.
-3. Partially-compressible and incompressible churn no longer produces V1's approximately
-   2.86x lower-device write amplification.
-4. GC-triggering latency is materially lower than V1's approximately 1.03 second
-   full-live-set rotation result on the same 1 ms delayed stack.
-5. Highly compressible queued writes retain useful packing and lower-write reduction.
-6. Mapping-table scanning does not become a dominant CPU/latency problem.
-7. Host allocation traverses segments broadly before reuse.
-8. Missing or failing DISCARD remains an optimization issue only.
-9. Lower read/write errors never produce silent data corruption.
-10. Real swap pressure does not cause reclaim recursion, worker deadlock, or swapoff hangs.
-
-## Safety
-
-Treat every physical-media test as destructive.
-
-Never destructively test root, mounted filesystems, active swap, boot/system partitions,
-valuable data, or an ambiguous physical device.
-
-Before any physical test record:
-
-```bash
-lsblk -o NAME,KNAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,ROTA,MODEL,SERIAL
-lsblk -D
-findmnt
-cat /proc/swaps
-```
-
-Only use a physical device when the operator explicitly identifies that exact device or
-partition as disposable.
-
-Otherwise use loop devices or disposable DM stacks.
-
-## Phase 1 — Source, environment, build
-
-Start clean and current:
+Start with:
 
 ```bash
 cd ~/swapz
 git restore .
-git pull --ff-only
+git fetch origin --prune
+git switch main
+git reset --hard origin/main
 git status --short
 git rev-parse HEAD
 git rev-parse origin/main
+git branch --show-current
 ```
 
-Record:
+Requirements:
+
+```text
+branch = main
+HEAD = origin/main
+dkms.conf PACKAGE_VERSION = 0.2.1
+kernel contains SWAPZ_WRITE_BATCH_BLOCKS
+kernel status contains physical_write_reqs
+kernel status contains multi_write_reqs
+kernel status contains max_write_batch
+```
+
+Verify:
+
+```bash
+grep 'PACKAGE_VERSION="0.2.1"' dkms.conf
+grep -n 'SWAPZ_WRITE_BATCH_BLOCKS' kernel/dm-swapz.c
+grep -n 'physical_write_reqs' kernel/dm-swapz.c
+grep -n 'multi_write_reqs' kernel/dm-swapz.c
+grep -n 'max_write_batch' kernel/dm-swapz.c
+```
+
+If any check fails, stop with `WRONG CHECKOUT`.
+
+The validated V2 A/B reference is branch `v2`, commit:
+
+```text
+1e3a0c71b4e514bccae58d79be9f319640478b5c
+```
+
+Do not replace `main` with that branch except for explicit A/B benchmark runs.
+
+Your final report must begin:
+
+```text
+TESTED_BRANCH=main
+TESTED_HEAD=<actual HEAD equal to origin/main>
+CANDIDATE=V2.1_WRITE_BATCHING
+```
+
+## What changed from validated V2
+
+Validated V2 fixed V1's allocator/write-amplification problem but remained slow because each
+physical 4 KiB output was issued as one synchronous lower request.
+
+V2.1 keeps the V2 segment-GC architecture and changes only the physical output path:
+
+- one serialized `WQ_MEM_RECLAIM` worker remains;
+- lower queue depth remains one;
+- up to eight consecutive physical 4 KiB outputs are staged;
+- one lower request may therefore contain up to 32 KiB;
+- raw pages and compressed containers share the same batch;
+- GC output uses the same batch path;
+- mappings become authoritative only after the entire lower batch succeeds;
+- reads, DISCARD, flush, PREFLUSH, and segment transitions force pending output to commit;
+- a failed batch must leave previous mappings authoritative;
+- the single-record compression wait is reduced from 500-1000 us to 50-100 us.
+
+This is an optimization of V2, not a new allocator.
+
+## Historical V2 measurements to compare against
+
+On the prior 1 ms/request disposable virtual stack, validated V2 showed:
+
+```text
+partial/incompressible lower writes: ~1.00x raw
+partial/incompressible V2 QD1:       ~2.0 MB/s
+partial/incompressible V2 QD8:       ~3.85 MB/s
+raw QD1:                              ~4.07 MB/s
+raw QD8:                              ~31 MB/s
+V2 live-GC tail latency:              ~7.662 ms
+V1 live-set rotation latency:         ~1.03 s
+```
+
+Highly compressible QD8 V2 reduced about 67.1 MB logical/raw lower writes to about 8.47 MB.
+
+V2.1 must preserve V2's endurance result while reducing lower request count and request
+overhead.
+
+## Phase 1 — Build and model
+
+Record environment and build on the Linux 7.0.x machine:
 
 ```bash
 uname -a
@@ -125,14 +118,8 @@ cat /proc/version
 getconf PAGESIZE
 gcc --version
 clang --version
-ld --version
-dmsetup version
 fio --version
-```
 
-Primary build gate on Linux 7.0.x:
-
-```bash
 make -C kernel clean KDIR=/lib/modules/$(uname -r)/build
 make -C kernel KDIR=/lib/modules/$(uname -r)/build W=1
 make -C userspace clean
@@ -141,374 +128,224 @@ make -C tests clean
 make -C tests test
 ```
 
-Run the C++ model under ASan + UBSan.
+Run the model under ASan + UBSan.
 
-Zero swapz compiler warnings are expected.
+The checked-in mixed raw/compressed GC fixture has been corrected. It must now pass without a
+temporary patch and must actually report live GC work (`gc_pages > 0`).
 
-If the module does not build, report the first meaningful diagnostic and stop kernel runtime
-testing. Continue independent userspace/model tests.
+Any compile error, warning attributable to swapz, model failure, or sanitizer diagnostic is
+a failure.
 
-## Phase 2 — Model-specific V2 checks
+## Phase 2 — Fixed kernel regressions
 
-The model must exercise segment states and victim GC, not the old V1 arena algorithm.
-
-Verify that model tests cover:
-
-- compressed packing;
-- raw fallback;
-- overwrite/latest-write-wins;
-- logical discard;
-- segment switches;
-- victim cleaning;
-- mixed raw/compressed GC;
-- hot-page churn;
-- randomized rewrite/read/discard churn.
-
-ASan and UBSan must remain clean.
-
-## Phase 3 — Kernel smoke and fixed regressions
-
-Install/load the newly built module temporarily.
-
-Run:
+Load the newly built module and run:
 
 ```bash
 sudo ./scripts/loop-smoke.sh
-sudo bash ./scripts/rotation-regression.sh
+sudo ./scripts/rotation-regression.sh
+sudo ./scripts/write-batch-regression.sh
 ```
 
-The rotation regression now means a V2 segment boundary.
-
-It must cover both:
+The new batching regression must show:
 
 ```text
-raw/incompressible foreground payload
-compressed foreground payload
+raw_pages > 0
+physical_write_reqs > 0
+multi_write_reqs > 0
+max_write_batch > 1
+physical_write_reqs < raw_pages
+failed=0
 ```
 
-Verify:
+Inspect `dmesg` and `journalctl -k` after each phase.
 
-- empty fsync succeeds;
-- post-write fsync succeeds;
-- data reads back exactly;
-- at least one segment switch occurs;
-- raw and compressed counters are exercised;
-- `failed=0`;
-- teardown succeeds.
+## Phase 3 — V2 correctness regression
 
-Inspect `dmesg` and `journalctl -k`.
+Repeat the validated V2 correctness suite against V2.1:
 
-Any BUG, WARN, Oops, hung task, lockup, sanitizer report, refcount error, or data mismatch is a
-failure.
+- five deterministic 100,000-operation seeds;
+- long mixed live-GC stress;
+- victim selectivity and packed-container GC;
+- lower read/write fault injection;
+- upper/lower DISCARD fallback;
+- 100 lifecycle cycles;
+- bounded real Linux swap pressure;
+- swapoff and second swapon.
 
-## Phase 4 — Deterministic randomized block validation
+All previously validated correctness properties must remain true.
 
-Run at least 100,000 operations using:
+Pay special attention to batching failure semantics:
 
-```text
-seed 0x5a7a2026
-seed 0x00000001
-seed 0x12345678
-seed 0xdeadbeef
-seed 0x7fffffff
-```
+1. inject a lower write failure while a multi-block batch is pending;
+2. every BIO belonging to that failed batch must fail;
+3. no mapping from the failed batch may become authoritative;
+4. an older successfully-written mapping must remain readable where the target's failure
+   policy permits verification;
+5. no silent partial-batch success is acceptable.
 
-Include writes, rewrites, reads, flushes, logical DISCARD, compressed data, and
-incompressible data.
+## Phase 4 — Batch observability
 
-Every read must match an independent userspace reference.
-
-Record per seed:
+For representative QD1 and QD8 workloads record:
 
 ```text
-writes
-rewrites
-reads
-flushes
-discard ranges/pages
-segment switches
-gc_victims
-gc_scanned
-gc_pages
-gc_read
-gc_write
+logical_write
+physical_write
+physical_write_reqs
+multi_write_reqs
+max_write_batch
 compressed_pages
 raw_pages
+gc_write
+gc_read
+gc_victims
 failed
 ```
 
-Force actual GC, not only free-segment traversal.
+Also record the actual lower block-device write-I/O count and sectors written from
+`/sys/class/block/<lower>/stat`.
 
-## Phase 5 — Long multi-GC correctness
-
-Run a long mixed workload containing:
-
-- frequently rewritten hot pages;
-- long-lived cold pages;
-- logical discards;
-- highly compressible pages;
-- incompressible pages.
-
-Target at least 100 victim cleanings when practical.
-
-Verify all live pages against a userspace reference periodically and after the final GC.
-
-Important invariants:
-
-- a FREE segment must have zero live mappings;
-- a cleaned victim must reach zero live blocks before reuse;
-- GC must not resurrect stale mappings;
-- a failed replacement must not destroy the last known-good mapping;
-- `failed` remains zero during successful tests.
-
-## Phase 6 — GC selectivity measurement
-
-This is a primary V2 test.
-
-Create a workload where only a small hot subset is repeatedly rewritten while most logical
-pages remain cold.
-
-Measure:
+Calculate:
 
 ```text
-logical page count
-gc_victims
-gc_scanned
-gc_pages
-gc_read
-gc_write
-segment switches
+physical blocks / swapz lower request
+lower write-I/O reduction versus validated V2
+lower sectors / logical sectors
 ```
 
-The map scan may touch all logical mapping entries, but physical relocation must be tied to
-the selected victim's live data.
+The internal request counters and lower-device request counters should tell a consistent
+story.
 
-Compare this with the V1 full-live-set behavior.
+## Phase 5 — Mandatory V2 versus V2.1 A/B
 
-Explicitly report:
-
-```text
-GC relocated pages per victim
-GC bytes written per victim
-logical-map entries scanned per victim
-```
-
-## Phase 7 — DISCARD matrix
-
-Test:
-
-### No lower DISCARD
-
-Expected:
-
-```text
-lower_discard=off
-normal read/write works
-segment switching works
-victim GC works
-```
-
-### Lower DISCARD available
-
-Verify it is detected from the actual queue.
-
-### Runtime lower-DISCARD rejection
-
-If safely reproducible on a disposable DM stack:
-
-```text
-discard failure counted
-lower discard becomes off
-normal read/write continues
-target does not fail solely because DISCARD failed
-```
-
-### No upper page DISCARD
-
-Correctness must remain unchanged. Compare GC work with and without upper invalidation hints.
-
-## Phase 8 — Lower I/O error behavior
-
-Use disposable DM fault layers.
-
-Inject lower read and write errors.
-
-Verify:
-
-- affected BIO fails;
-- target failure is explicit;
-- a failed new write does not silently replace a prior good mapping;
-- no fabricated successful data is returned;
-- no crash or worker deadlock occurs;
-- teardown remains possible when kernel state permits.
-
-## Phase 9 — Lifecycle
-
-Run 100 create/use/destroy cycles.
-
-Verify no leaked target, loop device, workqueue symptom, module reference, or delayed kernel
-warning.
-
-## Phase 10 — Real Linux swap pressure
-
-Only after block correctness passes.
-
-Create a disposable swapz target, run `mkswap`, activate it, and generate bounded memory
-pressure.
-
-Exercise swap-out, swap-in, churn, segment GC, swapoff, and a second swapon.
-
-Monitor:
-
-```bash
-vmstat 1
-cat /proc/swaps
-cat /proc/vmstat
-dmsetup status swapz0
-dmesg -w
-```
-
-Look for reclaim recursion, allocation failures, worker starvation, BIO stalls, OOM caused
-by swapz, and swapoff deadlock.
-
-## Phase 11 — Benchmark methodology
-
-Raw and swapz must submit the same logical byte count.
-
-Do not compare fixed-duration runs by lower sectors written; that biases the result because
-the faster path submits more logical data.
-
-Use a fixed seed and fixed logical I/O volume.
-
-For a physical disposable device, the checked-in benchmark can be used:
-
-```bash
-sudo ./bench/block-benchmark.sh \
-  --backing /dev/TESTPART \
-  --size 1G \
-  --io-size 2G \
-  --iodepth 1 \
-  --destroy
-```
-
-Repeat at QD8.
-
-Run paired raw and swapz workloads for:
-
-```text
-100% compressible
-50% compressible
-0% compressible
-```
-
-Record the actual lower-device sector deltas.
-
-## Phase 12 — Safe virtual V1-versus-V2 comparison
-
-If no physical device is authorized, reproduce a safe virtual lower stack similar to the
-previous 1 ms/request test.
-
-Absolute throughput is not a 20 MB/s physical-device claim.
-
-Use it for an allocator A/B comparison.
-
-The V1 reference is branch:
-
-```text
-v1
-025edff9fbe1d402cf6eab294e3ce1627e49a1e9
-```
-
-Run the same fixed logical I/O volume, seed, logical size, physical size, QD, and delayed
-lower stack on V1 and V2.
-
-Unload the module and remove all DM/loop devices between versions.
+Use the same disposable backing stack, logical target size, fixed logical I/O volume, random
+seed, block size, compressibility, and queue depth.
 
 Compare:
 
 ```text
-lower write sectors
-lower read sectors
-throughput
-average latency
-p95
-p99
-max latency
-GC/compaction bytes
-GC-triggering latency
+V2 branch: 1e3a0c71b4e514bccae58d79be9f319640478b5c
+V2.1:      current origin/main
 ```
 
-The most important V2 comparison is the 50%-compressible and incompressible long-churn case
-that produced about 2.86x raw writes in V1.
+Unload the module and remove all temporary devices between versions.
 
-## Phase 13 — GC latency
-
-Measure individual writes around GC boundaries.
-
-Report steady-state versus GC-triggering:
+Run at minimum:
 
 ```text
-average
-p95
-p99
-max
+100% compressible: QD1, QD8
+50% compressible:  QD1, QD8
+0% compressible:   QD1, QD8
 ```
 
-Compare V2 with the historical V1 approximately 1.03 second rotation-triggering result on
-the same delayed stack.
+Use fixed logical bytes, not fixed duration.
 
-Do not hide tail latency inside average throughput.
+Report for both versions:
 
-## Phase 14 — Host-LBA distribution
+| Workload | Version | QD | Throughput | Avg lat | p95 | p99 | Max | Lower write I/Os | Lower write bytes | GC write | GC read |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 
-Use segment cycle counters and block tracing if practical.
+For V2.1 also include `physical_write_reqs`, `multi_write_reqs`, and
+`max_write_batch`.
 
-Report:
+## Phase 6 — QD1 requirement
+
+QD1 is a primary target, not an afterthought.
+
+The lower write batch cannot create concurrency when only one upper request exists, so the
+important V2.1 QD1 change is the shorter single-record pack wait.
+
+Measure QD1 carefully for all three data classes.
+
+Determine whether the prior approximately 2x partial/raw penalty versus raw is materially
+reduced.
+
+Also verify the shorter wait does not destroy compression packing under normal swap-out
+bursts.
+
+## Phase 7 — QD8 diagnostic
+
+QD8 is a diagnostic of request overhead, not a goal to compete with NVMe.
+
+On the 1 ms/request virtual stack, validated V2 was limited to about 3.85 MB/s for
+partial/incompressible QD8 while raw reached about 31 MB/s.
+
+V2.1 should demonstrate that several consecutive 4 KiB outputs can share one serialized
+lower request.
+
+The key evidence is:
 
 ```text
-segment_cycle_min
-segment_cycle_max
-segment switches
-range of lower LBAs written
-whether FREE-segment allocation advances broadly before reuse
+max_write_batch > 1
+multi_write_reqs > 0
+substantially fewer lower write I/Os
+material QD8 throughput improvement over V2
 ```
 
-Call this host-LBA distribution, not NAND wear leveling.
+Do not declare failure merely because raw QD8 still benefits from eight concurrent lower
+requests. The physical design target remains serialized media.
 
-## Phase 15 — Required benchmark table
+## Phase 8 — Endurance regression
 
-Return at least:
+V2.1 must not undo the validated V2 endurance result.
 
-| Workload | Version/path | QD | Logical bytes | Throughput | Avg lat | p95 | p99 | CPU | Lower write bytes | Lower read bytes | GC write | GC read | GC victims | Write ratio |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+For partial and incompressible long churn:
 
-Include raw, V1 where compared, and V2.
+```text
+V2.1 lower bytes should remain approximately raw, not return toward V1's 2.86x raw
+GC write amplification must not materially increase
+host-LBA traversal must remain broad
+```
 
-## Decision metrics
+For highly compressible queued writes, useful lower-byte reduction must remain.
+
+## Phase 9 — GC latency regression
+
+Repeat the live-GC latency probe.
+
+Validated V2 was approximately 7.662 ms on the prior virtual test.
+
+Report steady, segment-switch, and GC-triggering latency. Batching should not reintroduce
+V1-scale stalls.
+
+## Phase 10 — Physical-media safety
+
+No physical test device is implicitly authorized.
+
+If the operator does not explicitly identify an exact disposable physical device/partition,
+report:
+
+```text
+PHYSICAL BENCHMARK: NOT RUN
+```
+
+Do not guess based on existing disks or swap partitions.
+
+## Required conclusions
 
 Explicitly answer:
 
-1. Did V2 eliminate V1's multi-x write amplification for partial/raw churn?
-2. How much lower I/O does highly compressible V2 traffic save?
-3. What is V2 QD1 overhead when packing opportunities are weak?
-4. How many pages/bytes are relocated per victim?
-5. What is the cost of scanning the logical map?
-6. How large are GC-triggered latency spikes?
-7. Does GC still preserve an endurance benefit after its reads/writes are included?
-8. Does segment allocation traverse the backing space broadly?
-9. Is the single worker still appropriate for the intended slow-device target?
+1. Did V2.1 preserve V2 correctness?
+2. Did multi-block batching actually occur?
+3. By how much did lower write-I/O count fall?
+4. Did partial/incompressible QD8 improve versus V2?
+5. Did QD1 improve after reducing the pack wait?
+6. Did lower bytes written remain at or below the V2 level?
+7. Did highly compressible packing remain effective?
+8. Did GC latency or write amplification regress?
+9. Is serialized 32 KiB batching a good fit for the intended old storage target?
 
 ## Final status
 
 Choose exactly one:
 
 ```text
-BLOCKED — correctness failure
-CORRECTNESS PASS, PERFORMANCE FAIL
-CORRECTNESS PASS, PHYSICAL BENCHMARK STILL NEEDED
-V2 PROOF-OF-CONCEPT SUCCESS
+BLOCKED — CORRECTNESS FAILURE
+CORRECTNESS PASS, BATCHING INEFFECTIVE
+CORRECTNESS PASS, VIRTUAL PERFORMANCE IMPROVED — PHYSICAL BENCHMARK NEEDED
+V2.1 PROOF-OF-CONCEPT SUCCESS
 ```
 
-Then list the three highest-priority findings for the primary developer.
+Use `V2.1 PROOF-OF-CONCEPT SUCCESS` only if an explicitly authorized physical target has
+also demonstrated the intended performance/endurance benefit.
 
 Do not commit or push changes.
