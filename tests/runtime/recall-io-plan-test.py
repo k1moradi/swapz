@@ -9,11 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ast
 import importlib.util
+import os
 from pathlib import Path
 import random
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent
@@ -295,9 +297,135 @@ class RecallIOPlanTests(unittest.TestCase):
 
     def test_truncated_source_blocks_read(self) -> None:
         self.source.write_bytes(b"x" * 8000)
-        with self.assertRaisesRegex(RecallPlanError, "truncated"):
+        with self.assertRaisesRegex(RecallPlanError, "invalid recall file identity or size"):
             self.plan.prepare_expected(4, "a")
         self.assertTrue(self.plan.failure)
+
+    def _mutate_after_fake_read(self, mutate) -> None:
+        original = self.fake.wait
+        def injected(handle: str, timeout: float) -> FakeResult:
+            outcome = original(handle, timeout)
+            mutate(self.directory / "read-a")
+            return outcome
+        self.fake.wait = injected
+
+    def test_dangling_output_symlink_denies_launch(self) -> None:
+        (self.directory / "read-a").symlink_to(self.directory / "missing")
+        with self.assertRaisesRegex(RecallPlanError, "already exists"):
+            self.plan.read_one(0, "a")
+        self.assertEqual(self.plan.handles, [])
+        self.assertTrue(self.plan.failure)
+        self.plan.cleanup_after_stop(lambda: self.fail("unsafe cleanup"))
+
+    def test_fifo_output_denies_launch_without_blocking(self) -> None:
+        os.mkfifo(self.directory / "read-a")
+        with self.assertRaisesRegex(RecallPlanError, "already exists"):
+            self.plan.read_one(0, "a")
+        self.assertEqual(self.plan.handles, [])
+        self.assertTrue(self.plan.failure)
+
+    def test_source_symlink_denies_expected_preparation(self) -> None:
+        actual = self.directory / "actual-pages"
+        self.source.replace(actual)
+        self.source.symlink_to(actual)
+        with self.assertRaisesRegex(RecallPlanError, "unsafe non-regular"):
+            self.plan.read_one(0, "a")
+        self.assertEqual(self.fake.events, [])
+        self.assertTrue(self.plan.failure)
+
+    def test_source_hardlink_denies_expected_preparation(self) -> None:
+        os.link(self.source, self.directory / "second-source-link")
+        with self.assertRaisesRegex(RecallPlanError, "unsafe non-regular"):
+            self.plan.read_one(0, "a")
+        self.assertEqual(self.plan.handles, [])
+        self.assertTrue(self.plan.failure)
+
+    def test_symlinked_readback_after_reap_denies_cleanup(self) -> None:
+        def mutate(output: Path) -> None:
+            output.unlink()
+            output.symlink_to(self.directory / "expected-a")
+        self._mutate_after_fake_read(mutate)
+        with self.assertRaisesRegex(RecallPlanError, "unsafe non-regular"):
+            self.plan.read_one(0, "a")
+        self.assertEqual(self.plan.handles, ["handle-1"])
+        self.plan.cleanup_after_stop(lambda: self.fail("unsafe cleanup"))
+
+    def test_fifo_readback_after_reap_is_nonblocking_rejection(self) -> None:
+        def mutate(output: Path) -> None:
+            output.unlink()
+            os.mkfifo(output)
+        self._mutate_after_fake_read(mutate)
+        with self.assertRaisesRegex(RecallPlanError, "unsafe non-regular"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+
+    def test_hardlinked_readback_after_reap_is_rejected(self) -> None:
+        def mutate(output: Path) -> None:
+            output.unlink()
+            os.link(self.directory / "expected-a", output)
+        self._mutate_after_fake_read(mutate)
+        with self.assertRaisesRegex(RecallPlanError, "unsafe non-regular"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+
+    def test_oversized_readback_after_reap_is_rejected(self) -> None:
+        def mutate(output: Path) -> None:
+            with output.open("ab") as out:
+                out.write(b"x" * (1024 * 1024))
+        self._mutate_after_fake_read(mutate)
+        with self.assertRaisesRegex(RecallPlanError, "invalid recall file identity or size"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+
+    def test_short_readback_after_reap_is_rejected(self) -> None:
+        def mutate(output: Path) -> None:
+            output.write_bytes(b"short")
+        self._mutate_after_fake_read(mutate)
+        with self.assertRaisesRegex(RecallPlanError, "invalid recall file identity or size"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+
+    def test_expected_replaced_with_symlink_after_wait_rejected(self) -> None:
+        def mutate(_output: Path) -> None:
+            expected = self.directory / "expected-a"
+            reference = self.directory / "real-expected"
+            expected.replace(reference)
+            expected.symlink_to(reference)
+        self._mutate_after_fake_read(mutate)
+        with self.assertRaisesRegex(RecallPlanError, "unsafe non-regular"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+
+    def test_exclusive_expected_create_rejects_racing_link(self) -> None:
+        original_open = os.open
+        victim = self.directory / "unrelated-file"
+        victim.write_bytes(b"preserve me")
+        expected = self.directory / "expected-a"
+        def inject_create(path, flags, *args):
+            if Path(path) == expected:
+                expected.symlink_to(victim)
+            return original_open(path, flags, *args)
+        with mock.patch.object(plan_module.os, "open", side_effect=inject_create):
+            with self.assertRaisesRegex(RecallPlanError, "cannot prepare safe recall"):
+                self.plan.read_one(0, "a")
+        self.assertEqual(victim.read_bytes(), b"preserve me")
+        self.assertEqual(self.plan.handles, [])
+        self.assertTrue(self.plan.failure)
+
+    def test_readback_inode_changed_between_lstat_and_open_rejected(self) -> None:
+        original_open = os.open
+        output = self.directory / "read-a"
+        def inject_open(path, flags, *args):
+            if Path(path) == output:
+                moved = self.directory / "old-read-a"
+                output.replace(moved)
+                output.write_bytes(moved.read_bytes())
+            return original_open(path, flags, *args)
+        with mock.patch.object(plan_module.os, "open", side_effect=inject_open):
+            with self.assertRaisesRegex(RecallPlanError, "invalid recall file identity or size"):
+                self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+        self.plan.cleanup_after_stop(lambda: self.fail("unsafe cleanup"))
 
     def test_negative_clock_delta_fails(self) -> None:
         self.plan.clock_ns = iter([10, 1]).__next__
