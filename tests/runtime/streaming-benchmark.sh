@@ -78,6 +78,11 @@ cleanup() {
     exit "$rc"
   fi
   if (( rc == 0 )); then
+    # NBD server stats are emitted only after its graceful shutdown. Keep
+    # actual observed maximum lower request size visible before deleting TMP.
+    if [[ "$BACKEND_KIND" == nbd && -s "$NBD_STATS" ]]; then
+      echo "SIZE_AWARE_NBD_STATS=$(cat "$NBD_STATS")"
+    fi
     rm -rf "$TMP"
   else
     echo "Benchmark exited with status $rc; diagnostic artifacts preserved at $TMP" >&2
@@ -186,8 +191,17 @@ setup_nbd() {
     echo "ERROR: size-aware NBD server did not become ready" >&2
     return 1
   }
-  local backing_bytes
-  backing_bytes=$(blockdev --getsize64 "$BACKING") || return 1
+  local backing_bytes=""
+  for ((i=0; i<50; ++i)); do
+    backing_bytes=$(blockdev --getsize64 "$BACKING" 2>/dev/null || true)
+    [[ "$backing_bytes" == 268435456 ]] && break
+    if ! kill -0 "$NBD_PID" 2>/dev/null; then
+      echo "ERROR: size-aware NBD server exited before geometry was ready" >&2
+      cat "$NBD_LOG" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
   [[ "$backing_bytes" == 268435456 ]] || {
     echo "ERROR: size-aware NBD device has unexpected capacity: $backing_bytes" >&2
     return 1
