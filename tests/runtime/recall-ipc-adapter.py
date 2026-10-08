@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Rootless adapter for test-only pidfd supervisor IPC, not production recall.
+"""Rootless adapters for strict pidfd supervisor IPC, not production recall.
 
-The only admitted workers are fixed sleep and exit test commands. No arbitrary
-argv, direct dd, device access, numeric PID signals or real cleanup.
+The default adapter admits only fixed sleep/exit test commands. The separate
+opt-in role adapter is for trusted rootless injected fixtures; no arbitrary
+argv, mapper path, numeric PID signals or real device cleanup is enabled.
 """
 
 from __future__ import annotations
@@ -204,4 +205,81 @@ class RecallIPCAdapter:
         return callback()
 
 
-__all__ = ["RecallIPCAdapter", "RecallIPCError", "WorkerOutcome", "StopAttestation"]
+
+# The opt-in adapter is constructed only by trusted test fixtures. A later
+# production bootstrap must prove that verify_role_result binds each readback
+# to the exact output descriptor retained at worker admission. It must NOT
+# derive an output identity by opening a mutable pathname after execution.
+_ROLE_PAGE = {"a": 0, "b": 4, "a2": 0, "b2": 5}
+_ROLE_ORDER = frozenset(("writer", *_ROLE_PAGE))
+
+
+class RecallRoleIPCAdapter(RecallIPCAdapter):
+    """Strict five-role session with mandatory pre-cleanup data attestation.
+
+    A trusted in-process fixture supplies the callback, which must compare
+    already pinned readback identity against immutable reference bytes.
+    The callback is never chosen by the remote controller or IPC request.
+    This is a rootless integration API, not a production bootstrap.
+    """
+
+    def __init__(self, client: IPCClient, process: ServiceProcess, *,
+                 verify_role_result: Callable[[str], bool],
+                 exit_timeout: float = 8.0) -> None:
+        if not callable(verify_role_result):
+            raise ValueError("a trusted role-result verifier is required")
+        super().__init__(client, process, exit_timeout=exit_timeout)
+        self._verify_role_result = verify_role_result
+        self._issued_roles: set[str] = set()
+        self._role_by_handle: dict[str, str] = {}
+        self._verified_role_handles: set[str] = set()
+
+    def launch_test(self, command: str, *, duration_ms: int | None = None,
+                    code: int | None = None) -> str:
+        self._reject("role-specific IPC session cannot launch test workers")
+
+    def launch_role(self, role: str) -> str:
+        if self._denied or self._stopped or self._shutdown:
+            self._reject("role launch admission closed")
+        if (type(role) is not str or role not in _ROLE_ORDER
+                or role in self._issued_roles
+                or (role != "writer" and "writer" not in self._issued_roles)):
+            self._reject("invalid, repeated or out-of-order recall role")
+        response = self._call("launch", command="recall-dd", role=role)
+        handle = response.get("handle")
+        if (response.get("status") != "ready" or response.get("ok") is not True
+                or response.get("cleanup_allowed") is not False
+                or response.get("preserve_backing") is not True
+                or not self._valid_handle(handle) or handle in self.handles):
+            self._reject("unconfirmed or duplicated recall role worker")
+        self.handles.append(handle)
+        self._issued_roles.add(role)
+        self._role_by_handle[handle] = role
+        return handle
+
+    def wait_reaped(self, handle: str, *, timeout_ms: int = 2000) -> WorkerOutcome:
+        result = super().wait_reaped(handle, timeout_ms=timeout_ms)
+        if handle in self._role_by_handle:
+            role = self._role_by_handle[handle]
+            if handle not in self._verified_role_handles:
+                # The writer has no readback file; other roles require an
+                # explicit, identity-bound exact-data verifier. The trusted
+                # callback must return precisely True, not merely truthiness.
+                if role != "writer":
+                    try:
+                        approved = self._verify_role_result(role)
+                    except Exception as exc:
+                        self._reject(f"trusted {role} readback check failed: {exc}")
+                    if approved is not True:
+                        self._reject(f"trusted {role} readback was not attested")
+                self._verified_role_handles.add(handle)
+        return result
+
+    def stop_all(self) -> StopAttestation:
+        # Positive synthetic cleanup requires every role's successful wait,
+        # not merely a supervisor stop report after a failed data test.
+        if set(self._role_by_handle) != self._verified_role_handles:
+            self._reject("role worker completion or readback attestation missing")
+        return super().stop_all()
+
+__all__ = ["RecallIPCAdapter", "RecallRoleIPCAdapter", "RecallIPCError", "WorkerOutcome", "StopAttestation"]
