@@ -294,7 +294,17 @@ def validate_nbd_node(path: str) -> str:
         raise ValueError("empty /proc/self/mountinfo; NBD mount status unverified")
     for line in mount_rows:
         fields = line.split()
-        if len(fields) < 10 or "-" not in fields[6:-3]:
+        # Format: id parent major:minor root mountpoint options
+        # [optional fields...] - fstype source superoptions. The separator
+        # must have exactly three trailing fields; searching for any '-'
+        # in the row could accept corrupt metadata as "not mounted".
+        separator = len(fields) - 4
+        if (separator < 6 or fields[separator] != "-" or
+                not re.fullmatch(r"[0-9]+", fields[0]) or
+                not re.fullmatch(r"[0-9]+", fields[1]) or
+                not re.fullmatch(r"[0-9]+:[0-9]+", fields[2]) or
+                "-" in fields[6:separator] or
+                not all(fields[index] for index in (3, 4, 5, -3, -2, -1))):
             raise ValueError("malformed /proc/self/mountinfo; NBD mount status unverified")
         if fields[2] == number:
             raise ValueError("selected NBD node is mounted")
