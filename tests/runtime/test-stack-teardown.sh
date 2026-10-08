@@ -48,11 +48,16 @@ swapz_test_check_loop_holders() {
   local loop_device=$1
   local loop_name=${loop_device##*/}
   local holders_dir="/sys/class/block/$loop_name/holders"
+  local first_holder
   if [[ ! -d "$holders_dir" ]]; then
     echo "ERROR: cannot verify holders for $loop_device; preserving loop" >&2
     return 1
   fi
-  if [[ -n "$(find "$holders_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+  if ! first_holder=$(find "$holders_dir" -mindepth 1 -maxdepth 1 -print -quit); then
+    echo "ERROR: could not inspect holders for $loop_device; preserving loop" >&2
+    return 1
+  fi
+  if [[ -n "$first_holder" ]]; then
     echo "ERROR: $loop_device still has block holders; preserving loop" >&2
     return 1
   fi
