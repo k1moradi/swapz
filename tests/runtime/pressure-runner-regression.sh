@@ -33,6 +33,32 @@ python3() {
     printf '%s\n' "$TOKEN"
     return
   fi
+  if [[ "$1" == "$ROOT/tests/runtime/pressure-swap-inventory.py" ]]; then
+    [[ "$2" == "$DEVICE" ]] || return 91
+    note "inspect-swap"
+    local fixture="$TMP/mock-swaps"
+    printf 'Filename Type Size Used Priority\n' >"$fixture"
+    case "$SCENARIO" in
+      missing_swap)
+        printf '/swapfile file 64 0 -1\n' >>"$fixture" ;;
+      bad_swap_used)
+        printf '%s partition 64 16garbage 100\n' "$DEVICE" >>"$fixture" ;;
+      duplicate_swap)
+        printf '%s partition 64 16 100\n' "$DEVICE" >>"$fixture"
+        printf '%s partition 64 16 100\n' "$DEVICE" >>"$fixture" ;;
+      unrelated_corrupt)
+        printf '%s partition 64 16 100\n' "$DEVICE" >>"$fixture"
+        printf '/swapfile file 64 corrupt -1\n' >>"$fixture" ;;
+      bad_swap_header)
+        printf '/swapfile corrupted-header\n' >"$fixture" ;;
+      no_swap_used)
+        printf '%s partition 64 0 100\n' "$DEVICE" >>"$fixture" ;;
+      *)
+        printf '%s partition 64 16 100\n' "$DEVICE" >>"$fixture" ;;
+    esac
+    command python3 "$1" "$2" --fixture "$fixture" 2>/dev/null
+    return $?
+  fi
   [[ "$1" == "$ROOT/tests/runtime/pressure_checkpoint.py" ]] || return 91
   note "$2:$5"
   command python3 "$@" >/dev/null 2>&1 || return 1
@@ -82,6 +108,15 @@ dmsetup() {
   case "$SCENARIO" in
     bad_status) printf '0 1024 swapz failed=1 gc_pages=5\n' ;;
     status_error) return 5 ;;
+    bad_status_after_filled)
+      if [[ -f "$TMP/$UNIT/release-filled" ]]; then
+        printf '0 1024 swapz failed=1 gc_pages=5\n'
+      else
+        printf '0 1024 swapz failed=0 gc_pages=5\n'
+      fi ;;
+    status_error_after_filled)
+      [[ -f "$TMP/$UNIT/release-filled" ]] && return 5
+      printf '0 1024 swapz failed=0 gc_pages=5\n' ;;
     no_gc) printf '0 1024 swapz failed=0 gc_pages=0\n' ;;
     *) printf '0 1024 swapz failed=0 gc_pages=5\n' ;;
   esac
@@ -128,8 +163,15 @@ run_case symlink_verified no_verified
 run_case missing_verified no_verified
 run_case no_memory_swap no_verified
 run_case no_swap_used no_verified
-run_case bad_status no_verified
-run_case status_error no_verified
+run_case bad_status no_filled
+run_case status_error no_filled
+run_case bad_status_after_filled no_verified
+run_case status_error_after_filled no_verified
+run_case missing_swap no_filled
+run_case bad_swap_used no_filled
+run_case duplicate_swap no_filled
+run_case unrelated_corrupt no_filled
+run_case bad_swap_header no_filled
 run_case no_gc no_verified
 run_case bad_result fail_after
 echo 'rootless production pressure controller: PASS'
