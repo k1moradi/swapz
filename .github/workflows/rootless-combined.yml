@@ -1,0 +1,128 @@
+name: Rootless combined source qualification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-nbd.yml'
+      - '.github/workflows/rootless-teardown.yml'
+      - 'tests/runtime/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-nbd.yml'
+      - '.github/workflows/rootless-teardown.yml'
+      - 'tests/runtime/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  one-revision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record exact joint source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "COMBINED_TESTED_HEAD=$(git rev-parse HEAD)"
+          echo "NBD_BLOB=$(git rev-parse HEAD:tests/runtime/size-aware-nbd.py)"
+          echo "KERNEL_BLOB=$(git rev-parse HEAD:kernel/dm-swapz.c)"
+          git status --short
+      - name: Refuse captured syscalls before running NBD selftest
+        run: |
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          source = Path("tests/runtime/size-aware-nbd.py").read_text()
+          tree = ast.parse(source)
+          functions = {node.name: node for node in tree.body
+                       if isinstance(node, ast.FunctionDef)}
+          shutdown = functions["shutdown_kernel_session"]
+          defaults = dict(zip((arg.arg for arg in shutdown.args.kwonlyargs),
+                              shutdown.args.kw_defaults))
+          for key in ("ioctl", "close_fd"):
+              value = defaults[key]
+              assert isinstance(value, ast.Constant) and value.value is None, (
+                  f"unsafe captured syscall default: {key}")
+          gates = functions["selftest_failure_gates"]
+          assert any(
+              isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "fake_fd"
+                      for target in node.targets)
+              and isinstance(node.value, ast.Call)
+              and isinstance(node.value.func, ast.Name)
+              and node.value.func.id == "object"
+              for node in ast.walk(gates)
+          ), "mock must use non-integer fd sentinel"
+          assert 'return_value=fake_fd' in source, "mocked os.open missing sentinel"
+          assert 'mock.patch("fcntl.ioctl"' in source, "ioctl patch missing"
+          assert 'mock.patch("os.close"' in source, "close patch missing"
+          print("COMBINED_NBD_STATIC_SYSCALL_ISOLATION: PASS")
+          PY
+      - name: All rootless Bash syntax gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in \
+            tests/runtime/test-stack-teardown.sh \
+            tests/runtime/test-stack-teardown-regression.sh \
+            tests/runtime/pressure-teardown.sh \
+            tests/runtime/pressure-teardown-regression.sh \
+            tests/runtime/no-discard-livegc.sh \
+            tests/runtime/buffer-recall.sh \
+            tests/runtime/pressure.sh \
+            tests/runtime/streaming-benchmark.sh \
+            tests/runtime/streaming-benchmark-teardown.sh \
+            tests/runtime/size-aware-nbd-teardown-test.sh; do
+            bash -n "$file"
+          done
+          echo "COMBINED_BASH_SYNTAX_10: PASS"
+      - name: Full DM and loop teardown mocks
+        run: bash tests/runtime/test-stack-teardown-regression.sh
+      - name: Full pressure teardown mocks
+        run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Offline live GC analyzer tests
+        run: python3 tests/runtime/live-gc-latency-analyze-test.py -v
+      - name: Compile and run full NBD userspace protocol selftest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/size-aware-nbd.py
+          python3 tests/runtime/size-aware-nbd.py selftest
+      - name: Recheck NBD selftest race in 25 separate processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..25}; do
+            if ! timeout 15s python3 tests/runtime/size-aware-nbd.py selftest \
+                >"$RUNNER_TEMP/joint-nbd-selftest.log" 2>&1; then
+              printf 'FAIL: NBD selftest process %s/25\n' "$attempt"
+              cat "$RUNNER_TEMP/joint-nbd-selftest.log"
+              exit 1
+            fi
+            echo "COMBINED_NBD_STRESS $attempt/25: PASS"
+          done
+      - name: Rootless NBD teardown mock
+        run: bash tests/runtime/size-aware-nbd-teardown-test.sh
+      - name: Rootless streaming teardown mock
+        run: bash tests/runtime/streaming-teardown-regression.sh
+      - name: Report joint rootless gate PASS
+        shell: bash
+        run: |
+          {
+            echo "## Combined rootless source gate: PASS"
+            echo ""
+            echo "Tested commit: \`$(git rev-parse HEAD)\`"
+            echo ""
+            echo "10 Bash syntax checks, 2 teardown regressions, 11 offline GC analyzer"
+            echo "tests, static NBD syscall isolation, NBD compilation, 26 complete"
+            echo "NBD selftests and 2 NBD/streaming teardown mocks all passed."
+            echo ""
+            echo "**No real DM/loop/NBD, swap or physical device operations.**"
+          } >>"$GITHUB_STEP_SUMMARY"
