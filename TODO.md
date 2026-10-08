@@ -270,3 +270,31 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       source blob after its ongoing teardown audit.
 - [ ] No live kernel NBD, swap, DM/loop or GC-overlap/physical tests
       without separate explicit authorization.
+
+### 2026-10-08 post-Codex teardown-PASS regression completion
+
+- [x] Record Codex independent **SOURCE-ONLY TEARDOWN GATE PASS**
+      at `0f2f169631d08fc1b92e2aba1bed398e1ef795ff` after all
+      ten commands and supplemental DM/ControlGroup checks passed.
+- [x] Check in direct tests of duplicate, empty, invalid-suffix,
+      traversal, slash and malformed transient unit names.
+- [x] Check in ControlGroup-empty plus live MainPID, active state and
+      both unsafe tests simultaneously; retain positive tests for
+      stopped/reaped inactive and failed services.
+- [x] Record systemctl property reads and unexpected process signals
+      in a file-backed log that persists across Bash subshells.
+- [x] Fix uncovered sequencing issue: prevalidate both transient unit
+      names before any systemd inspection/stop, even if the second
+      name is malformed.
+- [x] Teardown CI **PASS** at
+      `e64509318576f3c4d65050426af234c2910b70ff`:
+      https://github.com/k1moradi/swapz/actions/runs/37784883620
+- [x] Combined NBD+teardown same-source CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37784883592
+      (26/26 NBD selftests, 11 offline GC analyzer tests, all teardown mocks).
+- [ ] Await Codex independent Linux-host audit of the revised NBD
+      mountinfo bounds/partition source blob.
+- [ ] Review the remaining Bash PID reuse check-to-signal TOCTOU
+      separately before introducing new process signaling.
+- [ ] Real kernel, swap, device, GC overlap and physical performance
+      qualification remains unauthorized.
