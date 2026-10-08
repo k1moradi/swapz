@@ -14,7 +14,8 @@ reset_fixture() {
   LOOP_LIST_FAIL=0; FALSE_DETACH=0
   LOOP_LIST_PADDED=0; LOOP_LIST_MALFORMED=0; LOOP_LIST_EXTRA=0
   LOOP_LIST_FAIL_AFTER=0
-  PS_FAIL=0; CHILD_STATE=""; CALLS=(); SIGNALS=(); JOB_RUNNING=1; JOB_STOPPED=0
+  PS_FAIL=0; CHILD_STATE=""; CHILD_REAPS_ON_TERM=0
+  CALLS=(); SIGNALS=(); JOB_RUNNING=1; JOB_STOPPED=0
 }
 dmsetup() {
   local command=$1 target=""
@@ -152,7 +153,11 @@ jobs() {
 kill() {
   case "$1" in
     -0) [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
-    -CONT|-TERM) SIGNALS+=("$1:$2"); [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
+    -CONT) SIGNALS+=("$1:$2"); [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
+    -TERM)
+      SIGNALS+=("$1:$2")
+      if (( CHILD_REAPS_ON_TERM )); then CHILD_STATE=Z; fi
+      [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
     *) return 99 ;;
   esac
 }
@@ -284,6 +289,19 @@ PS_FAIL=1
 CHILD_STATE=D
 if swapz_test_stop_child 424242; then exit 1; fi
 echo 'process-state inspection failure preserves stack: PASS'
+
+# A stopped, shell-owned child must receive CONT before TERM and be
+# confirmed stopped before the test stack is eligible for teardown.
+reset_fixture
+JOB_RUNNING=0
+JOB_STOPPED=1
+CHILD_STATE=T
+CHILD_REAPS_ON_TERM=1
+swapz_test_stop_child 424242
+[[ "${SIGNALS[*]}" == "-CONT:424242 -TERM:424242" ]]
+[[ "$CHILD_STATE" == Z ]]
+[[ "${#CALLS[@]}" == 0 ]]
+echo 'stopped job resumed and terminated in order: PASS'
 
 # No job ownership and no living process means the child was already reaped.
 jobs() { [[ "$*" == -pr || "$*" == -ps ]] && :; }
