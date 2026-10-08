@@ -295,9 +295,19 @@ def validate_nbd_node(path: str) -> str:
     sysdir = Path("/sys/class/block", name)
     if any(child.name.startswith(name + "p") for child in sysdir.iterdir()):
         raise ValueError("selected NBD node has partitions")
-    swaps = Path("/proc/swaps").read_text()
-    for line in swaps.splitlines()[1:]:
-        swap_path = line.split()[0]
+    swap_lines = Path("/proc/swaps").read_text().splitlines()
+    # A successful read returning no header or malformed rows does not prove
+    # absence of swap. Reject untrustworthy inventory before touching ioctls.
+    if (not swap_lines or
+            swap_lines[0].split() != ["Filename", "Type", "Size",
+                                      "Used", "Priority"]):
+        raise ValueError("invalid /proc/swaps header; NBD status unverified")
+    for line in swap_lines[1:]:
+        fields = line.split()
+        if (len(fields) != 5 or not fields[0].startswith("/") or
+                fields[1] not in ("partition", "file")):
+            raise ValueError("malformed /proc/swaps entry; NBD status unverified")
+        swap_path = fields[0]
         try:
             swap_st = os.stat(swap_path)
         except OSError as exc:
