@@ -1719,3 +1719,66 @@ was fixed and requalified in both passing runs.
 live-GC behavior remain untested and unauthorized. Codex's separate
 gated-pidfd supervisor for recall is still not integrated; this
 pressure controller work does not eliminate the recall PID-reuse risk.
+
+## 2026-10-08 — Strict pressure /proc/swaps accounting and checkpoint release safety
+
+While Codex independently works on recall's gated-pidfd supervisor,
+a source-only pressure controller review found another **fail-open
+accounting ambiguity**: `awk '$1==d {used=$4} END {print used+0}'`
+silently converted a malformed `Used` field such as `16garbage`
+to a positive number; a missing target swap was silently represented
+as zero rather than reported as malformed. The filled checkpoint
+also previously only printed matching inventory rows.
+
+The primary developer added `tests/runtime/pressure-swap-inventory.py`
+and replaced those AWK inspections in the production
+`swapz_pressure_run_unit()` at **both** filled and verified phases.
+The strict parser verifies the full `/proc/swaps` header and *every*
+inventory row (five fields, absolute path, file/partition type,
+bounded ASCII-decimal Size/Used/Priority, nonzero Size and Used ≤ Size).
+It requires exactly one row whose canonical device path matches the
+test's known canonical swap device, rejecting absent/duplicated
+targets, malformed unrelated rows and truncated inventories.
+No `used+0` conversion or default fabricated zero is used.
+At verified checkpoint, the existing positive-memory-swap,
+positive-Used, exact `failed=0` DM status and required-GC predicates
+still gate release; unreadable or malformed inventories now stop
+progress at either checkpoint.
+
+**Rootless regression additions:** 23 dedicated parser unit tests
+exercise accepted target/unrelated entries, zero Used for the early
+phase, negative priority, valid canonical symlink aliases, and failures
+for missing/duplicate target, malformed header/rows/numerics,
+Unicode digits, oversized numbers, missing final newline, impossible
+Size/Used, invalid type/path and malformed unrelated entries.
+The rootless *production controller* regression also invokes the
+actual parser through a synthetic file while mocking systemd, cgroups
+and DM, checking that missing, duplicated, corrupt-Used, corrupt-header
+and corrupt-unrelated swap inventories prevent checkpoint release.
+This remains completely separate from actual pressure workload
+execution or real swap commands.
+
+**Successful source-only GitHub Actions evidence:**
+
+- Teardown rootless gate **SUCCESS** at
+  `3f4d1cd334074ba423b87b0801b1bccd72d0021c`:
+  https://github.com/k1moradi/swapz/actions/runs/37802473498
+- Combined rootless gate **SUCCESS** at
+  `b3833393c2a6d4e351e2610e647eaad0863eed05`:
+  https://github.com/k1moradi/swapz/actions/runs/37802481882
+
+Both runs exercised the same parser/controller source blobs;
+the latter revision includes a combined-workflow step to run the
+23 parser tests. The final combined gate passed 23 swap-parser
+tests, the full rootless controller and pressure/DM teardown
+regressions, 16 pressure checkpoint tests with 10/10 additional
+timed repetitions, all 11 offline GC analyzer tests, static NBD
+syscall isolation and **26/26 complete NBD userspace selftests**.
+There were no unexpected assertion failures or `EBADF` results.
+
+**Limits:** all inventories in the new parser and controller tests
+were synthetic regular files. No live /proc/swaps modification,
+systemd pressure job, kernel device, real swapoff/on, GC-overlap
+latency or physical performance test occurred. The recall PID-reuse
+risk is not addressed by this pressure change. The kernel, NBD
+backend, and Codex-owned recall/DM teardown source remain unchanged.
