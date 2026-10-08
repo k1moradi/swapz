@@ -89,6 +89,12 @@ jobs:
         run: bash tests/runtime/test-stack-teardown-regression.sh
       - name: Full pressure teardown mocks
         run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Strict pressure swap inventory parser unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/pressure-swap-inventory.py tests/runtime/pressure-swap-inventory-test.py
+          python3 tests/runtime/pressure-swap-inventory-test.py -v
       - name: Rootless production pressure controller regression
         run: bash tests/runtime/pressure-runner-regression.sh
       - name: Rootless pressure checkpoint release-token tests
@@ -143,7 +149,7 @@ jobs:
             echo ""
             echo "Tested commit: \`$(git rev-parse HEAD)\`"
             echo ""
-            echo "12 Bash syntax checks, 3 teardown regressions, pressure token tests, 11 offline GC analyzer"
+            echo "12 Bash syntax checks, 3 teardown regressions, strict swap inventory and pressure token tests, 11 offline GC analyzer"
             echo "tests, static NBD syscall isolation, NBD compilation, 26 complete"
             echo "NBD selftests and 2 NBD/streaming teardown mocks all passed."
             echo ""
