@@ -1956,3 +1956,48 @@ check-to-kill race remains an explicit source-only qualification.
 
 All work remains rootless; no real systemd service, block device,
 swap command, physical media, kernel module, fio or reboot.
+
+## Source-only follow-up after Codex independent NBD PASS — 8 MiB cleanup
+
+Codex independently confirmed **NBD SOURCE-ONLY GATE PASS** on
+`bd9fac18d06f1c4642c913618de645401611698e`,
+blob `3138df5d431b086ad61a4debda04159f6e0a6010`, with all seven
+rootless commands and 10 additional timed selftests passing.
+The only reported P2 NBD test edge was the exceptional local
+socketpair cleanup path if its worker remained alive after two
+bounded join attempts.
+
+The primary developer extracted a test-only
+`finish_test_socketpair_worker()` from the 8 MiB wire test and
+added `selftest_socketpair_cleanup()` with deterministic fake-worker
+and fake-socket scenarios. A still-alive worker fails explicitly
+with a diagnostic; both socket closes run even on cleanup failure;
+shutdown OSError is tolerated only if the subsequent bounded join
+proves worker exit. Worker exceptions and original wire-transaction
+failures remain failures. Production NBD kernel shutdown and its
+intentional descriptor-preserving join are unchanged.
+
+**Executed combined source-only qualification** at
+`52a2d6330428c64b39f2f8fe1c42aa1ff70a4cc9`:
+
+- https://github.com/k1moradi/swapz/actions/runs/37788553329
+  (NBD rootless, 26/26 complete full selftests)
+- https://github.com/k1moradi/swapz/actions/runs/37788553094
+  (joint NBD/teardown, 26/26 NBD tests, all teardown mocks,
+  ten Bash checks and 11 offline GC analyzer tests)
+
+Both workflows logged `NBD 8 MiB socketpair fault-injected cleanup: PASS`
+and the complete preflight, wire, setup/worker-error PASS.
+No EBADF or uncontrolled test-thread wait was recorded.
+
+Codex's independent teardown gate previously passed on
+`0f2f169631d08fc1b92e2aba1bed398e1ef795ff`;
+the later pressure unit-name two-unit prevalidation is being
+independently rechecked. Its design-only PID-safe signaling review
+must not be mistaken for an approved pidfd implementation.
+
+When updating source-only qualification again, record exact HEAD and
+source blobs, preserve the two local untracked `*-verify.state`
+files and verify syscall patch containment *before* any NBD selftest.
+No real NBD, DM/loop, swap, systemd pressure fixture, module,
+fio, physical device, kernel attachment or reboot is authorized.
