@@ -32,11 +32,22 @@ _SUPERVISOR_MODULE = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _SUPERVISOR_MODULE
 _SPEC.loader.exec_module(_SUPERVISOR_MODULE)
 
+_ALLOWLIST_PATH = Path(__file__).with_name("recall-dd-allowlist.py")
+_ALLOWLIST_SPEC = importlib.util.spec_from_file_location("swapz_recall_dd_allowlist", _ALLOWLIST_PATH)
+if _ALLOWLIST_SPEC is None or _ALLOWLIST_SPEC.loader is None:
+    raise RuntimeError("could not import recall dd launch policy")
+_ALLOWLIST_MODULE = importlib.util.module_from_spec(_ALLOWLIST_SPEC)
+sys.modules[_ALLOWLIST_SPEC.name] = _ALLOWLIST_MODULE
+_ALLOWLIST_SPEC.loader.exec_module(_ALLOWLIST_MODULE)
+
 GatedPidfdSupervisor = _SUPERVISOR_MODULE.GatedPidfdSupervisor
 PidfdUnavailable = _SUPERVISOR_MODULE.PidfdUnavailable
 StopReport = _SUPERVISOR_MODULE.StopReport
 SupervisorError = _SUPERVISOR_MODULE.SupervisorError
 WorkerResult = _SUPERVISOR_MODULE.WorkerResult
+DDPolicyDenied = _ALLOWLIST_MODULE.DDPolicyDenied
+PinnedDDLaunch = _ALLOWLIST_MODULE.PinnedDDLaunch
+RecallDDLaunchGate = _ALLOWLIST_MODULE.RecallDDLaunchGate
 
 MAX_FRAME_BYTES = 4096
 MAX_WORKERS = 16
@@ -212,13 +223,43 @@ def _result_dict(result: WorkerResult) -> dict[str, Any]:
 class SupervisorControlService:
     """Single-threaded, fail-closed request loop around GatedPidfdSupervisor."""
 
-    def __init__(self, *, supervisor: Any | None = None, io_timeout: float = DEFAULT_IO_TIMEOUT) -> None:
+    def __init__(
+        self,
+        *,
+        supervisor: Any | None = None,
+        io_timeout: float = DEFAULT_IO_TIMEOUT,
+        recall_dd_gate: Any | None = None,
+        enable_direct_dd: bool = False,
+    ) -> None:
         if not math.isfinite(io_timeout) or io_timeout <= 0:
             raise ValueError("io_timeout must be finite and positive")
+        if type(enable_direct_dd) is not bool:
+            raise ValueError("enable_direct_dd must be an explicit boolean")
+        if enable_direct_dd and recall_dd_gate is None:
+            raise ValueError("direct dd requires a trusted bootstrap launch gate")
+        if recall_dd_gate is not None and not all(
+            callable(getattr(recall_dd_gate, name, None))
+            for name in ("admit", "close_admission", "close")
+        ):
+            raise ValueError("recall dd gate does not implement the trusted launch API")
+        if recall_dd_gate is not None and not enable_direct_dd:
+            close_error: str | None = None
+            try:
+                recall_dd_gate.close_admission()
+                errors = recall_dd_gate.close()
+                if errors:
+                    close_error = "; ".join(_bounded_text(item) for item in errors)
+            except Exception as exc:
+                close_error = _bounded_text(exc)
+            suffix = f"; gate descriptor close failed: {close_error}" if close_error else ""
+            raise ValueError("a recall dd gate requires explicit direct-dd enablement" + suffix)
         self.supervisor = supervisor if supervisor is not None else GatedPidfdSupervisor(
             startup_timeout=2.0, term_grace=0.25, kill_grace=0.25, escalate=True
         )
         self.io_timeout = io_timeout
+        self.recall_dd_gate = recall_dd_gate
+        self.enable_direct_dd = enable_direct_dd
+        self._recall_dd_close_attempted = False
         self.handles: list[str] = []
         self._launch_attempts = 0
         self._last_request_id = 0
@@ -282,7 +323,10 @@ class SupervisorControlService:
         if self._admission_closed:
             self._sticky_failure = True
             return self._response(request_id, status="admission_closed", error="launch admission is closed")
+        if self._launch_attempts >= MAX_WORKERS:
+            raise ProtocolError("worker limit reached", request_id=request_id)
         command = request.get("command")
+        launch_options: dict[str, Any] = {}
         if command == "sleep":
             self._exact_keys(request, {"id", "op", "command", "duration_ms"})
             duration_ms = self._bounded_integer(
@@ -293,15 +337,65 @@ class SupervisorControlService:
             self._exact_keys(request, {"id", "op", "command", "code"})
             code = self._bounded_integer(request.get("code"), 0, 125, "code", request_id)
             argv = (sys.executable, "-c", _WORKER_CODE["exit"], str(code))
+        elif command == "recall-dd":
+            self._exact_keys(request, {"id", "op", "command", "role"})
+            if not self.enable_direct_dd or self.recall_dd_gate is None:
+                raise ProtocolError("direct dd role launch is disabled in this service")
+            role = request.get("role")
+            try:
+                launch = self.recall_dd_gate.admit(role)
+            except DDPolicyDenied as exc:
+                self._sticky_failure = True
+                try:
+                    self.recall_dd_gate.close_admission()
+                except Exception:
+                    self._sticky_failure = True
+                return self._response(
+                    request_id, status="launch_failure", error=_bounded_text(exc),
+                    preserve_required=True,
+                )
+            except Exception as exc:
+                self._sticky_failure = True
+                self._unconfirmed_launch = True
+                try:
+                    self.recall_dd_gate.close_admission()
+                except Exception:
+                    self._sticky_failure = True
+                return self._response(
+                    request_id, status="launch_failure",
+                    error=f"recall role admission failed: {_bounded_text(exc)}",
+                    preserve_required=True,
+                )
+            if not isinstance(launch, PinnedDDLaunch):
+                self._sticky_failure = True
+                self._unconfirmed_launch = True
+                self.recall_dd_gate.close_admission()
+                return self._response(
+                    request_id, status="supervisor_contract_failure",
+                    error="recall role gate returned an invalid launch descriptor",
+                    preserve_required=True,
+                )
+            argv = launch.argv
+            launch_options = {
+                "executable": launch.executable,
+                "executable_fd": launch.executable_fd,
+                "pass_fds": launch.pass_fds,
+                "strict_fds": True,
+            }
         else:
             raise ProtocolError("command is not in the test worker allowlist", request_id=request_id)
-        if self._launch_attempts >= MAX_WORKERS:
-            raise ProtocolError("worker limit reached", request_id=request_id)
         self._launch_attempts += 1
         try:
-            handle = self.supervisor.launch(argv, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"})
+            handle = self.supervisor.launch(
+                argv, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"}, **launch_options
+            )
         except SupervisorError as exc:
             self._sticky_failure = True
+            if command == "recall-dd":
+                try:
+                    self.recall_dd_gate.close_admission()
+                except Exception:
+                    pass
             error_handle = exc.handle if _valid_opaque_handle(exc.handle) else None
             if error_handle is not None and error_handle not in self.handles:
                 self.handles.append(error_handle)
@@ -317,17 +411,44 @@ class SupervisorControlService:
         except Exception as exc:
             self._sticky_failure = True
             self._unconfirmed_launch = True
+            if command == "recall-dd":
+                try:
+                    self.recall_dd_gate.close_admission()
+                except Exception:
+                    pass
             return self._response(request_id, status="launch_failure",
                                   error=f"supervisor launch failed: {_bounded_text(exc)}",
                                   preserve_required=True)
         if not _valid_opaque_handle(handle) or handle in self.handles:
             self._sticky_failure = True
             self._unconfirmed_launch = True
+            if command == "recall-dd":
+                try:
+                    self.recall_dd_gate.close_admission()
+                except Exception:
+                    pass
             return self._response(request_id, status="supervisor_contract_failure",
                                   error="supervisor returned an invalid or duplicate handle",
                                   preserve_required=True)
         self.handles.append(handle)
         return self._response(request_id, status="ready", ok=True, handle=handle)
+
+    def _close_recall_dd_descriptors(self) -> list[str]:
+        if self.recall_dd_gate is None or self._recall_dd_close_attempted:
+            return []
+        self._recall_dd_close_attempted = True
+        try:
+            errors = self.recall_dd_gate.close()
+        except Exception as exc:
+            self._sticky_failure = True
+            return [f"direct dd descriptor cleanup failed: {_bounded_text(exc)}"]
+        if not isinstance(errors, (tuple, list)) or any(not isinstance(item, str) for item in errors):
+            self._sticky_failure = True
+            return ["direct dd descriptor cleanup returned an invalid report"]
+        if errors:
+            self._sticky_failure = True
+            return [_bounded_text(item, 160) for item in errors[:8]]
+        return []
 
     def _worker_reaped(self, handle: str) -> bool:
         try:
@@ -390,16 +511,18 @@ class SupervisorControlService:
             self._last_stop_all_clean = False
             return self._response(request_id, status="lifecycle_failure",
                                   error=f"stop_all failed: {_bounded_text(exc)}")
+        descriptor_errors = self._close_recall_dd_descriptors() if self._all_reaped() else []
         self._last_stop_all_reaped = bool(report.all_reaped) and self._all_reaped()
         self._last_stop_all_clean = (
-            bool(report.cleanup_allowed) and self._last_stop_all_reaped and not repeated_stop
+            bool(report.cleanup_allowed) and self._last_stop_all_reaped
+            and not repeated_stop and not descriptor_errors
         )
         result_handles = [result.handle for result in report.results]
         if (any(not _valid_opaque_handle(handle) for handle in result_handles)
                 or len(result_handles) != len(set(result_handles))
                 or set(result_handles) != set(self.handles)):
             self._sticky_failure = True
-        if report.errors or any(result.errors for result in report.results):
+        if report.errors or any(result.errors for result in report.results) or descriptor_errors:
             self._sticky_failure = True
         cleanup_allowed = self._last_stop_all_clean and not self._sticky_failure
         if not cleanup_allowed:
@@ -412,7 +535,9 @@ class SupervisorControlService:
             cleanup_allowed=cleanup_allowed,
             all_reaped=self._last_stop_all_reaped,
             workers=results,
-            errors=[_bounded_text(item, 160) for item in report.errors[:8]],
+            errors=[_bounded_text(item, 160)
+                    for item in list(report.errors)[:max(0, 8 - len(descriptor_errors))]]
+                    + descriptor_errors[:8],
         )
         if len(encode_frame(response)) > MAX_FRAME_BYTES:
             response = self._response(
@@ -468,11 +593,12 @@ class SupervisorControlService:
         try:
             report, _ = self.supervisor.cleanup_after_stop(tuple(self.handles), lambda: "authorization-only")
             all_reaped = bool(report.all_reaped) and self._all_reaped()
+            descriptor_errors = self._close_recall_dd_descriptors() if self._all_reaped() else []
             # Even a successful internal recovery after transport loss cannot
             # authorize caller cleanup because no definitive response arrived.
             print(
                 f"preserve_backing: {reason}; internal_all_reaped={str(all_reaped).lower()}; "
-                "external_cleanup_allowed=false",
+                f"descriptor_errors={len(descriptor_errors)}; external_cleanup_allowed=false",
                 file=sys.stderr,
                 flush=True,
             )

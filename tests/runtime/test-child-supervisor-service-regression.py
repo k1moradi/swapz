@@ -6,11 +6,14 @@ from __future__ import annotations
 import importlib.util
 import json
 import errno
+import os
 import socket
+import stat
 import struct
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -100,10 +103,12 @@ class FakeServiceSupervisor:
         self.launch_error = launch_error
         self.next = 0
         self.launch_failure_error: str | None = None
+        self.launch_records: list[tuple[tuple[str, ...], dict[str, Any]]] = []
 
-    def launch(self, argv: tuple[str, ...], *, env: dict[str, str]) -> str:
+    def launch(self, argv: tuple[str, ...], *, env: dict[str, str], **options: Any) -> str:
         self.next += 1
         handle = f"fake-handle-{self.next}"
+        self.launch_records.append((tuple(argv), {**options, "env": dict(env)}))
         self.records[handle] = SimpleNamespace(reaped=False)
         if self.launch_error:
             self.launch_failure_error = "injected post-pidfd startup failure"
@@ -928,6 +933,294 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
         self.assertIn('"exit"', source)
         self.assertNotIn("request.get(\"pid\")", source)
         self.assertNotIn("request.get(\"argv\")", source)
+
+
+class RecallDDServiceAdmissionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory(prefix="swapz-recall-dd-service-")
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.fixture = self.base / "fixture"
+        self.fixture.mkdir(mode=0o700)
+        self.pages = self.fixture / "pages.bin"
+        self.pages.write_bytes(bytes(range(256)) * (4096 * 9 // 256))
+        self.pages.chmod(0o600)
+        self.mapper_name = "swapz-v22-recall-service-test"
+        self.mapper_file = self.base / "synthetic-mapper"
+        self.mapper_file.write_bytes(b"synthetic descriptor only")
+        self.mapper_file.chmod(0o600)
+
+    def make_gate(self):
+        mapper_fd = os.open(self.mapper_file, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            gate = service_module.RecallDDLaunchGate(
+                self.fixture,
+                self.mapper_name,
+                mapper_fd=mapper_fd,
+                executable_path=Path(sys.executable),
+                mapper_verifier=lambda fd, name, ops: (
+                    name == self.mapper_name and stat.S_ISREG(ops.fstat(fd).st_mode)
+                ),
+            )
+        finally:
+            os.close(mapper_fd)
+        self.addCleanup(gate.close)
+        return gate
+
+    def start_service_thread(self, service):
+        client_sock, server_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        outcomes: list[Any] = []
+
+        def serve() -> None:
+            try:
+                outcomes.append(service.serve(server_sock))
+            finally:
+                server_sock.close()
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        client = SupervisorControlClient(client_sock, timeout=2.0)
+        self.addCleanup(thread.join, 3.0)
+        self.addCleanup(server_sock.close)
+        self.addCleanup(client.close)
+        return client, thread, outcomes
+
+    def test_default_service_rejects_recall_roles_and_arbitrary_launch_fields(self) -> None:
+        fake = FakeServiceSupervisor()
+        default_service = SupervisorControlService(supervisor=fake, io_timeout=0.5)
+        direct_request = {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"}
+        outcome, responses = run_in_process(raw_frame(direct_request), default_service)
+        self.assertEqual(responses[0]["status"], "protocol_error")
+        self.assertFalse(responses[0]["cleanup_allowed"])
+        self.assertEqual(fake.launch_records, [])
+        self.assertFalse(outcome.cleanup_allowed)
+
+        configured_gate = self.make_gate()
+        configured = SupervisorControlService(
+            supervisor=FakeServiceSupervisor(), recall_dd_gate=configured_gate,
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        malformed = {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer",
+                     "argv": ["dd", "of=/dev/sda"], "pid": 123, "mapper": "/dev/sda"}
+        outcome2, responses2 = run_in_process(raw_frame(malformed), configured)
+        self.assertEqual(responses2[0]["status"], "protocol_error")
+        self.assertFalse(responses2[0]["cleanup_allowed"])
+        self.assertFalse(outcome2.cleanup_allowed)
+        self.assertEqual(configured.supervisor.launch_records, [])
+
+    def test_explicit_role_mode_routes_all_five_exact_fd_commands_to_fake_supervisor(self) -> None:
+        fake = FakeServiceSupervisor()
+        gate = self.make_gate()
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=gate, enable_direct_dd=True, io_timeout=1.0,
+        )
+        client, thread, outcomes = self.start_service_thread(service)
+        roles = ("writer", "a", "b", "a2", "b2")
+        handles: list[str] = []
+        for role in roles:
+            response = client.call("launch", command="recall-dd", role=role)
+            self.assertEqual(response["status"], "ready")
+            handles.append(response["handle"])
+        self.assertEqual(gate.roles_issued, roles)
+        self.assertEqual(len(fake.launch_records), 5)
+        writer_argv, writer_options = fake.launch_records[0]
+        source_fd, mapper_fd = writer_options["pass_fds"]
+        exec_fd = int(writer_options["executable"].rsplit("/", 1)[1])
+        self.assertEqual(writer_argv, (
+            "dd", f"if=/proc/self/fd/{source_fd}", f"of=/proc/self/fd/{mapper_fd}",
+            "bs=4096", "count=9", "oflag=direct", "conv=notrunc", "status=none",
+        ))
+        self.assertEqual(writer_options["executable_fd"], exec_fd)
+        self.assertTrue(writer_options["strict_fds"])
+        self.assertNotIn(exec_fd, writer_options["pass_fds"])
+        for role, (argv, options), page in zip(roles[1:], fake.launch_records[1:], (0, 4, 0, 5)):
+            output_fd = int(argv[2].rsplit("/", 1)[1])
+            self.assertEqual(argv, (
+                "dd", f"if=/proc/self/fd/{mapper_fd}", f"of=/proc/self/fd/{output_fd}",
+                "bs=4096", f"skip={page}", "count=1", "iflag=direct", "status=none",
+            ))
+            self.assertEqual(options["pass_fds"], (source_fd, mapper_fd, output_fd))
+            self.assertEqual(options["executable_fd"], exec_fd)
+            self.assertTrue(options["strict_fds"])
+            self.assertEqual(Path(gate._directory_path / ("read-" + role)).name, "read-" + role)
+        self.assertTrue(os.path.exists(f"/proc/self/fd/{exec_fd}"))
+        self.assertEqual(client.call("stop_all", handles=handles)["status"], "complete")
+        self.assertEqual(client.call("shutdown")["status"], "shutdown")
+        thread.join(timeout=2.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcomes[0].exit_code, 0)
+        self.assertTrue(client.confirm_service_exit(outcomes[0].exit_code))
+        self.assertTrue(client.cleanup_authorized)
+        self.assertEqual(fake.callback_count, 1)
+
+    def test_reader_before_writer_and_repeated_roles_permanently_deny_cleanup(self) -> None:
+        for roles in (("a",), ("writer", "writer")):
+            with self.subTest(roles=roles):
+                fake = FakeServiceSupervisor()
+                service = SupervisorControlService(
+                    supervisor=fake, recall_dd_gate=self.make_gate(),
+                    enable_direct_dd=True, io_timeout=1.0,
+                )
+                client, thread, outcomes = self.start_service_thread(service)
+                for role in roles:
+                    try:
+                        response = client.call("launch", command="recall-dd", role=role)
+                    except ChannelFailure:
+                        break
+                    if response["status"] != "ready":
+                        break
+                self.assertTrue(service._sticky_failure)
+                self.assertFalse(client.cleanup_authorized)
+                try:
+                    client.call("stop_all", handles=list(client._registered_handles))
+                    client.call("shutdown")
+                    thread.join(timeout=2.0)
+                    if outcomes:
+                        client.confirm_service_exit(outcomes[0].exit_code)
+                except ChannelFailure:
+                    pass
+                self.assertFalse(client.cleanup_authorized)
+                client.close()
+                thread.join(timeout=2.0)
+
+    def test_pidfd_start_failure_after_role_admission_denies_cleanup(self) -> None:
+        fake = FakeServiceSupervisor(launch_error=True)
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=self.make_gate(),
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        requests = [
+            {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
+            {"id": 2, "op": "stop_all", "handles": ["fake-handle-1"]},
+            {"id": 3, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(item) for item in requests), service)
+        self.assertEqual(responses[0]["status"], "launch_failure")
+        self.assertTrue(responses[0]["preserve_required"])
+        self.assertFalse(responses[1]["cleanup_allowed"])
+        self.assertFalse(responses[2]["cleanup_allowed"])
+        self.assertEqual(outcome.exit_code, 3)
+        self.assertEqual(gate_roles(service), ("writer",))
+
+    def test_worker_failure_after_successful_role_launch_denies_cleanup(self) -> None:
+        fake = FakeServiceSupervisor(stop_error="injected later worker failure")
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=self.make_gate(),
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        requests = [
+            {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
+            {"id": 2, "op": "launch", "command": "recall-dd", "role": "a"},
+            {"id": 3, "op": "stop_all", "handles": ["fake-handle-1", "fake-handle-2"]},
+            {"id": 4, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(item) for item in requests), service)
+        self.assertEqual([row["status"] for row in responses[:2]], ["ready", "ready"])
+        self.assertFalse(responses[2]["cleanup_allowed"])
+        self.assertEqual(responses[2]["workers"][1]["errors"], ["injected later worker failure"])
+        self.assertFalse(responses[3]["cleanup_allowed"])
+        self.assertEqual(outcome.exit_code, 3)
+
+    def test_duplicate_handle_after_role_admission_is_unconfirmed(self) -> None:
+        class DuplicateHandleSupervisor(FakeServiceSupervisor):
+            def launch(self, argv, *, env, **options):
+                super().launch(argv, env=env, **options)
+                return "fake-handle-1"
+
+        fake = DuplicateHandleSupervisor()
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=self.make_gate(),
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        requests = [
+            {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
+            {"id": 2, "op": "launch", "command": "recall-dd", "role": "a"},
+            {"id": 3, "op": "stop_all", "handles": ["fake-handle-1"]},
+            {"id": 4, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(item) for item in requests), service)
+        self.assertEqual(responses[0]["status"], "ready")
+        self.assertEqual(responses[1]["status"], "supervisor_contract_failure")
+        self.assertFalse(responses[2]["all_reaped"])
+        self.assertFalse(responses[2]["cleanup_allowed"])
+        self.assertFalse(responses[3]["cleanup_allowed"])
+        self.assertFalse(outcome.cleanup_allowed)
+
+    def test_pidfd_unavailable_after_admission_is_sticky_and_closes_gate(self) -> None:
+        class UnsupportedPidfdSupervisor(FakeServiceSupervisor):
+            def launch(self, argv, *, env, **options):
+                raise PidfdUnavailable("injected pidfd API unavailable", preserve_required=False)
+
+        fake = UnsupportedPidfdSupervisor()
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=self.make_gate(),
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        requests = [
+            {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
+            {"id": 2, "op": "stop_all", "handles": []},
+            {"id": 3, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(item) for item in requests), service)
+        self.assertEqual(responses[0]["status"], "launch_failure")
+        self.assertIn("pidfd API unavailable", responses[0]["error"])
+        self.assertFalse(responses[1]["cleanup_allowed"])
+        self.assertFalse(responses[2]["cleanup_allowed"])
+        self.assertEqual(outcome.exit_code, 3)
+        self.assertTrue(service._recall_dd_close_attempted)
+
+    def test_lost_service_channel_after_direct_launch_never_authorizes_cleanup(self) -> None:
+        fake = FakeServiceSupervisor()
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=self.make_gate(),
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        client, thread, outcomes = self.start_service_thread(service)
+        started = client.call("launch", command="recall-dd", role="writer")
+        self.assertEqual(started["status"], "ready")
+        client.close()
+        thread.join(timeout=2.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcomes[0].status, "connection_lost")
+        self.assertTrue(outcomes[0].all_reaped)
+        self.assertFalse(outcomes[0].cleanup_allowed)
+        self.assertFalse(client.cleanup_authorized)
+        self.assertEqual(fake.calls, [(started["handle"],)])
+
+    def test_descriptor_close_failure_denies_cleanup_even_after_reap(self) -> None:
+        class CloseFailureGate:
+            def __init__(self, inner):
+                self.inner = inner
+            def admit(self, role):
+                return self.inner.admit(role)
+            def close_admission(self):
+                self.inner.close_admission()
+            def close(self):
+                self.inner.close()
+                return ("injected retained descriptor close failure",)
+
+        fake = FakeServiceSupervisor()
+        gate = CloseFailureGate(self.make_gate())
+        service = SupervisorControlService(
+            supervisor=fake, recall_dd_gate=gate,
+            enable_direct_dd=True, io_timeout=0.5,
+        )
+        requests = [
+            {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
+            {"id": 2, "op": "stop_all", "handles": ["fake-handle-1"]},
+            {"id": 3, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(item) for item in requests), service)
+        self.assertEqual(responses[0]["status"], "ready")
+        self.assertEqual(responses[1]["status"], "lifecycle_failure")
+        self.assertIn("descriptor close failure", responses[1]["errors"][0])
+        self.assertFalse(responses[1]["cleanup_allowed"])
+        self.assertFalse(responses[2]["cleanup_allowed"])
+        self.assertEqual(outcome.exit_code, 3)
+
+
+def gate_roles(service: Any) -> tuple[str, ...]:
+    return service.recall_dd_gate.roles_issued
 
 
 if __name__ == "__main__":

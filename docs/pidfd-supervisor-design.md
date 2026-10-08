@@ -134,7 +134,7 @@ socketpair endpoint. The service does not create or remove DM mappings, loops,
 swap entries, or backing files. Its `cleanup_after_stop()` callback returns an
 in-memory marker only.
 
-The command allowlist is deliberately limited to:
+The default command allowlist is deliberately limited to:
 
 ```text
 launch {command:"sleep", duration_ms:0..5000}
@@ -146,17 +146,38 @@ shutdown
 
 The service translates `sleep` and `exit` into fixed Python worker programs.
 The wire API has no PID, `argv`, shell, working-directory, environment, or
-device-path field. It passes a small fixed environment to workers. This
-allowlist is for protocol and lifecycle tests; production recall must receive
-a separate reviewed direct-worker allowlist with exact argument and file-path
-validation before it can launch `dd`. That review must admit only the fixed
-read/write forms the recall fixture needs, validate block size, count, flags,
-input/output paths and the fixture-owned mapper identity, and keep page
-comparison in the parent. It must reject shell wrappers, generic executable
-paths, arbitrary environment/cwd values, and commands that can spawn I/O
-descendants. If a direct worker can still create descendants, the adapter must
-use a dedicated test cgroup and prove it empty before backing cleanup; the
-current test-only `sleep`/`exit` allowlist remains unchanged.
+device-path field. It passes a small fixed environment to workers. The service
+class also has an explicit in-process `enable_direct_dd=True` option that
+requires a trusted `RecallDDLaunchGate`. It accepts only `command="recall-dd"`
+with one of the five fixed `role` strings. The normal `--fd` CLI does not pass
+that option or construct a gate, so its direct-dd mode remains disabled; a
+future trusted launcher and its bridge/API contract need separate review
+before opting in.
+
+The descriptor-bound role gate pins the private fixture directory and source,
+the exact test DM descriptor, fixed readback outputs, and a verified ELF dd
+executable. It returns `/proc/self/fd/N` arguments plus an explicit descriptor
+pass list. `GatedPidfdSupervisor.launch()` can run a pinned executable path
+without PATH search, keep selected descriptors close-on-exec in the parent,
+pass only those descriptors in the child, and close unlisted child FDs before
+exec. The child remains blocked until its pidfd has been retained. The service
+still owns the direct child and all stop signals use that retained pidfd.
+
+This is admission and launch preparation, not production recall integration.
+Rootless role tests use synthetic files and a fake supervisor; they do not
+execute dd or open `/dev/mapper`. The service CLI's `sleep`/`exit` allowlist
+remains its default. The trusted bootstrap must still ensure the DM descriptor
+identifies the exact fixture mapping and prevent concurrent DM table changes.
+The source file can be changed in place by another same-UID process, so the
+fixture must retain an independent expected-data reference and exclude
+concurrent mutation.
+
+A pidfd does not contain descendants or terminate a worker if the supervisor
+crashes. GNU dd is intended to be the direct I/O process, but production
+integration must verify that exact executable does not create I/O-producing
+descendants, or use a separately owned cgroup and prove it empty before
+backing cleanup. A broken service, lost response, unconfirmed reap, fd-close
+failure, or abnormal process exit always requires preserving backing.
 
 ### Wire framing and session rules
 

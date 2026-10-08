@@ -7,6 +7,8 @@ import ast
 import importlib.util
 import os
 from pathlib import Path
+import shutil
+import stat
 import sys
 import tempfile
 import unittest
@@ -26,6 +28,8 @@ def load(name: str, path: Path):
 
 policy_module = load("recall_dd_allowlist", HERE / "recall-dd-allowlist.py")
 RecallDDAllowlist = policy_module.RecallDDAllowlist
+RecallDDLaunchGate = policy_module.RecallDDLaunchGate
+RecallDDFileOps = policy_module.RecallDDFileOps
 DDPolicyDenied = policy_module.DDPolicyDenied
 plan_module = load("recall_io_plan_allowlist_contract", HERE / "recall-io-plan.py")
 
@@ -47,6 +51,7 @@ class DDAllowlistTests(unittest.TestCase):
         self.root.mkdir()
         self.source = self.root / "pages.bin"
         self.source.write_bytes(bytes(range(256)) * (4096 * 9 // 256))
+        self.source.chmod(0o600)
         self.name = "swapz-v22-recall-safe-42"
         self.policy = RecallDDAllowlist(self.root, self.name)
 
@@ -271,6 +276,318 @@ class DDAllowlistTests(unittest.TestCase):
                 self.assertNotIn(name, banned)
         self.assertFalse(hasattr(self.policy, "launch"))
         self.assertFalse(hasattr(self.policy, "stop_all"))
+
+
+class PinnedDDLaunchGateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.root = self.base / "private-fixture"
+        self.root.mkdir(mode=0o700)
+        self.source = self.root / "pages.bin"
+        self.original = bytes(range(256)) * (4096 * 9 // 256)
+        self.source.write_bytes(self.original)
+        self.source.chmod(0o600)
+        self.name = "swapz-v22-recall-source-only"
+
+    def make_gate(self, *, executable: Path | None = None,
+                  ops: RecallDDFileOps | None = None):
+        map_path = self.base / "synthetic-mapper-fd"
+        map_path.write_bytes(b"fake block mapping descriptor")
+        map_path.chmod(0o600)
+        map_fd = os.open(map_path, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            gate = RecallDDLaunchGate(
+                self.root, self.name, mapper_fd=map_fd,
+                executable_path=Path(sys.executable) if executable is None else executable,
+                ops=ops,
+                mapper_verifier=lambda fd, name, file_ops: (
+                    name == self.name and stat.S_ISREG(file_ops.fstat(fd).st_mode)
+                ),
+            )
+        finally:
+            os.close(map_fd)
+        self.addCleanup(gate.close)
+        return gate
+
+    def test_all_five_roles_have_exact_fd_bound_argv_and_cloexec_parent(self):
+        gate = self.make_gate()
+        writer = gate.admit("writer")
+        source_fd = gate._source_fd
+        mapper_fd = gate._mapper_fd
+        executable_fd = gate._executable_fd
+        self.assertEqual(writer.argv, (
+            "dd", f"if=/proc/self/fd/{source_fd}", f"of=/proc/self/fd/{mapper_fd}",
+            "bs=4096", "count=9", "oflag=direct", "conv=notrunc", "status=none",
+        ))
+        self.assertEqual(writer.executable, f"/proc/self/fd/{executable_fd}")
+        self.assertEqual(writer.pass_fds, (source_fd, mapper_fd))
+        expected = {"a": 0, "b": 4, "a2": 0, "b2": 5}
+        for role, page in expected.items():
+            launch = gate.admit(role)
+            output_fd = gate._output_fds[role]
+            self.assertEqual(launch.argv, (
+                "dd", f"if=/proc/self/fd/{mapper_fd}", f"of=/proc/self/fd/{output_fd}",
+                "bs=4096", f"skip={page}", "count=1", "iflag=direct", "status=none",
+            ))
+            self.assertEqual(launch.page, page)
+            self.assertEqual(launch.output_path, self.root / ("read-" + role))
+            self.assertEqual(launch.pass_fds, (source_fd, mapper_fd, output_fd))
+        self.assertEqual(gate.roles_issued, ("writer", "a", "b", "a2", "b2"))
+        for fd in (gate._directory_fd, source_fd, mapper_fd, executable_fd,
+                   *gate._output_fds.values()):
+            self.assertFalse(os.get_inheritable(fd), f"parent fd {fd} must remain CLOEXEC")
+
+    def test_gate_is_one_use_and_reader_before_writer_closes_admission(self):
+        gate = self.make_gate()
+        with self.assertRaisesRegex(DDPolicyDenied, "before"):
+            gate.admit("a")
+        with self.assertRaisesRegex(DDPolicyDenied, "permanently closed"):
+            gate.admit("writer")
+        gate2 = self.make_gate()
+        gate2.admit("writer")
+        gate2.admit("a")
+        with self.assertRaisesRegex(DDPolicyDenied, "repeated"):
+            gate2.admit("a")
+        with self.assertRaises(DDPolicyDenied):
+            gate2.admit("b")
+
+    def test_default_mapper_verification_requires_exact_block_dm_name(self):
+        fake = self.base / "not-a-block-device"
+        fake.write_bytes(b"ordinary file")
+        fd = os.open(fake, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            with self.assertRaisesRegex(DDPolicyDenied, "not a block device"):
+                policy_module._verify_dm_descriptor(fd, self.name, RecallDDFileOps())
+        finally:
+            os.close(fd)
+
+    def test_trusted_mapper_descriptor_must_be_close_on_exec(self):
+        mapper_path = self.base / "synthetic-inheritable-mapper"
+        mapper_path.write_bytes(b"synthetic mapper identity")
+        mapper_fd = os.open(mapper_path, os.O_RDONLY)
+        try:
+            os.set_inheritable(mapper_fd, True)
+            with self.assertRaisesRegex(DDPolicyDenied, "close-on-exec"):
+                RecallDDLaunchGate(
+                    self.root, self.name, mapper_fd=mapper_fd,
+                    executable_path=Path(sys.executable),
+                    mapper_verifier=lambda *_: True,
+                )
+        finally:
+            os.close(mapper_fd)
+
+    def test_missing_or_replaced_source_denies_before_launch(self):
+        self.source.unlink()
+        with self.assertRaises(DDPolicyDenied):
+            self.make_gate()
+        self.source.write_bytes(self.original)
+        self.source.chmod(0o600)
+        gate = self.make_gate()
+        replacement = self.root / "replacement.bin"
+        replacement.write_bytes(self.original)
+        replacement.chmod(0o600)
+        replacement.replace(self.source)
+        with self.assertRaisesRegex(DDPolicyDenied, "identity"):
+            gate.admit("writer")
+        self.assertEqual(gate.roles_issued, ())
+
+    def test_private_directory_and_exact_source_shape_are_required(self):
+        for kind in ("mode", "wrong-size", "hardlink", "symlink"):
+            with self.subTest(kind=kind):
+                if kind == "mode":
+                    self.root.chmod(0o755)
+                elif kind == "wrong-size":
+                    self.source.write_bytes(b"short")
+                    self.source.chmod(0o600)
+                elif kind == "hardlink":
+                    os.link(self.source, self.base / "second-source-link")
+                else:
+                    real = self.root / "real-pages.bin"
+                    self.source.replace(real)
+                    self.source.symlink_to(real)
+                with self.assertRaises(DDPolicyDenied):
+                    self.make_gate()
+                if kind == "mode":
+                    self.root.chmod(0o700)
+                elif kind == "hardlink":
+                    (self.base / "second-source-link").unlink()
+                elif kind == "symlink":
+                    self.source.unlink()
+                    (self.root / "real-pages.bin").replace(self.source)
+                    self.source.chmod(0o600)
+                elif kind == "wrong-size":
+                    self.source.write_bytes(self.original)
+                    self.source.chmod(0o600)
+
+    def test_symlink_parent_and_mutable_source_type_are_rejected(self):
+        alias = self.base / "fixture-link"
+        alias.symlink_to(self.root, target_is_directory=True)
+        map_path = self.base / "synthetic-map"
+        map_path.write_bytes(b"fake")
+        map_fd = os.open(map_path, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            with self.assertRaises(DDPolicyDenied):
+                RecallDDLaunchGate(
+                    alias, self.name, mapper_fd=map_fd,
+                    executable_path=Path(sys.executable),
+                    mapper_verifier=lambda *_: True,
+                )
+        finally:
+            os.close(map_fd)
+
+        gate = self.make_gate()
+        source = self.root / "pages.bin"
+        source.unlink()
+        os.mkfifo(source)
+        with self.assertRaisesRegex(DDPolicyDenied, "identity"):
+            gate.admit("writer")
+
+    def test_replaced_fixture_directory_path_is_rejected(self):
+        gate = self.make_gate()
+        moved = self.base / "original-fixture"
+        self.root.rename(moved)
+        self.root.mkdir(mode=0o700)
+        replacement = self.root / "pages.bin"
+        replacement.write_bytes(self.original)
+        replacement.chmod(0o600)
+        with self.assertRaisesRegex(DDPolicyDenied, "directory path identity"):
+            gate.admit("writer")
+
+    def test_output_creation_rejects_regular_fifo_hardlink_and_symlink_entries(self):
+        for kind in ("regular", "fifo", "hardlink", "symlink", "dangling"):
+            with self.subTest(kind=kind):
+                gate = self.make_gate()
+                gate.admit("writer")
+                output = self.root / "read-a"
+                if kind == "regular":
+                    output.write_bytes(b"old")
+                elif kind == "fifo":
+                    os.mkfifo(output)
+                elif kind == "hardlink":
+                    hardlink_target = self.base / "hardlink-target"
+                    hardlink_target.write_text("private test target")
+                    os.link(hardlink_target, output)
+                elif kind == "symlink":
+                    victim = self.base / "victim"
+                    victim.write_text("safe")
+                    output.symlink_to(victim)
+                else:
+                    output.symlink_to(self.base / "missing")
+                with self.assertRaisesRegex(DDPolicyDenied, "already exists"):
+                    gate.admit("a")
+                if kind == "symlink":
+                    self.assertEqual(victim.read_text(), "safe")
+                output.unlink()
+
+    def test_replacement_after_admission_cannot_redirect_pinned_source(self):
+        gate = self.make_gate()
+        launch = gate.admit("writer")
+        source_fd = gate._source_fd
+        original_identity = (os.fstat(source_fd).st_dev, os.fstat(source_fd).st_ino)
+        moved = self.root / "renamed-pages.bin"
+        self.source.replace(moved)
+        self.source.write_bytes(b"replacement" * (4096 * 9 // 11))
+        self.source.chmod(0o600)
+        self.assertIn(f"if=/proc/self/fd/{source_fd}", launch.argv)
+        self.assertEqual(os.pread(source_fd, len(self.original), 0), self.original)
+        self.assertEqual((os.fstat(source_fd).st_dev, os.fstat(source_fd).st_ino),
+                         original_identity)
+
+    def test_output_path_replacement_after_admission_cannot_redirect_pinned_fd(self):
+        gate = self.make_gate()
+        gate.admit("writer")
+        launch = gate.admit("a")
+        output_fd = gate._output_fds["a"]
+        output_path = self.root / "read-a"
+        moved = self.root / "read-a-original"
+        victim = self.base / "victim"
+        victim.write_bytes(b"unchanged")
+        identity = (os.fstat(output_fd).st_dev, os.fstat(output_fd).st_ino)
+        output_path.replace(moved)
+        output_path.symlink_to(victim)
+        self.assertIn(f"of=/proc/self/fd/{output_fd}", launch.argv)
+        os.write(output_fd, b"synthetic worker output")
+        self.assertEqual(victim.read_bytes(), b"unchanged")
+        self.assertEqual(moved.read_bytes(), b"synthetic worker output")
+        self.assertEqual((os.fstat(output_fd).st_dev, os.fstat(output_fd).st_ino), identity)
+
+    def test_mapper_identity_is_rechecked_at_each_role_launch(self):
+        mapper_path = self.base / "synthetic-map-changing"
+        mapper_path.write_bytes(b"synthetic fd")
+        mapper_fd = os.open(mapper_path, os.O_RDONLY | os.O_CLOEXEC)
+        checks = iter((True, True, False))
+        try:
+            gate = RecallDDLaunchGate(
+                self.root, self.name, mapper_fd=mapper_fd,
+                executable_path=Path(sys.executable),
+                mapper_verifier=lambda *_: next(checks),
+            )
+        finally:
+            os.close(mapper_fd)
+        self.addCleanup(gate.close)
+        gate.admit("writer")
+        with self.assertRaisesRegex(DDPolicyDenied, "identity no longer matches"):
+            gate.admit("a")
+
+    def test_invalid_executable_identity_and_descriptor_acquisition_fail_closed(self):
+        bad_exe = self.base / "not-elf-dd"
+        bad_exe.write_bytes(b"#!/bin/sh\nexit 0\n")
+        bad_exe.chmod(0o755)
+        with self.assertRaisesRegex(DDPolicyDenied, "trusted ELF"):
+            self.make_gate(executable=bad_exe)
+
+        class FailingOps(RecallDDFileOps):
+            def open(self, path, flags, mode=0o777, *, dir_fd=None):
+                if path == "pages.bin":
+                    raise OSError("injected source fd acquisition failure")
+                return super().open(path, flags, mode, dir_fd=dir_fd)
+
+        with self.assertRaisesRegex(DDPolicyDenied, "cannot bind direct dd"):
+            self.make_gate(ops=FailingOps())
+
+    def test_executable_path_replacement_cannot_change_pinned_executable(self):
+        pinned_path = self.base / "trusted-dd"
+        shutil.copyfile(sys.executable, pinned_path)
+        pinned_path.chmod(0o700)
+        gate = self.make_gate(executable=pinned_path)
+        executable_fd = gate._executable_fd
+        identity = (os.fstat(executable_fd).st_dev, os.fstat(executable_fd).st_ino)
+        moved = self.base / "trusted-dd-original"
+        pinned_path.replace(moved)
+        pinned_path.write_text("#!/bin/sh\nexit 1\n")
+        pinned_path.chmod(0o755)
+        launch = gate.admit("writer")
+        self.assertEqual(launch.executable, f"/proc/self/fd/{executable_fd}")
+        self.assertEqual((os.fstat(executable_fd).st_dev, os.fstat(executable_fd).st_ino), identity)
+        self.assertEqual(os.pread(executable_fd, 4, 0), b"\x7fELF")
+
+    def test_close_failure_is_reported_once_and_denies_followup(self):
+        class CloseFailOps(RecallDDFileOps):
+            def __init__(self):
+                self.fail_fd = None
+                self.attempts = []
+            def close(self, fd):
+                self.attempts.append(fd)
+                if fd == self.fail_fd:
+                    raise OSError("injected close failure")
+                return super().close(fd)
+
+        ops = CloseFailOps()
+        gate = self.make_gate(ops=ops)
+        ops.fail_fd = gate._source_fd
+        errors = gate.close()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("injected close failure", errors[0])
+        attempts = list(ops.attempts)
+        self.assertEqual(gate.close(), errors)
+        self.assertEqual(ops.attempts, attempts)
+        with self.assertRaisesRegex(DDPolicyDenied, "closed"):
+            gate.admit("writer")
+        # The fake close failure intentionally leaves the descriptor open;
+        # close it directly as test-fixture cleanup after the assertion.
+        os.close(ops.fail_fd)
 
 
 if __name__ == "__main__":
