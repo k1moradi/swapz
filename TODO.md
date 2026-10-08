@@ -431,3 +431,32 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       systemd installation before any authorized live pressure test.
 - [ ] Recall PID reuse remains open until Codex's gated-pidfd
       supervisor prototype is reviewed and later integrated.
+
+### 2026-10-08 — Direct recall I/O plan and pidfd CI milestone
+
+- [x] Check in fixture-neutral `recall-io-plan.py` constructing
+      direct `dd` argv arrays with no background Bash wrappers.
+- [x] Preserve the nine-page deterministic fixture, exact 4096-byte
+      comparisons, staged single A/B reads, and both dual readers
+      **launched before either is waited**.
+- [x] Preserve all returned opaque supervisor handles, including
+      already-reaped readers and the outstanding staged writer.
+- [x] Block mock cleanup callback after any ambiguous worker launch,
+      wait, reap, identity, comparison, stop report or supervisor error.
+- [x] Add 25 rootless fake-supervisor tests with synthetic pages,
+      injected errors and AST process-syscall isolation assertions.
+- [x] Gate Codex's 27-case gated-pidfd supervisor suite in both
+      workflows with three additional finite-timeout process repeats.
+- [x] Teardown rootless GitHub CI **PASS** at
+      `a276218feba2454b5f4c1e9c515d276a8155c468`:
+      https://github.com/k1moradi/swapz/actions/runs/37808199284
+- [x] Same-revision combined NBD/teardown CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37808199250
+      (27 supervisor tests + 3 repeats, 25 I/O-plan tests, 26
+      NBD selftests, pressure and teardown mocks, 11 analyzer tests).
+- [ ] Await Codex's independently reviewed opaque-handle IPC
+      control-service work before a separately reviewed adapter.
+- [ ] Do not claim original recall PID reuse risk is resolved:
+      `buffer-recall.sh` still launches numeric-PID Bash jobs.
+- [ ] Real kernel, DM/loop, swap, systemd pressure and physical
+      device/latency qualification requires separate authorization.
