@@ -82,7 +82,13 @@ swapz_test_loop_presence() {
     echo "ERROR: cannot inventory loop attachments; preserving backing" >&2
     return 2
   fi
-  while IFS= read -r entry; do
+  # `read` splits/strips column padding emitted by some losetup builds.
+  while read -r entry _; do
+    [[ -z "$entry" ]] && continue
+    if [[ ! "$entry" =~ ^/dev/loop[0-9]+$ ]]; then
+      echo "ERROR: malformed loop inventory entry: $entry" >&2
+      return 2
+    fi
     [[ "$entry" == "$loop_device" ]] && return 0
   done <<<"$inventory"
   return 1
