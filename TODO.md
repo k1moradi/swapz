@@ -175,3 +175,23 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Treat shell PID identity TOCTOU as open until a safe separately
       reviewed pidfd-based signaling design is justified and tested.
 - [ ] No real device or performance testing without explicit new approval.
+
+### 2026-10-08 NBD 8 MiB race and mountinfo qualification follow-up
+
+- [x] Fix the observed 8 MiB socketpair EBADF race: stop/join-before-close.
+- [x] Apply join-before-close to malformed-request and cancellation tests.
+- [x] Strengthen /proc/self/mountinfo parse for mount IDs, major:minor
+      syntax, and exact field separator; test malformed ten-field entries.
+- [x] Preserve valid optional mountinfo tags and escaped path fixtures.
+- [x] Match NBD pull_request CI path filter to its push filter.
+- [x] Rootless NBD full seven-command gate PASS at
+      `edbf6d1452bd8c87b36c44daa6ad349967592a22`
+      (run https://github.com/k1moradi/swapz/actions/runs/37778788448).
+- [x] Execute full NBD selftest 25 additional times in separate CI
+      processes (25/25 PASS; 26 including initial run), reaching previously
+      blocked serve_kernel setup and worker-error tests.
+- [ ] Obtain independent Codex Linux-host NBD requalification of the
+      revised blob once its teardown task is complete.
+- [ ] Perform joint teardown + NBD source-only gate at one common HEAD
+      before asking for any separately authorized virtual runtime test.
+- [ ] No live kernel NBD/DM/loop/swap or physical testing approved.
