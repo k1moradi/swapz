@@ -272,6 +272,62 @@ class SupervisorRootlessTests(unittest.TestCase):
             self.assertEqual({event[1] for event in signals}, {opened[1]})
             self.assertEqual(supervisor.worker_for_test(handle).close_attempted, True)
 
+    def test_explicit_exec_and_pass_fds_are_pinned_and_parent_stays_cloexec(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "input.bin"
+            source.write_bytes(b"pinned-source")
+            source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC)
+            unpassed_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC)
+            executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                # Simulate an unrelated inheritable descriptor in the service.
+                # Strict direct mode must close it in the worker child only.
+                os.set_inheritable(unpassed_fd, True)
+                code = (
+                    "import os,sys,time; "
+                    "fd=int(sys.argv[1]); other=int(sys.argv[2]); "
+                    "data=os.read(fd,64); time.sleep(.05); "
+                    "ok=data==b'pinned-source'; "
+                    "exec(\"try: os.fstat(other); ok=False\\nexcept OSError: pass\"); "
+                    "raise SystemExit(0 if ok else 9)"
+                )
+                supervisor = GatedPidfdSupervisor(term_grace=.2, kill_grace=.2)
+                handle = supervisor.launch(
+                    ("pinned-python", "-c", code, str(source_fd), str(unpassed_fd)),
+                    executable=f"/proc/self/fd/{executable_fd}",
+                    executable_fd=executable_fd,
+                    pass_fds=(source_fd,),
+                    strict_fds=True,
+                )
+                self.assertFalse(os.get_inheritable(source_fd))
+                self.assertTrue(os.get_inheritable(unpassed_fd),
+                                "fork-child isolation must not mutate parent fd flags")
+                self.assertFalse(os.get_inheritable(executable_fd))
+                result = supervisor.wait(handle, 3.0)
+                self.assertTrue(result.reaped)
+                self.assertEqual(result.exit_code, 0, result.errors)
+                self.assertFalse(result.errors)
+            finally:
+                os.set_inheritable(unpassed_fd, False)
+                os.close(source_fd)
+                os.close(unpassed_fd)
+                os.close(executable_fd)
+
+    def test_invalid_pass_fds_fail_before_pipe_or_child_creation(self) -> None:
+        ops = FaultOps()
+        supervisor = GatedPidfdSupervisor(ops=ops)
+        with tempfile.TemporaryFile() as handle:
+            fd = handle.fileno()
+            os.set_inheritable(fd, True)
+            with self.assertRaisesRegex(ValueError, "close-on-exec"):
+                supervisor.launch((sys.executable, "-c", "pass"), pass_fds=(fd,))
+            os.set_inheritable(fd, False)
+            with self.assertRaisesRegex(ValueError, "duplicates"):
+                supervisor.launch((sys.executable, "-c", "pass"), pass_fds=(fd, fd))
+            with self.assertRaisesRegex(ValueError, "nonnegative integer"):
+                supervisor.launch((sys.executable, "-c", "pass"), pass_fds=(True,))
+        self.assertEqual(ops.pipe_count, 0)
+
     def test_stopped_child_gets_cont_then_term_through_one_pidfd(self) -> None:
         with tempfile.TemporaryDirectory(prefix="swapz-pidfd-stopped-") as tmp:
             marker = Path(tmp) / "stopped"

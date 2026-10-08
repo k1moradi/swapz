@@ -378,6 +378,10 @@ class GatedPidfdSupervisor:
         argv: tuple[str, ...],
         env: dict[str, str],
         cwd: str | None,
+        executable: str | None,
+        executable_fd: int | None,
+        pass_fds: tuple[int, ...],
+        strict_fds: bool,
     ) -> None:
         # This path runs only in the forked, single-threaded child.  The worker
         # cannot run until the parent writes the start byte after pidfd_open.
@@ -390,7 +394,43 @@ class GatedPidfdSupervisor:
                 os._exit(125)
             if cwd is not None:
                 os.chdir(cwd)
-            os.execvpe(argv[0], argv, env)
+            if strict_fds:
+                # Direct-I/O role launches may inherit only their pinned
+                # descriptors.  Enumerate in this single-threaded fork child;
+                # any inspection/close error aborts exec and is reported over
+                # the existing CLOEXEC error pipe.
+                keep = {0, 1, 2, error_write_fd}
+                keep.update(pass_fds)
+                if executable_fd is not None:
+                    keep.add(executable_fd)
+                try:
+                    inherited = os.listdir("/proc/self/fd")
+                except OSError as exc:
+                    raise OSError(errno.EIO, f"cannot inspect child descriptors: {exc}") from exc
+                for entry in inherited:
+                    if not entry.isdecimal():
+                        continue
+                    fd = int(entry)
+                    if fd < 3 or fd in keep:
+                        continue
+                    try:
+                        os.close(fd)
+                    except OSError as exc:
+                        # listdir's own fd can already have closed when its
+                        # returned entries are processed. EBADF is harmless.
+                        if exc.errno != errno.EBADF:
+                            raise
+            # File descriptors are close-on-exec by default.  Only explicitly
+            # selected descriptors cross this exec boundary.  This mutation
+            # occurs in the forked child, so the supervisor's own descriptor
+            # flags remain unchanged.
+            for fd in pass_fds:
+                os.set_inheritable(fd, True)
+            if executable is None:
+                os.execvpe(argv[0], argv, env)
+            # The caller may provide a descriptor-pinned path such as
+            # /proc/self/fd/N.  os.execve does no PATH lookup in this mode.
+            os.execve(executable, argv, env)
         except BaseException as exc:
             number = getattr(exc, "errno", None) or errno.EFAULT
             try:
@@ -404,6 +444,10 @@ class GatedPidfdSupervisor:
         *,
         env: Mapping[str, str] | None = None,
         cwd: str | None = None,
+        executable: str | None = None,
+        executable_fd: int | None = None,
+        pass_fds: Sequence[int] = (),
+        strict_fds: bool = False,
     ) -> str:
         """Start argv behind a gate and return only after pidfd-backed exec."""
         if self._closing:
@@ -418,6 +462,39 @@ class GatedPidfdSupervisor:
             raise ValueError("argv entries must be NUL-free strings")
         if not command[0]:
             raise ValueError("argv[0] must be nonempty")
+        if not isinstance(pass_fds, Sequence) or isinstance(pass_fds, (str, bytes)):
+            raise ValueError("pass_fds must be a sequence of file descriptors")
+        inherited_fds = tuple(pass_fds)
+        if any(isinstance(fd, bool) or not isinstance(fd, int) or fd < 0 for fd in inherited_fds):
+            raise ValueError("pass_fds must contain nonnegative integer descriptors")
+        if len(inherited_fds) != len(set(inherited_fds)):
+            raise ValueError("pass_fds must not contain duplicates")
+        if executable is not None and (
+            not isinstance(executable, str) or not executable.startswith("/")
+            or "\x00" in executable
+        ):
+            raise ValueError("executable must be an absolute NUL-free path")
+        if type(strict_fds) is not bool:
+            raise ValueError("strict_fds must be a boolean")
+        if executable_fd is not None:
+            if (isinstance(executable_fd, bool) or not isinstance(executable_fd, int)
+                    or executable_fd < 0 or executable is None):
+                raise ValueError("executable_fd requires a valid pinned executable path")
+            os.fstat(executable_fd)
+            if (os.get_inheritable(executable_fd)
+                    or executable != f"/proc/self/fd/{executable_fd}"):
+                raise ValueError("pinned executable must use its close-on-exec procfd path")
+            if executable_fd in inherited_fds:
+                raise ValueError("pinned executable descriptor must remain close-on-exec")
+            if not strict_fds:
+                raise ValueError("pinned executable launches require strict descriptor isolation")
+        for fd in inherited_fds:
+            # Validate in the parent before creating a child.  The descriptor
+            # stays CLOEXEC here and is made inheritable only in the gated
+            # child immediately before exec.
+            os.fstat(fd)
+            if os.get_inheritable(fd):
+                raise ValueError("pass_fds must be close-on-exec in the supervisor")
         child_env = dict(os.environ if env is None else env)
         if any(not isinstance(k, str) or not isinstance(v, str) or "\x00" in k or "\x00" in v
                for k, v in child_env.items()):
@@ -460,7 +537,7 @@ class GatedPidfdSupervisor:
         if pid == 0:
             self._child_exec(
                 gate_read_fd, gate_write_fd, error_read_fd, error_write_fd,
-                command, child_env, cwd,
+                command, child_env, cwd, executable, executable_fd, inherited_fds, strict_fds,
             )
             os._exit(127)
 
