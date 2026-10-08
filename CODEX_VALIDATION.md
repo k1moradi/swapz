@@ -1873,3 +1873,45 @@ shell-job PID-check-to-kill TOCTOU has been eliminated.
 Do not conduct any real DM/loop/NBD, swapon/swapoff, kernel module,
 physical-media, fio, benchmark or reboot activity without separate
 explicit authorization.
+
+## NBD independent qualification handoff after mountinfo dev_t correction
+
+Codex's NBD source-only qualification at
+`b838ad11e7ac49327514d55a1f2aeea9e3e1769e` reported **FAIL**
+although all seven rootless commands and 10/10 complete selftests
+passed. The observed remaining fail-open case was a numeric but
+out-of-range mountinfo device tuple (for example `4096:0`,
+`43:1048576`); NBD sysfs partition rejection had no direct test.
+
+The primary developer now validates mountinfo major/minor integers
+against 4095/1048575, compares the device identity numerically
+(including leading zeros), and tests bad first and second rows,
+valid boundary device numbers, synthetic `nbd0p1` partition presence
+and partition-enumeration failures. Both CI gates passed on the
+**same code commit**
+`40678c7d9743d6efca943885f40be1a0388d3ca6`:
+
+- NBD source-only rootless CI:
+  https://github.com/k1moradi/swapz/actions/runs/37783419565
+- Combined teardown+NBD rootless CI:
+  https://github.com/k1moradi/swapz/actions/runs/37783419522
+
+Each workflow completed 26 full NBD selftests (initial selftest plus
+25 repetitions) with no reported EBADF or assertion errors.
+The combined workflow also passed the DM/loop and pressure teardown
+mocks, ten syntax checks and 11 offline analyzer tests.
+
+**After finishing the independently assigned teardown audit:**
+refresh `main`, record HEAD, kernel blob and updated NBD blob; preserve
+both local `*-verify.state` files. Before running the NBD selftest
+review late-bound ioctl/close mocks, the noninteger fake fd and the
+thread-stop/join-before-socket-close ordering. Run the seven NBD
+source-only commands listed in the prior NBD section, check the new
+out-of-bounds and partition negative cases truly exercise their
+respective failure paths, and report the exact Linux-host verdict.
+Do not reuse the historical unsafe captured-default source blob.
+
+A GitHub CI PASS does not supersede independent Linux-host review,
+nor does any rootless result prove live kernel NBD shutdown, actual
+swap-in p99, GC overlap, device throughput or physical performance.
+No module, device, swap, fio, teardown fixture or reboot is permitted.
