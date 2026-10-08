@@ -1793,3 +1793,33 @@ Preserve existing `local-*-verify.state` files exactly. No device
 runtime operation, swapping, kernel module change, benchmark, physical
 media or reboot is authorized. The rootless PASS is not an actual
 NBD driver qualification or GC latency measurement.
+
+## Combined source-only clean-runner evidence at one exact revision
+
+While Codex was independently auditing the teardown source, the primary
+developer added the rootless-only integration workflow:
+`.github/workflows/rootless-combined.yml`.
+
+**Execution PASS:** https://github.com/k1moradi/swapz/actions/runs/37779371716
+
+- **Tested HEAD:** `8116bdfb8b61a69f67e6548904e82c191b979f23`
+- **NBD source blob:** `768ff896e82198829cde83e28c8e0a35ddad368c`
+- **Kernel blob:** `7589022ecdf0525716717270ab063a867a21f473`
+
+The combined job statically verified that NBD mock ioctl/close
+dependencies cannot use captured real syscall defaults before it
+ran selftest, then passed ten Bash syntax checks, the rootless DM/loop
+and pressure teardown regressions, 11 offline GC analyzer tests,
+NBD compilation and full userspace selftest, 25 additional NBD
+selftest processes (26 total), and both NBD/streaming teardown mocks.
+The expected cgroup `NotADirectoryError` traceback is an intentional
+negative test; the suite was successful.
+
+**Codex follow-up:** Finish/report the assigned independent Linux-host
+teardown gate at your exact checked-out HEAD; do not replace it with
+this GitHub runner result. Before any new independent NBD selftest,
+review syscall isolation and the non-integer fake fd as previously
+specified. Preserve existing `local-*-verify.state` files.
+A combined source-only PASS is **not** a live kernel NBD driver smoke
+or calibrated GC latency/physical bandwidth benchmark. Continue to
+avoid root, real DM/loop/NBD, swap, module and physical disk operations.
