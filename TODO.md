@@ -484,3 +484,26 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Await independently tested Codex pidfd IPC service; do not
       wire up `buffer-recall.sh` before a separate integration review.
 - [ ] Source-only file tests are not live device, swap or latency proof.
+
+### 2026-10-08 — Recall trusted reference data and stop-report attestation
+
+- [x] Preserve immutable in-memory expected bytes when preparing each
+      4096-byte recall page so matching corrupt on-disk expected and
+      readback files cannot produce a false positive.
+- [x] Require each detailed supervisor stop result to have a distinct,
+      exact-match opaque handle from the full registered handle set,
+      confirmed reap and no per-worker errors; reject report-level
+      errors even with `cleanup_allowed=true`.
+- [x] Add 9 adversarial tests, raising the source-only recall plan
+      suite from 37 to **46 tests**.
+- [x] Rootless teardown CI **PASS** on
+      `ec70195d1d1c7a44a72aea83de65043c5fef323f`:
+      https://github.com/k1moradi/swapz/actions/runs/37810629055
+- [x] Same-commit combined NBD/teardown CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37810628795
+      (46 recall tests, 27 pidfd supervisor tests + 3 repeats,
+      26 NBD selftests, 23 strict swap-parser tests and 11 GC analyzer tests).
+- [ ] Retain separate Codex control-service implementation and
+      independent review before any production recall IPC integration.
+- [ ] Production Bash recall still contains the numeric-PID reuse race
+      and untracked background read-function descendants.
