@@ -592,7 +592,7 @@ def selftest_failure_gates() -> None:
 
     # Preflight cannot treat active PID, empty/malformed swap inventory,
     # or failed stat of any active swap entry as safe evidence of unused NBD.
-    for case in ("pid_present", "mountinfo_empty", "mountinfo_corrupt",
+    for case in ("unused", "pid_present", "mountinfo_empty", "mountinfo_corrupt",
                  "swaps_read_error", "swaps_empty", "swaps_bad_header",
                  "swaps_bad_row", "swaps_bad_numeric",
                  "active_swap_stat_error", "active_swap_selected"):
@@ -621,7 +621,7 @@ def selftest_failure_gates() -> None:
                     return ("Filename\tType\tSize\tUsed\tPriority\n"
                             "/dev/test-nbd-swap\tpartition\tbad\t0\t1\n")
                 return ("Filename\tType\tSize\tUsed\tPriority\n"
-                        "/dev/test-nbd-swap\tpartition\t64\t0\t1\n")
+                        "/dev/test-nbd-swap\tpartition\t64\t0\t-2\n")
             raise AssertionError("unexpected preflight read: " + label)
 
         def preflight_stat(path: object, *_args: object,
@@ -634,6 +634,8 @@ def selftest_failure_gates() -> None:
             if label == "/dev/test-nbd-swap":
                 if case == "active_swap_stat_error":
                     raise PermissionError("injected swap stat failure")
+                if case == "unused":
+                    return SimpleNamespace(st_mode=stat.S_IFREG, st_rdev=0)
                 return valid_node
             raise AssertionError("unexpected preflight stat: " + label)
 
@@ -645,6 +647,9 @@ def selftest_failure_gates() -> None:
               mock.patch("os.scandir",
                          return_value=contextlib.nullcontext(iter(()))),
               mock.patch("os.stat", side_effect=preflight_stat)):
+            if case == "unused":
+                assert validate_nbd_node("/dev/nbd0") == "/dev/nbd0"
+                continue
             try:
                 validate_nbd_node("/dev/nbd0")
             except (ValueError, OSError) as exc:
