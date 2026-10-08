@@ -71,7 +71,7 @@ cleanup() {
   trap - EXIT
   set +e
   if ! swapz_benchmark_cleanup_resources; then
-    echo "ERROR: benchmark cleanup incomplete; preserving the DM target, null_blk backing, and $TMP for diagnosis." >&2
+    echo "ERROR: benchmark cleanup incomplete; preserving the test DM target, backing device, and $TMP for diagnosis." >&2
     if (( rc == 0 )); then
       rc=1
     fi
