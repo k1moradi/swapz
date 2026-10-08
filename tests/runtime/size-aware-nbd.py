@@ -285,7 +285,7 @@ def validate_nbd_node(path: str) -> str:
         raise ValueError("NBD node has an active client and may not be reused")
     # Reject any mounted NBD block or dependent DM holder. Do not rely on
     # pathname equality: mounts can use alternate /dev symlinks.
-    number = f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
+    device_numbers = (os.major(st.st_rdev), os.minor(st.st_rdev))
     mount_rows = Path("/proc/self/mountinfo").read_text().splitlines()
     # Empty/truncated mount inventories cannot prove this device unmounted.
     # A normal row has at least six fixed fields, an optional-fields section,
@@ -306,14 +306,30 @@ def validate_nbd_node(path: str) -> str:
                 "-" in fields[6:separator] or
                 not all(fields[index] for index in (3, 4, 5, -3, -2, -1))):
             raise ValueError("malformed /proc/self/mountinfo; NBD mount status unverified")
-        if fields[2] == number:
+        # Linux's 32-bit dev_t representation has a 12-bit major and
+        # 20-bit minor. Decimal syntax alone permits impossible values
+        # (e.g. 4096:0) that must NOT establish absence of NBD mounts.
+        # Compare numeric tuples, not raw strings, to also reject a mounted
+        # device represented with leading zeroes.
+        try:
+            mount_major_text, mount_minor_text = fields[2].split(":")
+            mount_major = int(mount_major_text)
+            mount_minor = int(mount_minor_text)
+        except ValueError as exc:
+            raise ValueError("malformed /proc/self/mountinfo; NBD mount status unverified") from exc
+        if mount_major > 4095 or mount_minor > 1048575:
+            raise ValueError("malformed /proc/self/mountinfo; NBD mount status unverified")
+        if (mount_major, mount_minor) == device_numbers:
             raise ValueError("selected NBD node is mounted")
     verify_nbd_no_holders(name)
     # A partition mounted under /dev/nbdNp1 would have a different dev_t
     # than the parent. Refuse reuse of an NBD node with any partition nodes.
     sysdir = Path("/sys/class/block", name)
-    if any(child.name.startswith(name + "p") for child in sysdir.iterdir()):
-        raise ValueError("selected NBD node has partitions")
+    try:
+        if any(child.name.startswith(name + "p") for child in sysdir.iterdir()):
+            raise ValueError("selected NBD node has partitions")
+    except OSError as exc:
+        raise ValueError(f"cannot inspect NBD partitions: {exc}") from exc
     swap_lines = Path("/proc/swaps").read_text().splitlines()
     # A successful read returning no header or malformed rows does not prove
     # absence of swap. Reject untrustworthy inventory before touching ioctls.
