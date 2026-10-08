@@ -244,6 +244,9 @@ class PressureCheckpointTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _expected(TOKEN, "unexpected")
         fixture = (HERE / "pressure.sh").read_text()
+        self.assertIn('source "$ROOT/tests/runtime/pressure-runner.sh"', fixture)
+        self.assertIn("swapz_pressure_run_unit", fixture)
+        fixture += (HERE / "pressure-runner.sh").read_text()
         cleanup = (HERE / "pressure-teardown.sh").read_text()
         helper = (HERE / "pressure-helper.py").read_text()
         self.assertNotIn("kill -CONT", fixture)
