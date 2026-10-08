@@ -38,6 +38,13 @@ swapz_pressure_cleanup_resources() {
       echo "ERROR: test-owned unit $unit remains $unit_state; preserving swap target" >&2
       return 1
     fi
+    # A failed/inactive unit can still have D-state tasks in its old cgroup.
+    # Do not release the backing while those tasks could own swap I/O.
+    if [[ -n "$unit_cgroup" && -e "/sys/fs/cgroup$unit_cgroup/cgroup.procs" ]] &&
+       [[ -s "/sys/fs/cgroup$unit_cgroup/cgroup.procs" ]]; then
+      echo "ERROR: test-owned unit $unit still has cgroup tasks; preserving swap target" >&2
+      return 1
+    fi
     systemctl reset-failed "$unit" >/dev/null 2>&1 || true
   done
 
