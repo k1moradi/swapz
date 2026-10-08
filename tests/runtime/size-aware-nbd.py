@@ -911,32 +911,45 @@ def selftest() -> int:
                 self.alive = False
 
     class ShutdownSocket:
-        def __init__(self, worker: ShutdownWorker):
+        def __init__(self, worker: ShutdownWorker, fail: bool = False):
             self.worker = worker
             self.closed = False
+            self.fail = fail
 
         def close(self) -> None:
             assert not self.worker.is_alive(), "closed socket while worker active"
             self.closed = True
+            if self.fail:
+                raise OSError(errno.EIO, "injected socket-close failure")
 
-    for failure in ("none", "disconnect", "clear", "slow_worker"):
+    for failure in ("none", "disconnect", "clear", "slow_worker",
+                    "server_close", "kernel_close", "fd_close",
+                    "disconnect_server_close"):
         shutdown_worker = ShutdownWorker(slow=failure == "slow_worker")
-        shutdown_server = ShutdownSocket(shutdown_worker)
-        shutdown_kernel = ShutdownSocket(shutdown_worker)
+        shutdown_server = ShutdownSocket(shutdown_worker,
+                                         fail=failure in ("server_close", "disconnect_server_close"))
+        shutdown_kernel = ShutdownSocket(shutdown_worker,
+                                         fail=failure == "kernel_close")
         ioctl_steps: list[int] = []
         fd_closed: list[int] = []
         shutdown_errors: list[str] = []
 
         def fake_ioctl(_fd: int, operation: int) -> None:
             ioctl_steps.append(operation)
-            if ((failure == "disconnect" and operation == NBD_DISCONNECT)
+            if ((failure in ("disconnect", "disconnect_server_close")
+                 and operation == NBD_DISCONNECT)
                     or (failure == "clear" and operation == NBD_CLEAR_SOCK)):
                 raise OSError(errno.EIO, "injected NBD ioctl failure")
+
+        def fake_close(fd: int) -> None:
+            fd_closed.append(fd)
+            if failure == "fd_close":
+                raise OSError(errno.EIO, "injected fd-close failure")
 
         shutdown_kernel_session(
             99, True, shutdown_worker, threading.Event(),
             shutdown_server, shutdown_kernel, shutdown_errors,
-            ioctl=fake_ioctl, close_fd=fd_closed.append, join_timeout=0)
+            ioctl=fake_ioctl, close_fd=fake_close, join_timeout=0)
         assert ioctl_steps == [NBD_DISCONNECT, NBD_CLEAR_SOCK]
         assert shutdown_server.closed and shutdown_kernel.closed
         assert fd_closed == [99]
@@ -946,6 +959,13 @@ def selftest() -> int:
             assert len(shutdown_worker.joins) == 2
             assert shutdown_worker.joins[1] is None
             assert any("shutdown deadline" in issue for issue in shutdown_errors)
+        elif failure == "disconnect_server_close":
+            assert any("NBD_DISCONNECT failed" in issue for issue in shutdown_errors)
+            assert any("server socket" in issue for issue in shutdown_errors)
+        elif failure in ("server_close", "kernel_close", "fd_close"):
+            expected = {"server_close": "server socket",
+                        "kernel_close": "kernel socket", "fd_close": "NBD fd"}[failure]
+            assert any(expected in issue for issue in shutdown_errors)
         else:
             assert any(failure.upper() in issue for issue in shutdown_errors)
 
