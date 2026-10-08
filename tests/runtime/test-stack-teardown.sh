@@ -54,7 +54,8 @@ swapz_test_remove_dm_target() {
 swapz_test_check_loop_holders() {
   local loop_device=$1
   local loop_name=${loop_device##*/}
-  local holders_dir="/sys/class/block/$loop_name/holders"
+  # Optional directory argument is only for source-only mocked holder tests.
+  local holders_dir=${2:-"/sys/class/block/$loop_name/holders"}
   local first_holder
   if [[ ! -d "$holders_dir" ]]; then
     echo "ERROR: cannot verify holders for $loop_device; preserving loop" >&2
