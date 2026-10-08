@@ -224,4 +224,19 @@ reset_fixture
 swapz_test_stop_child 424242
 echo 'already-reaped test child handled without signal: PASS'
 
+# All three tracked recall I/O jobs must be visited even if one fails.
+STOPPED_CHILDREN=()
+STOP_FAIL_PID=11
+swapz_test_stop_child() {
+  STOPPED_CHILDREN+=("$1")
+  [[ "$1" != "$STOP_FAIL_PID" ]]
+}
+if swapz_test_stop_children 10 11 12; then exit 1; fi
+[[ "${STOPPED_CHILDREN[*]}" == "10 11 12" ]]
+STOPPED_CHILDREN=()
+STOP_FAIL_PID=0
+swapz_test_stop_children "" 10 11 12
+[[ "${STOPPED_CHILDREN[*]}" == "10 11 12" ]]
+echo 'all writer/reader jobs checked; one failure blocks teardown: PASS'
+
 echo 'swapz test-stack teardown rootless regression: PASS'
