@@ -835,3 +835,61 @@ hang/WARN/Oops before any remaining performance phase. Then run a separate
 unthrottled discard-enabled live-GC check to retain optional-discard coverage.
 Do not change kernel GC policy merely to compensate for this synthetic throttle
 unless the focused test reveals a real kernel bug.
+
+
+## V2.2 null_blk GC/DISCARD focused retest: PASS
+
+Codex tested `main` at
+`111fc89e4b7edb97f2f61c7e5fd5b3acd01ee137` on
+Linux 7.0.0-34-generic with a freshly built W=1 module:
+
+```text
+built/loaded srcversion: C0E91E94E24D50FDC42769E
+module SHA-256: 7a27b2cf2313ece3305d2dfed142bb2abb1c16ab72464da698633ef68068e41f
+```
+
+The source invariants, null_blk DISCARD guard, teardown mock regression, and
+unsafe-config rejection all passed. `SWAPZ_BENCH_MBPS=20` plus
+`SWAPZ_BENCH_DISCARD=1` returned exit code 4 **before** creating a test
+device.
+
+The two bounded 60-second GC churn comparisons used QD64,
+50% compressibility, opportunistic 16 KiB batches, and 0.5 ms nominal
+null_blk completion latency:
+
+| Lower backend | GC victims | Lower DISCARD | Result |
+|---|---:|---|---|
+| 20 MiB/s null_blk, DISCARD off | 921 | `lower_discard=off` | `failed=0`, drained, safe teardown |
+| Unthrottled null_blk, DISCARD on | 1,125 | `discard_bytes=1,179,648,000`; `discard_failures=0` | `failed=0`, drained, safe teardown |
+
+Both runs completed with no outstanding lower stream request or callback.
+Post-run inspection found no disposable DM targets, null_blk devices,
+swapz loops, fio processes, or new related kernel WARN/Oops/hung-task messages.
+The unrelated `/swapfile` and `/dev/sdb1` remained configured and were not
+targeted by validation commands.
+
+This is strong **runtime confirmation** of the earlier diagnosis: the
+bandwidth-throttled null_blk backend can wedge on a whole-segment GC DISCARD
+larger than its replenished byte budget. Disabling its lower DISCARD removed
+the previously observed stall, and separately allowing DISCARD on an unthrottled
+backend reclaimed over 1 GiB without error. No swapz kernel policy change was
+needed.
+
+**Scope of this PASS:** GC forward progress, optional lower-DISCARD behavior,
+and safe teardown. The fio reader job does **not** provide byte-for-byte
+live-set integrity verification. Prior randomized/live-GC correctness passes
+remain valid, but this focused long-churn workload is **not** a new exact-data
+integrity result.
+
+Current status:
+
+```text
+FOCUSED GC/DISCARD PROGRESS PASS — V2.2 FULL PERFORMANCE GATE STILL OPEN
+```
+
+Next: on the confirmed clean host, run separate exact-readback live-GC
+correctness coverage under appropriate bounded test conditions, then finish
+cancellation, GC-read/write latency/amplification, bounded real swap pressure,
+and performance comparison. Do not select a physical-media batch ceiling using
+the 50 Hz null_blk throttle; 512 KiB/1 MiB at ~20 MiB/s require a size-aware
+synthetic backend or an explicitly authorized disposable physical device.
