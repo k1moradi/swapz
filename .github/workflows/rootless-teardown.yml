@@ -26,6 +26,7 @@ on:
       - 'tests/runtime/recall-ipc-adapter-test.py'
       - 'tests/runtime/recall-dd-allowlist.py'
       - 'tests/runtime/recall-dd-allowlist-test.py'
+      - 'tests/runtime/recall-dd-worker-integration-test.py'
       - 'tests/runtime/recall-control-bridge.py'
       - 'tests/runtime/recall-control-bridge-test.py'
       - 'tests/runtime/recall-control-bridge-regression.sh'
@@ -119,6 +120,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-dd-allowlist.py tests/runtime/recall-dd-allowlist-test.py
           timeout 20s python3 tests/runtime/recall-dd-allowlist-test.py -v
+      - name: Rootless pinned direct dd worker integration regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-dd-worker-integration-test.py
+          timeout 35s python3 tests/runtime/recall-dd-worker-integration-test.py -v
       - name: Rootless direct recall I/O orchestration test
         shell: bash
         run: |
