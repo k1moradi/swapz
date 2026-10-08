@@ -12,11 +12,15 @@ LOOP=/dev/loop1234
 
 reset_fixture() {
   SWAPON=0
+  GROUP_REMOVED=0
   UNIT_LOAD_FAIL=0; UNIT_GROUP_FAIL=0; UNIT_STATE_FAIL=0
   UNIT_PID_FAIL=0; UNIT_STOP_FAIL=0; CGROUP_PIDS=""
   CGROUP_READ_FAIL=0; SWAPS_READ_FAIL=0; SWAPS_INVALID=0
   MAP_EXISTS=1; MAP_ABSENCE_FAIL=0; MAP_RESOLVE_FAIL=0
   ACTIVE_SWAP=0; SWAPOFF_FAIL=0; CLEAN_CALLS=0; SWAPOFF_CALLS=0
+}
+swapz_pressure_cgroup_dir_exists() {
+  (( ! GROUP_REMOVED ))
 }
 cat() {
   [[ "$1" == -- ]] || return 99
@@ -164,6 +168,12 @@ ACTIVE_SWAP=1
 swapz_pressure_cleanup_resources
 (( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 ))
 echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
+
+reset_fixture
+GROUP_REMOVED=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'stopped unit with confirmed removed cgroup: PASS'
 
 reset_fixture
 MAP_EXISTS=0
