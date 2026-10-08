@@ -37,13 +37,13 @@ class DirectDDCommand:
 
 def _file_identity(path: Path, *, directory: bool, size: int | None = None) -> tuple[int, int]:
     """No-follow identity check, not a guarantee against later path swaps."""
-    info = path.lstat()
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise DDPolicyDenied(f"cannot inspect recall fixture path: {path}: {exc}") from exc
     kind = stat.S_ISDIR if directory else stat.S_ISREG
-    if (not kind(info.st_mode) or info.st_nlink != (2 if directory else 1)
-            and not directory):
+    if not kind(info.st_mode) or (not directory and info.st_nlink != 1):
         raise DDPolicyDenied(f"unsafe recall fixture path type or links: {path}")
-    if directory and not stat.S_ISDIR(info.st_mode):
-        raise DDPolicyDenied(f"recall fixture root is not a directory: {path}")
     if size is not None and info.st_size != size:
         raise DDPolicyDenied(f"recall fixture source has wrong size: {path}")
     if path != Path(os.path.realpath(path)):
