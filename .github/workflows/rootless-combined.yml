@@ -131,6 +131,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-ipc-adapter.py tests/runtime/recall-ipc-adapter-test.py
           timeout 60s python3 tests/runtime/recall-ipc-adapter-test.py -v
+      - name: Rootless five-role readback and IPC bridge regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-role-bridge-test.py
+          timeout 35s python3 tests/runtime/recall-role-bridge-test.py -v
       - name: Persistent Bash pidfd IPC control bridge rootless regression
         shell: bash
         run: |
