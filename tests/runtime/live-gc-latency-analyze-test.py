@@ -109,6 +109,14 @@ class LiveGcAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "expected CSV columns"):
             analyzer.analyze(self.gc_path, self.reads_path, 1)
 
+    def test_missing_required_read_column(self) -> None:
+        self.populate(gc_rows="monotonic,100,200,1\n",
+                      read_rows="monotonic,120,140,ok\n")
+        self.reads_path.write_text("clock,start_ns,end_ns\n"
+                                   "monotonic,120,140\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "expected CSV columns"):
+            analyzer.analyze(self.gc_path, self.reads_path, 1)
+
     def test_exact_nearest_rank_percentiles(self) -> None:
         rows = "".join(f"monotonic,0,{millis * 1_000_000},ok\n"
                        for millis in range(1, 101))
