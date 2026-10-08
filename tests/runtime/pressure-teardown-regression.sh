@@ -59,9 +59,7 @@ cat() {
       return 0 ;;
     /sys/fs/cgroup/*/cgroup.procs)
       case "$2" in
-        "/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs"|
-        "/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs"|
-        "/sys/fs/cgroup/test/cgroup.procs")
+        "/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs"|"/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs"|"/sys/fs/cgroup/test/cgroup.procs")
           record "verify-cgroup:$2" ;;
         *) echo "ERROR: unexpected test cgroup $2" >&2; return 99 ;;
       esac
