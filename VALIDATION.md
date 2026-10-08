@@ -1085,3 +1085,42 @@ based signal. Never claim that all possible races are eliminated.
 Kernel blob `7589022ecdf0525716717270ab063a867a21f473`
 remains unchanged; current NBD source is handled by its own independent
 source-only audit.
+
+## 2026-10-08 — Rootless NBD requalification at a corrected mock-isolation commit
+
+Codex previously tested NBD source blob
+`bae63c5db31a621c2f25855a7a7c0dee5c7e7f78` at commit
+`2fc80f4ead9da0fde5a725487e3744acff1fca28`. Its seven-command
+source-only gate **FAILED** because the Python selftest did not reach
+its final assertions. More seriously, the selftest patched `fcntl.ioctl`
+and `os.close` but `shutdown_kernel_session()` had captured the original
+syscalls as keyword defaults. The mocked cleanup consequently attempted
+real NBD_CLEAR_SOCK and close against numeric fd 81. There is no basis
+for asserting those attempted operations had no effect merely because
+the host lacked sysfs NBD devices or showed no swap-entry change.
+
+The primary developer fixed this by resolving the syscall dependencies
+at shutdown invocation and replacing the mocked numeric fd with a
+non-integer sentinel object, so a missed patch cannot issue operations
+against a real descriptor number. The setup mock asserts ioctl and
+close interception. The backend additionally records unexpected
+non-OSError NBD_DO_IT exceptions as errors. Rootless regressions now
+cover the previously skipped setup cases, an unexpected worker failure,
+active NBD PID, unreadable swap information and selected-device swap,
+and a complete 8 MiB socketpair READ/WRITE at the accepted request
+ceiling. No real block/NBD device was opened by those tests.
+
+**Executed evidence:** The GitHub Actions
+`Rootless NBD source safety` workflow completed successfully on
+`f1c458f638712a19dea8b724a7f32bd1052b791e`
+at https://github.com/k1moradi/swapz/actions/runs/37774348723.
+The workflow's source AST check verified non-captured `ioctl`/`close_fd`
+defaults and presence of the fake-fd sentinel before running the selftest.
+Python compilation, NBD selftest, three Bash syntax checks, NBD teardown
+mock, and streaming teardown mock all **PASSED**.
+
+This is a valid *rootless, clean GitHub-runner source-only PASS* for the
+tested code, but Codex independent Linux-host requalification remains
+pending. It provides no proof of live NBD driver behavior, actual
+DM/loop teardown, GC-overlapping swap-in latency, physical performance,
+or an authorized runtime experiment. The kernel remains unchanged.
