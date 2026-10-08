@@ -763,3 +763,75 @@ Status: `CORRECTNESS PASS — PARTIAL SYNTHETIC PERFORMANCE, TEARDOWN RETEST REQ
 
 The next gate is the teardown regression and focused 1/2 ms reruns on virtual
 devices; the physical bandwidth plateau remains unresolved.
+
+
+## V2.2 GC churn blocked at lower DISCARD on throttled null_blk
+
+Codex validated the safe benchmark teardown and then completed 100 synthetic cases:
+1 and 2 ms batch matrices, QD and compressibility sweeps. All completed
+cases had `failed=0`. The 1 ms guarded candidate was 32 KiB, the 2 ms
+candidate 64 KiB, but the virtual results do not select a final physical-media
+batch.
+
+A subsequent 60-second configured GC-churn test ran for over 11 minutes and
+did not finish. It used 20 MiB/s bandwidth-limited, memory-backed
+`null_blk`, 0.5 ms latency, QD64, 50% compressibility, opportunistic 16 KiB.
+
+Snapshot:
+
+```text
+failed=0
+current segment 255/256
+free_segments=0
+gc_victims=1
+gc_scanned=8192
+gc_pages=0
+inflight_id=-1
+inflight_blocks=0
+fill_blocks=0
+pack_records=0
+async_cb=0
+one lower null_blk request remained in flight
+```
+
+Source review identifies a strong backend-specific explanation: GC increments
+`gc_victims` before visiting the victim's live blocks. Even if the victim has
+zero live pages, `swapz_clean_segment()` calls `swapz_try_discard_segment()`
+before marking it free. For a fully written 1 MiB victim that function issues
+`blkdev_issue_discard()` for **1 MiB synchronously**, blocking the sole swapz
+worker. When null_blk has `mbps=20`, its per-50-Hz-tick limit is only about
+409.6 KiB and its throttle accounts request bytes for DISCARD as well as
+data operations; this can permanently requeue the 1 MiB discard.
+
+The previous benchmark's request-size safeguard covered stream writes but
+erroneously enabled lower DISCARD. The repaired bandwidth-limited fixture now:
+
+- defaults `SWAPZ_BENCH_DISCARD=0`;
+- refuses DISCARD-enabled `null_blk mbps>0` before device setup;
+- configures the null_blk DISCARD capability to off;
+- verifies every target reports `lower_discard=off` before its workload;
+- preserves the existing <= per-tick write-batch limit;
+- offers optional lower-DISCARD testing only with an **unthrottled** null_blk
+  backend (`SWAPZ_BENCH_MBPS=0 SWAPZ_BENCH_DISCARD=1`) or separate correctness
+  tests.
+
+This is a high-confidence source-based diagnosis, **not yet a runtime-proven
+resolution**. The current 11-minute stalled host state was left pinned,
+with the lower null_blk powered on by guarded cleanup. Reboot requires the
+operator's explicit authorization and cannot be inferred from this report.
+
+Status:
+
+```text
+CORRECTNESS PASS ON PRIOR GATES — GC CHURN BLOCKED,
+SUSPECTED OVERSIZED SYNTHETIC DISCARD, FOCUSED RETEST REQUIRED
+```
+
+After an operator-authorized reboot (if the pinned state cannot be cleared by
+safe ordinary means), load the fresh matching module and run a focused extended
+GC-churn test with lower DISCARD definitively off. Require genuine segment reuse,
+`gc_victims > 1`, no outstanding I/O, exact readback when applicable, and no
+hang/WARN/Oops before any remaining performance phase. Then run a separate
+unthrottled discard-enabled live-GC check to retain optional-discard coverage.
+Do not change kernel GC policy merely to compensate for this synthetic throttle
+unless the focused test reveals a real kernel bug.
