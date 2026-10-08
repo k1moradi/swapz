@@ -98,6 +98,12 @@ swapz_test_stop_child() {
     echo "ERROR: invalid test-owned child PID: $child_pid" >&2
     return 1
   }
+  # Check shell ownership before signaling: a finished child's PID could be
+  # reused by an unrelated process before EXIT cleanup runs.
+  if ! jobs -p | grep -Fxq "$child_pid"; then
+    echo "ERROR: PID $child_pid is not a test-owned background job; preserving stack" >&2
+    return 1
+  fi
   if kill -0 "$child_pid" 2>/dev/null; then
     if ! kill -TERM "$child_pid" 2>/dev/null; then
       echo "ERROR: failed to stop test child $child_pid" >&2
