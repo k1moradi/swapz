@@ -127,6 +127,15 @@ class PersistentRecallBridge:
             else:
                 raise BridgeError("test worker command not allowlisted")
             return self._reply(request_id, "ready", handle=handle)
+        if op == "LAUNCH_ROLE":
+            # This branch is never reachable from the public CLI instance.
+            # Only a trusted, rootless, in-process test fixture can inject
+            # an opt-in role adapter. Never accept device/argv paths in JSON.
+            if not getattr(self, "_rootless_role_test", False):
+                raise BridgeError("direct recall roles are disabled in the normal bridge")
+            self._fields(message, {"id", "op", "role"})
+            handle = self.adapter.launch_role(message["role"])
+            return self._reply(request_id, "ready", handle=handle)
         if op == "WAIT":
             self._fields(message, {"id", "op", "handle", "timeout_ms"})
             result = self.adapter.wait_reaped(message["handle"], timeout_ms=message["timeout_ms"])
@@ -171,6 +180,31 @@ class PersistentRecallBridge:
         except (subprocess.TimeoutExpired, OSError):
             print("BRIDGE_PRESERVE: service exit not confirmed; retain all backing", file=sys.stderr)
         self.finished = True
+
+
+class RootlessRoleBridge(PersistentRecallBridge):
+    """Trusted-injection-only test bridge; not exposed by main() or service CLI.
+
+    The caller already owns a synthetic service, its control client, exact
+    process object and an adapter with an identity-bound readback verifier.
+    This class creates no process and cannot enable live mapper operations.
+    """
+
+    def __init__(self, *, client: Any, process: Any,
+                 adapter: Any) -> None:
+        if not isinstance(adapter, adapter_module.RecallRoleIPCAdapter):
+            raise ValueError("rootless role bridge requires an explicit role adapter")
+        if adapter.client is not client or adapter.process is not process:
+            raise ValueError("rootless bridge client and service identity do not match")
+        self.client = client
+        self.process = process
+        self.adapter = adapter
+        self._rootless_role_test = True
+        self.failed = False
+        self.finalized = False
+        self.request_count = 0
+        self.last_id = 0
+        self.finished = False
 
 def _decode(raw: bytes) -> Any:
     if not raw or len(raw) > MAX_LINE_BYTES or not raw.endswith(b"\n"):
