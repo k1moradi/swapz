@@ -602,7 +602,11 @@ def selftest_failure_gates() -> None:
 
     # Preflight cannot treat active PID, empty/malformed swap inventory,
     # or failed stat of any active swap entry as safe evidence of unused NBD.
-    for case in ("unused", "pid_present", "mountinfo_empty", "mountinfo_corrupt",
+    for case in ("unused", "unused_optional_mountinfo", "unused_escaped_mountinfo",
+                 "pid_present", "mountinfo_empty", "mountinfo_corrupt",
+                 "mountinfo_bad_id", "mountinfo_bad_parent", "mountinfo_bad_dev",
+                 "mountinfo_bad_separator", "mountinfo_early_separator",
+                 "mountinfo_bad_second_row", "mountinfo_selected",
                  "swaps_read_error", "swaps_empty", "swaps_bad_header",
                  "swaps_bad_row", "swaps_bad_numeric",
                  "active_swap_stat_error", "active_swap_selected"):
@@ -612,11 +616,31 @@ def selftest_failure_gates() -> None:
             if label.endswith("/dev"):
                 return "43:0\n"
             if label == "/proc/self/mountinfo":
+                valid = "42 41 0:1 / / rw,relatime - tmpfs tmpfs rw\n"
                 if case == "mountinfo_empty":
                     return ""
                 if case == "mountinfo_corrupt":
                     return "42 41 0:1 truncated"
-                return "42 41 0:1 / / rw,relatime - tmpfs tmpfs rw\n"
+                if case == "mountinfo_bad_id":
+                    return "wrong 41 0:1 / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_parent":
+                    return "42 wrong 0:1 / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_dev":
+                    # Exactly ten fields: this previously passed as unrelated.
+                    return "42 41 not-a-dev / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_separator":
+                    return "42 41 0:1 / / rw,relatime not-a-separator tmpfs tmpfs rw"
+                if case == "mountinfo_early_separator":
+                    return "42 41 0:1 / / rw,relatime - shared:19 tmpfs tmpfs rw"
+                if case == "mountinfo_bad_second_row":
+                    return valid + "bad 41 0:1 / / rw - tmpfs tmpfs rw\n"
+                if case == "mountinfo_selected":
+                    return "42 41 43:0 / / rw,relatime - ext4 /dev/nbd0 rw\n"
+                if case == "unused_optional_mountinfo":
+                    return "42 41 0:1 / / rw,relatime shared:19 master:12 - tmpfs tmpfs rw\n"
+                if case == "unused_escaped_mountinfo":
+                    return r"42 41 0:1 / /mnt/escaped\040name rw,relatime shared:19 - tmpfs tmpfs rw" + "\n"
+                return valid
             if label == "/proc/swaps":
                 if case == "swaps_read_error":
                     raise OSError(errno.EIO, "injected swap inventory failure")
@@ -644,7 +668,7 @@ def selftest_failure_gates() -> None:
             if label == "/dev/test-nbd-swap":
                 if case == "active_swap_stat_error":
                     raise PermissionError("injected swap stat failure")
-                if case == "unused":
+                if case.startswith("unused"):
                     return SimpleNamespace(st_mode=stat.S_IFREG, st_rdev=0)
                 return valid_node
             raise AssertionError("unexpected preflight stat: " + label)
@@ -657,8 +681,8 @@ def selftest_failure_gates() -> None:
               mock.patch("os.scandir",
                          return_value=contextlib.nullcontext(iter(()))),
               mock.patch("os.stat", side_effect=preflight_stat)):
-            if case == "unused":
-                assert validate_nbd_node("/dev/nbd0") == "/dev/nbd0"
+            if case.startswith("unused"):
+                assert validate_nbd_node("/dev/nbd0") == "/dev/nbd0", case
                 continue
             try:
                 validate_nbd_node("/dev/nbd0")
@@ -667,6 +691,13 @@ def selftest_failure_gates() -> None:
                     "pid_present": "active client",
                     "mountinfo_empty": "empty /proc/self/mountinfo",
                     "mountinfo_corrupt": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_id": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_parent": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_dev": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_separator": "malformed /proc/self/mountinfo",
+                    "mountinfo_early_separator": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_second_row": "malformed /proc/self/mountinfo",
+                    "mountinfo_selected": "selected NBD node is mounted",
                     "swaps_read_error": "swap inventory failure",
                     "swaps_empty": "invalid /proc/swaps header",
                     "swaps_bad_header": "invalid /proc/swaps header",
@@ -963,6 +994,8 @@ def selftest_failure_gates() -> None:
             assert "NBD_DO_IT unexpected RuntimeError" in err.getvalue()
         else:
             assert NBD_DO_IT not in steps
+
+    print("NBD preflight, 8 MiB wire, setup cleanup and worker exceptions: PASS")
 
 
 def selftest() -> int:
