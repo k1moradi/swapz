@@ -319,20 +319,25 @@ def shutdown_kernel_session(fd: int, attached: bool,
     When the kernel worker cannot stop promptly, preserve the backing/session
     and wait for it rather than returning successfully and closing live fds.
     """
+    def record_shutdown_failure(message: str) -> None:
+        failures.append(message)
+        # Emit immediately: a stuck worker could make a later final report
+        # unreachable, so preserve the specific ioctl failure before join().
+        print("ERROR: " + message, file=sys.stderr, flush=True)
+
     stopping.set()
     if attached and worker is not None and worker.is_alive():
         try:
             ioctl(fd, NBD_DISCONNECT)
         except OSError as exc:
-            failures.append(f"NBD_DISCONNECT failed: {exc}")
+            record_shutdown_failure(f"NBD_DISCONNECT failed: {exc}")
     if worker is not None:
         worker.join(timeout=join_timeout)
         if worker.is_alive():
             warning = ("NBD_DO_IT worker did not stop within shutdown deadline; "
                        "retaining descriptors until it exits; "
                        "investigate DM holders and kernel task state")
-            failures.append(warning)
-            print("ERROR: " + warning, file=sys.stderr, flush=True)
+            record_shutdown_failure(warning)
             # Releasing the socket/fd here can disconnect a live DM-backed
             # client. Do not abandon a daemon worker or force detach.
             worker.join()
@@ -340,10 +345,17 @@ def shutdown_kernel_session(fd: int, attached: bool,
         try:
             ioctl(fd, NBD_CLEAR_SOCK)
         except OSError as exc:
-            failures.append(f"NBD_CLEAR_SOCK failed: {exc}")
-    server_sock.close()
-    kernel_sock.close()
-    close_fd(fd)
+            record_shutdown_failure(f"NBD_CLEAR_SOCK failed: {exc}")
+    # Once the kernel worker is definitely stopped, independently close all
+    # three owned handles. A later close exception must not hide earlier
+    # detach/clear-sock failures or skip another cleanup step.
+    for label, closer in (("server socket", server_sock.close),
+                          ("kernel socket", kernel_sock.close),
+                          ("NBD fd", lambda: close_fd(fd))):
+        try:
+            closer()
+        except OSError as exc:
+            record_shutdown_failure(f"could not close {label}: {exc}")
 
 
 def serve_kernel(args: argparse.Namespace) -> int:
