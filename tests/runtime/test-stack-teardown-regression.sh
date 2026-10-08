@@ -401,6 +401,9 @@ swapz_test_stop_children "" 10 11 12
 echo 'all writer/reader jobs checked; one failure blocks teardown: PASS'
 
 # The staged recall's production cleanup decision is this shared helper.
+# Earlier tests temporarily restored the real holders inspection, so restore
+# the rootless mock before a successful simulated loop detach.
+swapz_test_check_loop_holders() { (( ! LOOP_HELD )); }
 # Even if the third child is healthy, a failed second child must block ALL
 # device cleanup; a successful group permits upper/lower/loop removal.
 reset_fixture
