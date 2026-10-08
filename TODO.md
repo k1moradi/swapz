@@ -405,3 +405,29 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       authorized real systemd pressure execution.
 - [ ] Await Codex's gated-pidfd recall-supervisor prototype; recall's
       numeric-PID signaling safety remains an open qualification.
+
+### 2026-10-08 — Strict pressure swap inventory before phase releases
+
+- [x] Replace the controller's ambiguous AWK `Used+0` coercion and
+      missing-row default with a strict full `/proc/swaps` parser.
+- [x] Validate exact header, five fields per row, path/type, ASCII
+      decimal Size/Used/Priority, nonzero Size and Used ≤ Size;
+      require **exactly one** canonical row matching the test device.
+- [x] Fail closed at filled and verified checkpoints for unreadable,
+      missing, duplicate, truncated or malformed swap inventories.
+- [x] Add 23 standalone parser tests, including bad Used suffix,
+      malformed unrelated entries and valid symlink alias.
+- [x] Execute the actual production controller with mock inventories,
+      verifying that malformed cases do not authorize phase release.
+- [x] Teardown rootless CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37802473498
+      (commit `3f4d1cd334074ba423b87b0801b1bccd72d0021c`).
+- [x] Combined rootless CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37802481882
+      (commit `b3833393c2a6d4e351e2610e647eaad0863eed05`,
+      23 parser tests, 10/10 pressure suite repeats, 26/26 NBD
+      selftests and 11 offline analyzer tests).
+- [ ] Independently review controller behavior under a supported
+      systemd installation before any authorized live pressure test.
+- [ ] Recall PID reuse remains open until Codex's gated-pidfd
+      supervisor prototype is reviewed and later integrated.
