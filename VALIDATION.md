@@ -2200,3 +2200,56 @@ module, physical device, fio, pressure/recall fixture or
 benchmark operation was performed. See
 `docs/recall-control-bridge.md` for the protocol and
 production migration boundaries.
+
+## 2026-10-08 — Pinned direct-dd actual-worker rootless qualification
+
+**Tested executable-source revision:**
+`4a89dc77752a28c53d62a6f81eec276e6438dfe0`.
+
+Codex's opt-in descriptor-pinned role admission arrived in commits
+`a0a1252a058f1c9f941ea178866a1a5060a988eb` and
+`afffddadc99d8301a6e1494ae6e8237bf9becc29`.
+The primary developer reviewed the service, role gate, pidfd launch boundary,
+existing IPC adapter and Bash bridge; no production recall migration was made.
+The direct-dd service mode remains disabled by the default CLI, and the
+persistent Bash bridge still admits only fixed `sleep`/`exit` test workers.
+
+An independent regression was added in
+`tests/runtime/recall-dd-worker-integration-test.py` and gated in **both**
+rootless CI workflows. Unlike the preceding fake-supervisor allowlist tests,
+these **three rootless tests execute the actual pinned `/usr/bin/dd` binary**
+through `GatedPidfdSupervisor`, with a temporary regular file standing in
+for the test mapper. They confirm:
+
+- All five roles (`writer`, `a`, `b`, `a2`, `b2`) use direct descriptor
+  arguments, retain worker pidfds and yield exact readback of the specified
+  nine source pages; the A/B concurrent phase launches both readers before
+  waiting for either.
+- Replacing `pages.bin` after writer admission cannot redirect the worker
+  away from the retained source file descriptor.
+- Replacing `read-a` after reader admission cannot redirect writes away
+  from the retained output descriptor. The replacement pathname is untouched;
+  this also shows why production comparisons must bind readback *identity*,
+  not trust a mutable pathname after completion.
+- Teardown uses supervisor-owned handles and never sends numeric-PID signals.
+
+**Same-revision mandatory GitHub Actions: PASS**
+
+- Rootless teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37858629277
+- Combined NBD/teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37858629165
+
+The combined log records the exact tested HEAD, the three new tests as
+`ok`, the Bash bridge gate PASS, 10/10 complete IPC repeat runs and 25/25
+additional NBD userspace selftests after the primary selftest. The new CI
+workflow dependency ensures a change to the combined workflow also triggers
+teardown qualification on the same source revision.
+
+**Not established:** no real `/dev/mapper` descriptor, DM table identity
+stability, kernel swapz behavior, live recall timings, swap pressure, process-
+tree containment after supervisor death, real device teardown, or physical
+performance was exercised. The opt-in role launcher and actual pidfd worker
+lifecycle are still not integrated into the Bash bridge or production
+`buffer-recall.sh`; do not authorize backing deletion on this evidence
+alone. Subsequent documentation-only commits do not change the tested source.
