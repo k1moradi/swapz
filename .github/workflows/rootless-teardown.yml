@@ -27,6 +27,8 @@ on:
       - 'tests/runtime/recall-ipc-adapter-test.py'
       - 'tests/runtime/recall-role-bridge-test.py'
       - 'tests/runtime/recall-role-service-integration-test.py'
+      - 'tests/runtime/recall-role-bridge-fixture.py'
+      - 'tests/runtime/recall-role-bridge-regression.sh'
       - 'tests/runtime/recall-dd-allowlist.py'
       - 'tests/runtime/recall-dd-allowlist-test.py'
       - 'tests/runtime/recall-dd-worker-integration-test.py'
@@ -125,6 +127,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-role-service-integration-test.py
           timeout 35s python3 tests/runtime/recall-role-service-integration-test.py -v
+      - name: Genuine Bash synthetic role coprocess lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/recall-role-bridge-regression.sh
+          python3 -m py_compile tests/runtime/recall-role-bridge-fixture.py
+          timeout 35s bash tests/runtime/recall-role-bridge-regression.sh
       - name: Persistent Bash pidfd IPC control bridge rootless regression
         shell: bash
         run: |
