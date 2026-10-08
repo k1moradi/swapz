@@ -76,3 +76,22 @@
       without authorization of its exact disposable path.
 
 See `docs/benchmarks/v2.2-live-gc-latency.md`.
+
+### 2026-10-08 teardown audit requalification
+
+- [x] Implement checked loop inventory before and after detach, with
+      failure distinct from confirmed absence.
+- [x] Reject DM parser errors rather than accepting missing target.
+- [x] Replace cgroup.procs `-s` checks with checked content reads.
+- [x] Fail closed on systemd and /proc/swaps inspection failures.
+- [x] Quiesce all three staged-recall background I/O children.
+- [x] Make failed child-state inspection block lower teardown.
+- [x] Expand rootless teardown mocks and offline GC-analyzer unit tests.
+- [ ] Codex independently execute the **updated** source-only teardown,
+      pressure and analyzer regressions at the final changed HEAD.
+- [ ] Review/fix any failure exposed by that independent rootless gate.
+- [ ] Only after all source gates pass, obtain explicit separately scoped
+      permission for disposable virtual DM/loop runtime smoke; do not
+      operate host swap or physical backing.
+- [ ] NBD rootless requalification assigned separately to Codex;
+      NBD kernel smoke and calibration remain unapproved and unmeasured.
