@@ -1688,3 +1688,55 @@ its intended rejection path rather than a different mock failure.
 Do not revisit the historical NBD blob whose selftest attempted a real
 ioctl/close. Do not conduct any kernel NBD, DM/loop, swap, physical
 media, module, or benchmarking operations without explicit approval.
+
+## Follow-up teardown source-only requalification after Codex's PASS
+
+Codex independently tested teardown source at `10c9d09bf4d3e78dd9524e20988c38b204f9ad42`
+and reported **SOURCE-ONLY TEARDOWN GATE PASS** (ten commands,
+including 11 GC-analyzer tests). The primary developer then addressed
+its remaining mock-coverage and inventory-parsing gaps without touching
+the concurrent NBD source or the kernel.
+
+The GitHub-hosted rootless teardown gate passed at
+`68360c26214c4c08a57180f50ae032746d68342f`:
+https://github.com/k1moradi/swapz/actions/runs/37777532521
+
+Changes after the older independent test include:
+
+- DM inventory rejection of duplicate names or major/minor > 4095/1048575
+- Exact checked /proc/swaps header and numeric row fields
+- Distinct cgroup paths for first and second systemd units in the mock
+- Stop-failure test starting with active swap and proving no swapoff
+- Stopped child CONT/TERM ordering and truthful pseudo-file mock description
+
+After finishing the concurrent NBD source audit, review the latest HEAD
+and recheck the combined source-only gates (no device runtime):
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+git rev-parse HEAD:kernel/dm-swapz.c
+git rev-parse HEAD:tests/runtime/size-aware-nbd.py
+git status --short --branch
+bash -n tests/runtime/test-stack-teardown.sh
+bash -n tests/runtime/test-stack-teardown-regression.sh
+bash -n tests/runtime/pressure-teardown.sh
+bash -n tests/runtime/pressure-teardown-regression.sh
+bash -n tests/runtime/no-discard-livegc.sh
+bash -n tests/runtime/buffer-recall.sh
+bash -n tests/runtime/pressure.sh
+bash tests/runtime/test-stack-teardown-regression.sh
+bash tests/runtime/pressure-teardown-regression.sh
+python3 tests/runtime/live-gc-latency-analyze-test.py -v
+```
+
+Preserve `local-batch-regression-0-verify.state` and
+`local-verify-0-verify.state`. Do not change any source as part of
+verification. Verify that bad inventory outputs fail closed and no
+rootless mock performs actual device/swap operations.
+
+The remaining Bash job identity check is non-atomic. Completed jobs are
+excluded, but PID reuse between job enumeration and kill remains
+theoretical; never report perfect PID reuse protection.
+
+No live NBD/DM/loop/swap operations, modprobe, fio, physical devices or reboot.
