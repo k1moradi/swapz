@@ -619,12 +619,16 @@ def selftest_failure_gates() -> None:
     # Preflight cannot treat active PID, empty/malformed swap inventory,
     # or failed stat of any active swap entry as safe evidence of unused NBD.
     for case in ("unused", "unused_optional_mountinfo", "unused_escaped_mountinfo",
+                 "unused_max_device", "unused_zero_device",
                  "pid_present", "mountinfo_empty", "mountinfo_corrupt",
                  "mountinfo_bad_id", "mountinfo_bad_parent", "mountinfo_bad_dev",
+                 "mountinfo_bad_major_range", "mountinfo_bad_minor_range",
+                 "mountinfo_bad_negative_minor", "mountinfo_bad_second_row_range",
                  "mountinfo_bad_separator", "mountinfo_early_separator",
                  "mountinfo_bad_second_row", "mountinfo_selected",
-                 "swaps_read_error", "swaps_empty", "swaps_bad_header",
-                 "swaps_bad_row", "swaps_bad_numeric",
+                 "mountinfo_selected_leading_zero", "partitions_present",
+                 "partitions_error", "swaps_read_error", "swaps_empty",
+                 "swaps_bad_header", "swaps_bad_row", "swaps_bad_numeric",
                  "active_swap_stat_error", "active_swap_selected"):
         def preflight_read(path: Path, *_args: object,
                            **_kwargs: object) -> str:
@@ -644,6 +648,14 @@ def selftest_failure_gates() -> None:
                 if case == "mountinfo_bad_dev":
                     # Exactly ten fields: this previously passed as unrelated.
                     return "42 41 not-a-dev / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_major_range":
+                    return "42 41 4096:0 / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_minor_range":
+                    return "42 41 43:1048576 / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_negative_minor":
+                    return "42 41 43:-1 / / rw,relatime - tmpfs tmpfs rw"
+                if case == "mountinfo_bad_second_row_range":
+                    return valid + "43 41 0:1048576 / / rw - tmpfs tmpfs rw\n"
                 if case == "mountinfo_bad_separator":
                     return "42 41 0:1 / / rw,relatime not-a-separator tmpfs tmpfs rw"
                 if case == "mountinfo_early_separator":
@@ -652,6 +664,12 @@ def selftest_failure_gates() -> None:
                     return valid + "bad 41 0:1 / / rw - tmpfs tmpfs rw\n"
                 if case == "mountinfo_selected":
                     return "42 41 43:0 / / rw,relatime - ext4 /dev/nbd0 rw\n"
+                if case == "mountinfo_selected_leading_zero":
+                    return "42 41 0043:000 / / rw,relatime - ext4 /dev/nbd0 rw\n"
+                if case == "unused_max_device":
+                    return "42 41 4095:1048575 / / rw - tmpfs tmpfs rw\n"
+                if case == "unused_zero_device":
+                    return "42 41 0:0 / / rw - tmpfs tmpfs rw\n"
                 if case == "unused_optional_mountinfo":
                     return "42 41 0:1 / / rw,relatime shared:19 master:12 - tmpfs tmpfs rw\n"
                 if case == "unused_escaped_mountinfo":
@@ -689,11 +707,20 @@ def selftest_failure_gates() -> None:
                 return valid_node
             raise AssertionError("unexpected preflight stat: " + label)
 
+        def preflight_iterdir(path: Path) -> object:
+            assert str(path) == "/sys/class/block/nbd0", (case, str(path))
+            if case == "partitions_error":
+                raise PermissionError("injected NBD partition enumeration failure")
+            if case == "partitions_present":
+                return iter((Path("/sys/class/block/nbd0/nbd0p1"),))
+            return iter(())
+
         with (mock.patch("os.lstat", return_value=valid_node),
               mock.patch.object(Path, "exists", return_value=True),
               mock.patch.object(Path, "read_text", autospec=True,
                                 side_effect=preflight_read),
-              mock.patch.object(Path, "iterdir", return_value=iter(())),
+              mock.patch.object(Path, "iterdir", autospec=True,
+                                side_effect=preflight_iterdir),
               mock.patch("os.scandir",
                          return_value=contextlib.nullcontext(iter(()))),
               mock.patch("os.stat", side_effect=preflight_stat)):
@@ -710,10 +737,17 @@ def selftest_failure_gates() -> None:
                     "mountinfo_bad_id": "malformed /proc/self/mountinfo",
                     "mountinfo_bad_parent": "malformed /proc/self/mountinfo",
                     "mountinfo_bad_dev": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_major_range": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_minor_range": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_negative_minor": "malformed /proc/self/mountinfo",
+                    "mountinfo_bad_second_row_range": "malformed /proc/self/mountinfo",
                     "mountinfo_bad_separator": "malformed /proc/self/mountinfo",
                     "mountinfo_early_separator": "malformed /proc/self/mountinfo",
                     "mountinfo_bad_second_row": "malformed /proc/self/mountinfo",
                     "mountinfo_selected": "selected NBD node is mounted",
+                    "mountinfo_selected_leading_zero": "selected NBD node is mounted",
+                    "partitions_present": "selected NBD node has partitions",
+                    "partitions_error": "cannot inspect NBD partitions",
                     "swaps_read_error": "swap inventory failure",
                     "swaps_empty": "invalid /proc/swaps header",
                     "swaps_bad_header": "invalid /proc/swaps header",
