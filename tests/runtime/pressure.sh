@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$ROOT/tests/runtime/test-stack-teardown.sh"
+source "$ROOT/tests/runtime/pressure-teardown.sh"
 [[ $EUID -eq 0 ]] || { echo 'root required' >&2; exit 1; }
 for tool in awk dmsetup losetup mkswap modprobe ps readlink swapon swapoff systemctl systemd-run truncate; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
@@ -11,65 +12,6 @@ TMP=$(mktemp -d /dev/shm/swapz-v21-pressure.XXXXXX)
 TAG="$$-$RANDOM"
 NAME="swapz-v21-pressure-$TAG"; PRIORITY=100; SWAPON=0; FIRST_UNIT="swapz-v21-pressure-$TAG-first.service"; SECOND_UNIT="swapz-v21-pressure-$TAG-second.service"
 LOOP=""
-swapz_pressure_cleanup_resources() {
-  local unit unit_state unit_pid unit_cgroup attempt swap_path expected_device
-  for unit in "$FIRST_UNIT" "$SECOND_UNIT"; do
-    unit_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null || true)
-    [[ -z "$unit_state" || "$unit_state" == not-found ]] && continue
-    unit_pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || true)
-    unit_cgroup=$(systemctl show "$unit" -p ControlGroup --value 2>/dev/null || true)
-    # The helper may be stopped at a checkpoint. Only signal it if its PID
-    # still belongs to this exact transient unit, guarding against PID reuse.
-    if [[ "$unit_pid" =~ ^[1-9][0-9]*$ && -n "$unit_cgroup" ]] &&
-       [[ -r "/proc/$unit_pid/cgroup" ]] &&
-       grep -Fq ":$unit_cgroup" "/proc/$unit_pid/cgroup"; then
-      kill -CONT "$unit_pid" 2>/dev/null || true
-    fi
-    if ! systemctl stop --no-block "$unit"; then
-      echo "ERROR: failed to stop test-owned unit $unit" >&2
-      return 1
-    fi
-    for ((attempt=0; attempt<100; ++attempt)); do
-      unit_state=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null || true)
-      [[ "$unit_state" == inactive || "$unit_state" == failed || "$unit_state" == not-found ]] && break
-      sleep 0.1
-    done
-    if [[ "$unit_state" != inactive && "$unit_state" != failed && "$unit_state" != not-found ]]; then
-      echo "ERROR: test-owned unit $unit remains $unit_state; preserving swap target" >&2
-      return 1
-    fi
-    # A failed/inactive unit can still have D-state tasks in its old cgroup.
-    # Do not release the backing while those tasks could own swap I/O.
-    if [[ -n "$unit_cgroup" && -e "/sys/fs/cgroup$unit_cgroup/cgroup.procs" ]] &&
-       [[ -s "/sys/fs/cgroup$unit_cgroup/cgroup.procs" ]]; then
-      echo "ERROR: test-owned unit $unit still has cgroup tasks; preserving swap target" >&2
-      return 1
-    fi
-    systemctl reset-failed "$unit" >/dev/null 2>&1 || true
-  done
-
-  if (( SWAPON )); then
-    if ! swapoff "/dev/mapper/$NAME"; then
-      echo "ERROR: swapoff failed for test target $NAME; preserving DM and loop" >&2
-      return 1
-    fi
-    SWAPON=0
-  fi
-  # Even if swapon/swapoff returned unexpectedly, do not remove a mapping
-  # that remains listed as active swap under an alternate /dev/dm-N path.
-  expected_device=$(readlink -f "/dev/mapper/$NAME" 2>/dev/null || true)
-  if [[ -n "$expected_device" ]]; then
-    while read -r swap_path _; do
-      [[ "$swap_path" == Filename ]] && continue
-      if [[ "$(readlink -f "$swap_path" 2>/dev/null || true)" == "$expected_device" ]]; then
-        echo "ERROR: $NAME remains active swap; preserving DM and loop" >&2
-        return 1
-      fi
-    done </proc/swaps
-  fi
-  swapz_test_cleanup_dm_stack "$LOOP" "$NAME"
-}
-
 cleanup() {
   local exit_status=$?
   trap - EXIT
