@@ -1250,3 +1250,63 @@ powered until explicit safe operator action.
 After that, continue the existing QD/compressibility/cancellation/GC/pressure
 performance plan; never choose a 512 KiB / 1 MiB 20 MiB/s plateau from
 null_blk's 50 Hz throttle.
+
+
+## Throttled null_blk GC DISCARD deadlock gate
+
+The 20 MiB/s `null_blk mbps` limit applies to **DISCARD request bytes too**.
+Swapz's segment GC can issue an optional synchronous 1 MiB lower DISCARD when
+reclaiming a fully written segment. This request exceeds null_blk's ~409.6 KiB
+per-tick budget and can wedge the queue, even with a safe 16 KiB stream batch.
+
+This matches the latest stopped GC churn run's signature: `gc_victims=1`,
+`gc_pages=0`, `free_segments=0`, `inflight_id=-1`, `async_cb=0`,
+one lower request blocked, and `failed=0`. Root cause is highly plausible but
+must be confirmed by a focused runtime retest.
+
+The checked-in benchmark must **not** enable lower DISCARD while using
+`SWAPZ_BENCH_MBPS>0`. The fixture defaults to `SWAPZ_BENCH_DISCARD=0`,
+rejects `SWAPZ_BENCH_DISCARD=1` with throttling before setup, and checks
+`lower_discard=off` in every DM target status before running fio.
+
+Codex's host still has a pinned disposable target and D-state fio workers.
+**Do not reboot without explicit operator permission.** Do not force-remove,
+power off its backing, or run runtime tests until the host is safely clear.
+
+Focused gate on a clean host:
+
+```bash
+git fetch origin --prune
+git switch main
+git pull --ff-only origin main
+bash -n tests/runtime/streaming-benchmark.sh
+bash tests/runtime/nullblk-discard-guard.sh
+bash tests/runtime/streaming-teardown-regression.sh
+bash tests/runtime/source-invariants.sh
+# Verify fresh module build/source and loaded module srcversion match.
+# A rejected unsafe config must exit without creating DM/null_blk devices:
+sudo env SWAPZ_BENCH_MBPS=20 SWAPZ_BENCH_DISCARD=1 \
+  bash tests/runtime/streaming-benchmark.sh
+# Expected explicit refusal (not PASS exit code).
+```
+
+Then rerun **only the previously failing extended GC-churn scenario** with
+`SWAPZ_BENCH_MBPS=20 SWAPZ_BENCH_DISCARD=0` and the same
+0.5 ms / QD64 / 50%-compressible / opportunistic 16 KiB workload.
+Keep a bounded external timeout and capture status, lower I/O, dmesg and
+live-set verification. Require `lower_discard=off`, more than one GC victim,
+completion, no residual I/O, and successful safe teardown.
+
+The benchmark's default 32 MiB logical / 256 MiB null_blk geometry may need
+more than 60 seconds at 20 MiB/s to recycle segments; run a dedicated bounded
+long-churn fixture if needed, with the same validated safety limits. Do not
+call a short run with no GC a focused PASS.
+
+If that passes, separately test lower DISCARD with
+`SWAPZ_BENCH_MBPS=0 SWAPZ_BENCH_DISCARD=1` (unthrottled) and explicit GC
+coverage. Compare the observed GC/discard progress.
+
+If GC still hangs with lower discard off, classify it as a real new
+forward-progress blocker and report the exact worker stack and state.
+No architecture/performance changes by Codex; report measurements for
+primary-developer review.
