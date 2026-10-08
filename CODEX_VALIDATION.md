@@ -2343,3 +2343,46 @@ same new source before attempting a narrowly allowlisted direct
 `local-*-verify.state` files; never infer that mock/test-worker
 completion proves production descendant containment or actual
 DM/loop/NBD/swap safety.
+
+## 2026-10-08 — Proposed exact direct dd worker allowlist (not integrated)
+
+The primary developer completed a separate test-only, fixture-bound
+direct-`dd` argument policy while Codex reviews the pidfd IPC
+client. `tests/runtime/recall-dd-allowlist.py` generates only one
+nine-page writer and four exact 4096-byte A/B readers with fixed
+offsets, flags, source/output paths and a prebound fixture-specific
+mapper. It refuses arbitrary argv or shell commands, source or
+output path redirection, bad mapper grammar, repeated roles,
+reader-before-writer and ambiguous/symlinked fixture paths.
+Root/source dev-inode snapshots are rechecked at admission.
+The policy has **no process launch or PID signaling API**.
+
+The corresponding 26 rootless tests validate all five argv
+vectors against `recall-io-plan.py`, rejected flag/path variations,
+source type and missing/truncated/replaced identity, stale output,
+symlink ancestors, role admission replay and sticky denial.
+One missing-root edge case initially raised raw FileNotFoundError;
+the final code raises the policy's fail-closed DDPolicyDenied.
+
+**Both source-only GitHub gates PASS at exact tested code**
+`8aa82dfef9a455ee3e6b26e7e3533c2eb98758d3`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37815480268
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37815480464
+
+The final combined gate additionally passed the 20 IPC adapter
+tests, 23 service tests plus 10 repeats, 27 pidfd supervisor tests
+plus 3 repeats, 46 I/O plan tests, all pressure/analyzer mocks
+and 26 full NBD selftests.
+
+**Do not infer production readiness.** This policy is NOT yet
+used by `test-child-supervisor-service.py` or `buffer-recall.sh`.
+Path-based argv checks leave a race between validation and a
+future worker's open/exec; the actual trusted launcher must own
+the private directory, validate its permissions and protect
+file/mapper identity through launch. A pidfd does not contain
+descendants or survive a crashed supervisor as a teardown
+authorization. See `docs/recall-dd-allowlist.md`. Codex's
+separate service/client files and the two host-local state files
+must remain under independent ownership. No live device or
+benchmark operations occurred.
