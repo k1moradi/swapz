@@ -639,3 +639,42 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       threshold, discard, writer wait, fsync or cancellation assertions.
 - [ ] Keep live DM/loop/NBD/swap, pressure, module and physical-media
       operations gated on separate explicit user authorization.
+
+### 2026-10-08 — Identity-bound readback and rootless fixed-role bridge
+
+- [x] Add descriptor-pinned 4 KiB readback attestation, independent
+      immutable reference comparison, pathname/inode/size checks and
+      fail-closed negative tests.
+- [x] Implement opt-in `RecallRoleIPCAdapter` with exactly five one-use
+      workers, handle retention, all-role completion requirements,
+      simultaneous A2/B2 launch-before-wait gating and writer lifetime
+      through completed reader checks.
+- [x] Implement synthetic-only injected `RootlessRoleBridge`, strict
+      role-only JSON, sticky finalization failure, and no change to the
+      normal bridge or service CLI's fixed test-worker allowlist.
+- [x] Add true AF_UNIX service-wire + Codex launch gate regression with
+      temporary regular files and a non-forking fake supervisor.
+- [x] Add real Bash coprocess synthetic-role success/failure/disconnect
+      qualification, with only synthetic backing-marker deletion.
+- [x] Extend both required rootless workflows; PASS at executable SHA
+      `0592b47693ca95ca7ff3f07fc7f56a502bc83519`:
+      https://github.com/k1moradi/swapz/actions/runs/37860393441
+      https://github.com/k1moradi/swapz/actions/runs/37860393481
+- [ ] Review Codex's independently implemented worker-crash/descendant
+      containment and obtain same-revision joint CI after integration.
+- [ ] Implement a *trusted* separate-service bootstrap that binds the
+      actual test DM descriptor identity and each newly created output
+      descriptor to immutable reference bytes across the IPC boundary.
+      Neither an after-the-fact path check nor an unchecked callback is
+      sufficient to authorize production teardown.
+- [ ] Connect proven real direct-worker pidfd lifecycle, identity
+      attestation and service-process exit into the approved Bash bridge;
+      test service crash/reuse/errors under rootless regular files first.
+- [ ] Only then migrate production `buffer-recall.sh`, preserving nine
+      deterministic 4 KiB pages, staged A/B hits, 500 ms lower delay,
+      concurrent-phase completion, 300 ms read threshold, discard,
+      exact data, writer wait, fsync and cancellation/failed counters.
+- [ ] Obtain separate operator approval before live DM/loop/NBD/swap,
+      kernel pressure/GC latency campaigns or physical benchmarking;
+      complete 4 KiB..1 MiB drain-throughput/read-p99 plateau
+      qualification and choose V2.2 strategy/batch only from measured data.
