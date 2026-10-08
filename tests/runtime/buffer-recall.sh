@@ -15,14 +15,24 @@ LOOP=""
 DELAY="swapz-v22-recall-delay-$TAG"
 TARGET="swapz-v22-recall-$TAG"
 WRITER=""
+PIDA=""
+PIDB=""
 
 cleanup() {
   local exit_status=$?
   trap - EXIT
   set +e
-  # A blocked writer must not outlive the target or its lower dm-delay stack.
-  if [[ -n "$WRITER" ]] && ! swapz_test_stop_child "$WRITER"; then
-    echo "ERROR: recall writer still active; preserving test stack and $TMP" >&2
+  # A failed/interrupted dual read may leave two test-owned I/O children.
+  # Stop/reap ALL background I/O before attempting upper/lower DM removal.
+  local child children_quiet=1
+  for child in "$WRITER" "$PIDA" "$PIDB"; do
+    [[ -z "$child" ]] && continue
+    if ! swapz_test_stop_child "$child"; then
+      children_quiet=0
+    fi
+  done
+  if (( ! children_quiet )); then
+    echo "ERROR: recall I/O child still active; preserving test stack and $TMP" >&2
     (( exit_status != 0 )) || exit_status=1
   elif ! swapz_test_cleanup_dm_stack "$LOOP" "$TARGET" "$DELAY"; then
     echo "ERROR: recall stack teardown incomplete; preserving backing and $TMP" >&2
@@ -133,7 +143,9 @@ PIDA=$!
 read_page 5 "$TMP/read-b2" "$TMP/expected-b2" >"$TMP/b2.ns" &
 PIDB=$!
 wait "$PIDA"
+PIDA=""
 wait "$PIDB"
+PIDB=""
 end_both=$(date +%s%N)
 BOTH_NS=$((end_both - start_both))
 HITS3=$(status_value staged_hits)
