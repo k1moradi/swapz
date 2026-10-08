@@ -2115,3 +2115,88 @@ paths and mapper identity at the actual execution boundary.
 No live DM, loop, NBD, swap, systemd, physical device, recall
 fixture, kernel module or benchmark operation occurred. Production
 numeric-PID recall cleanup is unchanged.
+
+## 2026-10-08 — Persistent test-only Bash-to-pidfd IPC control bridge
+
+While Codex separately works on the reviewed direct-`dd` role-admission
+and launch-boundary safety, the primary developer added a rootless
+Bash-facing persistent bridge in `tests/runtime/recall-control-bridge.py`
+plus `recall-control-bridge-test.py` and
+`recall-control-bridge-regression.sh`. The bridge creates a private
+socketpair, owns one subprocess running the test-only pidfd control
+service, binds that exact `Popen` instance to
+`SupervisorControlClient` and retains the existing
+`RecallIPCAdapter` from launch through `STOP_ALL`, `SHUTDOWN`
+and `FINALIZE`. It does not modify production `buffer-recall.sh`.
+
+Bash's restricted newline-JSON interface has bounded 2048-byte
+requests, strictly increasing request IDs and exactly five
+operations: `LAUNCH_TEST` (fixed `sleep`/`exit` workers only),
+`WAIT` (registered opaque handle), `STOP_ALL` (complete internal
+handle inventory), `SHUTDOWN` and `FINALIZE`. It refuses
+caller-supplied argv, device paths, numeric PIDs, arbitrary
+process signals, omitted/duplicate worker handle overrides,
+unknown fields, duplicate JSON keys, truncated/oversized
+requests and command replay. It never executes `dd`, a real
+DM operation or any swap/device command.
+
+**Cleanup authorization is delayed until FINALIZE**. Every
+prior reply, including successful `STOP_ALL` and `SHUTDOWN`,
+explicitly says `cleanup_allowed=false`; `FINALIZE` requires
+a complete stop/reap attestation, successful service shutdown,
+actual matching zero service-process exit and clean closure of
+the control socket. A failing worker, malformed frame, bad
+channel/descriptor, premature EOF, unsupported operation or
+unconfirmed service exit returns a preservation verdict and
+nonzero status whenever possible. No numeric-PID signal
+fallback exists; disconnection triggers best-effort control-socket
+closure/reap, which must never count as cleanup authorization.
+
+The **23-test rootless Python bridge suite** exercises persistent
+multi-worker sessions, two launches before either wait, nonzero
+worker exits, premature/duplicate operations, malformed and
+oversized messages, stale request-ID protection, invalid
+user-supplied cleanup handles, mock shutdown/descriptor-close
+denial, and EOF during the lifecycle. The Bash regression also
+uses a real `coproc` to launch three owned test workers, retains
+opaque handles across read-equivalent phases and waits, and proves
+that only a successful FINALIZE permits deletion of a
+**synthetic** backing marker. Separate Bash tests reject
+truncated/contradictory responses and preserve synthetic files
+when a worker fails or the controller pipe disconnects.
+
+**Both GitHub Actions workflows PASSED at one exact source revision**
+`ec52145bd0543f80e7576236231184d32656f1e1`:
+
+- Rootless teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37855300271
+  — **23 bridge tests**, all four Bash bridge safety checks,
+  34 pidfd IPC service tests and **10/10 full-suite repeats**,
+  27 gated-pidfd supervisor tests and **3/3 repeats**,
+  20 recall IPC adapter tests, 26 direct-dd allowlist tests,
+  46 direct recall I/O tests, 23 swap-parser tests,
+  16 pressure token tests and 10/10 repeats, 11 offline
+  GC analyzer tests, plus both rootless teardown regressions.
+- Combined NBD/teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37855300287
+  — same gates plus static NBD syscall containment,
+  compilation, **26/26 complete NBD selftests** and NBD/streaming
+  teardown mocks.
+
+An earlier pre-hardening code revision passed both CI gates;
+an additional audit then caught and fixed stale request IDs on
+malformed input and enforced socket-close verification before
+positive FINALIZE. Both workflows were rerun after these changes
+and passed at the exact revision above. Subsequent documentation
+commits do not alter the tested code.
+
+**Important limits:** bridge requests are intentionally restricted
+to fixed `sleep`/`exit` test workers. The independently tested
+direct-`dd` allowlist is not connected, and production
+`buffer-recall.sh` still uses Bash job PIDs and background
+reader functions; the PID reuse and descendant risks remain
+unresolved. No real DM, loop, NBD, swap, systemd, kernel
+module, physical device, fio, pressure/recall fixture or
+benchmark operation was performed. See
+`docs/recall-control-bridge.md` for the protocol and
+production migration boundaries.
