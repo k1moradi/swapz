@@ -1350,3 +1350,57 @@ signal TOCTOU window remains; an atomic pidfd approach has not been
 implemented or independently reviewed. Codex's concurrent independent
 NBD Linux-host audit is a separate gate. The NBD backend and kernel
 source blobs are unchanged by this teardown work.
+
+## 2026-10-08 — Codex NBD impossible-dev_t preflight FAIL corrected
+
+Codex independently ran the seven-command NBD source-only gate on its
+Linux host at `b838ad11e7ac49327514d55a1f2aeea9e3e1769e`,
+NBD source blob `768ff896e82198829cde83e28c8e0a35ddad368c`.
+**All seven commands exited zero and ten independent selftests passed
+without EBADF**, with syscall mock isolation checked first. Codex
+nevertheless reported **NBD SOURCE-ONLY GATE FAIL** after finding that
+the mountinfo parser accepted syntactically decimal but impossible
+Linux device tuples such as `4096:0` or `43:1048576`, potentially
+falsely proving the selected NBD node was unmounted. The partition
+rejection branch also lacked a direct rootless selftest.
+
+The primary developer updated `validate_nbd_node()` to parse mountinfo
+device fields numerically, enforce the Linux 32-bit `dev_t`
+major 0–4095 and minor 0–1048575 bounds, and compare numeric tuples
+against the selected NBD identity (including leading-zero encodings).
+Any malformed or out-of-bounds row anywhere in mountinfo fails closed.
+It additionally reports inaccessible NBD partition enumeration as a
+preflight error. Rootless negative/positive cases now cover:
+
+- `4096:0` and `43:1048576` rejected;
+- malformed negative minor and an out-of-range second row rejected;
+- valid unrelated `4095:1048575` and `0:0` accepted;
+- a selected-device mount with `0043:000` rejected;
+- synthetic `nbd0p1` child rejected and unreadable partitions rejected;
+- empty partition list retained in the existing positive preflight cases.
+
+**Executed same-revision GitHub Actions results:**
+
+- Source commit `40678c7d9743d6efca943885f40be1a0388d3ca6`.
+- Rootless NBD CI **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37783419565
+  — static syscall-isolation gate, Python compile, complete NBD
+  selftest plus **25/25 independent additional selftests**, three
+  shell syntax checks and both rootless NBD/streaming teardown mocks.
+- Combined rootless teardown+NBD CI **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37783419522
+  — same commit, ten Bash syntax checks, two full teardown mocks,
+  11 offline GC analyzer tests, static NBD syscall isolation,
+  NBD compile, **26 complete NBD selftests** (one plus 25 repeats)
+  and both NBD/streaming teardown mocks.
+- No EBADF or selftest assertion failure appeared in either run.
+  The complete selftest reached its partial-setup cleanup and
+  unexpected worker-exception checks.
+
+The NBD kernel-worker shutdown still contains the deliberate unbounded
+join to preserve active descriptors; no real kernel NBD driver
+termination was tested. The kernel and teardown source were unchanged
+by this NBD patch. Codex independent Linux-host requalification of the
+updated NBD blob remains to be obtained after its separate teardown
+audit. No actual DM, loop, NBD, swap, module, physical-media or
+benchmark operations were authorized or performed.
