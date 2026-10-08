@@ -312,13 +312,20 @@ def shutdown_kernel_session(fd: int, attached: bool,
                             stopping: threading.Event,
                             server_sock: socket.socket, kernel_sock: socket.socket,
                             failures: list[str], *,
-                            ioctl=fcntl.ioctl, close_fd=os.close,
+                            ioctl=None, close_fd=None,
                             join_timeout: float = 5.0) -> None:
     """Never release NBD descriptors while the kernel worker still owns them.
 
     When the kernel worker cannot stop promptly, preserve the backing/session
     and wait for it rather than returning successfully and closing live fds.
     """
+    # Resolve at invocation time. Frozen function defaults defeat unittest.mock
+    # patches and could apply real ioctls/closes to synthetic test fds.
+    if ioctl is None:
+        ioctl = fcntl.ioctl
+    if close_fd is None:
+        close_fd = os.close
+
     def record_shutdown_failure(message: str) -> None:
         failures.append(message)
         # Emit immediately: a stuck worker could make a later final report
