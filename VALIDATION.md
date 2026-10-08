@@ -1201,3 +1201,44 @@ This is rootless source-only validation, not authorization for real
 NBD, DM/loop, swap, kernel module, fio, physical media or reboot.
 Kernel blob `7589022ecdf0525716717270ab063a867a21f473` is unchanged.
 The concurrent NBD independent audit remains a separate qualification.
+
+## 2026-10-08 — Codex NBD source-only FAIL corrected; 26 rootless PASSes
+
+Codex independently tested NBD source blob
+`9abcce54fb2cb892e64132ad2b76244110383092` at
+`977023f4aca61e4e8d408065504966f3646b5eee`.
+Its syscall-isolation review **PASSED**. Six of the seven source-only
+commands **PASSED**, but `size-aware-nbd.py selftest` exited 1 with
+`AssertionError: [OSError(9, 'Bad file descriptor')]`: in the 8 MiB
+socketpair case, the test closed its sockets before joining its
+still-active server thread. The resulting EBADF prevented the later
+mocked NBD_SET_SOCK cleanup/worker-start cases from executing in that
+host run. The error came from userspace test cleanup, not from a real
+NBD ioctl.
+
+The primary developer reordered cleanup: set the stop event, join with
+a finite deadline, and only then close sockets; an unexpected stuck
+test thread may be unblocked by shutting down its local socketpair.
+Related malformed-request and cancellation tests also join before
+closing. The preflight now validates numeric mount IDs, decimal
+major:minor and the exact `-` separator position in mountinfo, including
+negative tests for minimum-length malformed rows and positive tests
+for optional fields and escaped paths. The NBD CI PR trigger now
+covers the same relevant scripts as its push trigger.
+
+**Executed CI evidence:**
+https://github.com/k1moradi/swapz/actions/runs/37778788448
+at `edbf6d1452bd8c87b36c44daa6ad349967592a22` concluded
+**SUCCESS**. Static syscall isolation, Python compilation, the
+complete rootless NBD selftest (including the previously blocked
+partial-setup and worker-error mock assertions), three Bash syntax
+checks, NBD teardown mock and streaming teardown mock all passed.
+The workflow also ran **25 separate additional NBD selftest processes,
+all 25/25 PASS**, for **26 successful complete selftests** total.
+The log contained no EBADF or assertion tracebacks.
+
+The NBD source is still **not independently Linux-host requalified**
+against the new code by Codex, and real kernel attachment, teardown,
+physical performance, live GC overlap and swap-in p99 remain untested.
+The concurrent teardown source and kernel were not changed by this
+NBD correction.
