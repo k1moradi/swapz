@@ -291,6 +291,45 @@ def validate_nbd_node(path: str) -> str:
     return path
 
 
+def shutdown_kernel_session(fd: int, attached: bool,
+                            worker: threading.Thread | None,
+                            stopping: threading.Event,
+                            server_sock: socket.socket, kernel_sock: socket.socket,
+                            failures: list[str], *,
+                            ioctl=fcntl.ioctl, close_fd=os.close,
+                            join_timeout: float = 5.0) -> None:
+    """Never release NBD descriptors while the kernel worker still owns them.
+
+    When the kernel worker cannot stop promptly, preserve the backing/session
+    and wait for it rather than returning successfully and closing live fds.
+    """
+    stopping.set()
+    if attached and worker is not None and worker.is_alive():
+        try:
+            ioctl(fd, NBD_DISCONNECT)
+        except OSError as exc:
+            failures.append(f"NBD_DISCONNECT failed: {exc}")
+    if worker is not None:
+        worker.join(timeout=join_timeout)
+        if worker.is_alive():
+            warning = ("NBD_DO_IT worker did not stop within shutdown deadline; "
+                       "retaining descriptors until it exits; "
+                       "investigate DM holders and kernel task state")
+            failures.append(warning)
+            print("ERROR: " + warning, file=sys.stderr, flush=True)
+            # Releasing the socket/fd here can disconnect a live DM-backed
+            # client. Do not abandon a daemon worker or force detach.
+            worker.join()
+    if attached:
+        try:
+            ioctl(fd, NBD_CLEAR_SOCK)
+        except OSError as exc:
+            failures.append(f"NBD_CLEAR_SOCK failed: {exc}")
+    server_sock.close()
+    kernel_sock.close()
+    close_fd(fd)
+
+
 def serve_kernel(args: argparse.Namespace) -> int:
     path = validate_nbd_node(args.device)
     model = SizeAwareDevice(args.size_mib, args.mbps,
@@ -307,8 +346,12 @@ def serve_kernel(args: argparse.Namespace) -> int:
     # NBD_SET_SOCK fails if an active kernel client already owns this NBD
     # device. Never change its geometry until that ioctl succeeds.
     fd = os.open(path, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
-    kernel_sock, server_sock = socket.socketpair(socket.AF_UNIX,
-                                                  socket.SOCK_STREAM)
+    try:
+        kernel_sock, server_sock = socket.socketpair(socket.AF_UNIX,
+                                                      socket.SOCK_STREAM)
+    except OSError:
+        os.close(fd)
+        raise
     attached = False
     worker: threading.Thread | None = None
     try:
@@ -331,13 +374,16 @@ def serve_kernel(args: argparse.Namespace) -> int:
         def kernel_thread() -> None:
             try:
                 fcntl.ioctl(fd, NBD_DO_IT)
+                if not stop.is_set():
+                    errors.append("NBD_DO_IT unexpectedly returned before shutdown")
             except OSError as exc:
                 if not stop.is_set():
-                    errors.append(str(exc))
+                    errors.append(f"NBD_DO_IT failed: {exc}")
             finally:
                 stop.set()
 
-        worker = threading.Thread(target=kernel_thread, daemon=True)
+        # The worker must never be abandoned: it owns the NBD file descriptor.
+        worker = threading.Thread(target=kernel_thread, daemon=False)
         worker.start()
         # No auto device selection or formatting: the caller owns the
         # explicit virtual device and all higher DM mappings.
@@ -347,32 +393,21 @@ def serve_kernel(args: argparse.Namespace) -> int:
                         "bandwidth_mib_s": args.mbps,
                         "latency_us": args.latency_us,
                         "discard": args.allow_trim}) + "\n")
-        try:
-            model.serve(server_sock, stop)
-        finally:
-            stop.set()
-        return 0 if not errors else 1
+        model.serve(server_sock, stop)
     finally:
-        if attached:
-            try:
-                fcntl.ioctl(fd, NBD_DISCONNECT)
-            except OSError:
-                pass
-        server_sock.close()
-        kernel_sock.close()
-        if worker is not None:
-            worker.join(timeout=5)
-        if attached:
-            try:
-                fcntl.ioctl(fd, NBD_CLEAR_SOCK)
-            except OSError:
-                pass
-        os.close(fd)
+        shutdown_kernel_session(fd, attached, worker, stop,
+                                server_sock, kernel_sock, errors)
         if args.stats_file:
-            Path(args.stats_file).write_text(
-                json.dumps(model.stats, sort_keys=True) + "\n")
+            try:
+                Path(args.stats_file).write_text(
+                    json.dumps(model.stats, sort_keys=True) + "\n")
+            except OSError as exc:
+                errors.append(f"failed to write NBD stats: {exc}")
         if errors:
-            print("kernel NBD worker: " + "; ".join(errors), file=sys.stderr)
+            print("NBD backend: " + "; ".join(errors), file=sys.stderr)
+    # This is evaluated *after* shutdown; errors from disconnect, join and
+    # clear-sock must affect the CLI result.
+    return 0 if not errors else 1
 
 
 def client_recv_exact(conn: socket.socket, count: int) -> bytes:
