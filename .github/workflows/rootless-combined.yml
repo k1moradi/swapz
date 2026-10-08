@@ -77,16 +77,20 @@ jobs:
             tests/runtime/no-discard-livegc.sh \
             tests/runtime/buffer-recall.sh \
             tests/runtime/pressure.sh \
+            tests/runtime/pressure-runner.sh \
+            tests/runtime/pressure-runner-regression.sh \
             tests/runtime/streaming-benchmark.sh \
             tests/runtime/streaming-benchmark-teardown.sh \
             tests/runtime/size-aware-nbd-teardown-test.sh; do
             bash -n "$file"
           done
-          echo "COMBINED_BASH_SYNTAX_10: PASS"
+          echo "COMBINED_BASH_SYNTAX_12: PASS"
       - name: Full DM and loop teardown mocks
         run: bash tests/runtime/test-stack-teardown-regression.sh
       - name: Full pressure teardown mocks
         run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Rootless production pressure controller regression
+        run: bash tests/runtime/pressure-runner-regression.sh
       - name: Rootless pressure checkpoint release-token tests
         shell: bash
         run: |
@@ -139,7 +143,7 @@ jobs:
             echo ""
             echo "Tested commit: \`$(git rev-parse HEAD)\`"
             echo ""
-            echo "10 Bash syntax checks, 2 teardown regressions, pressure token tests, 11 offline GC analyzer"
+            echo "12 Bash syntax checks, 3 teardown regressions, pressure token tests, 11 offline GC analyzer"
             echo "tests, static NBD syscall isolation, NBD compilation, 26 complete"
             echo "NBD selftests and 2 NBD/streaming teardown mocks all passed."
             echo ""
