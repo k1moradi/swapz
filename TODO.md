@@ -606,3 +606,36 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Test-owned bridge is source-only: real DM/loop/NBD,
       swap, GC/latency, physical-media operations remain
       unapproved/unverified.
+
+### 2026-10-08 — Pinned direct-dd role admission and real rootless worker regression
+
+- [x] Verify Codex's new two-commit opt-in launch-gate work
+      (`a0a1252a`, `afffddad`) and review the direct-child pidfd,
+      descriptor-pinning, role admission, IPC and shutdown code.
+- [x] Preserve default service and Bash bridge as test-only.
+      No direct `dd` request is accepted by the current bridge.
+- [x] Add independent rootless regression that executes genuine pinned
+      GNU `dd` with an ordinary temporary file as synthetic mapper,
+      verifies all five roles and exact bytes, and checks source/output
+      path-replacement redirection after role admission.
+- [x] Gate that regression in both rootless workflows and trigger both
+      workflows whenever either mandatory workflow changes.
+- [x] Teardown and combined CI both PASS at executable-source revision
+      `4a89dc77752a28c53d62a6f81eec276e6438dfe0`:
+      https://github.com/k1moradi/swapz/actions/runs/37858629277
+      https://github.com/k1moradi/swapz/actions/runs/37858629165
+- [ ] Add a separately reviewed trusted direct-dd bootstrap for the
+      fixture-owned live mapper with authoritative identity, and prevent
+      concurrent DM table changes while supervised I/O is outstanding.
+- [ ] Preserve the pinned *output descriptor identity* through readback
+      validation, so replacing a pathname cannot subvert exact comparison.
+- [ ] Add approved role commands to a rootless persistent bridge integration;
+      retain complete opaque handle inventory, stop/reap, process exit and
+      FINALIZE before any synthetic cleanup authorization.
+- [ ] Independently prove no I/O-producing descendants survive and define
+      service-crash containment/preservation before production recall migration.
+- [ ] Migrate production `buffer-recall.sh` without weakening nine-page
+      A/B staged hits, concurrent read timing, exact readback, 300 ms
+      threshold, discard, writer wait, fsync or cancellation assertions.
+- [ ] Keep live DM/loop/NBD/swap, pressure, module and physical-media
+      operations gated on separate explicit user authorization.
