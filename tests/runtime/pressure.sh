@@ -45,7 +45,9 @@ run_pressure(){
   local unit=$1 size=$2 mem=$3 swap=$4 require_gc=$5
   local dir="$TMP/$unit"
   mkdir -p "$dir"
-  systemd-run --unit="$unit" --property="MemoryMax=$mem" --property="MemorySwapMax=$swap" \
+  # Pin the transient service to system.slice so teardown can verify its
+  # exact systemd ControlGroup identity rather than trusting arbitrary paths.
+  systemd-run --unit="$unit" --slice=system.slice --property="MemoryMax=$mem" --property="MemorySwapMax=$swap" \
     --property=TasksMax=32 --property=RuntimeMaxSec=300 \
     --no-block /usr/bin/python3 "$ROOT/tests/runtime/pressure-helper.py" "$size" "$dir" >/dev/null
   local ready=0 pid=0 cg="" state=""
