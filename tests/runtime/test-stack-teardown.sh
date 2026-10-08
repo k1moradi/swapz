@@ -25,6 +25,14 @@ swapz_test_confirm_dm_absent() {
         malformed = 1
         next
       }
+      # Linux dev_t allocates 12 bits to the major and 20 to minor.
+      # Duplicate inventory names cannot establish a trustworthy absence.
+      split(substr($2, 2, length($2) - 2), device_parts, ":")
+      if (device_parts[1] + 0 > 4095 ||
+          device_parts[2] + 0 > 1048575 || seen[$1]++) {
+        malformed = 1
+        next
+      }
       rows++
       if ($1 == name) found = 1
     }
