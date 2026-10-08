@@ -124,6 +124,89 @@ connection as a cleanup failure and preserve the DM/loop stack. A later
 integration can add a parent-death signal and/or a fixture-owned cgroup, but
 must test those mechanisms independently; they are not part of this prototype.
 
+## Rootless IPC control service
+
+`tests/runtime/test-child-supervisor-service.py` adds a single-threaded control
+loop around `GatedPidfdSupervisor`. It accepts one inherited private
+`AF_UNIX/SOCK_STREAM` file descriptor with `--fd`; the socket descriptor is
+marked close-on-exec before any worker launch. The controller owns the other
+socketpair endpoint. The service does not create or remove DM mappings, loops,
+swap entries, or backing files. Its `cleanup_after_stop()` callback returns an
+in-memory marker only.
+
+The command allowlist is deliberately limited to:
+
+```text
+launch {command:"sleep", duration_ms:0..5000}
+launch {command:"exit", code:0..125}
+wait   {handle:<opaque>, timeout_ms:0..60000}
+stop_all {handles:[<opaque>, ...]}
+shutdown
+```
+
+The service translates `sleep` and `exit` into fixed Python worker programs.
+The wire API has no PID, `argv`, shell, working-directory, environment, or
+device-path field. It passes a small fixed environment to workers. This
+allowlist is for protocol and lifecycle tests; production recall must receive
+a separate reviewed direct-worker allowlist with exact argument and file-path
+validation before it can launch `dd`.
+
+### Wire framing and session rules
+
+Each request and response is a four-byte unsigned network-order payload length
+followed by one UTF-8 JSON object. Payloads are limited to 4096 bytes. Every
+request contains a strictly increasing positive integer `id` and an `op`.
+Duplicate JSON keys, non-finite JSON constants, repeated or out-of-order IDs,
+unknown fields, malformed JSON, truncated frames, and unsupported operations
+are rejected. The service sends a bounded deterministic error response when
+possible, closes the session, and attempts to stop/reap its registered direct
+children. Each complete frame has a finite read and write deadline; partial
+frames use the same deadline. The client applies its own deadline and treats
+EOF, timeout, malformed response, or mismatched request ID as
+`preserve_backing`. Its API distinguishes `ProtocolFailure` from
+`SupervisorUnavailable`; both permanently deny cleanup authorization for that
+session.
+
+Every response carries `cleanup_allowed` and `preserve_backing`, with exactly
+one true. `launch` returns only an opaque handle after the supervisor's pidfd
+gate and exec handshake. `wait` accepts only a handle previously returned by
+that session and a bounded timeout. A timeout reports `running` and cannot
+authorize teardown. A natural nonzero exit is a lifecycle error even after
+the child has been reaped.
+
+`stop_all` permanently closes launch admission and passes the supplied handle
+list to `cleanup_after_stop()`. The supervisor still attempts all registered
+workers when the list is incomplete, but any omitted, duplicate, unknown, or
+malformed handle denies authorization. The only callback is an in-memory
+marker; the response reports provisional authorization only when every
+registered direct child has been reaped, every pidfd close was error-free,
+and no lifecycle error occurred.
+
+The controller must then request `shutdown`, receive a successful all-reaped
+response, wait for the service process, and verify exit status zero. Only the
+client's `confirm_service_exit(0)` after those steps returns true from
+`cleanup_authorized` (the default client deadline is 75 seconds, longer than
+the 60-second maximum natural wait request). The caller must preserve backing
+after a service crash, disconnect, broken pipe, timeout, invalid response,
+nonzero exit, or any lifecycle failure, even if the service logs that it
+recovered and reaped its workers internally. Requests queued after a
+successful shutdown are not processed; the service closes the channel.
+
+The service loop and the fork-based supervisor require the service process to
+remain single-threaded with default `SIGCHLD` handling. The supported baseline
+is Linux 5.3 or newer with Python 3.9 or newer exposing `os.pidfd_open()` and
+`signal.pidfd_send_signal()`. If pidfd support is absent or acquisition fails,
+there is no numeric-PID signaling fallback and no cleanup authorization.
+
+The control service does not make supervisor crashes safe. If the service is
+killed while a child is running, that child may continue; a pidfd does not
+provide parent-death signaling or descendant containment. The future caller
+must preserve the DM/loop stack on any lost service response or abnormal
+service exit. Direct-child supervision also cannot establish that a worker's
+grandchildren are gone. Production workers must be direct executables that do
+not fork I/O-producing descendants, or a separately reviewed test-owned
+cgroup must be verified empty before cleanup.
+
 ## Proposed `buffer-recall.sh` migration
 
 The current fixture tracks `WRITER`, `PIDA`, and `PIDB` as Bash numeric job
@@ -134,12 +217,14 @@ signaled while a child `dd` continues doing mapper I/O.
 
 The integration should be a separate reviewed change with these steps:
 
-1. Start one single-threaded Python supervisor control process for the fixture.
-   Keep it alive until the fixture's EXIT cleanup has completed. Bash sends
-   commands and receives opaque handles over a private inherited pipe or
-   Unix-domain socket; it never receives worker PIDs. The control protocol
-   must validate request IDs and handles and must not expose arbitrary
-   signaling.
+1. Add a small reviewed launcher/adapter that creates the private socketpair,
+   starts this service with the service endpoint as its inherited `--fd`, and
+   gives the controller endpoint to the fixture's persistent Python IPC
+   adapter. Keep both alive until EXIT cleanup finishes. Bash sends only the
+   documented bounded requests through that adapter and stores opaque handles;
+   it never receives worker PIDs. The current test allowlist must be replaced
+   with a narrowly validated direct-`dd` allowlist as part of that separate
+   change. Do not expose a generic `argv` or signal operation.
 2. Replace the writer's `dd ... &` with `launch` of the direct `dd` argv. Keep
    its handle in a list immediately after a successful launch.
 3. Preserve the first A and B recall timing points by launching each direct
