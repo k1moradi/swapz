@@ -2049,3 +2049,37 @@ Keep both host-local `local-*-verify.state` files unchanged. Never
 run real systemd units, pressure fixtures, block devices, swap
 commands, kernel modules, physical disk tests, fio or reboot absent
 fresh explicit authorization.
+
+## Pressure checkpoint token file-integrity regression handoff
+
+While Codex independently develops the recall gated-pidfd
+supervisor, the primary developer hardened private pressure
+checkpoint markers and releases. They no longer trust unbounded
+`Path.read_bytes()` or shell `cat`. Checkpoint reads validate
+the file without following symlinks, reject FIFOs, hardlinks,
+non-regular files, overlong contents and lstat/open inode changes,
+and read only the exact expected token length (plus one).
+The new controller-side `check` mode validates both markers
+without creating release files; `release` remains exact-nonce,
+phase-specific and no-replace atomic.
+
+New rootless cases grow the suite from 8 to **16 tests**. Each
+workflow runs one suite and then **10 additional independent timed
+suite processes**. Tested results:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37794454277
+  commit `6755e82b18c59f9b9047098ec6da97dba620c3f6` — PASS.
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37794468550
+  commit `45ac8b7dc668200315bea8556708bffa944dcb3d` — PASS,
+  26 NBD userspace selftests and 11 offline analyzer tests included.
+
+The two executions share the same pressure code/tests; the
+subsequent revision added the combined workflow repeat step.
+These source-only mocks do not exercise real pressure, systemd,
+swap or block devices. Codex's separate recall pidfd prototype
+has not been integrated; do not claim PID reuse elimination.
+
+Future independent review: preserve the two host-local
+`local-*-verify.state` files and verify that malformed checkpoint
+files cannot lead to release or device teardown. No actual DM/loop,
+NBD, swap, module, fio or physical-device operations are permitted.
