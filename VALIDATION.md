@@ -1031,3 +1031,57 @@ calibrated 20 MiB/s lower rate, GC-trigger latency, overlapping-live-GC
 swap-in p99, or a physical batch-size choice. The next NBD gate is the
 exact source-only command sequence recorded in `CODEX_VALIDATION.md`
 after the concurrently assigned teardown audit is complete.
+
+## 2026-10-08 — Follow-up P0 teardown fixes and executed rootless CI PASS
+
+Codex independently audited teardown source at
+`ae594c266d11a815091b5957b496b1705252db72`: seven Bash syntax checks
+PASS, pressure teardown mock PASS, and ten offline analyzer tests PASS.
+The DM/loop regression **FAILED** at an incorrect expectation after the
+upper mapping had already been removed. Codex additionally reproduced two
+P0 fail-open inspections: a successful but malformed `dmsetup ls` listing
+was accepted as absence, and failed cgroup `-d`/`-e` inspections could
+masquerade as a removed cgroup.
+
+The primary developer committed fixes: validate complete `dmsetup ls`
+NAME (major:minor) rows and reject bad parsing; inspect cgroup directories
+using Python `os.stat` to distinguish ENOENT, present directory, and all
+other errors; verify `cgroup.procs` contents when present; correct test
+expectations for already-removed upper mappings; restrict child signals
+to running or stopped shell jobs, not completed-but-listed PIDs; and
+strengthen ordered pressure teardown mocks, unknown loop inventory columns,
+systemd/mapper/swap inspection errors, and a missing foreground-read
+result column.
+
+A **rootless-only GitHub Actions workflow** was added at
+`.github/workflows/rootless-teardown.yml`. Its successful run:
+
+- **Tested commit:** `e92ad29a192b70cbe9e04a1421496bfaf85bd460`
+- **Run:** https://github.com/k1moradi/swapz/actions/runs/37772741880
+- Bash syntax (seven fixtures/helpers): **PASS**
+- Full DM/loop teardown rootless regression (all mock cases including
+  false-positive detach, malformed listing, find failure, live ps error,
+  completed/recycled PID and three-child cleanup): **PASS**
+- Pressure teardown rootless regression (cgroup tri-state including
+  direct `os.stat`, systemd, swapoff, alternate active path, ordering):
+  **PASS**
+- Offline GC analyzer unit tests: **11 passed, OK**
+
+The temporary preceding CI runs failed and were used to correct two
+additional test-harness defects: a duplicate malformed shell fragment
+and a missing restoration of the real loop-holder helper. The successful
+run is the authoritative execution result; earlier failed runs are not
+counted as PASS.
+
+**Qualification boundary:** This verifies source-only behavior on a clean
+GitHub-hosted Ubuntu runner. Codex's independent Linux-host rerun at the
+new teardown SHA is still desirable. Even this PASS does **not** authorize
+root-only fixture teardown, live NBD attachment, kernel module changes,
+swap activation, physical disk operations, or reboot. The shell job
+ownership check reduces stale PID signaling but cannot eliminate every
+PID-reuse race between observation and signal without an atomic pidfd-
+based signal. Never claim that all possible races are eliminated.
+
+Kernel blob `7589022ecdf0525716717270ab063a867a21f473`
+remains unchanged; current NBD source is handled by its own independent
+source-only audit.
