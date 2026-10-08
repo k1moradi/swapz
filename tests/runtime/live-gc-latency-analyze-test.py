@@ -65,6 +65,15 @@ class LiveGcAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "clock domain"):
             analyzer.analyze(self.gc_path, self.reads_path, 1)
 
+    def test_touching_boundary_is_not_overlap(self) -> None:
+        self.populate(gc_rows="monotonic,100,200,1\n",
+                      read_rows="monotonic,50,100,ok\n"
+                                "monotonic,200,250,ok\n"
+                                "monotonic,150,160,ok\n")
+        report = analyzer.analyze(self.gc_path, self.reads_path, 1)
+        self.assertEqual(report["overlapping_live_gc"]["count"], 1)
+        self.assertEqual(report["outside_live_gc"]["count"], 2)
+
     def test_overlapping_gc_windows_are_merged(self) -> None:
         self.populate(gc_rows="monotonic,100,200,1\nmonotonic,150,300,2\n",
                       read_rows="monotonic,250,350,ok\n")
