@@ -33,9 +33,10 @@ def load(name: str, filename: str):
 
 
 service_module = load("swapz_live_role_protocol_service", "test-child-supervisor-service.py")
-adapter_module = load("swapz_live_role_protocol_adapter", "recall-ipc-adapter.py")
 readback_module = load("swapz_live_role_protocol_readback", "recall-readback-identity.py")
 bridge_module = load("swapz_live_role_protocol_bridge", "recall-control-bridge.py")
+# Use the bridge-owned import identity for its explicit trusted adapter type gate.
+adapter_module = bridge_module.adapter_module
 
 PAGES = {"a": 0, "b": 4, "a2": 0, "b2": 5}
 PAGE_SIZE = 4096
