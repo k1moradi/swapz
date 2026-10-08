@@ -375,6 +375,33 @@ def serve_kernel(args: argparse.Namespace) -> int:
             print("kernel NBD worker: " + "; ".join(errors), file=sys.stderr)
 
 
+def client_recv_exact(conn: socket.socket, count: int) -> bytes:
+    """Bounded selftest receive: fail on EOF or timeout, never spin on b''."""
+    pieces = bytearray()
+    while len(pieces) < count:
+        try:
+            part = conn.recv(count - len(pieces))
+        except socket.timeout as exc:
+            raise TimeoutError("timed out waiting for NBD test reply") from exc
+        if not part:
+            raise EOFError("truncated NBD test reply")
+        pieces.extend(part)
+    return bytes(pieces)
+
+
+def client_transact(conn: socket.socket, command: int, cookie: int,
+                    offset: int, length: int, payload: bytes = b"") -> bytes:
+    try:
+        conn.sendall(REQUEST.pack(REQUEST_MAGIC, command, cookie,
+                                  offset, length) + payload)
+    except socket.timeout as exc:
+        raise TimeoutError("timed out sending NBD test request") from exc
+    magic, error, reply_cookie = REPLY.unpack(client_recv_exact(conn, REPLY.size))
+    if (magic, error, reply_cookie) != (REPLY_MAGIC, 0, cookie):
+        raise ProtocolError("invalid NBD test reply magic, error or cookie")
+    return client_recv_exact(conn, length) if command == CMD_READ else b""
+
+
 def selftest() -> int:
     from types import SimpleNamespace
     from unittest import mock
@@ -397,51 +424,56 @@ def selftest() -> int:
     data = bytes(range(256)) * 4096  # Exactly 1 MiB.
     model.process(CMD_WRITE, 0, len(data), data)
     assert model.process(CMD_READ, 0, len(data)) == data
-    assert abs(times[0] - (0.0005 + 1 / 20)) < 1e-9
+    full_duration = 0.0005 + 1 / 20
+    assert abs(times[0] - full_duration) < 1e-9
+    assert abs(times[1] - full_duration) < 1e-9
     assert model.stats["max_request_bytes"] == 1048576
-    assert model.process(CMD_READ, 1048576, 4096) == ZERO
+    assert model.process(CMD_READ, 1048576, BLOCK) == ZERO
+    small_duration = times[-1]
+    assert abs(small_duration - (0.0005 + BLOCK / (20 * 1048576))) < 1e-9
+    assert full_duration > small_duration * 10  # Constant duration must fail.
     model.process(CMD_FLUSH, 0, 0)
+    assert abs(times[-1] - 0.0005) < 1e-9
     assert model.stats["flushes"] == 1
     try:
-        model.process(CMD_TRIM, 0, 4096)
+        model.process(CMD_TRIM, 0, BLOCK)
     except ProtocolError:
         pass
     else:
         raise AssertionError("DISCARD unexpectedly enabled")
 
+    for invalid_rate in (float("nan"), float("inf"), 0.01):
+        try:
+            SizeAwareDevice(32, invalid_rate, 500)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("unsafe NBD bandwidth accepted")
+
     # Exercise the real wire framing and server loop using socketpair only;
     # no root, NBD kernel driver, or live block device is touched.
     server, client = socket.socketpair()
+    client.settimeout(2)
     stopping = threading.Event()
     thread = threading.Thread(target=model.serve, args=(server, stopping))
     thread.start()
-
-    def transact(command: int, cookie: int, offset: int,
-                 length: int, payload: bytes = b"") -> bytes:
-        client.sendall(REQUEST.pack(REQUEST_MAGIC, command, cookie,
-                                    offset, length) + payload)
-        hdr = b""
-        while len(hdr) < REPLY.size:
-            hdr += client.recv(REPLY.size - len(hdr))
-        magic, error, reply_cookie = REPLY.unpack(hdr)
-        assert (magic, error, reply_cookie) == (REPLY_MAGIC, 0, cookie)
-        result = b""
-        if command == CMD_READ:
-            while len(result) < length:
-                result += client.recv(length - len(result))
-        return result
-
-    # Exercise a full-size NBD reply through the actual socket loop.
-    assert transact(CMD_READ, 16, 0, len(data)) == data
-    assert transact(CMD_READ, 11, 0, 4096) == data[:4096]
-    assert transact(CMD_WRITE, 12, 1048576, 4096, b"Z" * 4096) == b""
-    assert transact(CMD_READ, 13, 1048576, 4096) == b"Z" * 4096
-    assert transact(CMD_FLUSH, 14, 0, 0) == b""
-    client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 15, 0, 0))
-    thread.join(timeout=2)
+    try:
+        assert client_transact(client, CMD_READ, 16, 0, len(data)) == data
+        # Full-size WRITE must travel through the socket, not just the model.
+        replacement = b"W" * len(data)
+        assert client_transact(client, CMD_WRITE, 17, 0, len(data), replacement) == b""
+        assert client_transact(client, CMD_READ, 18, 0, len(data)) == replacement
+        assert client_transact(client, CMD_WRITE, 12, 1048576, BLOCK,
+                               b"Z" * BLOCK) == b""
+        assert client_transact(client, CMD_READ, 13, 1048576, BLOCK) == b"Z" * BLOCK
+        assert client_transact(client, CMD_FLUSH, 14, 0, 0) == b""
+        client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 15, 0, 0))
+    finally:
+        stopping.set()
+        thread.join(timeout=2)
+        server.close()
+        client.close()
     assert not thread.is_alive()
-    server.close()
-    client.close()
     assert model.stats["invalid_requests"] == 0
 
     class PartialReplySocket:
@@ -457,16 +489,121 @@ def selftest() -> int:
             self.received.extend(pending[:sent])
             return sent
 
-    # Verify that a timeout after a partial send cannot duplicate reply data.
+    # Timeout after a partial send cannot duplicate reply data.
     partial_socket = PartialReplySocket()
     model.send_exact(partial_socket, b"abcdefg", threading.Event())
     assert partial_socket.received == b"abcdefg"
 
-    discard = SizeAwareDevice(32, 20, 500, allow_trim=True, sleeper=lambda _: None)
-    discard.process(CMD_WRITE, 0, 4096, b"Q" * 4096)
-    discard.process(CMD_TRIM, 0, 4096)
-    assert discard.process(CMD_READ, 0, 4096) == ZERO
-    print("size-aware NBD protocol, 1 MiB request, timing and TRIM: PASS")
+    discard_times: list[float] = []
+    discard = SizeAwareDevice(32, 20, 500, allow_trim=True,
+                              sleeper=discard_times.append)
+    discard.process(CMD_WRITE, 0, BLOCK, b"Q" * BLOCK)
+    discard.process(CMD_TRIM, 0, BLOCK)
+    assert abs(discard_times[-1] - 0.0005) < 1e-9
+    assert discard.process(CMD_READ, 0, BLOCK) == ZERO
+
+    trim_server, trim_client = socket.socketpair()
+    trim_client.settimeout(2)
+    trim_stop = threading.Event()
+    trim_thread = threading.Thread(target=discard.serve,
+                                   args=(trim_server, trim_stop))
+    trim_thread.start()
+    try:
+        client_transact(trim_client, CMD_WRITE, 20, 0, BLOCK, b"Q" * BLOCK)
+        client_transact(trim_client, CMD_TRIM, 21, 0, BLOCK)
+        assert client_transact(trim_client, CMD_READ, 22, 0, BLOCK) == ZERO
+        trim_client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 23, 0, 0))
+    finally:
+        trim_stop.set()
+        trim_thread.join(timeout=2)
+        trim_client.close()
+        trim_server.close()
+    assert not trim_thread.is_alive()
+
+    # Incomplete reply headers/payloads, an idle peer and invalid reply
+    # framing must fail deterministically rather than hang or spin.
+    for case in ("header_eof", "payload_eof", "timeout", "bad_cookie", "bad_magic"):
+        peer, client = socket.socketpair()
+        client.settimeout(0.05)
+        try:
+            if case == "header_eof":
+                peer.sendall(REPLY.pack(REPLY_MAGIC, 0, 45)[:7])
+                peer.shutdown(socket.SHUT_WR)
+                try:
+                    client_recv_exact(client, REPLY.size)
+                except EOFError:
+                    pass
+                else:
+                    raise AssertionError("truncated header was accepted")
+            elif case == "payload_eof":
+                peer.sendall(b"X" * 5)
+                peer.shutdown(socket.SHUT_WR)
+                try:
+                    client_recv_exact(client, BLOCK)
+                except EOFError:
+                    pass
+                else:
+                    raise AssertionError("truncated payload was accepted")
+            elif case == "timeout":
+                try:
+                    client_recv_exact(client, REPLY.size)
+                except TimeoutError:
+                    pass
+                else:
+                    raise AssertionError("stalled reply did not time out")
+            else:
+                cookie = 44 if case == "bad_cookie" else 45
+                magic = REPLY_MAGIC if case == "bad_cookie" else 0
+                peer.sendall(REPLY.pack(magic, 0, cookie))
+                try:
+                    client_transact(client, CMD_FLUSH, 45, 0, 0)
+                except ProtocolError:
+                    pass
+                else:
+                    raise AssertionError("invalid reply framing accepted")
+        finally:
+            client.close()
+            peer.close()
+
+    # Disabled TRIM and malformed NBD commands must terminate the server.
+    for command, magic in ((CMD_TRIM, REQUEST_MAGIC),
+                           (CMD_READ, 0xDEADBEEF)):
+        bad_server, bad_client = socket.socketpair()
+        bad_client.settimeout(1)
+        bad_stop = threading.Event()
+        failures: list[Exception] = []
+
+        def run_invalid() -> None:
+            try:
+                model.serve(bad_server, bad_stop)
+            except ProtocolError as exc:
+                failures.append(exc)
+
+        bad_thread = threading.Thread(target=run_invalid)
+        bad_thread.start()
+        try:
+            bad_client.sendall(REQUEST.pack(magic, command, 60, 0, BLOCK))
+            bad_thread.join(timeout=1)
+            assert not bad_thread.is_alive() and len(failures) == 1
+        finally:
+            bad_stop.set()
+            bad_client.close()
+            bad_server.close()
+            bad_thread.join(timeout=1)
+        assert not bad_thread.is_alive()
+
+    # A modeled multi-second wait must react immediately to stop.
+    slow = SizeAwareDevice(32, 1, 500)
+    stopped = threading.Event()
+    stopped.set()
+    try:
+        slow.process(CMD_READ, 0, 1048576, stopping=stopped)
+    except EOFError:
+        pass
+    else:
+        raise AssertionError("model delay did not respond to server stop")
+
+    print("size-aware NBD protocol, 1 MiB wire I/O, latency, TRIM and EOF: PASS")
     return 0
 
 
