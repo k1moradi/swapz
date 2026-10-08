@@ -691,6 +691,9 @@ def selftest_failure_gates() -> None:
             self.closed = True
 
     kernel_sock, server_sock = FakeSocket(), FakeSocket()
+    # The fake fd is deliberately NOT an int: any missed patch can only
+    # raise TypeError, never ioctl/close an unrelated real numeric fd.
+    fake_fd = object()
     ioctl_steps: list[int] = []
 
     def setup_ioctl(_fd: int, operation: int, *_args: object) -> None:
@@ -706,7 +709,7 @@ def selftest_failure_gates() -> None:
     err = io.StringIO()
     with (mock.patch(__name__ + ".validate_nbd_node", return_value="/dev/nbd0"),
           mock.patch(__name__ + ".verify_nbd_device_identity"),
-          mock.patch("os.open", return_value=81),
+          mock.patch("os.open", return_value=fake_fd),
           mock.patch("os.fstat", return_value=spoof),
           mock.patch("os.close") as fd_close,
           mock.patch("socket.socketpair", return_value=(kernel_sock, server_sock)),
@@ -721,7 +724,7 @@ def selftest_failure_gates() -> None:
             raise AssertionError("NBD setup fault was accepted")
     assert ioctl_steps == [NBD_SET_SOCK, NBD_SET_BLKSIZE, NBD_CLEAR_SOCK]
     assert kernel_sock.closed and server_sock.closed
-    fd_close.assert_called_once_with(81)
+    fd_close.assert_called_once_with(fake_fd)
     assert "NBD_CLEAR_SOCK failed" in err.getvalue()
 
     # Exercise the final CLI-level result after an otherwise successful,
@@ -754,7 +757,7 @@ def selftest_failure_gates() -> None:
 
         with (mock.patch(__name__ + ".validate_nbd_node", return_value="/dev/nbd0"),
               mock.patch(__name__ + ".verify_nbd_device_identity"),
-              mock.patch("os.open", return_value=81),
+              mock.patch("os.open", return_value=fake_fd),
               mock.patch("os.fstat", return_value=spoof),
               mock.patch("os.close") as fd_close,
               mock.patch("socket.socketpair", return_value=(ksock, ssock)),
@@ -774,7 +777,7 @@ def selftest_failure_gates() -> None:
             else:
                 assert serve_kernel(args) == 1, "clear-sock error yielded success"
         assert ksock.closed and ssock.closed
-        fd_close.assert_called_once_with(81)
+        fd_close.assert_called_once_with(fake_fd)
         assert steps[-1] == NBD_CLEAR_SOCK
         if worker_case == "clear_failure":
             assert "NBD_CLEAR_SOCK failed" in err.getvalue()
