@@ -10,7 +10,8 @@ LOOP_DEVICE=/dev/loop1234
 reset_fixture() {
   UPPER_EXISTS=1; LOWER_EXISTS=1; LOOP_ATTACHED=1
   BUSY_TARGET=""; FALSE_REMOVE=""; FALSE_INFO=""; LOOP_HELD=0
-  LIST_FAIL=0; AWK_FAIL=0; LIST_MALFORMED=0; LOOP_LIST_FAIL=0; FALSE_DETACH=0
+  LIST_FAIL=0; AWK_FAIL=0; LIST_MALFORMED=0; LIST_EXTRA=""; LIST_REPLACE=""
+  LOOP_LIST_FAIL=0; FALSE_DETACH=0
   LOOP_LIST_PADDED=0; LOOP_LIST_MALFORMED=0; LOOP_LIST_EXTRA=0
   LOOP_LIST_FAIL_AFTER=0
   PS_FAIL=0; CHILD_STATE=""; CALLS=(); SIGNALS=(); JOB_RUNNING=1; JOB_STOPPED=0
@@ -22,8 +23,10 @@ dmsetup() {
       [[ "$2" == --noheadings ]] || return 99
       (( LIST_FAIL )) && return 5
       if (( LIST_MALFORMED )); then printf 'corrupt-inventory-row\n'; return 0; fi
+      if [[ -n "$LIST_REPLACE" ]]; then printf '%s\n' "$LIST_REPLACE"; return 0; fi
       (( UPPER_EXISTS )) && printf '%s (253:10)\n' "$UPPER"
       (( LOWER_EXISTS )) && printf '%s (253:11)\n' "$LOWER"
+      [[ -z "$LIST_EXTRA" ]] || printf '%s\n' "$LIST_EXTRA"
       return 0 ;;
     info|status)
       target=$2
@@ -188,6 +191,31 @@ if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
 (( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
 [[ "${#CALLS[@]}" == 0 ]]
 echo 'malformed DM inventory rejected after failed info: PASS'
+
+# A duplicate name or an impossible dev_t tuple is not trustworthy
+# absence even if dmsetup ls succeeded and dmsetup info failed.
+for corrupt_entry in "$UPPER (253:10)" "unrelated (4096:0)" \
+                     "unrelated (1:1048576)"; do
+  reset_fixture
+  FALSE_INFO=$UPPER
+  LIST_EXTRA=$corrupt_entry
+  if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+  (( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+  [[ "${#CALLS[@]}" == 0 ]]
+done
+echo 'duplicate DM names and out-of-range major/minor rejected: PASS'
+
+# Both documented empty-list formats and valid boundary dev_t must work.
+reset_fixture
+UPPER_EXISTS=0; LOWER_EXISTS=0
+LIST_REPLACE="No devices found"
+swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"
+(( ! LOOP_ATTACHED ))
+reset_fixture
+UPPER_EXISTS=0; LOWER_EXISTS=0
+LIST_EXTRA="unrelated (4095:1048575)"
+if ! swapz_test_confirm_dm_absent "$UPPER"; then exit 1; fi
+echo 'empty DM list and valid dev_t bounds accepted: PASS'
 
 # A spurious successful losetup -d does not establish detach.
 reset_fixture
