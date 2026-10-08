@@ -175,6 +175,15 @@ if swapz_test_stop_child 424242; then exit 1; fi
 [[ "${#CALLS[@]}" == 0 ]]
 echo 'unresponsive writer blocks teardown: PASS'
 
+# The actual stop-before-cleanup helper must block DM/loop teardown when
+# the real mocked child inspector finds an unresponsive shell-owned writer.
+reset_fixture
+CHILD_STATE=D
+if swapz_test_stop_children_then_cleanup_stack "$LOOP_DEVICE" "$UPPER" "$LOWER" 424242; then exit 1; fi
+(( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+[[ "${#CALLS[@]}" == 0 ]]
+echo 'real child-stop failure blocks integrated stack cleanup: PASS'
+
 # Inventory parser and device-list errors must never prove mapping absence.
 reset_fixture
 AWK_FAIL=1
@@ -390,5 +399,24 @@ STOP_FAIL_PID=0
 swapz_test_stop_children "" 10 11 12
 [[ "${STOPPED_CHILDREN[*]}" == "10 11 12" ]]
 echo 'all writer/reader jobs checked; one failure blocks teardown: PASS'
+
+# The staged recall's production cleanup decision is this shared helper.
+# Even if the third child is healthy, a failed second child must block ALL
+# device cleanup; a successful group permits upper/lower/loop removal.
+reset_fixture
+STOPPED_CHILDREN=()
+STOP_FAIL_PID=11
+if swapz_test_stop_children_then_cleanup_stack "$LOOP_DEVICE" "$UPPER" "$LOWER" 10 11 12; then exit 1; fi
+[[ "${STOPPED_CHILDREN[*]}" == "10 11 12" ]]
+[[ "${#CALLS[@]}" == 0 ]]
+(( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+reset_fixture
+STOPPED_CHILDREN=()
+STOP_FAIL_PID=0
+swapz_test_stop_children_then_cleanup_stack "$LOOP_DEVICE" "$UPPER" "$LOWER" 10 11 12
+[[ "${STOPPED_CHILDREN[*]}" == "10 11 12" ]]
+[[ "${CALLS[*]}" == "remove:$UPPER remove:$LOWER detach:$LOOP_DEVICE" ]]
+(( ! UPPER_EXISTS && ! LOWER_EXISTS && ! LOOP_ATTACHED ))
+echo 'three-child recall cleanup gate preserves backing or removes in order: PASS'
 
 echo 'swapz test-stack teardown rootless regression: PASS'
