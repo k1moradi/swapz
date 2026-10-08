@@ -196,9 +196,12 @@ failure and cannot produce a new authorization.
 The required sequence is one or more successfully tracked launches (or an
 empty worker set), one complete `stop_all`, a successful `shutdown`, and an
 observed zero exit from the exact service process launched for this control
-session. The client binds the service's `subprocess.Popen` object at
-construction; `confirm_service_exit()` polls that object rather than trusting
-a caller-supplied integer. Cleanup authorization is monotonic: a protocol,
+session. When the client is constructed with that service's `subprocess.Popen`
+object, `confirm_service_exit(exit_code)` polls it and requires the observed
+return code to match the value supplied by the caller. When no Popen object is
+bound, the caller must pass only the exact result returned by waiting for this
+service process; a fabricated code is outside the client API contract. Cleanup
+authorization is monotonic: a protocol,
 transport, launch, wait, stop, shutdown, inventory, or exit failure cannot be
 cleared by a later positive response. A shutdown attempted before a clean
 `stop_all` permanently denies cleanup; best-effort stopping may still proceed

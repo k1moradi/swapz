@@ -66,7 +66,7 @@ class ServiceProcess:
 
     def finish(self, *, timeout: float = 8.0) -> tuple[int, str, str]:
         out, err = self.process.communicate(timeout=timeout)
-        self.client.confirm_service_exit()
+        self.client.confirm_service_exit(self.process.returncode)
         self.client.close()
         return self.process.returncode or 0, out, err
 
@@ -557,7 +557,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
         peer.close()
         with self.assertRaises(ChannelFailure):
             client.call("shutdown")
-        self.assertFalse(client.confirm_service_exit())
+        self.assertFalse(client.confirm_service_exit(0))
         client.close()
 
     def test_stop_all_requires_complete_attested_worker_inventory(self) -> None:
@@ -625,7 +625,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
                         pass
                     else:
                         client.call("shutdown")
-                    self.assertFalse(client.confirm_service_exit())
+                    self.assertFalse(client.confirm_service_exit(process.returncode))
                     self.assertFalse(client.cleanup_authorized)
                 finally:
                     client.close()
@@ -648,7 +648,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             self.assertEqual(client.call("stop_all", handles=["worker-A"])["status"], "lifecycle_failure")
             self.assertTrue(client.call("stop_all", handles=["worker-A"])["cleanup_allowed"])
             self.assertEqual(client.call("shutdown")["status"], "shutdown")
-            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.confirm_service_exit(process.returncode))
             self.assertFalse(client.cleanup_authorized)
         finally:
             client.close()
@@ -665,7 +665,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             peer.close()
             with self.assertRaises(ChannelFailure):
                 client.call("shutdown")
-            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.confirm_service_exit(process.returncode))
         finally:
             client.close()
             peer.close()
@@ -681,7 +681,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             client.call("launch", command="sleep", duration_ms=10)
             client.call("stop_all", handles=["worker-A"])
             client.call("shutdown")
-            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.confirm_service_exit(process.returncode))
             self.assertFalse(client.cleanup_authorized)
         finally:
             client.close()
@@ -703,9 +703,9 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             client.call("launch", command="sleep", duration_ms=10)
             client.call("stop_all", handles=["worker-A"])
             client.call("shutdown")
-            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.confirm_service_exit(0))
             process.wait(timeout=3.0)
-            self.assertFalse(client.confirm_service_exit())  # Missing step is sticky.
+            self.assertFalse(client.confirm_service_exit(0))  # Missing step is sticky.
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -751,7 +751,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             replay_client.call("launch", command="sleep", duration_ms=10)
             with self.assertRaises(ProtocolFailure):
                 replay_client.call("wait", handle="worker-A", timeout_ms=1)
-            self.assertFalse(replay_client.confirm_service_exit())
+            self.assertFalse(replay_client.confirm_service_exit(process.returncode))
         finally:
             replay_client.close()
             replay_peer.close()
@@ -768,7 +768,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             nonzero_client.call("launch", command="sleep", duration_ms=10)
             with self.assertRaises(ProtocolFailure):
                 nonzero_client.call("wait", handle="worker-A", timeout_ms=10)
-            self.assertFalse(nonzero_client.confirm_service_exit())
+            self.assertFalse(nonzero_client.confirm_service_exit(process2.returncode))
         finally:
             nonzero_client.close()
             nonzero_peer.close()
@@ -790,7 +790,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             self.assertEqual(session.process.returncode, 2)
             self.assertIn("internal_all_reaped=true", err)
             self.assertIn("external_cleanup_allowed=false", err)
-            self.assertFalse(session.client.confirm_service_exit())
+            self.assertFalse(session.client.confirm_service_exit(session.process.returncode))
         finally:
             session.abort()
 
@@ -845,7 +845,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             self.assertEqual(client.call("not-an-operation")["status"], "protocol_error")
             with self.assertRaises(ChannelFailure):
                 client.call("stop_all", handles=[])
-            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.confirm_service_exit(process.returncode))
         finally:
             client.close()
             peer.close()
@@ -863,7 +863,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             client.call("stop_all", handles=[])
             with self.assertRaises(ProtocolFailure):
                 client.call("launch", command="sleep", duration_ms=10)
-            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.confirm_service_exit(process.returncode))
         finally:
             client.close()
             peer.close()

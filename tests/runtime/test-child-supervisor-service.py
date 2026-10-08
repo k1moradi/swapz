@@ -529,9 +529,10 @@ class SupervisorControlService:
 class SupervisorControlClient:
     """Client-side protocol with complete worker attestation and sticky denial.
 
-    ``service_process`` must be the Popen object used to launch this service.
-    Final authorization polls that exact object and requires an observed zero
-    exit after a valid shutdown response.
+    When available, ``service_process`` should be the Popen object used to
+    launch this service.  Final authorization cross-checks the caller's waited
+    exit code against that object.  Without a bound Popen, the caller must pass
+    the exact result returned by waiting for this service process.
     """
 
     def __init__(
@@ -794,22 +795,30 @@ class SupervisorControlClient:
             self._deny(transport=response["status"] == "protocol_error")
         return response
 
-    def confirm_service_exit(self) -> bool:
-        """Finalize after polling the exact service process bound to this client."""
+    def confirm_service_exit(self, exit_code: object) -> bool:
+        """Finalize after the caller has observed the service process exit.
+
+        If a Popen object was bound at construction, its observed return code
+        must match the caller's result.  Otherwise ``exit_code`` is the
+        caller's attestation and must come directly from waiting for this
+        session's service process.
+        """
         if self._finalized:
             return self.cleanup_authorized
         self._finalized = True
-        exit_code: int | None = None
+        exit_observed = type(exit_code) is int and exit_code == 0
         if isinstance(self.service_process, subprocess.Popen):
             try:
                 observed = self.service_process.poll()
-                if isinstance(observed, int) and not isinstance(observed, bool):
-                    exit_code = observed
+                exit_observed = (
+                    exit_observed and isinstance(observed, int) and not isinstance(observed, bool)
+                    and observed == exit_code
+                )
             except Exception:
-                exit_code = None
+                exit_observed = False
         self.cleanup_authorized = bool(
             not self._transport_failed and not self._authorization_denied
-            and self._stop_authorized and self._shutdown_acknowledged and exit_code == 0
+            and self._stop_authorized and self._shutdown_acknowledged and exit_observed
         )
         if not self.cleanup_authorized:
             self._deny()
