@@ -1310,3 +1310,59 @@ If GC still hangs with lower discard off, classify it as a real new
 forward-progress blocker and report the exact worker stack and state.
 No architecture/performance changes by Codex; report measurements for
 primary-developer review.
+
+
+## Current handoff: GC/DISCARD retest passed (supersedes pinned-host gate)
+
+Codex completed the focused gate against kernel source on
+`111fc89e4b7edb97f2f61c7e5fd5b3acd01ee137`:
+
+```text
+20 MiB/s, lower_discard=off: 921 GC victims, failed=0, clean drain/teardown
+unthrottled, lower_discard=on: 1125 GC victims, 1179648000 bytes
+  discarded, discard_failures=0, failed=0, clean drain/teardown
+unsafe throttled + DISCARD: exit 4 before creating device
+built and loaded srcversion: C0E91E94E24D50FDC42769E
+```
+
+Both configurations completed with no leaked virtual targets, processes, or
+stuck tasks. **The earlier pinned-host instructions are historical, not
+instructions to reboot the now-clean host.** Do not reboot without a new,
+explicit operator authorization if a future independent failure requires it.
+
+The long fio GC test proves forward progress, not exact live-set integrity.
+Proceed as follows, without changing swapz kernel source:
+
+1. Pull current `origin/main`, confirm clean test host, verify source
+   invariants and loaded/fresh module identity.
+2. Run exact byte-for-byte live-set readback using existing
+   `tests/runtime/correctness.sh` and `tests/runtime/no-discard-livegc.sh`.
+   Require `failed=0`, `gc_pages>0`, and complete reference readback.
+   Test opportunistic and staged long/live-GC coverage. Do not mislabel
+   the recent empty-victim churn as evidence of live-page relocation.
+3. Continue the unfinished **performance-only** phases: cancellation/unsent
+   stale-write avoidance, GC trigger latency/bytes and read p99, and bounded
+   real swap pressure for the selected experimental policies. Retain the
+   prior 1/2 ms, QD, compressibility matrix measurements as synthetic
+   evidence; avoid rerunning completed matrices without a reason.
+4. Keep the physical-drain plateau verdict **unresolved** until a
+   size-aware 20 MiB/s backend can safely handle 512 KiB–1 MiB requests,
+   or the operator explicitly authorizes an exact disposable physical
+   device. The current throttled null_blk test cannot establish that
+   plateau; the unthrottled results test latency/overhead only.
+5. Report matched upper completion vs physical-drain throughput, read
+   p95/p99/max, lower bytes/I/Os, GC/cancellation metrics, buffer RAM,
+   exact tested module identity, and any remaining blockers.
+
+Every runtime test must use disposable virtual devices and verify normal
+teardown. Stop on any new pinned target, preserve its powered backing, and
+request explicit reboot authorization if safe cleanup is impossible.
+Codex may make only minimal mechanical compile/test-harness fixes, after
+which the primary developer reviews the exact diff and nearby code.
+
+Final milestone status until the remaining gates complete:
+
+```text
+V2.2 CORRECTNESS PASS — FOCUSED GC/DISCARD PASS —
+STREAMING STRATEGY/PHYSICAL PLATEAU NOT YET SELECTED
+```
