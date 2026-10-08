@@ -234,7 +234,7 @@ class RootlessRoleBridgeTests(unittest.TestCase):
         self.role("a")
         with self.assertRaisesRegex(RoleError, "attestation missing"):
             self.request("STOP_ALL")
-        with self.assertRaises(RoleError):
+        with self.assertRaises(bridge_module.BridgeError):
             self.request("SHUTDOWN")
         self.assertFalse(self.adapter.cleanup_authorized)
 
@@ -342,7 +342,7 @@ class RootlessRoleBridgeTests(unittest.TestCase):
         self.role("writer")
         with self.assertRaises(bridge_module.BridgeError):
             self.bridge.dispatch({"id": 1, "op": "WAIT", "handle": "x", "timeout_ms": 0})
-        with self.assertRaises(RoleError):
+        with self.assertRaises(bridge_module.BridgeError):
             self.request("LAUNCH_TEST", command="exit", code=0)
 
 
