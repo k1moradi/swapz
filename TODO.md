@@ -460,3 +460,27 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       `buffer-recall.sh` still launches numeric-PID Bash jobs.
 - [ ] Real kernel, DM/loop, swap, systemd pressure and physical
       device/latency qualification requires separate authorization.
+
+### 2026-10-08 — Recall I/O source and readback file integrity
+
+- [x] Stop following symlinks or blocking on special files while preparing
+      expected recall pages or comparing worker readback results.
+- [x] Read only exact-sized single-link regular files with nofollow,
+      nonblocking descriptor opens and lstat/fstat inode identity checks.
+- [x] Reject malformed nine-page source, short/oversized readback,
+      symlink/FIFO/hardlink, and injected path-replacement races.
+- [x] Create expected 4096-byte pages exclusively (`O_EXCL`); reject
+      dangling pre-existing or racing symlink output paths.
+- [x] Preserve the plan's fail-closed stop/reap and cleanup-callback
+      contract on every file preparation/readback failure.
+- [x] Grow source-only direct recall suite from 25 to **37 tests**.
+- [x] Teardown CI **PASS** at
+      `4181df6ad91099ae0717fa6474750be153ed8734`:
+      https://github.com/k1moradi/swapz/actions/runs/37809491958
+- [x] Same-source combined NBD/teardown CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37809491946
+      (37 recall tests, 27 supervisor tests + 3 repeats,
+      26 NBD selftests, 23 swap-parser tests, 11 analyzer tests).
+- [ ] Await independently tested Codex pidfd IPC service; do not
+      wire up `buffer-recall.sh` before a separate integration review.
+- [ ] Source-only file tests are not live device, swap or latency proof.
