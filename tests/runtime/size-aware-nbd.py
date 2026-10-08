@@ -286,9 +286,18 @@ def validate_nbd_node(path: str) -> str:
     # Reject any mounted NBD block or dependent DM holder. Do not rely on
     # pathname equality: mounts can use alternate /dev symlinks.
     number = f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
-    mountinfo = Path("/proc/self/mountinfo").read_text()
-    if any(line.split()[2] == number for line in mountinfo.splitlines()):
-        raise ValueError("selected NBD node is mounted")
+    mount_rows = Path("/proc/self/mountinfo").read_text().splitlines()
+    # Empty/truncated mount inventories cannot prove this device unmounted.
+    # A normal row has at least six fixed fields, an optional-fields section,
+    # a '-' separator and three trailing filesystem fields.
+    if not mount_rows:
+        raise ValueError("empty /proc/self/mountinfo; NBD mount status unverified")
+    for line in mount_rows:
+        fields = line.split()
+        if len(fields) < 10 or "-" not in fields[6:-3]:
+            raise ValueError("malformed /proc/self/mountinfo; NBD mount status unverified")
+        if fields[2] == number:
+            raise ValueError("selected NBD node is mounted")
     verify_nbd_no_holders(name)
     # A partition mounted under /dev/nbdNp1 would have a different dev_t
     # than the parent. Refuse reuse of an NBD node with any partition nodes.
@@ -305,7 +314,9 @@ def validate_nbd_node(path: str) -> str:
     for line in swap_lines[1:]:
         fields = line.split()
         if (len(fields) != 5 or not fields[0].startswith("/") or
-                fields[1] not in ("partition", "file")):
+                fields[1] not in ("partition", "file") or
+                not fields[2].isdecimal() or not fields[3].isdecimal() or
+                not re.fullmatch(r"-?[0-9]+", fields[4])):
             raise ValueError("malformed /proc/swaps entry; NBD status unverified")
         swap_path = fields[0]
         try:
