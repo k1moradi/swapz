@@ -4,14 +4,19 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
 
-from pressure_checkpoint import publish_release, wait_checkpoint, _expected
+from pressure_checkpoint import (
+    publish_release, verify_marker, wait_checkpoint, _expected,
+)
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("pressure_helper", HERE / "pressure-helper.py")
@@ -142,6 +147,96 @@ class PressureCheckpointTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "readback mismatch"):
             pressure_helper.verify_pages(view, 1, seed, passes=2)
 
+    def test_symlink_to_valid_marker_is_not_readiness(self) -> None:
+        reference = self.directory / "reference"
+        reference.write_bytes(_expected(TOKEN, "filled"))
+        (self.directory / "filled").symlink_to(reference)
+        with self.assertRaisesRegex(ValueError, "unsafe pressure checkpoint"):
+            verify_marker(self.directory, TOKEN, "filled")
+        with self.assertRaises(ValueError):
+            publish_release(self.directory, TOKEN, "filled")
+        self.assertFalse((self.directory / "release-filled").exists())
+
+    def test_symlink_to_valid_release_cannot_advance_worker(self) -> None:
+        reference = self.directory / "reference"
+        reference.write_bytes(_expected(TOKEN, "filled"))
+        (self.directory / "release-filled").symlink_to(reference)
+        with self.assertRaisesRegex(ValueError, "unsafe pressure checkpoint"):
+            wait_checkpoint(self.directory, TOKEN, "filled",
+                            timeout_seconds=0.2, poll_seconds=0.01)
+        self.assertFalse((self.directory / "verified").exists())
+
+    def test_fifo_marker_is_rejected_without_blocking(self) -> None:
+        os.mkfifo(self.directory / "filled")
+        begin = time.monotonic()
+        with self.assertRaisesRegex(ValueError, "unsafe pressure checkpoint"):
+            verify_marker(self.directory, TOKEN, "filled")
+        self.assertLess(time.monotonic() - begin, 1.0)
+
+    def test_fifo_release_is_rejected_without_blocking(self) -> None:
+        os.mkfifo(self.directory / "release-filled")
+        begin = time.monotonic()
+        with self.assertRaisesRegex(ValueError, "unsafe pressure checkpoint"):
+            wait_checkpoint(self.directory, TOKEN, "filled",
+                            timeout_seconds=0.2, poll_seconds=0.01)
+        self.assertLess(time.monotonic() - begin, 1.0)
+
+    def test_oversized_marker_and_release_are_rejected(self) -> None:
+        oversized = _expected(TOKEN, "filled") + b"x" * (1024 * 1024)
+        (self.directory / "filled").write_bytes(oversized)
+        with self.assertRaisesRegex(ValueError, "invalid pressure checkpoint contents"):
+            verify_marker(self.directory, TOKEN, "filled")
+        (self.directory / "filled").unlink()
+        (self.directory / "release-filled").write_bytes(oversized)
+        with self.assertRaisesRegex(ValueError, "invalid pressure checkpoint contents"):
+            wait_checkpoint(self.directory, TOKEN, "filled",
+                            timeout_seconds=0.2, poll_seconds=0.01)
+
+    def test_hardlink_marker_is_rejected(self) -> None:
+        reference = self.directory / "reference"
+        reference.write_bytes(_expected(TOKEN, "filled"))
+        os.link(reference, self.directory / "filled")
+        with self.assertRaisesRegex(ValueError, "unsafe pressure checkpoint"):
+            verify_marker(self.directory, TOKEN, "filled")
+        self.assertFalse((self.directory / "release-filled").exists())
+
+    def test_controller_cli_checks_marker_without_publishing_release(self) -> None:
+        args = [
+            sys.executable, str(HERE / "pressure_checkpoint.py"), "check",
+            str(self.directory), TOKEN, "filled",
+        ]
+        result = subprocess.run(args, capture_output=True, text=True,
+                                timeout=3, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        (self.directory / "filled").write_bytes(_expected(TOKEN, "filled"))
+        result = subprocess.run(args, capture_output=True, text=True,
+                                timeout=3, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.directory / "release-filled").exists())
+        (self.directory / "filled").unlink()
+        os.mkfifo(self.directory / "filled")
+        result = subprocess.run(args, capture_output=True, text=True,
+                                timeout=3, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsafe pressure checkpoint", result.stderr)
+
+    def test_replaced_checkpoint_between_lstat_and_open_rejected(self) -> None:
+        first = self.directory / "filled"
+        first.write_bytes(_expected(TOKEN, "filled"))
+        alternate = self.directory / "replacement"
+        alternate.write_bytes(_expected(TOKEN, "filled"))
+        open_original = os.open
+
+        def replace_on_open(path, flags):
+            first.unlink()
+            alternate.replace(first)
+            return open_original(path, flags)
+
+        with mock.patch("pressure_checkpoint.os.open",
+                        side_effect=replace_on_open):
+            with self.assertRaisesRegex(ValueError, "invalid pressure checkpoint contents"):
+                verify_marker(self.directory, TOKEN, "filled")
+
     def test_nonce_phase_and_static_no_numeric_signal_contract(self) -> None:
         for bad in ("", "../bad", "0" * 31, "Z" * 32):
             with self.assertRaises(ValueError):
@@ -154,6 +249,8 @@ class PressureCheckpointTests(unittest.TestCase):
         self.assertNotIn("kill -CONT", fixture)
         self.assertNotIn("kill -CONT", cleanup)
         self.assertNotIn("SIGSTOP", helper)
+        self.assertIn('check "$dir" "$token" filled', fixture)
+        self.assertIn('check "$dir" "$token" verified', fixture)
         self.assertIn('release "$dir" "$token" filled', fixture)
         self.assertIn('release "$dir" "$token" verified', fixture)
         self.assertIn('systemctl stop --no-block "$unit"', cleanup)
