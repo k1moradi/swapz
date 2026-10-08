@@ -286,13 +286,24 @@ class RootlessRoleBridgeTests(unittest.TestCase):
         self.assertFalse(self.adapter.cleanup_authorized)
 
     def test_partial_ab_phase_missing_second_reader_denies(self):
-        writer = self.role("writer")
-        a2 = self.role("a2")
-        self.verified(a2)
-        self.verified(writer)
+        self.role("writer")
+        self.role("a2")
         self.client.fail_launch_role = "b2"
         with self.assertRaises(RoleError):
             self.role("b2")
+        self.assertFalse(self.adapter.cleanup_authorized)
+
+    def test_waiting_first_concurrent_reader_before_second_launch_is_denied(self):
+        self.role("writer")
+        first = self.role("a2")
+        with self.assertRaisesRegex(RoleError, "both concurrent"):
+            self.verified(first)
+        self.assertFalse(self.adapter.cleanup_authorized)
+
+    def test_waiting_writer_before_reader_checks_is_denied(self):
+        writer = self.role("writer")
+        with self.assertRaisesRegex(RoleError, "writer must remain"):
+            self.verified(writer)
         self.assertFalse(self.adapter.cleanup_authorized)
 
     def test_nonzero_worker_or_fabricated_stop_denies(self):
