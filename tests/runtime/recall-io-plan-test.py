@@ -7,6 +7,7 @@ Never launches dd, uses a device node, invokes dmsetup, or signals a PID.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ast
 import importlib.util
 from pathlib import Path
 import random
@@ -312,11 +313,23 @@ class RecallIOPlanTests(unittest.TestCase):
 
     def test_plan_has_no_numeric_pid_or_process_spawn(self) -> None:
         source = (HERE / "recall-io-plan.py").read_text()
-        self.assertNotIn("subprocess", source)
-        self.assertNotIn("os.kill", source)
-        self.assertNotIn("os.fork", source)
-        self.assertNotIn("shell=True", source)
-        self.assertNotIn("bash -c", source.split('def _launch_direct', 1)[-1])
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                self.assertFalse(any(alias.name == "subprocess" for alias in node.names))
+            elif isinstance(node, ast.ImportFrom):
+                self.assertNotEqual(node.module, "subprocess")
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute):
+                    self.assertNotIn(
+                        node.func.attr,
+                        ("fork", "kill", "system", "Popen", "run", "call", "execv",
+                         "execvp", "execvpe", "posix_spawn", "spawn"),
+                    )
+                self.assertFalse(any(
+                    keyword.arg == "shell" and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True for keyword in node.keywords
+                ))
         fixture = (HERE / "buffer-recall.sh").read_text()
         self.assertIn("swapz_test_stop_children_then_cleanup_stack", fixture)
 
