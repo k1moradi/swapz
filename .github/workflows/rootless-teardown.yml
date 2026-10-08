@@ -26,6 +26,9 @@ on:
       - 'tests/runtime/recall-ipc-adapter-test.py'
       - 'tests/runtime/recall-dd-allowlist.py'
       - 'tests/runtime/recall-dd-allowlist-test.py'
+      - 'tests/runtime/recall-control-bridge.py'
+      - 'tests/runtime/recall-control-bridge-test.py'
+      - 'tests/runtime/recall-control-bridge-regression.sh'
       - 'tests/runtime/recall-io-plan.py'
       - 'tests/runtime/recall-io-plan-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
@@ -103,6 +106,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-ipc-adapter.py tests/runtime/recall-ipc-adapter-test.py
           timeout 60s python3 tests/runtime/recall-ipc-adapter-test.py -v
+      - name: Persistent Bash pidfd IPC control bridge rootless regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/recall-control-bridge-regression.sh
+          python3 -m py_compile tests/runtime/recall-control-bridge.py tests/runtime/recall-control-bridge-test.py
+          timeout 110s bash tests/runtime/recall-control-bridge-regression.sh
       - name: Strict fixture-bound direct dd role allowlist regression
         shell: bash
         run: |
