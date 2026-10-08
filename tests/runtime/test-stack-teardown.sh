@@ -8,10 +8,240 @@ swapz_test_confirm_dm_absent() {
   local target_name=$1
   local dm_mappings
   # A failing `dmsetup info` alone is not proof that the target is gone.
-  if ! dm_mappings=$(dmsetup ls --noheadings 2>/dev/null); then
+  # Preserve trailing newlines so newline-only output cannot masquerade as
+  # an empty inventory after Bash strips command-substitution newlines.
+  if ! dm_mappings=$(dmsetup ls --noheadings 2>/dev/null && printf '\037'); then
     echo "ERROR: cannot list DM devices to verify $target_name removal" >&2
     return 1
   fi
+  dm_mappings=${dm_mappings%
+  # A successful command is not proof that its output is well formed. Validate
+  # *every* row before allowing "not listed" to authorize lower-layer removal.
+  # dmsetup ls --noheadings prints NAME (MAJOR:MINOR), or an empty list.
+  if ! state=$(awk -v name="$target_name" '
+    NF == 0 { malformed = 1; next }
+    $0 == "No devices found" { if (NR != 1) malformed = 1; empty = 1; next }
+    {
+      if (NF != 2 || $1 !~ /^[^[:space:]]+$/ ||
+          $2 !~ /^\([0-9][0-9]*:[0-9][0-9]*\)$/) {
+        malformed = 1
+        next
+      }
+      # Linux dev_t allocates 12 bits to the major and 20 to minor.
+      # Duplicate inventory names cannot establish a trustworthy absence.
+      split(substr($2, 2, length($2) - 2), device_parts, ":")
+      if (device_parts[1] + 0 > 4095 ||
+          device_parts[2] + 0 > 1048575 || seen[$1]++) {
+        malformed = 1
+        next
+      }
+      rows++
+      if ($1 == name) found = 1
+    }
+    END {
+      if (malformed || (empty && rows)) exit 2
+      print found ? "present" : "absent"
+    }
+  ' < <(printf '%s' "$dm_mappings")); then
+    echo "ERROR: malformed or unreadable DM inventory; preserving backing" >&2
+    return 1
+  fi
+  case "$state" in
+    absent) return 0 ;;
+    present) echo "ERROR: DM target $target_name is still listed; preserving backing" >&2; return 1 ;;
+    *) echo "ERROR: invalid DM inventory parser result; preserving backing" >&2; return 1 ;;
+  esac
+  return 0
+}
+
+swapz_test_remove_dm_target() {
+  local target_name=$1
+  [[ "$target_name" == swapz-* ]] || {
+    echo "ERROR: refusing removal of non-test DM target: $target_name" >&2
+    return 1
+  }
+  # The caller may have failed before creating this mapping.
+  if ! dmsetup info "$target_name" >/dev/null 2>&1; then
+    swapz_test_confirm_dm_absent "$target_name" || return 1
+    return 0
+  fi
+  if ! dmsetup remove --retry "$target_name"; then
+    echo "ERROR: DM removal failed for $target_name; backing preserved" >&2
+    dmsetup info "$target_name" >&2 || true
+    dmsetup status "$target_name" >&2 || true
+    return 1
+  fi
+  if dmsetup info "$target_name" >/dev/null 2>&1; then
+    echo "ERROR: DM target $target_name still exists after removal; backing preserved" >&2
+    return 1
+  fi
+  swapz_test_confirm_dm_absent "$target_name" || return 1
+  return 0
+}
+
+swapz_test_check_loop_holders() {
+  local loop_device=$1
+  local loop_name=${loop_device##*/}
+  # Optional directory argument is only for source-only mocked holder tests.
+  local holders_dir=${2:-"/sys/class/block/$loop_name/holders"}
+  local first_holder
+  if [[ ! -d "$holders_dir" ]]; then
+    echo "ERROR: cannot verify holders for $loop_device; preserving loop" >&2
+    return 1
+  fi
+  if ! first_holder=$(find "$holders_dir" -mindepth 1 -maxdepth 1 -print -quit); then
+    echo "ERROR: could not inspect holders for $loop_device; preserving loop" >&2
+    return 1
+  fi
+  if [[ -n "$first_holder" ]]; then
+    echo "ERROR: $loop_device still has block holders; preserving loop" >&2
+    return 1
+  fi
+  return 0
+}
+
+# Exit 0: exact loop is attached; 1: definitely absent; 2: inspection failed.
+# Unlike `losetup /dev/loopN`, this uses a successful full inventory query,
+# so a query error can never be mistaken for a safely detached loop.
+swapz_test_loop_presence() {
+  local loop_device=$1
+  local inventory entry extra
+  if ! inventory=$(losetup --list --noheadings --output NAME); then
+    echo "ERROR: cannot inventory loop attachments; preserving backing" >&2
+    return 2
+  fi
+  # `read` splits/strips column padding emitted by some losetup builds.
+  while read -r entry extra; do
+    [[ -z "$entry" && -z "$extra" ]] && continue
+    if [[ ! "$entry" =~ ^/dev/loop[0-9]+$ || -n "$extra" ]]; then
+      echo "ERROR: malformed loop inventory row: $entry $extra" >&2
+      return 2
+    fi
+    [[ "$entry" == "$loop_device" ]] && return 0
+  done <<<"$inventory"
+  return 1
+}
+
+swapz_test_detach_loop() {
+  local loop_device=$1
+  [[ "$loop_device" =~ ^/dev/loop[0-9]+$ ]] || {
+    echo "ERROR: refusing to detach a non-loop device: $loop_device" >&2
+    return 1
+  }
+  if swapz_test_loop_presence "$loop_device"; then
+    : # Still attached; verify holders before attempting detach.
+  else
+    case $? in
+      1) return 0 ;; # Confirmed already absent after successful inventory.
+      *) return 1 ;; # Inventory command failed: do not delete backing.
+    esac
+  fi
+  swapz_test_check_loop_holders "$loop_device" || return 1
+  if ! losetup -d "$loop_device"; then
+    echo "ERROR: could not detach test loop $loop_device; preserving backing" >&2
+    return 1
+  fi
+  if swapz_test_loop_presence "$loop_device"; then
+    echo "ERROR: test loop $loop_device is still attached; preserving backing" >&2
+    return 1
+  else
+    case $? in
+      1) return 0 ;; # Successfully inventoried and confirmed absent.
+      *) return 1 ;; # Inspection failure is not proof of detach.
+    esac
+  fi
+}
+
+swapz_test_cleanup_dm_stack() {
+  local loop_device=$1
+  shift
+  local target_name
+  for target_name in "$@"; do
+    [[ -z "$target_name" ]] && continue
+    swapz_test_remove_dm_target "$target_name" || return 1
+  done
+  if [[ -n "$loop_device" ]]; then
+    swapz_test_detach_loop "$loop_device" || return 1
+  fi
+  return 0
+}
+
+swapz_test_stop_child() {
+  local child_pid=$1
+  local attempt child_state running_jobs stopped_jobs
+  [[ "$child_pid" =~ ^[1-9][0-9]*$ ]] || {
+    echo "ERROR: invalid test-owned child PID: $child_pid" >&2
+    return 1
+  }
+  # jobs -p alone can include a completed/reaped job, permitting PID reuse
+  # before a later kill -0. Consider only *currently running or stopped*
+  # shell-owned jobs as candidates for signals. An absent job may already be
+  # reaped; never send a signal based on PID existence alone.
+  if ! running_jobs=$(jobs -pr) || ! stopped_jobs=$(jobs -ps); then
+    echo "ERROR: cannot inspect active shell jobs; preserving test stack" >&2
+    return 1
+  fi
+  local active_jobs="$running_jobs"
+  if [[ -n "$stopped_jobs" ]]; then
+    active_jobs+="
+$stopped_jobs"
+  fi
+  if ! grep -Fxq "$child_pid" <<<"$active_jobs"; then
+    if kill -0 "$child_pid" 2>/dev/null; then
+      echo "ERROR: PID $child_pid is not an active test-owned job; preserving stack" >&2
+      return 1
+    fi
+    return 0
+  fi
+  if kill -0 "$child_pid" 2>/dev/null; then
+    # Stopped checkpoint jobs need CONT before TERM can be processed.
+    if ! kill -CONT "$child_pid" 2>/dev/null ||
+       ! kill -TERM "$child_pid" 2>/dev/null; then
+      echo "ERROR: failed to stop test child $child_pid" >&2
+      return 1
+    fi
+    for ((attempt=0; attempt<50; ++attempt)); do
+      if ! kill -0 "$child_pid" 2>/dev/null; then
+        break
+      fi
+      if ! child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null); then
+        # A disappearing child can race ps; if still alive, fail closed.
+        if kill -0 "$child_pid" 2>/dev/null; then
+          echo "ERROR: cannot inspect live test child $child_pid; preserving stack" >&2
+          return 1
+        fi
+        break
+      fi
+      [[ "$child_state" == Z* ]] && break
+      sleep 0.1
+    done
+    if kill -0 "$child_pid" 2>/dev/null; then
+      if ! child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null); then
+        echo "ERROR: cannot verify test child $child_pid stopped; preserving stack" >&2
+        return 1
+      fi
+      if [[ "$child_state" != Z* ]]; then
+        echo "ERROR: test child $child_pid did not stop; preserving stack" >&2
+        return 1
+      fi
+    fi
+  fi
+  # A terminated or already-reaped child cannot keep test I/O active.
+  wait "$child_pid" 2>/dev/null || true
+  return 0
+}
+
+# Always attempt to stop every test-owned I/O child. One failure blocks all
+# mapper/loop teardown, but cannot prevent checking the remaining children.
+swapz_test_stop_children() {
+  local child failed=0
+  for child in "$@"; do
+    [[ -z "$child" ]] && continue
+    swapz_test_stop_child "$child" || failed=1
+  done
+  (( failed == 0 ))
+}
+\037'}
   local state
   # A successful command is not proof that its output is well formed. Validate
   # *every* row before allowing "not listed" to authorize lower-layer removal.
