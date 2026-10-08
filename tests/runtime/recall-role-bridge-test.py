@@ -199,6 +199,13 @@ class RootlessRoleBridgeTests(unittest.TestCase):
         result = self.request("WAIT", handle=handle, timeout_ms=2000)
         self.assertEqual(result["status"], "reaped")
 
+    def run_all_verified(self):
+        writer = self.role("writer")
+        readers = [self.role(role) for role in ("a", "b", "a2", "b2")]
+        for handle in readers:
+            self.verified(handle)
+        self.verified(writer)
+
     def complete(self):
         self.request("STOP_ALL")
         self.request("SHUTDOWN")
@@ -297,16 +304,14 @@ class RootlessRoleBridgeTests(unittest.TestCase):
         self.assertFalse(self.adapter.cleanup_authorized)
 
     def test_missing_stop_worker_report_denies(self):
-        writer = self.role("writer")
-        self.verified(writer)
+        self.run_all_verified()
         self.client.bad_stop = True
         with self.assertRaises(RoleError):
             self.request("STOP_ALL")
         self.assertFalse(self.adapter.cleanup_authorized)
 
     def test_unconfirmed_service_exit_denies(self):
-        writer = self.role("writer")
-        self.verified(writer)
+        self.run_all_verified()
         self.request("STOP_ALL")
         self.client.bad_exit = True
         with self.assertRaises(RoleError):
@@ -314,8 +319,7 @@ class RootlessRoleBridgeTests(unittest.TestCase):
         self.assertFalse(self.adapter.cleanup_authorized)
 
     def test_final_descriptor_close_failure_denies(self):
-        writer = self.role("writer")
-        self.verified(writer)
+        self.run_all_verified()
         self.request("STOP_ALL")
         self.request("SHUTDOWN")
         self.client.close_failure = True
