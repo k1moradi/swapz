@@ -9,6 +9,9 @@ on:
       - 'tests/runtime/test-stack-teardown-regression.sh'
       - 'tests/runtime/pressure-teardown.sh'
       - 'tests/runtime/pressure-teardown-regression.sh'
+      - 'tests/runtime/pressure_checkpoint.py'
+      - 'tests/runtime/pressure-checkpoint-test.py'
+      - 'tests/runtime/pressure-helper.py'
       - 'tests/runtime/pressure.sh'
       - 'tests/runtime/buffer-recall.sh'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
@@ -42,5 +45,11 @@ jobs:
         run: bash tests/runtime/test-stack-teardown-regression.sh
       - name: Rootless pressure teardown regression
         run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Rootless pressure release-token protocol regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/pressure_checkpoint.py tests/runtime/pressure-helper.py tests/runtime/pressure-checkpoint-test.py
+          python3 tests/runtime/pressure-checkpoint-test.py -v
       - name: Offline GC latency analyzer regression
         run: python3 tests/runtime/live-gc-latency-analyze-test.py -v
