@@ -1647,3 +1647,75 @@ and rootless mocked tests, **not** a real systemd pressure, swap or
 block-device qualification. The Codex pidfd supervisor prototype
 remains separately assigned and unintegrated; recall PID reuse is
 not resolved by these changes.
+
+## 2026-10-08 — Production pressure controller isolated and explicitly fail-closed
+
+A source-only review identified that the pressure fixture's `run_pressure()`
+was embedded after real DM/loop/swap initialization, preventing isolated
+execution of the actual phase controller. Existing tests validated
+`pressure_checkpoint.py` and teardown independently, but not the
+controller's sequence of checking `filled`, releasing the helper,
+validating `verified` accounting, and releasing completion.
+
+The primary developer moved that controller verbatim into the
+source-only `tests/runtime/pressure-runner.sh` as
+`swapz_pressure_run_unit()`, sourced by `pressure.sh`. Sourcing the
+library takes no device action. New
+`pressure-runner-regression.sh` calls the **same production function**
+with shell-local mocks of `systemd-run`, `systemctl`, cgroup reads,
+`/proc/swaps`, `dmsetup status`, and bounded polling. The only
+permitted actual Python subprocess is the rootless private-file
+checkpoint CLI. No pressure fixture, live unit or block/swap command
+runs.
+
+**Safety defect found by the new regression:** when a Bash function is
+called via a conditional (`if`, `||`), `set -e` inside the function
+does not reliably abort on intermediate failed commands. The
+production controller could continue after a zero `memory.swap.current`
+arithmetic check and issue `release-verified`. The rootless regression
+reproduced this actual branch failure before the fix.
+
+The controller now uses **explicit guarded returns** for unit launch
+and directory creation, cgroup and DM-status reads, phase polling,
+`/proc/swaps` observations and status processing. Verified accounting
+requires strictly decimal, **positive** memory swap and active-swap
+used values, an exact `failed=0` status field, and positive
+`gc_pages` when GC is required. Failed or unreadable inspection
+cannot authorize the second release, regardless of Bash's caller
+`errexit` context.
+
+The 17 rootless controller scenarios (two successful variants and 15
+negative/failure variants) exercise missing, wrong and symlink/FIFO
+markers; malformed unit ControlGroup, early exit and missing phase
+markers; zero memory or swap usage, failed/unreadable DM status,
+zero required GC pages, and unsuccessful unit result. The regression
+asserts that failures cannot publish inappropriate phase releases.
+
+The existing `pressure-checkpoint-test.py` static assertions now
+verify the real fixture sources and invokes the extracted controller,
+so the library tests cannot silently become disconnected from runtime.
+
+**Successful source-only CI at identical commit**
+`c484ac0c9a90c5ff33b0c17b2b1044f5be80110d`:
+
+- Teardown **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37801182069
+  — shell syntax, actual controller with mocked dependencies,
+  DM/loop and pressure teardown regressions, 16 token tests with
+  10 additional timed suite repetitions, and 11 offline analyzer tests.
+- Combined **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37801181958
+  — same pressure and teardown gates, NBD static syscall isolation,
+  compilation, 26 complete NBD socketpair/userspace selftests, and
+  NBD/streaming teardown mocks.
+
+Intermediate CI failures identified initial regression-mock
+argument parsing and a static assertion still looking in
+`pressure.sh` after the extraction. Those were corrected. The new
+runner then exposed the genuine zero-memory-swap fail-open, which
+was fixed and requalified in both passing runs.
+
+**Boundary:** real systemd, swap pressure, device/mapper setup and
+live-GC behavior remain untested and unauthorized. Codex's separate
+gated-pidfd supervisor for recall is still not integrated; this
+pressure controller work does not eliminate the recall PID-reuse risk.
