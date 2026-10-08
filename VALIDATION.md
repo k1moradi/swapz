@@ -996,3 +996,38 @@ bash tests/runtime/test-stack-teardown-regression.sh
 bash tests/runtime/pressure-teardown-regression.sh
 python3 tests/runtime/live-gc-latency-analyze-test.py -v
 ```
+
+## 2026-10-08: Additional size-aware NBD source safety review
+
+Codex independently reported seven of seven NBD rootless commands PASS at
+`0c3a9169b8efcab06ef8c2641d36885976a8ccde` with NBD Python
+source blob `ad9637ade1895bd1f31a4fe9780530417f8f6597`.
+The intentionally injected NBD slow-worker error and DM busy-removal
+errors were present, and their preservation assertions passed.
+Codex confirmed that the tested kernel blob
+`7589022ecdf0525716717270ab063a867a21f473` matches the previously
+validated candidate. No live kernel NBD, mapping, swap, or module operation
+was performed.
+
+The source audit identified incomplete coverage of missing/denied NBD
+holders, illegal commands/flags, complete-client short READ payloads,
+mid-request stop, maximum request boundary, partial NBD setup and failed
+worker startup. It also found a shutdown diagnostic weakness: a failed
+NBD_DISCONNECT could remain buffered if the kernel worker never exits,
+and later descriptor-close exceptions could hide earlier failures.
+
+The primary developer subsequently committed source-only corrections to
+`tests/runtime/size-aware-nbd.py`: checked holders/PID/swap inspection;
+immediate printing of disconnect errors; independent socket/fd close error
+recording; expanded actual protocol-loop negative tests; modeled request
+boundary and cancellation-during-wait tests; and mock `serve_kernel`
+setup, startup, and final exit-status tests. No kernel source or concurrent
+teardown test source was changed by this NBD follow-up.
+
+**Evidence boundary:** These newer additions have NOT yet received the
+same checked-out-HEAD Linux-host source-only execution. Neither rootless
+selftest checks nor this report establish an actual NBD kernel smoke,
+calibrated 20 MiB/s lower rate, GC-trigger latency, overlapping-live-GC
+swap-in p99, or a physical batch-size choice. The next NBD gate is the
+exact source-only command sequence recorded in `CODEX_VALIDATION.md`
+after the concurrently assigned teardown audit is complete.
