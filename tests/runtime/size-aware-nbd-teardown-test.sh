@@ -2,7 +2,7 @@
 # Source-only safety regression. Never opens NBD or Device Mapper devices.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "\${BASH_SOURCE[0]}")/../.." && pwd)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$ROOT/tests/runtime/streaming-benchmark-teardown.sh"
 
 TARGET="swapz-v22-stream-nbd-mock-$$"
