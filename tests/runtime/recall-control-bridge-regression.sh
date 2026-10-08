@@ -82,6 +82,17 @@ controller_disconnect_preserves() (
 )
 
 timeout 60s python3 -B "$ROOT/tests/runtime/recall-control-bridge-test.py" -v
+# Bash rejects truncated or contradictory bridge replies, rather than
+# treating absent/ambiguous cleanup permission as success.
+if check_reply '{"status":' stopped >/dev/null 2>&1; then
+  echo 'ERROR: accepted truncated bridge response' >&2
+  exit 1
+fi
+if check_reply '{"status":"stopped","cleanup_allowed":true,"preserve_backing":true}' stopped >/dev/null 2>&1; then
+  echo 'ERROR: accepted contradictory bridge cleanup verdict' >&2
+  exit 1
+fi
+echo "BRIDGE_BASH_MALFORMED_RESPONSE_REJECTED: PASS"
 success
 echo "BRIDGE_BASH_PERSISTENT_THREE_WORKERS: PASS"
 failed_worker_preserves
