@@ -15,7 +15,7 @@ note() { printf '%s\n' "$1" >>"$EVENTS"; }
 systemd-run() {
   note start
   [[ "$*" == *"--unit=$UNIT"* && "$*" == *"--slice=system.slice"* ]] || return 91
-  local dir="${@: -2}" token="${@: -1}"
+  local dir="${@: -2:1}" token="${@: -1:1}"
   [[ "$dir" == "$TMP/$UNIT" && "$token" == "$TOKEN" ]] || return 91
   case "$SCENARIO" in
     missing_filled|early_exit) ;;
