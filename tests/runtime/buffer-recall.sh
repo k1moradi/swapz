@@ -23,11 +23,15 @@ cleanup() {
   trap - EXIT
   set +e
   # A failed/interrupted dual read may leave two test-owned I/O children.
-  # Stop/reap ALL background I/O before attempting upper/lower DM removal.
-  if ! swapz_test_stop_children "$WRITER" "$PIDA" "$PIDB"; then
+  # Share the exact stop-then-cleanup decision with rootless integration
+  # regressions; no DM/loop teardown if ANY child is still running.
+  local teardown_result=0
+  swapz_test_stop_children_then_cleanup_stack "$LOOP" "$TARGET" "$DELAY" \
+    "$WRITER" "$PIDA" "$PIDB" || teardown_result=$?
+  if (( teardown_result == 2 )); then
     echo "ERROR: recall I/O child still active; preserving test stack and $TMP" >&2
     (( exit_status != 0 )) || exit_status=1
-  elif ! swapz_test_cleanup_dm_stack "$LOOP" "$TARGET" "$DELAY"; then
+  elif (( teardown_result != 0 )); then
     echo "ERROR: recall stack teardown incomplete; preserving backing and $TMP" >&2
     (( exit_status != 0 )) || exit_status=1
   elif (( exit_status == 0 )); then
