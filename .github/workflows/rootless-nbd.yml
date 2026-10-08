@@ -14,6 +14,10 @@ on:
     paths:
       - '.github/workflows/rootless-nbd.yml'
       - 'tests/runtime/size-aware-nbd.py'
+      - 'tests/runtime/size-aware-nbd-teardown-test.sh'
+      - 'tests/runtime/streaming-teardown-regression.sh'
+      - 'tests/runtime/streaming-benchmark.sh'
+      - 'tests/runtime/streaming-benchmark-teardown.sh'
   workflow_dispatch:
 
 permissions:
