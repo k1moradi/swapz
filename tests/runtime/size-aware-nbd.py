@@ -517,11 +517,11 @@ def selftest_failure_gates() -> None:
     def fake_sysfs_text(path: Path, *_args: object, **_kw: object) -> str:
         label = str(path)
         if label.endswith("/dev"):
-            return "43:0\\n"
+            return "43:0\n"
         if label == "/proc/self/mountinfo":
             return ""
         if label == "/proc/swaps":
-            return "Filename\\tType\\tSize\\tUsed\\tPriority\\n"
+            return "Filename\tType\tSize\tUsed\tPriority\n"
         raise AssertionError("unexpected sysfs/proc read: " + label)
 
     with (mock.patch("os.lstat", return_value=valid_node),
