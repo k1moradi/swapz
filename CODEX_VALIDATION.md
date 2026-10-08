@@ -2175,3 +2175,44 @@ the fixture's true `/proc/swaps` shape. Preserve both existing
 host-local `local-*-verify.state` files. These mocks are **not**
 live pressure/GC/device measurements and do not address Codex's
 separate unintegrated pidfd supervisor for recall.
+
+## Gated pidfd supervisor is now mandatory in CI; direct recall plan is still isolated
+
+Codex's independently implemented `test-child-supervisor.py`
+prototype (commit `5cb92f6696232f1719cfc9390f77b109a2d00c23`)
+previously passed 27 tests, but was not required by the standard
+GitHub teardown and combined gates. Both workflows now compile and
+execute the full 27-test suite and run three additional complete
+suite processes, each under a 40-second timeout.
+
+The primary developer also created fixture-neutral
+`recall-io-plan.py` plus `recall-io-plan-test.py`. The plan
+prepares exact deterministic 4096-byte expected pages, constructs
+direct `dd` argument arrays without shell wrappers, sequences A/B
+reads, launches both concurrent readers before either wait, retains
+all opaque handles including completed workers, compares exact
+data after reap confirmation, and denies device cleanup callbacks
+when any worker or channel outcome is ambiguous. Twenty-five
+rootless fake-supervisor tests use synthetic regular files;
+no real dd or mapper I/O executes.
+
+**Both source-only workflows PASS on the same code revision**
+`a276218feba2454b5f4c1e9c515d276a8155c468`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37808199284
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37808199250
+
+Each passed 27 pidfd supervisor tests and 3/3 repeated runs, 25
+direct recall-plan tests, 23 strict swap-inventory tests, 16 pressure
+token tests plus 10/10 repeated runs, existing teardown mocks and
+11 offline analyzer tests. The combined workflow additionally
+passed NBD syscall isolation, 26 complete NBD userspace selftests
+and NBD/streaming teardown mocks.
+
+The standalone plan is not connected to `buffer-recall.sh` or
+Codex's separately assigned IPC service. The production recall
+fixture still tracks numeric Bash job PIDs and may leave
+unsupervised I/O-producing descendants; the PID-reuse race is
+**not eliminated** by this source-only milestone. No real
+DM/loop/NBD/swap/systemd/module/physical device or live workload
+operations occurred.
