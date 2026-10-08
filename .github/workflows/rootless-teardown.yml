@@ -51,5 +51,18 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/pressure_checkpoint.py tests/runtime/pressure-helper.py tests/runtime/pressure-checkpoint-test.py
           python3 tests/runtime/pressure-checkpoint-test.py -v
+      - name: Repeat pressure token safety regression in separate processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..10}; do
+            if ! timeout 12s python3 tests/runtime/pressure-checkpoint-test.py \
+                >"$RUNNER_TEMP/pressure-token-repeat.log" 2>&1; then
+              echo "PRESSURE_TOKEN_REPEAT $attempt/10: FAIL"
+              cat "$RUNNER_TEMP/pressure-token-repeat.log"
+              exit 1
+            fi
+            echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
+          done
       - name: Offline GC latency analyzer regression
         run: python3 tests/runtime/live-gc-latency-analyze-test.py -v
