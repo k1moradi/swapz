@@ -1449,3 +1449,46 @@ Do not attach loops/NBD, create DM mappings, activate swap, run runtime
 benchmarks, touch normal system swap, or reboot without a separate explicit
 virtual-runtime handoff. If a source regression fails, report the evidence
 without weakening the assertion or making a substantive kernel fix.
+
+
+## NBD rootless requalification after shutdown/test hardening (2026-10-08)
+
+The previous Codex source-only PASS at `47883567` covered the older
+`tests/runtime/size-aware-nbd.py`; it does not validate the later
+size-aware NBD shutdown and selftest changes. Finish any already-assigned
+teardown/GC analyzer audit first. This follow-up requires a separately
+checked-out current HEAD.
+
+Run only rootless/source-only operations:
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+python3 -m py_compile tests/runtime/size-aware-nbd.py
+python3 tests/runtime/size-aware-nbd.py selftest
+bash -n tests/runtime/streaming-benchmark.sh
+bash -n tests/runtime/streaming-benchmark-teardown.sh
+bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/streaming-teardown-regression.sh
+```
+
+The updated selftest must prove 4 KiB versus 1 MiB timing scaling, a **wire**
+1 MiB WRITE/READ, permitted TRIM via socketpair, disabled TRIM rejection,
+truncated reply/EOF/timeout/mismatched cookie and magic failures, no test
+thread hang, and mock coverage of disconnect, clear-socket and slow-worker
+shutdown errors. An ERROR line from the intentional slow-worker mock is
+expected only if the complete selftest exits 0 and checks its failure result.
+Report full output and exit codes.
+
+Review `shutdown_kernel_session()` behavior: its initial worker join is
+bounded to five seconds. If the kernel worker remains alive, it logs a failure
+and **waits for the worker instead of releasing the attached descriptors**;
+this exceptionally may keep the NBD server process running. Never claim a
+bounded process shutdown in that path. Do not force-kill the server under a
+live DM mapping, force/defer DM removal, or perform an unapproved device
+attachment/reboot.
+
+The NBD backend is still EXPERIMENTAL. Do not run `serve`, open
+`/dev/nbdN`, activate swap, or run a performance matrix based on these
+source-only checks.
