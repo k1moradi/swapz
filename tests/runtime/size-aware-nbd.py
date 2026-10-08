@@ -525,12 +525,155 @@ def client_transact(conn: socket.socket, command: int, cookie: int,
     return client_recv_exact(conn, length) if command == CMD_READ else b""
 
 
+def finish_test_socketpair_worker(worker: threading.Thread,
+                                  stopping: threading.Event,
+                                  client: socket.socket,
+                                  server: socket.socket,
+                                  errors: list[Exception]) -> None:
+    """Bounded, test-only wire-worker cleanup. Never attaches an NBD device.
+
+    The ordinary path joins before socket close; shutdown is only an
+    escalation for a still-running local socketpair worker. An unresponsive
+    worker is a test FAILURE even if closing its sockets later unblocks it.
+    Python cannot force-kill a thread. This is deliberately distinct from
+    kernel-session shutdown, which retains descriptors until its worker exits.
+    """
+    stopping.set()
+    still_alive = False
+    try:
+        if worker.ident is not None:
+            worker.join(timeout=2)
+            if worker.is_alive():
+                try:
+                    client.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    # Already shut down peers are possible in failed tests.
+                    # Still require the worker to terminate at the next join.
+                    pass
+                worker.join(timeout=2)
+            still_alive = worker.is_alive()
+    finally:
+        try:
+            client.close()
+        finally:
+            server.close()
+    if still_alive:
+        raise AssertionError(
+            "8 MiB socketpair worker remained alive after two bounded joins; "
+            "local sockets closed but no thread termination was proven")
+    if errors:
+        raise AssertionError(f"8 MiB socketpair worker raised: {errors!r}")
+
+
+def selftest_socketpair_cleanup() -> None:
+    """Deterministic fault injection for the full-size wire cleanup helper."""
+    log: list[str] = []
+
+    class FakeStop:
+        def set(self) -> None:
+            log.append("stop")
+
+    class FakeWorker:
+        def __init__(self, remains_alive: tuple[bool, ...],
+                     started: bool = True) -> None:
+            self.ident = 1 if started else None
+            self.alive = started
+            self.remains_alive = remains_alive
+            self.joins = 0
+
+        def join(self, timeout: float | None = None) -> None:
+            assert timeout == 2, "unbounded selftest worker join"
+            self.joins += 1
+            log.append("join")
+            assert self.joins <= len(self.remains_alive)
+            self.alive = self.remains_alive[self.joins - 1]
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+    class FakeSocket:
+        def __init__(self, role: str, shutdown_fails: bool = False) -> None:
+            self.role = role
+            self.shutdown_fails = shutdown_fails
+            self.closed = False
+
+        def shutdown(self, how: int) -> None:
+            assert self.role == "client" and how == socket.SHUT_RDWR
+            log.append("shutdown")
+            if self.shutdown_fails:
+                raise OSError(errno.ENOTCONN, "injected shutdown failure")
+
+        def close(self) -> None:
+            log.append(self.role + "-close")
+            self.closed = True
+
+    cases = (
+        ("first_join", (False,), False, False, (), False),
+        ("second_join", (True, False), False, False, (), False),
+        ("shutdown_error", (True, False), True, False, (), False),
+        ("hung_worker", (True, True), False, False, (), True),
+        ("worker_exception", (False,), False, False,
+         (RuntimeError("injected wire worker exception"),), True),
+        ("unstarted_transaction_failure", (), False, True, (), False),
+    )
+    for (case, alive_after_join, fail_shutdown, unstarted,
+         worker_errors, should_fail) in cases:
+        log.clear()
+        fake_worker = FakeWorker(alive_after_join, started=not unstarted)
+        fake_client = FakeSocket("client", shutdown_fails=fail_shutdown)
+        fake_server = FakeSocket("server")
+        failure: AssertionError | None = None
+        try:
+            finish_test_socketpair_worker(
+                fake_worker, FakeStop(), fake_client, fake_server,
+                list(worker_errors))
+        except AssertionError as exc:
+            failure = exc
+        assert (failure is not None) == should_fail, (case, failure)
+        if case == "hung_worker":
+            assert failure is not None and "remained alive" in str(failure)
+        if case == "worker_exception":
+            assert failure is not None and "injected wire worker" in str(failure)
+        assert fake_client.closed and fake_server.closed, case
+        assert log[0] == "stop" and log[-2:] == [
+            "client-close", "server-close"], (case, log)
+        assert log.count("join") == len(alive_after_join), (case, log)
+        assert ("shutdown" in log) == (
+            len(alive_after_join) == 2), (case, log)
+        if alive_after_join:
+            assert log.index("join") < log.index("client-close")
+
+    # If a wire transaction itself fails, successful test-local cleanup must
+    # not suppress the original error. Also confirm sockets are still closed.
+    log.clear()
+    fake_worker = FakeWorker((False,))
+    fake_client = FakeSocket("client")
+    fake_server = FakeSocket("server")
+    try:
+        try:
+            raise ProtocolError("injected wire transaction failure")
+        finally:
+            finish_test_socketpair_worker(
+                fake_worker, FakeStop(), fake_client, fake_server, [])
+    except ProtocolError as exc:
+        assert "injected wire transaction failure" in str(exc)
+    else:
+        raise AssertionError("wire transaction failure was suppressed")
+    assert fake_client.closed and fake_server.closed
+    assert log == ["stop", "join", "client-close", "server-close"]
+    print("NBD 8 MiB socketpair fault-injected cleanup: PASS")
+
+
 def selftest_failure_gates() -> None:
     """Rootless negative cases against the actual validators and serve loop."""
     import contextlib
     import io
     from types import SimpleNamespace
     from unittest import mock
+
+    # A deterministic fake worker covers the two-join timeout escalation
+    # and preserves real transaction failures without starting live threads.
+    selftest_socketpair_cleanup()
 
     # This runs before any mocked serve_kernel(): a source regression to
     # captured syscall defaults must fail safely before any fake fd is used.
@@ -792,23 +935,8 @@ def selftest_failure_gates() -> None:
                                MAX_REQUEST_BYTES) == wire_data
         wire_client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 97, 0, 0))
     finally:
-        wire_stop.set()
-        # The server may still be blocked in recv() when DISC is sent. Join
-        # before closing its socket: close-before-join intermittently raises
-        # EBADF in the worker and makes a valid wire exchange fail.
-        if wire_worker.ident is not None:
-            wire_worker.join(timeout=2)
-            if wire_worker.is_alive():
-                # Only a test-local socketpair: unblock any unexpected stuck
-                # recv without allowing an unbounded test or orphan worker.
-                try:
-                    wire_client.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                wire_worker.join(timeout=2)
-        wire_client.close()
-        wire_server.close()
-    assert not wire_worker.is_alive() and not wire_errors, wire_errors
+        finish_test_socketpair_worker(wire_worker, wire_stop, wire_client,
+                                      wire_server, wire_errors)
     assert wire_model.stats["write_bytes"] == MAX_REQUEST_BYTES
     assert wire_model.stats["read_bytes"] == MAX_REQUEST_BYTES
     assert wire_model.stats["max_request_bytes"] == MAX_REQUEST_BYTES
