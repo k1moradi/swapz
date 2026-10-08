@@ -702,10 +702,21 @@ def selftest_failure_gates() -> None:
         wire_client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 97, 0, 0))
     finally:
         wire_stop.set()
-        wire_client.close()
-        wire_server.close()
+        # The server may still be blocked in recv() when DISC is sent. Join
+        # before closing its socket: close-before-join intermittently raises
+        # EBADF in the worker and makes a valid wire exchange fail.
         if wire_worker.ident is not None:
             wire_worker.join(timeout=2)
+            if wire_worker.is_alive():
+                # Only a test-local socketpair: unblock any unexpected stuck
+                # recv without allowing an unbounded test or orphan worker.
+                try:
+                    wire_client.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                wire_worker.join(timeout=2)
+        wire_client.close()
+        wire_server.close()
     assert not wire_worker.is_alive() and not wire_errors, wire_errors
     assert wire_model.stats["write_bytes"] == MAX_REQUEST_BYTES
     assert wire_model.stats["read_bytes"] == MAX_REQUEST_BYTES
@@ -759,10 +770,10 @@ def selftest_failure_gates() -> None:
             assert diagnostic in str(caught[0]), (case_name, caught)
         finally:
             stopped.set()
-            client.close()
-            server.close()
             if thread.ident is not None:
                 thread.join(timeout=1)
+            client.close()
+            server.close()
         assert not thread.is_alive()
 
     # Test the complete client transaction with a valid reply header followed
@@ -818,10 +829,10 @@ def selftest_failure_gates() -> None:
         assert client.recv(1) == b"", "cancelled request emitted a reply"
     finally:
         stopped.set()
-        client.close()
-        server.close()
         if thread.ident is not None:
             thread.join(timeout=2)
+        client.close()
+        server.close()
     assert not thread.is_alive()
 
     # Fail after successful NBD_SET_SOCK but before worker startup. This
