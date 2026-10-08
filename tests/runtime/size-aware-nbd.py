@@ -506,7 +506,7 @@ def selftest() -> int:
     else:
         raise AssertionError("DISCARD unexpectedly enabled")
 
-    for invalid_rate in (float("nan"), float("inf"), 0.01):
+    for invalid_rate in (float("nan"), float("inf"), 0.0, -1.0, 0.01):
         try:
             SizeAwareDevice(32, invalid_rate, 500)
         except ValueError:
@@ -521,8 +521,8 @@ def selftest() -> int:
     stopping = threading.Event()
     thread = threading.Thread(target=model.serve, args=(server, stopping),
                               daemon=True)
-    thread.start()
     try:
+        thread.start()
         assert client_transact(client, CMD_READ, 16, 0, len(data)) == data
         # Full-size WRITE must travel through the socket, not just the model.
         replacement = b"W" * len(data)
@@ -535,7 +535,8 @@ def selftest() -> int:
         client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 15, 0, 0))
     finally:
         stopping.set()
-        thread.join(timeout=2)
+        if thread.ident is not None:
+            thread.join(timeout=2)
         server.close()
         client.close()
     assert not thread.is_alive()
@@ -572,15 +573,16 @@ def selftest() -> int:
     trim_stop = threading.Event()
     trim_thread = threading.Thread(target=discard.serve,
                                    args=(trim_server, trim_stop), daemon=True)
-    trim_thread.start()
     try:
+        trim_thread.start()
         client_transact(trim_client, CMD_WRITE, 20, 0, BLOCK, b"Q" * BLOCK)
         client_transact(trim_client, CMD_TRIM, 21, 0, BLOCK)
         assert client_transact(trim_client, CMD_READ, 22, 0, BLOCK) == ZERO
         trim_client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 23, 0, 0))
     finally:
         trim_stop.set()
-        trim_thread.join(timeout=2)
+        if trim_thread.ident is not None:
+            trim_thread.join(timeout=2)
         trim_client.close()
         trim_server.close()
     assert not trim_thread.is_alive()
@@ -645,8 +647,8 @@ def selftest() -> int:
                 failures.append(exc)
 
         bad_thread = threading.Thread(target=run_invalid, daemon=True)
-        bad_thread.start()
         try:
+            bad_thread.start()
             bad_client.sendall(REQUEST.pack(magic, command, 60, 0, BLOCK))
             bad_thread.join(timeout=1)
             assert not bad_thread.is_alive() and len(failures) == 1
@@ -654,7 +656,8 @@ def selftest() -> int:
             bad_stop.set()
             bad_client.close()
             bad_server.close()
-            bad_thread.join(timeout=1)
+            if bad_thread.ident is not None:
+                bad_thread.join(timeout=1)
         assert not bad_thread.is_alive()
 
     # A modeled multi-second wait must react immediately to stop.
