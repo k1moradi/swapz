@@ -1663,3 +1663,28 @@ Do **not** run this against the failed historical NBD source blob. Do not
 open a real /dev/nbdN, create DM or loop mappings, run swapon/swapoff,
 load modules, access physical media, benchmark fio, or reboot. A full
 kernel NBD smoke remains a separately authorized next phase.
+
+## NBD preflight follow-up to include in later independent NBD audit
+
+After the captured-default mock correction passed in CI, the primary
+developer additionally hardened `validate_nbd_node()` against successful
+but corrupt `/proc/self/mountinfo` and `/proc/swaps` reads. Neither
+empty/malformed mount inventories nor a malformed swap header/entry
+can establish device absence.
+
+A subsequent rootless NBD CI run passed at
+`0b93caf752aa4716100815734d3a1f299fc2dec8`:
+https://github.com/k1moradi/swapz/actions/runs/37775709673.
+The suite includes malformed and absent mountinfo, corrupt swap headers,
+incomplete/nonnumeric swap records, failed swap path stat, and a safe
+positive validation path with a non-NBD active swap. It still opens no
+real block devices.
+
+When assigned to NBD **after completing the ongoing teardown task**,
+Codex should fetch the latest HEAD and NBD blob, review the corrected
+mock-isolation source before running the seven-command rootless gate
+already listed above, and audit whether every new negative case tests
+its intended rejection path rather than a different mock failure.
+Do not revisit the historical NBD blob whose selftest attempted a real
+ioctl/close. Do not conduct any kernel NBD, DM/loop, swap, physical
+media, module, or benchmarking operations without explicit approval.
