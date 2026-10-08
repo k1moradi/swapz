@@ -206,6 +206,17 @@ class RootlessRoleBridge(PersistentRecallBridge):
         self.last_id = 0
         self.finished = False
 
+    def dispatch(self, message: Any) -> dict[str, Any]:
+        # The default command-line loop already catches and latches failures.
+        # This injected library API must do so itself: test-only callers can
+        # invoke dispatch directly without that CLI failure wrapper.
+        try:
+            return super().dispatch(message)
+        except Exception:
+            self.failed = True
+            raise
+
+
 def _decode(raw: bytes) -> Any:
     if not raw or len(raw) > MAX_LINE_BYTES or not raw.endswith(b"\n"):
         raise BridgeError("missing, oversized, or unterminated request line")
