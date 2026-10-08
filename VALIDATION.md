@@ -1522,3 +1522,73 @@ Source-only tests are not proof of actual kernel NBD execution,
 GC-overlap swap-in p99 or measured physical throughput. No actual
 block device, systemd pressure workload, swap or module activity was
 performed.
+
+## 2026-10-08 — Pressure checkpoint PID-signaling migration, source-only CI PASS
+
+Following Codex's **SOURCE-ONLY TEARDOWN GATE PASS** and its
+independent PID-reuse design review, the primary developer removed the
+pressure fixture's numeric-MainPID signal paths. The prior
+`pressure-helper.py` held at two `os.kill(os.getpid(), SIGSTOP)`
+checkpoints, `pressure.sh` resumed its saved MainPID twice with
+`kill -CONT`, and `pressure-teardown.sh` could manually resume that
+MainPID after a non-atomic `/proc/<pid>/cgroup` ownership check.
+
+**New source-only protocol:**
+
+- The pressure helper publishes `filled` and `verified` markers
+  only after the respective fill and readback operations. It retains
+  the allocated memory while awaiting each phase release.
+- The fixture uses a new private directory per unit and a fresh
+  128-bit random hex nonce. A matching `phase:nonce` token is
+  required for each release; `release-filled` cannot satisfy
+  `release-verified`. Marker validation is exact.
+- `pressure_checkpoint.py` atomically publishes complete marker
+  and release data via temporary files and `os.link` with
+  no-replace semantics, rejecting stale or duplicate files rather
+  than silently overwriting them. Waits use a monotonic deadline,
+  a short polling interval and an explicit timeout; malformed
+  release tokens fail immediately.
+- `pressure.sh` no longer uses `ps` job state or numeric-PID
+  `kill -CONT` to advance checkpoints. It preserves the memory,
+  /proc/swaps, DM status, GC-page and readback checks between
+  releases, plus finite unit-completion waits.
+- `swapz_pressure_cleanup_resources()` still validates both
+  distinct unit identities before contacting systemd, stops each
+  named unit and verifies cgroup quiescence, swap inactivity and
+  dependency order, but no longer resumes a saved numeric MainPID.
+  Its read-only MainPID check remains for guarding the empty-cgroup
+  case.
+
+**New rootless regression:** 8 `pressure-checkpoint-test.py`
+unit tests exercise both phases, wrong-phase/cross-unit nonce,
+duplicate/stale/malformed release, deadline, interruption, retained
+positive completion, readback corruption and pre-verified failure.
+The pressure cleanup mock now explicitly requires no numeric-PID
+signal even with nonzero MainPID and confirms stop/verify/swapoff/
+mapper removal ordering.
+
+**Successful source-only CI on exact tested HEAD**
+`1c5cfe5305ba0bad9c8edbf404390b4093bdfbec`:
+
+- Teardown workflow: https://github.com/k1moradi/swapz/actions/runs/37791843695
+  — seven Bash syntax checks, DM/loop and pressure regressions, Python
+  compile, eight release-token tests and 11 offline analyzer tests.
+- Combined workflow: https://github.com/k1moradi/swapz/actions/runs/37791843564
+  — same pressure tests, ten Bash checks, two teardown regressions,
+  11 offline GC analyzer tests, NBD syscall isolation, compile,
+  **26/26 complete NBD selftests** (one plus 25 repetitions) and two
+  NBD/streaming teardown mocks.
+
+The first CI run with these tests failed because the test expected
+`ValueError` for a release attempted before its marker existed.
+The implementation correctly raised `FileNotFoundError`;
+the assertion was corrected, and both complete CI workflows passed.
+
+**Limits:** this is a rootless token and mocked teardown gate; the
+actual 160/32 MiB pressure fixture has NOT been executed, and live
+systemd behavior, swap-in latency, GC overlap and physical device
+behavior remain unverified. The separate recall Bash job-to-kill PID
+reuse race is still open. Codex is independently prototyping a gated
+pidfd supervisor for recall; that prototype is NOT integrated here.
+No real systemd service, NBD/DM/loop device, swap command, module,
+fio, physical backing or reboot was exercised.
