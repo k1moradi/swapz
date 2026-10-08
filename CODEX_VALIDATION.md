@@ -2083,3 +2083,49 @@ Future independent review: preserve the two host-local
 `local-*-verify.state` files and verify that malformed checkpoint
 files cannot lead to release or device teardown. No actual DM/loop,
 NBD, swap, module, fio or physical-device operations are permitted.
+
+## Pressure production phase-controller regression and fail-closed repair
+
+During Codex's separately assigned rootless pidfd supervisor work,
+the primary developer made the pressure fixture's phase controller
+sourceable from `tests/runtime/pressure-runner.sh`, with no action at
+import time. The real `pressure.sh` sources and invokes that exact
+function. A new rootless shell regression mocks all systemd, cgroup,
+DM, swap and process operations while exercising the actual controller
+and real private-file token CLI.
+
+**New safety finding, now fixed:** in a conditional call context,
+Bash suppresses `set -e` for the body of the called function.
+Failed verified-accounting assertions (including
+`memory.swap.current=0`) previously did not necessarily stop
+execution and could allow `release-verified`. The new regression
+caught this. Production now explicitly checks every required
+inventory read and the exact `failed=0` DM status field, demands
+positive decimal memory-swap and used-swap counts and positive
+`gc_pages` where required, and returns failure before any
+inappropriate phase release. It also guards unit launch, checkpoint
+polling and command failures instead of relying on implicit errexit.
+
+Rootless controller cases include both positive paths; malformed,
+missing, symlink and FIFO phase markers; wrong cgroup, early unit exit,
+bad/unavailable DM status, no measured memory swap, no swap used,
+zero GC pages and unit failure. The existing static test now asserts
+that production actually sources the tested controller library.
+
+**Exact-source combined CI PASS**
+`c484ac0c9a90c5ff33b0c17b2b1044f5be80110d`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37801182069
+- Combined NBD and teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37801181958
+
+Both run the new controller gate, pressure token mocks and teardown
+regressions. The combined workflow additionally ran static NBD syscall
+isolation, 26 NBD selftests and 11 offline analyzer tests.
+Previously failing experimental CI revisions were corrected before
+these final PASS results.
+
+This is source-only rootless coverage; do not interpret it as real
+systemd, pressure workload, swap, kernel, throughput or GC-overlap
+qualification. Codex's independent supervisor prototype remains
+unintegrated and the recall PID-reuse limitation persists.
