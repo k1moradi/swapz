@@ -12,7 +12,7 @@ reset_fixture() {
   BUSY_TARGET=""; FALSE_REMOVE=""; FALSE_INFO=""; LOOP_HELD=0
   LIST_FAIL=0; AWK_FAIL=0; LOOP_LIST_FAIL=0; FALSE_DETACH=0
   LOOP_LIST_PADDED=0; LOOP_LIST_MALFORMED=0
-  LOOP_LIST_COUNT=0; LOOP_LIST_FAIL_AFTER=0
+  LOOP_LIST_FAIL_AFTER=0
   PS_FAIL=0; CHILD_STATE=""; CALLS=()
 }
 dmsetup() {
@@ -54,8 +54,9 @@ swapz_test_check_loop_holders() { (( ! LOOP_HELD )); }
 awk() { (( AWK_FAIL )) && return 2; command awk "$@"; }
 losetup() {
   if [[ "$1" == --list && "$2" == --noheadings && "$3" == --output && "$4" == NAME ]]; then
-    ((++LOOP_LIST_COUNT))
-    (( LOOP_LIST_FAIL || (LOOP_LIST_FAIL_AFTER && LOOP_LIST_COUNT >= LOOP_LIST_FAIL_AFTER) )) && return 5
+    # losetup inventory runs in a command substitution: emulate the *post*
+    # detach failure using parent-visible attachment state, not a subshell counter.
+    (( LOOP_LIST_FAIL || (LOOP_LIST_FAIL_AFTER && ! LOOP_ATTACHED) )) && return 5
     if (( LOOP_LIST_MALFORMED )); then printf 'unparseable-loop-row\n'; return 0; fi
     if (( LOOP_ATTACHED )); then
       if (( LOOP_LIST_PADDED )); then printf '  %s  \n' "$LOOP_DEVICE"
