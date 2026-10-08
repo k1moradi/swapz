@@ -1152,3 +1152,52 @@ the final source-only suite ran to completion.
 This does not establish kernel-backed NBD runtime safety or physical
 latency/cost measurements. The kernel and Codex-owned teardown
 sources are untouched; host device operations remain unauthorized.
+
+## 2026-10-08 — Teardown follow-up hardening after independent Codex PASS
+
+Codex independently reported **SOURCE-ONLY TEARDOWN GATE PASS** at
+`10c9d09bf4d3e78dd9524e20988c38b204f9ad42`: seven Bash syntax
+checks passed, both rootless teardown regressions passed and the
+offline live-GC analyzer passed all 11 tests. Its audit identified
+defense-in-depth gaps (duplicate/out-of-range DM tuples, prefix-only
+swap-inventory header, per-unit cgroup mock conflation, missing stopped
+job test, and an insufficient active-stop-failure assertion).
+
+The primary developer subsequently committed teardown-only corrections:
+
+- `swapz_test_confirm_dm_absent` rejects duplicate DM inventory names
+  and major/minor tuples outside the Linux 12-bit-major/20-bit-minor
+  `dev_t` representation (up to 4095:1048575).
+- `swapz_pressure_confirm_swap_inactive` requires an exact
+  five-column /proc/swaps header and exactly five fields in each row;
+  validates swap type, absolute path and numeric size/used/priority;
+  rejects malformed output before mapper cleanup. Valid unrelated
+  swaps with negative priority remain acceptable.
+- Rootless regressions separately inspect the first and second
+  test-unit cgroups, prove that failed systemd stop with active swap
+  triggers **zero** swapoff/DM calls, verify unexpected inventory
+  contents are rejected, and exercise a stopped-owned child through
+  ordered CONT then TERM signals using mocks.
+- The cgroup.procs regression explicitly describes mocked content
+  behavior instead of claiming to construct a real pseudo-file.
+
+**Executed evidence:** The GitHub Actions `Rootless teardown safety`
+run at `68360c26214c4c08a57180f50ae032746d68342f` was **SUCCESS**:
+https://github.com/k1moradi/swapz/actions/runs/37777532521.
+All seven Bash syntax checks, the complete DM/loop and pressure rootless
+regressions, and 11 offline analyzer tests passed. Earlier intermediate
+CI failures were test-fixture syntax/duplicate-source defects; they
+were corrected before the successful run.
+
+**Remaining child-identity limitation:** The existing jobs -pr/-ps
+checks reject completed-but-listed PID reuse and the new test covers
+stopped children. There is still a TOCTOU window between job-state
+inspection and `kill -CONT`/`kill -TERM`. A process start-time
+comparison would not eliminate that window; atomic pidfd-based signal
+delivery would require a separately reviewed implementation and
+fixtures. No new real process-signaling mechanism was introduced.
+
+This is rootless source-only validation, not authorization for real
+NBD, DM/loop, swap, kernel module, fio, physical media or reboot.
+Kernel blob `7589022ecdf0525716717270ab063a867a21f473` is unchanged.
+The concurrent NBD independent audit remains a separate qualification.
