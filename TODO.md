@@ -114,3 +114,24 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       Bash job-state inspection still has a small TOCTOU PID-reuse window.
 - [ ] Keep kernel device runtime and performance gates blocked until the
       appropriate independent and explicitly authorized test phases.
+
+### 2026-10-08 NBD syscall-isolation remediation
+
+- [x] Fix captured Python default `ioctl=fcntl.ioctl` and
+      `close_fd=os.close` that bypassed selftest mocks.
+- [x] Use a non-integer fake fd in all mocked `serve_kernel()` setup
+      cases, preventing accidental real fd operations on number 81.
+- [x] Assert the real shutdown helper resolves mock syscall dependencies
+      and preserves its operation-order and cleanup-error diagnostics.
+- [x] Treat unexpected non-OSError NBD_DO_IT exceptions as backend failure.
+- [x] Mock active NBD PID, unreadable swap inventory, failed active-swap
+      stat and the selected NBD block as active swap.
+- [x] Execute exact 8 MiB NBD socketpair WRITE/READ in the selftest.
+- [x] Obtain static syscall-isolation + seven source-only command PASS
+      on disposable GitHub Actions runner at
+      f1c458f638712a19dea8b724a7f32bd1052b791e
+      (run 37774348723).
+- [ ] Obtain independent Codex Linux-host source-only NBD requalification
+      *after* it finishes the teardown assignment.
+- [ ] Any real kernel NBD/DM/swap runtime test still requires separate
+      explicit authorization; no physical or host swap access.
