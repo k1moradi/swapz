@@ -1823,3 +1823,53 @@ specified. Preserve existing `local-*-verify.state` files.
 A combined source-only PASS is **not** a live kernel NBD driver smoke
 or calibrated GC latency/physical bandwidth benchmark. Continue to
 avoid root, real DM/loop/NBD, swap, module and physical disk operations.
+
+## Teardown whitespace-inventory follow-up after Codex independent FAIL
+
+Codex's independent teardown source-only gate at
+`5a3aea67fc303748c7efae7e4a36e595ba4c7ab7`
+reported **FAIL**, despite all ten listed commands passing.
+The supplemental mocked `dmsetup ls` response consisting only of
+spaces/tabs was incorrectly accepted as mapping absence.
+The previous green GitHub run did not exercise this input.
+
+The primary developer fixed the production DM inventory parser to
+preserve even newline-only stdout (which plain Bash command
+substitution would discard) and to fail on blank/whitespace inventory
+records. Truly empty stdout and `No devices found` remain accepted.
+Regression cases exercise the exact reported failure and lower-backing
+preservation after upper removal.
+
+Other Codex findings corrected simultaneously:
+
+- Pinned pressure transient workers to `system.slice`; the pressure
+  cleanup helper verifies exact, distinct `/system.slice/$unit`
+  ControlGroup identity instead of arbitrary absolute paths. Mocked
+  wrong, swapped, duplicated, unrelated and traversal paths block
+  swapoff and mapper cleanup.
+- Staged recall calls a shared testable child-stop-before-DM-cleanup
+  helper. Rootless tests exercise unresponsive child failure and
+  all-three-worker failure/success with actual cleanup decision.
+- The pressure parser test includes nonnumeric `Used` swap entry.
+
+**Fresh same-revision source-only CI PASS:** commit
+`3b60d7659df8cf59716286dfe0d1504307eb2e78`.
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37781726152
+- Combined NBD/teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37781726172
+
+Both workflows passed, including the new whitespace rejection and
+ControlGroup identity regressions. The combined workflow also verified
+NBD syscall isolation and executed 26 complete userspace NBD selftests
+(25 repeats) on the *same commit*.
+
+Once the current NBD independent host assignment finishes, Codex may
+re-run its ten-command rootless teardown gate against the latest HEAD.
+Record exact blobs, preserve the two `local-*-verify.state` files and
+reproduce the whitespace-only DM mock. Do not claim the residual
+shell-job PID-check-to-kill TOCTOU has been eliminated.
+
+Do not conduct any real DM/loop/NBD, swapon/swapoff, kernel module,
+physical-media, fio, benchmark or reboot activity without separate
+explicit authorization.
