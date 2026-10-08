@@ -1,0 +1,46 @@
+name: Rootless teardown safety
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rootless-teardown.yml'
+      - 'tests/runtime/test-stack-teardown.sh'
+      - 'tests/runtime/test-stack-teardown-regression.sh'
+      - 'tests/runtime/pressure-teardown.sh'
+      - 'tests/runtime/pressure-teardown-regression.sh'
+      - 'tests/runtime/pressure.sh'
+      - 'tests/runtime/buffer-recall.sh'
+      - 'tests/runtime/live-gc-latency-analyze-test.py'
+      - 'tests/runtime/live-gc-latency-analyze.py'
+  pull_request:
+    paths:
+      - '.github/workflows/rootless-teardown.yml'
+      - 'tests/runtime/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Bash syntax
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/test-stack-teardown.sh
+          bash -n tests/runtime/test-stack-teardown-regression.sh
+          bash -n tests/runtime/pressure-teardown.sh
+          bash -n tests/runtime/pressure-teardown-regression.sh
+          bash -n tests/runtime/no-discard-livegc.sh
+          bash -n tests/runtime/buffer-recall.sh
+          bash -n tests/runtime/pressure.sh
+      - name: Rootless DM and loop teardown regression
+        run: bash tests/runtime/test-stack-teardown-regression.sh
+      - name: Rootless pressure teardown regression
+        run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Offline GC latency analyzer regression
+        run: python3 tests/runtime/live-gc-latency-analyze-test.py -v
