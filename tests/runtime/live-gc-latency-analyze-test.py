@@ -74,6 +74,53 @@ class LiveGcAnalysisTests(unittest.TestCase):
         self.assertEqual(report["overlapping_live_gc"]["count"], 1)
         self.assertEqual(report["outside_live_gc"]["count"], 2)
 
+    def test_bad_gc_intervals_and_counts(self) -> None:
+        for row in ("monotonic,-1,200,1\n",
+                    "monotonic,300,200,1\n",
+                    "monotonic,100,100,1\n",
+                    "monotonic,100,200,-1\n",
+                    "monotonic,100,200,not-an-int\n",
+                    "monotonic,100,200,\n"):
+            with self.subTest(row=row):
+                self.populate(gc_rows=row,
+                              read_rows="monotonic,120,140,ok\n")
+                with self.assertRaisesRegex(ValueError, "invalid"):
+                    analyzer.analyze(self.gc_path, self.reads_path, 1)
+
+    def test_invalid_read_intervals_and_gc_clock(self) -> None:
+        self.populate(gc_rows="monotonic_raw,100,200,1\n",
+                      read_rows="monotonic,120,140,ok\n")
+        with self.assertRaisesRegex(ValueError, "clock domain"):
+            analyzer.analyze(self.gc_path, self.reads_path, 1)
+        for row in ("monotonic,-1,140,ok\n",
+                    "monotonic,140,120,ok\n",
+                    "monotonic,120,120,ok\n"):
+            with self.subTest(row=row):
+                self.populate(gc_rows="monotonic,100,200,1\n",
+                              read_rows=row)
+                with self.assertRaisesRegex(ValueError, "invalid"):
+                    analyzer.analyze(self.gc_path, self.reads_path, 1)
+
+    def test_missing_required_gc_column(self) -> None:
+        self.populate(gc_rows="monotonic,100,200,1\n",
+                      read_rows="monotonic,120,140,ok\n")
+        self.gc_path.write_text("clock,start_ns,end_ns\n"
+                                "monotonic,100,200\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "expected CSV columns"):
+            analyzer.analyze(self.gc_path, self.reads_path, 1)
+
+    def test_exact_nearest_rank_percentiles(self) -> None:
+        rows = "".join(f"monotonic,0,{millis * 1_000_000},ok\n"
+                       for millis in range(1, 101))
+        self.populate(gc_rows="monotonic,0,200000000,25\n",
+                      read_rows=rows)
+        report = analyzer.analyze(self.gc_path, self.reads_path, 100)
+        observed = report["overlapping_live_gc"]
+        self.assertEqual(observed["count"], 100)
+        self.assertEqual(observed["p95_ms"], 95)
+        self.assertEqual(observed["p99_ms"], 99)
+        self.assertEqual(observed["max_ms"], 100)
+
     def test_overlapping_gc_windows_are_merged(self) -> None:
         self.populate(gc_rows="monotonic,100,200,1\nmonotonic,150,300,2\n",
                       read_rows="monotonic,250,350,ok\n")
