@@ -59,8 +59,10 @@ run_pressure(){
   # The helper publishes filled only after touching all pages. The matching
   # token, rather than MainPID/ps stop state, proves which phase is waiting.
   for ((attempt=0; attempt<300; ++attempt)); do
-    if [[ -e "$dir/filled" ]]; then
-      if [[ "$(cat -- "$dir/filled")" != "filled:$token" ]]; then
+    if [[ -e "$dir/filled" || -L "$dir/filled" ]]; then
+      # Use the bounded nofollow regular-file validator, not cat: a FIFO
+      # or symlink must not block or spoof checkpoint readiness.
+      if ! python3 "$ROOT/tests/runtime/pressure_checkpoint.py" check "$dir" "$token" filled; then
         echo "ERROR: invalid filled checkpoint marker for $unit" >&2
         return 1
       fi
@@ -90,8 +92,8 @@ run_pressure(){
 
   ready=0
   for ((attempt=0; attempt<300; ++attempt)); do
-    if [[ -e "$dir/verified" ]]; then
-      if [[ "$(cat -- "$dir/verified")" != "verified:$token" ]]; then
+    if [[ -e "$dir/verified" || -L "$dir/verified" ]]; then
+      if ! python3 "$ROOT/tests/runtime/pressure_checkpoint.py" check "$dir" "$token" verified; then
         echo "ERROR: invalid verified checkpoint marker for $unit" >&2
         return 1
       fi
