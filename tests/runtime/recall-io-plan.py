@@ -133,6 +133,9 @@ class RecallIOPlan:
         self.failure = False
         self._closed = False
         self.writer_handle: str | None = None
+        # Expected files may be altered after preparation, so retain a
+        # trusted in-memory reference page for every comparison.
+        self._trusted_pages: dict[Path, bytes] = {}
 
     def _check_open(self) -> None:
         if self._closed or self.failure:
@@ -210,6 +213,7 @@ class RecallIOPlan:
                 offset=page * PAGE_SIZE,
             )
             _create_exact_expected(expected, contents)
+            self._trusted_pages[expected] = contents
         except (OSError, RecallPlanError) as exc:
             self.failure = True
             raise RecallPlanError(f"cannot prepare safe recall page: {exc}") from exc
@@ -228,9 +232,12 @@ class RecallIOPlan:
         except (OSError, RecallPlanError) as exc:
             self.failure = True
             raise RecallPlanError(f"cannot compare safe readback: {exc}") from exc
-        if result_page != source_page:
+        trusted = self._trusted_pages.get(expected)
+        if trusted is None or source_page != trusted or result_page != trusted:
             self.failure = True
-            raise RecallPlanError("direct read data did not match the expected 4096 bytes")
+            raise RecallPlanError(
+                "direct read/reference data did not match the trusted 4096-byte page"
+            )
 
     def read_one(self, page: int, label: str) -> ReadResult:
         expected, output = self.prepare_expected(page, label)
@@ -283,7 +290,24 @@ class RecallIOPlan:
         except Exception as exc:
             self.failure = True
             raise RecallPlanError(f"cannot confirm stop/reap: {exc}") from exc
-        if (self.failure or getattr(report, "cleanup_allowed", None) is not True
+        # Treat a future IPC report as untrusted: true summary flags alone
+        # cannot authorize cleanup if any worker is omitted or reported in error.
+        try:
+            results = tuple(report.results)
+            errors = tuple(report.errors)
+            names = [result.handle for result in results]
+            complete = (
+                len(names) == len(self.handles)
+                and len(set(names)) == len(names)
+                and set(names) == set(self.handles)
+                and all(result.reaped is True and not result.errors
+                        for result in results)
+                and not errors
+            )
+        except (AttributeError, TypeError, ValueError):
+            complete = False
+        if (self.failure or not complete
+                or getattr(report, "cleanup_allowed", None) is not True
                 or getattr(report, "all_reaped", None) is not True):
             return report, None
         return report, callback()
