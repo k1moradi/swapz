@@ -7,6 +7,16 @@ for tool in awk blockdev dmsetup fio modprobe python3; do
 done
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+BACKEND_KIND=${SWAPZ_BENCH_BACKEND:-null_blk}
+case "$BACKEND_KIND" in
+  null_blk|nbd) ;;
+  *) echo "ERROR: SWAPZ_BENCH_BACKEND must be null_blk or nbd" >&2; exit 4 ;;
+esac
+NBD_DEVICE=${SWAPZ_BENCH_NBD_DEVICE:-}
+if [[ "$BACKEND_KIND" == nbd && ! "$NBD_DEVICE" =~ ^/dev/nbd[0-9]+$ ]]; then
+  echo "ERROR: NBD backend requires an explicit unused SWAPZ_BENCH_NBD_DEVICE=/dev/nbdN" >&2
+  exit 4
+fi
 BANDWIDTH=${SWAPZ_BENCH_MBPS:-20}
 LATENCY_NS=${SWAPZ_BENCH_LATENCY_NS:-500000}
 RUNTIME=${SWAPZ_BENCH_RUNTIME:-3}
@@ -21,7 +31,7 @@ case "$BENCH_DISCARD" in
   0|1) ;;
   *) echo "ERROR: SWAPZ_BENCH_DISCARD must be 0 or 1" >&2; exit 4 ;;
 esac
-if (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )); then
+if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )); then
   echo "ERROR: null_blk mbps may requeue a 1 MiB GC DISCARD forever; use SWAPZ_BENCH_DISCARD=0 with bandwidth throttling." >&2
   exit 4
 fi
@@ -47,6 +57,10 @@ BACKEND=""
 CONFIGFS_MOUNTED_BY_US=0
 RESULTS="$TMP/results.jsonl"
 TARGET_ACTIVE=0
+NBD_PID=""
+NBD_READY="$TMP/nbd.ready"
+NBD_STATS="$TMP/nbd.stats.json"
+NBD_LOG="$TMP/nbd-server.log"
 
 # Teardown is deliberately a separate, mock-testable helper. A failed normal
 # dmsetup removal must NEVER power off the backing null_blk device.
@@ -129,13 +143,70 @@ setup_nullblk() {
   return 0
 }
 
-if ! setup_nullblk; then
+# NBD is strictly opt-in. The operator must identify an unused *virtual*
+# /dev/nbdN; this harness will never pick or touch a physical device.
+setup_nbd() {
+  [[ -b "$NBD_DEVICE" ]] || {
+    echo "ERROR: $NBD_DEVICE is unavailable. Load the NBD kernel driver separately before testing." >&2
+    return 1
+  }
+  (( BANDWIDTH > 0 )) || {
+    echo "ERROR: NBD requires positive bandwidth; zero means unthrottled null_blk only." >&2
+    return 1
+  }
+  (( LATENCY_NS >= 0 && LATENCY_NS % 1000 == 0 )) || {
+    echo "ERROR: NBD completion latency must be a nonnegative whole number of microseconds." >&2
+    return 1
+  }
+  local cmd=(
+    python3 "$ROOT/tests/runtime/size-aware-nbd.py" serve
+    --device "$NBD_DEVICE" --size-mib 256
+    --mbps "$BANDWIDTH" --latency-us "$((LATENCY_NS / 1000))"
+    --ready-file "$NBD_READY" --stats-file "$NBD_STATS"
+  )
+  (( BENCH_DISCARD )) && cmd+=(--allow-trim)
+  "${cmd[@]}" >"$NBD_LOG" 2>&1 &
+  NBD_PID=$!
+  BACKING="$NBD_DEVICE"
+  BACKING_KNAME=${NBD_DEVICE##*/}
+  BACKEND="size-aware-nbd-${BANDWIDTH}MiBps-${LATENCY_NS}ns-serialized"
+  local i
+  for ((i=0; i<100; ++i)); do
+    if [[ -s "$NBD_READY" && -e "/sys/class/block/$BACKING_KNAME/stat" ]]; then
+      break
+    fi
+    if ! kill -0 "$NBD_PID" 2>/dev/null; then
+      echo "ERROR: size-aware NBD server failed during startup:" >&2
+      cat "$NBD_LOG" >&2
+      return 1
+    fi
+    sleep 0.1
+  done
+  [[ -s "$NBD_READY" && -e "/sys/class/block/$BACKING_KNAME/stat" ]] || {
+    echo "ERROR: size-aware NBD server did not become ready" >&2
+    return 1
+  }
+  local backing_bytes
+  backing_bytes=$(blockdev --getsize64 "$BACKING") || return 1
+  [[ "$backing_bytes" == 268435456 ]] || {
+    echo "ERROR: size-aware NBD device has unexpected capacity: $backing_bytes" >&2
+    return 1
+  }
+  return 0
+}
+
+if [[ "$BACKEND_KIND" == nbd ]]; then
+  if ! setup_nbd; then
+    echo "ERROR: opt-in size-aware NBD backend setup failed; inspect $NBD_LOG" >&2
+    exit 2
+  fi
+elif ! setup_nullblk; then
   echo "ERROR: null_blk with memory_backed+mbps+completion_nsec is required for the controlled V2.2 sweep." >&2
   echo "Use bench/request-plateau.py for a model-only sweep or install a kernel with null_blk controls." >&2
   exit 2
 fi
 
-if (( BANDWIDTH > 0 )); then
+if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 )); then
   unsafe=()
   for batch in $BATCHES; do
     if (( batch * 1024 > NULLBLK_TICK_BYTES )); then
@@ -197,8 +268,8 @@ run_case() {
   TARGET_ACTIVE=1
   # Prove the throttled fixture cannot issue a full-segment lower DISCARD
   # before any write/GC can reach it.
-  if (( BANDWIDTH > 0 )) && ! dmsetup status "$TARGET" | grep -q 'lower_discard=off'; then
-    echo "ERROR: bandwidth-limited null_blk unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
+  if (( ! BENCH_DISCARD )) && ! dmsetup status "$TARGET" | grep -q 'lower_discard=off'; then
+    echo "ERROR: benchmark backend unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
     return 1
   fi
   prefill_cold "$path"
@@ -301,6 +372,7 @@ PY
 
 echo "BACKEND=$BACKEND"
 echo "LOWER_DISCARD=$BENCH_DISCARD"
+echo "NBD_DEVICE=${NBD_DEVICE:-not-used}"
 echo "BATCHES=$BATCHES"
 echo "STRATEGIES=$STRATEGIES"
 
