@@ -119,7 +119,18 @@ swapz_pressure_confirm_swap_inactive() {
 
 swapz_pressure_cleanup_resources() {
   local unit unit_state unit_pid unit_cgroup load_state attempt
+  # The pressure fixture creates two distinct, transient system.slice services.
+  # If their names alias, we cannot verify both workloads independently.
+  if [[ -z "$FIRST_UNIT" || -z "$SECOND_UNIT" ||
+        "$FIRST_UNIT" == "$SECOND_UNIT" ]]; then
+    echo "ERROR: invalid or duplicate test unit names; preserving swap" >&2
+    return 1
+  fi
   for unit in "$FIRST_UNIT" "$SECOND_UNIT"; do
+    if [[ ! "$unit" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.@-]*\.service$ ]]; then
+      echo "ERROR: invalid transient unit name $unit; preserving swap" >&2
+      return 1
+    fi
     if ! load_state=$(systemctl show "$unit" -p LoadState --value) ||
        [[ -z "$load_state" ]]; then
       echo "ERROR: cannot inspect unit $unit LoadState; preserving swap" >&2
@@ -153,8 +164,11 @@ swapz_pressure_cleanup_resources() {
       return 1
     fi
     if [[ -n "$unit_cgroup" ]]; then
-      if [[ "$unit_cgroup" != /* || "$unit_cgroup" == *..* ]]; then
-        echo "ERROR: unsafe unit $unit cgroup path; preserving swap" >&2
+      # The fixture pins systemd-run to system.slice. An unrelated or
+      # duplicated ControlGroup would allow checking the WRONG workers and
+      # could falsely authorize swapoff or lower device teardown.
+      if [[ "$unit_cgroup" != "/system.slice/$unit" ]]; then
+        echo "ERROR: unit $unit ControlGroup identity mismatch; preserving swap" >&2
         return 1
       fi
       # Resume a stopped helper only while its PID still belongs to this
