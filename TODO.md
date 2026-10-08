@@ -507,3 +507,38 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       independent review before any production recall IPC integration.
 - [ ] Production Bash recall still contains the numeric-PID reuse race
       and untracked background read-function descendants.
+
+### 2026-10-08 — Test-only pidfd IPC adapter and mandatory CI
+
+- [x] Add `recall-ipc-adapter.py` with only fixed `sleep` and
+      `exit` test-worker admission, opaque handle registry and
+      typed worker-result/stop-attestation objects.
+- [x] Require complete exact-handle, all-reaped and no-errors
+      `stop_all` attestation before any provisional cleanup decision.
+- [x] Require successful shutdown, actual service exit code zero
+      and independent client exit confirmation before allowing even
+      a **synthetic** cleanup callback; fail closed on channel or
+      worker failure.
+- [x] Add 20 rootless adapter tests: fabricated contradictory
+      reports, missing/duplicate/unknown workers, exit and transport
+      failure, plus actual private socketpair IPC with short-lived
+      test-only service children.
+- [x] Require 23 IPC service tests and **10 additional 15-second
+      bounded separate suite runs** in both rootless workflows.
+- [x] Preserve the 27-test supervisor gate + three repetitions,
+      46 recall I/O tests, all pressure/teardown and NBD checks.
+- [x] Teardown rootless CI **PASS** at
+      `d6a92486d71ba0e1f6c27cf1c1b4781e4ce1cd81`:
+      https://github.com/k1moradi/swapz/actions/runs/37814381219
+- [x] Same-commit combined rootless CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37814381190
+      (20 adapter tests, 23 IPC service tests + 10/10 repeats,
+      27 supervisor tests + 3 repeats, 46 direct recall plan tests,
+      26/26 NBD selftests, 11 offline GC analyzer tests).
+- [ ] Await Codex's independent IPC report-verification hardening
+      and rerun cross-component gates if its service blobs change.
+- [ ] Review the narrow direct-`dd` command grammar, controlled
+      supervisor ownership, descendant containment, and Bash-facing
+      adapter before replacing the numeric-PID recall fixture.
+- [ ] Real kernel, NBD/DM/loop, swap, systemd and physical
+      performance qualification remains unapproved and untested.
