@@ -352,3 +352,27 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       prototype and review; **recall PID-reuse race is still open**.
 - [ ] No live pressure, systemd service, swap, DM/loop/NBD, kernel module
       or physical testing without separate explicit authorization.
+
+### 2026-10-08 — Private pressure token file integrity
+
+- [x] Eliminate unbounded/following `read_bytes()` token reads and
+      shell `cat` of checkpoint markers; use nofollow, nonblocking,
+      regular-file, inode-stable, single-link and exact-size checks.
+- [x] Reject symlink/hardlink/FIFO and oversized marker/release files,
+      including a replacement between lstat and open; check command
+      validates readiness without publishing a release.
+- [x] Raise explicit errors on malformed token files while preserving
+      the monotonic wait timeout and exact `phase:nonce` protocol.
+- [x] Grow rootless pressure checkpoint suite to 16 tests; repeat all
+      16 in 10 independently timed processes in both CI workflows.
+- [x] Teardown CI **PASS** at
+      `6755e82b18c59f9b9047098ec6da97dba620c3f6`:
+      https://github.com/k1moradi/swapz/actions/runs/37794454277
+- [x] Combined rootless CI **PASS** at
+      `45ac8b7dc668200315bea8556708bffa944dcb3d`:
+      https://github.com/k1moradi/swapz/actions/runs/37794468550
+      (10/10 pressure suite repeats, 26 NBD selftests, 11 analyzer tests).
+- [ ] No live systemd, swap, device, GC latency, or physical qualification
+      without separate authorization.
+- [ ] Recall PID reuse remains open pending independently tested
+      gated-pidfd supervisor design and later integration approval.
