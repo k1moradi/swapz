@@ -215,15 +215,26 @@ class SizeAwareDevice:
                 raise
 
 
+def verify_nbd_device_identity(name: str, device_number: int) -> None:
+    """Require the selected device node to match the actual NBD sysfs device."""
+    expected_number = Path("/sys/class/block", name, "dev").read_text().strip()
+    observed_number = f"{os.major(device_number)}:{os.minor(device_number)}"
+    if observed_number != expected_number:
+        raise ValueError("NBD device node major:minor differs from NBD sysfs")
+
+
 def validate_nbd_node(path: str) -> str:
     if not re.fullmatch(r"/dev/nbd[0-9]+", path):
         raise ValueError("explicit --device must be /dev/nbdN, never a physical disk")
-    st = os.stat(path)
+    # lstat rejects symlinks masquerading as the explicitly named NBD node.
+    st = os.lstat(path)
     if not stat.S_ISBLK(st.st_mode):
         raise ValueError("NBD node must be a block device")
     name = os.path.basename(path)
     if not Path("/sys/class/block", name).exists():
         raise ValueError("corresponding NBD sysfs block device is missing")
+    # /dev/nbdN can otherwise be replaced by an unrelated block-device node.
+    verify_nbd_device_identity(name, st.st_rdev)
     if Path("/sys/class/block", name, "pid").exists():
         raise ValueError("NBD node has an active client and may not be reused")
     # Reject any mounted NBD block or dependent DM holder. Do not rely on
@@ -267,12 +278,15 @@ def serve_kernel(args: argparse.Namespace) -> int:
 
     # NBD_SET_SOCK fails if an active kernel client already owns this NBD
     # device. Never change its geometry until that ioctl succeeds.
-    fd = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+    fd = os.open(path, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
     kernel_sock, server_sock = socket.socketpair(socket.AF_UNIX,
                                                   socket.SOCK_STREAM)
     attached = False
     worker: threading.Thread | None = None
     try:
+        # Recheck the opened descriptor to close the validate/open race before
+        # NBD_SET_SOCK, geometry changes, or any other NBD ioctl.
+        verify_nbd_device_identity(os.path.basename(path), os.fstat(fd).st_rdev)
         fcntl.ioctl(fd, NBD_SET_SOCK, kernel_sock.fileno())
         attached = True
         fcntl.ioctl(fd, NBD_SET_BLKSIZE, BLOCK)
@@ -331,6 +345,22 @@ def serve_kernel(args: argparse.Namespace) -> int:
 
 
 def selftest() -> int:
+    from types import SimpleNamespace
+    from unittest import mock
+
+    # No root or device attach: model a spoofed /dev/nbd0 node whose dev_t
+    # belongs to a non-NBD disk, while the NBD sysfs entry exists.
+    spoofed_node = SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=os.makedev(8, 0))
+    with (mock.patch("os.lstat", return_value=spoofed_node),
+          mock.patch.object(Path, "exists", return_value=True),
+          mock.patch.object(Path, "read_text", return_value="43:0\\n")):
+        try:
+            validate_nbd_node("/dev/nbd0")
+        except ValueError as exc:
+            assert "major:minor" in str(exc)
+        else:
+            raise AssertionError("spoofed NBD device node was accepted")
+
     times: list[float] = []
     model = SizeAwareDevice(32, 20, 500, sleeper=times.append)
     data = bytes(range(256)) * 4096  # Exactly 1 MiB.
