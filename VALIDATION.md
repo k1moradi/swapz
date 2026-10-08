@@ -1404,3 +1404,62 @@ by this NBD patch. Codex independent Linux-host requalification of the
 updated NBD blob remains to be obtained after its separate teardown
 audit. No actual DM, loop, NBD, swap, module, physical-media or
 benchmark operations were authorized or performed.
+
+## 2026-10-08 — Codex teardown PASS and follow-up systemd guard coverage
+
+Codex independently validated teardown at
+`0f2f169631d08fc1b92e2aba1bed398e1ef795ff` and reported
+**SOURCE-ONLY TEARDOWN GATE PASS**: seven Bash syntax checks, both
+rootless teardown mocks, and all 11 offline GC analyzer tests exited
+zero. Supplemental shell-local inventory checks confirmed that the
+whitespace-only DM fail-open was closed and that the command-substitution
+sentinel preserves both inventory bytes and failure status. Codex found
+no new P0 fail-open issue. It identified P2 checked-in regression gaps
+for malformed/duplicate unit names and empty ControlGroup combined
+with an active state or nonzero MainPID.
+
+The primary developer added corresponding mock cases, including
+duplicate, empty, nonsuffixed, traversal, slash and illegal-character
+unit names; empty ControlGroup with MainPID > 0 or ActiveState=active;
+and accepted empty ControlGroup with MainPID=0 and
+ActiveState=inactive or failed. All rejection cases begin with modeled
+active swap and assert no swapoff, no DM/loop cleanup, unchanged swap
+state and no unexpected process signal.
+
+A new file-backed `systemctl show`/signal event log proves those
+negative cases reach the intended production guard despite Bash
+command substitutions, which isolate in-memory mock counters. Tests
+assert the exact four-property inspection sequence for rejected empty
+cgroups and no systemd calls for invalid unit names.
+
+The new tests revealed a sequencing gap: production cleanup validated
+each name just before processing that unit, allowing a malformed
+SECOND_UNIT to be detected after the first unit was already touched.
+The production helper now prevalidates **both** names before any
+systemd call. This was a separate narrow correctness fix, not a change
+to swapoff or block-device cleanup ordering.
+
+**Executed rootless CI at the same source commit**
+`e64509318576f3c4d65050426af234c2910b70ff`:
+
+- Teardown safety **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37784883620
+  — seven Bash syntax checks, complete DM/loop and pressure regression
+  suites, and 11 offline analyzer tests.
+- Combined NBD and teardown **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37784883592
+  — same regression suites, 10 Bash syntax checks, static syscall
+  containment gate, NBD compilation, one complete NBD selftest and
+  25 additional separate selftest processes (**26/26 PASS**), plus
+  NBD/streaming teardown mocks.
+
+The intermediary CI run at `41adbff877cf609634778829b36276d4404521b2`
+correctly failed because the first production unit could be contacted
+before rejecting an invalid second unit. The above fix and subsequent
+successful workflows resolved that regression.
+
+The shell-owned-child jobs-to-PID inspection/signaling TOCTOU remains
+a design qualification, not an issue solved by these mocks. Independent
+Codex host requalification of the latest NBD source is being performed
+separately. No real systemd unit, DM, loop, NBD, swap, module, fio,
+physical-media test or reboot was performed.
