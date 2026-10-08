@@ -250,6 +250,17 @@ It covers reads from the in-flight buffer while the second fills, reads from the
 buffer while the first is being written, simultaneous reads from both, and invalidation of
 an unsent record before lower submission.
 
+## Optional size-aware synthetic NBD backend
+
+An experimental, opt-in RAM-backed NBD simulator can model serialized
+lower requests with size-aware transfer time, including 512 KiB and 1 MiB
+requests at nominal 20 MiB/s without null_blk's fixed per-tick token ceiling.
+It is **not yet runtime-qualified**, and it is not physical-media evidence.
+
+See [`docs/benchmarks/v2.2-size-aware-nbd.md`](docs/benchmarks/v2.2-size-aware-nbd.md)
+for the source-only selftest, explicit unused `/dev/nbdN` requirement, safe teardown,
+and staged calibration process. Existing null_blk remains the default backend.
+
 ## Benchmarking
 
 The key success metric is **lower-device sectors written**, not LZ4 ratio.
