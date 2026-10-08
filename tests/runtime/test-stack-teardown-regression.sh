@@ -21,7 +21,7 @@ dmsetup() {
     ls)
       [[ "$2" == --noheadings ]] || return 99
       (( LIST_FAIL )) && return 5
-      if (( LIST_MALFORMED )); then printf 'corrupt-inventory-row\\n'; return 0; fi
+      if (( LIST_MALFORMED )); then printf 'corrupt-inventory-row\n'; return 0; fi
       (( UPPER_EXISTS )) && printf '%s (253:10)\n' "$UPPER"
       (( LOWER_EXISTS )) && printf '%s (253:11)\n' "$LOWER"
       return 0 ;;
@@ -140,9 +140,9 @@ echo 'unrelated DM/physical device rejected: PASS'
 # An unresponsive owned writer must stop cleanup before mapping removal.
 jobs() {
   case "$*" in
-    -p) printf '%s\\n' 424242 ;;
-    -pr) (( JOB_RUNNING )) && printf '%s\\n' 424242; return 0 ;;
-    -ps) (( JOB_STOPPED )) && printf '%s\\n' 424242; return 0 ;;
+    -p) printf '%s\n' 424242 ;;
+    -pr) (( JOB_RUNNING )) && printf '%s\n' 424242; return 0 ;;
+    -ps) (( JOB_STOPPED )) && printf '%s\n' 424242; return 0 ;;
     *) return 99 ;;
   esac
 }
