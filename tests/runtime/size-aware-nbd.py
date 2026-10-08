@@ -180,6 +180,22 @@ class SizeAwareDevice:
             chunks.extend(part)
         return bytes(chunks)
 
+    def send_exact(self, conn: socket.socket, payload: bytes,
+                   stopping: threading.Event) -> None:
+        # sendall() loses the transmitted byte count on socket timeout;
+        # retrying it could duplicate a partially sent NBD reply.
+        pending = memoryview(payload)
+        while pending:
+            if stopping.is_set():
+                raise EOFError("server stopping")
+            try:
+                sent = conn.send(pending)
+            except socket.timeout:
+                continue
+            if not sent:
+                raise EOFError("NBD peer disconnected during reply")
+            pending = pending[sent:]
+
     def serve(self, conn: socket.socket, stopping: threading.Event) -> None:
         conn.settimeout(0.25)
         while not stopping.is_set():
@@ -207,7 +223,8 @@ class SizeAwareDevice:
                 payload = (self.recv_exact(conn, length, stopping)
                            if command == CMD_WRITE else b"")
                 reply = self.process(command, offset, length, payload)
-                conn.sendall(REPLY.pack(REPLY_MAGIC, 0, cookie) + reply)
+                self.send_exact(conn, REPLY.pack(REPLY_MAGIC, 0, cookie) + reply,
+                                stopping)
             except (EOFError, BrokenPipeError, ConnectionResetError):
                 return
             except ProtocolError:
@@ -403,6 +420,8 @@ def selftest() -> int:
                 result += client.recv(length - len(result))
         return result
 
+    # Exercise a full-size NBD reply through the actual socket loop.
+    assert transact(CMD_READ, 16, 0, len(data)) == data
     assert transact(CMD_READ, 11, 0, 4096) == data[:4096]
     assert transact(CMD_WRITE, 12, 1048576, 4096, b"Z" * 4096) == b""
     assert transact(CMD_READ, 13, 1048576, 4096) == b"Z" * 4096
@@ -413,6 +432,24 @@ def selftest() -> int:
     server.close()
     client.close()
     assert model.stats["invalid_requests"] == 0
+
+    class PartialReplySocket:
+        def __init__(self):
+            self.received = bytearray()
+            self.attempts = 0
+
+        def send(self, pending: memoryview) -> int:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise socket.timeout("injected transient send timeout")
+            sent = min(len(pending), 3)
+            self.received.extend(pending[:sent])
+            return sent
+
+    # Verify that a timeout after a partial send cannot duplicate reply data.
+    partial_socket = PartialReplySocket()
+    model.send_exact(partial_socket, b"abcdefg", threading.Event())
+    assert partial_socket.received == b"abcdefg"
 
     discard = SizeAwareDevice(32, 20, 500, allow_trim=True, sleeper=lambda _: None)
     discard.process(CMD_WRITE, 0, 4096, b"Q" * 4096)
