@@ -82,7 +82,7 @@ class PressureCheckpointTests(unittest.TestCase):
             publish_release(second_dir, TOKEN, "filled")
         with self.assertRaises(ValueError):
             publish_release(self.directory, OTHER_TOKEN, "filled")
-        with self.assertRaises(ValueError):
+        with self.assertRaises(FileNotFoundError):
             publish_release(self.directory, TOKEN, "verified")
         self.assertTrue(thread.is_alive())
         publish_release(self.directory, TOKEN, "filled")
