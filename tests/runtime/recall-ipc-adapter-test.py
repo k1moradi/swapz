@@ -33,10 +33,10 @@ RecallIPCAdapter = adapter_module.RecallIPCAdapter
 RecallIPCError = adapter_module.RecallIPCError
 
 
-def base(ok: bool = False, **fields: Any) -> dict[str, Any]:
+def base(cleanup: bool = False, **fields: Any) -> dict[str, Any]:
     return {
-        "ok": ok, "cleanup_allowed": ok,
-        "preserve_backing": not ok, "all_reaped": False,
+        "ok": cleanup, "cleanup_allowed": cleanup,
+        "preserve_backing": not cleanup, "all_reaped": False,
         **fields,
     }
 
