@@ -1973,3 +1973,79 @@ signaling and can have untracked descendant workers; the new IPC
 service is not integrated. No real DM/loop/NBD, swap, systemd,
 kernel module, fio, physical device or pressure/recall workload
 operations were performed.
+
+## 2026-10-08 — Rootless pidfd IPC adapter and mandatory service gate
+
+Codex previously delivered a **test-only** single-threaded pidfd
+supervisor IPC service, with a private inherited Unix socket,
+bounded length-prefixed frames, 23 standalone protocol/lifecycle
+tests and fixed `sleep`/`exit` worker allowlist. Production
+`buffer-recall.sh` was not wired to the service.
+
+The primary developer added a new, separate
+`tests/runtime/recall-ipc-adapter.py` and
+`tests/runtime/recall-ipc-adapter-test.py`. The adapter does NOT
+accept generic argv, real `dd` workers or mapper paths. It
+tracks opaque handles returned from the service and verifies each
+test-worker wait result. It independently reconciles `stop_all`
+against the **exact complete handle set**, rejects missing,
+duplicate or unknown workers, unconfirmed reap, worker/report errors,
+invalid fields and contradictory summary flags. Cleanup denial
+is sticky. A synthetic callback cannot run until successful
+`stop_all`, successful `shutdown`, the actual service process
+exiting with code zero, and explicit client exit confirmation.
+This is distinct from Codex's concurrent independent IPC client
+safety review; it makes no changes to the service/client source.
+
+The adapter's **20 rootless tests** include fake malformed,
+contradictory, incomplete or stale response cases; invalid launch
+and wait; duplicate handles; nonzero and unconfirmed worker
+exit; service-process failure and timeout; and actual private
+socketpair subprocess sessions with only short-lived owned
+`sleep`/`exit` test workers. The tests demonstrate that
+two workers may be launched before either wait, that a valid
+stop/shutdown/exit sequence permits a **synthetic only** callback,
+and that connection loss before or after stop or failed worker
+execution preserves backing authorization denial.
+
+The two existing GitHub Actions source-only gates now require
+compilation and execution of the **23-test IPC service regression**
+plus **10 additional separate timed complete test-suite processes**
+(`timeout 15s` each), followed by the 20-test adapter regression.
+The prior 27-test gated pidfd supervisor with 3 repetitions, the
+46-test unintegrated direct recall I/O plan, pressure and DM teardown
+regressions, strict swap inventory, checkpoint token tests and NBD
+gates remain required.
+
+**Successful same-revision CI at exact code HEAD
+`d6a92486d71ba0e1f6c27cf1c1b4781e4ce1cd81`:**
+
+- Rootless teardown **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37814381219
+  — 23 IPC service tests, **10/10 timed repeats**, 20 adapter
+  tests, 27 supervisor tests and **3/3 repeats**, 46 recall
+  I/O plan tests, 23 strict swap inventory tests, 16 pressure
+  token tests and **10/10 repeats**, rootless teardown regressions
+  and 11 offline GC analyzer tests.
+- Combined source-only **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37814381190
+  — same tests plus static NBD syscall containment, compilation,
+  **26/26 complete NBD selftests** (one full selftest and 25
+  additional complete runs) and NBD/streaming teardown mocks.
+
+The first new adapter gate failed because a fake test-response
+constructor inadvertently supplied duplicate `ok` arguments.
+The test fixture was corrected and both full workflows completed
+successfully; no production source was changed by that correction.
+
+**Explicit limitations:** this adapter uses only fixed test-worker
+commands and cannot launch direct `dd`. The real recall
+`buffer-recall.sh` still tracks numeric Bash child PIDs and uses
+background read-function wrappers that may spawn untracked mapper
+I/O workers. Its check-to-signal PID-reuse risk is **not solved**.
+The adapter and Codex's service were tested together for controlled
+rootless test workers; production direct-I/O allowlisting, IPC
+migration, descendant containment and independent safety review
+remain separate milestones. No actual DM, loop, NBD, swap, systemd,
+kernel module, fio, physical-device or recall/pressure fixture
+operation was performed.
