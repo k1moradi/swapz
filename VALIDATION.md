@@ -1592,3 +1592,58 @@ reuse race is still open. Codex is independently prototyping a gated
 pidfd supervisor for recall; that prototype is NOT integrated here.
 No real systemd service, NBD/DM/loop device, swap command, module,
 fio, physical backing or reboot was exercised.
+
+## 2026-10-08 — Pressure checkpoint file-type and bounded-read hardening
+
+A follow-up source-only audit found that pressure release/marker checks
+used `Path.read_bytes()`: valid-looking contents could be read through
+a symlink, a FIFO read could block, and a very large file could be read
+without a bound. The pressure fixture also used shell `cat` to inspect
+its `filled` and `verified` marker, duplicating those hazards.
+
+`tests/runtime/pressure_checkpoint.py` now validates each token via
+`lstat`, a no-follow/nonblocking descriptor open, `fstat`, exact
+file/inode identity, regular-file and single-link checks, expected
+byte size, and a bounded read of at most the expected token length
+plus one. This rejects malformed files rather than treating them as
+checkpoint progress. The controller provides a read-only `check`
+command used for both marker phases in `pressure.sh`; token release
+still uses the original atomic, no-overwrite publication and fresh
+nonce check.
+
+Eight new rootless cases (16 total) verify symlinks to *valid* marker
+and release contents cannot spoof readiness, FIFO marker and release
+cannot block, oversized token files fail without an unbounded read,
+hardlinked markers are rejected, controller CLI validation does not
+publish releases, and a token replaced between `lstat` and open is
+rejected. Existing phase, timeout, interruption, readback-corruption
+and correct release tests remain intact.
+
+Both CI workflows additionally repeat the full 16-test pressure
+suite in **ten independent timed processes** to catch concurrency
+and scheduling regressions.
+
+**Executed source-only results:**
+
+- Teardown rootless workflow **SUCCESS** at
+  `6755e82b18c59f9b9047098ec6da97dba620c3f6`:
+  https://github.com/k1moradi/swapz/actions/runs/37794454277
+  — 16 pressure token tests, 10/10 additional timed suite runs,
+  DM/loop and pressure teardown regressions, seven Bash syntax
+  checks and 11 offline analyzer tests.
+- Latest combined rootless workflow **SUCCESS** at
+  `45ac8b7dc668200315bea8556708bffa944dcb3d`:
+  https://github.com/k1moradi/swapz/actions/runs/37794468550
+  — the same 16 tests and 10/10 pressure repeats, all teardown
+  regressions, 11 offline analyzer tests, NBD syscall isolation,
+  compilation, **26/26 complete NBD userspace selftests** and
+  NBD/streaming mock teardowns. The two source commits differ
+  only by the follow-up combined workflow change.
+
+A traceback line in each teardown/combined log is the pre-existing
+expected injected cgroup-directory type failure, not a real test
+failure; both jobs ended `success`. These are private temporary-file
+and rootless mocked tests, **not** a real systemd pressure, swap or
+block-device qualification. The Codex pidfd supervisor prototype
+remains separately assigned and unintegrated; recall PID reuse is
+not resolved by these changes.
