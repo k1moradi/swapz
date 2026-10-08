@@ -1915,3 +1915,44 @@ A GitHub CI PASS does not supersede independent Linux-host review,
 nor does any rootless result prove live kernel NBD shutdown, actual
 swap-in p99, GC overlap, device throughput or physical performance.
 No module, device, swap, fio, teardown fixture or reboot is permitted.
+
+## Post-independent teardown-PASS pressure mock coverage and testable ordering
+
+Codex's source-only teardown test at
+`0f2f169631d08fc1b92e2aba1bed398e1ef795ff`
+reported **SOURCE-ONLY TEARDOWN GATE PASS**. All ten Bash/Python
+commands exited zero; additional DM parser inventory reproduction
+was rejected fail closed. Codex found no new P0 but identified missing
+checked-in negative tests for duplicate/invalid service names and
+empty cgroups in active/nonzero-MainPID states.
+
+The primary developer added those regressions using a **file-backed
+show/signal event log**, avoiding the known subshell counter issue.
+New cases explicitly reject duplicate, blank, path/traversal,
+nonsuffixed and malformed names before systemd; empty ControlGroup
+with live PID or active state also fails before any stop/swapoff.
+Empty ControlGroup with MainPID zero and inactive/failed unit continues
+to pass. Every rejected case starts with simulated active swap and
+asserts no swapoff or mapper removal. A production ordering correction
+now validates both names *before touching either unit*, rather than
+detecting an invalid second name after contacting the first.
+
+The complete rootless teardown and combined NBD/teardown suites
+passed on one checked-out commit:
+`e64509318576f3c4d65050426af234c2910b70ff`.
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37784883620
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37784883592
+
+The latter also passed static NBD syscall isolation, NBD compilation,
+26 full NBD selftests and all NBD/streaming teardown mocks.
+
+For Codex's **concurrent NBD source-only independent task**, retain
+the specified pre-execution mock syscall containment review and
+record the latest NBD and kernel blob. Do not infer Linux kernel
+runtime behavior from socketpair mocks. Keep both existing untracked
+`local-*-verify.state` files untouched. The Bash jobs-to-PID
+check-to-kill race remains an explicit source-only qualification.
+
+All work remains rootless; no real systemd service, block device,
+swap command, physical media, kernel module, fio or reboot.
