@@ -12,7 +12,14 @@ swapz_test_confirm_dm_absent() {
     echo "ERROR: cannot list DM devices to verify $target_name removal" >&2
     return 1
   fi
-  if awk -v name="$target_name" '$1 == name { found = 1 } END { exit !found }' <<<"$dm_mappings"; then
+  local matched
+  # Parse output must succeed independently of whether the target matched.
+  # A broken parser must never be treated as verified DM absence.
+  if ! matched=$(awk -v name="$target_name" '$1 == name { print "present"; exit }' <<<"$dm_mappings"); then
+    echo "ERROR: cannot parse DM device inventory; preserving backing" >&2
+    return 1
+  fi
+  if [[ -n "$matched" ]]; then
     echo "ERROR: DM target $target_name is still listed; preserving backing" >&2
     return 1
   fi
@@ -64,22 +71,50 @@ swapz_test_check_loop_holders() {
   return 0
 }
 
+# Exit 0: exact loop is attached; 1: definitely absent; 2: inspection failed.
+# Unlike `losetup /dev/loopN`, this uses a successful full inventory query,
+# so a query error can never be mistaken for a safely detached loop.
+swapz_test_loop_presence() {
+  local loop_device=$1
+  local inventory entry
+  if ! inventory=$(losetup --list --noheadings --output NAME); then
+    echo "ERROR: cannot inventory loop attachments; preserving backing" >&2
+    return 2
+  fi
+  while IFS= read -r entry; do
+    [[ "$entry" == "$loop_device" ]] && return 0
+  done <<<"$inventory"
+  return 1
+}
+
 swapz_test_detach_loop() {
   local loop_device=$1
   [[ "$loop_device" =~ ^/dev/loop[0-9]+$ ]] || {
     echo "ERROR: refusing to detach a non-loop device: $loop_device" >&2
     return 1
   }
+  if swapz_test_loop_presence "$loop_device"; then
+    : # Still attached; verify holders before attempting detach.
+  else
+    case $? in
+      1) return 0 ;; # Confirmed already absent after successful inventory.
+      *) return 1 ;; # Inventory command failed: do not delete backing.
+    esac
+  fi
   swapz_test_check_loop_holders "$loop_device" || return 1
   if ! losetup -d "$loop_device"; then
     echo "ERROR: could not detach test loop $loop_device; preserving backing" >&2
     return 1
   fi
-  if losetup "$loop_device" >/dev/null 2>&1; then
+  if swapz_test_loop_presence "$loop_device"; then
     echo "ERROR: test loop $loop_device is still attached; preserving backing" >&2
     return 1
+  else
+    case $? in
+      1) return 0 ;; # Successfully inventoried and confirmed absent.
+      *) return 1 ;; # Inspection failure is not proof of detach.
+    esac
   fi
-  return 0
 }
 
 swapz_test_cleanup_dm_stack() {
@@ -98,19 +133,28 @@ swapz_test_cleanup_dm_stack() {
 
 swapz_test_stop_child() {
   local child_pid=$1
-  local attempt child_state
+  local attempt child_state job_pids
   [[ "$child_pid" =~ ^[1-9][0-9]*$ ]] || {
     echo "ERROR: invalid test-owned child PID: $child_pid" >&2
     return 1
   }
-  # Check shell ownership before signaling: a finished child's PID could be
-  # reused by an unrelated process before EXIT cleanup runs.
-  if ! jobs -p | grep -Fxq "$child_pid"; then
-    echo "ERROR: PID $child_pid is not a test-owned background job; preserving stack" >&2
+  # Never signal an arbitrary PID: require a shell-owned job or positively
+  # verify the old child is no longer running (already waited/reaped).
+  if ! job_pids=$(jobs -p); then
+    echo "ERROR: cannot inspect shell jobs; preserving test stack" >&2
     return 1
   fi
+  if ! grep -Fxq "$child_pid" <<<"$job_pids"; then
+    if kill -0 "$child_pid" 2>/dev/null; then
+      echo "ERROR: child PID $child_pid is running without shell ownership; preserving stack" >&2
+      return 1
+    fi
+    return 0
+  fi
   if kill -0 "$child_pid" 2>/dev/null; then
-    if ! kill -TERM "$child_pid" 2>/dev/null; then
+    # Stopped checkpoint jobs need CONT before TERM can be processed.
+    if ! kill -CONT "$child_pid" 2>/dev/null ||
+       ! kill -TERM "$child_pid" 2>/dev/null; then
       echo "ERROR: failed to stop test child $child_pid" >&2
       return 1
     fi
@@ -118,17 +162,29 @@ swapz_test_stop_child() {
       if ! kill -0 "$child_pid" 2>/dev/null; then
         break
       fi
-      child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null || true)
+      if ! child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null); then
+        # A disappearing child can race ps; if still alive, fail closed.
+        if kill -0 "$child_pid" 2>/dev/null; then
+          echo "ERROR: cannot inspect live test child $child_pid; preserving stack" >&2
+          return 1
+        fi
+        break
+      fi
       [[ "$child_state" == Z* ]] && break
       sleep 0.1
     done
-    child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null || true)
-    if [[ -n "$child_state" && "$child_state" != Z* ]]; then
-      echo "ERROR: test child $child_pid did not stop; preserving stack" >&2
-      return 1
+    if kill -0 "$child_pid" 2>/dev/null; then
+      if ! child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null); then
+        echo "ERROR: cannot verify test child $child_pid stopped; preserving stack" >&2
+        return 1
+      fi
+      if [[ "$child_state" != Z* ]]; then
+        echo "ERROR: test child $child_pid did not stop; preserving stack" >&2
+        return 1
+      fi
     fi
   fi
-  # SIGTERM may yield a nonzero exit code: this is expected during cleanup.
+  # A terminated or already-reaped child cannot keep test I/O active.
   wait "$child_pid" 2>/dev/null || true
   return 0
 }
