@@ -1567,3 +1567,50 @@ assertions execute and the command exits 0.
 Do not modify current teardown scripts during NBD audit or claim runtime
 qualification. No /dev/nbdN attach, module loads, DM/loop operations,
 swap changes, physical tests, or reboot without separate explicit approval.
+
+## Next independent teardown gate — after current NBD qualification
+
+Codex's audit on `ae594c266d11a815091b5957b496b1705252db72`
+returned source-only teardown FAIL: malformed `dmsetup ls` and unknown
+cgroup directory inspections could fail open; the stack regression also
+stopped on two wrong state assertions before its later cases ran.
+
+Primary developer has corrected these issues and obtained **rootless CI
+PASS** at `e92ad29a192b70cbe9e04a1421496bfaf85bd460`
+(https://github.com/k1moradi/swapz/actions/runs/37772741880).
+The run exercised all 7 syntax checks, the *entire* stack teardown mock,
+the pressure teardown mock, and 11 offline GC analyzer tests. It does not
+supersede the need for a separately reported Codex Linux-host check.
+
+Once the current independent NBD audit is complete, run read-only/rootless:
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+git rev-parse HEAD:kernel/dm-swapz.c
+git status --short --branch
+for f in \
+  tests/runtime/test-stack-teardown.sh \
+  tests/runtime/test-stack-teardown-regression.sh \
+  tests/runtime/pressure-teardown.sh \
+  tests/runtime/pressure-teardown-regression.sh \
+  tests/runtime/no-discard-livegc.sh \
+  tests/runtime/buffer-recall.sh \
+  tests/runtime/pressure.sh; do bash -n "$f" || exit; done
+bash tests/runtime/test-stack-teardown-regression.sh
+bash tests/runtime/pressure-teardown-regression.sh
+python3 tests/runtime/live-gc-latency-analyze-test.py -v
+```
+
+Audit critical behavior at the exact tested HEAD: malformed DM inventory
+output is never accepted as an absent mapping; cgroup EACCES/EIO never
+counts as confirmed removal; post-detach inventory failures and
+completed-but-listed reused PID mocks execute; pressure stop/cgroup/
+swapoff/swap-inventory/cleanup event sequence is asserted, and test swap
+remains untouched on any inspection error. Keep any existing untracked
+`local-*-verify.state` files unchanged.
+
+A Bash jobs -pr/-ps snapshot removes the reproduced completed-job
+false-positive, but does not supply an atomic signal target. State
+the remaining PID reuse TOCTOU limit. No root, real DM/loop/NBD,
+modprobe, swap commands, block devices, fio, physical media, or reboot.
