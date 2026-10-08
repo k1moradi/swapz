@@ -7,7 +7,7 @@
 swapz_test_confirm_dm_absent() {
   local target_name=$1
   local dm_mappings
-  # A failing \`dmsetup info\` alone is not proof that the target is gone.
+  # A failing `dmsetup info` alone is not proof that the target is gone.
   if ! dm_mappings=$(dmsetup ls --noheadings 2>/dev/null); then
     echo "ERROR: cannot list DM devices to verify $target_name removal" >&2
     return 1
@@ -46,7 +46,7 @@ swapz_test_remove_dm_target() {
 
 swapz_test_check_loop_holders() {
   local loop_device=$1
-  local loop_name=\${loop_device##*/}
+  local loop_name=${loop_device##*/}
   local holders_dir="/sys/class/block/$loop_name/holders"
   if [[ ! -d "$holders_dir" ]]; then
     echo "ERROR: cannot verify holders for $loop_device; preserving loop" >&2
