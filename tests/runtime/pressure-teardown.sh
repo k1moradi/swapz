@@ -62,28 +62,58 @@ swapz_pressure_confirm_swap_inactive() {
     echo "ERROR: cannot inspect /proc/swaps; preserving stack" >&2
     return 1
   fi
-  if [[ "$swaps" != Filename* ]]; then
-    echo "ERROR: invalid /proc/swaps inventory; preserving stack" >&2
-    return 1
-  fi
-  while read -r swap_path _; do
-    [[ "$swap_path" == Filename ]] && continue
-    [[ -z "$swap_path" ]] && continue
-    if [[ "$swap_path" == "/dev/mapper/$name" ]]; then
-      echo "ERROR: $name is still active swap; preserving stack" >&2
-      return 1
-    fi
-    if [[ -n "$expected_device" ]]; then
-      if ! canonical_path=$(readlink -f -- "$swap_path"); then
-        echo "ERROR: cannot resolve active swap $swap_path; preserving stack" >&2
+  # An unreadable or malformed inventory is NOT evidence of inactive swap.
+  # Do not accept a prefix-only header such as "Filename invalid columns".
+  local swap_line swap_type swap_size swap_used swap_priority row=0
+  local -a fields
+  while IFS= read -r swap_line; do
+    read -r -a fields <<<"$swap_line"
+    if (( row == 0 )); then
+      if (( ${#fields[@]} != 5 )) ||
+         [[ "${fields[*]}" != "Filename Type Size Used Priority" ]]; then
+        echo "ERROR: invalid /proc/swaps header; preserving stack" >&2
         return 1
       fi
-      if [[ "$canonical_path" == "$expected_device" ]]; then
+    else
+      if (( ${#fields[@]} != 5 )); then
+        echo "ERROR: malformed /proc/swaps entry; preserving stack" >&2
+        return 1
+      fi
+      swap_path=${fields[0]}
+      swap_type=${fields[1]}
+      swap_size=${fields[2]}
+      swap_used=${fields[3]}
+      swap_priority=${fields[4]}
+      if [[ "$swap_path" != /* ||
+            ( "$swap_type" != file && "$swap_type" != partition ) ||
+            ! "$swap_size" =~ ^[0-9]+$ ||
+            ! "$swap_used" =~ ^[0-9]+$ ||
+            ! "$swap_priority" =~ ^-?[0-9]+$ ]]; then
+        echo "ERROR: invalid /proc/swaps fields; preserving stack" >&2
+        return 1
+      fi
+      if [[ "$swap_path" == "/dev/mapper/$name" ]]; then
         echo "ERROR: $name is still active swap; preserving stack" >&2
         return 1
       fi
+      if [[ -n "$expected_device" ]]; then
+        if ! canonical_path=$(readlink -f -- "$swap_path") ||
+           [[ -z "$canonical_path" ]]; then
+          echo "ERROR: cannot resolve active swap $swap_path; preserving stack" >&2
+          return 1
+        fi
+        if [[ "$canonical_path" == "$expected_device" ]]; then
+          echo "ERROR: $name is still active swap; preserving stack" >&2
+          return 1
+        fi
+      fi
     fi
+    ((++row))
   done <<<"$swaps"
+  if (( row == 0 )); then
+    echo "ERROR: empty /proc/swaps inventory; preserving stack" >&2
+    return 1
+  fi
   return 0
 }
 
