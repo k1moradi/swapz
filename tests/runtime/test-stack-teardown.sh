@@ -158,20 +158,71 @@ swapz_test_cleanup_dm_stack() {
 
 swapz_test_stop_child() {
   local child_pid=$1
-  local attempt child_state job_pids
+  local attempt child_state running_jobs stopped_jobs
   [[ "$child_pid" =~ ^[1-9][0-9]*$ ]] || {
     echo "ERROR: invalid test-owned child PID: $child_pid" >&2
     return 1
   }
-  # Never signal an arbitrary PID: require a shell-owned job or positively
-  # verify the old child is no longer running (already waited/reaped).
-  if ! job_pids=$(jobs -p); then
-    echo "ERROR: cannot inspect shell jobs; preserving test stack" >&2
+  # jobs -p alone can include a completed/reaped job, permitting PID reuse
+  # before a later kill -0. Consider only *currently running or stopped*
+  # shell-owned jobs as candidates for signals. An absent job may already be
+  # reaped; never send a signal based on PID existence alone.
+  if ! running_jobs=$(jobs -pr) || ! stopped_jobs=$(jobs -ps); then
+    echo "ERROR: cannot inspect active shell jobs; preserving test stack" >&2
     return 1
   fi
-  if ! grep -Fxq "$child_pid" <<<"$job_pids"; then
+  if ! grep -Fxq "$child_pid" <<<"$running_jobs"
+  if kill -0 "$child_pid" 2>/dev/null; then
+    # Stopped checkpoint jobs need CONT before TERM can be processed.
+    if ! kill -CONT "$child_pid" 2>/dev/null ||
+       ! kill -TERM "$child_pid" 2>/dev/null; then
+      echo "ERROR: failed to stop test child $child_pid" >&2
+      return 1
+    fi
+    for ((attempt=0; attempt<50; ++attempt)); do
+      if ! kill -0 "$child_pid" 2>/dev/null; then
+        break
+      fi
+      if ! child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null); then
+        # A disappearing child can race ps; if still alive, fail closed.
+        if kill -0 "$child_pid" 2>/dev/null; then
+          echo "ERROR: cannot inspect live test child $child_pid; preserving stack" >&2
+          return 1
+        fi
+        break
+      fi
+      [[ "$child_state" == Z* ]] && break
+      sleep 0.1
+    done
     if kill -0 "$child_pid" 2>/dev/null; then
-      echo "ERROR: child PID $child_pid is running without shell ownership; preserving stack" >&2
+      if ! child_state=$(ps -o stat= -p "$child_pid" 2>/dev/null); then
+        echo "ERROR: cannot verify test child $child_pid stopped; preserving stack" >&2
+        return 1
+      fi
+      if [[ "$child_state" != Z* ]]; then
+        echo "ERROR: test child $child_pid did not stop; preserving stack" >&2
+        return 1
+      fi
+    fi
+  fi
+  # A terminated or already-reaped child cannot keep test I/O active.
+  wait "$child_pid" 2>/dev/null || true
+  return 0
+}
+
+# Always attempt to stop every test-owned I/O child. One failure blocks all
+# mapper/loop teardown, but cannot prevent checking the remaining children.
+swapz_test_stop_children() {
+  local child failed=0
+  for child in "$@"; do
+    [[ -z "$child" ]] && continue
+    swapz_test_stop_child "$child" || failed=1
+  done
+  (( failed == 0 ))
+}
+\\n'"$stopped_jobs"; then
+    if kill -0 "$child_pid" 2>/dev/null; then
+      echo "ERROR: child PID $child_pid is not an active test-owned job; preserving stack" >&2
       return 1
     fi
     return 0
