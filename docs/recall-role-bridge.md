@@ -18,6 +18,10 @@ pidfd service CLI remain restricted to fixed `sleep`/`exit` workers. Production
   handle, forbids duplicated/reordered roles, and requires all five workers
   to be successfully waited/reaped before `STOP_ALL` can authorize even a
   *synthetic* cleanup.
+  Both concurrent-phase readers (`a2`, `b2`) must receive launch acknowledgments
+  before either wait; the writer cannot be waited/reaped by the controller
+  until all four reader comparisons have succeeded. All invalid operations
+  make the opt-in role bridge permanently deny cleanup.
 - `RootlessRoleBridge` is the test-only Bash-facing adapter. Its constructor
   requires the exact opt-in adapter/client/process objects already owned by
   the test harness. It is not called by `recall-control-bridge.py`'s
