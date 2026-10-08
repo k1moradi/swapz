@@ -2049,3 +2049,69 @@ migration, descendant containment and independent safety review
 remain separate milestones. No actual DM, loop, NBD, swap, systemd,
 kernel module, fio, physical-device or recall/pressure fixture
 operation was performed.
+
+## 2026-10-08 — Strict fixture-bound direct-dd role allowlist
+
+While Codex separately audits the pidfd IPC cleanup-authorization
+protocol, the primary developer implemented a **standalone proposed
+direct-`dd` launch allowlist** in
+`tests/runtime/recall-dd-allowlist.py`. It does not edit or connect
+to `test-child-supervisor-service.py`, the direct I/O plan, or
+production `buffer-recall.sh` and never launches `dd`.
+
+The trusted launcher binds the exact fixture root and
+`swapz-v22-recall-<test-specific-name>` mapper identity before any
+client request. Only five fixed, one-use roles may produce argument
+vectors: the nine-page direct writer and four 4096-byte staged
+Buffer A/B reads at page offsets 0, 4, 0 and 5. Exact `dd` argv
+includes every source/destination, block size, count, offset,
+direct-I/O/conv flag and status argument. Role replay,
+reader-before-writer, arbitrary argv, shell options and target
+redirection permanently close admission. The policy checks a
+canonical absolute test-owned directory, single-link exact-sized
+36,864-byte `pages.bin`, retained root/source dev-inode identity,
+and absence of any pre-existing output including dangling links
+and FIFOs. All path inspections are read-only and **no**
+`/dev/mapper` device is opened.
+
+Twenty-six new rootless
+`tests/runtime/recall-dd-allowlist-test.py` cases exercise
+the five exact commands and their byte-for-byte agreement with
+the existing fixture-neutral I/O plan, extra/modified argument
+rejection, mapper grammar, malformed paths, symlinked ancestors,
+source symlink/hardlink/FIFO, short or oversized source, replaced
+root/source inode, stale output paths, one-use launch and sticky
+denial. New CI workflow steps require compile and execution of
+this suite. An initial rootless run found that a missing fixture
+path raised raw `FileNotFoundError`; the policy was adjusted to
+normalize inspection failure into explicit `DDPolicyDenied`
+before the final two green runs.
+
+**Source-only PASS at identical executable-code revision
+`8aa82dfef9a455ee3e6b26e7e3533c2eb98758d3`:**
+
+- Rootless teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37815480268
+- Combined NBD/teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37815480464
+
+Both passed 26 allowlist cases, 20 IPC adapter tests,
+23 IPC service tests plus 10 complete repeats,
+27 pidfd supervisor tests plus 3 repeats,
+46 direct recall plan tests, 23 strict pressure swap parser tests,
+16 pressure token tests plus 10 repeats, and 11 offline analyzer
+tests. The combined gate also passed static NBD syscall isolation,
+NBD compilation and **26/26 full NBD protocol selftests**, plus
+teardown mocks. All these are private temporary-file and rootless
+mock checks.
+
+The threat model and outstanding production integration requirements
+are documented in `docs/recall-dd-allowlist.md`. **Critical
+limitation:** this policy does not bind file descriptors through
+`exec`; it cannot eliminate a path replacement race after checking
+but before a future worker opens its path. The future trusted
+launcher must bind its owned private directory, source, output
+paths and mapper identity at the actual execution boundary.
+No live DM, loop, NBD, swap, systemd, physical device, recall
+fixture, kernel module or benchmark operation occurred. Production
+numeric-PID recall cleanup is unchanged.
