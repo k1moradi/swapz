@@ -195,3 +195,14 @@ swapz_test_stop_child() {
   wait "$child_pid" 2>/dev/null || true
   return 0
 }
+
+# Always attempt to stop every test-owned I/O child. One failure blocks all
+# mapper/loop teardown, but cannot prevent checking the remaining children.
+swapz_test_stop_children() {
+  local child failed=0
+  for child in "$@"; do
+    [[ -z "$child" ]] && continue
+    swapz_test_stop_child "$child" || failed=1
+  done
+  (( failed == 0 ))
+}
