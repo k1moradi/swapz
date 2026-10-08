@@ -2255,3 +2255,41 @@ still has the original numeric-PID reuse and background-wrapper
 descendant problem. Review the future IPC adapter independently
 before any real device or pressure/recall execution. Preserve the
 two untracked Codex Linux-host state files.
+
+## 2026-10-08 — Trust-boundary checks for the future supervisor IPC adapter
+
+The primary developer enhanced the **unintegrated**
+`recall-io-plan.py` while Codex works on its separate pidfd IPC
+service. An in-memory copy of the original 4096-byte expected
+page now authorizes comparisons, rather than trusting two potentially
+changed disk files to corroborate one another. An injected case
+that corrupts both disk files identically is rejected.
+
+The cleanup handoff now regards the full `StopReport` structure
+as untrusted control-channel evidence: it requires distinct and
+exact registered-handle coverage in `results`, a reaped flag for
+every worker, no per-worker or report-level errors, plus explicit
+`all_reaped` and `cleanup_allowed` values. A contradictory
+top-level success cannot silently override partial/unknown/duplicate
+worker records or hidden errors. The rootless fake report now
+matches the real supervisor's detailed result interface.
+
+**Both rootless workflows PASS at exact commit**
+`ec70195d1d1c7a44a72aea83de65043c5fef323f`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37810629055
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37810628795
+
+The updated 46-test I/O plan, 27-test pidfd supervisor suite plus
+3 full-suite repeats, pressure parser/checkpoint mocks, DM teardown,
+and offline analyzer all pass. The combined suite also passes
+26 full NBD protocol selftests and two NBD teardown mocks.
+
+**Handoff qualification:** future IPC adapters must not map a mere
+boolean `cleanup_allowed` response to authorization without
+verifying report completeness, exact handle identities and explicit
+errors. The current code does not prove IPC transport authenticity,
+retained pidfd ownership or actual descendant quiescence. Real
+`buffer-recall.sh` still uses numeric job-PID signaling and must
+not be claimed safe until separately integrated and requalified.
+No real device or pressure/recall fixture operations occurred.
