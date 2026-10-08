@@ -893,3 +893,52 @@ cancellation, GC-read/write latency/amplification, bounded real swap pressure,
 and performance comparison. Do not select a physical-media batch ceiling using
 the 50 Hz null_blk throttle; 512 KiB/1 MiB at ~20 MiB/s require a size-aware
 synthetic backend or an explicitly authorized disposable physical device.
+
+
+## 2026-10-08: exact live-GC / pressure evidence and teardown-source hardening
+
+Codex reported the following host campaign on `main` at
+`d35455ec146ffed7aaed08a001764cd0e05324dd`, loaded/built
+`srcversion=C0E91E94E24D50FDC42769E` (reported kernel logs and local
+artifacts were not independently rerun in this primary-developer session):
+
+- Opportunistic and staged each passed five 100,000-operation exact-reference
+  randomized seeds. The long live-GC case passed 30,000 operations and 117
+  checkpoints per strategy, with **116 actual relocated pages** each and
+  `gc_read=gc_write=475136` bytes; `failed=0`. Opportunistic with lower
+  DISCARD disabled also passed exact live-GC readback with 116 relocations.
+- Staged canceled 10,446 unsent 4 KiB blocks across the matched five-seed
+  randomized runs, avoiding 42,786,816 physical bytes against opportunistic;
+  lower write-request counts also reflected 37 coalesced requests.
+- Both opportunistic and staged completed two bounded Linux swap-pressure
+  holds at an experimental matched 16 KiB batch, swapoff, second swapon, and
+  exact readback. The first holds relocated 66,220 and 67,831 pages,
+  respectively; both ended `failed=0`.
+- The host report ended with matched loaded/built module identity, no
+  test-owned mapper/loop/null_blk remaining, and the normal host
+  `/swapfile` and `/dev/sdb1` swap entries unchanged.
+- **Missing evidence:** no GC-trigger latency distribution and no swap-in
+  p95/p99/max specifically during live-victim GC. Existing synthetic
+  null_blk 20 MiB/s plateaus are backend-limited; the 512 KiB–1 MiB physical
+  batch decision remains unresolved.
+
+The same campaign showed that `no-discard-livegc.sh` and
+`buffer-recall.sh` could report successful workloads while retaining their
+test DM/loop dependencies. The primary developer subsequently committed
+fail-closed, verified upper-to-lower teardown in those two scripts and
+`pressure.sh`, plus `tests/runtime/test-stack-teardown.sh` and a mock
+regression. Cleanup failure now prevents PASS, returns nonzero, and retains
+diagnostics/backing. **This is source-only hardening, not yet a Linux-host
+runtime validation of the changed scripts.**
+
+Development-environment source-only checks passed for the corresponding
+teardown helper and its busy/false-positive/partial/holder/writer mock cases.
+The offline live-GC correlation analyzer and five rootless unit tests also
+passed locally. Neither set of tests loaded the module or attached DM/loop/NBD.
+See `docs/benchmarks/v2.2-live-gc-latency.md` for the proposed timestamps,
+per-event relocation evidence, sample-size gate and clock-domain constraints.
+Kernel `dm-swapz.c` is unchanged.
+
+Next gates remain: independent Codex source-only review of this new teardown
+code; separately authorized bounded virtual teardown/runtimes; source-only NBD
+preflight and later NBD calibration; then exact live-GC tail-latency evidence.
