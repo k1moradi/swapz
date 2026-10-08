@@ -709,6 +709,7 @@ def selftest_failure_gates() -> None:
     ioctl_steps: list[int] = []
 
     def setup_ioctl(_fd: int, operation: int, *_args: object) -> None:
+        assert _fd is fake_fd, "mocked ioctl touched a non-test fd"
         ioctl_steps.append(operation)
         if operation == NBD_SET_BLKSIZE:
             raise OSError(errno.EIO, "injected geometry setup failure")
@@ -744,11 +745,16 @@ def selftest_failure_gates() -> None:
     class FakeWorker:
         def __init__(self, *args: object, **kwargs: object):
             self.started = False
+            self.target = kwargs["target"]
 
         def start(self) -> None:
             if worker_case == "start_failure":
                 raise OSError(errno.EAGAIN, "injected worker startup failure")
             self.started = True
+            if worker_case == "worker_exception":
+                # Synchronous mock executes the real kernel_thread closure.
+                # It must convert a non-OSError to a backend failure.
+                self.target()
 
         def is_alive(self) -> bool:
             return False
@@ -756,16 +762,19 @@ def selftest_failure_gates() -> None:
         def join(self, timeout: float | None = None) -> None:
             assert self.started
 
-    for worker_case in ("clear_failure", "start_failure"):
+    for worker_case in ("clear_failure", "start_failure", "worker_exception"):
         ksock, ssock = FakeSocket(), FakeSocket()
         steps: list[int] = []
         err = io.StringIO()
 
         def mocked_ioctl(_fd: int, operation: int,
                          *_args: object) -> None:
+            assert _fd is fake_fd, "mocked ioctl touched a non-test fd"
             steps.append(operation)
             if worker_case == "clear_failure" and operation == NBD_CLEAR_SOCK:
                 raise OSError(errno.EIO, "injected clear failure")
+            if worker_case == "worker_exception" and operation == NBD_DO_IT:
+                raise RuntimeError("injected unexpected NBD worker failure")
 
         with (mock.patch(__name__ + ".validate_nbd_node", return_value="/dev/nbd0"),
               mock.patch(__name__ + ".verify_nbd_device_identity"),
@@ -787,12 +796,15 @@ def selftest_failure_gates() -> None:
                 else:
                     raise AssertionError("failed worker startup was accepted")
             else:
-                assert serve_kernel(args) == 1, "clear-sock error yielded success"
+                assert serve_kernel(args) == 1, "worker/clear-sock error yielded success"
         assert ksock.closed and ssock.closed
         fd_close.assert_called_once_with(fake_fd)
         assert steps[-1] == NBD_CLEAR_SOCK
         if worker_case == "clear_failure":
             assert "NBD_CLEAR_SOCK failed" in err.getvalue()
+        elif worker_case == "worker_exception":
+            assert NBD_DO_IT in steps
+            assert "NBD_DO_IT unexpected RuntimeError" in err.getvalue()
         else:
             assert NBD_DO_IT not in steps
 
