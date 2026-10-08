@@ -12,17 +12,35 @@ swapz_test_confirm_dm_absent() {
     echo "ERROR: cannot list DM devices to verify $target_name removal" >&2
     return 1
   fi
-  local matched
-  # Parse output must succeed independently of whether the target matched.
-  # A broken parser must never be treated as verified DM absence.
-  if ! matched=$(awk -v name="$target_name" '$1 == name { print "present"; exit }' <<<"$dm_mappings"); then
-    echo "ERROR: cannot parse DM device inventory; preserving backing" >&2
+  local state
+  # A successful command is not proof that its output is well formed. Validate
+  # *every* row before allowing "not listed" to authorize lower-layer removal.
+  # dmsetup ls --noheadings prints NAME (MAJOR:MINOR), or an empty list.
+  if ! state=$(awk -v name="$target_name" '
+    NF == 0 { next }
+    $0 == "No devices found" { if (NR != 1) malformed = 1; empty = 1; next }
+    {
+      if (NF != 2 || $1 !~ /^[^[:space:]]+$/ ||
+          $2 !~ /^\\([0-9][0-9]*:[0-9][0-9]*\\)$/) {
+        malformed = 1
+        next
+      }
+      rows++
+      if ($1 == name) found = 1
+    }
+    END {
+      if (malformed || (empty && rows)) exit 2
+      print found ? "present" : "absent"
+    }
+  ' <<<"$dm_mappings"); then
+    echo "ERROR: malformed or unreadable DM inventory; preserving backing" >&2
     return 1
   fi
-  if [[ -n "$matched" ]]; then
-    echo "ERROR: DM target $target_name is still listed; preserving backing" >&2
-    return 1
-  fi
+  case "$state" in
+    absent) return 0 ;;
+    present) echo "ERROR: DM target $target_name is still listed; preserving backing" >&2; return 1 ;;
+    *) echo "ERROR: invalid DM inventory parser result; preserving backing" >&2; return 1 ;;
+  esac
   return 0
 }
 
@@ -77,16 +95,16 @@ swapz_test_check_loop_holders() {
 # so a query error can never be mistaken for a safely detached loop.
 swapz_test_loop_presence() {
   local loop_device=$1
-  local inventory entry
+  local inventory entry extra
   if ! inventory=$(losetup --list --noheadings --output NAME); then
     echo "ERROR: cannot inventory loop attachments; preserving backing" >&2
     return 2
   fi
   # `read` splits/strips column padding emitted by some losetup builds.
-  while read -r entry _; do
-    [[ -z "$entry" ]] && continue
-    if [[ ! "$entry" =~ ^/dev/loop[0-9]+$ ]]; then
-      echo "ERROR: malformed loop inventory entry: $entry" >&2
+  while read -r entry extra; do
+    [[ -z "$entry" && -z "$extra" ]] && continue
+    if [[ ! "$entry" =~ ^/dev/loop[0-9]+$ || -n "$extra" ]]; then
+      echo "ERROR: malformed loop inventory row: $entry $extra" >&2
       return 2
     fi
     [[ "$entry" == "$loop_device" ]] && return 0
