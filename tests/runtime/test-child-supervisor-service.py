@@ -16,6 +16,7 @@ import re
 import select
 import socket
 import struct
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -225,6 +226,7 @@ class SupervisorControlService:
         self._sticky_failure = False
         self._unconfirmed_launch = False
         self._shutdown = False
+        self._stop_all_attempted = False
         self._last_stop_all_reaped = False
         self._last_stop_all_clean = False
 
@@ -372,6 +374,12 @@ class SupervisorControlService:
         if any(not isinstance(item, str) or not item or len(item) > 128 for item in handles):
             raise ProtocolError("handles contain an invalid opaque handle", request_id=request_id)
         self._admission_closed = True
+        repeated_stop = self._stop_all_attempted
+        self._stop_all_attempted = True
+        if repeated_stop:
+            # A second report is not a new authorization attempt.  Still run
+            # the supervisor's best-effort stop/reap pass, but latch failure.
+            self._sticky_failure = True
         try:
             # The callback only returns an in-memory marker.  This service has
             # no device cleanup callback and cannot touch DM, loop, or swap.
@@ -383,7 +391,9 @@ class SupervisorControlService:
             return self._response(request_id, status="lifecycle_failure",
                                   error=f"stop_all failed: {_bounded_text(exc)}")
         self._last_stop_all_reaped = bool(report.all_reaped) and self._all_reaped()
-        self._last_stop_all_clean = bool(report.cleanup_allowed) and self._last_stop_all_reaped
+        self._last_stop_all_clean = (
+            bool(report.cleanup_allowed) and self._last_stop_all_reaped and not repeated_stop
+        )
         result_handles = [result.handle for result in report.results]
         if (any(not _valid_opaque_handle(handle) for handle in result_handles)
                 or len(result_handles) != len(set(result_handles))
@@ -416,13 +426,19 @@ class SupervisorControlService:
     def _shutdown_request(self, request_id: int, request: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         self._exact_keys(request, {"id", "op"})
         if not self._all_reaped():
+            # An out-of-order or unresolved shutdown attempt is sticky.  The
+            # caller may still issue stop_all to reap children, but it can no
+            # longer receive cleanup authorization from this session.
+            self._sticky_failure = True
             return self._response(request_id, status="workers_unresolved", all_reaped=False,
                                   error="shutdown rejected while a worker is unconfirmed or unreaped"), False
         self._admission_closed = True
         self._shutdown = True
-        clean = self._last_stop_all_clean and not self._sticky_failure
-        status = "shutdown" if not self._sticky_failure else "shutdown_with_lifecycle_failure"
-        return self._response(request_id, status=status, ok=True,
+        clean = self._stop_all_attempted and self._last_stop_all_clean and not self._sticky_failure
+        if not clean:
+            self._sticky_failure = True
+        status = "shutdown" if clean else "shutdown_with_lifecycle_failure"
+        return self._response(request_id, status=status, ok=clean,
                               cleanup_allowed=clean, all_reaped=True), True
 
     def _dispatch(self, request: object) -> tuple[dict[str, Any], bool, int | None]:
@@ -511,52 +527,230 @@ class SupervisorControlService:
 
 
 class SupervisorControlClient:
-    """Small client-side protocol implementation with fail-closed authorization."""
+    """Client-side protocol with complete worker attestation and sticky denial.
 
-    def __init__(self, sock: socket.socket, *, timeout: float = DEFAULT_CLIENT_TIMEOUT) -> None:
+    ``service_process`` must be the Popen object used to launch this service.
+    Final authorization polls that exact object and requires an observed zero
+    exit after a valid shutdown response.
+    """
+
+    def __init__(
+        self,
+        sock: socket.socket,
+        *,
+        service_process: subprocess.Popen[Any] | None = None,
+        timeout: float = DEFAULT_CLIENT_TIMEOUT,
+    ) -> None:
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout must be finite and positive")
         if sock.family != socket.AF_UNIX or sock.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM:
             raise ValueError("control client requires an AF_UNIX stream socket")
         self.sock = sock
+        self.service_process = service_process
         self.sock.setblocking(False)
         self.timeout = timeout
         self._next_id = 1
         self._transport_failed = False
         self._authorization_denied = False
+        self._registered_handles: list[str] = []
+        self._launch_attempts = 0
+        self._stop_attempts = 0
         self._stop_authorized = False
         self._shutdown_acknowledged = False
+        self._shutdown_attempts = 0
+        self._finalized = False
         self.cleanup_authorized = False
 
+    def _deny(self, *, transport: bool = False) -> None:
+        """Latch a session failure; no later response can clear this state."""
+        self._authorization_denied = True
+        self.cleanup_authorized = False
+        if transport:
+            self._transport_failed = True
+            self._stop_authorized = False
+            self._shutdown_acknowledged = False
+
+    def _protocol_failure(self, message: str) -> ProtocolFailure:
+        self._deny(transport=True)
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        return ProtocolFailure(f"untrustworthy supervisor response: {message}; preserve backing")
+
+    @staticmethod
+    def _response_envelope(response: object, request_id: int) -> dict[str, Any]:
+        if not isinstance(response, dict):
+            raise ProtocolError("response must be an object")
+        response_id = response.get("id")
+        if isinstance(response_id, bool) or not isinstance(response_id, int) or response_id != request_id:
+            raise ProtocolError("response request id mismatch")
+        if not isinstance(response.get("status"), str):
+            raise ProtocolError("response status is missing or invalid")
+        for key in ("ok", "all_reaped", "cleanup_allowed", "preserve_backing"):
+            if not isinstance(response.get(key), bool):
+                raise ProtocolError(f"response field {key} is missing or invalid")
+        if response["preserve_backing"] == response["cleanup_allowed"]:
+            raise ProtocolError("response cleanup fields contradict")
+        return response
+
+    @staticmethod
+    def _worker_row_shape(row: object) -> bool:
+        if not isinstance(row, dict) or set(row) != {"handle", "reaped", "exit_code", "escalated", "errors"}:
+            return False
+        if not _valid_opaque_handle(row["handle"]):
+            return False
+        if not isinstance(row["reaped"], bool) or not isinstance(row["escalated"], bool):
+            return False
+        exit_code = row["exit_code"]
+        if exit_code is not None and (
+            isinstance(exit_code, bool) or not isinstance(exit_code, int) or not 0 <= exit_code <= 255
+        ):
+            return False
+        errors = row["errors"]
+        return isinstance(errors, list) and all(isinstance(item, str) for item in errors)
+
+    def _validate_stop_success(self, response: dict[str, Any]) -> bool:
+        expected_keys = {
+            "id", "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "workers", "errors"
+        }
+        if set(response) != expected_keys:
+            raise ProtocolError("successful stop_all response has missing or unexpected fields")
+        if not (
+            response["status"] == "complete" and response["ok"] is True
+            and response["all_reaped"] is True and response["cleanup_allowed"] is True
+            and response["preserve_backing"] is False
+        ):
+            raise ProtocolError("successful stop_all verdict fields contradict")
+        workers = response["workers"]
+        errors = response["errors"]
+        if not isinstance(workers, list) or len(workers) > MAX_WORKERS:
+            raise ProtocolError("successful stop_all worker inventory is invalid")
+        if not isinstance(errors, list) or any(not isinstance(item, str) for item in errors):
+            raise ProtocolError("successful stop_all error inventory is invalid")
+        if any(not self._worker_row_shape(row) for row in workers):
+            raise ProtocolError("successful stop_all contains a malformed worker result")
+        handles = [row["handle"] for row in workers]
+        if len(handles) != len(set(handles)):
+            raise ProtocolError("successful stop_all contains duplicate worker handles")
+        if set(handles) != set(self._registered_handles) or len(handles) != len(self._registered_handles):
+            raise ProtocolError("successful stop_all worker inventory does not match launch history")
+        if any(row["reaped"] is not True or row["exit_code"] is None for row in workers):
+            raise ProtocolError("successful stop_all contains an unreaped worker")
+        if errors or any(row["errors"] for row in workers):
+            return False
+        return True
+
+    def _validate_launch_response(self, response: dict[str, Any]) -> bool:
+        if response.get("status") != "ready":
+            self._deny()
+            return False
+        if self._stop_attempts:
+            raise ProtocolError("service accepted launch after cleanup admission closed")
+        expected_keys = {
+            "id", "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "handle"
+        }
+        handle = response.get("handle")
+        if (set(response) != expected_keys or response["ok"] is not True
+                or response["all_reaped"] is not False or response["cleanup_allowed"] is not False
+                or response["preserve_backing"] is not True or not _valid_opaque_handle(handle)
+                or handle in self._registered_handles):
+            raise ProtocolError("launch READY response is malformed or has a duplicate handle")
+        self._registered_handles.append(handle)
+        return True
+
+    def _validate_wait_response(self, response: dict[str, Any], handle: object) -> None:
+        status = response["status"]
+        if status not in {"running", "reaped"}:
+            self._deny()
+            return
+        if set(response) != {
+            "id", "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "worker"
+        }:
+            raise ProtocolError("wait response has missing or unexpected fields")
+        row = response["worker"]
+        if not self._worker_row_shape(row) or row["handle"] != handle:
+            raise ProtocolError("wait response worker does not match requested handle")
+        if response["cleanup_allowed"] is not False or response["preserve_backing"] is not True:
+            raise ProtocolError("wait response contains a cleanup verdict")
+        if status == "running":
+            if (response["ok"] is not True or row["reaped"] is not False
+                    or row["exit_code"] is not None or row["errors"]):
+                raise ProtocolError("running wait response has a contradictory worker result")
+        elif (response["ok"] is not True or row["reaped"] is not True
+              or row["exit_code"] != 0 or row["errors"]):
+            raise ProtocolError("reaped wait response has a contradictory worker result")
+
+    def _validate_shutdown_response(self, response: dict[str, Any]) -> bool:
+        status = response["status"]
+        if status == "workers_unresolved":
+            self._deny()
+            if (response["ok"] is not False or response["all_reaped"] is not False
+                    or response["cleanup_allowed"] is not False or response["preserve_backing"] is not True
+                    or not isinstance(response.get("error"), str)):
+                raise ProtocolError("workers_unresolved response is malformed")
+            return False
+        if status != "shutdown":
+            self._deny()
+            return False
+        expected_keys = {"id", "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing"}
+        if (set(response) != expected_keys or response["ok"] is not True
+                or response["all_reaped"] is not True or response["cleanup_allowed"] is not True
+                or response["preserve_backing"] is not False):
+            raise ProtocolError("successful shutdown response is incomplete or contradictory")
+        return True
+
     def call(self, operation: str, **fields: Any) -> dict[str, Any]:
-        if self._transport_failed:
-            raise ChannelFailure("control session already failed; preserve backing")
+        if self._transport_failed or self._finalized or self._shutdown_acknowledged:
+            self._deny()
+            raise ChannelFailure("control session is no longer usable; preserve backing")
+        if not isinstance(operation, str):
+            self._deny()
+            raise ValueError("operation must be a string")
         if "id" in fields or "op" in fields:
-            self._authorization_denied = True
+            self._deny()
             raise ValueError("id and op are reserved protocol fields")
+        if operation not in {"launch", "wait", "stop_all", "shutdown"}:
+            self._deny()
+        denied_before_call = self._authorization_denied
+        if operation in {"launch", "wait"} and self._stop_attempts:
+            self._deny()
+        if operation == "launch":
+            if self._launch_attempts >= MAX_WORKERS:
+                self._deny()
+                raise ChannelFailure("client worker limit reached; preserve backing")
+            self._launch_attempts += 1
+            if denied_before_call and not self._stop_attempts:
+                raise ChannelFailure("launch denied after an earlier session failure; preserve backing")
+        if operation == "stop_all":
+            self._stop_attempts += 1
+            if self._stop_attempts > 1:
+                self._deny()
+            supplied = fields.get("handles")
+            if supplied != self._registered_handles:
+                self._deny()
+        if operation == "shutdown":
+            self._shutdown_attempts += 1
+            if self._shutdown_attempts > 1 or not self._stop_authorized or self._authorization_denied:
+                self._deny()
         request_id = self._next_id
         self._next_id += 1
         request = {"id": request_id, "op": operation, **fields}
         try:
             send_frame(self.sock, request, self.timeout)
             response = recv_frame(self.sock, self.timeout)
-            if response is None or response.get("id") != request_id:
-                raise ProtocolError("response request id mismatch")
-            if not isinstance(response.get("cleanup_allowed"), bool) or not isinstance(response.get("preserve_backing"), bool):
-                raise ProtocolError("response lacks explicit cleanup verdict")
-            if response["preserve_backing"] == response["cleanup_allowed"]:
-                raise ProtocolError("response cleanup fields contradict")
+            if response is None:
+                raise ProtocolError("supervisor closed without a response")
+            response = self._response_envelope(response, request_id)
         except OSError as exc:
-            self._transport_failed = True
-            self._authorization_denied = True
-            self.cleanup_authorized = False
-            self._stop_authorized = False
+            self._deny(transport=True)
             raise SupervisorUnavailable(f"supervisor transport failed: {exc}; preserve backing") from exc
         except (ProtocolError, TimeoutError) as exc:
-            self._transport_failed = True
-            self._authorization_denied = True
-            self.cleanup_authorized = False
-            self._stop_authorized = False
+            self._deny(transport=True)
             message = str(exc)
             unavailable_markers = ("timed out", "read failed", "write failed", "truncated control frame",
                                    "short write")
@@ -564,59 +758,70 @@ class SupervisorControlClient:
                           else ProtocolFailure)
             raise error_type(f"untrustworthy supervisor response: {exc}; preserve backing") from exc
 
-        if operation == "stop_all":
-            self._stop_authorized = (
-                response.get("status") == "complete"
-                and response.get("ok") is True
-                and response.get("all_reaped") is True
-                and response.get("cleanup_allowed") is True
-                and response.get("preserve_backing") is False
-            )
-            if not self._stop_authorized:
-                self._authorization_denied = True
-                self.cleanup_authorized = False
-        elif operation == "shutdown":
-            self._shutdown_acknowledged = (
-                response.get("status") == "shutdown"
-                and response.get("ok") is True
-                and response.get("all_reaped") is True
-            )
-            if self._stop_authorized and (
-                response.get("cleanup_allowed") is not True
-                or response.get("preserve_backing") is not False
-            ):
-                self._shutdown_acknowledged = False
-            if not self._shutdown_acknowledged:
-                if response.get("status") != "workers_unresolved":
-                    self._authorization_denied = True
-                self.cleanup_authorized = False
-        if response.get("status") in {"protocol_error", "lifecycle_failure", "launch_failure", "supervisor_contract_failure"}:
-            self._authorization_denied = True
-            self.cleanup_authorized = False
-            if response.get("status") == "protocol_error":
-                self._transport_failed = True
-        if response.get("status") == "admission_closed":
-            self._authorization_denied = True
-            self.cleanup_authorized = False
+        try:
+            if operation == "launch":
+                if not self._validate_launch_response(response):
+                    pass
+            elif operation == "wait":
+                self._validate_wait_response(response, fields.get("handle"))
+            elif operation == "stop_all":
+                if response["status"] == "complete":
+                    report_clean = self._validate_stop_success(response)
+                    self._stop_authorized = report_clean and not self._authorization_denied
+                    if not report_clean:
+                        self._deny()
+                else:
+                    self._stop_authorized = False
+                    if (response["ok"] is not False or response["cleanup_allowed"] is not False
+                            or response["preserve_backing"] is not True):
+                        raise ProtocolError("failed stop_all response has a contradictory verdict")
+                    self._deny()
+            elif operation == "shutdown":
+                response_clean = self._validate_shutdown_response(response)
+                self._shutdown_acknowledged = response_clean and not self._authorization_denied
+                if not response_clean:
+                    self._deny()
+            else:
+                self._deny()
+        except ProtocolError as exc:
+            raise self._protocol_failure(str(exc)) from exc
+
+        if operation in {"launch", "wait"} and response["cleanup_allowed"] is not False:
+            raise self._protocol_failure(f"{operation} response unexpectedly grants cleanup")
+        if response["status"] in {
+            "protocol_error", "lifecycle_failure", "launch_failure", "supervisor_contract_failure", "admission_closed"
+        }:
+            self._deny(transport=response["status"] == "protocol_error")
         return response
 
-    def confirm_service_exit(self, exit_code: int) -> bool:
-        """Finalize only after a clean shutdown response and process exit."""
+    def confirm_service_exit(self) -> bool:
+        """Finalize after polling the exact service process bound to this client."""
+        if self._finalized:
+            return self.cleanup_authorized
+        self._finalized = True
+        exit_code: int | None = None
+        if isinstance(self.service_process, subprocess.Popen):
+            try:
+                observed = self.service_process.poll()
+                if isinstance(observed, int) and not isinstance(observed, bool):
+                    exit_code = observed
+            except Exception:
+                exit_code = None
         self.cleanup_authorized = bool(
             not self._transport_failed and not self._authorization_denied
             and self._stop_authorized and self._shutdown_acknowledged and exit_code == 0
         )
         if not self.cleanup_authorized:
-            self._authorization_denied = True
+            self._deny()
         return self.cleanup_authorized
 
     def close(self) -> None:
+        if not self.cleanup_authorized:
+            self._deny(transport=True)
         try:
             self.sock.close()
         except OSError:
-            self._transport_failed = True
-            self._authorization_denied = True
-            self.cleanup_authorized = False
+            self._deny(transport=True)
 
 
 def _main() -> int:

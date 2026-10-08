@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import errno
 import socket
 import struct
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -35,6 +37,7 @@ supervisor_module = load_module("service_test_supervisor", SUPERVISOR_PATH)
 service_module = load_module("service_test_module", SERVICE_PATH)
 
 SupervisorError = service_module.SupervisorError
+PidfdUnavailable = service_module.PidfdUnavailable
 StopReport = supervisor_module.StopReport
 WorkerResult = supervisor_module.WorkerResult
 ChannelFailure = service_module.ChannelFailure
@@ -59,11 +62,11 @@ class ServiceProcess:
             close_fds=True,
         )
         child.close()
-        self.client = SupervisorControlClient(parent, timeout=12.0)
+        self.client = SupervisorControlClient(parent, service_process=self.process, timeout=12.0)
 
     def finish(self, *, timeout: float = 8.0) -> tuple[int, str, str]:
         out, err = self.process.communicate(timeout=timeout)
-        self.client.confirm_service_exit(self.process.returncode or 0)
+        self.client.confirm_service_exit()
         self.client.close()
         return self.process.returncode or 0, out, err
 
@@ -138,6 +141,66 @@ class FakeServiceSupervisor:
 def raw_frame(value: dict[str, Any]) -> bytes:
     payload = json.dumps(value, separators=(",", ":")).encode()
     return _HEADER.pack(len(payload)) + payload
+
+
+def response_base(request_id: int, *, status: str, ok: bool, all_reaped: bool,
+                  cleanup_allowed: bool = False) -> dict[str, Any]:
+    return {
+        "id": request_id,
+        "ok": ok,
+        "status": status,
+        "all_reaped": all_reaped,
+        "cleanup_allowed": cleanup_allowed,
+        "preserve_backing": not cleanup_allowed,
+    }
+
+
+def launch_ready(request_id: int, handle: str) -> dict[str, Any]:
+    return {**response_base(request_id, status="ready", ok=True, all_reaped=False), "handle": handle}
+
+
+def worker_result(handle: str, *, reaped: bool = True, exit_code: int | None = 143,
+                  errors: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "handle": handle,
+        "reaped": reaped,
+        "exit_code": exit_code,
+        "escalated": False,
+        "errors": [] if errors is None else errors,
+    }
+
+
+def stop_complete(request_id: int, handles: list[str]) -> dict[str, Any]:
+    return {
+        **response_base(request_id, status="complete", ok=True, all_reaped=True, cleanup_allowed=True),
+        "workers": [worker_result(handle) for handle in handles],
+        "errors": [],
+    }
+
+
+def shutdown_clean(request_id: int) -> dict[str, Any]:
+    return response_base(request_id, status="shutdown", ok=True, all_reaped=True, cleanup_allowed=True)
+
+
+def completed_process(exit_code: int = 0) -> subprocess.Popen[Any]:
+    process = subprocess.Popen(
+        [sys.executable, "-c", f"raise SystemExit({exit_code})"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    process.wait(timeout=3.0)
+    return process
+
+
+def queued_client(responses: list[dict[str, Any]], *, timeout: float = 0.5,
+                  process: subprocess.Popen[Any] | None = None) -> tuple[Any, Any, subprocess.Popen[Any] | None]:
+    client_socket, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer.setblocking(False)
+    for response in responses:
+        service_module.send_frame(peer, response, 0.5)
+    client = SupervisorControlClient(client_socket, service_process=process, timeout=timeout)
+    return client, peer, process
 
 
 def run_in_process(raw: bytes, service: SupervisorControlService | None = None) -> tuple[Any, list[dict[str, Any]]]:
@@ -244,7 +307,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
         finally:
             session.abort()
 
-    def test_shutdown_rejection_is_recoverable_then_stop_all_succeeds(self) -> None:
+    def test_out_of_order_shutdown_permanently_denies_even_after_reaping(self) -> None:
         session = ServiceProcess()
         try:
             started = session.client.call("launch", command="sleep", duration_ms=4000)
@@ -253,11 +316,12 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             self.assertEqual(rejected["status"], "workers_unresolved")
             self.assertFalse(rejected["all_reaped"])
             stopped = session.client.call("stop_all", handles=[handle])
-            self.assertTrue(stopped["cleanup_allowed"])
-            session.client.call("shutdown")
+            self.assertFalse(stopped["cleanup_allowed"])
+            shutdown = session.client.call("shutdown")
+            self.assertEqual(shutdown["status"], "shutdown_with_lifecycle_failure")
             code, _, _ = session.finish()
-            self.assertEqual(code, 0)
-            self.assertTrue(session.client.cleanup_authorized)
+            self.assertNotEqual(code, 0)
+            self.assertFalse(session.client.cleanup_authorized)
         finally:
             session.abort()
 
@@ -413,8 +477,8 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             {"id": 2, "op": "launch", "command": "exit", "code": 0}
         )
         outcome, responses = run_in_process(raw, SupervisorControlService(supervisor=fake, io_timeout=0.5))
-        self.assertEqual(outcome.exit_code, 0)
-        self.assertEqual([row["status"] for row in responses], ["shutdown"])
+        self.assertEqual(outcome.exit_code, 3)
+        self.assertEqual([row["status"] for row in responses], ["shutdown_with_lifecycle_failure"])
         self.assertEqual(fake.next, 0)
 
     def test_protocol_rejects_oversized_malformed_and_partial_frames(self) -> None:
@@ -487,16 +551,323 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
     def test_service_unavailability_after_stop_response_denies_final_authorization(self) -> None:
         client_socket, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         client = SupervisorControlClient(client_socket, timeout=0.5)
-        service_module.send_frame(peer, {"id": 1, "ok": True, "status": "complete",
-                                         "cleanup_allowed": True, "preserve_backing": False,
-                                         "all_reaped": True}, 0.5)
+        service_module.send_frame(peer, stop_complete(1, []), 0.5)
         response = client.call("stop_all", handles=[])
         self.assertEqual(response["status"], "complete")
         peer.close()
         with self.assertRaises(ChannelFailure):
             client.call("shutdown")
-        self.assertFalse(client.confirm_service_exit(0))
+        self.assertFalse(client.confirm_service_exit())
         client.close()
+
+    def test_stop_all_requires_complete_attested_worker_inventory(self) -> None:
+        def empty_workers(response: dict[str, Any]) -> None:
+            response["workers"] = []
+
+        def missing_worker(response: dict[str, Any]) -> None:
+            response["workers"] = [worker_result("worker-A")]
+
+        def duplicate_handle(response: dict[str, Any]) -> None:
+            response["workers"] = [worker_result("worker-A"), worker_result("worker-A")]
+
+        def unknown_handle(response: dict[str, Any]) -> None:
+            response["workers"] = [worker_result("worker-A"), worker_result("worker-X")]
+
+        def unreaped_worker(response: dict[str, Any]) -> None:
+            response["workers"][1] = worker_result("worker-B", reaped=False, exit_code=None)
+
+        def worker_error(response: dict[str, Any]) -> None:
+            response["workers"][0] = worker_result("worker-A", errors=["injected close error"])
+
+        def report_error(response: dict[str, Any]) -> None:
+            response["errors"] = ["injected report error"]
+
+        def bad_worker_type(response: dict[str, Any]) -> None:
+            response["workers"] = "worker-A,worker-B"
+
+        def omitted_report_field(response: dict[str, Any]) -> None:
+            del response["errors"]
+
+        def contradictory_verdict(response: dict[str, Any]) -> None:
+            response["ok"] = False
+            response["all_reaped"] = False
+
+        cases = [
+            ("empty worker list", empty_workers),
+            ("missing worker", missing_worker),
+            ("duplicate handle", duplicate_handle),
+            ("unknown handle", unknown_handle),
+            ("unreaped worker", unreaped_worker),
+            ("worker error", worker_error),
+            ("report error", report_error),
+            ("malformed worker type", bad_worker_type),
+            ("omitted report field", omitted_report_field),
+            ("contradictory top level", contradictory_verdict),
+        ]
+        for label, mutate in cases:
+            with self.subTest(case=label):
+                stop = stop_complete(3, ["worker-A", "worker-B"])
+                mutate(stop)
+                process = completed_process(0)
+                responses = [
+                    launch_ready(1, "worker-A"),
+                    launch_ready(2, "worker-B"),
+                    stop,
+                    shutdown_clean(4),  # A forged later success must never erase denial.
+                ]
+                client, peer, _ = queued_client(responses, process=process)
+                try:
+                    self.assertEqual(client.call("launch", command="sleep", duration_ms=10)["handle"], "worker-A")
+                    self.assertEqual(client.call("launch", command="sleep", duration_ms=10)["handle"], "worker-B")
+                    try:
+                        client.call("stop_all", handles=["worker-A", "worker-B"])
+                    except ProtocolFailure:
+                        pass
+                    else:
+                        client.call("shutdown")
+                    self.assertFalse(client.confirm_service_exit())
+                    self.assertFalse(client.cleanup_authorized)
+                finally:
+                    client.close()
+                    peer.close()
+                    process.wait(timeout=3.0)
+
+    def test_failed_stop_then_forged_shutdown_and_second_stop_cannot_clear_denial(self) -> None:
+        failed_stop = {
+            **response_base(2, status="lifecycle_failure", ok=False, all_reaped=True),
+            "error": "injected worker failure",
+        }
+        process = completed_process(0)
+        client, peer, _ = queued_client(
+            [launch_ready(1, "worker-A"), failed_stop,
+             stop_complete(3, ["worker-A"]), shutdown_clean(4)],
+            process=process,
+        )
+        try:
+            client.call("launch", command="sleep", duration_ms=10)
+            self.assertEqual(client.call("stop_all", handles=["worker-A"])["status"], "lifecycle_failure")
+            self.assertTrue(client.call("stop_all", handles=["worker-A"])["cleanup_allowed"])
+            self.assertEqual(client.call("shutdown")["status"], "shutdown")
+            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.cleanup_authorized)
+        finally:
+            client.close()
+            peer.close()
+            process.wait(timeout=3.0)
+
+    def test_lost_shutdown_response_after_valid_stop_denies_cleanup(self) -> None:
+        process = completed_process(0)
+        client, peer, _ = queued_client([launch_ready(1, "worker-A"), stop_complete(2, ["worker-A"])],
+                                        process=process)
+        try:
+            client.call("launch", command="sleep", duration_ms=10)
+            self.assertTrue(client.call("stop_all", handles=["worker-A"])["cleanup_allowed"])
+            peer.close()
+            with self.assertRaises(ChannelFailure):
+                client.call("shutdown")
+            self.assertFalse(client.confirm_service_exit())
+        finally:
+            client.close()
+            peer.close()
+            process.wait(timeout=3.0)
+
+    def test_successful_shutdown_with_nonzero_bound_service_exit_denies_cleanup(self) -> None:
+        process = completed_process(7)
+        client, peer, _ = queued_client(
+            [launch_ready(1, "worker-A"), stop_complete(2, ["worker-A"]), shutdown_clean(3)],
+            process=process,
+        )
+        try:
+            client.call("launch", command="sleep", duration_ms=10)
+            client.call("stop_all", handles=["worker-A"])
+            client.call("shutdown")
+            self.assertFalse(client.confirm_service_exit())
+            self.assertFalse(client.cleanup_authorized)
+        finally:
+            client.close()
+            peer.close()
+            process.wait(timeout=3.0)
+
+    def test_confirm_requires_observed_exit_of_the_bound_service_process(self) -> None:
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(2)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        client, peer, _ = queued_client(
+            [launch_ready(1, "worker-A"), stop_complete(2, ["worker-A"]), shutdown_clean(3)],
+            process=process,
+        )
+        try:
+            client.call("launch", command="sleep", duration_ms=10)
+            client.call("stop_all", handles=["worker-A"])
+            client.call("shutdown")
+            self.assertFalse(client.confirm_service_exit())
+            process.wait(timeout=3.0)
+            self.assertFalse(client.confirm_service_exit())  # Missing step is sticky.
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=3.0)
+            client.close()
+            peer.close()
+
+    def test_delayed_and_replayed_response_ids_never_advance_the_session(self) -> None:
+        client_socket, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        client = SupervisorControlClient(client_socket, timeout=0.03)
+        send_errors: list[Exception] = []
+
+        def delayed_response() -> None:
+            try:
+                time.sleep(0.08)
+                service_module.send_frame(peer, launch_ready(1, "late-worker"), 0.5)
+            except Exception as exc:
+                send_errors.append(exc)
+
+        sender = threading.Thread(target=delayed_response, daemon=True)
+        sender.start()
+        try:
+            with self.assertRaises(SupervisorUnavailable):
+                client.call("launch", command="sleep", duration_ms=10)
+            sender.join(timeout=1.0)
+            self.assertFalse(sender.is_alive())
+            with self.assertRaises(ChannelFailure):
+                client.call("launch", command="sleep", duration_ms=10)
+            self.assertFalse(client.cleanup_authorized)
+        finally:
+            client.close()
+            peer.close()
+        self.assertEqual(send_errors, [])
+
+        process = completed_process(0)
+        replay_client, replay_peer, _ = queued_client(
+            [launch_ready(1, "worker-A"),
+             {**response_base(1, status="running", ok=True, all_reaped=False),
+              "worker": worker_result("worker-A", reaped=False, exit_code=None)}],
+            process=process,
+        )
+        try:
+            replay_client.call("launch", command="sleep", duration_ms=10)
+            with self.assertRaises(ProtocolFailure):
+                replay_client.call("wait", handle="worker-A", timeout_ms=1)
+            self.assertFalse(replay_client.confirm_service_exit())
+        finally:
+            replay_client.close()
+            replay_peer.close()
+            process.wait(timeout=3.0)
+
+        process2 = completed_process(0)
+        nonzero_client, nonzero_peer, _ = queued_client(
+            [launch_ready(1, "worker-A"),
+             {**response_base(2, status="reaped", ok=True, all_reaped=True),
+              "worker": worker_result("worker-A", exit_code=9)}],
+            process=process2,
+        )
+        try:
+            nonzero_client.call("launch", command="sleep", duration_ms=10)
+            with self.assertRaises(ProtocolFailure):
+                nonzero_client.call("wait", handle="worker-A", timeout_ms=10)
+            self.assertFalse(nonzero_client.confirm_service_exit())
+        finally:
+            nonzero_client.close()
+            nonzero_peer.close()
+            process2.wait(timeout=3.0)
+
+    def test_service_disconnect_during_multiworker_stop_reaps_but_never_authorizes(self) -> None:
+        session = ServiceProcess()
+        handles = []
+        try:
+            for _ in range(3):
+                handles.append(session.client.call("launch", command="sleep", duration_ms=4000)["handle"])
+            service_module.send_frame(
+                session.client.sock,
+                {"id": 4, "op": "stop_all", "handles": handles},
+                1.0,
+            )
+            session.client.close()
+            _, err = session.process.communicate(timeout=8.0)
+            self.assertEqual(session.process.returncode, 2)
+            self.assertIn("internal_all_reaped=true", err)
+            self.assertIn("external_cleanup_allowed=false", err)
+            self.assertFalse(session.client.confirm_service_exit())
+        finally:
+            session.abort()
+
+    def test_service_repeated_stop_all_is_sticky_and_shutdown_fails(self) -> None:
+        fake = FakeServiceSupervisor()
+        service = SupervisorControlService(supervisor=fake, io_timeout=0.5)
+        requests = [
+            {"id": 1, "op": "launch", "command": "sleep", "duration_ms": 0},
+            {"id": 2, "op": "stop_all", "handles": ["fake-handle-1"]},
+            {"id": 3, "op": "stop_all", "handles": ["fake-handle-1"]},
+            {"id": 4, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(row) for row in requests), service)
+        self.assertTrue(responses[1]["cleanup_allowed"])
+        self.assertFalse(responses[2]["cleanup_allowed"])
+        self.assertEqual(responses[2]["status"], "lifecycle_failure")
+        self.assertFalse(responses[3]["cleanup_allowed"])
+        self.assertEqual(responses[3]["status"], "shutdown_with_lifecycle_failure")
+        self.assertEqual(outcome.exit_code, 3)
+        self.assertEqual(fake.calls, [("fake-handle-1",), ("fake-handle-1",)])
+
+    def test_pidfd_api_and_permission_failures_never_fall_back_or_authorize(self) -> None:
+        for number in (errno.ENOSYS, errno.EPERM):
+            with self.subTest(errno=number):
+                class UnsupportedPidfdSupervisor(FakeServiceSupervisor):
+                    def launch(self, argv: tuple[str, ...], *, env: dict[str, str]) -> str:
+                        raise PidfdUnavailable(
+                            f"injected pidfd failure {number}", preserve_required=False, child_reaped=True
+                        )
+
+                fake = UnsupportedPidfdSupervisor()
+                service = SupervisorControlService(supervisor=fake, io_timeout=0.5)
+                requests = [
+                    {"id": 1, "op": "launch", "command": "sleep", "duration_ms": 0},
+                    {"id": 2, "op": "stop_all", "handles": []},
+                    {"id": 3, "op": "shutdown"},
+                ]
+                outcome, responses = run_in_process(b"".join(raw_frame(row) for row in requests), service)
+                self.assertEqual(responses[0]["status"], "launch_failure")
+                self.assertFalse(responses[1]["cleanup_allowed"])
+                self.assertFalse(responses[2]["cleanup_allowed"])
+                self.assertEqual(outcome.exit_code, 3)
+                self.assertEqual(fake.next, 0)
+
+    def test_unexpected_client_operation_makes_later_positive_reports_useless(self) -> None:
+        protocol_error = response_base(1, status="protocol_error", ok=False, all_reaped=True)
+        process = completed_process(0)
+        client, peer, _ = queued_client(
+            [protocol_error, stop_complete(2, []), shutdown_clean(3)], process=process
+        )
+        try:
+            self.assertEqual(client.call("not-an-operation")["status"], "protocol_error")
+            with self.assertRaises(ChannelFailure):
+                client.call("stop_all", handles=[])
+            self.assertFalse(client.confirm_service_exit())
+        finally:
+            client.close()
+            peer.close()
+            process.wait(timeout=3.0)
+
+    def test_launch_after_cleanup_admission_closes_is_rejected_client_side(self) -> None:
+        # Existing live-service coverage checks the wire response; here also
+        # exercise the client-side latch against a forged READY response.
+        process = completed_process(0)
+        client, peer, _ = queued_client(
+            [stop_complete(1, []), launch_ready(2, "late-worker"), shutdown_clean(3)],
+            process=process,
+        )
+        try:
+            client.call("stop_all", handles=[])
+            with self.assertRaises(ProtocolFailure):
+                client.call("launch", command="sleep", duration_ms=10)
+            self.assertFalse(client.confirm_service_exit())
+        finally:
+            client.close()
+            peer.close()
+            process.wait(timeout=3.0)
 
     def test_three_worker_failure_denies_authorization_but_accounts_for_all(self) -> None:
         fake = FakeServiceSupervisor(stop_error="injected pidfd signal failure")

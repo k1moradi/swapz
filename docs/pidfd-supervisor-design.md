@@ -149,7 +149,14 @@ The wire API has no PID, `argv`, shell, working-directory, environment, or
 device-path field. It passes a small fixed environment to workers. This
 allowlist is for protocol and lifecycle tests; production recall must receive
 a separate reviewed direct-worker allowlist with exact argument and file-path
-validation before it can launch `dd`.
+validation before it can launch `dd`. That review must admit only the fixed
+read/write forms the recall fixture needs, validate block size, count, flags,
+input/output paths and the fixture-owned mapper identity, and keep page
+comparison in the parent. It must reject shell wrappers, generic executable
+paths, arbitrary environment/cwd values, and commands that can spawn I/O
+descendants. If a direct worker can still create descendants, the adapter must
+use a dedicated test cgroup and prove it empty before backing cleanup; the
+current test-only `sleep`/`exit` allowlist remains unchanged.
 
 ### Wire framing and session rules
 
@@ -175,22 +182,33 @@ authorize teardown. A natural nonzero exit is a lifecycle error even after
 the child has been reaped.
 
 `stop_all` permanently closes launch admission and passes the supplied handle
-list to `cleanup_after_stop()`. The supervisor still attempts all registered
-workers when the list is incomplete, but any omitted, duplicate, unknown, or
-malformed handle denies authorization. The only callback is an in-memory
-marker; the response reports provisional authorization only when every
-registered direct child has been reaped, every pidfd close was error-free,
-and no lifecycle error occurred.
+list to `cleanup_after_stop()`. The client retains every opaque handle from a
+valid `ready` response and checks the complete `stop_all` report before it
+records even provisional authorization. A successful report must have the
+expected top-level verdict fields, an empty report error list, and exactly one
+well-formed, reaped, error-free worker row for every handle returned by launch.
+Missing, duplicate, unknown, or changed handles; malformed row types; an
+unreaped row; a worker error; a report error; or contradictory verdict fields
+permanently deny cleanup. The only service callback remains an in-memory
+marker. Repeated `stop_all` calls still make a best-effort reap pass but latch
+failure and cannot produce a new authorization.
 
-The controller must then request `shutdown`, receive a successful all-reaped
-response, wait for the service process, and verify exit status zero. Only the
-client's `confirm_service_exit(0)` after those steps returns true from
-`cleanup_authorized` (the default client deadline is 75 seconds, longer than
-the 60-second maximum natural wait request). The caller must preserve backing
-after a service crash, disconnect, broken pipe, timeout, invalid response,
-nonzero exit, or any lifecycle failure, even if the service logs that it
-recovered and reaped its workers internally. Requests queued after a
-successful shutdown are not processed; the service closes the channel.
+The required sequence is one or more successfully tracked launches (or an
+empty worker set), one complete `stop_all`, a successful `shutdown`, and an
+observed zero exit from the exact service process launched for this control
+session. The client binds the service's `subprocess.Popen` object at
+construction; `confirm_service_exit()` polls that object rather than trusting
+a caller-supplied integer. Cleanup authorization is monotonic: a protocol,
+transport, launch, wait, stop, shutdown, inventory, or exit failure cannot be
+cleared by a later positive response. A shutdown attempted before a clean
+`stop_all` permanently denies cleanup; best-effort stopping may still proceed
+to reap children, but the service exits unsuccessfully. (The client deadline
+defaults to 75 seconds, longer than the 60-second maximum natural wait
+request.) The caller must preserve backing after a service crash, disconnect,
+broken pipe, timeout, invalid or contradictory response, nonzero exit, or any
+lifecycle failure, even if the service logs that it recovered and reaped its
+workers internally. Requests queued after shutdown are not processed; the
+service closes the channel.
 
 The service loop and the fork-based supervisor require the service process to
 remain single-threaded with default `SIGCHLD` handling. The supported baseline
