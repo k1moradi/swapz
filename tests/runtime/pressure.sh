@@ -4,7 +4,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source "$ROOT/tests/runtime/test-stack-teardown.sh"
 source "$ROOT/tests/runtime/pressure-teardown.sh"
 [[ $EUID -eq 0 ]] || { echo 'root required' >&2; exit 1; }
-for tool in awk dmsetup losetup mkswap modprobe ps readlink swapon swapoff systemctl systemd-run truncate; do
+for tool in awk dmsetup losetup mkswap modprobe ps python3 readlink swapon swapoff systemctl systemd-run truncate; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 grep -qw memory /sys/fs/cgroup/cgroup.controllers || { echo 'cgroup v2 memory controller unavailable' >&2; exit 1; }
