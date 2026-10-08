@@ -509,6 +509,34 @@ def selftest_failure_gates() -> None:
         else:
             raise AssertionError("NBD holders iteration failure was accepted")
 
+    # Assert validate_nbd_node() actually invokes the checked holder gate,
+    # not merely that the helper rejects an error when called directly.
+    valid_node = SimpleNamespace(st_mode=stat.S_IFBLK,
+                                 st_rdev=os.makedev(43, 0))
+
+    def fake_sysfs_text(path: Path, *_args: object, **_kw: object) -> str:
+        label = str(path)
+        if label.endswith("/dev"):
+            return "43:0\\n"
+        if label == "/proc/self/mountinfo":
+            return ""
+        if label == "/proc/swaps":
+            return "Filename\\tType\\tSize\\tUsed\\tPriority\\n"
+        raise AssertionError("unexpected sysfs/proc read: " + label)
+
+    with (mock.patch("os.lstat", return_value=valid_node),
+          mock.patch.object(Path, "exists", return_value=True),
+          mock.patch.object(Path, "read_text", autospec=True,
+                            side_effect=fake_sysfs_text),
+          mock.patch("os.stat", side_effect=FileNotFoundError("no PID")),
+          mock.patch("os.scandir", side_effect=PermissionError("holders denied"))):
+        try:
+            validate_nbd_node("/dev/nbd0")
+        except ValueError as exc:
+            assert "cannot inspect NBD holders" in str(exc)
+        else:
+            raise AssertionError("full NBD preflight skipped failed holder inspection")
+
     # A failed sysfs PID inspection must not pass the full node preflight.
     spoof = SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=os.makedev(43, 0))
     with (mock.patch("os.lstat", return_value=spoof),
