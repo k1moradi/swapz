@@ -19,7 +19,8 @@ reset_fixture() {
   GROUP_REMOVED=0; GROUP_INSPECT_FAIL=0
   UNIT_LOAD_FAIL=0; UNIT_GROUP_FAIL=0; UNIT_STATE_FAIL=0
   UNIT_PID_FAIL=0; UNIT_STOP_FAIL=0; CGROUP_PIDS=""
-  CGROUP_READ_FAIL=0; SWAPS_READ_FAIL=0; SWAPS_INVALID=0
+  CGROUP_READ_FAIL=0; CGROUP_SECOND_PIDS=""; SWAPS_READ_FAIL=0; SWAPS_INVALID=0
+  SWAPS_FAKE_CONTENT=""
   MAP_EXISTS=1; MAP_ABSENCE_FAIL=0; MAP_RESOLVE_FAIL=0; SWAP_RESOLVE_FAIL=0
   ACTIVE_SWAP=0; SWAPOFF_FAIL=0; CLEAN_CALLS=0; SWAPOFF_CALLS=0
   : >"$EVENT_LOG"
@@ -48,14 +49,28 @@ cat() {
       record 'verify-swap'
       (( SWAPS_READ_FAIL )) && return 5
       if (( SWAPS_INVALID )); then printf 'corrupt header\n'; return 0; fi
+      if [[ -n "$SWAPS_FAKE_CONTENT" ]]; then
+        printf '%s\n' "$SWAPS_FAKE_CONTENT"
+        return 0
+      fi
       printf 'Filename\tType\tSize\tUsed\tPriority\n'
       printf '/swapfile\tfile\t64\t0\t-1\n'
       (( ACTIVE_SWAP )) && printf '/dev/dm-93\tpartition\t64\t0\t100\n'
       return 0 ;;
     /sys/fs/cgroup/*/cgroup.procs)
-      record 'verify-cgroup'
+      case "$2" in
+        "/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs"|
+        "/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs")
+          record "verify-cgroup:$2" ;;
+        *) echo "ERROR: unexpected test cgroup $2" >&2; return 99 ;;
+      esac
       (( CGROUP_READ_FAIL )) && return 5
-      [[ -z "$CGROUP_PIDS" ]] || printf '%s\n' "$CGROUP_PIDS"
+      if [[ "$2" == "/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs" &&
+            -n "$CGROUP_SECOND_PIDS" ]]; then
+        printf '%s\n' "$CGROUP_SECOND_PIDS"
+      elif [[ -n "$CGROUP_PIDS" ]]; then
+        printf '%s\n' "$CGROUP_PIDS"
+      fi
       return 0 ;;
     *) return 99 ;;
   esac
@@ -90,7 +105,7 @@ systemctl() {
         printf '0\n' ;;
       ControlGroup)
         (( UNIT_GROUP_FAIL )) && return 5
-        printf '/system.slice/%s\n' "$FIRST_UNIT" ;;
+        printf '/system.slice/%s\n' "$2" ;;
       ActiveState)
         (( UNIT_STATE_FAIL )) && return 5
         printf 'inactive\n' ;;
@@ -142,6 +157,14 @@ if swapz_pressure_cleanup_resources; then exit 1; fi
 echo 'inactive unit with live cgroup tasks: PASS'
 
 reset_fixture
+CGROUP_SECOND_PIDS=424242
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 ))
+mapfile -t group_events <"$EVENT_LOG"
+[[ "${group_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs" ]]
+echo 'second unit cgroup checked independently: PASS'
+
+reset_fixture
 UNIT_LOAD_FAIL=1
 if swapz_pressure_cleanup_resources; then exit 1; fi
 (( CLEAN_CALLS == 0 ))
@@ -155,8 +178,11 @@ if swapz_pressure_cleanup_resources; then exit 1; fi
 (( CLEAN_CALLS == 0 ))
 reset_fixture
 UNIT_STOP_FAIL=1
+SWAPON=1
+ACTIVE_SWAP=1
 if swapz_pressure_cleanup_resources; then exit 1; fi
-(( CLEAN_CALLS == 0 ))
+(( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 && SWAPON == 1 && ACTIVE_SWAP == 1 ))
+[[ "$(command cat "$EVENT_LOG")" == "stop:$FIRST_UNIT" ]]
 reset_fixture
 UNIT_PID_FAIL=1
 if swapz_pressure_cleanup_resources; then exit 1; fi
@@ -215,7 +241,7 @@ ACTIVE_SWAP=1
 swapz_pressure_cleanup_resources
 (( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 ))
 mapfile -t ordered_events <"$EVENT_LOG"
-[[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup stop:$SECOND_UNIT verify-cgroup swapoff verify-swap cleanup-stack" ]]
+[[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
 echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
 
 reset_fixture
