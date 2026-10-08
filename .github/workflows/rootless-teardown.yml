@@ -12,6 +12,8 @@ on:
       - 'tests/runtime/pressure_checkpoint.py'
       - 'tests/runtime/pressure-checkpoint-test.py'
       - 'tests/runtime/pressure-helper.py'
+      - 'tests/runtime/pressure-runner.sh'
+      - 'tests/runtime/pressure-runner-regression.sh'
       - 'tests/runtime/pressure.sh'
       - 'tests/runtime/buffer-recall.sh'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
@@ -41,10 +43,14 @@ jobs:
           bash -n tests/runtime/no-discard-livegc.sh
           bash -n tests/runtime/buffer-recall.sh
           bash -n tests/runtime/pressure.sh
+          bash -n tests/runtime/pressure-runner.sh
+          bash -n tests/runtime/pressure-runner-regression.sh
       - name: Rootless DM and loop teardown regression
         run: bash tests/runtime/test-stack-teardown-regression.sh
       - name: Rootless pressure teardown regression
         run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Rootless production pressure controller regression
+        run: bash tests/runtime/pressure-runner-regression.sh
       - name: Rootless pressure release-token protocol regression
         shell: bash
         run: |
