@@ -1492,3 +1492,40 @@ attachment/reboot.
 The NBD backend is still EXPERIMENTAL. Do not run `serve`, open
 `/dev/nbdN`, activate swap, or run a performance matrix based on these
 source-only checks.
+
+## Follow-up: teardown audit remediation independent source-only gate
+
+**This is a separate handoff AFTER completion of the currently assigned NBD
+requalification.** The primary developer has now corrected the cleanup
+problems identified by Codex's read-only audit at `4307f0c9`. Do not run
+root-only fixture workloads: this handoff authorizes only rootless source
+parsing, mocks and offline analyzer tests.
+
+First fast-forward and record the exact tested SHA, preserving both existing
+untracked `local-*-verify.state` files. Then run:
+
+```bash
+bash -n tests/runtime/test-stack-teardown.sh
+bash -n tests/runtime/test-stack-teardown-regression.sh
+bash -n tests/runtime/pressure-teardown.sh
+bash -n tests/runtime/pressure-teardown-regression.sh
+bash -n tests/runtime/no-discard-livegc.sh
+bash -n tests/runtime/buffer-recall.sh
+bash -n tests/runtime/pressure.sh
+bash tests/runtime/test-stack-teardown-regression.sh
+bash tests/runtime/pressure-teardown-regression.sh
+python3 tests/runtime/live-gc-latency-analyze-test.py -v
+```
+
+Validate that the mock regression truly injects the hazards: populated
+cgroup.procs with zero st_size, failed cgroup/systemd/DM/losetup/readlink/
+proc-swaps inspection, post-detach inventory failure, live swap and
+swapoff failure, stopped or exited I/O children, and real find errors.
+An intentionally emitted ERROR in a negative mock is expected only when the
+test also asserts preserved backing and returns zero.
+
+Audit any remaining false PASS, misplaced command-substitution error,
+unbounded child wait, PID reuse, or resource-name ambiguity. Report line
+numbers and exact command results; don't make substantive unreviewed
+changes. Continue to require explicit separate authorization for any
+NBD/DM/loop runtime operation, swap activation, physical device, or reboot.
