@@ -33,17 +33,29 @@ BACKING_KNAME=""
 BACKEND=""
 CONFIGFS_MOUNTED_BY_US=0
 RESULTS="$TMP/results.jsonl"
+TARGET_ACTIVE=0
+
+# Teardown is deliberately a separate, mock-testable helper. A failed normal
+# dmsetup removal must NEVER power off the backing null_blk device.
+source "$ROOT/tests/runtime/streaming-benchmark-teardown.sh"
 
 cleanup() {
-  dmsetup remove "$TARGET" >/dev/null 2>&1 || true
-  if [[ -d "$NULL_CFG" ]]; then
-    echo 0 >"$NULL_CFG/power" 2>/dev/null || true
-    rmdir "$NULL_CFG" 2>/dev/null || true
+  local rc=$?
+  trap - EXIT
+  set +e
+  if ! swapz_benchmark_cleanup_resources; then
+    echo "ERROR: benchmark cleanup incomplete; preserving the DM target, null_blk backing, and $TMP for diagnosis." >&2
+    if (( rc == 0 )); then
+      rc=1
+    fi
+    exit "$rc"
   fi
-  if (( CONFIGFS_MOUNTED_BY_US )); then
-    umount /sys/kernel/config >/dev/null 2>&1 || true
+  if (( rc == 0 )); then
+    rm -rf "$TMP"
+  else
+    echo "Benchmark exited with status $rc; diagnostic artifacts preserved at $TMP" >&2
   fi
-  rm -rf "$TMP"
+  exit "$rc"
 }
 trap cleanup EXIT
 
@@ -158,8 +170,13 @@ run_case() {
   local json="$TMP/${strategy}-${batch}.json"
   local before after status start_ns end_ns
 
-  dmsetup remove "$TARGET" >/dev/null 2>&1 || true
+  # Never reuse the target name if a prior case failed to remove it.
+  if (( TARGET_ACTIVE )) || dmsetup info "$TARGET" >/dev/null 2>&1; then
+    echo "ERROR: previous benchmark DM target still exists; refusing to start another case." >&2
+    return 1
+  fi
   dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch"
+  TARGET_ACTIVE=1
   prefill_cold "$path"
 
   cat >"$fiofile" <<EOF
@@ -251,8 +268,11 @@ row["max_write_batch"] = int(s.get("max_write_batch", 0))
 print(json.dumps(row, sort_keys=True))
 PY
 
+  # A RESULT is only valid after successful, verified teardown. In particular,
+  # do not allow an open-count/udev race to abort the sweep and trigger unsafe
+  # backing removal in the EXIT trap.
+  swapz_benchmark_remove_target || return 1
   echo "RESULT strategy=$strategy batch_kib=$batch $(tail -n1 "$RESULTS")"
-  dmsetup remove "$TARGET"
 }
 
 echo "BACKEND=$BACKEND"
