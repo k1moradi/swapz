@@ -2253,3 +2253,66 @@ performance was exercised. The opt-in role launcher and actual pidfd worker
 lifecycle are still not integrated into the Bash bridge or production
 `buffer-recall.sh`; do not authorize backing deletion on this evidence
 alone. Subsequent documentation-only commits do not change the tested source.
+
+## 2026-10-08 — Five-role pinned-readback and synthetic bridge qualification
+
+**Fully qualified executable-source revision:**
+`0592b47693ca95ca7ff3f07fc7f56a502bc83519`.
+
+The independent primary-developer work adds:
+
+- `recall-readback-identity.py`: attest exactly one fixed-role
+  `read-a/read-b/read-a2/read-b2` 4 KiB file by a descriptor identity pinned
+  *before* direct-worker launch. Reopen its retained O_WRONLY descriptor
+  through `/proc/self/fd` for bounded readback, never through a mutable
+  pathname; recheck directory, output, entry and size before/after reading.
+  Compare only against an immutable in-memory expected page. Fail closed on
+  replacement, symlink, hardlink, unexpected size, poison, descriptor or
+  reference error. Borrowed descriptor ownership stays with the fixture.
+- `RecallRoleIPCAdapter`: explicitly constructed, five-role-only client
+  path requiring all five role launches, worker wait/reap attestations and
+  successful identity-bound reader checks before `STOP_ALL`. Both concurrent
+  readers must launch before either wait, and the staged writer must remain
+  outstanding until all four reader checks finish. Preserve all original
+  opaque-handle, stop report, shutdown and service-exit checks.
+- `RootlessRoleBridge`: explicit trusted-injection-only class; the default
+  Bash bridge constructor and normal service CLI still reject role requests.
+  Role JSON accepts only an opaque fixed role, not arbitrary argv, paths,
+  executable descriptors, mapper names or PIDs. Any exception permanently
+  closes the injected library bridge to later cleanup authorization.
+- `recall-role-service-integration-test.py`: actual AF_UNIX service/client
+  wire protocol through Codex's descriptor-pinned role gate, with an injected
+  non-forking fake supervisor and ordinary synthetic files. It exercises
+  admission, identity capture, service launch/wait/stop/shutdown response
+  handling and output replacement.
+- `recall-role-bridge-fixture.py` and `recall-role-bridge-regression.sh`:
+  genuine Bash coprocess with a permanently synthetic-only client, checking
+  five-role handle continuity, failure and disconnect preservation.
+
+**Both mandatory rootless GitHub workflows PASS at that exact code revision:**
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37860393441
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37860393481
+
+Combined logs show the 16-test rootless five-role adapter/bridge suite,
+3-test true-service-wire/false-worker suite, 10 pinned readback identity
+tests, the three Bash role-coprocess PASS markers, the prior three
+real-pinned-GNU-`dd` tests, the existing Bash-to-pidfd bridge safety gate,
+10/10 repeated IPC service suites, 25/25 additional NBD selftests
+(26 including the primary selftest), and all remaining mandatory rootless
+teardown/pressure/GC analysis gates passing.
+
+**Critical scope boundary:** the new synthetic service-wire tests do
+not create real `dd` processes or attest a real service process exit;
+the genuine pinned-`dd` tests are independent rootless tests against
+regular files. The normal service/bridge CLIs never opt in, the IPC wire
+does not yet provide a trusted output descriptor or prelaunch inode
+attestation across a separate service process, and production recall
+remains unchanged. No supervisor-crash descendant containment, actual
+DM mapping/table identity, live swap correctness, GC/read p99, batch
+throughput calibration, or physical-media qualification was established.
+
+No real device, DM/loop/NBD attach, swap/systemd, module load, pressure
+fixture, production recall, fio benchmark, physical I/O or reboot was
+performed. See `docs/recall-role-bridge.md` for the integration and
+ownership boundary.
