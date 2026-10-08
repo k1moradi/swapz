@@ -136,7 +136,7 @@ echo 'unrelated DM/physical device rejected: PASS'
 jobs() { [[ "$*" == -p ]] && printf '%s\n' 424242; }
 kill() {
   case "$1" in
-    -0|-TERM) [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
+    -0|-CONT|-TERM) [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
     *) return 99 ;;
   esac
 }
