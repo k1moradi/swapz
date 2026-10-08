@@ -942,3 +942,57 @@ Kernel `dm-swapz.c` is unchanged.
 Next gates remain: independent Codex source-only review of this new teardown
 code; separately authorized bounded virtual teardown/runtimes; source-only NBD
 preflight and later NBD calibration; then exact live-GC tail-latency evidence.
+
+## 2026-10-08 — Codex teardown audit follow-up (source changes, new gate pending)
+
+Codex independently executed eight source-only checks at
+`4307f0c9a3becb9c9e87a73f8609a3656c4ccf23`:
+five Bash syntax checks, the rootless teardown mock, six GC-latency analyzer
+unit tests, and Python compilation. All eight exited 0. The host's normal
+`/swapfile` and `/dev/sdb1` swap remained unchanged and both pre-existing
+untracked state files were preserved. This is host-reported evidence for the
+**older** teardown source, not qualification of changes made afterward.
+
+The audit identified fail-open inspection paths: cgroup.procs reporting zero
+st_size while listing live PIDs; a failed losetup/awk inspection interpreted
+as confirmed absence; suppressed systemd/readlink/proc-swaps errors; untracked
+parallel recall readers; and ps errors enabling blocking wait. It also noted
+missing analyzer invalid-input and tail-percentile regressions.
+
+The primary developer implemented source-only fixes after that audit:
+
+- `tests/runtime/test-stack-teardown.sh`: independently checked DM parsing;
+  successful, exact-name loop inventory before/after detach; fail-closed
+  unexpected inventory entries and holder-inspection errors; safe child
+  ownership/state checks; and all-child quiescence.
+- `tests/runtime/pressure-teardown.sh` (sourced by `pressure.sh`):
+  read and validate cgroup.procs contents rather than its size; fail on
+  unknown systemd state and swap/mapper inspection; confirm test swap
+  inactivity independently of the SWAPON tracking flag before teardown.
+- `tests/runtime/buffer-recall.sh`: track, stop, and reap both parallel
+  readers as well as the writer before removing DM targets.
+- Rootless failure-injection expansions for loop post-detach/inventory,
+  DM parser, process inspection, cgroup, systemd, proc-swaps, swapoff and
+  active swap; four new offline analyzer invalid-input/statistics tests.
+
+**Current status:** changes are committed for independent Linux-host
+source-only requalification; new/changed rootless regressions have not yet
+been executed on the Codex host. No live kernel DM/loop teardown, NBD
+attachment, GC-overlap swap-in p99, or physical-media benchmark was run
+in this development step. Passing old checks does not authorize runtime
+testing of the new cleanup paths.
+
+Source-only follow-up (no device or root operations):
+
+```bash
+bash -n tests/runtime/test-stack-teardown.sh
+bash -n tests/runtime/test-stack-teardown-regression.sh
+bash -n tests/runtime/pressure-teardown.sh
+bash -n tests/runtime/pressure-teardown-regression.sh
+bash -n tests/runtime/no-discard-livegc.sh
+bash -n tests/runtime/buffer-recall.sh
+bash -n tests/runtime/pressure.sh
+bash tests/runtime/test-stack-teardown-regression.sh
+bash tests/runtime/pressure-teardown-regression.sh
+python3 tests/runtime/live-gc-latency-analyze-test.py -v
+```
