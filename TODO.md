@@ -570,3 +570,39 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       integration with a production direct-`dd` service allowlist.
 - [ ] `buffer-recall.sh` remains unchanged: numeric-PID safety
       and hidden read-worker descendants are still unresolved.
+
+### 2026-10-08 — Persistent rootless Bash pidfd control bridge
+
+- [x] Create `recall-control-bridge.py` owning one persistent
+      private IPC socketpair, one test-only pidfd service Popen
+      and one continuous opaque-handle registry.
+- [x] Implement bounded Bash JSON `LAUNCH_TEST`, `WAIT`,
+      `STOP_ALL`, `SHUTDOWN`, `FINALIZE` protocol with
+      monotonically increasing IDs and no numeric-PID signaling,
+      direct-`dd` execution or arbitrary argv.
+- [x] Require full worker accounting, clean shutdown, observed
+      zero service exit and clean control-socket close before
+      the sole positive FINALIZE cleanup decision.
+- [x] Add 23 Python rootless cases and genuine Bash coprocess
+      rootless regressions for three-worker continuity,
+      dual launch-before-wait ordering, malformed replies,
+      nonzero child exit and abrupt controller disconnection.
+- [x] Gate bridge compilation, Bash syntax and runtime regression
+      in both GitHub rootless workflows.
+- [x] Rootless teardown CI PASS at
+      `ec52145bd0543f80e7576236231184d32656f1e1`:
+      https://github.com/k1moradi/swapz/actions/runs/37855300271
+- [x] Combined NBD/teardown CI PASS at same code revision:
+      https://github.com/k1moradi/swapz/actions/runs/37855300287
+      (23 bridge, 34 IPC service + 10 repeats, 27 pidfd
+      supervisor + 3 repeats, 20 adapter, 26 dd-allowlist,
+      46 I/O plan, 26 NBD selftests plus teardown/pressure).
+- [ ] Codex to separately review a fixture-bound direct-dd
+      launch path and address path identity at the actual spawn
+      boundary before production integration.
+- [ ] Replace production `buffer-recall.sh` numeric-PID
+      cleanup and background reader subshells only after
+      independent integration tests and safety review.
+- [ ] Test-owned bridge is source-only: real DM/loop/NBD,
+      swap, GC/latency, physical-media operations remain
+      unapproved/unverified.
