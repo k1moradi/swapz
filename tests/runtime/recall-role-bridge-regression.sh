@@ -45,7 +45,8 @@ rootless_role_success() (
   [[ ${#handles[@]} -eq 5 ]]
   [[ "${handles[3]}" != "${handles[4]}" ]]
   # Both A/B concurrent-phase roles were admitted before either WAIT.
-  for handle in "${handles[@]}"; do
+  # Preserve the staged writer lifetime until all reader checks finish.
+  for handle in "${handles[@]:1}" "${handles[0]}"; do
     id=$((id + 1))
     printf '{"id":%s,"op":"WAIT","handle":"%s","timeout_ms":2000}\n' "$id" "$handle" >&"${ROLE[1]}"
     IFS= read -r -t 10 response <&"${ROLE[0]}"
