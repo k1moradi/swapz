@@ -322,3 +322,33 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       design and independent latest pressure teardown prevalidation audit.
 - [ ] Leave real NBD, swap, DM/loop, module, GC latency and physical
       performance qualification blocked pending explicit authorization.
+
+### 2026-10-08 — Pressure checkpoint token migration and mock proof
+
+- [x] Remove both checkpoint `kill -CONT "$pid"` calls and the
+      SIGSTOP/wait pattern from the pressure workload helper.
+- [x] Remove numeric MainPID `SIGCONT` from pressure teardown.
+      Keep unit stop by exact name and fail-closed cgroup/swap checks.
+- [x] Provide a bounded `filled` -> `release-filled` ->
+      `verified` -> `release-verified` protocol with a fresh
+      128-bit nonce per transient unit and per-unit private paths.
+- [x] Atomically publish full marker/release data without overwriting
+      stale tokens; reject malformed, duplicate and wrong-phase tokens.
+- [x] Add 8 new rootless tests for phase ordering, wrong-phase/cross-unit
+      release, timeout, interruption, malformed/stale token, readback
+      corruption and successful completion.
+- [x] Extend pressure teardown mock to prove **zero numeric-PID
+      signals**, even with a nonzero mocked MainPID.
+- [x] Teardown source-only CI **PASS** at
+      `1c5cfe5305ba0bad9c8edbf404390b4093bdfbec`:
+      https://github.com/k1moradi/swapz/actions/runs/37791843695
+- [x] Same-commit combined NBD/teardown CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37791843564
+      (8 pressure token tests, 11 analyzer tests, 26/26 complete NBD selftests).
+- [ ] Independently review rootless pressure protocol's behavior under
+      the supported real systemd service manager before any authorized
+      live pressure test.
+- [ ] Collect Codex's separately assigned gated pidfd supervisor
+      prototype and review; **recall PID-reuse race is still open**.
+- [ ] No live pressure, systemd service, swap, DM/loop/NBD, kernel module
+      or physical testing without separate explicit authorization.
