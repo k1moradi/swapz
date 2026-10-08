@@ -60,7 +60,8 @@ cat() {
     /sys/fs/cgroup/*/cgroup.procs)
       case "$2" in
         "/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs"|
-        "/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs")
+        "/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs"|
+        "/sys/fs/cgroup/test/cgroup.procs")
           record "verify-cgroup:$2" ;;
         *) echo "ERROR: unexpected test cgroup $2" >&2; return 99 ;;
       esac
@@ -137,10 +138,8 @@ swapz_test_cleanup_dm_stack() {
   return 0
 }
 reset_fixture
-# A separate zero-size ordinary file illustrates why size cannot prove
-# content emptiness; the cgroup.procs behavior itself is mocked below.
-: >"$TMP/zero-size-pseudo-file"
-[[ ! -s "$TMP/zero-size-pseudo-file" ]]
+# Rootless mock simulates cgroup.procs content independent of st_size.
+# This does not claim to create a real zero-size cgroup pseudo-file.
 CGROUP_PIDS=424242
 if swapz_pressure_cgroup_empty /sys/fs/cgroup/test/cgroup.procs; then exit 1; fi
 CGROUP_PIDS=""
@@ -148,7 +147,7 @@ CGROUP_READ_FAIL=1
 if swapz_pressure_cgroup_empty /sys/fs/cgroup/test/cgroup.procs; then exit 1; fi
 CGROUP_READ_FAIL=0
 swapz_pressure_cgroup_empty /sys/fs/cgroup/test/cgroup.procs
-echo 'zero-size cgroup with PIDs and failed read both block teardown: PASS'
+echo 'mocked cgroup.procs PIDs and read failure both block teardown: PASS'
 
 reset_fixture
 CGROUP_PIDS=424242
@@ -220,6 +219,180 @@ if swapz_pressure_cleanup_resources; then exit 1; fi
 echo 'missing mapper and failed active-swap resolution block teardown: PASS'
 
 echo 'mapper, proc-swaps inspection and bad-header errors preserve swap: PASS'
+
+# A partially correct header, truncated row, or bad accounting must never
+# count as evidence that the test mapper is absent from active swap.
+for bad_swaps in \
+    "Filename NOT_Type Size Used Priority" \
+    
+
+reset_fixture
+ACTIVE_SWAP=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 ))
+echo 'active test swap on /dev/dm-N blocks mapper removal: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+SWAPOFF_FAIL=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 1 && SWAPON == 1 ))
+echo 'swapoff failure preserves mapper and backing: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 ))
+mapfile -t ordered_events <"$EVENT_LOG"
+[[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
+echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
+
+reset_fixture
+GROUP_REMOVED=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'stopped unit with confirmed removed cgroup: PASS'
+
+reset_fixture
+MAP_EXISTS=0
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'confirmed absent test mapping safely handled: PASS'
+
+echo 'swapz pressure teardown rootless regression: PASS'
+Filename\tType\tSize\tUsed\tPriority\n/swapfile file' \
+    
+
+reset_fixture
+ACTIVE_SWAP=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 ))
+echo 'active test swap on /dev/dm-N blocks mapper removal: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+SWAPOFF_FAIL=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 1 && SWAPON == 1 ))
+echo 'swapoff failure preserves mapper and backing: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 ))
+mapfile -t ordered_events <"$EVENT_LOG"
+[[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
+echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
+
+reset_fixture
+GROUP_REMOVED=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'stopped unit with confirmed removed cgroup: PASS'
+
+reset_fixture
+MAP_EXISTS=0
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'confirmed absent test mapping safely handled: PASS'
+
+echo 'swapz pressure teardown rootless regression: PASS'
+Filename\tType\tSize\tUsed\tPriority\n/swapfile file unknown 0 -1' \
+    
+
+reset_fixture
+ACTIVE_SWAP=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 ))
+echo 'active test swap on /dev/dm-N blocks mapper removal: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+SWAPOFF_FAIL=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 1 && SWAPON == 1 ))
+echo 'swapoff failure preserves mapper and backing: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 ))
+mapfile -t ordered_events <"$EVENT_LOG"
+[[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
+echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
+
+reset_fixture
+GROUP_REMOVED=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'stopped unit with confirmed removed cgroup: PASS'
+
+reset_fixture
+MAP_EXISTS=0
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'confirmed absent test mapping safely handled: PASS'
+
+echo 'swapz pressure teardown rootless regression: PASS'
+Filename\tType\tSize\tUsed\tPriority\n/swapfile file 64 0 not-a-priority'; do
+  reset_fixture
+  SWAPS_FAKE_CONTENT=$bad_swaps
+  if swapz_pressure_cleanup_resources; then exit 1; fi
+  (( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 ))
+done
+echo 'malformed swap header, row and numeric fields block mapper teardown: PASS'
+
+reset_fixture
+SWAPS_FAKE_CONTENT=
+
+reset_fixture
+ACTIVE_SWAP=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 ))
+echo 'active test swap on /dev/dm-N blocks mapper removal: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+SWAPOFF_FAIL=1
+if swapz_pressure_cleanup_resources; then exit 1; fi
+(( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 1 && SWAPON == 1 ))
+echo 'swapoff failure preserves mapper and backing: PASS'
+
+reset_fixture
+SWAPON=1
+ACTIVE_SWAP=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 ))
+mapfile -t ordered_events <"$EVENT_LOG"
+[[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
+echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
+
+reset_fixture
+GROUP_REMOVED=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'stopped unit with confirmed removed cgroup: PASS'
+
+reset_fixture
+MAP_EXISTS=0
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 ))
+echo 'confirmed absent test mapping safely handled: PASS'
+
+echo 'swapz pressure teardown rootless regression: PASS'
+Filename\tType\tSize\tUsed\tPriority\n/swapfile\tfile\t64\t0\t-1'
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 0 ))
+echo 'valid unrelated negative-priority swap permits test-only cleanup: PASS'
+
+
 
 reset_fixture
 ACTIVE_SWAP=1
