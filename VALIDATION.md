@@ -1284,3 +1284,69 @@ Independent Codex Linux-host requalification of the latest teardown
 source was assigned concurrently; this clean-runner gate does not
 substitute for its result. Real NBD/GC latency and physical batch-size
 qualification remain outside authorization.
+
+## 2026-10-08 — Codex whitespace-only DM fail-open corrected and jointly revalidated
+
+Codex independently tested teardown at
+`5a3aea67fc303748c7efae7e4a36e595ba4c7ab7`. All ten standard
+source-only commands passed, but a supplemental **rootless mocked**
+`dmsetup ls --noheadings` response consisting only of whitespace was
+incorrectly accepted as confirming target absence. Codex reported
+**SOURCE-ONLY TEARDOWN GATE FAIL** despite the existing suite's green
+result. The defect was the AWK rule `NF == 0 { next }`; Bash's normal
+command substitution also stripped trailing newlines and could mask a
+newline-only malformed inventory.
+
+The primary developer fixed `swapz_test_confirm_dm_absent()` by:
+- Preserving the exact trailing newlines from successful `dmsetup ls`
+  output with an appended command-substitution sentinel.
+- Rejecting any whitespace-only AWK record instead of skipping it.
+- Feeding exact returned bytes to AWK without an inserted here-string
+  newline, preserving a **truly empty** stdout as an accepted format.
+- Retaining fail-closed behavior for malformed rows, duplicates,
+  out-of-range device numbers, inventory failure and false-positive
+  upper-target removal.
+
+Rootless regression tests now cover spaces, tabs, newline-only output,
+mixed valid/whitespace rows, malformed inventory after successful upper
+removal, failed `dmsetup info`, and positive cases for empty stdout,
+`No devices found`, valid unrelated target and target present.
+
+Codex also found a pressure ControlGroup identity gap. The fixture now
+explicitly passes `--slice=system.slice` to `systemd-run`, while
+`swapz_pressure_cleanup_resources()` refuses any nonempty ControlGroup
+other than the exact `/system.slice/$unit` path of each test-owned
+service. Distinct unit names are required. Wrong, swapped, duplicated,
+unrelated and traversal paths are tested; rejection leaves swap and DM
+untouched. Empty cgroup metadata remains permitted only for a stopped
+unit with MainPID 0 under the existing fail-closed checks.
+
+For recall, the real fixture and rootless tests now share
+`swapz_test_stop_children_then_cleanup_stack()`. The helper returns
+failure without DM/loop cleanup if **any** of the three writer/reader
+children cannot be stopped. Regression cases prove both the
+unresponsive-child blocked path and successful upper/lower/loop cleanup
+order. A nonnumeric `Used` field in `/proc/swaps` is additionally
+rejected in the pressure negative suite.
+
+**Executed evidence at identical revision:**
+`3b60d7659df8cf59716286dfe0d1504307eb2e78`
+
+- Rootless teardown workflow **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37781726152
+- Rootless combined NBD/teardown workflow **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37781726172
+
+The teardown workflow executed seven syntax checks, both full
+teardown mocks including the new regressions, and 11 offline analyzer
+tests. The combined workflow executed ten syntax checks, both teardown
+mocks, the analyzer, static NBD syscall-isolation check, NBD userspace
+selftest plus 25 process-level repetitions, and NBD/streaming teardown
+mocks. Both succeeded on the **same** source commit.
+
+**Qualification limits:** these remain source-only / rootless mocks,
+not real NBD, DM, loop, swap or GC latency tests. The Bash jobs-to-PID
+signal TOCTOU window remains; an atomic pidfd approach has not been
+implemented or independently reviewed. Codex's concurrent independent
+NBD Linux-host audit is a separate gate. The NBD backend and kernel
+source blobs are unchanged by this teardown work.
