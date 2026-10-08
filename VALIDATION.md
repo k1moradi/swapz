@@ -1124,3 +1124,31 @@ tested code, but Codex independent Linux-host requalification remains
 pending. It provides no proof of live NBD driver behavior, actual
 DM/loop teardown, GC-overlapping swap-in latency, physical performance,
 or an authorized runtime experiment. The kernel remains unchanged.
+
+## 2026-10-08 — Additional NBD source-only inventory inspection gate
+
+The primary developer audited NBD preflight after the mocked syscall
+isolation fix. `/proc/swaps` previously accepted empty output or
+malformed-but-readable rows as if there were no active swap entries;
+`/proc/self/mountinfo` similarly accepted empty output as an empty
+mount list. This is a fail-open preflight interpretation even if the
+corresponding proc read itself succeeds.
+
+Updated `tests/runtime/size-aware-nbd.py` rejects empty/malformed
+mount and swap inventories before NBD attachment and validates
+swap-entry field types. A rootless positive preflight test also
+confirms an unused virtual device with valid mount and swap inventory
+(including negative swap priority) remains acceptable.
+
+**Executed evidence:** Rootless NBD CI
+https://github.com/k1moradi/swapz/actions/runs/37775709673
+at `0b93caf752aa4716100815734d3a1f299fc2dec8`
+concluded **SUCCESS**. The static syscall isolation guard, Python
+compilation, NBD selftest, three Bash syntax checks, and NBD/streaming
+teardown mocks all passed. An intermediate run failed because the
+prior test fixture used empty mountinfo; the mocks were corrected and
+the final source-only suite ran to completion.
+
+This does not establish kernel-backed NBD runtime safety or physical
+latency/cost measurements. The kernel and Codex-owned teardown
+sources are untouched; host device operations remain unauthorized.
