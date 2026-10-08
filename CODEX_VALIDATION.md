@@ -1366,3 +1366,42 @@ Final milestone status until the remaining gates complete:
 V2.2 CORRECTNESS PASS — FOCUSED GC/DISCARD PASS —
 STREAMING STRATEGY/PHYSICAL PLATEAU NOT YET SELECTED
 ```
+
+ 
+## Optional size-aware NBD prototype gate
+
+The primary developer has committed a **prototype**, not a validated new
+benchmark backend. The existing null_blk performance and correctness contract
+remains authoritative.
+
+The prototype adds an explicitly opt-in `SWAPZ_BENCH_BACKEND=nbd` option and a
+sparse-RAM userspace NBD server which models a serialized lower queue with
+`latency_us + request_bytes / bandwidth`. It must not be confused with actual
+physical-device measurements or treated as validated before smoke/calibration.
+
+The next **source-only** checks may be run without root or runtime device setup:
+
+```bash
+git pull --ff-only origin main
+python3 tests/runtime/size-aware-nbd.py selftest
+bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+bash -n tests/runtime/streaming-benchmark.sh
+bash -n tests/runtime/streaming-benchmark-teardown.sh
+bash tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/streaming-teardown-regression.sh
+```
+
+Please report the exact output and any Python or Bash syntax failure. These
+checks do **not** authorize a kernel NBD attach or another benchmark matrix.
+
+A later kernel NBD smoke test requires a separate explicit handoff from the
+primary developer, an observed unused virtual `/dev/nbdN`, and the preflight
+and safe-teardown rules in
+`docs/benchmarks/v2.2-size-aware-nbd.md`. The harness will refuse other paths,
+including physical disks. Never force-detach NBD under an active DM mapping
+and never reboot without explicit operator permission.
+
+The size-aware backend becomes eligible to resolve the 512 KiB–1 MiB plateau
+only after its actual request sizes, raw transfer rate, exact data readback,
+and teardown are demonstrated. Continue the existing V2.2 reference-driven
+correctness and measured performance gates separately.
