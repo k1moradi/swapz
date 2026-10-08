@@ -265,7 +265,22 @@ swapz_test_stop_child 424242
 echo 'already-reaped test child handled without signal: PASS'
 
 # A completed child can remain in jobs -p after its process has exited.
-# Simulate PID reuse: kill -0 succeeds, but -pr/-ps do not list the PID.
+# Simulate PID reuse: jobs -p lists a completed PID, while -pr/-ps do
+# not; kill -0 now finds a different live process with the recycled number.
+jobs() {
+  case "$*" in
+    -p) printf '%s\n' 424242 ;;
+    -pr|-ps) return 0 ;;
+    *) return 99 ;;
+  esac
+}
+kill() {
+  case "$1" in
+    -0) return 0 ;;
+    -CONT|-TERM) SIGNALS+=("$1:$2"); return 0 ;;
+    *) return 99 ;;
+  esac
+}
 reset_fixture
 JOB_RUNNING=0
 CHILD_STATE=R
