@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
 from pathlib import Path
 import re
+import stat
 import time
 from typing import Callable, Protocol, Sequence
 
@@ -42,6 +44,50 @@ class RecallSupervisor(Protocol):
     def launch(self, argv: Sequence[str]) -> str: ...
     def wait(self, handle: str, timeout: float) -> WorkerResultLike: ...
     def stop_all(self, handles: Sequence[str]) -> StopReportLike: ...
+
+
+def _read_exact_regular(path: Path, *, file_size: int,
+                        offset: int = 0) -> bytes:
+    """Read one page from an exact-size, single-link regular file only.
+
+    lstat/open/fstat identity checking prevents a path swapped between the
+    inspection and use from being accepted; O_NOFOLLOW and O_NONBLOCK avoid
+    symlink redirection and a blocking FIFO. Limit reads to at most 4097
+    bytes so a malformed fixture cannot exhaust memory.
+    """
+    previous = path.lstat()
+    if not stat.S_ISREG(previous.st_mode) or previous.st_nlink != 1:
+        raise RecallPlanError(f"unsafe non-regular or linked recall file: {path}")
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as handle:
+        current = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                or (previous.st_dev, previous.st_ino) != (current.st_dev, current.st_ino)
+                or current.st_size != file_size):
+            raise RecallPlanError(f"invalid recall file identity or size: {path}")
+        handle.seek(offset)
+        # At the last source page (offset > 0), the following byte may be EOF;
+        # elsewhere the source contains later pages. The known total size is
+        # checked above, so reading exactly one page is enough for the source.
+        data = handle.read(PAGE_SIZE if file_size != PAGE_SIZE else PAGE_SIZE + 1)
+        if len(data) != PAGE_SIZE:
+            raise RecallPlanError(f"short or oversized recall page: {path}")
+        if os.fstat(handle.fileno()).st_size != file_size:
+            raise RecallPlanError(f"recall file changed size during read: {path}")
+    return data
+
+
+def _create_exact_expected(path: Path, contents: bytes) -> None:
+    """Create a fresh 4 KiB expected page; never overwrite or follow a link."""
+    if len(contents) != PAGE_SIZE:
+        raise RecallPlanError("invalid expected recall page length")
+    fd = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+        0o600,
+    )
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(contents)
+        handle.flush()
 
 
 @dataclass(frozen=True)
@@ -153,16 +199,20 @@ class RecallIOPlan:
             raise ValueError("invalid recall output label")
         expected = self.output_dir / f"expected-{label}"
         output = self.output_dir / f"read-{label}"
-        with self.source.open("rb") as f:
-            f.seek(page * PAGE_SIZE)
-            contents = f.read(PAGE_SIZE)
-        if len(contents) != PAGE_SIZE:
+        try:
+            # lexists sees dangling symlinks that Path.exists() misses.
+            if os.path.lexists(expected) or os.path.lexists(output):
+                raise RecallPlanError("recall output/expected path already exists")
+            if self.output_dir.is_symlink() or not self.output_dir.is_dir():
+                raise RecallPlanError("recall output directory must be a real directory")
+            contents = _read_exact_regular(
+                self.source, file_size=PAGE_SIZE * PAGE_COUNT,
+                offset=page * PAGE_SIZE,
+            )
+            _create_exact_expected(expected, contents)
+        except (OSError, RecallPlanError) as exc:
             self.failure = True
-            raise RecallPlanError("source page is truncated")
-        if expected.exists() or output.exists():
-            self.failure = True
-            raise RecallPlanError("recall output/expected path already exists")
-        expected.write_bytes(contents)
+            raise RecallPlanError(f"cannot prepare safe recall page: {exc}") from exc
         return expected, output
 
     def _read_argv(self, page: int, output: Path) -> tuple[str, ...]:
@@ -173,12 +223,12 @@ class RecallIOPlan:
 
     def _compare(self, expected: Path, output: Path) -> None:
         try:
-            source_page = expected.read_bytes()
-            result_page = output.read_bytes()
-        except OSError as exc:
+            source_page = _read_exact_regular(expected, file_size=PAGE_SIZE)
+            result_page = _read_exact_regular(output, file_size=PAGE_SIZE)
+        except (OSError, RecallPlanError) as exc:
             self.failure = True
-            raise RecallPlanError(f"cannot compare readback: {exc}") from exc
-        if len(source_page) != PAGE_SIZE or result_page != source_page:
+            raise RecallPlanError(f"cannot compare safe readback: {exc}") from exc
+        if result_page != source_page:
             self.failure = True
             raise RecallPlanError("direct read data did not match the expected 4096 bytes")
 
