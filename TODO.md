@@ -298,3 +298,27 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       separately before introducing new process signaling.
 - [ ] Real kernel, swap, device, GC overlap and physical performance
       qualification remains unauthorized.
+
+### 2026-10-08 — NBD exceptional socketpair cleanup follow-up
+
+- [x] Codex independent **NBD SOURCE-ONLY GATE PASS** at
+      `bd9fac18d06f1c4642c913618de645401611698e`
+      (all seven commands, 10/10 additional timed selftests).
+- [x] Factor 8 MiB wire socketpair stop/join/shutdown/join/close
+      into a test-only bounded cleanup helper, not production kernel shutdown.
+- [x] Fail with an explicit diagnostic if worker remains alive after
+      both bounded joins, including when closing sockets later unblocks it.
+- [x] Deterministically fault-inject first-join exit, second-join exit,
+      local shutdown error, still-active worker, unexpected worker
+      exception, unstarted cleanup and wire-transaction failure.
+- [x] New NBD rootless CI **PASS** at
+      `52a2d6330428c64b39f2f8fe1c42aa1ff70a4cc9`:
+      https://github.com/k1moradi/swapz/actions/runs/37788553329
+      (one full NBD selftest and 25/25 additional processes).
+- [x] Same-revision combined NBD+teardown CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37788553094
+      (full NBD and teardown mocks and 11 offline analyzer tests).
+- [ ] Collect Codex's separately assigned identity-safe PID signaling
+      design and independent latest pressure teardown prevalidation audit.
+- [ ] Leave real NBD, swap, DM/loop, module, GC latency and physical
+      performance qualification blocked pending explicit authorization.
