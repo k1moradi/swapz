@@ -2293,3 +2293,53 @@ retained pidfd ownership or actual descendant quiescence. Real
 `buffer-recall.sh` still uses numeric job-PID signaling and must
 not be claimed safe until separately integrated and requalified.
 No real device or pressure/recall fixture operations occurred.
+
+## 2026-10-08 — Mandatory pidfd IPC service gate and isolated client adapter
+
+While Codex independently reviews and hardens the pidfd IPC service's
+worker-result and shutdown trust boundary, the primary developer
+created `tests/runtime/recall-ipc-adapter.py` and 20 rootless
+adapter tests. The adapter consumes the existing IPC client
+`call()` interface but refuses to trust its top-level cleanup
+boolean without independently reconciling the complete `workers`
+results, exact opaque handle inventory, all-reaped flags and
+worker/report errors. It requires a clean shutdown acknowledgment,
+real service-process exit code zero and explicit client confirmation
+before authorizing a **synthetic only** callback. Any failure is
+sticky and requires preserving the hypothetical device backing.
+
+The new suite exercises real private socketpair sessions with
+short-lived, test-owned `sleep` and `exit` workers, plus
+fake contradictory and incomplete reply scenarios, duplicate/unknown
+handles, service/transport loss before and after stop, and
+unconfirmed worker or supervisor exit. There is no direct-`dd`
+worker support or production `buffer-recall.sh` integration.
+The original Bash numeric-PID cleanup race remains unresolved.
+
+**Both GitHub source-only workflows passed on one exact checkout**
+`d6a92486d71ba0e1f6c27cf1c1b4781e4ce1cd81`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37814381219
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37814381190
+
+Both now require the IPC service's 23 tests and **10 additional
+15-second-timeout independent suite repetitions**, 20 adapter
+tests, 27 gated-pidfd supervisor tests and 3 repeats, 46 recall
+I/O plan tests, strict pressure and teardown regressions, and
+11 offline analyzer tests. The combined run also passed static NBD
+syscall isolation, **26 full NBD selftests** and both NBD/streaming
+teardown mocks.
+
+The first adapter run exposed an incorrect mock generator supplying
+duplicate `ok` parameters; after correcting the test fixture,
+both source-only workflows passed. No modifications were made to
+Codex's supervisor/service source or production recall.
+
+**Independent requalification needed:** when Codex next pushes IPC
+client verification changes, record the exact new service/regression
+blobs and rerun both whole workflows and 20 adapter cases on the
+same new source before attempting a narrowly allowlisted direct
+`dd` integration. Preserve both Codex host-local
+`local-*-verify.state` files; never infer that mock/test-worker
+completion proves production descendant containment or actual
+DM/loop/NBD/swap safety.
