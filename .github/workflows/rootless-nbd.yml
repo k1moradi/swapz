@@ -64,6 +64,18 @@ jobs:
         run: python3 -m py_compile tests/runtime/size-aware-nbd.py
       - name: Run rootless NBD selftest
         run: python3 tests/runtime/size-aware-nbd.py selftest
+      - name: Repeat rootless NBD selftest 25 times to catch socket races
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..25}; do
+            if ! timeout 15s python3 tests/runtime/size-aware-nbd.py selftest >"$RUNNER_TEMP/nbd-repeat.log" 2>&1; then
+              echo "FAIL: rootless NBD selftest repetition $i/25"
+              cat "$RUNNER_TEMP/nbd-repeat.log"
+              exit 1
+            fi
+            echo "NBD rootless selftest repetition $i/25: PASS"
+          done
       - name: Verify benchmark and NBD teardown Bash syntax
         run: |
           bash -n tests/runtime/streaming-benchmark.sh
