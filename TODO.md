@@ -135,3 +135,19 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       *after* it finishes the teardown assignment.
 - [ ] Any real kernel NBD/DM/swap runtime test still requires separate
       explicit authorization; no physical or host swap access.
+
+### NBD preflight inventory follow-up — 2026-10-08
+
+- [x] Reject empty/malformed `/proc/self/mountinfo` and `/proc/swaps`
+      inventories before NBD attachment.
+- [x] Reject incomplete or nonnumeric active-swap records rather than
+      treating them as absence.
+- [x] Prove valid unused NBD preflight can still pass the rootless mock
+      with an unrelated swap file and negative swap priority.
+- [x] Pass updated static syscall isolation and full userspace NBD
+      source-only CI on
+      `0b93caf752aa4716100815734d3a1f299fc2dec8`
+      (run 37775709673).
+- [ ] Independent Codex Linux-host NBD requalification remains pending;
+      no kernel NBD smoke, real device cleanup or throughput benchmark is
+      authorized.
