@@ -286,7 +286,10 @@ def serve_kernel(args: argparse.Namespace) -> int:
     try:
         # Recheck the opened descriptor to close the validate/open race before
         # NBD_SET_SOCK, geometry changes, or any other NBD ioctl.
-        verify_nbd_device_identity(os.path.basename(path), os.fstat(fd).st_rdev)
+        opened_device = os.fstat(fd)
+        if not stat.S_ISBLK(opened_device.st_mode):
+            raise ValueError("opened NBD descriptor is not a block device")
+        verify_nbd_device_identity(os.path.basename(path), opened_device.st_rdev)
         fcntl.ioctl(fd, NBD_SET_SOCK, kernel_sock.fileno())
         attached = True
         fcntl.ioctl(fd, NBD_SET_BLKSIZE, BLOCK)
@@ -353,7 +356,7 @@ def selftest() -> int:
     spoofed_node = SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=os.makedev(8, 0))
     with (mock.patch("os.lstat", return_value=spoofed_node),
           mock.patch.object(Path, "exists", return_value=True),
-          mock.patch.object(Path, "read_text", return_value="43:0\\n")):
+          mock.patch.object(Path, "read_text", return_value="43:0\n")):
         try:
             validate_nbd_node("/dev/nbd0")
         except ValueError as exc:
