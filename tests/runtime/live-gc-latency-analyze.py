@@ -61,9 +61,9 @@ def latencies_ms(read_intervals: list[tuple[int, int, int]],
     not_overlapping: list[float] = []
     current_gc = 0
     for start, end, _ in sorted(read_intervals):
-        while current_gc < len(gc_windows) and gc_windows[current_gc][1] < start:
+        while current_gc < len(gc_windows) and gc_windows[current_gc][1] <= start:
             current_gc += 1
-        overlap = (current_gc < len(gc_windows) and gc_windows[current_gc][0] <= end)
+        overlap = (current_gc < len(gc_windows) and gc_windows[current_gc][0] < end)
         (overlapping if overlap else not_overlapping).append((end - start) / 1_000_000)
     return overlapping, not_overlapping
 
