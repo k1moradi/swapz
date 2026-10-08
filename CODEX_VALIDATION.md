@@ -2129,3 +2129,49 @@ This is source-only rootless coverage; do not interpret it as real
 systemd, pressure workload, swap, kernel, throughput or GC-overlap
 qualification. Codex's independent supervisor prototype remains
 unintegrated and the recall PID-reuse limitation persists.
+
+## Source-only pressure swap inventory parser: additional P1 hardening
+
+A rootless audit of the production pressure controller found its
+verified-phase `awk ... END {print used+0}` would coerce a malformed
+`Used` value such as `16garbage` to positive numeric usage and would
+not distinguish absent matching swap from a measured zero value.
+The filled phase also printed rows without confirming the target
+inventory identity.
+
+The primary developer implemented a **strict full-inventory
+`/proc/swaps` parser** with an exact header, per-row field count
+and types, bounded ASCII decimal accounting, Used ≤ Size, and
+exactly one canonical test-device match. Failure of *any* inventory
+row, or a missing/duplicate target, now blocks filled or verified
+pressure checkpoint releases. No actual system swap command or
+device is touched by the parser tests.
+
+Twenty-three rootless parser unit cases now cover positive target,
+valid unrelated swap and alias, malformed rows, bad numeric Used,
+duplicate and missing device, malformed unrelated rows, bad header,
+truncation, oversized decimal, incorrect type, invalid path and
+impossible Size/Used. The isolated production-controller regression
+also runs the actual parser via synthetic test-owned swap inventories
+and asserts the corresponding malformed cases never issue checkpoint
+release.
+
+Both GitHub source-only gates passed with identical production
+parser/controller blobs:
+
+- Teardown at `3f4d1cd334074ba423b87b0801b1bccd72d0021c`:
+  https://github.com/k1moradi/swapz/actions/runs/37802473498
+- Combined at `b3833393c2a6d4e351e2610e647eaad0863eed05`:
+  https://github.com/k1moradi/swapz/actions/runs/37802481882
+
+The final combined workflow executed the new 23-test parser gate,
+the production pressure-controller regression, 16 phase-token tests
+plus 10 independent timed repeats, both teardown mocks, 11 offline
+analyzer tests and 26 complete NBD userspace selftests.
+
+For independent host follow-up: review strict parser invocation,
+canonical device matching and the phase-release ordering against
+the fixture's true `/proc/swaps` shape. Preserve both existing
+host-local `local-*-verify.state` files. These mocks are **not**
+live pressure/GC/device measurements and do not address Codex's
+separate unintegrated pidfd supervisor for recall.
