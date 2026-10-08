@@ -1782,3 +1782,74 @@ systemd pressure job, kernel device, real swapoff/on, GC-overlap
 latency or physical performance test occurred. The recall PID-reuse
 risk is not addressed by this pressure change. The kernel, NBD
 backend, and Codex-owned recall/DM teardown source remain unchanged.
+
+## 2026-10-08 — Fixture-neutral direct recall I/O plan and mandatory pidfd prototype CI
+
+After Codex pushed the independent gated-pidfd supervisor prototype
+at `5cb92f6696232f1719cfc9390f77b109a2d00c23`
+(supervisor blob `52ebf3d700a49c4396a2236b4137d334641012d0`),
+the primary developer added a **new fixture-neutral** direct recall
+orchestration prototype in `tests/runtime/recall-io-plan.py`.
+This does **not** replace or execute `buffer-recall.sh`.
+
+The plan accepts an injected supervisor with `launch(argv)`,
+`wait(opaque_handle, finite_timeout)` and `stop_all(handles)`.
+It prepares each expected 4096-byte page from the original nine-page
+source, constructs **direct `dd` argv arrays** (not Bash child
+functions or `bash -c`), launches and waits for the sequential
+Buffer A/Buffer B reads, and **launches both concurrent reads before
+waiting for either**. Exact-data comparisons run synchronously after
+worker exit/reap confirmation; a controlled monotonic clock supports
+timing-order assertions, not claims about real device latency.
+
+Every successfully returned opaque handle remains in the registry,
+even after a successful wait, including the nine-page direct writer,
+which stays outstanding through the read checks. A failed or
+ambiguous launch, wait, comparison, worker identity, or supervisor
+connection prevents the plan's cleanup callback; `stop_all` is
+still called to account for known workers when possible. Positive
+cleanup requires an explicit all-reaped, cleanup-allowed report.
+This is conservative **source-only** orchestration and does not
+prove descendant containment or production stop behavior.
+
+A new `tests/runtime/recall-io-plan-test.py` suite uses only a
+synthetic nine-page temporary file and fake supervisor: **25 tests**
+cover exact 4 KiB expected/output comparisons, direct writer/read
+argv, launch-before-wait ordering, staged writer lifetime, retained
+handles, launch/second-launch/wait/reap failures, corrupted or missing
+read outputs, duplicate/mismatched handles, supervisor disconnection,
+denied callbacks and admitted success. An AST check verifies that the
+plan does not invoke process-creation or numeric-signal APIs.
+No test opens a mapper or spawns a real dd process.
+
+The teardown and combined rootless GitHub workflows now **require**
+Codex's standalone supervisor regression: syntax compilation,
+**27 full tests**, and **3 additional independent runs** each
+bounded by a 40-second process timeout. They also require the new
+25-test direct recall plan, preserving existing pressure/DM/NBD gates.
+
+**Both workflows succeeded at exactly the same commit**
+`a276218feba2454b5f4c1e9c515d276a8155c468`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37808199284
+  — 27 supervisor tests plus 3/3 repeats, 25 direct I/O plan tests,
+  both teardown mocks, 23 strict swap-parser tests, 16 pressure
+  token tests and 10/10 repeats, and 11 offline GC analyzer tests.
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37808199250
+  — all above plus NBD syscall-isolation check, compilation,
+  **26/26 complete NBD selftests** and NBD/streaming teardown mocks.
+
+An earlier first-pass CI run failed because the new test incorrectly
+matched the string `shell=True` in a non-executable comment. The test
+was changed to inspect Python AST for executable process-spawning
+calls instead; the two completed CI runs above passed. There was no
+device or process-safety bypass in the source.
+
+**Unresolved P1:** `buffer-recall.sh` still uses Bash job PIDs for
+SIGCONT/SIGTERM and background `read_page` wrapper functions.
+The new plan and Codex's gated-pidfd prototype are **not connected
+to production recall**, nor to the unfinished separate IPC service.
+Production migration needs a reviewed control-channel adapter,
+failure-aware teardown and descendant containment. No real DM,
+loop, NBD, swap, systemd unit, module, physical-media test, fio,
+recall fixture, pressure fixture or reboot was performed.
