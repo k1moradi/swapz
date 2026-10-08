@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/rootless-teardown.yml'
+      - '.github/workflows/rootless-combined.yml'
       - 'tests/runtime/test-stack-teardown.sh'
       - 'tests/runtime/test-stack-teardown-regression.sh'
       - 'tests/runtime/pressure-teardown.sh'
@@ -37,6 +38,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rootless-teardown.yml'
+      - '.github/workflows/rootless-combined.yml'
       - 'tests/runtime/**'
   workflow_dispatch:
 
