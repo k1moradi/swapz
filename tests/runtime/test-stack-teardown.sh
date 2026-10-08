@@ -171,7 +171,17 @@ swapz_test_stop_child() {
     echo "ERROR: cannot inspect active shell jobs; preserving test stack" >&2
     return 1
   fi
-  if ! grep -Fxq "$child_pid" <<<"$running_jobs"
+  local active_jobs="$running_jobs"
+  if [[ -n "$stopped_jobs" ]]; then
+    active_jobs+=$(printf '\\n%s' "$stopped_jobs")
+  fi
+  if ! grep -Fxq "$child_pid" <<<"$active_jobs"; then
+    if kill -0 "$child_pid" 2>/dev/null; then
+      echo "ERROR: PID $child_pid is not an active test-owned job; preserving stack" >&2
+      return 1
+    fi
+    return 0
+  fi
   if kill -0 "$child_pid" 2>/dev/null; then
     # Stopped checkpoint jobs need CONT before TERM can be processed.
     if ! kill -CONT "$child_pid" 2>/dev/null ||
