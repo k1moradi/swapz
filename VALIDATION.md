@@ -1914,3 +1914,62 @@ until IPC service integration and independent review. The kernel, NBD
 source, DM/loop teardown, production recall, pressure code and Codex
 supervisor files were not changed; no real device, systemd/swap,
 physical-media or latency experiment occurred.
+
+## 2026-10-08 — Trusted recall references and worker cleanup-report attestation
+
+A source-only review found two risks in the future, not-yet-integrated
+`tests/runtime/recall-io-plan.py`:
+
+1. **Reference poisoning:** the controller previously compared two
+   on-disk files (`expected` and `readback`). If both were overwritten
+   with the same incorrect 4096-byte contents after preparation, the
+   comparison could pass. Each prepared page is now retained as a trusted,
+   immutable in-memory bytes value; both on-disk expected and worker
+   readback must match that original byte value.
+2. **Conflicting supervisor report:** a top-level `cleanup_allowed=True`
+   and `all_reaped=True` could previously authorize a cleanup callback
+   even if a detailed result omitted a registered handle, duplicated or
+   added an unknown handle, contained per-worker errors, reported an
+   unreaped worker, or contained report-level errors. The adapter now
+   independently verifies exact registered-handle coverage, distinct
+   identities, all worker reaped flags, absence of worker/report errors,
+   and both positive top-level safety decisions. Missing or invalid
+   report details fail closed.
+
+These changes are limited to the isolated plan and its rootless
+fake-supervisor tests; they do not modify `buffer-recall.sh`, the
+supervisor prototype, or Codex's in-progress IPC service.
+Nine new rootless negative cases (46 total) cover identical corruption
+of expected/readback, corrupted expected data alone, contradictory
+summary/report errors, missing, unknown or duplicate result handles,
+worker errors, unreaped workers and missing detail records. The
+existing 37 tests continue to cover direct `dd` argument planning,
+concurrency ordering, exact pages, source/readback file type and
+inode validation, and failed-stop cleanup denial.
+
+**Same-commit rootless CI PASS at**
+`ec70195d1d1c7a44a72aea83de65043c5fef323f`:
+
+- Teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37810629055
+  — 46 recall I/O plan tests, 27 supervisor tests and 3/3 repeats,
+  rootless DM and pressure regression suites, 23 strict swap-parser
+  tests, 16 pressure token tests and 10/10 repeats, and 11 offline
+  GC analyzer tests.
+- Combined:
+  https://github.com/k1moradi/swapz/actions/runs/37810628795
+  — same recall/pressure/teardown checks plus static NBD syscall
+  containment, Python compilation, **26/26 full NBD userspace
+  selftests** and NBD/streaming teardown mocks.
+
+The initial source-only commit with strict stop-report checking failed
+the recall-plan mocks because their old `FakeReport` did not expose
+detailed worker results. The mock was updated to model the real
+supervisor's full report contract; both complete workflows then passed.
+This is a deliberate fail-closed API hardening, not a live IPC proof.
+
+**Limits:** real production recall still uses numeric-PID Bash job
+signaling and can have untracked descendant workers; the new IPC
+service is not integrated. No real DM/loop/NBD, swap, systemd,
+kernel module, fio, physical device or pressure/recall workload
+operations were performed.
