@@ -137,6 +137,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-role-bridge-test.py
           timeout 35s python3 tests/runtime/recall-role-bridge-test.py -v
+      - name: Rootless real role service IPC protocol integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-role-service-integration-test.py
+          timeout 35s python3 tests/runtime/recall-role-service-integration-test.py -v
       - name: Persistent Bash pidfd IPC control bridge rootless regression
         shell: bash
         run: |
