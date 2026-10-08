@@ -12,6 +12,19 @@ LATENCY_NS=${SWAPZ_BENCH_LATENCY_NS:-500000}
 RUNTIME=${SWAPZ_BENCH_RUNTIME:-3}
 WRITE_QD=${SWAPZ_BENCH_QD:-64}
 COMPRESS=${SWAPZ_BENCH_COMPRESS:-50}
+# Throttled null_blk also charges DISCARD by request size. GC discards a
+# full 1 MiB segment and can permanently requeue above the 50 Hz budget.
+# Disable lower DISCARD in the synthetic bandwidth tests; its correctness
+# and availability are exercised separately by runtime GC/discard tests.
+BENCH_DISCARD=${SWAPZ_BENCH_DISCARD:-0}
+case "$BENCH_DISCARD" in
+  0|1) ;;
+  *) echo "ERROR: SWAPZ_BENCH_DISCARD must be 0 or 1" >&2; exit 4 ;;
+esac
+if (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )); then
+  echo "ERROR: null_blk mbps may requeue a 1 MiB GC DISCARD forever; use SWAPZ_BENCH_DISCARD=0 with bandwidth throttling." >&2
+  exit 4
+fi
 BATCHES=${SWAPZ_BENCH_BATCHES:-"4 8 16 32 64 128 256 512 1024"}
 STRATEGIES=${SWAPZ_BENCH_STRATEGIES:-"immediate opportunistic staged"}
 # null_blk's mbps throttle replenishes bytes at 50 ticks/second. A request
@@ -78,7 +91,12 @@ setup_nullblk() {
   echo 1 >"$NULL_CFG/hw_queue_depth"
   echo 2048 >"$NULL_CFG/max_sectors"
   echo "$BANDWIDTH" >"$NULL_CFG/mbps"
-  [[ -e "$NULL_CFG/discard" ]] && echo 1 >"$NULL_CFG/discard" || true
+  if [[ -e "$NULL_CFG/discard" ]]; then
+    echo "$BENCH_DISCARD" >"$NULL_CFG/discard"
+  elif (( BENCH_DISCARD )); then
+    echo "ERROR: null_blk discard requested but configfs has no discard control" >&2
+    return 1
+  fi
   echo 1 >"$NULL_CFG/power"
   local index candidate
   index=$(cat "$NULL_CFG/index")
@@ -177,6 +195,12 @@ run_case() {
   fi
   dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch"
   TARGET_ACTIVE=1
+  # Prove the throttled fixture cannot issue a full-segment lower DISCARD
+  # before any write/GC can reach it.
+  if (( BANDWIDTH > 0 )) && ! dmsetup status "$TARGET" | grep -q 'lower_discard=off'; then
+    echo "ERROR: bandwidth-limited null_blk unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
+    return 1
+  fi
   prefill_cold "$path"
 
   cat >"$fiofile" <<EOF
@@ -276,6 +300,7 @@ PY
 }
 
 echo "BACKEND=$BACKEND"
+echo "LOWER_DISCARD=$BENCH_DISCARD"
 echo "BATCHES=$BATCHES"
 echo "STRATEGIES=$STRATEGIES"
 
