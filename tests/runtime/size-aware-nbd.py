@@ -440,7 +440,7 @@ def selftest() -> int:
 
         def send(self, pending: memoryview) -> int:
             self.attempts += 1
-            if self.attempts == 1:
+            if self.attempts == 2:
                 raise socket.timeout("injected transient send timeout")
             sent = min(len(pending), 3)
             self.received.extend(pending[:sent])
