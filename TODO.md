@@ -217,3 +217,31 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       separately; no unreviewed process-signaling mechanism.
 - [ ] Do not infer real kernel NBD behavior, live GC-overlap swap-in
       latency, calibrated bandwidth or batch-size choice from mocks.
+
+### 2026-10-08 Codex whitespace-DM fail-open follow-up
+
+- [x] Accept only truly empty / documented `No devices found`
+      successful DM inventory as absence; **reject spaces/tabs/newline-only**
+      and whitespace rows mixed with valid device rows.
+- [x] Preserve `dmsetup ls` trailing newlines across Bash command
+      substitution so malformed inventories cannot masquerade as empty.
+- [x] Mock Codex's precise whitespace-only proof-of-failure, post-upper
+      removal ambiguity, and positive empty/unrelated/present cases.
+- [x] Pin pressure transient test units to `system.slice`, enforce the
+      exact nonempty ControlGroup path for each distinct unit, reject
+      duplicated/wrong/traversal paths with no swapoff/DM cleanup.
+- [x] Test the actual staged-recall stop-all-children -> DM/loop cleanup
+      guard on failure and success, without real process/device actions.
+- [x] Add malformed `Used` numeric field to the pressure swap mocks.
+- [x] Clean GitHub teardown CI PASS at
+      `3b60d7659df8cf59716286dfe0d1504307eb2e78`
+      (https://github.com/k1moradi/swapz/actions/runs/37781726152).
+- [x] Clean same-revision combined source-only CI PASS at
+      `3b60d7659df8cf59716286dfe0d1504307eb2e78`
+      (https://github.com/k1moradi/swapz/actions/runs/37781726172).
+- [ ] Obtain Codex independent host requalification of updated teardown
+      after it finishes its currently assigned NBD audit.
+- [ ] PID-reuse check-to-signal race remains unresolved; no unreviewed
+      atomic signaling mechanism has been introduced.
+- [ ] Real swap/NBD/DM runtime, GC-overlap p99 and physical testing
+      remain unauthorized.
