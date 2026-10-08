@@ -10,10 +10,10 @@ LOOP_DEVICE=/dev/loop1234
 reset_fixture() {
   UPPER_EXISTS=1; LOWER_EXISTS=1; LOOP_ATTACHED=1
   BUSY_TARGET=""; FALSE_REMOVE=""; FALSE_INFO=""; LOOP_HELD=0
-  LIST_FAIL=0; AWK_FAIL=0; LOOP_LIST_FAIL=0; FALSE_DETACH=0
-  LOOP_LIST_PADDED=0; LOOP_LIST_MALFORMED=0
+  LIST_FAIL=0; AWK_FAIL=0; LIST_MALFORMED=0; LOOP_LIST_FAIL=0; FALSE_DETACH=0
+  LOOP_LIST_PADDED=0; LOOP_LIST_MALFORMED=0; LOOP_LIST_EXTRA=0
   LOOP_LIST_FAIL_AFTER=0
-  PS_FAIL=0; CHILD_STATE=""; CALLS=()
+  PS_FAIL=0; CHILD_STATE=""; CALLS=(); SIGNALS=(); JOB_RUNNING=1; JOB_STOPPED=0
 }
 dmsetup() {
   local command=$1 target=""
@@ -21,6 +21,7 @@ dmsetup() {
     ls)
       [[ "$2" == --noheadings ]] || return 99
       (( LIST_FAIL )) && return 5
+      if (( LIST_MALFORMED )); then printf 'corrupt-inventory-row\\n'; return 0; fi
       (( UPPER_EXISTS )) && printf '%s (253:10)\n' "$UPPER"
       (( LOWER_EXISTS )) && printf '%s (253:11)\n' "$LOWER"
       return 0 ;;
@@ -58,6 +59,7 @@ losetup() {
     # detach failure using parent-visible attachment state, not a subshell counter.
     (( LOOP_LIST_FAIL || (LOOP_LIST_FAIL_AFTER && ! LOOP_ATTACHED) )) && return 5
     if (( LOOP_LIST_MALFORMED )); then printf 'unparseable-loop-row\n'; return 0; fi
+    if (( LOOP_LIST_EXTRA )); then printf '%s unexpected-column\n' "$LOOP_DEVICE"; return 0; fi
     if (( LOOP_ATTACHED )); then
       if (( LOOP_LIST_PADDED )); then printf '  %s  \n' "$LOOP_DEVICE"
       else printf '%s\n' "$LOOP_DEVICE"; fi
@@ -136,10 +138,18 @@ if swapz_test_detach_loop /dev/sdb1; then exit 1; fi
 echo 'unrelated DM/physical device rejected: PASS'
 
 # An unresponsive owned writer must stop cleanup before mapping removal.
-jobs() { [[ "$*" == -p ]] && printf '%s\n' 424242; }
+jobs() {
+  case "$*" in
+    -p) printf '%s\\n' 424242 ;;
+    -pr) (( JOB_RUNNING )) && printf '%s\\n' 424242; return 0 ;;
+    -ps) (( JOB_STOPPED )) && printf '%s\\n' 424242; return 0 ;;
+    *) return 99 ;;
+  esac
+}
 kill() {
   case "$1" in
-    -0|-CONT|-TERM) [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
+    -0) [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
+    -CONT|-TERM) SIGNALS+=("$1:$2"); [[ "$2" == 424242 ]] && [[ -n "$CHILD_STATE" ]] ;;
     *) return 99 ;;
   esac
 }
@@ -159,14 +169,25 @@ echo 'unresponsive writer blocks teardown: PASS'
 reset_fixture
 AWK_FAIL=1
 if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
-(( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
-echo 'DM parser failure preserves backing: PASS'
+(( ! UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+[[ "${CALLS[*]}" == "remove:$UPPER" ]]
+echo 'DM parser failure preserves lower backing: PASS'
 
 reset_fixture
 LIST_FAIL=1
 if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+(( ! UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+[[ "${CALLS[*]}" == "remove:$UPPER" ]]
+echo 'DM inventory failure preserves lower backing: PASS'
+
+# Successful dmsetup ls with corrupt rows cannot prove target absence.
+reset_fixture
+LIST_MALFORMED=1
+FALSE_INFO=$UPPER
+if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
 (( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
-echo 'DM inventory failure preserves backing: PASS'
+[[ "${#CALLS[@]}" == 0 ]]
+echo 'malformed DM inventory rejected after failed info: PASS'
 
 # A spurious successful losetup -d does not establish detach.
 reset_fixture
@@ -202,6 +223,12 @@ if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
 echo 'malformed loop inventory preserves backing: PASS'
 
 reset_fixture
+LOOP_LIST_EXTRA=1
+if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+(( LOOP_ATTACHED ))
+echo 'loop inventory with unexpected column rejected: PASS'
+
+reset_fixture
 LOOP_ATTACHED=0
 swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"
 [[ "${CALLS[*]}" == "remove:$UPPER remove:$LOWER" ]]
@@ -228,11 +255,20 @@ if swapz_test_stop_child 424242; then exit 1; fi
 echo 'process-state inspection failure preserves stack: PASS'
 
 # No job ownership and no living process means the child was already reaped.
-jobs() { [[ "$*" == -p ]] && :; }
+jobs() { [[ "$*" == -pr || "$*" == -ps ]] && :; }
 kill() { return 1; }
 reset_fixture
 swapz_test_stop_child 424242
 echo 'already-reaped test child handled without signal: PASS'
+
+# A completed child can remain in jobs -p after its process has exited.
+# Simulate PID reuse: kill -0 succeeds, but -pr/-ps do not list the PID.
+reset_fixture
+JOB_RUNNING=0
+CHILD_STATE=R
+if swapz_test_stop_child 424242; then exit 1; fi
+[[ "${#SIGNALS[@]}" == 0 ]]
+echo 'completed-but-listed reused PID is never signaled: PASS'
 
 # All three tracked recall I/O jobs must be visited even if one fails.
 STOPPED_CHILDREN=()
