@@ -17,6 +17,12 @@ swapz_pressure_cgroup_empty() {
   return 0
 }
 
+# A cgroup directory may disappear once systemd has stopped the unit.
+# Presence must be checked independently of cgroup.procs st_size.
+swapz_pressure_cgroup_dir_exists() {
+  [[ -d "$1" ]]
+}
+
 swapz_pressure_confirm_swap_inactive() {
   local name=$1 expected_device="" swaps swap_path canonical_path
   # If the mapper still exists, its canonical path must be resolvable.
@@ -127,8 +133,15 @@ swapz_pressure_cleanup_resources() {
       return 1
     fi
     if [[ -n "$unit_cgroup" ]]; then
-      swapz_pressure_cgroup_empty "/sys/fs/cgroup$unit_cgroup/cgroup.procs" ||
+      local cgroup_dir="/sys/fs/cgroup$unit_cgroup"
+      if swapz_pressure_cgroup_dir_exists "$cgroup_dir"; then
+        swapz_pressure_cgroup_empty "$cgroup_dir/cgroup.procs" || return 1
+      elif [[ -e "$cgroup_dir" ]]; then
+        echo "ERROR: unit $unit cgroup path is not inspectable; preserving swap" >&2
         return 1
+      fi
+      # The stopped unit's cgroup was independently confirmed absent, or
+      # was present and its task listing successfully checked empty.
     fi
     systemctl reset-failed "$unit" >/dev/null 2>&1 || true
   done
