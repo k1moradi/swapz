@@ -215,6 +215,86 @@ swapz_pressure_cleanup_resources
 echo 'stopped and reaped units with empty ControlGroup remain safe: PASS'
 
 
+# The unit-name guard must reject malformed or ambiguous test ownership
+# *before* making a single systemctl request or attempting any teardown.
+for bad_name_case in identical empty_first empty_second no_suffix \
+                     slash traversal illegal_character; do
+  reset_fixture
+  SWAPON=1
+  ACTIVE_SWAP=1
+  case "$bad_name_case" in
+    identical) SECOND_UNIT=$FIRST_UNIT ;;
+    empty_first) FIRST_UNIT="" ;;
+    empty_second) SECOND_UNIT="" ;;
+    no_suffix) FIRST_UNIT="swapz-test-no-suffix" ;;
+    slash) SECOND_UNIT="system.slice/other.service" ;;
+    traversal) FIRST_UNIT="../other.service" ;;
+    illegal_character) SECOND_UNIT="swapz-test-?invalid.service" ;;
+  esac
+  if swapz_pressure_cleanup_resources; then
+    echo "ERROR: invalid unit name $bad_name_case was accepted" >&2
+    exit 1
+  fi
+  (( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 && SWAPON == 1 && ACTIVE_SWAP == 1 ))
+  [[ ! -s "$EVENT_LOG" ]]
+  [[ ! -s "$SHOW_LOG" ]]
+done
+reset_fixture
+echo 'duplicate, missing and malformed transient unit names rejected before systemctl: PASS'
+
+# An empty ControlGroup is safe only for a stopped unit with MainPID=0.
+# File-backed inspection logs survive command substitutions and prove that
+# each rejection reached the intended production guard.
+for bad_group_case in live_pid_inactive active_zero_pid active_live_pid; do
+  reset_fixture
+  SWAPON=1
+  ACTIVE_SWAP=1
+  UNIT_GROUP_EMPTY=1
+  case "$bad_group_case" in
+    live_pid_inactive) UNIT_MOCK_PID=424242; UNIT_MOCK_STATE=inactive ;;
+    active_zero_pid) UNIT_MOCK_PID=0; UNIT_MOCK_STATE=active ;;
+    active_live_pid) UNIT_MOCK_PID=424242; UNIT_MOCK_STATE=active ;;
+  esac
+  if swapz_pressure_cleanup_resources; then
+    echo "ERROR: unsafe empty cgroup $bad_group_case was accepted" >&2
+    exit 1
+  fi
+  (( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 && SWAPON == 1 && ACTIVE_SWAP == 1 ))
+  [[ ! -s "$EVENT_LOG" ]]
+  mapfile -t observed_show_events <"$SHOW_LOG"
+  expected_show_events=(
+    "show:$FIRST_UNIT:LoadState"
+    "show:$FIRST_UNIT:MainPID"
+    "show:$FIRST_UNIT:ControlGroup"
+    "show:$FIRST_UNIT:ActiveState"
+  )
+  if [[ "${observed_show_events[*]}" != "${expected_show_events[*]}" ]]; then
+    printf 'ERROR: empty cgroup case %s did not reach its guard:\n' "$bad_group_case" >&2
+    printf '%s\n' "${observed_show_events[*]}" >&2
+    exit 1
+  fi
+done
+echo 'empty cgroup with live PID or active state rejected before stop/swapoff: PASS'
+
+# The legitimate reaped inactive/failed cases must still permit controlled
+# cleanup. Starting with active swap proves swapoff and DM follow-up happen.
+for stopped_state in inactive failed; do
+  reset_fixture
+  SWAPON=1
+  ACTIVE_SWAP=1
+  UNIT_GROUP_EMPTY=1
+  UNIT_MOCK_PID=0
+  UNIT_MOCK_STATE=$stopped_state
+  swapz_pressure_cleanup_resources
+  (( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && SWAPON == 0 && ACTIVE_SWAP == 0 ))
+  mapfile -t observed_show_events <"$SHOW_LOG"
+  [[ "${observed_show_events[*]}" == *"show:$FIRST_UNIT:ControlGroup"* ]]
+  [[ "${observed_show_events[*]}" == *"show:$SECOND_UNIT:ControlGroup"* ]]
+  [[ "${observed_show_events[*]}" != *"signal:"* ]]
+done
+reset_fixture
+echo 'empty cgroup allowed for reaped inactive/failed units only: PASS'
+
 reset_fixture
 UNIT_LOAD_FAIL=1
 if swapz_pressure_cleanup_resources; then exit 1; fi
