@@ -39,7 +39,7 @@ else:
     return 1
   fi
   case "$result" in
-    present|absent) printf '%s\\n' "$result" ;;
+    present|absent) printf '%s\n' "$result" ;;
     *) echo "ERROR: invalid cgroup inspection result; preserving swap" >&2; return 1 ;;
   esac
 }
