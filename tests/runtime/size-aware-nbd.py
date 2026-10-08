@@ -628,6 +628,41 @@ def selftest_failure_gates() -> None:
                   MAX_REQUEST_BYTES, full)
     assert model.process(CMD_READ, capacity - MAX_REQUEST_BYTES,
                          MAX_REQUEST_BYTES) == full
+    # Exercise the protocol at the accepted 8 MiB ceiling, not merely the
+    # model. Keep the exchange on a local socketpair with finite deadlines.
+    wire_model = SizeAwareDevice(32, 250, 0)
+    wire_data = bytes(range(256)) * (MAX_REQUEST_BYTES // 256)
+    wire_offset = wire_model.disk.size_bytes - MAX_REQUEST_BYTES
+    wire_server, wire_client = socket.socketpair()
+    wire_client.settimeout(4)
+    wire_stop = threading.Event()
+    wire_errors: list[Exception] = []
+
+    def serve_maximum_wire() -> None:
+        try:
+            wire_model.serve(wire_server, wire_stop)
+        except Exception as exc:
+            wire_errors.append(exc)
+
+    wire_worker = threading.Thread(target=serve_maximum_wire, daemon=True)
+    try:
+        wire_worker.start()
+        assert client_transact(wire_client, CMD_WRITE, 95, wire_offset,
+                               MAX_REQUEST_BYTES, wire_data) == b""
+        assert client_transact(wire_client, CMD_READ, 96, wire_offset,
+                               MAX_REQUEST_BYTES) == wire_data
+        wire_client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_DISC, 97, 0, 0))
+    finally:
+        wire_stop.set()
+        wire_client.close()
+        wire_server.close()
+        if wire_worker.ident is not None:
+            wire_worker.join(timeout=2)
+    assert not wire_worker.is_alive() and not wire_errors, wire_errors
+    assert wire_model.stats["write_bytes"] == MAX_REQUEST_BYTES
+    assert wire_model.stats["read_bytes"] == MAX_REQUEST_BYTES
+    assert wire_model.stats["max_request_bytes"] == MAX_REQUEST_BYTES
+
     for off, count in ((0, MAX_REQUEST_BYTES + BLOCK),
                        (1, BLOCK),
                        (capacity, BLOCK),
