@@ -398,6 +398,23 @@ mapfile -t ordered_events <"$EVENT_LOG"
 [[ "${ordered_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
 echo 'successful stop, swapoff, verify, mapper teardown order: PASS'
 
+# The pressure helper uses release tokens rather than SIGSTOP. Even when
+# systemctl reports a nonzero MainPID, cleanup must never send a numeric
+# SIGCONT; it stops the test-owned unit by exact name, then verifies quiescence.
+reset_fixture
+UNIT_MOCK_PID=424242
+SWAPON=1
+ACTIVE_SWAP=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 1 && ACTIVE_SWAP == 0 ))
+if grep -q '^signal:' "$SHOW_LOG"; then
+  echo 'ERROR: pressure cleanup sent an unsafe numeric-PID signal' >&2
+  exit 1
+fi
+mapfile -t token_stop_events <"$EVENT_LOG"
+[[ "${token_stop_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs swapoff verify-swap cleanup-stack" ]]
+echo 'nonzero MainPID needs no manual SIGCONT to stop and clean up: PASS'
+
 reset_fixture
 GROUP_REMOVED=1
 swapz_pressure_cleanup_resources
@@ -409,5 +426,13 @@ MAP_EXISTS=0
 swapz_pressure_cleanup_resources
 (( CLEAN_CALLS == 1 ))
 echo 'confirmed absent test mapping safely handled: PASS'
+
+# Signal mock events are persisted even through command substitutions.
+# No rejection or success path may resume a numeric MainPID.
+if grep -q '^signal:' "$SHOW_LOG"; then
+  echo 'ERROR: pressure cleanup unexpectedly signaled a numeric PID' >&2
+  exit 1
+fi
+echo 'pressure teardown never signals a numeric PID: PASS'
 
 echo 'swapz pressure teardown rootless regression: PASS'
