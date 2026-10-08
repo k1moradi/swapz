@@ -717,6 +717,63 @@ def selftest_failure_gates() -> None:
     fd_close.assert_called_once_with(81)
     assert "NBD_CLEAR_SOCK failed" in err.getvalue()
 
+    # Exercise the final CLI-level result after an otherwise successful,
+    # fully mocked setup, and the cleanup path for Thread.start() failure.
+    class FakeWorker:
+        def __init__(self, *args: object, **kwargs: object):
+            self.started = False
+
+        def start(self) -> None:
+            if worker_case == "start_failure":
+                raise OSError(errno.EAGAIN, "injected worker startup failure")
+            self.started = True
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout: float | None = None) -> None:
+            assert self.started
+
+    for worker_case in ("clear_failure", "start_failure"):
+        ksock, ssock = FakeSocket(), FakeSocket()
+        steps: list[int] = []
+        err = io.StringIO()
+
+        def mocked_ioctl(_fd: int, operation: int,
+                         *_args: object) -> None:
+            steps.append(operation)
+            if worker_case == "clear_failure" and operation == NBD_CLEAR_SOCK:
+                raise OSError(errno.EIO, "injected clear failure")
+
+        with (mock.patch(__name__ + ".validate_nbd_node", return_value="/dev/nbd0"),
+              mock.patch(__name__ + ".verify_nbd_device_identity"),
+              mock.patch("os.open", return_value=81),
+              mock.patch("os.fstat", return_value=spoof),
+              mock.patch("os.close") as fd_close,
+              mock.patch("socket.socketpair", return_value=(ksock, ssock)),
+              mock.patch("fcntl.ioctl", side_effect=mocked_ioctl),
+              mock.patch("signal.signal"),
+              mock.patch("threading.Thread", side_effect=FakeWorker),
+              mock.patch.object(Path, "write_text", return_value=1),
+              mock.patch.object(SizeAwareDevice, "serve", return_value=None),
+              contextlib.redirect_stderr(err)):
+            if worker_case == "start_failure":
+                try:
+                    serve_kernel(args)
+                except OSError as exc:
+                    assert "worker startup failure" in str(exc)
+                else:
+                    raise AssertionError("failed worker startup was accepted")
+            else:
+                assert serve_kernel(args) == 1, "clear-sock error yielded success"
+        assert ksock.closed and ssock.closed
+        fd_close.assert_called_once_with(81)
+        assert steps[-1] == NBD_CLEAR_SOCK
+        if worker_case == "clear_failure":
+            assert "NBD_CLEAR_SOCK failed" in err.getvalue()
+        else:
+            assert NBD_DO_IT not in steps
+
 
 def selftest() -> int:
     from types import SimpleNamespace
