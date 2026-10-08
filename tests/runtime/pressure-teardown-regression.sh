@@ -24,6 +24,18 @@ reset_fixture() {
   ACTIVE_SWAP=0; SWAPOFF_FAIL=0; CLEAN_CALLS=0; SWAPOFF_CALLS=0
   : >"$EVENT_LOG"
 }
+# Exercise the real os.stat-based tri-state checker on ordinary temp paths
+# before replacing it with controlled mocks for later systemd scenarios.
+mkdir "$TMP/present-cgroup"
+[[ "$(swapz_pressure_cgroup_state "$TMP/present-cgroup")" == present ]]
+[[ "$(swapz_pressure_cgroup_state "$TMP/absent-cgroup")" == absent ]]
+printf marker >"$TMP/not-a-directory"
+if swapz_pressure_cgroup_state "$TMP/not-a-directory"; then exit 1; fi
+python3() { return 5; }
+if swapz_pressure_cgroup_state "$TMP/present-cgroup"; then exit 1; fi
+unset -f python3
+echo 'real cgroup tri-state: present, ENOENT, invalid type and inspection failure: PASS'
+
 swapz_pressure_cgroup_state() {
   (( GROUP_INSPECT_FAIL )) && return 5
   if (( GROUP_REMOVED )); then printf 'absent\n'
