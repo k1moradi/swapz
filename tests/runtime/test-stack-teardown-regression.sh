@@ -236,6 +236,9 @@ echo 'confirmed already-detached loop: PASS'
 
 # Directly exercise the real find/holder implementation, not its mock.
 unset -f swapz_test_check_loop_holders
+# Restore the original helper after removing the mock; otherwise the direct
+# holder probe exits 127 without exercising find/sysfs inspection at all.
+source "$ROOT/tests/runtime/test-stack-teardown.sh"
 ROOT_HOLDERS=$(mktemp -d)
 trap 'rm -rf -- "$ROOT_HOLDERS"' EXIT
 command touch "$ROOT_HOLDERS/dm-1"
