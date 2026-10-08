@@ -383,8 +383,9 @@ def serve_kernel(args: argparse.Namespace) -> int:
                 stop.set()
 
         # The worker must never be abandoned: it owns the NBD file descriptor.
-        worker = threading.Thread(target=kernel_thread, daemon=False)
-        worker.start()
+        new_worker = threading.Thread(target=kernel_thread, daemon=False)
+        new_worker.start()
+        worker = new_worker
         # No auto device selection or formatting: the caller owns the
         # explicit virtual device and all higher DM mappings.
         Path(args.ready_file).write_text(
