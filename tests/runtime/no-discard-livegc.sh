@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$ROOT/tests/runtime/test-stack-teardown.sh"
 [[ $EUID -eq 0 ]] || { echo 'root required' >&2; exit 1; }
 for tool in dmsetup g++ losetup lsblk modprobe truncate; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
@@ -8,7 +9,27 @@ done
 TMP=$(mktemp -d /dev/shm/swapz-v21-no-discard.XXXXXX)
 TAG="$$-$RANDOM"
 LOOP=""; CRYPT="swapz-v21-crypt-$TAG"; NAME="swapz-v21-no-discard-$TAG"
-cleanup(){ dmsetup remove "$NAME" >/dev/null 2>&1 || true; dmsetup remove "$CRYPT" >/dev/null 2>&1 || true; [[ -z "$LOOP" ]] || losetup -d "$LOOP" >/dev/null 2>&1 || true; rm -rf "$TMP"; }
+cleanup() {
+  local exit_status=$?
+  trap - EXIT
+  set +e
+  # Remove swapz -> crypt -> loop. Never detach the lower loop if any DM
+  # target remains, and preserve the image for investigation on failure.
+  if ! swapz_test_cleanup_dm_stack "$LOOP" "$NAME" "$CRYPT"; then
+    echo "ERROR: no-DISCARD teardown incomplete; preserved test resources and $TMP" >&2
+    (( exit_status != 0 )) || exit_status=1
+  elif (( exit_status == 0 )); then
+    if rm -rf -- "$TMP"; then
+      echo 'V2.2 no-DISCARD live-GC readback and teardown: PASS'
+    else
+      echo "ERROR: could not remove test directory $TMP" >&2
+      exit_status=1
+    fi
+  else
+    echo "ERROR: no-DISCARD fixture failed; diagnostics preserved at $TMP" >&2
+  fi
+  exit "$exit_status"
+}
 trap cleanup EXIT
 g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror "$ROOT/tests/runtime/reference.cpp" -o "$TMP/reference"
 truncate -s 3M "$TMP/backing.img"
