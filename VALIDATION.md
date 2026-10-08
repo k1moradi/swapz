@@ -1853,3 +1853,64 @@ Production migration needs a reviewed control-channel adapter,
 failure-aware teardown and descendant containment. No real DM,
 loop, NBD, swap, systemd unit, module, physical-media test, fio,
 recall fixture, pressure fixture or reboot was performed.
+
+## 2026-10-08 — Rootless recall reference/readback file-safety qualification
+
+While Codex separately develops the pidfd supervisor IPC service, the primary
+developer hardened the **fixture-neutral, not-yet-integrated**
+`tests/runtime/recall-io-plan.py` reference and readback handling.
+Previously `Path.exists()` missed dangling symlinks and
+`Path.write_bytes()` could follow a racing link while creating the
+expected page; unrestricted `Path.read_bytes()` could follow a symlink,
+block on a FIFO or allocate memory for an oversized result. An exact-byte
+comparison alone did not establish the file's type or ownership identity.
+
+The new `_read_exact_regular()` rejects symlinks, FIFO/special files,
+hardlinks, wrong-length content and paths replaced between `lstat` and
+`open`. It uses `O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC`, compares
+pre-open and post-open device/inode and regular-file/link-count metadata,
+enforces exact expected length and reads no more than one page plus one
+byte. The nine-page fixture source must also be an exact-size regular
+single-link file. The expected 4096-byte reference uses
+`O_CREAT | O_EXCL | O_NOFOLLOW` to prevent replacing or following an
+existing or newly injected file. Path preparation and readback failures
+record `plan.failure`, preventing the future cleanup callback even
+after a successful supervisor stop report.
+
+The fake-supervisor rootless regression gained **12 adversarial tests**
+(37 total) for dangling symlinks and FIFOs existing before worker
+launch; symlinked/hardlinked source, symlinked, hardlinked, FIFO,
+undersized or oversized readback, symlinked expected data after worker
+reaping, injected exclusive-create racing link, and inode replacement
+between lstat and open. All tests use disposable regular files and
+fake workers; there are no production `dd` invocations, device
+accesses, real PID signals, or block-device teardowns.
+
+**GitHub Actions SUCCESS at exact code commit**
+`4181df6ad91099ae0717fa6474750be153ed8734`:
+
+- Rootless teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37809491958
+- Combined NBD and teardown:
+  https://github.com/k1moradi/swapz/actions/runs/37809491946
+
+Both workflows passed **37 recall I/O plan tests**, **27 gated pidfd
+supervisor tests**, three further complete supervisor test processes,
+the teardown mocks, 23 strict pressure swap-parser tests, 16 pressure
+checkpoint tests with 10 independent repeats, and 11 offline GC
+analyzer tests. The combined workflow also passed static NBD syscall
+isolation, compilation, 26/26 full NBD selftests and both NBD/streaming
+teardown mocks.
+
+The initial code-only commit's CI failed solely because the pre-existing
+test still expected a diagnostic containing `truncated` after the
+file-size guard began reporting `invalid recall file identity or size`.
+That assertion was updated alongside the 12 negative cases before the
+successful runs above.
+
+This strengthens the synthetic I/O plan, **not** production
+`buffer-recall.sh`. Numeric-PID signaling remains in that live fixture
+until IPC service integration and independent review. The kernel, NBD
+source, DM/loop teardown, production recall, pressure code and Codex
+supervisor files were not changed; no real device, systemd/swap,
+physical-media or latency experiment occurred.
