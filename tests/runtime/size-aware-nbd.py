@@ -466,6 +466,230 @@ def client_transact(conn: socket.socket, command: int, cookie: int,
     return client_recv_exact(conn, length) if command == CMD_READ else b""
 
 
+def selftest_failure_gates() -> None:
+    """Rootless negative cases against the actual validators and serve loop."""
+    import contextlib
+    import io
+    from types import SimpleNamespace
+    from unittest import mock
+
+    # Missing/unreadable directories and iteration failures are *not* empty.
+    with mock.patch("os.scandir",
+                    return_value=contextlib.nullcontext(iter(()))):
+        verify_nbd_no_holders("nbd0")
+    with mock.patch("os.scandir",
+                    return_value=contextlib.nullcontext(iter((object(),)))):
+        try:
+            verify_nbd_no_holders("nbd0")
+        except ValueError as exc:
+            assert "holders" in str(exc)
+        else:
+            raise AssertionError("populated NBD holders directory was accepted")
+    for scan_error in (FileNotFoundError("missing sysfs holders"),
+                       PermissionError("denied sysfs holders"),
+                       OSError(errno.EIO, "cannot enumerate holders")):
+        with mock.patch("os.scandir", side_effect=scan_error):
+            try:
+                verify_nbd_no_holders("nbd0")
+            except ValueError as exc:
+                assert "cannot inspect" in str(exc)
+            else:
+                raise AssertionError("uninspectable NBD holders were accepted")
+
+    class FaultyEntries:
+        def __iter__(self):
+            raise OSError(errno.EIO, "directory iteration failed")
+
+    with mock.patch("os.scandir",
+                    return_value=contextlib.nullcontext(FaultyEntries())):
+        try:
+            verify_nbd_no_holders("nbd0")
+        except ValueError as exc:
+            assert "cannot inspect" in str(exc)
+        else:
+            raise AssertionError("NBD holders iteration failure was accepted")
+
+    # A failed sysfs PID inspection must not pass the full node preflight.
+    spoof = SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=os.makedev(43, 0))
+    with (mock.patch("os.lstat", return_value=spoof),
+          mock.patch.object(Path, "exists", return_value=True),
+          mock.patch.object(Path, "read_text", return_value="43:0\n"),
+          mock.patch("os.stat", side_effect=PermissionError("pid inaccessible"))):
+        try:
+            validate_nbd_node("/dev/nbd0")
+        except ValueError as exc:
+            assert "cannot inspect NBD client PID" in str(exc)
+        else:
+            raise AssertionError("inaccessible NBD client PID was accepted")
+
+    model = SizeAwareDevice(32, 20, 0, sleeper=lambda _delay: None)
+    full = b"A" * MAX_REQUEST_BYTES
+    capacity = model.disk.size_bytes
+    model.process(CMD_WRITE, capacity - MAX_REQUEST_BYTES,
+                  MAX_REQUEST_BYTES, full)
+    assert model.process(CMD_READ, capacity - MAX_REQUEST_BYTES,
+                         MAX_REQUEST_BYTES) == full
+    for off, count in ((0, MAX_REQUEST_BYTES + BLOCK),
+                       (1, BLOCK),
+                       (capacity, BLOCK),
+                       (capacity - BLOCK, 2 * BLOCK)):
+        try:
+            model.disk.check(off, count)
+        except ProtocolError as exc:
+            assert "unaligned or out-of-bounds" in str(exc)
+        else:
+            raise AssertionError("invalid NBD size/offset was accepted")
+
+    # For each malformed request, assert the *specific* serve() rejection.
+    # No write payload is supplied: over-limit requests must be rejected
+    # before attempting to receive a multi-megabyte body.
+    cases = (
+        ("unknown_command", REQUEST_MAGIC, 0x1234, BLOCK,
+         "unsupported command"),
+        ("unsupported_flags", REQUEST_MAGIC, (1 << 17) | CMD_READ,
+         BLOCK, "unsupported NBD request flag"),
+        ("invalid_fua", REQUEST_MAGIC, CMD_FLAG_FUA | CMD_READ,
+         BLOCK, "FUA on non-write"),
+        ("oversize_write", REQUEST_MAGIC, CMD_WRITE,
+         MAX_REQUEST_BYTES + BLOCK, "unaligned or out-of-bounds"),
+        ("invalid_flush", REQUEST_MAGIC, CMD_FLUSH,
+         BLOCK, "invalid flush"),
+    )
+    for case_name, magic, type_flags, count, diagnostic in cases:
+        server, client = socket.socketpair()
+        client.settimeout(1)
+        stopped = threading.Event()
+        caught: list[Exception] = []
+
+        def serve_bad() -> None:
+            try:
+                model.serve(server, stopped)
+            except Exception as exc:
+                caught.append(exc)
+
+        thread = threading.Thread(target=serve_bad, daemon=True)
+        try:
+            thread.start()
+            client.sendall(REQUEST.pack(magic, type_flags, 0xA55A, 0, count))
+            thread.join(timeout=1)
+            assert not thread.is_alive(), f"{case_name} did not terminate server"
+            assert len(caught) == 1 and isinstance(caught[0], ProtocolError)
+            assert diagnostic in str(caught[0]), (case_name, caught)
+        finally:
+            stopped.set()
+            client.close()
+            server.close()
+            if thread.ident is not None:
+                thread.join(timeout=1)
+        assert not thread.is_alive()
+
+    # Test the complete client transaction with a valid reply header followed
+    # by a truncated payload, instead of only testing the recv helper.
+    peer, client = socket.socketpair()
+    client.settimeout(1)
+    try:
+        peer.sendall(REPLY.pack(REPLY_MAGIC, 0, 91) + b"short")
+        peer.shutdown(socket.SHUT_WR)
+        try:
+            client_transact(client, CMD_READ, 91, 0, BLOCK)
+        except EOFError as exc:
+            assert "truncated" in str(exc)
+        else:
+            raise AssertionError("client_transact accepted a short READ reply")
+    finally:
+        peer.close()
+        client.close()
+
+    # Interrupt an *already active* modeled read wait. Confirm the
+    # server sends no successful reply after a cancelled operation.
+    entered = threading.Event()
+
+    class ObservedStop(threading.Event):
+        def wait(self, timeout: float | None = None) -> bool:
+            entered.set()
+            return super().wait(timeout)
+
+    server, client = socket.socketpair()
+    client.settimeout(1)
+    stopped = ObservedStop()
+    errors: list[Exception] = []
+    slow = SizeAwareDevice(32, 1, 0)
+
+    def serve_slow() -> None:
+        try:
+            slow.serve(server, stopped)
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=serve_slow, daemon=True)
+    try:
+        thread.start()
+        client.sendall(REQUEST.pack(REQUEST_MAGIC, CMD_READ, 88,
+                                    0, 1048576))
+        assert entered.wait(timeout=2), "modeled transfer never entered wait"
+        assert thread.is_alive(), "server exited before mid-wait cancellation"
+        stopped.set()
+        thread.join(timeout=2)
+        assert not thread.is_alive(), "modeled request ignored mid-wait stop"
+        assert not errors, f"unexpected cancellation error: {errors}"
+        server.close()
+        assert client.recv(1) == b"", "cancelled request emitted a reply"
+    finally:
+        stopped.set()
+        client.close()
+        server.close()
+        if thread.ident is not None:
+            thread.join(timeout=2)
+    assert not thread.is_alive()
+
+    # Fail after successful NBD_SET_SOCK but before worker startup. This
+    # checks actual serve_kernel() cleanup with mocked descriptors/ioctls;
+    # no /dev/nbdN, kernel worker, or system swap is opened.
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def fileno(self) -> int:
+            return 82
+
+        def close(self) -> None:
+            self.closed = True
+
+    kernel_sock, server_sock = FakeSocket(), FakeSocket()
+    ioctl_steps: list[int] = []
+
+    def setup_ioctl(_fd: int, operation: int, *_args: object) -> None:
+        ioctl_steps.append(operation)
+        if operation == NBD_SET_BLKSIZE:
+            raise OSError(errno.EIO, "injected geometry setup failure")
+        if operation == NBD_CLEAR_SOCK:
+            raise OSError(errno.EIO, "injected setup clear failure")
+
+    args = argparse.Namespace(device="/dev/nbd0", size_mib=32, mbps=20,
+                              latency_us=500, allow_trim=False,
+                              ready_file="not-written", stats_file=None)
+    err = io.StringIO()
+    with (mock.patch(__name__ + ".validate_nbd_node", return_value="/dev/nbd0"),
+          mock.patch(__name__ + ".verify_nbd_device_identity"),
+          mock.patch("os.open", return_value=81),
+          mock.patch("os.fstat", return_value=spoof),
+          mock.patch("os.close") as fd_close,
+          mock.patch("socket.socketpair", return_value=(kernel_sock, server_sock)),
+          mock.patch("fcntl.ioctl", side_effect=setup_ioctl),
+          mock.patch("signal.signal"),
+          contextlib.redirect_stderr(err)):
+        try:
+            serve_kernel(args)
+        except OSError as exc:
+            assert "geometry setup failure" in str(exc)
+        else:
+            raise AssertionError("NBD setup fault was accepted")
+    assert ioctl_steps == [NBD_SET_SOCK, NBD_SET_BLKSIZE, NBD_CLEAR_SOCK]
+    assert kernel_sock.closed and server_sock.closed
+    fd_close.assert_called_once_with(81)
+    assert "NBD_CLEAR_SOCK failed" in err.getvalue()
+
+
 def selftest() -> int:
     from types import SimpleNamespace
     from unittest import mock
@@ -725,6 +949,7 @@ def selftest() -> int:
         else:
             assert any(failure.upper() in issue for issue in shutdown_errors)
 
+    selftest_failure_gates()
     print("size-aware NBD protocol, 1 MiB wire I/O, timing, TRIM, EOF and shutdown: PASS")
     return 0
 
