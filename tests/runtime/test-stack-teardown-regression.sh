@@ -10,13 +10,15 @@ LOOP_DEVICE=/dev/loop1234
 reset_fixture() {
   UPPER_EXISTS=1; LOWER_EXISTS=1; LOOP_ATTACHED=1
   BUSY_TARGET=""; FALSE_REMOVE=""; FALSE_INFO=""; LOOP_HELD=0
-  CHILD_STATE=""; CALLS=()
+  LIST_FAIL=0; AWK_FAIL=0; LOOP_LIST_FAIL=0; FALSE_DETACH=0
+  PS_FAIL=0; CHILD_STATE=""; CALLS=()
 }
 dmsetup() {
   local command=$1 target=""
   case "$command" in
     ls)
       [[ "$2" == --noheadings ]] || return 99
+      (( LIST_FAIL )) && return 5
       (( UPPER_EXISTS )) && printf '%s (253:10)\n' "$UPPER"
       (( LOWER_EXISTS )) && printf '%s (253:11)\n' "$LOWER"
       return 0 ;;
@@ -47,14 +49,20 @@ dmsetup() {
   esac
 }
 swapz_test_check_loop_holders() { (( ! LOOP_HELD )); }
+awk() { (( AWK_FAIL )) && return 2; command awk "$@"; }
 losetup() {
+  if [[ "$1" == --list && "$2" == --noheadings && "$3" == --output && "$4" == NAME ]]; then
+    (( LOOP_LIST_FAIL )) && return 5
+    (( LOOP_ATTACHED )) && printf '%s\n' "$LOOP_DEVICE"
+    return 0
+  fi
   if [[ "$1" == -d && "$2" == "$LOOP_DEVICE" ]]; then
     CALLS+=("detach:$LOOP_DEVICE")
     (( LOOP_ATTACHED )) || return 1
-    LOOP_ATTACHED=0
+    (( FALSE_DETACH )) || LOOP_ATTACHED=0
     return 0
   fi
-  [[ "$1" == "$LOOP_DEVICE" ]] && (( LOOP_ATTACHED ))
+  return 99
 }
 # Busy upper preserves both lower layers.
 reset_fixture
@@ -127,7 +135,10 @@ kill() {
     *) return 99 ;;
   esac
 }
-ps() { [[ "$*" == '-o stat= -p 424242' ]] && printf '%s\n' "$CHILD_STATE"; }
+ps() {
+  (( PS_FAIL )) && return 5
+  [[ "$*" == '-o stat= -p 424242' ]] && printf '%s\n' "$CHILD_STATE"
+}
 sleep() { :; }
 reset_fixture
 CHILD_STATE=D
@@ -135,4 +146,65 @@ if swapz_test_stop_child 424242; then exit 1; fi
 (( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
 [[ "${#CALLS[@]}" == 0 ]]
 echo 'unresponsive writer blocks teardown: PASS'
+
+# Inventory parser and device-list errors must never prove mapping absence.
+reset_fixture
+AWK_FAIL=1
+if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+(( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+echo 'DM parser failure preserves backing: PASS'
+
+reset_fixture
+LIST_FAIL=1
+if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+(( UPPER_EXISTS && LOWER_EXISTS && LOOP_ATTACHED ))
+echo 'DM inventory failure preserves backing: PASS'
+
+# A spurious successful losetup -d does not establish detach.
+reset_fixture
+FALSE_DETACH=1
+if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+(( ! UPPER_EXISTS && ! LOWER_EXISTS && LOOP_ATTACHED ))
+echo 'false-positive loop detach preserves backing: PASS'
+
+reset_fixture
+LOOP_LIST_FAIL=1
+if swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"; then exit 1; fi
+(( ! UPPER_EXISTS && ! LOWER_EXISTS && LOOP_ATTACHED ))
+[[ "${CALLS[*]}" == "remove:$UPPER remove:$LOWER" ]]
+echo 'failed loop inventory blocks detach: PASS'
+
+reset_fixture
+LOOP_ATTACHED=0
+swapz_test_cleanup_dm_stack "$LOOP_DEVICE" "$UPPER" "$LOWER"
+[[ "${CALLS[*]}" == "remove:$UPPER remove:$LOWER" ]]
+echo 'confirmed already-detached loop: PASS'
+
+# Directly exercise the real find/holder implementation, not its mock.
+unset -f swapz_test_check_loop_holders
+ROOT_HOLDERS=$(mktemp -d)
+trap 'rm -rf -- "$ROOT_HOLDERS"' EXIT
+command touch "$ROOT_HOLDERS/dm-1"
+if swapz_test_check_loop_holders "$LOOP_DEVICE" "$ROOT_HOLDERS"; then exit 1; fi
+rm -f -- "$ROOT_HOLDERS/dm-1"
+find() { return 2; }
+if swapz_test_check_loop_holders "$LOOP_DEVICE" "$ROOT_HOLDERS"; then exit 1; fi
+unset -f find
+swapz_test_check_loop_holders "$LOOP_DEVICE" "$ROOT_HOLDERS"
+echo 'real holder enumeration, find error and empty directory: PASS'
+
+# Failed ps lookup for a live, shell-owned process must not block in wait.
+reset_fixture
+PS_FAIL=1
+CHILD_STATE=D
+if swapz_test_stop_child 424242; then exit 1; fi
+echo 'process-state inspection failure preserves stack: PASS'
+
+# No job ownership and no living process means the child was already reaped.
+jobs() { [[ "$*" == -p ]] && :; }
+kill() { return 1; }
+reset_fixture
+swapz_test_stop_child 424242
+echo 'already-reaped test child handled without signal: PASS'
+
 echo 'swapz test-stack teardown rootless regression: PASS'
