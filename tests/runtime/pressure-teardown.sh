@@ -17,10 +17,31 @@ swapz_pressure_cgroup_empty() {
   return 0
 }
 
-# A cgroup directory may disappear once systemd has stopped the unit.
-# Presence must be checked independently of cgroup.procs st_size.
-swapz_pressure_cgroup_dir_exists() {
-  [[ -d "$1" ]]
+# A cgroup may disappear after unit shutdown. os.stat distinguishes
+# ENOENT from EACCES/EIO: Bash -d / -e alone cannot do so.
+swapz_pressure_cgroup_state() {
+  local path=$1 result
+  if ! result=$(python3 -c '
+import errno, os, stat, sys
+try:
+    details = os.stat(sys.argv[1])
+except OSError as exc:
+    if exc.errno == errno.ENOENT:
+        print("absent")
+    else:
+        raise
+else:
+    if not stat.S_ISDIR(details.st_mode):
+        raise NotADirectoryError(sys.argv[1])
+    print("present")
+' "$path"); then
+    echo "ERROR: cannot inspect cgroup directory $path; preserving swap" >&2
+    return 1
+  fi
+  case "$result" in
+    present|absent) printf '%s\\n' "$result" ;;
+    *) echo "ERROR: invalid cgroup inspection result; preserving swap" >&2; return 1 ;;
+  esac
 }
 
 swapz_pressure_confirm_swap_inactive() {
@@ -133,15 +154,20 @@ swapz_pressure_cleanup_resources() {
       return 1
     fi
     if [[ -n "$unit_cgroup" ]]; then
-      local cgroup_dir="/sys/fs/cgroup$unit_cgroup"
-      if swapz_pressure_cgroup_dir_exists "$cgroup_dir"; then
-        swapz_pressure_cgroup_empty "$cgroup_dir/cgroup.procs" || return 1
-      elif [[ -e "$cgroup_dir" ]]; then
-        echo "ERROR: unit $unit cgroup path is not inspectable; preserving swap" >&2
+      local cgroup_dir="/sys/fs/cgroup$unit_cgroup" group_state
+      if ! group_state=$(swapz_pressure_cgroup_state "$cgroup_dir"); then
         return 1
       fi
-      # The stopped unit's cgroup was independently confirmed absent, or
-      # was present and its task listing successfully checked empty.
+      case "$group_state" in
+        present) swapz_pressure_cgroup_empty "$cgroup_dir/cgroup.procs" || return 1 ;;
+        absent) # Positive ENOENT is safe only because ActiveState is stopped.
+          if [[ "$unit_state" != inactive && "$unit_state" != failed &&
+                "$unit_state" != not-found ]]; then
+            echo "ERROR: cgroup absent but unit $unit is not stopped" >&2
+            return 1
+          fi ;;
+        *) echo "ERROR: unknown cgroup state; preserving swap" >&2; return 1 ;;
+      esac
     fi
     systemctl reset-failed "$unit" >/dev/null 2>&1 || true
   done
