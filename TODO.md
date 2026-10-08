@@ -95,3 +95,22 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       operate host swap or physical backing.
 - [ ] NBD rootless requalification assigned separately to Codex;
       NBD kernel smoke and calibration remain unapproved and unmeasured.
+
+### 2026-10-08 executed teardown correction gate
+
+- [x] Reject malformed successful DM inventories, including trailing fields.
+- [x] Distinguish cgroup os.stat ENOENT from permission/I/O failure.
+- [x] Correct false expected states after upper DM was already removed.
+- [x] Avoid signaling completed-but-listed shell PIDs.
+- [x] Assert pressure cleanup stop -> cgroup check -> swapoff ->
+      active-swap verification -> stack cleanup order with mock event log.
+- [x] Exercise missing read-result CSV header; analyzer tests now total 11.
+- [x] Execute the entire revised *rootless* teardown and analyzer suite
+      successfully in GitHub Actions at e92ad29a192b70cbe9e04a1421496bfaf85bd460
+      (run 37772741880), including seven Bash syntax checks.
+- [ ] Obtain independent Codex Linux-host source-only requalification of the
+      newest teardown source after completion of the NBD assignment.
+- [ ] Consider pidfd-based atomic signaling for test-owned children if needed;
+      Bash job-state inspection still has a small TOCTOU PID-reuse window.
+- [ ] Keep kernel device runtime and performance gates blocked until the
+      appropriate independent and explicitly authorized test phases.
