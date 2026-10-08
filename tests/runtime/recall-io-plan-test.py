@@ -42,6 +42,8 @@ class FakeResult:
 class FakeReport:
     all_reaped: bool = True
     cleanup_allowed: bool = True
+    errors: tuple[str, ...] = ()
+    results: tuple[FakeResult, ...] | None = None
 
 
 class FakeSupervisor:
@@ -100,7 +102,14 @@ class FakeSupervisor:
         self.events.append("stop_all")
         if self.raise_stop:
             raise RuntimeError("supervisor connection lost")
-        return self.report
+        report = self.report
+        return FakeReport(
+            all_reaped=report.all_reaped,
+            cleanup_allowed=report.cleanup_allowed,
+            errors=report.errors,
+            results=(report.results if report.results is not None else
+                     tuple(FakeResult(handle) for handle in handles)),
+        )
 
 
 class RecallIOPlanTests(unittest.TestCase):
@@ -277,6 +286,80 @@ class RecallIOPlanTests(unittest.TestCase):
         self.assertTrue(report.cleanup_allowed)
         self.assertEqual(result, "clean")
         self.assertEqual(len(self.plan.handles), 3)
+
+    def test_expected_and_readback_both_corrupted_identically_is_rejected(self) -> None:
+        # Comparing only the two on-disk files would wrongly pass.
+        def alter_both(output: Path) -> None:
+            expected = self.directory / "expected-a"
+            corruption = b"x" * PAGE_SIZE
+            expected.write_bytes(corruption)
+            output.write_bytes(corruption)
+        self._mutate_after_fake_read(alter_both)
+        with self.assertRaisesRegex(RecallPlanError, "trusted 4096-byte page"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+        self.plan.cleanup_after_stop(lambda: self.fail("corrupt data authorized cleanup"))
+
+    def test_corrupted_expected_reference_alone_is_rejected(self) -> None:
+        self._mutate_after_fake_read(
+            lambda output: (self.directory / "expected-a").write_bytes(b"!" * PAGE_SIZE))
+        with self.assertRaisesRegex(RecallPlanError, "trusted 4096-byte page"):
+            self.plan.read_one(0, "a")
+        self.assertTrue(self.plan.failure)
+
+    def test_stop_report_errors_override_cleanup_allowed(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(errors=("child close failed",))
+        report, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("error-laden cleanup report was accepted"))
+        self.assertTrue(report.all_reaped)
+        self.assertTrue(report.cleanup_allowed)
+        self.assertIsNone(result)
+
+    def test_stop_report_missing_worker_blocks_cleanup(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(results=())
+        _, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("omitted handle authorized cleanup"))
+        self.assertIsNone(result)
+
+    def test_stop_report_unrecognized_worker_blocks_cleanup(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(results=(FakeResult("unknown-handle"),))
+        _, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("unknown handle authorized cleanup"))
+        self.assertIsNone(result)
+
+    def test_stop_report_duplicate_worker_blocks_cleanup(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(results=(
+            FakeResult("handle-1"), FakeResult("handle-1")))
+        _, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("duplicate handles authorized cleanup"))
+        self.assertIsNone(result)
+
+    def test_stop_report_worker_error_blocks_cleanup(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(results=(
+            FakeResult("handle-1", errors=("unconfirmed quiescence",)),))
+        _, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("worker error authorized cleanup"))
+        self.assertIsNone(result)
+
+    def test_stop_report_unreaped_worker_blocks_cleanup_even_with_good_summary(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(results=(
+            FakeResult("handle-1", reaped=False),))
+        _, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("unreaped worker authorized cleanup"))
+        self.assertIsNone(result)
+
+    def test_stop_report_has_no_details_blocks_cleanup(self) -> None:
+        self.plan.launch_writer()
+        self.fake.report = FakeReport(results=())
+        _, result = self.plan.cleanup_after_stop(
+            lambda: self.fail("missing results authorized cleanup"))
+        self.assertIsNone(result)
 
     def test_lost_supervisor_blocks_cleanup(self) -> None:
         self.plan.launch_writer()
