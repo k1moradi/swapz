@@ -126,11 +126,15 @@ swapz_pressure_cleanup_resources() {
     echo "ERROR: invalid or duplicate test unit names; preserving swap" >&2
     return 1
   fi
+  # Validate BOTH identifiers before stopping or inspecting EITHER unit.
+  # Otherwise an invalid second name could partially stop the first.
   for unit in "$FIRST_UNIT" "$SECOND_UNIT"; do
     if [[ ! "$unit" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.@-]*\.service$ ]]; then
       echo "ERROR: invalid transient unit name $unit; preserving swap" >&2
       return 1
     fi
+  done
+  for unit in "$FIRST_UNIT" "$SECOND_UNIT"; do
     if ! load_state=$(systemctl show "$unit" -p LoadState --value) ||
        [[ -z "$load_state" ]]; then
       echo "ERROR: cannot inspect unit $unit LoadState; preserving swap" >&2
