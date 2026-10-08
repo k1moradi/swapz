@@ -195,3 +195,25 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Perform joint teardown + NBD source-only gate at one common HEAD
       before asking for any separately authorized virtual runtime test.
 - [ ] No live kernel NBD/DM/loop/swap or physical testing approved.
+
+### Combined rootless source gate — 2026-10-08
+
+- [x] Run both updated NBD and teardown source-only suites on one
+      **exact** checkout and SHA, rather than comparing separately
+      tested versions.
+- [x] Add `.github/workflows/rootless-combined.yml` to gate relevant
+      runtime source changes on push and pull request.
+- [x] CI SUCCESS at `8116bdfb8b61a69f67e6548904e82c191b979f23`
+      (https://github.com/k1moradi/swapz/actions/runs/37779371716):
+      10 Bash syntax checks; 2 teardown rootless regressions; 11 offline
+      analyzer tests; NBD syscall isolation, compile and full selftest;
+      25 additional full NBD selftest repetitions (26 total); and both
+      NBD/streaming teardown mocks.
+- [ ] Collect Codex's currently assigned independent Linux-host
+      teardown gate at its *own* exact tested HEAD.
+- [ ] Obtain an independent Linux-host requalification of the updated
+      NBD source if the previous run tested an older blob.
+- [ ] Investigate the remaining Bash PID-reuse check-to-signal race
+      separately; no unreviewed process-signaling mechanism.
+- [ ] Do not infer real kernel NBD behavior, live GC-overlap swap-in
+      latency, calibrated bandwidth or batch-size choice from mocks.
