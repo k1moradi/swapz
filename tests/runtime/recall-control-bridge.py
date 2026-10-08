@@ -147,6 +147,12 @@ class PersistentRecallBridge:
             self._fields(message, {"id", "op"})
             if not self.adapter.cleanup_authorized:
                 raise BridgeError("service exit or stop confirmation is missing")
+            # Close the already-exited service's control descriptor *before*
+            # issuing the sole positive cleanup verdict. The lower-level
+            # client latches descriptor-close errors as permanent denial.
+            self.client.close()
+            if self.client.cleanup_authorized is not True:
+                raise BridgeError("service control descriptor did not close cleanly")
             self.finalized = True
             self.finished = True
             return self._reply(request_id, "cleanup_authorized", cleanup_allowed=True)
@@ -165,14 +171,6 @@ class PersistentRecallBridge:
         except (subprocess.TimeoutExpired, OSError):
             print("BRIDGE_PRESERVE: service exit not confirmed; retain all backing", file=sys.stderr)
         self.finished = True
-
-    def close_after_finalization(self) -> None:
-        try:
-            self.client.close()
-        except Exception:
-            self.failed = True
-        self.finished = True
-
 
 def _decode(raw: bytes) -> Any:
     if not raw or len(raw) > MAX_LINE_BYTES or not raw.endswith(b"\n"):
@@ -212,18 +210,19 @@ def main() -> int:
             if not raw:
                 print("BRIDGE_PRESERVE: controller disconnected without FINALIZE", file=sys.stderr)
                 return 2
+            request = None  # A malformed frame never inherits a previous id.
             try:
                 request = _decode(raw)
                 reply = bridge.dispatch(request)
-            except (BridgeError, Exception) as exc:
+            except Exception as exc:
                 bridge.failed = True
                 print(f"BRIDGE_PRESERVE: {str(exc)[:200]}", file=sys.stderr)
+                error_id = (request.get("id") if isinstance(request, dict)
+                            and type(request.get("id")) is int else None)
                 _print_reply(bridge._reply(
-                    request.get("id") if isinstance(request, dict)
-                    and type(request.get("id")) is int else None, "preserve_backing",
+                    error_id, "preserve_backing",
                     error="bridge or worker safety gate failed",
-                )) if "request" in locals() else _print_reply(bridge._reply(
-                    None, "preserve_backing", error="invalid bridge request"))
+                ))
                 return 2
             _print_reply(reply)
         return 0 if bridge.finalized and not bridge.failed else 2
@@ -231,9 +230,7 @@ def main() -> int:
         print(f"BRIDGE_PRESERVE: controller channel failed: {exc}", file=sys.stderr)
         return 2
     finally:
-        if bridge.finalized and not bridge.failed:
-            bridge.close_after_finalization()
-        else:
+        if not bridge.finalized or bridge.failed:
             bridge.best_effort_preserve()
 
 
