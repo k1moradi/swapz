@@ -414,6 +414,11 @@ def serve_kernel(args: argparse.Namespace) -> int:
             except OSError as exc:
                 if not stop.is_set():
                     errors.append(f"NBD_DO_IT failed: {exc}")
+            except Exception as exc:
+                # Python thread exceptions do not reach the parent thread.
+                # Record unexpected failures even if shutdown was requested;
+                # otherwise serve_kernel() could incorrectly return success.
+                errors.append(f"NBD_DO_IT unexpected {type(exc).__name__}: {exc}")
             finally:
                 stop.set()
 
@@ -479,6 +484,13 @@ def selftest_failure_gates() -> None:
     import io
     from types import SimpleNamespace
     from unittest import mock
+
+    # This runs before any mocked serve_kernel(): a source regression to
+    # captured syscall defaults must fail safely before any fake fd is used.
+    defaults = shutdown_kernel_session.__kwdefaults__
+    assert defaults is not None
+    assert defaults["ioctl"] is None and defaults["close_fd"] is None, (
+        "unsafe captured ioctl/close defaults on shutdown helper")
 
     # Missing/unreadable directories and iteration failures are *not* empty.
     with mock.patch("os.scandir",
