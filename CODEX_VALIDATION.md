@@ -1529,3 +1529,41 @@ unbounded child wait, PID reuse, or resource-name ambiguity. Report line
 numbers and exact command results; don't make substantive unreviewed
 changes. Continue to require explicit separate authorization for any
 NBD/DM/loop runtime operation, swap activation, physical device, or reboot.
+
+## Additional NBD source-only review — after teardown task completes
+
+Codex previously ran seven source-only NBD checks on `0c3a9169` (all
+PASS). The source had the previously acknowledged worker-shutdown guard,
+but independent audit found missing rejection-path and failure-diagnostic
+coverage. The primary developer later committed additional NBD-only
+source/test corrections. **These changes are not covered by the old PASS.**
+
+When the current teardown requalification assignment finishes, a separate
+NBD-only, **rootless** handoff should run:
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+python3 -m py_compile tests/runtime/size-aware-nbd.py
+python3 tests/runtime/size-aware-nbd.py selftest
+bash -n tests/runtime/streaming-benchmark.sh
+bash -n tests/runtime/streaming-benchmark-teardown.sh
+bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/streaming-teardown-regression.sh
+```
+
+Inspect exact source and exit codes. Confirm the selftest now exercises
+holder directory missing/permission/iteration failures, end-to-end
+preflight rejection, unknown command and unsupported flags/FUA, oversized
+write rejection before payload receive, an entire client transaction with
+short READ payload, the exact 8 MiB model boundary, stop **during** an
+active modeled wait with no successful reply, partial NBD_SET_SOCK setup,
+worker startup failure, cleanup-dependent CLI result, immediate disconnect
+errors, and independent close error preservation. Any intentional ERROR
+output from mocked failure branches is expected only if corresponding
+assertions execute and the command exits 0.
+
+Do not modify current teardown scripts during NBD audit or claim runtime
+qualification. No /dev/nbdN attach, module loads, DM/loop operations,
+swap changes, physical tests, or reboot without separate explicit approval.
