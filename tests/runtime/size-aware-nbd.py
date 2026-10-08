@@ -569,6 +569,58 @@ def selftest_failure_gates() -> None:
         else:
             raise AssertionError("inaccessible NBD client PID was accepted")
 
+    # Preflight cannot treat active PID, unreadable swap inventory, or a
+    # failed stat of any active swap entry as safe evidence of unused NBD.
+    for case in ("pid_present", "swaps_read_error",
+                 "active_swap_stat_error", "active_swap_selected"):
+        def preflight_read(path: Path, *_args: object,
+                           **_kwargs: object) -> str:
+            label = str(path)
+            if label.endswith("/dev"):
+                return "43:0\n"
+            if label == "/proc/self/mountinfo":
+                return ""
+            if label == "/proc/swaps":
+                if case == "swaps_read_error":
+                    raise OSError(errno.EIO, "injected swap inventory failure")
+                return ("Filename\tType\tSize\tUsed\tPriority\n"
+                        "/dev/test-nbd-swap\tpartition\t64\t0\t1\n")
+            raise AssertionError("unexpected preflight read: " + label)
+
+        def preflight_stat(path: object, *_args: object,
+                           **_kwargs: object) -> object:
+            label = str(path)
+            if label.endswith("/pid"):
+                if case == "pid_present":
+                    return object()
+                raise FileNotFoundError("no active client PID")
+            if label == "/dev/test-nbd-swap":
+                if case == "active_swap_stat_error":
+                    raise PermissionError("injected swap stat failure")
+                return valid_node
+            raise AssertionError("unexpected preflight stat: " + label)
+
+        with (mock.patch("os.lstat", return_value=valid_node),
+              mock.patch.object(Path, "exists", return_value=True),
+              mock.patch.object(Path, "read_text", autospec=True,
+                                side_effect=preflight_read),
+              mock.patch.object(Path, "iterdir", return_value=iter(())),
+              mock.patch("os.scandir",
+                         return_value=contextlib.nullcontext(iter(()))),
+              mock.patch("os.stat", side_effect=preflight_stat)):
+            try:
+                validate_nbd_node("/dev/nbd0")
+            except (ValueError, OSError) as exc:
+                expected = {
+                    "pid_present": "active client",
+                    "swaps_read_error": "swap inventory failure",
+                    "active_swap_stat_error": "cannot inspect active swap",
+                    "active_swap_selected": "active swap",
+                }[case]
+                assert expected in str(exc), (case, str(exc))
+            else:
+                raise AssertionError(f"unsafe NBD preflight accepted {case}")
+
     model = SizeAwareDevice(32, 20, 0, sleeper=lambda _delay: None)
     full = b"A" * MAX_REQUEST_BYTES
     capacity = model.disk.size_bytes
