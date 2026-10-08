@@ -173,7 +173,8 @@ swapz_test_stop_child() {
   fi
   local active_jobs="$running_jobs"
   if [[ -n "$stopped_jobs" ]]; then
-    active_jobs+=$(printf '\\n%s' "$stopped_jobs")
+    active_jobs+="
+$stopped_jobs"
   fi
   if ! grep -Fxq "$child_pid" <<<"$active_jobs"; then
     if kill -0 "$child_pid" 2>/dev/null; then
