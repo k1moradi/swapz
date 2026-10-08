@@ -235,6 +235,11 @@ def validate_nbd_node(path: str) -> str:
     holders = Path("/sys/class/block", name, "holders")
     if holders.exists() and any(holders.iterdir()):
         raise ValueError("selected NBD node has block-device holders")
+    # A partition mounted under /dev/nbdNp1 would have a different dev_t
+    # than the parent. Refuse reuse of an NBD node with any partition nodes.
+    sysdir = Path("/sys/class/block", name)
+    if any(child.name.startswith(name + "p") for child in sysdir.iterdir()):
+        raise ValueError("selected NBD node has partitions")
     swaps = Path("/proc/swaps").read_text()
     for line in swaps.splitlines()[1:]:
         swap_path = line.split()[0]
