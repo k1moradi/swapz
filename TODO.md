@@ -151,3 +151,27 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Independent Codex Linux-host NBD requalification remains pending;
       no kernel NBD smoke, real device cleanup or throughput benchmark is
       authorized.
+
+### 2026-10-08 teardown follow-up after independent Codex PASS
+
+- [x] Independent Codex Linux-host teardown source gate PASS at
+      `10c9d09bf4d3e78dd9524e20988c38b204f9ad42`.
+- [x] Reject duplicate DM names and out-of-range Linux dev_t values
+      in complete `dmsetup ls` inventory.
+- [x] Reject incomplete, malformed or prefix-spoofed pressure
+      `/proc/swaps` inventories before any mapper/loop teardown.
+- [x] Verify per-unit distinct systemd ControlGroup paths.
+- [x] With test swap active, verify stop failure sends **no** swapoff
+      and leaves test mapping and backing untouched.
+- [x] Cover stopped shell-owned child CONT/TERM ordering with a rootless mock.
+- [x] Accurately label the cgroup pseudo-file simulation as mocked reads.
+- [x] GitHub rootless teardown workflow PASS at
+      `68360c26214c4c08a57180f50ae032746d68342f`
+      (https://github.com/k1moradi/swapz/actions/runs/37777532521):
+      seven Bash syntax checks, both teardown regressions, and 11 analyzer
+      unit tests.
+- [ ] Requalify both latest NBD and teardown sources at a single exact
+      commit after Codex's current NBD independent audit.
+- [ ] Treat shell PID identity TOCTOU as open until a safe separately
+      reviewed pidfd-based signaling design is justified and tested.
+- [ ] No real device or performance testing without explicit new approval.
