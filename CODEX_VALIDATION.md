@@ -1740,3 +1740,56 @@ excluded, but PID reuse between job enumeration and kill remains
 theoretical; never report perfect PID reuse protection.
 
 No live NBD/DM/loop/swap operations, modprobe, fio, physical devices or reboot.
+
+## Next NBD independent Linux-host requalification after 8 MiB EBADF fix
+
+Codex's preceding NBD source-only test at
+`977023f4aca61e4e8d408065504966f3646b5eee`
+**FAILED** only on the userspace 8 MiB socketpair cleanup race:
+closing the server socket before joining its active recv thread
+intermittently raised EBADF and blocked later mock assertions.
+Codex verified syscall-mock isolation was already correct; there
+was no reported live NBD ioctl during this failed test.
+
+Primary developer has since changed 8 MiB and related socketpair
+cleanup to stop -> join -> close, strengthened the mountinfo parser
+(numeric IDs/major:minor and exact final-three-fields separator),
+added malformed minimum-length and optional-fields positive tests,
+and completed the NBD workflow's pull_request path filters.
+
+**Executed rootless CI** at
+`edbf6d1452bd8c87b36c44daa6ad349967592a22`:
+https://github.com/k1moradi/swapz/actions/runs/37778788448
+reported full NBD seven-command PASS, plus **25/25 repeated full
+selftests** (26 full passes including the initial run). The normal
+selftest logs the explicit
+`NBD preflight, 8 MiB wire, setup cleanup and worker exceptions: PASS`
+marker, so previously blocked cases demonstrably executed in CI.
+
+After completing the current teardown independent Linux-host audit,
+run the next NBD **rootless-only** check against the most recent
+`main` (record full HEAD and NBD/kernel blob):
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+git rev-parse HEAD:tests/runtime/size-aware-nbd.py
+git rev-parse HEAD:kernel/dm-swapz.c
+git status --short --branch
+python3 -m py_compile tests/runtime/size-aware-nbd.py
+python3 tests/runtime/size-aware-nbd.py selftest
+bash -n tests/runtime/streaming-benchmark.sh
+bash -n tests/runtime/streaming-benchmark-teardown.sh
+bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/streaming-teardown-regression.sh
+```
+
+**Before executing selftest**, independently verify the fake-fd
+`object()` sentinel, mocked ioctl/close call containment, and
+late-bound `shutdown_kernel_session()` dependencies. Specifically
+inspect 8 MiB cleanup order and ten-field bad mountinfo tests.
+Preserve existing `local-*-verify.state` files exactly. No device
+runtime operation, swapping, kernel module change, benchmark, physical
+media or reboot is authorized. The rootless PASS is not an actual
+NBD driver qualification or GC latency measurement.
