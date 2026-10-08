@@ -1410,3 +1410,42 @@ The size-aware backend becomes eligible to resolve the 512 KiB–1 MiB plateau
 only after its actual request sizes, raw transfer rate, exact data readback,
 and teardown are demonstrated. Continue the existing V2.2 reference-driven
 correctness and measured performance gates separately.
+
+
+## Follow-up source-only gate: verified loop-stack teardown and GC interval analysis
+
+**Not part of the already assigned NBD preflight/audit.** The primary
+developer has since modified the disposable no-DISCARD, recall, and pressure
+fixture teardown paths. Do not run their root-only workloads merely because
+this section exists. First complete and report the current source-only NBD
+assignment.
+
+A **separate source-only** handoff can then run at a newly verified HEAD:
+
+```bash
+git pull --ff-only origin main
+bash -n tests/runtime/test-stack-teardown.sh
+bash -n tests/runtime/test-stack-teardown-regression.sh
+bash -n tests/runtime/no-discard-livegc.sh
+bash -n tests/runtime/buffer-recall.sh
+bash -n tests/runtime/pressure.sh
+bash tests/runtime/test-stack-teardown-regression.sh
+python3 tests/runtime/live-gc-latency-analyze-test.py -v
+```
+
+Audit exact teardown behavior: transient busy DM removal, false-positive
+remove success, info/list disagreement, lower-target removal failure, missing
+resources, unknown holders, outstanding writer, service stop failure, active
+swapoff failure, failure exit codes, and preservation of diagnostic/backing
+files. Check scripts do not print final PASS before verified cleanup.
+
+The interval analyzer is an **offline** utility, not a collector or a kernel
+instrumentation pass. It needs matching monotonic timestamps and verified
+`moved_pages` for each GC interval. It must reject empty-GC-only evidence
+and insufficient correlated read samples. Its local rootless tests passed;
+independent checked-out-HEAD validation is still required.
+
+Do not attach loops/NBD, create DM mappings, activate swap, run runtime
+benchmarks, touch normal system swap, or reboot without a separate explicit
+virtual-runtime handoff. If a source regression fails, report the evidence
+without weakening the assertion or making a substantive kernel fix.
