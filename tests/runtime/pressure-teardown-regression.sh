@@ -18,6 +18,7 @@ reset_fixture() {
   SWAPON=0
   GROUP_REMOVED=0; GROUP_INSPECT_FAIL=0
   UNIT_LOAD_FAIL=0; UNIT_GROUP_FAIL=0; UNIT_STATE_FAIL=0
+  UNIT_GROUP_FIRST_OVERRIDE=""; UNIT_GROUP_SECOND_OVERRIDE=""; UNIT_GROUP_EMPTY=0
   UNIT_PID_FAIL=0; UNIT_STOP_FAIL=0; CGROUP_PIDS=""
   CGROUP_READ_FAIL=0; CGROUP_SECOND_PIDS=""; SWAPS_READ_FAIL=0; SWAPS_INVALID=0
   SWAPS_FAKE_CONTENT=""
@@ -104,7 +105,14 @@ systemctl() {
         printf '0\n' ;;
       ControlGroup)
         (( UNIT_GROUP_FAIL )) && return 5
-        printf '/system.slice/%s\n' "$2" ;;
+        if (( UNIT_GROUP_EMPTY )); then printf '\n'; return 0; fi
+        if [[ "$2" == "$FIRST_UNIT" && -n "$UNIT_GROUP_FIRST_OVERRIDE" ]]; then
+          printf '%s\n' "$UNIT_GROUP_FIRST_OVERRIDE"
+        elif [[ "$2" == "$SECOND_UNIT" && -n "$UNIT_GROUP_SECOND_OVERRIDE" ]]; then
+          printf '%s\n' "$UNIT_GROUP_SECOND_OVERRIDE"
+        else
+          printf '/system.slice/%s\n' "$2"
+        fi ;;
       ActiveState)
         (( UNIT_STATE_FAIL )) && return 5
         printf 'inactive\n' ;;
@@ -160,6 +168,36 @@ if swapz_pressure_cleanup_resources; then exit 1; fi
 mapfile -t group_events <"$EVENT_LOG"
 [[ "${group_events[*]}" == "stop:$FIRST_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$FIRST_UNIT/cgroup.procs stop:$SECOND_UNIT verify-cgroup:/sys/fs/cgroup/system.slice/$SECOND_UNIT/cgroup.procs" ]]
 echo 'second unit cgroup checked independently: PASS'
+
+# A systemctl ControlGroup response must belong to exactly the named
+# system.slice transient unit, not an unrelated, duplicated or swapped path.
+for bad_case in duplicated swapped unrelated traversal; do
+  reset_fixture
+  SWAPON=1
+  ACTIVE_SWAP=1
+  case "$bad_case" in
+    duplicated)
+      UNIT_GROUP_SECOND_OVERRIDE="/system.slice/$FIRST_UNIT" ;;
+    swapped)
+      UNIT_GROUP_FIRST_OVERRIDE="/system.slice/$SECOND_UNIT" ;;
+    unrelated)
+      UNIT_GROUP_FIRST_OVERRIDE="/unrelated.slice/important.service" ;;
+    traversal)
+      UNIT_GROUP_SECOND_OVERRIDE="/system.slice/../important.service" ;;
+  esac
+  if swapz_pressure_cleanup_resources; then exit 1; fi
+  (( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 && SWAPON == 1 && ACTIVE_SWAP == 1 ))
+done
+echo 'wrong, duplicate and traversal ControlGroup paths preserve swap: PASS'
+
+# systemd may report an empty ControlGroup only after a stopped unit has
+# MainPID=0; this preexisting accepted path remains valid.
+reset_fixture
+UNIT_GROUP_EMPTY=1
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 0 ))
+echo 'stopped and reaped units with empty ControlGroup remain safe: PASS'
+
 
 reset_fixture
 UNIT_LOAD_FAIL=1
@@ -224,6 +262,7 @@ BAD_SWAPS=(
   "Filename NOT_Type Size Used Priority"
   "Filename Type Size Used Priority|/swapfile file"
   "Filename Type Size Used Priority|/swapfile file unknown 0 -1"
+  "Filename Type Size Used Priority|/swapfile file 64 not-a-number -1"
   "Filename Type Size Used Priority|/swapfile file 64 0 not-a-priority"
 )
 for bad_swaps in "${BAD_SWAPS[@]}"; do
