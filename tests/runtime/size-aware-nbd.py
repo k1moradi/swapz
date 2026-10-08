@@ -559,7 +559,7 @@ def selftest_failure_gates() -> None:
         if label.endswith("/dev"):
             return "43:0\n"
         if label == "/proc/self/mountinfo":
-            return ""
+            return "42 41 0:1 / / rw,relatime - tmpfs tmpfs rw\n"
         if label == "/proc/swaps":
             return "Filename\tType\tSize\tUsed\tPriority\n"
         raise AssertionError("unexpected sysfs/proc read: " + label)
@@ -592,8 +592,9 @@ def selftest_failure_gates() -> None:
 
     # Preflight cannot treat active PID, empty/malformed swap inventory,
     # or failed stat of any active swap entry as safe evidence of unused NBD.
-    for case in ("pid_present", "swaps_read_error", "swaps_empty",
-                 "swaps_bad_header", "swaps_bad_row",
+    for case in ("pid_present", "mountinfo_empty", "mountinfo_corrupt",
+                 "swaps_read_error", "swaps_empty", "swaps_bad_header",
+                 "swaps_bad_row", "swaps_bad_numeric",
                  "active_swap_stat_error", "active_swap_selected"):
         def preflight_read(path: Path, *_args: object,
                            **_kwargs: object) -> str:
@@ -601,7 +602,11 @@ def selftest_failure_gates() -> None:
             if label.endswith("/dev"):
                 return "43:0\n"
             if label == "/proc/self/mountinfo":
-                return ""
+                if case == "mountinfo_empty":
+                    return ""
+                if case == "mountinfo_corrupt":
+                    return "42 41 0:1 truncated"
+                return "42 41 0:1 / / rw,relatime - tmpfs tmpfs rw\n"
             if label == "/proc/swaps":
                 if case == "swaps_read_error":
                     raise OSError(errno.EIO, "injected swap inventory failure")
@@ -612,6 +617,9 @@ def selftest_failure_gates() -> None:
                 if case == "swaps_bad_row":
                     return ("Filename\tType\tSize\tUsed\tPriority\n"
                             "truncated-swap-record\n")
+                if case == "swaps_bad_numeric":
+                    return ("Filename\tType\tSize\tUsed\tPriority\n"
+                            "/dev/test-nbd-swap\tpartition\tbad\t0\t1\n")
                 return ("Filename\tType\tSize\tUsed\tPriority\n"
                         "/dev/test-nbd-swap\tpartition\t64\t0\t1\n")
             raise AssertionError("unexpected preflight read: " + label)
@@ -642,10 +650,13 @@ def selftest_failure_gates() -> None:
             except (ValueError, OSError) as exc:
                 expected = {
                     "pid_present": "active client",
+                    "mountinfo_empty": "empty /proc/self/mountinfo",
+                    "mountinfo_corrupt": "malformed /proc/self/mountinfo",
                     "swaps_read_error": "swap inventory failure",
                     "swaps_empty": "invalid /proc/swaps header",
                     "swaps_bad_header": "invalid /proc/swaps header",
                     "swaps_bad_row": "malformed /proc/swaps entry",
+                    "swaps_bad_numeric": "malformed /proc/swaps entry",
                     "active_swap_stat_error": "cannot inspect active swap",
                     "active_swap_selected": "active swap",
                 }[case]
