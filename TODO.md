@@ -542,3 +542,31 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       adapter before replacing the numeric-PID recall fixture.
 - [ ] Real kernel, NBD/DM/loop, swap, systemd and physical
       performance qualification remains unapproved and untested.
+
+### 2026-10-08 — Strict direct dd allowlist ready for integration review
+
+- [x] Add `recall-dd-allowlist.py`: exactly five fixed, one-use
+      roles (writer, a, b, a2, b2) with explicit 4096-byte direct
+      `dd` flags, page offsets and fixture-owned input/output paths.
+- [x] Bind a trusted source directory and test-specific mapper
+      name; reject arbitrary argv, wrong flags and paths, role reuse,
+      readers before writer, symlinked/ambiguous source and output
+      files, changed fixture identities and unsafe root/path grammar.
+- [x] Verify generated argv matches `recall-io-plan.py` exactly.
+- [x] Add **26** new rootless adversarial allowlist tests and
+      gate them in both source-only GitHub workflows.
+- [x] Teardown rootless CI **PASS** at
+      `8aa82dfef9a455ee3e6b26e7e3533c2eb98758d3`:
+      https://github.com/k1moradi/swapz/actions/runs/37815480268
+- [x] Combined same-revision CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37815480464
+      (26 allowlist, 20 IPC adapter, 23 IPC service + 10 repeats,
+      27 supervisor + 3 repeats, 46 recall plan, 26 NBD and
+      all prior pressure/GC analysis gates).
+- [ ] Review fixture-owned private directory permissions and bind
+      file/mapper identity through actual process launch; argv/path
+      prechecks alone do **not** close a postvalidation path race.
+- [ ] Await independent Codex IPC hardening, then design/review
+      integration with a production direct-`dd` service allowlist.
+- [ ] `buffer-recall.sh` remains unchanged: numeric-PID safety
+      and hidden read-worker descendants are still unresolved.
