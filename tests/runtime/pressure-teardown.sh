@@ -175,12 +175,9 @@ swapz_pressure_cleanup_resources() {
         echo "ERROR: unit $unit ControlGroup identity mismatch; preserving swap" >&2
         return 1
       fi
-      # Resume a stopped helper only while its PID still belongs to this
-      # exact test-owned unit. Never send signals to a reused PID.
-      if [[ "$unit_pid" != 0 && -r "/proc/$unit_pid/cgroup" ]] &&
-         grep -Fqx "0::$unit_cgroup" "/proc/$unit_pid/cgroup"; then
-        kill -CONT "$unit_pid" 2>/dev/null || true
-      fi
+      # Pressure workers now wait for release files, not SIGSTOP; the
+      # test-owned unit is terminated via systemd by name below.
+      # Do not resume a MainPID: PID identity can be reused after inspection.
     fi
     if ! systemctl stop --no-block "$unit"; then
       echo "ERROR: failed to stop unit $unit; preserving swap" >&2
