@@ -226,9 +226,24 @@ def validate_nbd_node(path: str) -> str:
         raise ValueError("corresponding NBD sysfs block device is missing")
     if Path("/sys/class/block", name, "pid").exists():
         raise ValueError("NBD node has an active client and may not be reused")
+    # Reject any mounted NBD block or dependent DM holder. Do not rely on
+    # pathname equality: mounts can use alternate /dev symlinks.
+    number = f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
+    mountinfo = Path("/proc/self/mountinfo").read_text()
+    if any(line.split()[2] == number for line in mountinfo.splitlines()):
+        raise ValueError("selected NBD node is mounted")
+    holders = Path("/sys/class/block", name, "holders")
+    if holders.exists() and any(holders.iterdir()):
+        raise ValueError("selected NBD node has block-device holders")
     swaps = Path("/proc/swaps").read_text()
-    if path in swaps.split():
-        raise ValueError("selected NBD node is active swap")
+    for line in swaps.splitlines()[1:]:
+        swap_path = line.split()[0]
+        try:
+            swap_st = os.stat(swap_path)
+        except OSError:
+            continue
+        if stat.S_ISBLK(swap_st.st_mode) and swap_st.st_rdev == st.st_rdev:
+            raise ValueError("selected NBD node is active swap")
     return path
 
 
