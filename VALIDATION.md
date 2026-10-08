@@ -1242,3 +1242,45 @@ against the new code by Codex, and real kernel attachment, teardown,
 physical performance, live GC overlap and swap-in p99 remain untested.
 The concurrent teardown source and kernel were not changed by this
 NBD correction.
+
+## 2026-10-08 — One-revision combined rootless teardown + NBD source gate PASS
+
+The primary developer added
+`.github/workflows/rootless-combined.yml` to require a *single exact
+checkout* for the complete rootless teardown and NBD source suites,
+rather than extrapolating an integrated verdict from unrelated CI
+runs at different commits. The workflow is triggered by source,
+fixture, or workflow changes on `main` and relevant pull requests.
+
+**Executed CI evidence:**
+
+- **Tested commit:** `8116bdfb8b61a69f67e6548904e82c191b979f23`
+- **CI:** https://github.com/k1moradi/swapz/actions/runs/37779371716
+- **Conclusion:** SUCCESS.
+- **NBD source blob:** `768ff896e82198829cde83e28c8e0a35ddad368c`
+- **Kernel blob:** `7589022ecdf0525716717270ab063a867a21f473`
+- **Static NBD syscall isolation:** PASS before any selftest execution.
+- **Bash syntax:** 10/10 (seven teardown and three NBD/streaming scripts).
+- **DM/loop teardown mock:** PASS.
+- **Pressure teardown mock:** PASS.
+- **Offline GC latency analyzer:** 11 tests, OK.
+- **NBD userspace compilation:** PASS.
+- **Complete NBD selftest:** 1 initial PASS plus 25 additional
+  independent process executions, **26/26 PASS**.
+- **NBD DM teardown and streaming teardown mocks:** both PASS.
+
+The test output includes the explicit
+`NBD preflight, 8 MiB wire, setup cleanup and worker exceptions: PASS`
+marker. Expected injected failure lines, including a Python
+`NotADirectoryError` traceback from the real cgroup tri-state negative
+test, do not imply gate failure: the corresponding rejection assertions
+ran and the entire CI job concluded successfully.
+
+**Scope:** all device-control commands were test-local mocks.
+No real NBD attachment, DM/loop operations, swap commands, kernel
+modules, physical backing or benchmark was executed. The previously
+identified Bash PID inspection-to-signal TOCTOU limitation still exists.
+Independent Codex Linux-host requalification of the latest teardown
+source was assigned concurrently; this clean-runner gate does not
+substitute for its result. Real NBD/GC latency and physical batch-size
+qualification remain outside authorization.
