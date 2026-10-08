@@ -2216,3 +2216,42 @@ unsupervised I/O-producing descendants; the PID-reuse race is
 **not eliminated** by this source-only milestone. No real
 DM/loop/NBD/swap/systemd/module/physical device or live workload
 operations occurred.
+
+## 2026-10-08 — Readback reference/file identity safety for later IPC integration
+
+The primary developer hardened the independently tested but
+**unintegrated** `tests/runtime/recall-io-plan.py` while Codex
+develops the separate gated-pidfd supervisor control service.
+The I/O plan now creates expected pages via exclusive nofollow
+file creation and validates its nine-page fixture source and
+all 4 KiB readback files as exact-size, single-link regular
+files. It refuses symlinks, hardlinks, FIFOs, dangling output
+links, oversized/short output and lstat/open inode replacement.
+Only bounded file reads occur; a failed check permanently denies
+the plan's future cleanup callback.
+
+Twelve additional synthetic fake-supervisor cases raise the
+rootless recall I/O plan suite to **37 tests**, including injected
+racing links and replaced inodes. No real `dd`, systemd, DM,
+loop, NBD, swap, module, physical-device or signal operation is
+part of these tests.
+
+**Both source-only workflow PASS results on exact revision**
+`4181df6ad91099ae0717fa6474750be153ed8734`:
+
+- Teardown https://github.com/k1moradi/swapz/actions/runs/37809491958
+- Combined https://github.com/k1moradi/swapz/actions/runs/37809491946
+
+Both include 37 recall plan cases, the original 27 pidfd supervisor
+cases and three additional full-suite processes, rootless pressure
+and teardown regressions, 23 swap-parser cases, 16 token tests and
+ten token suite repeats, and 11 offline analyzer cases. The combined
+run additionally passed 26 complete NBD protocol selftests and NBD
+teardown mocks.
+
+Keep Codex's supervisor/service source independent: these file
+checks are not integrated into production `buffer-recall.sh`, which
+still has the original numeric-PID reuse and background-wrapper
+descendant problem. Review the future IPC adapter independently
+before any real device or pressure/recall execution. Preserve the
+two untracked Codex Linux-host state files.
