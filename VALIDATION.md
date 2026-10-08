@@ -715,3 +715,51 @@ CORRECTNESS PASS — PERFORMANCE BACKEND LIMIT, NOT SWAPZ PERFORMANCE FAIL
 A size-aware synthetic backend or explicitly authorized physical media is required to
 measure the 512 KiB / 1 MiB plateau at an actual ~20 MiB/s transfer rate without null_blk's
 token-bucket artifact.
+
+
+## V2.2 synthetic latency matrix: teardown failure
+
+Linux 7.0.0-34 performance validation on
+`9b0a0a2d193f19b7159983a2a47279c4f57ea597` again passed source invariants,
+GCC W=1, userspace/model/ASan/UBSan, staged fault recovery, and staged
+randomized/live-GC correctness (five 100,000-operation seeds; 30,000 live-GC
+operations; 116 victims/pages).
+
+The revised `null_blk` guard correctly rejected 512 KiB at 20 MiB/s. The following
+synthetic benchmark workloads produced usable results:
+
+- 20 MiB/s / 0.5 ms / <=256 KiB: full sweep passed; opportunistic and staged
+  peaked near 16 KiB (16.57 and 16.76 MiB/s), dropping toward 11 MiB/s at
+  256 KiB due to quantized null_blk bandwidth throttling.
+- Unthrottled / 0.5 ms / <=1024 KiB: request-overhead/latency characterization
+  passed; opportunistic peaked near 128 KiB (89.33 MiB/s), staged near 256 KiB
+  (150.65 MiB/s). These are **not** 20 MiB/s physical-drain measurements.
+- 20 MiB/s / 0.25 ms / <=256 KiB: completed.
+
+The remaining 1 and 2 ms matrix encountered `dmsetup remove` returning
+`Device or resource busy` after completed cases. The previous script's EXIT
+trap ignored that failed removal, then powered off/rmdir'ed the test null_blk.
+With the DM target still depending on a missing backing device, a subsequent
+`-EIO`/Buffer I/O error was caused by unsafe benchmark teardown rather than a
+demonstrated swapz data-path failure.
+
+Post-report review fixed this test-only failure:
+
+- `streaming-benchmark.sh` now requires successful and verified DM removal
+  before publishing a case and proceeding to another;
+- normal removal uses `dmsetup remove --retry` for transient opens, with no
+  `--force` or `--deferred`;
+- EXIT cleanup **preserves** the powered-on null_blk and diagnostic artifacts
+  if the test DM target cannot be removed safely;
+- the safety contract is isolated in `streaming-benchmark-teardown.sh`;
+- `streaming-teardown-regression.sh` tests busy and false-positive removal
+  conditions without loading kernel modules.
+
+No kernel performance policy was changed. The host's final Codex snapshot had
+no test DM/null_blk state or D-state tasks; the freshly built module remained
+loaded and matched source.
+
+Status: `CORRECTNESS PASS — PARTIAL SYNTHETIC PERFORMANCE, TEARDOWN RETEST REQUIRED`.
+
+The next gate is the teardown regression and focused 1/2 ms reruns on virtual
+devices; the physical bandwidth plateau remains unresolved.
