@@ -11,6 +11,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import stat
 import tempfile
 import time
 
@@ -47,12 +48,38 @@ def _publish_new(path: Path, contents: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _read_exact_checkpoint(path: Path, expected: bytes) -> None:
+    """Read only one short, unlinked regular file; never follow symlinks.
+
+    A malformed file must not act as a successful checkpoint. In particular,
+    Path.read_bytes() would accept a symlink to the expected token, read a
+    huge file without a bound, or block on a FIFO with no writer.
+    """
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise ValueError(f"unsafe pressure checkpoint file: {path}")
+    # O_NONBLOCK also protects against a path being swapped to a FIFO
+    # between lstat and open. O_NOFOLLOW rejects a replaced symlink.
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
+    with os.fdopen(fd, "rb") as handle:
+        after = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(after.st_mode) or after.st_nlink != 1 or
+                (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino) or
+                after.st_size != len(expected) or
+                handle.read(len(expected) + 1) != expected):
+            raise ValueError(f"invalid pressure checkpoint contents: {path}")
+
+
+def verify_marker(directory: Path, token: str, phase: str) -> None:
+    """Controller-only: require an exact, regular, phase-scoped marker."""
+    expected = _expected(token, phase)
+    _read_exact_checkpoint(directory / phase, expected)
+
+
 def publish_release(directory: Path, token: str, phase: str) -> None:
     """Controller: release only a published marker for the matching phase."""
     expected = _expected(token, phase)
-    marker = directory / phase
-    if marker.read_bytes() != expected:
-        raise ValueError(f"invalid {phase} checkpoint marker")
+    verify_marker(directory, token, phase)
     _publish_new(directory / f"release-{phase}", expected)
 
 
@@ -68,13 +95,11 @@ def wait_checkpoint(directory: Path, token: str, phase: str, *,
     deadline = time.monotonic() + timeout_seconds
     while True:
         try:
-            value = release.read_bytes()
+            _read_exact_checkpoint(release, expected)
         except FileNotFoundError:
             pass
         else:
-            if value == expected:
-                return
-            raise ValueError(f"invalid {phase} checkpoint release token")
+            return
         if time.monotonic() >= deadline:
             raise TimeoutError(f"pressure {phase} checkpoint release timed out")
         time.sleep(min(poll_seconds, max(0, deadline - time.monotonic())))
@@ -82,13 +107,16 @@ def wait_checkpoint(directory: Path, token: str, phase: str, *,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("release",))
+    parser.add_argument("mode", choices=("release", "check"))
     parser.add_argument("directory", type=Path)
     parser.add_argument("token")
     parser.add_argument("phase", choices=PHASES)
     args = parser.parse_args()
     try:
-        publish_release(args.directory, args.token, args.phase)
+        if args.mode == "release":
+            publish_release(args.directory, args.token, args.phase)
+        else:
+            verify_marker(args.directory, args.token, args.phase)
     except (OSError, ValueError) as exc:
         parser.exit(1, f"pressure checkpoint release error: {exc}\n")
     return 0
