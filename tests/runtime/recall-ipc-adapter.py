@@ -278,8 +278,9 @@ class RecallRoleIPCAdapter(RecallIPCAdapter):
     def stop_all(self) -> StopAttestation:
         # Positive synthetic cleanup requires every role's successful wait,
         # not merely a supervisor stop report after a failed data test.
-        if set(self._role_by_handle) != self._verified_role_handles:
-            self._reject("role worker completion or readback attestation missing")
+        if (self._issued_roles != _ROLE_ORDER
+                or set(self._role_by_handle) != self._verified_role_handles):
+            self._reject("complete five-role execution or readback attestation missing")
         return super().stop_all()
 
 __all__ = ["RecallIPCAdapter", "RecallRoleIPCAdapter", "RecallIPCError", "WorkerOutcome", "StopAttestation"]
