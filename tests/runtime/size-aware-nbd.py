@@ -638,7 +638,61 @@ def selftest() -> int:
     else:
         raise AssertionError("model delay did not respond to server stop")
 
-    print("size-aware NBD protocol, 1 MiB wire I/O, latency, TRIM and EOF: PASS")
+    # Mock the *real shutdown helper* without opening an NBD kernel device.
+    class ShutdownWorker:
+        def __init__(self, slow: bool = False):
+            self.alive = True
+            self.slow = slow
+            self.joins: list[float | None] = []
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def join(self, timeout: float | None = None) -> None:
+            self.joins.append(timeout)
+            if not self.slow or timeout is None:
+                self.alive = False
+
+    class ShutdownSocket:
+        def __init__(self, worker: ShutdownWorker):
+            self.worker = worker
+            self.closed = False
+
+        def close(self) -> None:
+            assert not self.worker.is_alive(), "closed socket while worker active"
+            self.closed = True
+
+    for failure in ("none", "disconnect", "clear", "slow_worker"):
+        shutdown_worker = ShutdownWorker(slow=failure == "slow_worker")
+        shutdown_server = ShutdownSocket(shutdown_worker)
+        shutdown_kernel = ShutdownSocket(shutdown_worker)
+        ioctl_steps: list[int] = []
+        fd_closed: list[int] = []
+        shutdown_errors: list[str] = []
+
+        def fake_ioctl(_fd: int, operation: int) -> None:
+            ioctl_steps.append(operation)
+            if ((failure == "disconnect" and operation == NBD_DISCONNECT)
+                    or (failure == "clear" and operation == NBD_CLEAR_SOCK)):
+                raise OSError(errno.EIO, "injected NBD ioctl failure")
+
+        shutdown_kernel_session(
+            99, True, shutdown_worker, threading.Event(),
+            shutdown_server, shutdown_kernel, shutdown_errors,
+            ioctl=fake_ioctl, close_fd=fd_closed.append, join_timeout=0)
+        assert ioctl_steps == [NBD_DISCONNECT, NBD_CLEAR_SOCK]
+        assert shutdown_server.closed and shutdown_kernel.closed
+        assert fd_closed == [99]
+        if failure == "none":
+            assert not shutdown_errors
+        elif failure == "slow_worker":
+            assert len(shutdown_worker.joins) == 2
+            assert shutdown_worker.joins[1] is None
+            assert any("shutdown deadline" in issue for issue in shutdown_errors)
+        else:
+            assert any(failure.upper() in issue for issue in shutdown_errors)
+
+    print("size-aware NBD protocol, 1 MiB wire I/O, timing, TRIM, EOF and shutdown: PASS")
     return 0
 
 
