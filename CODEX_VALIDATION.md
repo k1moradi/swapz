@@ -2001,3 +2001,51 @@ source blobs, preserve the two local untracked `*-verify.state`
 files and verify syscall patch containment *before* any NBD selftest.
 No real NBD, DM/loop, swap, systemd pressure fixture, module,
 fio, physical device, kernel attachment or reboot is authorized.
+
+## Pressure checkpoint migration after independent PID-reuse architecture review
+
+Codex's last independently reported teardown validation passed
+at `78e15e38a73c937c329932d8cc1c93c9131c92b7`, confirming both
+transient unit names are validated before systemd calls, and identifying
+the remaining numeric PID SIGCONT uses in `pressure.sh` and
+`pressure-teardown.sh`.
+
+The primary developer has now **removed these pressure numeric-PID
+signal paths**. The helper does not SIGSTOP itself; instead it
+publishes nonce-bound phase markers (`filled`, `verified`) and
+blocks on distinct atomic, private `release-filled` /
+`release-verified` files. The controller uses a fresh 128-bit
+nonce per unit; the helper holds its allocated pressure buffer while
+waiting and imposes a monotonic timeout. The pressure cleanup uses
+systemd's named-unit stop and cgroup-empty verification with no
+manual PID resume.
+
+Independent source-only code paths were exercised in eight new
+rootless `pressure-checkpoint-test.py` cases: two-phase handshake,
+wrong-phase and cross-unit nonce, malformed/reused files, timeout,
+interruption, readback corruption and successful release. Pressure
+teardown mocks now assert zero numeric-PID signals, including when
+systemctl returns a nonzero MainPID, and maintain stop/verify/swapoff/
+cleanup dependency order.
+
+**Executed GitHub Actions PASS**, tested commit
+`1c5cfe5305ba0bad9c8edbf404390b4093bdfbec`:
+
+- https://github.com/k1moradi/swapz/actions/runs/37791843695
+  — teardown source safety, 8 protocol tests, 11 offline analyzer tests
+- https://github.com/k1moradi/swapz/actions/runs/37791843564
+  — combined NBD/teardown, 8 protocol tests, 26 full NBD selftests,
+  11 offline analyzer tests
+
+**Next independent host task:** when Codex's gated pidfd recall
+prototype finishes, independently inspect the new pressure token
+protocol source and its mock boundaries before any separately approved
+live pressure fixture. Do not infer that this source-only change
+proves production systemd behavior. The Bash recall PID check-to-signal
+race remains unresolved until the new supervisor is integrated and
+independently requalified.
+
+Keep both host-local `local-*-verify.state` files unchanged. Never
+run real systemd units, pressure fixtures, block devices, swap
+commands, kernel modules, physical disk tests, fio or reboot absent
+fresh explicit authorization.
