@@ -258,6 +258,15 @@ class RecallRoleIPCAdapter(RecallIPCAdapter):
         return handle
 
     def wait_reaped(self, handle: str, *, timeout_ms: int = 2000) -> WorkerOutcome:
+        role = self._role_by_handle.get(handle)
+        if role in ("a2", "b2") and not {"a2", "b2"}.issubset(self._issued_roles):
+            self._reject("both concurrent recall readers must launch before either wait")
+        if role == "writer" and (
+            self._issued_roles != _ROLE_ORDER
+            or any(role_name != "writer" and role_handle not in self._verified_role_handles
+                   for role_handle, role_name in self._role_by_handle.items())
+        ):
+            self._reject("writer must remain outstanding until all reader checks finish")
         result = super().wait_reaped(handle, timeout_ms=timeout_ms)
         if handle in self._role_by_handle:
             role = self._role_by_handle[handle]
