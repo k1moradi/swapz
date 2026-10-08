@@ -579,9 +579,10 @@ def selftest_failure_gates() -> None:
         else:
             raise AssertionError("inaccessible NBD client PID was accepted")
 
-    # Preflight cannot treat active PID, unreadable swap inventory, or a
-    # failed stat of any active swap entry as safe evidence of unused NBD.
-    for case in ("pid_present", "swaps_read_error",
+    # Preflight cannot treat active PID, empty/malformed swap inventory,
+    # or failed stat of any active swap entry as safe evidence of unused NBD.
+    for case in ("pid_present", "swaps_read_error", "swaps_empty",
+                 "swaps_bad_header", "swaps_bad_row",
                  "active_swap_stat_error", "active_swap_selected"):
         def preflight_read(path: Path, *_args: object,
                            **_kwargs: object) -> str:
@@ -593,6 +594,13 @@ def selftest_failure_gates() -> None:
             if label == "/proc/swaps":
                 if case == "swaps_read_error":
                     raise OSError(errno.EIO, "injected swap inventory failure")
+                if case == "swaps_empty":
+                    return ""
+                if case == "swaps_bad_header":
+                    return "untrustworthy swap listing"
+                if case == "swaps_bad_row":
+                    return ("Filename\tType\tSize\tUsed\tPriority\n"
+                            "truncated-swap-record\n")
                 return ("Filename\tType\tSize\tUsed\tPriority\n"
                         "/dev/test-nbd-swap\tpartition\t64\t0\t1\n")
             raise AssertionError("unexpected preflight read: " + label)
@@ -624,6 +632,9 @@ def selftest_failure_gates() -> None:
                 expected = {
                     "pid_present": "active client",
                     "swaps_read_error": "swap inventory failure",
+                    "swaps_empty": "invalid /proc/swaps header",
+                    "swaps_bad_header": "invalid /proc/swaps header",
+                    "swaps_bad_row": "malformed /proc/swaps entry",
                     "active_swap_stat_error": "cannot inspect active swap",
                     "active_swap_selected": "active swap",
                 }[case]
