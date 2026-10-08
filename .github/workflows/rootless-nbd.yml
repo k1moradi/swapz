@@ -1,0 +1,71 @@
+name: Rootless NBD source safety
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rootless-nbd.yml'
+      - 'tests/runtime/size-aware-nbd.py'
+      - 'tests/runtime/size-aware-nbd-teardown-test.sh'
+      - 'tests/runtime/streaming-teardown-regression.sh'
+      - 'tests/runtime/streaming-benchmark.sh'
+      - 'tests/runtime/streaming-benchmark-teardown.sh'
+  pull_request:
+    paths:
+      - '.github/workflows/rootless-nbd.yml'
+      - 'tests/runtime/size-aware-nbd.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static syscall isolation gate (before any selftest)
+        run: |
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          src = Path("tests/runtime/size-aware-nbd.py").read_text()
+          tree = ast.parse(src)
+          def function(name):
+              return next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                          and n.name == name)
+          shutdown = function("shutdown_kernel_session")
+          defaults = dict(zip((a.arg for a in shutdown.args.kwonlyargs),
+                              shutdown.args.kw_defaults))
+          for key in ("ioctl", "close_fd"):
+              assert isinstance(defaults[key], ast.Constant) and defaults[key].value is None, (
+                  f"unsafe captured syscall default: {key}")
+          guards = function("selftest_failure_gates")
+          assert any(
+              isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == "fake_fd" for t in n.targets)
+              and isinstance(n.value, ast.Call)
+              and isinstance(n.value.func, ast.Name)
+              and n.value.func.id == "object"
+              for n in ast.walk(guards)
+          ), "fake setup fd must be a non-integer object"
+          assert "return_value=fake_fd" in src, "mocked os.open must return sentinel fd"
+          assert "mock.patch(\"fcntl.ioctl\"" in src and "mock.patch(\"os.close\"" in src, (
+              "syscalls must be patched inside setup mock")
+          print("NBD syscall isolation static gate: PASS")
+          PY
+      - name: Compile NBD userspace backend
+        run: python3 -m py_compile tests/runtime/size-aware-nbd.py
+      - name: Run rootless NBD selftest
+        run: python3 tests/runtime/size-aware-nbd.py selftest
+      - name: Verify benchmark and NBD teardown Bash syntax
+        run: |
+          bash -n tests/runtime/streaming-benchmark.sh
+          bash -n tests/runtime/streaming-benchmark-teardown.sh
+          bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+      - name: Rootless NBD teardown mock
+        run: bash tests/runtime/size-aware-nbd-teardown-test.sh
+      - name: Rootless streaming teardown mock
+        run: bash tests/runtime/streaming-teardown-regression.sh
