@@ -8,6 +8,16 @@
 - [ ] Re-run the full 20 MiB/s plateau on that backend before declaring the final V2.2 batch
       sweet spot if the safe null_blk sweep is still rising at 256 KiB.
 
+### Synthetic lower-DISCARD GC stall
+
+- [ ] Reproduce GC churn with throttled null_blk lower DISCARD disabled, only
+      after pinned-host state has been safely cleared with explicit reboot permission if needed.
+- [ ] Check `nullblk-discard-guard.sh` source regression and actual reject-before-setup case.
+- [ ] Verify `lower_discard=off`, repeated GC victims, forward progress, safe teardown.
+- [ ] Re-test GC with lower DISCARD enabled on **unthrottled** virtual storage separately.
+- [ ] If GC still hangs with discard off, inspect exact swapz worker stack/ownership;
+      treat as a kernel forward-progress blocker.
+
 ### Teardown safety gate
 
 - [ ] Verify teardown safety regression with busy and false-positive DM removal.
