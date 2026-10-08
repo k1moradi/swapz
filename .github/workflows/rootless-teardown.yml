@@ -20,6 +20,10 @@ on:
       - 'tests/runtime/buffer-recall.sh'
       - 'tests/runtime/test-child-supervisor.py'
       - 'tests/runtime/test-child-supervisor-regression.py'
+      - 'tests/runtime/test-child-supervisor-service.py'
+      - 'tests/runtime/test-child-supervisor-service-regression.py'
+      - 'tests/runtime/recall-ipc-adapter.py'
+      - 'tests/runtime/recall-ipc-adapter-test.py'
       - 'tests/runtime/recall-io-plan.py'
       - 'tests/runtime/recall-io-plan-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
@@ -73,6 +77,30 @@ jobs:
             fi
             echo "PIDFD_SUPERVISOR_REPEAT $attempt/3: PASS"
           done
+      - name: Rootless pidfd supervisor IPC service regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/test-child-supervisor-service.py tests/runtime/test-child-supervisor-service-regression.py
+          timeout 50s python3 tests/runtime/test-child-supervisor-service-regression.py -v
+      - name: Repeat pidfd IPC service regression in ten separate processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..10}; do
+            if ! timeout 15s python3 tests/runtime/test-child-supervisor-service-regression.py -q >"$RUNNER_TEMP/pidfd-ipc-repeat.log" 2>&1; then
+              echo "PIDFD_IPC_REPEAT $attempt/10: FAIL"
+              cat "$RUNNER_TEMP/pidfd-ipc-repeat.log"
+              exit 1
+            fi
+            echo "PIDFD_IPC_REPEAT $attempt/10: PASS"
+          done
+      - name: Rootless recall IPC adapter regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-ipc-adapter.py tests/runtime/recall-ipc-adapter-test.py
+          timeout 60s python3 tests/runtime/recall-ipc-adapter-test.py -v
       - name: Rootless direct recall I/O orchestration test
         shell: bash
         run: |
