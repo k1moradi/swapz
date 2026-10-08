@@ -218,11 +218,27 @@ echo 'missing mapper and failed active-swap resolution block teardown: PASS'
 
 echo 'mapper, proc-swaps inspection and bad-header errors preserve swap: PASS'
 
-# A partially correct header, truncated row, or bad accounting must never
-# count as evidence that the test mapper is absent from active swap.
-for bad_swaps in \
-    "Filename NOT_Type Size Used Priority" \
-    
+# A partially correct header, truncated row or bad accounting must not
+# establish that a test-owned mapping is absent from the active swap list.
+BAD_SWAPS=(
+  "Filename NOT_Type Size Used Priority"
+  "Filename Type Size Used Priority|/swapfile file"
+  "Filename Type Size Used Priority|/swapfile file unknown 0 -1"
+  "Filename Type Size Used Priority|/swapfile file 64 0 not-a-priority"
+)
+for bad_swaps in "${BAD_SWAPS[@]}"; do
+  reset_fixture
+  SWAPS_FAKE_CONTENT=${bad_swaps//|/$'\n'}
+  if swapz_pressure_cleanup_resources; then exit 1; fi
+  (( CLEAN_CALLS == 0 && SWAPOFF_CALLS == 0 ))
+done
+echo 'malformed swap header, row and numeric fields block mapper teardown: PASS'
+
+reset_fixture
+SWAPS_FAKE_CONTENT="Filename Type Size Used Priority"$'\n'"/swapfile file 64 0 -1"
+swapz_pressure_cleanup_resources
+(( CLEAN_CALLS == 1 && SWAPOFF_CALLS == 0 ))
+echo 'valid unrelated negative-priority swap permits test-only cleanup: PASS'
 
 reset_fixture
 ACTIVE_SWAP=1
