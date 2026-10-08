@@ -1614,3 +1614,52 @@ A Bash jobs -pr/-ps snapshot removes the reproduced completed-job
 false-positive, but does not supply an atomic signal target. State
 the remaining PID reuse TOCTOU limit. No root, real DM/loop/NBD,
 modprobe, swap commands, block devices, fio, physical media, or reboot.
+
+## Latest NBD source-only requalification handoff: corrected mock isolation
+
+**Do not rerun the older `2fc80f4` NBD selftest.** Codex demonstrated
+that the earlier test's captured syscall defaults attempted real
+NBD_CLEAR_SOCK and close against test fd 81, despite mocks. The primary
+developer replaced captured defaults with late binding, and every mocked
+`serve_kernel()` now uses a non-integer fake fd sentinel. The intended
+mock call order was verified on a disposable GitHub Actions runner.
+
+**Authoritative corrected source-only evidence:**
+
+- Commit: `f1c458f638712a19dea8b724a7f32bd1052b791e`
+- Rootless NBD workflow: https://github.com/k1moradi/swapz/actions/runs/37774348723
+- Static syscall-isolation check: **PASS**
+- Seven prior NBD source-only commands: **PASS**
+
+After completing the current independent teardown audit, Codex should
+fast-forward `main`, record HEAD/source blobs, then independently inspect
+the corrected keyword defaults and the non-integer fake-fd test before
+running the updated, **rootless-only** NBD gate:
+
+```bash
+git pull --ff-only origin main
+git rev-parse HEAD
+git rev-parse HEAD:tests/runtime/size-aware-nbd.py
+git rev-parse HEAD:kernel/dm-swapz.c
+git status --short --branch
+python3 -m py_compile tests/runtime/size-aware-nbd.py
+python3 tests/runtime/size-aware-nbd.py selftest
+bash -n tests/runtime/streaming-benchmark.sh
+bash -n tests/runtime/streaming-benchmark-teardown.sh
+bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/size-aware-nbd-teardown-test.sh
+bash tests/runtime/streaming-teardown-regression.sh
+```
+
+Verify the direct partial-setup cleanup mock intercepts NBD_SET_SOCK,
+NBD_CLEAR_SOCK, and descriptor close, rather than invoking kernel syscalls.
+Verify non-OSError NBD worker failure causes nonzero backend status;
+active NBD PID, swap-file read/stat error and exact 8 MiB wire READ/WRITE
+cases execute. Expected injected shutdown ERROR messages alone are
+not a failing result if the test assertions execute and the command returns
+0. Preserve the two pre-existing `local-*-verify.state` files.
+
+Do **not** run this against the failed historical NBD source blob. Do not
+open a real /dev/nbdN, create DM or loop mappings, run swapon/swapoff,
+load modules, access physical media, benchmark fio, or reboot. A full
+kernel NBD smoke remains a separately authorized next phase.
