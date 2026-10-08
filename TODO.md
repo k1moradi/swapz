@@ -245,3 +245,28 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       atomic signaling mechanism has been introduced.
 - [ ] Real swap/NBD/DM runtime, GC-overlap p99 and physical testing
       remain unauthorized.
+
+### 2026-10-08 NBD mountinfo dev_t and partition preflight qualification
+
+- [x] Correct Codex's NBD source-only FAIL: reject syntactically valid
+      but impossible mountinfo major/minor tuples outside Linux 12-bit
+      major / 20-bit minor limits.
+- [x] Compare mountinfo device identity numerically so a selected NBD
+      mount using leading zeros is not misclassified as unrelated.
+- [x] Extend malformed first/second-row, max/zero-valid-device and
+      mounted-device rootless preflight cases.
+- [x] Reject an NBD sysfs partition child (`nbd0p1`) in a direct
+      full-preflight rootless test and fail closed on unreadable
+      partition enumeration.
+- [x] Updated NBD rootless CI PASS at
+      `40678c7d9743d6efca943885f40be1a0388d3ca6`:
+      https://github.com/k1moradi/swapz/actions/runs/37783419565
+      (all seven-command equivalents plus 25/25 additional full
+      selftest executions; 26 in total).
+- [x] Updated combined same-commit rootless gate PASS:
+      https://github.com/k1moradi/swapz/actions/runs/37783419522
+      (teardown, NBD and 11 offline GC analyzer tests).
+- [ ] Independent Codex Linux-host NBD requalification of the new
+      source blob after its ongoing teardown audit.
+- [ ] No live kernel NBD, swap, DM/loop or GC-overlap/physical tests
+      without separate explicit authorization.
