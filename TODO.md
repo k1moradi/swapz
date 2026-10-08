@@ -376,3 +376,32 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       without separate authorization.
 - [ ] Recall PID reuse remains open pending independently tested
       gated-pidfd supervisor design and later integration approval.
+
+### 2026-10-08 — Production pressure controller source-only integration
+
+- [x] Extract pressure phase controller into side-effect-free
+      `tests/runtime/pressure-runner.sh`, sourced and called by the
+      real fixture, enabling safe rootless testing of production flow.
+- [x] Add `pressure-runner-regression.sh` to mock all systemd, device,
+      cgroup and swap operations, execute positive/negative phase
+      progression, and assert no incorrect checkpoint release.
+- [x] Detect and correct conditional Bash `errexit` fail-open:
+      failed `memory.swap.current`, swap usage, DM status or GC
+      accounting previously could be ignored when the function was
+      invoked under a conditional, wrongly issuing
+      `release-verified`.
+- [x] Use explicit guarded returns with exact DM `failed=0`
+      matching and positive decimal memory/swap/required-GC checks.
+- [x] Update static token test to verify the live fixture sources
+      and invokes the same tested controller.
+- [x] Teardown source-only CI **PASS** at
+      `c484ac0c9a90c5ff33b0c17b2b1044f5be80110d`:
+      https://github.com/k1moradi/swapz/actions/runs/37801182069
+- [x] Combined same-revision source-only CI **PASS**:
+      https://github.com/k1moradi/swapz/actions/runs/37801181958
+      (production controller mocks, 16 pressure protocol tests
+      repeated 10 times, 11 analyzer tests, 26 NBD selftests).
+- [ ] Independent host source review of pressure controller before
+      authorized real systemd pressure execution.
+- [ ] Await Codex's gated-pidfd recall-supervisor prototype; recall's
+      numeric-PID signaling safety remains an open qualification.
