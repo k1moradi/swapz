@@ -54,15 +54,16 @@ swapz_pressure_run_unit() {
     echo "ERROR: unexpected pressure unit ControlGroup $cg" >&2
     return 1
   fi
-  local filled_swap filled_status
+  local filled_swap filled_used filled_status
   if ! filled_swap=$(cat -- "/sys/fs/cgroup$cg/memory.swap.current") ||
+     ! filled_used=$(python3 "$ROOT/tests/runtime/pressure-swap-inventory.py" "$DEVICE") ||
      ! filled_status=$(dmsetup status "$NAME"); then
     echo "ERROR: cannot inspect filled pressure checkpoint metrics for $unit" >&2
     return 1
   fi
-  echo "$unit filled checkpoint cgroup=$cg memory.swap.current=$filled_swap"
-  if ! awk -v d="$DEVICE" -v label="$unit filled" '$1==d {print label " /proc/swaps_used_kib=" $4}' /proc/swaps; then
-    echo "ERROR: cannot inspect filled swap inventory for $unit" >&2
+  echo "$unit filled checkpoint cgroup=$cg memory.swap.current=$filled_swap /proc/swaps_used_kib=$filled_used"
+  if [[ ! "$filled_status" =~ (^|[[:space:]])failed=0([[:space:]]|$) ]]; then
+    echo "ERROR: filled pressure DM status indicates a failure for $unit" >&2
     return 1
   fi
   echo "$unit swapz status: $filled_status"
@@ -91,7 +92,7 @@ swapz_pressure_run_unit() {
   (( ready )) || { echo "$unit did not reach verified checkpoint" >&2; return 1; }
   local swap_current swap_used status gc_pages
   if ! swap_current=$(cat -- "/sys/fs/cgroup$cg/memory.swap.current") ||
-     ! swap_used=$(awk -v d="$DEVICE" '$1==d {used=$4} END {print used+0}' /proc/swaps) ||
+     ! swap_used=$(python3 "$ROOT/tests/runtime/pressure-swap-inventory.py" "$DEVICE") ||
      ! status=$(dmsetup status "$NAME"); then
     echo "ERROR: cannot inspect verified pressure accounting for $unit" >&2
     return 1
