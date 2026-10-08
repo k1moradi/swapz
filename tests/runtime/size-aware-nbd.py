@@ -491,7 +491,8 @@ def selftest() -> int:
     server, client = socket.socketpair()
     client.settimeout(2)
     stopping = threading.Event()
-    thread = threading.Thread(target=model.serve, args=(server, stopping))
+    thread = threading.Thread(target=model.serve, args=(server, stopping),
+                              daemon=True)
     thread.start()
     try:
         assert client_transact(client, CMD_READ, 16, 0, len(data)) == data
@@ -542,7 +543,7 @@ def selftest() -> int:
     trim_client.settimeout(2)
     trim_stop = threading.Event()
     trim_thread = threading.Thread(target=discard.serve,
-                                   args=(trim_server, trim_stop))
+                                   args=(trim_server, trim_stop), daemon=True)
     trim_thread.start()
     try:
         client_transact(trim_client, CMD_WRITE, 20, 0, BLOCK, b"Q" * BLOCK)
@@ -615,7 +616,7 @@ def selftest() -> int:
             except ProtocolError as exc:
                 failures.append(exc)
 
-        bad_thread = threading.Thread(target=run_invalid)
+        bad_thread = threading.Thread(target=run_invalid, daemon=True)
         bad_thread.start()
         try:
             bad_client.sendall(REQUEST.pack(magic, command, 60, 0, BLOCK))
