@@ -242,3 +242,15 @@ swapz_test_stop_children() {
   done
   (( failed == 0 ))
 }
+
+# Keep the staged recall's stop-before-DM-removal decision in a rootlessly
+# testable shared helper. Return 2 for active/unverified children and 1 for
+# mapper/loop cleanup failure, so the fixture retains diagnostics.
+# Arguments: LOOP UPPER LOWER [test-owned child PIDs...].
+swapz_test_stop_children_then_cleanup_stack() {
+  local loop_device=$1 upper_target=$2 lower_target=$3
+  shift 3
+  swapz_test_stop_children "$@" || return 2
+  swapz_test_cleanup_dm_stack "$loop_device" "$upper_target" "$lower_target" || return 1
+  return 0
+}
