@@ -1204,3 +1204,49 @@ CONTROLLED BACKEND LIMIT — 20 MiB/s PLATEAU NOT MEASURABLE ABOVE 256 KiB WITH 
 Do not modify swapz kernel policy merely to accommodate this null_blk limitation.
 A separate size-aware benchmark backend is a test-infrastructure task owned by the primary
 developer.
+
+
+## Benchmark teardown regression gate
+
+Codex's 1 and 2 ms synthetic sweeps exposed a **test cleanup bug**, not a
+validated swapz data-path error: `dmsetup remove` could transiently return
+`Device or resource busy`, and the old EXIT trap ignored that failure and
+powered off null_blk while DM still referenced it.
+
+The patched benchmark has a strict dependency-order contract:
+
+1. finish fio and flush;
+2. remove the *exact test-owned DM target* with `dmsetup remove --retry`;
+3. verify the target name is absent;
+4. only then power off/rmdir the test-owned null_blk backing;
+5. preserve the powered backing, target, and test artifacts if DM removal fails.
+
+Never use `dmsetup remove --force` or `--deferred` as a workaround. Never
+power off the lower device merely because the benchmark's EXIT trap is running.
+
+Before the next broad performance run:
+
+```bash
+git fetch origin --prune
+git switch main
+git pull --ff-only origin main
+bash -n tests/runtime/streaming-benchmark.sh
+bash -n tests/runtime/streaming-benchmark-teardown.sh
+bash -n tests/runtime/streaming-teardown-regression.sh
+bash tests/runtime/streaming-teardown-regression.sh
+bash tests/runtime/source-invariants.sh
+```
+
+Verify the current built module matches the loaded module. The last Codex
+snapshot showed a clean DM/null_blk test state, so **no reboot is indicated**
+unless a later runtime test independently pins a target.
+
+Then run the missing safe virtual matrix at 1.0 and 2.0 ms using <=256 KiB
+batch ceilings. Confirm every completed case leaves no DM mapping and no
+test null_blk before advancing. Record any busy removal and whether --retry
+succeeded. Stop if target removal remains blocked; the backing must stay
+powered until explicit safe operator action.
+
+After that, continue the existing QD/compressibility/cancellation/GC/pressure
+performance plan; never choose a 512 KiB / 1 MiB 20 MiB/s plateau from
+null_blk's 50 Hz throttle.
