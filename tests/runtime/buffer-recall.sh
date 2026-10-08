@@ -7,6 +7,7 @@ for tool in blkdiscard cmp dd dmsetup losetup modprobe python3 truncate; do
 done
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+source "$ROOT/tests/runtime/test-stack-teardown.sh"
 TMP=$(mktemp -d /dev/shm/swapz-v22-recall.XXXXXX)
 TAG="$$-$RANDOM"
 IMG="$TMP/backing.img"
@@ -16,11 +17,27 @@ TARGET="swapz-v22-recall-$TAG"
 WRITER=""
 
 cleanup() {
-  [[ -z "$WRITER" ]] || kill "$WRITER" >/dev/null 2>&1 || true
-  dmsetup remove "$TARGET" >/dev/null 2>&1 || true
-  dmsetup remove "$DELAY" >/dev/null 2>&1 || true
-  [[ -z "$LOOP" ]] || losetup -d "$LOOP" >/dev/null 2>&1 || true
-  rm -rf "$TMP"
+  local exit_status=$?
+  trap - EXIT
+  set +e
+  # A blocked writer must not outlive the target or its lower dm-delay stack.
+  if [[ -n "$WRITER" ]] && ! swapz_test_stop_child "$WRITER"; then
+    echo "ERROR: recall writer still active; preserving test stack and $TMP" >&2
+    (( exit_status != 0 )) || exit_status=1
+  elif ! swapz_test_cleanup_dm_stack "$LOOP" "$TARGET" "$DELAY"; then
+    echo "ERROR: recall stack teardown incomplete; preserving backing and $TMP" >&2
+    (( exit_status != 0 )) || exit_status=1
+  elif (( exit_status == 0 )); then
+    if rm -rf -- "$TMP"; then
+      echo 'V2.2 staged A/B recall and unsent cancellation: PASS'
+    else
+      echo "ERROR: could not remove test directory $TMP" >&2
+      exit_status=1
+    fi
+  else
+    echo "ERROR: recall fixture failed; diagnostic files preserved at $TMP" >&2
+  fi
+  exit "$exit_status"
 }
 trap cleanup EXIT
 
@@ -163,4 +180,3 @@ a, b, both = (int(x) / 1e6 for x in sys.argv[1:])
 print(f"RECALL A_inflight_ms={a:.3f} B_fill_ms={b:.3f} both_ms={both:.3f}")
 PY
 
-echo "V2.2 staged A/B recall and unsent cancellation: PASS"
