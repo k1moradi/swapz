@@ -251,6 +251,17 @@ def verify_nbd_device_identity(name: str, device_number: int) -> None:
         raise ValueError("NBD device node major:minor differs from NBD sysfs")
 
 
+def verify_nbd_no_holders(name: str) -> None:
+    """Inspect the actual sysfs holders directory; never infer empty on error."""
+    holders = Path("/sys/class/block", name, "holders")
+    try:
+        with os.scandir(holders) as entries:
+            if any(True for _ in entries):
+                raise ValueError("selected NBD node has block-device holders")
+    except OSError as exc:
+        raise ValueError(f"cannot inspect NBD holders for {name}: {exc}") from exc
+
+
 def validate_nbd_node(path: str) -> str:
     if not re.fullmatch(r"/dev/nbd[0-9]+", path):
         raise ValueError("explicit --device must be /dev/nbdN, never a physical disk")
@@ -263,7 +274,14 @@ def validate_nbd_node(path: str) -> str:
         raise ValueError("corresponding NBD sysfs block device is missing")
     # /dev/nbdN can otherwise be replaced by an unrelated block-device node.
     verify_nbd_device_identity(name, st.st_rdev)
-    if Path("/sys/class/block", name, "pid").exists():
+    # An inaccessible PID attribute is not proof that no NBD client exists.
+    try:
+        os.stat(Path("/sys/class/block", name, "pid"))
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ValueError(f"cannot inspect NBD client PID: {exc}") from exc
+    else:
         raise ValueError("NBD node has an active client and may not be reused")
     # Reject any mounted NBD block or dependent DM holder. Do not rely on
     # pathname equality: mounts can use alternate /dev symlinks.
@@ -271,9 +289,7 @@ def validate_nbd_node(path: str) -> str:
     mountinfo = Path("/proc/self/mountinfo").read_text()
     if any(line.split()[2] == number for line in mountinfo.splitlines()):
         raise ValueError("selected NBD node is mounted")
-    holders = Path("/sys/class/block", name, "holders")
-    if holders.exists() and any(holders.iterdir()):
-        raise ValueError("selected NBD node has block-device holders")
+    verify_nbd_no_holders(name)
     # A partition mounted under /dev/nbdNp1 would have a different dev_t
     # than the parent. Refuse reuse of an NBD node with any partition nodes.
     sysdir = Path("/sys/class/block", name)
@@ -284,8 +300,8 @@ def validate_nbd_node(path: str) -> str:
         swap_path = line.split()[0]
         try:
             swap_st = os.stat(swap_path)
-        except OSError:
-            continue
+        except OSError as exc:
+            raise ValueError(f"cannot inspect active swap path {swap_path}: {exc}") from exc
         if stat.S_ISBLK(swap_st.st_mode) and swap_st.st_rdev == st.st_rdev:
             raise ValueError("selected NBD node is active swap")
     return path
