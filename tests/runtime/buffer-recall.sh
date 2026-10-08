@@ -24,14 +24,7 @@ cleanup() {
   set +e
   # A failed/interrupted dual read may leave two test-owned I/O children.
   # Stop/reap ALL background I/O before attempting upper/lower DM removal.
-  local child children_quiet=1
-  for child in "$WRITER" "$PIDA" "$PIDB"; do
-    [[ -z "$child" ]] && continue
-    if ! swapz_test_stop_child "$child"; then
-      children_quiet=0
-    fi
-  done
-  if (( ! children_quiet )); then
+  if ! swapz_test_stop_children "$WRITER" "$PIDA" "$PIDB"; then
     echo "ERROR: recall I/O child still active; preserving test stack and $TMP" >&2
     (( exit_status != 0 )) || exit_status=1
   elif ! swapz_test_cleanup_dm_stack "$LOOP" "$TARGET" "$DELAY"; then
