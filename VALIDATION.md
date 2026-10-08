@@ -1463,3 +1463,62 @@ a design qualification, not an issue solved by these mocks. Independent
 Codex host requalification of the latest NBD source is being performed
 separately. No real systemd unit, DM, loop, NBD, swap, module, fio,
 physical-media test or reboot was performed.
+
+## 2026-10-08 — Exceptional 8 MiB NBD socketpair cleanup: deterministic rootless coverage
+
+Codex independently reported **NBD SOURCE-ONLY GATE PASS** on
+`bd9fac18d06f1c4642c913618de645401611698e`, NBD source blob
+`3138df5d431b086ad61a4debda04159f6e0a6010`: all seven required
+commands and ten additional timed Linux-host selftests passed.
+Its remaining P2 finding was an unexercised exceptional 8 MiB
+test-local socketpair path after two bounded worker joins. No P0 or
+NBD source-only blocker was found.
+
+The primary developer extracted **test-only**
+`finish_test_socketpair_worker()`, used by the full 8 MiB wire
+selftest. It sets the stop event, joins for at most two seconds,
+requests local client socket shutdown if still alive, and joins again
+for at most two seconds. Both test-local sockets close in a
+`finally` block. If the worker remains alive **after the second join**
+the function raises an explicit `AssertionError` even if later
+socket closure happens to unblock it. Recorded worker exceptions also
+fail the test. It does not force Python threads to terminate or change
+production `serve_kernel()` / kernel-session descriptor protection.
+
+`selftest_socketpair_cleanup()` uses fake workers, sockets and a stop
+event to deterministically check first-join exit, second-join exit,
+socket-shutdown OSError, still-alive failure with diagnostics,
+unexpected worker exception, unstarted cleanup and preservation of a
+wire-transaction exception. Assertions check stop/join/close order,
+finite join timeouts and closure of both sockets without creating
+an indefinitely running test thread.
+
+**Executed CI at one exact commit**
+`52a2d6330428c64b39f2f8fe1c42aa1ff70a4cc9`:
+
+- NBD source-only **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37788553329
+  — static syscall isolation, compilation, full NBD test, 25 further
+  complete process-level selftests (**26/26 PASS**), three shell syntax
+  checks and NBD/streaming teardown rootless mocks.
+- Combined NBD/teardown **SUCCESS**:
+  https://github.com/k1moradi/swapz/actions/runs/37788553094
+  — same source, ten Bash syntax checks, complete DM/loop and pressure
+  rootless suites, 11 offline GC analyzer tests, NBD isolation, full
+  NBD test plus 25 repetitions (**26/26 PASS**), and two teardown mocks.
+
+Both logs include `NBD 8 MiB socketpair fault-injected cleanup: PASS`
+and the full wire/setup/worker-exception PASS. No EBADF or assertion
+failure was observed. The still-alive test case *intentionally* raises
+and catches an AssertionError to prove it cannot be treated as
+success; it does not simulate actual unkillable threads.
+
+Separately Codex's independent teardown gate passed on
+`0f2f169631d08fc1b92e2aba1bed398e1ef795ff`. The newer
+systemd unit-name prevalidation has passed integrated CI, but is
+being separately audited by Codex together with a **design-only**
+review of the remaining shell PID check-to-signal reuse window.
+Source-only tests are not proof of actual kernel NBD execution,
+GC-overlap swap-in p99 or measured physical throughput. No actual
+block device, systemd pressure workload, swap or module activity was
+performed.
