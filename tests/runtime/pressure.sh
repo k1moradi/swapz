@@ -12,14 +12,17 @@ TAG="$$-$RANDOM"
 NAME="swapz-v21-pressure-$TAG"; PRIORITY=100; SWAPON=0; FIRST_UNIT="swapz-v21-pressure-$TAG-first.service"; SECOND_UNIT="swapz-v21-pressure-$TAG-second.service"
 LOOP=""
 swapz_pressure_cleanup_resources() {
-  local unit unit_state unit_pid attempt swap_path expected_device
+  local unit unit_state unit_pid unit_cgroup attempt swap_path expected_device
   for unit in "$FIRST_UNIT" "$SECOND_UNIT"; do
     unit_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null || true)
     [[ -z "$unit_state" || "$unit_state" == not-found ]] && continue
     unit_pid=$(systemctl show "$unit" -p MainPID --value 2>/dev/null || true)
-    # The test helper may be stopped at a checkpoint; resume it so SIGTERM
-    # and systemd can finish stopping this exact test-owned transient unit.
-    if [[ "$unit_pid" =~ ^[1-9][0-9]*$ ]]; then
+    unit_cgroup=$(systemctl show "$unit" -p ControlGroup --value 2>/dev/null || true)
+    # The helper may be stopped at a checkpoint. Only signal it if its PID
+    # still belongs to this exact transient unit, guarding against PID reuse.
+    if [[ "$unit_pid" =~ ^[1-9][0-9]*$ && -n "$unit_cgroup" ]] &&
+       [[ -r "/proc/$unit_pid/cgroup" ]] &&
+       grep -Fq ":$unit_cgroup" "/proc/$unit_pid/cgroup"; then
       kill -CONT "$unit_pid" 2>/dev/null || true
     fi
     if ! systemctl stop --no-block "$unit"; then
