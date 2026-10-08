@@ -178,6 +178,20 @@ class BridgeRootlessTests(unittest.TestCase):
                     s.raw(b'{"id":1,"op":"STOP_ALL","op":"FINALIZE"}\n'))
         self.assertEqual(s.finish(), 2)
 
+    def test_malformed_message_never_reuses_a_prior_request_id(self):
+        s = self.session()
+        s.send("LAUNCH_TEST", command="exit", code=0)
+        response = s.raw(b'not valid JSON\n')
+        self.denied(response)
+        self.assertIsNone(response["id"])
+        self.assertEqual(s.finish(), 2)
+
+    def test_caller_supplied_cleanup_handles_rejected(self):
+        s = self.session()
+        s.send("LAUNCH_TEST", command="sleep", duration_ms=40)
+        self.denied(s.send("STOP_ALL", handles=[]))
+        self.assertEqual(s.finish(), 2)
+
     def test_duplicate_request_after_valid_launch_denied(self):
         s = self.session()
         s.send("LAUNCH_TEST", command="sleep", duration_ms=40)
@@ -262,6 +276,23 @@ class BridgeMockedServiceTests(unittest.TestCase):
         bridge.adapter = StubAdapter()
         with self.assertRaisesRegex(RuntimeError, "incomplete"):
             bridge.dispatch({"id": 1, "op": "STOP_ALL"})
+        self.assertFalse(bridge.finalized)
+
+    def test_failed_control_descriptor_close_denies_finalization(self):
+        bridge = object.__new__(bridge_module.PersistentRecallBridge)
+        bridge.failed = False
+        bridge.finalized = False
+        bridge.finished = False
+        bridge.request_count = 0
+        bridge.last_id = 0
+        class FakeClient:
+            cleanup_authorized = True
+            def close(self):
+                self.cleanup_authorized = False
+        bridge.adapter = type("Ready", (), {"cleanup_authorized": True})()
+        bridge.client = FakeClient()
+        with self.assertRaisesRegex(bridge_module.BridgeError, "descriptor"):
+            bridge.dispatch({"id": 1, "op": "FINALIZE"})
         self.assertFalse(bridge.finalized)
 
     def test_unconfirmed_exit_prevents_bridge_finalization(self):
