@@ -3,8 +3,15 @@
 - [ ] Treat the 20 MiB/s `null_blk mbps` backend as valid only within its per-tick request budget.
 - [x] Run the backend-safe 20 MiB/s sweep through 256 KiB.
 - [x] Run a full 4 KiB..1 MiB latency-only sweep with `SWAPZ_BENCH_MBPS=0`.
-- [ ] Design or add a size-aware synthetic bandwidth backend that supports 512 KiB and 1 MiB
-      requests at ~20 MiB/s without request-size token-bucket livelock.
+- [x] Prototype an opt-in size-aware sparse-RAM NBD backend accepting 512 KiB
+      and 1 MiB simulated requests; protocol and host validation still required.
+- [ ] Execute `size-aware-nbd.py selftest` and both DM teardown mock regressions
+      on the Linux test host (no root/devices required).
+- [ ] Run a single isolated virtual-NBD smoke test only after checking an
+      explicitly selected unused `/dev/nbdN`; verify exact data readback,
+      1 MiB lower request size, and safe detach.
+- [ ] Calibrate raw virtual-NBD throughput against 20 MiB/s and bound
+      Python overhead before using the backend for any batch plateau claim.
 - [ ] Re-run the full 20 MiB/s plateau on that backend before declaring the final V2.2 batch
       sweet spot if the safe null_blk sweep is still rising at 256 KiB.
 
