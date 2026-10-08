@@ -1393,9 +1393,11 @@ bash tests/runtime/streaming-teardown-regression.sh
 
 Please report the exact output and any Python or Bash syntax failure. These
 checks do **not** authorize a kernel NBD attach or another benchmark matrix.
-The primary developer also added a rootless spoofed-NBD-device regression and
-major/minor identity checks before attachment; the source-only selftest must
-exercise those checks. Do not treat source inspection as execution evidence.
+The primary developer also added rootless regressions for spoofed NBD device
+identity, full-size (1 MiB) socket readback, and timeout-after-partial-send
+reply framing. The backend must match the NBD sysfs major/minor number both
+before and after opening the device. The Python selftest must exercise these
+checks. Do not treat source inspection as execution evidence.
 
 A later kernel NBD smoke test requires a separate explicit handoff from the
 primary developer, an observed unused virtual `/dev/nbdN`, and the preflight
