@@ -14,6 +14,8 @@ on:
       - 'tests/runtime/pressure-helper.py'
       - 'tests/runtime/pressure-runner.sh'
       - 'tests/runtime/pressure-runner-regression.sh'
+      - 'tests/runtime/pressure-swap-inventory.py'
+      - 'tests/runtime/pressure-swap-inventory-test.py'
       - 'tests/runtime/pressure.sh'
       - 'tests/runtime/buffer-recall.sh'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
@@ -49,6 +51,12 @@ jobs:
         run: bash tests/runtime/test-stack-teardown-regression.sh
       - name: Rootless pressure teardown regression
         run: bash tests/runtime/pressure-teardown-regression.sh
+      - name: Strict pressure swap inventory parser unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/pressure-swap-inventory.py tests/runtime/pressure-swap-inventory-test.py
+          python3 tests/runtime/pressure-swap-inventory-test.py -v
       - name: Rootless production pressure controller regression
         run: bash tests/runtime/pressure-runner-regression.sh
       - name: Rootless pressure release-token protocol regression
