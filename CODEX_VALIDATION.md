@@ -2386,3 +2386,52 @@ authorization. See `docs/recall-dd-allowlist.md`. Codex's
 separate service/client files and the two host-local state files
 must remain under independent ownership. No live device or
 benchmark operations occurred.
+
+## 2026-10-08 — Persistent Bash-to-pidfd rootless control bridge handoff
+
+The primary developer implemented `recall-control-bridge.py`,
+`recall-control-bridge-test.py` and
+`recall-control-bridge-regression.sh` without editing the
+supervisor, Codex-owned IPC service or the standalone direct-dd
+allowlist. The bridge creates one private socketpair and one owned
+service Popen, binds that exact process to the hardened IPC client,
+keeps the same opaque worker identity registry across five
+limited Bash operations, and authorizes only a **synthetic**
+cleanup callback after verified `STOP_ALL`, `SHUTDOWN`,
+matching service exit zero, socket close, and `FINALIZE`.
+Earlier stop and shutdown replies explicitly preserve backing.
+
+The **23 new rootless Python cases** plus real Bash coprocess
+tests exercise multiple owned test-worker launches, both readers
+launched before either wait, marker preservation on worker
+failure or disconnect, malformed/contradictory JSON response
+rejection, incomplete worker/cleanup overrides, sticky denial,
+stale reply IDs and descriptor-close failure. It accepts only
+the fixed test-only `sleep`/`exit` commands. It never launches
+direct `dd`, touches device paths, performs numeric PID
+signaling or modifies production recall.
+
+**Full same-commit GitHub CI PASS**
+`ec52145bd0543f80e7576236231184d32656f1e1`:
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37855300271
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37855300287
+
+Each passed 23 bridge tests, Bash coprocess preservation checks,
+34 pidfd IPC service tests and 10 full-suite repeats,
+27 pidfd supervisor tests and 3 repeats, 20 adapter tests,
+26 direct-dd policy tests, 46 recall I/O tests and the existing
+pressure/analyzer and teardown safety gates. Combined also
+passed 26 complete NBD userspace selftests and static syscall
+containment checks.
+
+**Future Codex integration:** adapt the persistent bridge only
+after trusted fixture-owned path and mapper identity are
+established at child launch and the service offers reviewed,
+role-only direct-dd admission. Preserve exact command/worker
+identity, staged writer lifetime, launch both concurrent
+readers before waiting, exact data checks, timings, discard
+and fsync. Current `buffer-recall.sh` is unchanged, and the
+numeric PID and hidden-descendant risks remain open. Preserve
+both untracked Linux-host state files, and do not infer device,
+GC or latency proof from this source-only result.
