@@ -131,6 +131,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-ipc-adapter.py tests/runtime/recall-ipc-adapter-test.py
           timeout 60s python3 tests/runtime/recall-ipc-adapter-test.py -v
+      - name: Strict fixture-bound direct dd role allowlist regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-dd-allowlist.py tests/runtime/recall-dd-allowlist-test.py
+          timeout 20s python3 tests/runtime/recall-dd-allowlist-test.py -v
       - name: Rootless direct recall I/O orchestration test
         shell: bash
         run: |
@@ -197,7 +203,7 @@ jobs:
             echo ""
             echo "Tested commit: \`$(git rev-parse HEAD)\`"
             echo ""
-            echo "12 Bash syntax checks, 3 teardown regressions, 27-test pidfd supervisor with 3 repeats, 23-test IPC service with 10 repeats, rootless IPC adapter, direct recall I/O, strict swap inventory and pressure token tests, 11 offline GC analyzer"
+            echo "12 Bash syntax checks, 3 teardown regressions, 27-test pidfd supervisor with 3 repeats, 23-test IPC service with 10 repeats, rootless IPC adapter, direct-dd allowlist, direct recall I/O, strict swap inventory and pressure token tests, 11 offline GC analyzer"
             echo "tests, static NBD syscall isolation, NBD compilation, 26 complete"
             echo "NBD selftests and 2 NBD/streaming teardown mocks all passed."
             echo ""
