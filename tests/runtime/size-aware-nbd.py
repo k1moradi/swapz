@@ -17,6 +17,7 @@ import argparse
 import errno
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -56,6 +57,9 @@ NBD_SET_SIZE_BLOCKS = 0xAB07
 NBD_DISCONNECT = 0xAB08
 NBD_SET_TIMEOUT = 0xAB09
 NBD_SET_FLAGS = 0xAB0A
+NBD_TIMEOUT_SECONDS = 120
+# Preserve a margin for Python transport/teardown overhead at max request size.
+MAX_MODELED_REQUEST_SECONDS = NBD_TIMEOUT_SECONDS - 30
 ZERO = bytes(BLOCK)
 
 
@@ -107,8 +111,8 @@ class SizeAwareDevice:
                  clock=time.monotonic, sleeper=time.sleep):
         if mib < 16 or mib > 4096:
             raise ValueError("export capacity must be 16..4096 MiB")
-        if bandwidth_mib_s <= 0 or bandwidth_mib_s > 100000:
-            raise ValueError("bandwidth must be positive")
+        if not math.isfinite(bandwidth_mib_s) or not 0 < bandwidth_mib_s <= 100000:
+            raise ValueError("bandwidth must be finite and positive")
         if latency_us < 0 or latency_us > 10_000_000:
             raise ValueError("latency_us out of range")
         self.disk = SparseRamDisk(mib * 1024 * 1024)
@@ -117,6 +121,8 @@ class SizeAwareDevice:
         self.allow_trim = allow_trim
         self.clock = clock
         self.sleeper = sleeper
+        if self.duration(MAX_REQUEST_BYTES, CMD_WRITE) >= MAX_MODELED_REQUEST_SECONDS:
+            raise ValueError("configured worst-case transfer exceeds NBD timeout safety margin")
         self.stats = {
             "reads": 0, "writes": 0, "flushes": 0, "trims": 0,
             "read_bytes": 0, "write_bytes": 0, "trim_bytes": 0,
@@ -130,7 +136,8 @@ class SizeAwareDevice:
         return self.latency + transferred / self.bps
 
     def process(self, command: int, offset: int, length: int,
-                payload: bytes = b"") -> bytes:
+                payload: bytes = b"",
+                stopping: threading.Event | None = None) -> bytes:
         if command in (CMD_READ, CMD_WRITE, CMD_TRIM, CMD_WRITE_ZEROES):
             self.disk.check(offset, length)
         elif command != CMD_FLUSH or offset or length:
@@ -162,7 +169,11 @@ class SizeAwareDevice:
 
         self.stats["max_request_bytes"] = max(
             self.stats["max_request_bytes"], length)
-        self.sleeper(self.duration(length, command))
+        duration = self.duration(length, command)
+        if stopping is None:
+            self.sleeper(duration)
+        elif stopping.wait(duration):
+            raise EOFError("NBD server stopped during modeled transfer")
         return reply
 
     def recv_exact(self, conn: socket.socket, count: int,
@@ -222,7 +233,7 @@ class SizeAwareDevice:
                     self.disk.check(offset, length)
                 payload = (self.recv_exact(conn, length, stopping)
                            if command == CMD_WRITE else b"")
-                reply = self.process(command, offset, length, payload)
+                reply = self.process(command, offset, length, payload, stopping=stopping)
                 self.send_exact(conn, REPLY.pack(REPLY_MAGIC, 0, cookie) + reply,
                                 stopping)
             except (EOFError, BrokenPipeError, ConnectionResetError):
@@ -311,7 +322,7 @@ def serve_kernel(args: argparse.Namespace) -> int:
         attached = True
         fcntl.ioctl(fd, NBD_SET_BLKSIZE, BLOCK)
         fcntl.ioctl(fd, NBD_SET_SIZE_BLOCKS, model.disk.size_bytes // BLOCK)
-        fcntl.ioctl(fd, NBD_SET_TIMEOUT, 120)
+        fcntl.ioctl(fd, NBD_SET_TIMEOUT, NBD_TIMEOUT_SECONDS)
         flags = NBD_FLAG_HAS_FLAGS | NBD_FLAG_SEND_FLUSH | NBD_FLAG_SEND_FUA
         if args.allow_trim:
             flags |= NBD_FLAG_SEND_TRIM
