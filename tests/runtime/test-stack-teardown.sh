@@ -21,7 +21,7 @@ swapz_test_confirm_dm_absent() {
     $0 == "No devices found" { if (NR != 1) malformed = 1; empty = 1; next }
     {
       if (NF != 2 || $1 !~ /^[^[:space:]]+$/ ||
-          $2 !~ /^\\([0-9][0-9]*:[0-9][0-9]*\\)$/) {
+          $2 !~ /^\([0-9][0-9]*:[0-9][0-9]*\)$/) {
         malformed = 1
         next
       }
