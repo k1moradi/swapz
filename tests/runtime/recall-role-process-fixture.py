@@ -24,7 +24,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 PAGE_SIZE = 4096
 PAGES = {"a": 0, "b": 4, "a2": 0, "b2": 5}
-TEST_MAPPER = "swapz-v22-rootless-regular-only"
+TEST_MAPPER = "swapz-v22-recall-rootless-regular"
 
 
 def load_module(name: str, filename: str) -> Any:
