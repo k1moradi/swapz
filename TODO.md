@@ -678,3 +678,45 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       kernel pressure/GC latency campaigns or physical benchmarking;
       complete 4 KiB..1 MiB drain-throughput/read-p99 plateau
       qualification and choose V2.2 strategy/batch only from measured data.
+
+### 2026-10-08 — Genuine cross-process rootless recall integration
+
+- [x] Start a separate, test-owned `Popen` service over an inherited private
+      AF_UNIX socket. Restrict its mapper to an owned exact-size regular file;
+      reject root operation and do not enable the normal service CLI.
+- [x] Use the real `GatedPidfdSupervisor` with parent-death and seccomp
+      containment for actual fixed-role direct `dd` workers.
+- [x] Capture service-owned output descriptors before reader launches and
+      verify exact pinned inode and independent 4096-B expected bytes after
+      each worker's zero-exit wait/reap.
+- [x] Validate a fixed role + opaque-handle + expected SHA-256 readback
+      receipt on the trusted process socket without granting arbitrary
+      caller-supplied paths, argv, fds or verification booleans.
+- [x] Confirm all five receipts and the true service process's zero exit
+      before permitting *synthetic-only* backing-marker cleanup.
+- [x] Test failure preservation for output pathname replacement, mutated
+      source data, writer/concurrent wait ordering, supervisor SIGKILL by
+      test-owned pidfd and controller EOF.
+- [x] Both mandatory CI workflows PASS at executable revision
+      `f1e07734b44ea88ebcb2f956773b92bd51cdc6ea`:
+      https://github.com/k1moradi/swapz/actions/runs/37878408360
+      https://github.com/k1moradi/swapz/actions/runs/37878408375
+- [x] Draft `docs/v22-virtual-benchmark-qualification.md` (NOT measured
+      results) with drain, GC/swap-in p99, 4..1024 KiB sweep and exact
+      approval gates.
+- [ ] Review/integrate Codex's independently trusted GNU executable
+      provenance, DM UUID/table lifecycle and I/O-drain policy, then run
+      same-revision rootless joint qualification.
+- [ ] Add further rootless fault injection for missing/forged receipts,
+      worker exec/nonzero failures, descriptor-close failure and service
+      crash during a deliberately held I/O operation.
+- [ ] Bind the trusted service to the real production Bash-controller
+      lifecycle without allowing device paths/argv from the control channel.
+- [ ] Only after exclusive mapper lifecycle ownership and kernel drain
+      guarantees: independently review migration of production
+      `buffer-recall.sh` preserving all prior page, staging, timing,
+      discard, fsync and cancellation assertions.
+- [ ] Obtain explicit operator approval for disposable DM/loop/NBD/swap
+      tests and, separately, physical benchmarks. V2.2 strategy and batch
+      remain **UNDETERMINED**; do not substitute the rootless CI results
+      for measured kernel performance.
