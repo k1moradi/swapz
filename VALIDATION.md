@@ -3131,3 +3131,79 @@ broker completion, ambiguous child ownership, and real owner
 authority/trust follow-ups. The main developer edited only workflows,
 its own static regression suite, and docs. Production admission is
 disabled and V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+## 2026-10-09 — Offline V2.2 evidence-bundle consistency and shared workflow dependency gate
+
+**Exact executable/source SHA qualified by all three mandatory source-only workflows:**
+`cf0752da282465bdf63b763c2b5621ce693b46a7`.
+
+- [Rootless teardown PASS](https://github.com/k1moradi/swapz/actions/runs/37997610540).
+- [Rootless combined PASS](https://github.com/k1moradi/swapz/actions/runs/37997610606),
+  with `COMBINED_TESTED_HEAD` equal to the exact SHA above.
+- [Standalone NBD source safety PASS](https://github.com/k1moradi/swapz/actions/runs/37997610596).
+
+Independent main-developer work, without changing Codex-owned
+modules, implemented
+`tests/runtime/v22-evidence-bundle-check.py` and
+`tests/runtime/v22-evidence-bundle-check-test.py`.
+The checker reads exact, bounded original JSONL/manifest bytes
+using no-symlink, regular-file descriptor pinning with metadata
+consistency, strict duplicate-field-free JSON and LF-delimited
+records. It reuses the existing strict V2.2 drain observation
+validator and requires one coherent claimed 40-hex source
+revision, collector, session, lower-device ID, backend, profile,
+evidence class, and unique ordered run inventory. Original
+whole-file and per-line SHA-256 bytes must exactly match the
+separately provided manifest; mixed revisions and incomplete
+or reordered inventories deny. Self-labeled kernel/physical
+observations must use exact-latency V2 rather than self-reported
+V1 p99.
+
+**The checker makes no authentication claim**: the separately
+provided manifest is untrusted and can be forged alongside
+measurement bytes. The original JSONL has no authenticated
+collector/session/device field. Its output always reports
+`authenticated_collector=false`,
+`independent_device_identity_proved=false`,
+`kernel_drain_proved=false`,
+`physical_selection_authorized=false` and
+`backing_release_authorized=false`. Verified *consistency*
+does not prove actual lower-device drain or real swap-in
+latency. See `docs/v22-evidence-bundle-offline.md`.
+
+Both combined and teardown workflow logs show
+`Ran 20 tests` and
+`V22_OFFLINE_BUNDLE_CONSISTENCY_ONLY: PASS`;
+all observations/tests are synthetic, rootless and
+source-only. The existing 20-case separate-process recall
+suite and six independent positive five-role repetitions
+remained intact; both logs report
+`RECALL_DIRECT_ROLE_REPEAT 6/6: PASS` and
+`FIXTURE_OWNER_BROKER_REPEAT 3/3: PASS`.
+The combined workflow also reports
+`COMBINED_NBD_STRESS 25/25: PASS`;
+the standalone NBD workflow reports
+`NBD rootless selftest repetition 25/25: PASS`.
+
+The shared workflow contract now includes the offline bundle
+suite as a mandatory executed bounded test in both joint
+workflows. The standalone NBD workflow now triggers on edits
+to either combined or teardown workflows because it executes
+that same shared contract. A negative case asserts this
+cross-workflow trigger dependency. All three workflows
+reported **12/12 workflow-contract tests** and their
+respective `ROOTLESS_*WORKFLOW_CONTRACT: PASS` messages.
+
+Intermediate commits that updated only one related workflow
+were rejected by the new contract, as intended. All three
+runs on the exact SHA above succeeded; the test predicate
+was not relaxed to obtain PASS.
+
+No actual DM/loop/NBD attachment, swap, kernel operation,
+physical I/O, device benchmark, nonvolatile drain or backing
+deletion occurred. Independent GNU reproduction, trusted
+signed source/per-device collection, privileged exclusive
+mapper owner, authenticated kernel I/O drain and physical
+p99 measurements remain unavailable. Production direct
+mapper admission and backing cleanup stay disabled; V2.2
+strategy and batch-size winner remain **UNDETERMINED**.
