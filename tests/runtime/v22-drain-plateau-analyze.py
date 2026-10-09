@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import io
 import json
 import math
+import os
 from pathlib import Path
+import stat
 from statistics import median
 
 SCHEMA = "swapz-drain-observation-v1"
@@ -150,12 +153,56 @@ def validate(row: object, line: int) -> dict[str, object]:
     return row
 
 
+def _read_pinned_observation_text(path: Path) -> str:
+    """Bound original bytes through one non-symlink regular-file descriptor.
+
+    This closes the check/open race. It does not authenticate a same-identity
+    actor that can rewrite file contents, or prove physical data provenance.
+    """
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("symlink-safe observation input unavailable")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(f"observation input cannot be pinned: {exc}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError("observation input must be a singly-linked regular file")
+        if before.st_size > MAX_INPUT_BYTES:
+            raise ValueError("observation input too large")
+        remaining = MAX_INPUT_BYTES + 1
+        blocks: list[bytes] = []
+        total = 0
+        while remaining:
+            block = os.read(descriptor, min(65536, remaining))
+            if not block:
+                break
+            blocks.append(block)
+            total += len(block)
+            remaining -= len(block)
+        if total > MAX_INPUT_BYTES:
+            raise ValueError("observation input too large")
+        after = os.fstat(descriptor)
+        def identity(metadata: os.stat_result) -> tuple[int, ...]:
+            return (metadata.st_dev, metadata.st_ino, metadata.st_mode,
+                    metadata.st_nlink, metadata.st_size, metadata.st_mtime_ns,
+                    metadata.st_ctime_ns)
+        if identity(before) != identity(after) or total != before.st_size:
+            raise ValueError("observation input changed during bounded read")
+        try:
+            return b"".join(blocks).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("observation input is not UTF-8") from exc
+    finally:
+        os.close(descriptor)
+
+
 def load_rows(path: Path) -> list[dict[str, object]]:
-    if not path.is_file() or path.stat().st_size > MAX_INPUT_BYTES:
-        raise ValueError("observation input missing or too large")
     rows: list[dict[str, object]] = []
     seen_ids: set[str] = set()
-    with path.open(encoding="utf-8") as stream:
+    with io.StringIO(_read_pinned_observation_text(path)) as stream:
         for number, line in enumerate(stream, start=1):
             if number > MAX_OBSERVATIONS:
                 raise ValueError("too many observations")

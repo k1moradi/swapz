@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -238,6 +239,33 @@ class OfflineDrainPlateauTests(unittest.TestCase):
         self.path.write_text(payload[:-1] + ', "run_id": "duplicate"}\n',
                              encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "duplicate JSON"):
+            analyzer.load_rows(self.path)
+
+    def test_symlinked_observations_never_followed(self):
+        self.write([observation()])
+        link = self.path.with_name("redirected.jsonl")
+        link.symlink_to(self.path)
+        with self.assertRaisesRegex(ValueError, "cannot be pinned"):
+            analyzer.load_rows(link)
+
+    def test_hardlinked_observations_rejected(self):
+        self.write([observation()])
+        alias = self.path.with_name("hardlink.jsonl")
+        os.link(self.path, alias)
+        with self.assertRaisesRegex(ValueError, "singly-linked regular file"):
+            analyzer.load_rows(alias)
+
+    def test_nonregular_fifo_is_rejected_without_reading(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("named pipes are unavailable")
+        pipe = self.path.with_name("malicious-pipe")
+        os.mkfifo(pipe, 0o600)
+        with self.assertRaisesRegex(ValueError, "singly-linked regular file"):
+            analyzer.load_rows(pipe)
+
+    def test_invalid_utf8_is_rejected_before_json_parsing(self):
+        self.path.write_bytes(bytes((0xff, 0x0a)))
+        with self.assertRaisesRegex(ValueError, "not UTF-8"):
             analyzer.load_rows(self.path)
 
     def test_blank_nan_empty_oversized_inputs_rejected(self):
