@@ -250,7 +250,7 @@ class RootlessWorkflowContractTests(unittest.TestCase):
     def test_nbd_must_recheck_joint_workflow_source_changes(self):
         for joint in WORKFLOWS:
             with self.subTest(workflow=joint):
-                path = f"      - '{joint}'\\n"
+                path = f"      - '{joint}'\n"
                 self.assertIn(path, self.nbd_source)
                 with self.assertRaisesRegex(WorkflowContractError, "dependent workflow"):
                     check_nbd_workflow(self.nbd_source.replace(path, "", 1))
