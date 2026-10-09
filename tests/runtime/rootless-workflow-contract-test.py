@@ -100,6 +100,8 @@ def check_workflow(name: str, source: str) -> None:
              f"{name}: teardown workflow changes cannot trigger the gate")
     _require(".github/workflows/rootless-combined.yml" in paths,
              f"{name}: combined workflow changes cannot trigger the gate")
+    _require(".github/workflows/rootless-nbd.yml" in paths,
+             f"{name}: standalone NBD workflow edits must trigger the joint safety gate")
 
     # Unlike combined, teardown enumerates each runtime path explicitly.
     # Account for every actual runtime script referred to by the job,
@@ -201,6 +203,14 @@ class RootlessWorkflowContractTests(unittest.TestCase):
         self.assertIn(trigger, source)
         with self.assertRaisesRegex(WorkflowContractError, "omitted from push"):
             check_workflow(name, source.replace(trigger, "", 1))
+
+    def test_teardown_must_recheck_standalone_nbd_workflow_changes(self):
+        name = WORKFLOWS[0]
+        source = self.sources[name]
+        path = "      - '.github/workflows/rootless-nbd.yml'\n"
+        self.assertIn(path, source)
+        with self.assertRaisesRegex(WorkflowContractError, "standalone NBD workflow edits"):
+            check_workflow(name, source.replace(path, "", 1))
 
     def test_removed_broker_primary_execution_is_rejected(self):
         for name, source in self.sources.items():
