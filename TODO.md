@@ -783,3 +783,47 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       Do not promote any nominal 97% point to V2.2 strategy/batch
       winner without qualified virtual and separately authorized
       physical tests. Actual winner remains **UNDETERMINED**.
+
+### 2026-10-09 — Mocked DM drain orchestration and NBD PID-reuse containment
+
+- [x] Add both original `recall-io-drain-policy-test.py` (8 tests) and
+      new `recall-io-drain-orchestrator-test.py` (15 tests) to **both**
+      mandatory source-only CI workflows and teardown path triggers.
+- [x] Introduce a strictly synthetic operations provider that
+      executes all 15 ordered drain-policy transitions, records
+      attempted actions, fails closed on every malformed/unknown
+      observation, and never makes real device calls.
+- [x] Bind synthetic backing-marker removal to complete policy
+      authorization and revalidation of the private original inode.
+      Tests cover corrupt worker inventory, swapoff, ordinary suspend,
+      noflush, open counts, holders, changed DM identity, false-positive
+      removal, loop failure, unexpected fields and marker replacement.
+- [x] Remove the NBD teardown helper's numeric `kill -0`,
+      `kill -TERM` and `ps -p NBD_PID` paths; obsolete positive
+      SIGTERM assertions were replaced with fail-closed preservation
+      mocks, including a fake numeric PID that must never be signaled.
+- [x] Explicitly **disable the live NBD streaming benchmark mode**
+      before fixture allocation, while retaining rootless, no-device
+      NBD userspace socket selftests. `setup_nbd()` also refuses any
+      attempted direct call. Do not silently bypass this guard.
+- [x] Both mandatory rootless CI gates PASS at exact source revision
+      `4843e385e54a3389ab9156bc1ad08509affdd00c`:
+      https://github.com/k1moradi/swapz/actions/runs/37910706506
+      https://github.com/k1moradi/swapz/actions/runs/37910706553
+- [ ] Implement a separately reviewed **pidfd-owned NBD server
+      controller** with stable child ownership, startup identity,
+      graceful shutdown, clean exit and full descendant containment,
+      then complete rootless fault injection before considering
+      re-enabling authorized disposable NBD benchmarking.
+- [ ] Replace the synthetic DM observation provider with separately
+      trusted, privileged-fixture-owned evidence collection only
+      after the GNU/mapper identity gate. Require ordinary real
+      suspend, verified absence, swap inventory, open/holder checks
+      and kernel I/O quiescence before any actual backing cleanup.
+- [ ] Connect full rootless recall-worker completion and subsequent
+      drain authorizations to production fixture only after separate
+      review. Never infer kernel drain from a reaped `dd` worker.
+- [ ] Obtain explicit operator approval for disposable virtual DM/loop
+      and later distinct physical media testing. Strategy and batch
+      remain **UNDETERMINED** without repeated valid lower-device
+      drain and read-p99 measurements.
