@@ -273,8 +273,15 @@ def _parse_static_elf(fd: int, size: int) -> dict[str, Any]:
             "elf_type": "ET_EXEC" if elf_type == 2 else "ET_DYN", "static": True}
 
 
-def _inspect_binary(path: Path, expected_version: str,
-                    expected_sha256: str | None = None) -> dict[str, Any]:
+def _inspect_binary(path: Path,
+                    expected_sha256: str | None = None,
+                    expected_identity: dict[str, int] | None = None) -> dict[str, Any]:
+    """Inspect a candidate by descriptor without executing it.
+
+    Structural ELF checks and a digest do not establish GNU program semantics.
+    Source authentication and restricted-worker execution are recorded by
+    their respective qualification stages; this function performs neither.
+    """
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
@@ -284,8 +291,19 @@ def _inspect_binary(path: Path, expected_version: str,
         before = os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_size <= 0
                 or before.st_size > MAX_BINARY_BYTES
+                or before.st_uid not in {0, os.geteuid()} or before.st_nlink != 1
                 or before.st_mode & (stat.S_ISUID | stat.S_ISGID | 0o022)):
             raise QualificationError("candidate executable metadata is unsafe")
+        current_identity = {
+            "device": before.st_dev, "inode": before.st_ino,
+            "size": before.st_size, "mode_bits": stat.S_IMODE(before.st_mode),
+            "owner_uid": before.st_uid, "link_count": before.st_nlink,
+            "mtime_ns": before.st_mtime_ns, "ctime_ns": before.st_ctime_ns,
+        }
+        if expected_identity is not None and current_identity != expected_identity:
+            raise QualificationError("candidate executable metadata differs from the attested build output")
+        if not before.st_mode & 0o111:
+            raise QualificationError("candidate executable has no executable mode bits")
         try:
             caps = os.getxattr(fd, "security.capability")
         except OSError as exc:
@@ -307,31 +325,20 @@ def _inspect_binary(path: Path, expected_version: str,
         if expected_sha256 is not None and actual_sha256 != expected_sha256:
             raise QualificationError("candidate executable digest differs from its build record")
         elf = _parse_static_elf(fd, before.st_size)
-        executable = f"/proc/self/fd/{fd}"
-        try:
-            result = subprocess.run(
-                [executable, "--version"], executable=executable, pass_fds=(fd,), close_fds=True,
-                env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "TZ": "UTC"},
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                timeout=5, check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise QualificationError(f"pinned candidate --version failed: {exc}") from exc
-        version_text = (result.stdout + result.stderr).decode("utf-8", errors="replace")[:4096]
-        if result.returncode != 0 or not re.search(
-                r"\bdd \(coreutils\) " + re.escape(expected_version) + r"(?:\s|$)",
-                version_text):
-            raise QualificationError("candidate does not identify as the expected GNU coreutils dd build")
         after = os.fstat(fd)
         path_after = os.stat(path, follow_symlinks=False)
-        identity = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        identity = lambda st: (st.st_dev, st.st_ino, st.st_size, stat.S_IMODE(st.st_mode),
+                               st.st_uid, st.st_nlink, st.st_mtime_ns, st.st_ctime_ns)
         if (identity(before) != identity(after)
                 or (path_after.st_dev, path_after.st_ino) != (before.st_dev, before.st_ino)):
             raise QualificationError("candidate executable changed during identity qualification")
         return {
             "sha256": actual_sha256, "size": before.st_size,
             "mode": format(stat.S_IMODE(before.st_mode), "04o"),
-            "version_output": version_text.strip(), "elf": elf,
+            "owner_uid": before.st_uid, "link_count": before.st_nlink,
+            "device": before.st_dev, "inode": before.st_ino,
+            "mtime_ns": before.st_mtime_ns, "ctime_ns": before.st_ctime_ns,
+            "elf": elf, "candidate_executed_during_inspection": False,
             "setid_bits": False, "file_capabilities": False,
             "pinned_descriptor_path_rechecked": True,
         }
@@ -474,8 +481,10 @@ def build_static(archive_path: Path, signature_path: Path, keyring_path: Path,
             copy_root.mkdir(mode=0o700)
             source = _extract_signed_source(archive_fd, archive_bytes, copy_root / "source", version)
             binary, logs = _build_once(source, copy_root / "build", spec["source_date_epoch"])
-            binary_record = _inspect_binary(binary, version)
-            build_results.append({"binary": str(binary), "binary_record": binary_record,
+            binary_record = _inspect_binary(binary)
+            build_results.append({"binary": str(binary),
+                                  "relative_path": binary.relative_to(output_dir).as_posix(),
+                                  "binary_record": binary_record,
                                   "logs": logs, "source_path_map": "<source-tree> -> ."})
     finally:
         os.close(archive_fd)
@@ -508,6 +517,10 @@ def build_static(archive_path: Path, signature_path: Path, keyring_path: Path,
             "static_libc_archive": _tool_probe("/usr/bin/gcc", "-print-file-name=libc.a"),
         },
         "binary": build_results[0]["binary_record"],
+        "outputs": [
+            {"path": item["relative_path"], "binary": item["binary_record"]}
+            for item in build_results
+        ],
         "rebuild_comparison": {
             "build_count": 2, "sha256_by_build": digests,
             "same_host_byte_identical": len(set(digests)) == 1,

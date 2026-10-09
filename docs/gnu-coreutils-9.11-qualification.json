@@ -1,5 +1,8 @@
 {
   "binary": {
+    "candidate_executed_during_inspection": false,
+    "ctime_ns": 1791542010807676040,
+    "device": 41,
     "elf": {
       "elf_class": "ELF64",
       "elf_type": "ET_EXEC",
@@ -8,12 +11,15 @@
       "static": true
     },
     "file_capabilities": false,
+    "inode": 59460,
+    "link_count": 1,
     "mode": "0755",
+    "mtime_ns": 1791541994513425580,
+    "owner_uid": 1000,
     "pinned_descriptor_path_rechecked": true,
     "setid_bits": false,
     "sha256": "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
-    "size": 939864,
-    "version_output": "dd (coreutils) 9.11\nCopyright (C) 2026 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Paul Rubin, David MacKenzie, and Stuart Kemp."
+    "size": 939864
   },
   "build_logs": [
     {
@@ -47,6 +53,58 @@
       "-j2"
     ]
   },
+  "outputs": [
+    {
+      "binary": {
+        "candidate_executed_during_inspection": false,
+        "ctime_ns": 1791542010807676040,
+        "device": 41,
+        "elf": {
+          "elf_class": "ELF64",
+          "elf_type": "ET_EXEC",
+          "endianness": "little",
+          "machine": "x86_64",
+          "static": true
+        },
+        "file_capabilities": false,
+        "inode": 59460,
+        "link_count": 1,
+        "mode": "0755",
+        "mtime_ns": 1791541994513425580,
+        "owner_uid": 1000,
+        "pinned_descriptor_path_rechecked": true,
+        "setid_bits": false,
+        "sha256": "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
+        "size": 939864
+      },
+      "path": "copy-1/source/coreutils-9.11/src/dd"
+    },
+    {
+      "binary": {
+        "candidate_executed_during_inspection": false,
+        "ctime_ns": 1791542301772134745,
+        "device": 41,
+        "elf": {
+          "elf_class": "ELF64",
+          "elf_type": "ET_EXEC",
+          "endianness": "little",
+          "machine": "x86_64",
+          "static": true
+        },
+        "file_capabilities": false,
+        "inode": 74640,
+        "link_count": 1,
+        "mode": "0755",
+        "mtime_ns": 1791542285509886445,
+        "owner_uid": 1000,
+        "pinned_descriptor_path_rechecked": true,
+        "setid_bits": false,
+        "sha256": "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
+        "size": 939864
+      },
+      "path": "copy-2/source/coreutils-9.11/src/dd"
+    }
+  ],
   "production_manifest_or_key_installed": false,
   "qualification": "source authenticated; two same-host clean builds compared",
   "rebuild_comparison": {

@@ -9,11 +9,14 @@ bootstrap mechanics; it is never installed or reused as a production key.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
+import platform
 import re
 import signal
 import stat
@@ -90,6 +93,7 @@ class AuthenticatedGNUWorkerQualification(unittest.TestCase):
     dd_binary: Path
     expected_source_sha256: str
     expected_binary_sha256: str
+    expected_output_identity: dict[str, int]
     build_record_path: Path
     output_record: Path | None = None
 
@@ -100,7 +104,10 @@ class AuthenticatedGNUWorkerQualification(unittest.TestCase):
         )
         if cls.source_record["archive_sha256"] != cls.expected_source_sha256:
             raise RuntimeError("verified source hash differs from the requested qualification input")
-        cls.binary_record = provenance._inspect_binary(cls.dd_binary, "9.11")
+        cls.binary_record = provenance._inspect_binary(
+            cls.dd_binary, expected_sha256=cls.expected_binary_sha256,
+            expected_identity=cls.expected_output_identity,
+        )
         if cls.binary_record["sha256"] != cls.expected_binary_sha256:
             raise RuntimeError("pinned GNU dd binary hash differs from the requested qualification input")
         cls.temp = tempfile.TemporaryDirectory(prefix="swapz-gnu-dd-seccomp-")
@@ -280,43 +287,353 @@ class AuthenticatedGNUWorkerQualification(unittest.TestCase):
             os.close(large_out)
 
 
-def _read_build_attestation(record_path: Path, binary_path: Path,
-                           source_sha256: str) -> tuple[dict, bytes, str]:
-    record_bytes, _ = provenance._read_regular(record_path, maximum=1024 * 1024)
+_BUILD_RECORD_KEYS = {
+    "schema", "qualification", "source", "build_recipe", "toolchain", "binary",
+    "outputs", "rebuild_comparison", "build_logs", "worker_seccomp_execution",
+    "production_manifest_or_key_installed",
+}
+_SOURCE_RECORD_KEYS = {
+    "schema", "release", "archive_name", "archive_sha256", "signature_sha256",
+    "gnu_keyring_sha256", "gpg_verifier", "published_sha256_base64",
+    "release_signer_fingerprint", "release_signature_epoch", "release_commit",
+    "source_authentication", "archive_layout", "release_announcement", "archive_url",
+    "signature_url", "trust_note",
+}
+_BINARY_RECORD_KEYS = {
+    "sha256", "size", "mode", "owner_uid", "link_count", "device", "inode",
+    "mtime_ns", "ctime_ns", "elf", "candidate_executed_during_inspection",
+    "setid_bits", "file_capabilities", "pinned_descriptor_path_rechecked",
+}
+_BINARY_IDENTITY_KEYS = {
+    "device", "inode", "size", "mode_bits", "owner_uid", "link_count",
+    "mtime_ns", "ctime_ns",
+}
+_OUTPUT_PATHS = (
+    "copy-1/source/coreutils-9.11/src/dd",
+    "copy-2/source/coreutils-9.11/src/dd",
+)
 
-    def unique_object(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"duplicate qualification-record key: {key}")
-            result[key] = value
-        return result
 
-    record = json.loads(record_bytes, object_pairs_hook=unique_object)
-    if not isinstance(record, dict):
-        raise RuntimeError("build qualification record is not an object")
-    comparison = record.get("rebuild_comparison")
-    source = record.get("source")
-    binary = record.get("binary")
-    if (record.get("schema") != "swapz.gnu-coreutils-dd-build.v1"
-            or not isinstance(source, dict) or source.get("release") != "9.11"
-            or source.get("archive_sha256") != source_sha256
-            or not isinstance(comparison, dict)
-            or type(comparison.get("build_count")) is not int
-            or comparison["build_count"] != 2
-            or comparison.get("same_host_byte_identical") is not True
-            or not isinstance(binary, dict)
-            or not isinstance(binary.get("sha256"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", binary["sha256"]) is None):
-        raise RuntimeError("build record does not attest two identical GNU 9.11 builds of the verified source")
-    record_root = record_path.resolve(strict=True).parent
-    expected_artifacts = {
-        (record_root / f"copy-{index}" / "source" / "coreutils-9.11" / "src" / "dd").resolve(strict=True)
-        for index in (1, 2)
+def _object(value, fields: set[str], context: str) -> dict:
+    if type(value) is not dict or set(value) != fields:
+        raise RuntimeError(f"{context} has missing, extra, or invalidly typed fields")
+    return value
+
+
+def _is_sha256(value) -> bool:
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _open_directory_chain(path: Path) -> int:
+    if (not path.is_absolute() or str(path) != os.path.normpath(str(path))):
+        raise RuntimeError("build record parent directory path is not canonical")
+    text = os.path.abspath(path)
+    if text != os.path.normpath(text) or not text.startswith("/"):
+        raise RuntimeError("build record parent directory path is not canonical")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open("/", flags)
+    try:
+        for component in Path(text).parts[1:]:
+            next_fd = os.open(component, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _open_relative_regular(root_fd: int, relative: str) -> int:
+    parts = PurePosixPath(relative).parts
+    if (not parts or PurePosixPath(relative).is_absolute()
+            or any(part in {"", ".", ".."} for part in parts)
+            or PurePosixPath(relative).as_posix() != relative):
+        raise RuntimeError("build output path is not a canonical relative path")
+    current_fd = os.dup(root_fd)
+    directory_flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+                       | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        for component in parts[:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=current_fd)
+            info = os.fstat(next_fd)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+                os.close(next_fd)
+                raise RuntimeError("build output parent is not an owner-controlled directory")
+            os.close(current_fd)
+            current_fd = next_fd
+        return os.open(parts[-1], os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+                       dir_fd=current_fd)
+    finally:
+        os.close(current_fd)
+
+
+def _read_pinned_json(root_fd: int, filename: str) -> bytes:
+    fd = os.open(filename, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+                 dir_fd=root_fd)
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_size <= 0
+                or before.st_size > 1024 * 1024 or before.st_uid != os.geteuid()
+                or before.st_nlink != 1 or before.st_mode & 0o077):
+            raise RuntimeError("build record is not a private owned regular file")
+        data = bytearray()
+        while len(data) < before.st_size:
+            chunk = os.pread(fd, min(65536, before.st_size - len(data)), len(data))
+            if not chunk:
+                raise RuntimeError("build record changed or truncated while being read")
+            data.extend(chunk)
+        after = os.fstat(fd)
+        if _stable_stat(before) != _stable_stat(after):
+            raise RuntimeError("build record metadata changed while being read")
+        return bytes(data)
+    finally:
+        os.close(fd)
+
+
+def _stable_stat(info) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_size, stat.S_IMODE(info.st_mode),
+            info.st_uid, info.st_nlink, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _hash_attested_output(root_fd: int, output: dict, context: str) -> dict[str, int]:
+    binary = _object(output.get("binary"), _BINARY_RECORD_KEYS, f"{context} binary")
+    elf = _object(binary["elf"], {
+        "elf_class", "endianness", "machine", "elf_type", "static",
+    }, f"{context} ELF")
+    metadata = {
+        "device": binary["device"], "inode": binary["inode"], "size": binary["size"],
+        "mode": binary["mode"], "owner_uid": binary["owner_uid"],
+        "link_count": binary["link_count"], "mtime_ns": binary["mtime_ns"],
+        "ctime_ns": binary["ctime_ns"],
     }
-    if binary_path.resolve(strict=True) not in expected_artifacts:
-        raise RuntimeError("candidate binary is not one of the recorded clean-build outputs")
-    return record, record_bytes, binary["sha256"]
+    if (not _is_sha256(binary["sha256"]) or type(binary["size"]) is not int
+            or binary["size"] <= 0 or type(binary["owner_uid"]) is not int
+            or binary["owner_uid"] != os.geteuid()
+            or type(binary["link_count"]) is not int or binary["link_count"] != 1
+            or type(binary["mode"]) is not str or binary["mode"] != "0755"
+            or any(type(binary[key]) is not int or binary[key] < 0 for key in
+                   ("device", "inode", "mtime_ns", "ctime_ns"))
+            or type(binary["candidate_executed_during_inspection"]) is not bool
+            or binary["candidate_executed_during_inspection"] is not False
+            or type(binary["setid_bits"]) is not bool or binary["setid_bits"] is not False
+            or type(binary["file_capabilities"]) is not bool or binary["file_capabilities"] is not False
+            or type(binary["pinned_descriptor_path_rechecked"]) is not bool
+            or binary["pinned_descriptor_path_rechecked"] is not True
+            or elf != {
+                "elf_class": "ELF64", "endianness": "little",
+                "machine": platform.machine(), "elf_type": "ET_EXEC", "static": True,
+            }):
+        raise RuntimeError(f"{context} output metadata is malformed or unsafe")
+    fd = _open_relative_regular(root_fd, output["path"])
+    try:
+        before = os.fstat(fd)
+        actual = {
+            "device": before.st_dev, "inode": before.st_ino, "size": before.st_size,
+            "mode": format(stat.S_IMODE(before.st_mode), "04o"),
+            "owner_uid": before.st_uid, "link_count": before.st_nlink,
+            "mtime_ns": before.st_mtime_ns, "ctime_ns": before.st_ctime_ns,
+        }
+        if actual != metadata or not stat.S_ISREG(before.st_mode):
+            raise RuntimeError(f"{context} output metadata differs from its pinned build record")
+        digest = hashlib.sha256()
+        offset = 0
+        while offset < before.st_size:
+            chunk = os.pread(fd, min(1024 * 1024, before.st_size - offset), offset)
+            if not chunk:
+                raise RuntimeError(f"{context} output was truncated while being hashed")
+            digest.update(chunk)
+            offset += len(chunk)
+        after = os.fstat(fd)
+        if _stable_stat(before) != _stable_stat(after):
+            raise RuntimeError(f"{context} output metadata changed while being hashed")
+        if digest.hexdigest() != binary["sha256"]:
+            raise RuntimeError(f"{context} output bytes do not match the recorded SHA-256")
+        path_fd = _open_relative_regular(root_fd, output["path"])
+        try:
+            if _stable_stat(os.fstat(path_fd)) != _stable_stat(before):
+                raise RuntimeError(f"{context} path was substituted while being hashed")
+        finally:
+            os.close(path_fd)
+        return {
+            "device": before.st_dev, "inode": before.st_ino, "size": before.st_size,
+            "mode_bits": stat.S_IMODE(before.st_mode), "owner_uid": before.st_uid,
+            "link_count": before.st_nlink, "mtime_ns": before.st_mtime_ns,
+            "ctime_ns": before.st_ctime_ns,
+        }
+    finally:
+        os.close(fd)
+
+
+def _validate_build_record_shape(record: dict, source_sha256: str) -> None:
+    _object(record, _BUILD_RECORD_KEYS, "build record")
+    if (record["schema"] != "swapz.gnu-coreutils-dd-build.v1"
+            or record["qualification"] != "source authenticated; two same-host clean builds compared"
+            or record["worker_seccomp_execution"] != "NOT RUN by build command"
+            or type(record["production_manifest_or_key_installed"]) is not bool
+            or record["production_manifest_or_key_installed"] is not False):
+        raise RuntimeError("build record qualification claims are contradictory")
+    source = _object(record["source"], _SOURCE_RECORD_KEYS, "source record")
+    release = provenance.RELEASES["9.11"]
+    _object(source["archive_layout"], {"top_level_directory", "configure_identity"}, "source layout")
+    _object(source["gpg_verifier"], {
+        "requested_path", "resolved_path", "sha256", "size", "mode", "owner_uid", "version",
+    }, "GPG verifier identity")
+    if (source["schema"] != "swapz.gnu-coreutils-source.v1" or source["release"] != "9.11"
+            or source["archive_name"] != release["archive_name"]
+            or source["archive_sha256"] != source_sha256
+            or source["archive_sha256"] != base64.b64decode(
+                release["archive_sha256_b64"], validate=True).hex()
+            or source["release_signer_fingerprint"] != release["signer_fingerprint"]
+            or source["release_signature_epoch"] != release["signature_epoch"]
+            or source["release_commit"] != release["release_commit"]
+            or source["source_authentication"] != "GNU detached signature verified; full key fingerprint pinned"
+            or source["published_sha256_base64"] != release["archive_sha256_b64"]
+            or source["release_announcement"] != release["announcement"]
+            or source["archive_url"] != release["archive_url"]
+            or source["signature_url"] != release["signature_url"]
+            or source["trust_note"] != (
+                "This authenticates the GNU release source archive, not any locally built binary or production application key."
+            )
+            or source["archive_layout"] != {
+                "top_level_directory": "coreutils-9.11",
+                "configure_identity": "GNU coreutils 9.11",
+            }
+            or not all(_is_sha256(source[key]) for key in (
+                "archive_sha256", "signature_sha256", "gnu_keyring_sha256",
+            ))
+            or not _is_sha256(source["gpg_verifier"]["sha256"])
+            or type(source["gpg_verifier"]["size"]) is not int
+            or source["gpg_verifier"]["size"] <= 0
+            or type(source["gpg_verifier"]["owner_uid"]) is not int
+            or type(source["gpg_verifier"]["requested_path"]) is not str
+            or source["gpg_verifier"]["requested_path"] != "/usr/bin/gpg"
+            or type(source["gpg_verifier"]["resolved_path"]) is not str
+            or not source["gpg_verifier"]["resolved_path"].startswith("/")
+            or type(source["gpg_verifier"]["mode"]) is not str
+            or type(source["gpg_verifier"]["version"]) is not str
+            or not source["gpg_verifier"]["version"]
+            or type(source["release_signature_epoch"]) is not int
+            or type(source["release_signer_fingerprint"]) is not str
+            or type(source["release_commit"]) is not str):
+        raise RuntimeError("build record source identity is missing or contradictory")
+    toolchain = record["toolchain"]
+    toolchain_keys = {
+        "python", "architecture", "host_platform", "kernel_release", "gcc", "make",
+        "linker", "assembler", "archiver", "ranlib", "tar", "compiler_target",
+        "static_libc_archive",
+    }
+    _object(toolchain, toolchain_keys, "toolchain")
+    for key in ("python", "architecture", "host_platform", "kernel_release",
+                "compiler_target", "static_libc_archive"):
+        if type(toolchain[key]) is not str or not toolchain[key]:
+            raise RuntimeError(f"build record toolchain {key} has the wrong type")
+    for key in ("gcc", "make", "linker", "assembler", "archiver", "ranlib", "tar"):
+        tool = _object(toolchain[key], {
+            "requested_path", "resolved_path", "sha256", "size", "mode", "owner_uid", "version",
+        }, f"toolchain {key}")
+        if (type(tool["requested_path"]) is not str or not tool["requested_path"].startswith("/")
+                or type(tool["resolved_path"]) is not str or not tool["resolved_path"].startswith("/")
+                or not _is_sha256(tool["sha256"]) or type(tool["size"]) is not int or tool["size"] <= 0
+                or type(tool["mode"]) is not str or tool["mode"] != "0755"
+                or type(tool["owner_uid"]) is not int or tool["owner_uid"] < 0
+                or type(tool["version"]) is not str or not tool["version"]):
+            raise RuntimeError(f"build record toolchain {key} is malformed")
+    recipe = _object(record["build_recipe"], {
+        "configure", "make", "environment", "install_or_system_changes",
+    }, "build recipe")
+    environment = _object(recipe["environment"], {
+        "CC", "CFLAGS", "LDFLAGS", "LC_ALL", "LANG", "TZ", "SOURCE_DATE_EPOCH",
+    }, "build environment")
+    if (recipe["configure"] != ["./configure", "--disable-nls", "--disable-acl", "--without-selinux"]
+            or recipe["make"] != ["/usr/bin/make", "-j2"]
+            or recipe["install_or_system_changes"] is not False
+            or environment != {
+                "CC": "/usr/bin/gcc", "CFLAGS": "-O2 -g0 -ffile-prefix-map=<source-tree>=.",
+                "LDFLAGS": "-static", "LC_ALL": "C", "LANG": "C", "TZ": "UTC",
+                "SOURCE_DATE_EPOCH": str(release["source_date_epoch"]),
+            }):
+        raise RuntimeError("build recipe differs from the reviewed static GNU recipe")
+    logs = record["build_logs"]
+    if type(logs) is not list or len(logs) != 2:
+        raise RuntimeError("build record does not contain exactly two build-log records")
+    for index, item in enumerate(logs, 1):
+        item = _object(item, {"configure_log_sha256", "build_log_sha256"}, f"build log {index}")
+        if not all(_is_sha256(item[key]) for key in item):
+            raise RuntimeError(f"build log {index} digest is malformed")
+    if toolchain["architecture"] != platform.machine():
+        raise RuntimeError("build record architecture differs from this qualification host")
+
+
+def _read_build_attestation(record_path: Path, binary_path: Path,
+                           source_sha256: str) -> tuple[dict, bytes, str, dict[str, int]]:
+    if (not record_path.is_absolute() or str(record_path) != os.path.normpath(str(record_path))
+            or record_path.name != "qualification-record.json"
+            or not binary_path.is_absolute() or str(binary_path) != os.path.normpath(str(binary_path))
+            or not _is_sha256(source_sha256)):
+        raise RuntimeError("build-record and candidate paths must be absolute and canonical")
+    root_fd = _open_directory_chain(record_path.parent)
+    try:
+        root_info = os.fstat(root_fd)
+        if (not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != os.geteuid()
+                or root_info.st_mode & 0o077):
+            raise RuntimeError("build output directory is not private and owned by this builder")
+        record_bytes = _read_pinned_json(root_fd, record_path.name)
+
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError(f"duplicate qualification-record key: {key}")
+                result[key] = value
+            return result
+
+        record = json.loads(record_bytes, object_pairs_hook=unique_object)
+        if type(record) is not dict:
+            raise RuntimeError("build qualification record is not an object")
+        _validate_build_record_shape(record, source_sha256)
+        outputs = record["outputs"]
+        if type(outputs) is not list or len(outputs) != 2:
+            raise RuntimeError("build record must describe exactly two concrete output files")
+        selected_metadata: dict[str, int] | None = None
+        output_digests = []
+        selected_index = None
+        root_text = os.path.abspath(str(record_path.parent))
+        candidate_text = os.path.abspath(str(binary_path))
+        for index, expected_path in enumerate(_OUTPUT_PATHS):
+            if candidate_text == os.path.abspath(str(Path(root_text) / expected_path)):
+                selected_index = index
+                break
+        if selected_index is None:
+            raise RuntimeError("candidate binary is not one of the two recorded clean-build outputs")
+        for index, expected_path in enumerate(_OUTPUT_PATHS):
+            output = _object(outputs[index], {"path", "binary"}, f"build output {index + 1}")
+            if output["path"] != expected_path:
+                raise RuntimeError("build output path is missing, reordered, or substituted")
+            selected_identity = _hash_attested_output(root_fd, output, f"build output {index + 1}")
+            output_digests.append(output["binary"]["sha256"])
+            if index == selected_index:
+                selected_metadata = selected_identity
+        comparison = _object(record["rebuild_comparison"], {
+            "build_count", "sha256_by_build", "same_host_byte_identical",
+            "independent_builder_reproduction",
+        }, "rebuild comparison")
+        if (type(comparison["build_count"]) is not int or comparison["build_count"] != 2
+                or type(comparison["sha256_by_build"]) is not list
+                or comparison["sha256_by_build"] != output_digests
+                or type(comparison["same_host_byte_identical"]) is not bool
+                or comparison["same_host_byte_identical"] is not (output_digests[0] == output_digests[1])
+                or comparison["same_host_byte_identical"] is not True
+                or comparison["independent_builder_reproduction"] != "not performed"):
+            raise RuntimeError("two same-host output hashes contradict the rebuild comparison")
+        first_binary = outputs[0]["binary"]
+        _object(record["binary"], _BINARY_RECORD_KEYS, "primary binary record")
+        if record["binary"] != first_binary:
+            raise RuntimeError("primary binary record differs from the first concrete build output")
+        if selected_index is None or selected_metadata is None:
+            raise RuntimeError("candidate binary is not one of the two recorded clean-build outputs")
+        return record, record_bytes, output_digests[selected_index], selected_metadata
+    finally:
+        os.close(root_fd)
 
 
 def _main() -> int:
@@ -331,11 +648,12 @@ def _main() -> int:
     args, unittest_args = parser.parse_known_args()
     try:
         source = provenance.verify_source_archive(args.archive, args.signature, args.gnu_keyring, "9.11")
-        build_record, build_bytes, expected_binary_sha256 = _read_build_attestation(
+        build_record, build_bytes, expected_binary_sha256, expected_output_identity = _read_build_attestation(
             args.build_record, args.binary, source["archive_sha256"],
         )
         binary = provenance._inspect_binary(
-            args.binary, "9.11", expected_sha256=expected_binary_sha256,
+            args.binary, expected_sha256=expected_binary_sha256,
+            expected_identity=expected_output_identity,
         )
         AuthenticatedGNUWorkerQualification.source_archive = args.archive
         AuthenticatedGNUWorkerQualification.source_signature = args.signature
@@ -343,6 +661,7 @@ def _main() -> int:
         AuthenticatedGNUWorkerQualification.dd_binary = args.binary
         AuthenticatedGNUWorkerQualification.expected_source_sha256 = source["archive_sha256"]
         AuthenticatedGNUWorkerQualification.expected_binary_sha256 = binary["sha256"]
+        AuthenticatedGNUWorkerQualification.expected_output_identity = expected_output_identity
         AuthenticatedGNUWorkerQualification.build_record_path = args.build_record
         AuthenticatedGNUWorkerQualification.output_record = args.record
         unittest_args = [arg for arg in unittest_args if arg not in {"--verbose", "-v"}]

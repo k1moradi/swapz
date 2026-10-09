@@ -166,73 +166,71 @@ class GNUQualificationTests(unittest.TestCase):
         candidate.chmod(mode)
         return candidate
 
-    def _mock_version(self, path: Path, action=None):
-        def fake_run(argv, **kwargs):
-            self.assertEqual(argv[-1], "--version")
-            self.assertEqual(kwargs["executable"], f"/proc/self/fd/{kwargs['pass_fds'][0]}")
-            self.assertTrue(kwargs["close_fds"])
-            self.assertEqual(kwargs["timeout"], 5)
-            if action is not None:
-                action()
-            return type("Completed", (), {
-                "returncode": 0,
-                "stdout": b"dd (coreutils) 9.11\n",
-                "stderr": b"",
-            })()
-        return fake_run
-
-    def test_candidate_requires_static_supported_elf_and_expected_gnu_version(self) -> None:
+    def test_inspection_never_executes_candidate_and_only_checks_static_elf(self) -> None:
         candidate = self._candidate(synthetic_elf())
-        with mock.patch.object(qualification.subprocess, "run", side_effect=self._mock_version(candidate)):
-            record = qualification._inspect_binary(candidate, "9.11")
+        marker = self.root / "untrusted-payload-ran"
+
+        def malicious_exec_attempt(*_args, **_kwargs):
+            marker.write_text("candidate executed")
+            raise AssertionError("candidate execution must not be attempted")
+
+        # Synthetic ELF bytes model an untrusted candidate that passed the
+        # structural stage. If qualification tries --version, the mock
+        # records that attempted execution as a payload side effect.
+        with mock.patch.object(qualification.subprocess, "run",
+                               side_effect=malicious_exec_attempt) as execute:
+            record = qualification._inspect_binary(candidate)
+        execute.assert_not_called()
+        self.assertFalse(marker.exists())
         self.assertTrue(record["elf"]["static"])
-        self.assertEqual(record["version_output"], "dd (coreutils) 9.11")
+        self.assertFalse(record["candidate_executed_during_inspection"])
 
         with mock.patch.object(qualification.subprocess, "run") as execute:
             with self.assertRaisesRegex(qualification.QualificationError, "differs from its build record"):
-                qualification._inspect_binary(candidate, "9.11", expected_sha256="f" * 64)
+                qualification._inspect_binary(candidate, expected_sha256="f" * 64)
         execute.assert_not_called()
 
         dynamic = self._candidate(synthetic_elf(interpreter=True))
         with self.assertRaisesRegex(qualification.QualificationError, "PT_INTERP"):
-            qualification._inspect_binary(dynamic, "9.11")
+            qualification._inspect_binary(dynamic)
 
         dynamic_without_interpreter = self._candidate(synthetic_elf(dynamic_segment=True))
         with self.assertRaisesRegex(qualification.QualificationError, "PT_DYNAMIC"):
-            qualification._inspect_binary(dynamic_without_interpreter, "9.11")
+            qualification._inspect_binary(dynamic_without_interpreter)
 
         wrong_arch = self._candidate(synthetic_elf(machine=3))
         with self.assertRaisesRegex(qualification.QualificationError, "architecture"):
-            qualification._inspect_binary(wrong_arch, "9.11")
+            qualification._inspect_binary(wrong_arch)
 
-    def test_candidate_rejects_setid_capability_version_mismatch_and_path_replace(self) -> None:
+    def test_candidate_rejects_setid_capability_and_path_replace(self) -> None:
         setid = self._candidate(synthetic_elf(), mode=0o4700)
         with self.assertRaisesRegex(qualification.QualificationError, "metadata"):
-            qualification._inspect_binary(setid, "9.11")
+            qualification._inspect_binary(setid)
 
         writable = self._candidate(synthetic_elf(), mode=0o770)
         with self.assertRaisesRegex(qualification.QualificationError, "metadata"):
-            qualification._inspect_binary(writable, "9.11")
+            qualification._inspect_binary(writable)
 
         candidate = self._candidate(synthetic_elf())
         with mock.patch.object(qualification.os, "getxattr", return_value=b"capability"):
             with self.assertRaisesRegex(qualification.QualificationError, "capabilities"):
-                qualification._inspect_binary(candidate, "9.11")
-
-        with mock.patch.object(qualification.subprocess, "run", return_value=type("Completed", (), {
-                "returncode": 0, "stdout": b"dd (uutils coreutils) 0.10\n", "stderr": b""})()):
-            with self.assertRaisesRegex(qualification.QualificationError, "does not identify"):
-                qualification._inspect_binary(candidate, "9.11")
+                qualification._inspect_binary(candidate)
 
         replacement = self.root / "replacement"
         replacement.write_bytes(synthetic_elf())
-        def replace_path() -> None:
-            candidate.unlink()
-            replacement.rename(candidate)
-        with mock.patch.object(qualification.subprocess, "run",
-                               side_effect=self._mock_version(candidate, replace_path)):
+        original_stat = qualification.os.stat
+        replaced = False
+
+        def replace_path(path, *args, **kwargs):
+            nonlocal replaced
+            if Path(path) == candidate and not replaced:
+                replaced = True
+                candidate.unlink()
+                replacement.rename(candidate)
+            return original_stat(path, *args, **kwargs)
+        with mock.patch.object(qualification.os, "stat", side_effect=replace_path):
             with self.assertRaisesRegex(qualification.QualificationError, "changed during"):
-                qualification._inspect_binary(candidate, "9.11")
+                qualification._inspect_binary(candidate)
 
     def test_build_tool_identity_requires_nonwritable_uncapable_file(self) -> None:
         tool = self.root / "test-build-tool"

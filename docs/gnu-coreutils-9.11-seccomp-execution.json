@@ -1,5 +1,8 @@
 {
   "binary": {
+    "candidate_executed_during_inspection": false,
+    "ctime_ns": 1791542010807676040,
+    "device": 41,
     "elf": {
       "elf_class": "ELF64",
       "elf_type": "ET_EXEC",
@@ -8,14 +11,17 @@
       "static": true
     },
     "file_capabilities": false,
+    "inode": 59460,
+    "link_count": 1,
     "mode": "0755",
+    "mtime_ns": 1791541994513425580,
+    "owner_uid": 1000,
     "pinned_descriptor_path_rechecked": true,
     "setid_bits": false,
     "sha256": "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
-    "size": 939864,
-    "version_output": "dd (coreutils) 9.11\nCopyright (C) 2026 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Paul Rubin, David MacKenzie, and Stuart Kemp."
+    "size": 939864
   },
-  "build_record_sha256": "451ab81c8a2e82f311a37fd9f51776abef05d2126d5fea26b87c8c82c889bc70",
+  "build_record_sha256": "01f6a986086718a48a86f9c5ee7e45830ec1a36a7b6b79aaa050d559ac9d0f6c",
   "cancellation": "actual short-lived dd copy cancelled and reaped via retained pidfd",
   "execution": "actual authenticated GNU static dd ran through RecallDDLaunchGate, sealed memfd, strict pass_fds, pidfd supervisor, parent-death containment, and existing seccomp filter",
   "mapper": "temporary ordinary regular file only; synthetic verifier; no DM device",
