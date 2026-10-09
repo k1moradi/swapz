@@ -2718,3 +2718,80 @@ V2.2 physical drain/read-p99 strategy winner remains UNDETERMINED.
 
 No real DM, loop, NBD attach, swap, kernel module, fio/device
 benchmark, physical storage IO or reboot was performed.
+
+## 2026-10-09 — Offline plateau read-p99 internal-integrity gate
+
+**Exact executable-source revision tested by BOTH mandatory workflows:**
+`6f42f13fb00296e8c809eee79b4780fb67a0cfec`.
+
+Main-developer audit found two performance-qualification risks in
+`v22-drain-plateau-analyze.py`:
+
+1. V1 allowed arbitrary self-reported `read_count >= 10000`
+   and `read_p99_ns`; a JSONL series claiming kernel or physical
+   evidence could produce an apparent provisional batch without
+   any latency-distribution consistency checks.
+2. The 97%-of-peak plateau predicate previously used six-decimal
+   **display-rounded** MiB/s rather than original sector-derived
+   rates, so a slightly subthreshold tail could be rounded into
+   an eligible plateau.
+
+The source-only fix adds strict `swapz-drain-observation-v2` with
+a 1–256-bin, strictly ordered, **exact-value** latency/count
+distribution (`read_latency_counts`). Counts must be positive
+integers summing exactly to the bounded total
+`10000 <= read_count <= 10000000`; latency values are positive,
+strictly increasing, bounded nanoseconds. The tool recomputes
+nearest-rank p99 at `ceil(0.99*N)` and refuses a mismatched
+`read_p99_ns`. Common counter and duration integers are bounded.
+Input v1 and v2 groups cannot pool; a v1 `kernel`/`physical`
+claim now produces **neither candidate nor provisional selection**.
+V1 `synthetic` fixtures remain explicitly illustrative.
+
+For v2, even a `kernel` or `physical` observation with internally
+consistent counted latencies can receive only
+`PROVISIONAL - INDEPENDENT EVIDENCE REVIEW REQUIRED`.
+Its labels, distributions, lower-device counters, timing and real
+sample existence are **not authenticated**. A self-reported
+histogram is not proof of actual swap-in reads, physical draining
+or nonvolatile durability. Because the present exact-value format
+permits only 256 distinct nanosecond latencies, it may be
+inapplicable to real workloads with thousands of distinct samples;
+do not silently round data or claim production collector readiness.
+
+Threshold eligibility now uses **unrounded** sector-derived median
+throughput; six-decimal rounding is strictly for output. The
+new near-97%-boundary regression constructs a synthetic tail that
+*displays* as 19.400000 MiB/s yet actually falls just below
+97% of 20 MiB/s, and confirms the plateau is **rejected**.
+
+**27 fully synthetic, rootless regressions PASSED at the same code
+revision** (including wrong p99/count, invalid histogram types,
+duplicate/non-monotone bins, fake excess samples, 64-bit counter
+bounds, 99th-nearest-rank boundary, v1/v2 mixing and synthetic
+no-winner gates). Exact GitHub Actions:
+
+- Rootless teardown safety:
+  https://github.com/k1moradi/swapz/actions/runs/37917836052
+- Rootless combined source qualification:
+  https://github.com/k1moradi/swapz/actions/runs/37917836051
+
+Combined logs show
+`COMBINED_TESTED_HEAD=6f42f13fb00296e8c809eee79b4780fb67a0cfec`,
+`Ran 27 tests`, `PIDFD_IPC_REPEAT 10/10: PASS`,
+`PRESSURE_TOKEN_REPEAT 10/10: PASS`, and
+`COMBINED_NBD_STRESS 25/25: PASS`.
+
+**Review note:** Some earlier in-progress combined runs failed in
+the *existing* separate-process direct-dd recall integration with
+`unconfirmed or duplicated recall role worker`; those failures
+occurred outside this analyzer and should be separately investigated
+for timing/admission races. The final exact-revision combined and
+teardown runs both passed. Do not silently discard prior failures
+when assessing broader system reliability.
+
+No DM/loop/NBD attachment, swap, module, pressure fixture,
+fio/device benchmark, real lower-device throughput measurement,
+physical I/O or reboot was performed. The V2.2 batch/strategy
+winner remains **UNDETERMINED**. See
+`docs/v22-drain-plateau-offline.md`.
