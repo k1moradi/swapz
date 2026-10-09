@@ -262,6 +262,102 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
         self.assertFalse(self.session.cleanup_marker.exists())
         self.assertFalse(self.session.bridge.failed)
 
+    def assert_writer_barrier_failed_closed(self, roles=()) -> None:
+        self.assertEqual(self.session.adapter._issued_roles, set(roles))
+        self.assertTrue(self.session.cleanup_marker.exists())
+        self.assertTrue(self.session.bridge.failed)
+        self.assertTrue(self.session.adapter._denied)
+        self.assertFalse(self.session.adapter.cleanup_authorized)
+        self.assertFalse(self.session.client.cleanup_authorized)
+        with self.assertRaises(bridge_module.BridgeError):
+            self.session.launch("a")
+        self.assertTrue(self.session.cleanup_marker.exists())
+
+    def test_delayed_writer_contents_do_not_admit_readers_until_complete(self):
+        # Deterministic test-owned writes, not a genuine kernel/device writer.
+        target = self.session.root / "synthetic-mapper.bin"
+        observations = []
+
+        def staged_write(_seconds):
+            observations.append(len(observations) + 1)
+            self.assertEqual(self.session.adapter._issued_roles, set())
+            with target.open("r+b") as output:
+                if len(observations) == 1:
+                    output.write(self.session.expected[:4096])
+                else:
+                    output.write(self.session.expected)
+
+        with mock.patch.object(time, "sleep", side_effect=staged_write):
+            self.session.await_synthetic_writer_contents(deadline_seconds=1.0)
+        self.assertEqual(observations, [1, 2])
+        self.assertEqual(target.read_bytes(), self.session.expected)
+        self.assertFalse(self.session.client.cleanup_authorized)
+        self.assertFalse(self.session.bridge.failed)
+
+    def test_missing_writer_bytes_timeout_denies_and_prevents_reader(self):
+        with mock.patch.object(time, "monotonic", side_effect=(100.0, 100.1)):
+            with self.assertRaisesRegex(RoleError, "never populated expected bytes"):
+                self.session.await_synthetic_writer_contents(deadline_seconds=0.01)
+        self.assert_writer_barrier_failed_closed()
+
+    def test_truncated_writer_contents_denies_and_prevents_reader(self):
+        target = self.session.root / "synthetic-mapper.bin"
+        target.write_bytes(self.session.expected[:4096])
+        with self.assertRaisesRegex(RoleError, "metadata or size differs"):
+            self.session.await_synthetic_writer_contents(deadline_seconds=0.01)
+        self.assert_writer_barrier_failed_closed()
+
+    def test_wrong_page_with_correct_length_denies_and_prevents_reader(self):
+        target = self.session.root / "synthetic-mapper.bin"
+        bad = bytearray(self.session.expected)
+        bad[4096 * 4] ^= 0xFF
+        target.write_bytes(bad)
+        with mock.patch.object(time, "monotonic", side_effect=(200.0, 200.1)):
+            with self.assertRaisesRegex(RoleError, "never populated expected bytes"):
+                self.session.await_synthetic_writer_contents(deadline_seconds=0.01)
+        self.assert_writer_barrier_failed_closed()
+
+    def test_mapper_path_replacement_after_pin_denies_even_with_matching_bytes(self):
+        target = self.session.root / "synthetic-mapper.bin"
+        displaced = self.session.root / "displaced-mapper.bin"
+        target.write_bytes(self.session.expected)
+        original_pread = os.pread
+        replaced = False
+
+        def replace_during_read(fd, count, offset):
+            nonlocal replaced
+            data = original_pread(fd, count, offset)
+            if not replaced:
+                replaced = True
+                target.rename(displaced)
+                target.write_bytes(self.session.expected)
+                target.chmod(0o600)
+            return data
+
+        with mock.patch.object(os, "pread", side_effect=replace_during_read):
+            with self.assertRaisesRegex(RoleError, "pathname or inode changed"):
+                self.session.await_synthetic_writer_contents(deadline_seconds=0.1)
+        self.assertTrue(replaced)
+        self.assert_writer_barrier_failed_closed()
+
+    def test_writer_observation_interrupted_denies_and_prevents_reader(self):
+        with mock.patch.object(os, "pread", side_effect=InterruptedError("test interrupted read")):
+            with self.assertRaisesRegex(RoleError, "test interrupted read"):
+                self.session.await_synthetic_writer_contents(deadline_seconds=0.1)
+        self.assert_writer_barrier_failed_closed()
+
+    def test_service_control_eof_before_writer_ready_preserves_backing(self):
+        self.session.client.sock.close()
+        self.assertNotEqual(self.session.process.wait(timeout=8), 0)
+        with self.assertRaisesRegex(RoleError, "service exited"):
+            self.session.await_synthetic_writer_contents(deadline_seconds=0.1)
+        self.assert_writer_barrier_failed_closed()
+
+    def test_invalid_writer_readiness_deadline_denies_session(self):
+        with self.assertRaisesRegex(RoleError, "invalid bounded deadline"):
+            self.session.await_synthetic_writer_contents(deadline_seconds=0)
+        self.assert_writer_barrier_failed_closed()
+
     def test_replaced_readback_path_cannot_fake_verified_output(self):
         self.session.launch("writer")
         self.session.await_synthetic_writer_contents()
