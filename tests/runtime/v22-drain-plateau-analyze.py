@@ -259,6 +259,10 @@ def _series(rows: list[dict[str, object]]) -> dict[str, object]:
         group["qualification"] = "SYNTHETIC ONLY - NOT BENCHMARK EVIDENCE"
         group["reason"] = "Illustrative candidate only; no measured kernel or physical drain"
     elif example["schema"] == SCHEMA:
+        # Even an unqualified algorithmic candidate can be mistaken for a
+        # performance nomination. Legacy self-labeled kernel/physical
+        # evidence supplies NO candidate or provisional selection.
+        group["candidate_batch_kib"] = None
         group["qualification"] = "UNVERIFIED P99 - EXACT LATENCY DISTRIBUTION REQUIRED"
         group["reason"] = (
             "V1 read_count and read_p99_ns are self-reported; no provisional "
