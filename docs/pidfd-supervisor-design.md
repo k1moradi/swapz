@@ -9,7 +9,9 @@ created solely by the tests with syscall-boundary fakes for failure cases.
 
 The prototype owns and reaps direct children. Its public API returns an opaque
 string handle. Callers do not signal a worker by PID, and the implementation
-has no numeric-PID signal fallback.
+has no numeric-PID signal fallback. Pinned-executable launches opt into the
+Linux process-containment filter described below; the ordinary `sleep` and
+`exit` test commands retain their existing behavior.
 
 ## Launch and identity protocol
 
@@ -18,8 +20,11 @@ For each launch, the supervisor:
 1. Validates the command and allocates a unique, nonnumeric opaque handle
    before creating a child.
 2. Creates a start-gate pipe and a close-on-exec exec-error pipe.
-3. Forks a direct child. The child closes its unused pipe ends and blocks on
-   the gate; it cannot execute the requested worker command yet.
+3. Forks a direct child. Before it blocks on the gate, a contained launch sets
+   `PR_SET_PDEATHSIG(SIGKILL)`, checks that its parent is still the exact
+   supervisor process observed before `fork()`, sets `PR_SET_NO_NEW_PRIVS`,
+   and installs a seccomp filter. It cannot execute the requested worker
+   command yet.
 4. Opens a pidfd for that unreaped child and stores it in the supervisor's
    private worker record.
 5. Sends the one-byte start token through the gate. If this fails, it sends an
@@ -42,10 +47,29 @@ is used to reap a child owned by this supervisor; it is never used to signal.
 If that child cannot be confirmed reaped, the raised `SupervisorError` sets
 `preserve_required=True`. There is no PID-only fallback.
 
+For pinned executable launches, containment setup must complete before the
+parent releases the start gate. On x86_64 and aarch64 the inherited seccomp
+filter rejects `fork`, `vfork`, and `clone` calls that create another process;
+`clone3` returns `ENOSYS` so a runtime may fall back to the filtered `clone`
+interface. `CLONE_THREAD` is allowed for utilities that use threads, since
+threads remain in the same thread group and are killed with the direct worker.
+The filter also denies attempts to clear `PR_SET_PDEATHSIG`, credential
+changes that Linux can use to clear the parent-death setting, namespace
+changes, and legacy AIO/io_uring context creation. The latter interfaces are
+not needed by the fixed synchronous `dd` roles. The filter is inherited across
+`execve` and cannot be removed by the worker. Unknown architectures or failure
+to install either mechanism fail before the gate opens. These
+containment requirements apply to pinned executable launches; unpinned test
+commands are not advertised as crash-contained.
+
 The implementation uses `os.pidfd_open()` and
 `signal.pidfd_send_signal()`. Those Python APIs were added in Python 3.9;
-`pidfd_open` requires Linux 5.3 or later, so Linux 5.3 is the effective minimum.
-The lower-level `pidfd_send_signal` syscall appeared earlier, in Linux 5.1.
+`pidfd_open` requires Linux 5.3 or later, so Linux 5.3 is the effective
+minimum for ordinary pidfd supervision. Opt-in block-mapper launches also
+require executable memfd support (`MFD_EXEC`, Linux 6.3 or later) and the
+required file seals; if the kernel or Python runtime cannot provide them, that
+launch mode is refused. The lower-level `pidfd_send_signal` syscall appeared
+earlier, in Linux 5.1.
 See the [Python `os.pidfd_open` reference](https://docs.python.org/3.12/library/os.html#os.pidfd_open),
 the [Python `signal.pidfd_send_signal` reference](https://docs.python.org/3.11/library/signal.html#signal.pidfd_send_signal),
 and the Linux [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html)
@@ -103,26 +127,42 @@ The supervisor does not authorize device teardown merely because a process
 looks absent in `/proc`. The only positive cleanup decision is based on direct
 child reaping and error-free lifecycle operations.
 
-## What this does not contain
+## Containment guarantees and limits
 
-A pidfd refers to one process. It does not automatically stop grandchildren,
-children forked by a worker, or background work started by a shell wrapper.
-Reaping the direct child is therefore sufficient only if the launched command
-does not leave I/O-producing descendants behind.
+The pidfd still identifies and signals one direct child, but pinned executable
+launches add two independent controls around it. `PR_SET_PDEATHSIG(SIGKILL)`
+terminates the direct worker if the single-threaded supervisor exits. The
+seccomp filter prevents the worker from creating a separate process that could
+outlive the pidfd-owned thread group, and prevents the worker from clearing
+the parent-death setting or changing credentials to clear it. A worker can use
+threads; those threads share the direct process lifetime. The gate and
+parent-identity check cover the fork-to-pidfd and parent-death setup windows:
+the command is never released before the pidfd exists and containment setup
+has succeeded.
+
+The service must still treat any lost connection, crash, timeout, malformed
+response, or nonzero service exit as `preserve_backing`. Parent-death cleanup
+is a last-resort stop mechanism, not a success attestation. If the service
+crashes, there is no final error-free stop report, so the caller cannot
+authorize device teardown even if an observer later sees the worker exit.
+The rootless crash tests cover supervisor exit before pidfd acquisition, after
+pidfd acquisition but before gate release, and after exec but before READY
+delivery. They use only test-created workers and temporary files.
+
+This is process-tree containment for a narrowly controlled direct executable,
+not proof that kernel block I/O has drained. An abrupt worker kill can occur
+while a synchronous I/O call is in progress; no real DM mapper or in-flight
+BIO behavior has been tested here. Production cleanup must retain the backing
+stack after abnormal service exit and must separately establish safe mapper
+removal and lower-device quiescence before any physical or disposable backing
+is detached. No cgroup delegation is assumed or required by this prototype.
 
 Production recall integration must not launch `bash -c`, a background shell
 function, or another wrapper that starts `dd` and returns before `dd` exits.
-The safest first integration is an allowlist of direct executables and
-arguments (`dd` for writer/read transfers) plus synchronous comparison and
-timing in the parent test harness. If a worker must create descendants, place
-the whole worker tree in a test-owned cgroup and confirm it is empty before
-device cleanup; direct-child pidfds alone cannot prove that tree is quiet.
-
-The prototype also does not contain a worker if the supervisor itself crashes
-or is killed. A production control service must treat a lost supervisor
-connection as a cleanup failure and preserve the DM/loop stack. A later
-integration can add a parent-death signal and/or a fixture-owned cgroup, but
-must test those mechanisms independently; they are not part of this prototype.
+The direct worker must remain the only I/O-producing process, and the service
+must retain its pidfd through wait/reap. The filter is limited to x86_64 and
+aarch64; unsupported architectures or unavailable seccomp/PDEATHSIG support
+deny launch rather than falling back.
 
 ## Rootless IPC control service
 
@@ -155,29 +195,46 @@ future trusted launcher and its bridge/API contract need separate review
 before opting in.
 
 The descriptor-bound role gate pins the private fixture directory and source,
-the exact test DM descriptor, fixed readback outputs, and a verified ELF dd
-executable. It returns `/proc/self/fd/N` arguments plus an explicit descriptor
-pass list. `GatedPidfdSupervisor.launch()` can run a pinned executable path
-without PATH search, keep selected descriptors close-on-exec in the parent,
-pass only those descriptors in the child, and close unlisted child FDs before
-exec. The child remains blocked until its pidfd has been retained. The service
-still owns the direct child and all stop signals use that retained pidfd.
+the exact test DM descriptor, and fixed readback outputs. It returns
+`/proc/self/fd/N` arguments plus an explicit descriptor pass list. The trusted
+bootstrap must supply an expected executable SHA-256 from an independent
+package or deployment trust source; hashing a binary and then trusting that
+same result would not establish identity. For block-mapper launches, the gate
+copies the digest-verified executable into an executable memfd and applies
+write, grow, shrink, seal, and exec seals. The worker executes that immutable
+snapshot, so a pathname replacement or later in-place update cannot change
+the bytes after verification. If executable memfd support or required seals
+are unavailable, block-mapper admission fails closed. The prototype checks
+byte identity; the trusted bootstrap must ensure that its expected hash is
+for the intended GNU `dd`. The current host's `/usr/bin/dd` is uutils
+coreutils, so no GNU `dd` identity claim is made from these tests.
+
+`GatedPidfdSupervisor.launch()` executes the pinned descriptor without PATH
+search, keeps selected descriptors close-on-exec in the parent, passes only
+those descriptors in the child, and closes unlisted child FDs before exec.
+The child remains blocked until its pidfd has been retained and containment
+has succeeded. The service still owns the direct child and all stop signals
+use that retained pidfd.
 
 This is admission and launch preparation, not production recall integration.
-Rootless role tests use synthetic files and a fake supervisor; they do not
-execute dd or open `/dev/mapper`. The service CLI's `sleep`/`exit` allowlist
-remains its default. The trusted bootstrap must still ensure the DM descriptor
-identifies the exact fixture mapping and prevent concurrent DM table changes.
-The source file can be changed in place by another same-UID process, so the
-fixture must retain an independent expected-data reference and exclude
-concurrent mutation.
+Rootless role-policy tests use synthetic files and a fake supervisor; the
+separate `recall-dd-worker-integration-test.py` executes the host's pinned
+`/usr/bin/dd` against temporary regular files only. Neither test opens
+`/dev/mapper`. The service CLI's `sleep`/`exit` allowlist remains its default.
+The trusted bootstrap must still ensure the DM descriptor identifies the
+exact fixture mapping and prevent concurrent DM table changes. The fixture
+source file can be changed in place by another same-UID process, so the fixture
+must retain an independent expected-data reference and exclude concurrent
+mutation.
 
-A pidfd does not contain descendants or terminate a worker if the supervisor
-crashes. GNU dd is intended to be the direct I/O process, but production
-integration must verify that exact executable does not create I/O-producing
-descendants, or use a separately owned cgroup and prove it empty before
-backing cleanup. A broken service, lost response, unconfirmed reap, fd-close
-failure, or abnormal process exit always requires preserving backing.
+A pidfd alone does not contain descendants. Here, pinned launches add
+`PDEATHSIG` and seccomp controls, but the implementation still does not test a
+real mapper, establish in-flight block-I/O drainage, or provide a cgroup
+fallback. A broken service, lost response, unconfirmed reap, fd-close failure,
+or abnormal process exit always requires preserving backing. The direct-dd
+CLI remains disabled; enabling it requires a separately trusted bootstrap and
+review of mapper identity, the expected GNU `dd` digest, and runtime teardown
+behavior.
 
 ### Wire framing and session rules
 
@@ -240,14 +297,14 @@ is Linux 5.3 or newer with Python 3.9 or newer exposing `os.pidfd_open()` and
 `signal.pidfd_send_signal()`. If pidfd support is absent or acquisition fails,
 there is no numeric-PID signaling fallback and no cleanup authorization.
 
-The control service does not make supervisor crashes safe. If the service is
-killed while a child is running, that child may continue; a pidfd does not
-provide parent-death signaling or descendant containment. The future caller
-must preserve the DM/loop stack on any lost service response or abnormal
-service exit. Direct-child supervision also cannot establish that a worker's
-grandchildren are gone. Production workers must be direct executables that do
-not fork I/O-producing descendants, or a separately reviewed test-owned
-cgroup must be verified empty before cleanup.
+Pinned worker launches now install parent-death and process-creation controls,
+but the control service still does not make supervisor crashes a cleanup
+success. If the service dies, the worker receives `SIGKILL` and the client
+must preserve the DM/loop stack because there is no final successful
+all-reaped attestation. A pidfd and seccomp do not establish that submitted
+kernel I/O has drained, and no real mapper or lower-device teardown has been
+tested. Production workers must be the direct pinned executable, without a
+shell wrapper or I/O-producing descendants.
 
 ## Proposed `buffer-recall.sh` migration
 
@@ -259,14 +316,16 @@ signaled while a child `dd` continues doing mapper I/O.
 
 The integration should be a separate reviewed change with these steps:
 
-1. Add a small reviewed launcher/adapter that creates the private socketpair,
-   starts this service with the service endpoint as its inherited `--fd`, and
-   gives the controller endpoint to the fixture's persistent Python IPC
-   adapter. Keep both alive until EXIT cleanup finishes. Bash sends only the
-   documented bounded requests through that adapter and stores opaque handles;
-   it never receives worker PIDs. The current test allowlist must be replaced
-   with a narrowly validated direct-`dd` allowlist as part of that separate
-   change. Do not expose a generic `argv` or signal operation.
+1. Add a separately reviewed trusted launcher/adapter that creates the private
+   socketpair, starts this service with the service endpoint as its inherited
+   `--fd`, and gives the controller endpoint to the fixture's persistent
+   Python IPC adapter. Keep both alive until EXIT cleanup finishes. Bash sends
+   only the documented bounded requests through that adapter and stores opaque
+   handles; it never receives worker PIDs. The normal service CLI must remain
+   limited to `sleep`/`exit`; direct-`dd` role admission may be enabled only by
+   a trusted in-process bootstrap that binds the exact mapper, fixture, and
+   independently trusted GNU `dd` digest. Do not expose a generic `argv` or
+   signal operation.
 2. Replace the writer's `dd ... &` with `launch` of the direct `dd` argv. Keep
    its handle in a list immediately after a successful launch.
 3. Preserve the first A and B recall timing points by launching each direct
@@ -307,16 +366,26 @@ is separately reviewed and tested.
 
 ## Prototype validation
 
-Run the standalone source checks with:
+Run the rootless source checks with:
 
 ```sh
 python3 -m py_compile tests/runtime/test-child-supervisor.py \
-  tests/runtime/test-child-supervisor-regression.py
+  tests/runtime/test-child-supervisor-regression.py \
+  tests/runtime/test-child-supervisor-service.py \
+  tests/runtime/test-child-supervisor-service-regression.py \
+  tests/runtime/recall-dd-allowlist.py \
+  tests/runtime/recall-dd-allowlist-test.py \
+  tests/runtime/test-child-containment-regression.py
 python3 tests/runtime/test-child-supervisor-regression.py -v
+python3 tests/runtime/test-child-supervisor-service-regression.py -v
+python3 tests/runtime/recall-dd-allowlist-test.py -v
+python3 tests/runtime/test-child-containment-regression.py -v
+python3 tests/runtime/recall-dd-worker-integration-test.py -v
 ```
 
 The real-process tests create only short-lived children for this suite. The
 failure injection tests use syscall fakes and numeric placeholder PIDs; they
-do not signal those placeholder PIDs or touch any device. These tests do not
-validate production recall teardown, descendant containment, or kernel/block
-device behavior.
+do not signal those placeholder PIDs or touch any device. The containment
+regressions exercise worker termination and denied fork attempts on this host,
+but they do not validate production recall teardown, mapper identity, or
+kernel/block-device I/O behavior.

@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -530,6 +533,183 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         gate.admit("writer")
         with self.assertRaisesRegex(DDPolicyDenied, "identity no longer matches"):
             gate.admit("a")
+
+    def test_block_mapper_requires_trusted_root_owned_executable_digest(self):
+        mapper_path = self.base / "synthetic-block-mapper"
+        mapper_path.write_bytes(b"synthetic block descriptor")
+        mapper_fd = os.open(mapper_path, os.O_RDONLY | os.O_CLOEXEC)
+
+        class BlockDescriptorOps(RecallDDFileOps):
+            def __init__(self):
+                self.block_fds = {mapper_fd}
+
+            def dup_cloexec(self, fd):
+                duplicate = super().dup_cloexec(fd)
+                self.block_fds.add(duplicate)
+                return duplicate
+
+            def fstat(self, fd):
+                if fd in self.block_fds:
+                    return SimpleNamespace(
+                        st_mode=stat.S_IFBLK | 0o600,
+                        st_rdev=os.makedev(253, 17),
+                        st_uid=0,
+                    )
+                return super().fstat(fd)
+
+        ops = BlockDescriptorOps()
+        try:
+            with self.assertRaisesRegex(DDPolicyDenied, "independently trusted"):
+                RecallDDLaunchGate(
+                    self.root, self.name, mapper_fd=mapper_fd,
+                    executable_path=Path("/usr/bin/dd"), ops=ops,
+                    mapper_verifier=lambda *_: True,
+                )
+
+            digest = hashlib.sha256(Path("/usr/bin/dd").read_bytes()).hexdigest()
+            with self.assertRaisesRegex(DDPolicyDenied, "trusted SHA-256"):
+                RecallDDLaunchGate(
+                    self.root, self.name, mapper_fd=mapper_fd,
+                    executable_path=Path("/usr/bin/dd"),
+                    expected_executable_sha256="0" * 64, ops=ops,
+                    mapper_verifier=lambda *_: True,
+                )
+
+            gate = RecallDDLaunchGate(
+                self.root, self.name, mapper_fd=mapper_fd,
+                executable_path=Path("/usr/bin/dd"),
+                expected_executable_sha256=digest, ops=ops,
+                mapper_verifier=lambda *_: True,
+            )
+            self.addCleanup(gate.close)
+            self.assertEqual(gate.admit("writer").role, "writer")
+        finally:
+            os.close(mapper_fd)
+
+    def test_block_mapper_launch_uses_immutable_digest_verified_snapshot(self):
+        executable_path = self.base / "trusted-executable-copy"
+        executable_path.write_bytes(Path(sys.executable).read_bytes())
+        executable_path.chmod(0o755)
+        expected_bytes = executable_path.read_bytes()
+        expected_digest = hashlib.sha256(expected_bytes).hexdigest()
+        mapper_path = self.base / "synthetic-block-mapper-snapshot"
+        mapper_path.write_bytes(b"synthetic block descriptor")
+        mapper_fd = os.open(mapper_path, os.O_RDONLY | os.O_CLOEXEC)
+
+        class BlockDescriptorOps(RecallDDFileOps):
+            def __init__(self):
+                self.block_fds = {mapper_fd}
+                self.root_owned_executable_fds = set()
+
+            def open(self, path, flags, mode=0o777, *, dir_fd=None):
+                fd = super().open(path, flags, mode, dir_fd=dir_fd)
+                if path == str(executable_path):
+                    self.root_owned_executable_fds.add(fd)
+                return fd
+
+            def fstat(self, fd):
+                if fd in self.block_fds:
+                    return SimpleNamespace(
+                        st_mode=stat.S_IFBLK | 0o600,
+                        st_rdev=os.makedev(253, 18),
+                        st_uid=0,
+                    )
+                info = super().fstat(fd)
+                if fd in self.root_owned_executable_fds:
+                    return SimpleNamespace(
+                        st_mode=info.st_mode, st_uid=0, st_size=info.st_size,
+                        st_dev=info.st_dev, st_ino=info.st_ino,
+                        st_mtime_ns=info.st_mtime_ns, st_ctime_ns=info.st_ctime_ns,
+                        st_nlink=info.st_nlink, st_gid=info.st_gid,
+                    )
+                return info
+
+        ops = BlockDescriptorOps()
+        try:
+            gate = RecallDDLaunchGate(
+                self.root, self.name, mapper_fd=mapper_fd,
+                executable_path=executable_path,
+                expected_executable_sha256=expected_digest,
+                ops=ops, mapper_verifier=lambda *_: True,
+            )
+            self.addCleanup(gate.close)
+            launch = gate.admit("writer")
+            snapshot_fd = launch.executable_fd
+            self.assertTrue(launch.executable.endswith(f"/fd/{snapshot_fd}"))
+            self.assertFalse(os.get_inheritable(snapshot_fd))
+            self.assertEqual(hashlib.sha256(os.pread(snapshot_fd, len(expected_bytes), 0)).hexdigest(),
+                             expected_digest)
+
+            with self.assertRaises(OSError):
+                os.pwrite(snapshot_fd, b"tamper", 0)
+            with self.assertRaises(OSError):
+                os.fchmod(snapshot_fd, 0o600)
+            completed = subprocess.run(
+                [launch.executable, "-c", "pass"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                pass_fds=(snapshot_fd,),
+                timeout=3.0,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
+            mutable_fd = os.open(executable_path, os.O_WRONLY | os.O_CLOEXEC)
+            try:
+                self.assertEqual(os.pwrite(mutable_fd, b"MUTATE", 0), 6)
+            finally:
+                os.close(mutable_fd)
+            self.assertEqual(hashlib.sha256(os.pread(snapshot_fd, len(expected_bytes), 0)).hexdigest(),
+                             expected_digest)
+            self.assertEqual(gate.admit("a").executable_fd, snapshot_fd)
+        finally:
+            os.close(mapper_fd)
+
+    def test_missing_executable_memfd_support_denies_block_mapper_launch(self):
+        mapper_path = self.base / "synthetic-block-mapper-no-memfd"
+        mapper_path.write_bytes(b"synthetic block descriptor")
+        mapper_fd = os.open(mapper_path, os.O_RDONLY | os.O_CLOEXEC)
+        executable_path = Path("/usr/bin/dd")
+
+        class BlockDescriptorOps(RecallDDFileOps):
+            def __init__(self):
+                self.block_fds = {mapper_fd}
+                self.root_owned_executable_fds = set()
+
+            def open(self, path, flags, mode=0o777, *, dir_fd=None):
+                fd = super().open(path, flags, mode, dir_fd=dir_fd)
+                if path == str(executable_path):
+                    self.root_owned_executable_fds.add(fd)
+                return fd
+
+            def fstat(self, fd):
+                if fd in self.block_fds:
+                    return SimpleNamespace(st_mode=stat.S_IFBLK | 0o600,
+                                           st_rdev=os.makedev(253, 19), st_uid=0)
+                info = super().fstat(fd)
+                if fd in self.root_owned_executable_fds:
+                    return SimpleNamespace(
+                        st_mode=info.st_mode, st_uid=0, st_size=info.st_size,
+                        st_dev=info.st_dev, st_ino=info.st_ino,
+                        st_mtime_ns=info.st_mtime_ns, st_ctime_ns=info.st_ctime_ns,
+                        st_nlink=info.st_nlink, st_gid=info.st_gid,
+                    )
+                return info
+
+            def create_sealed_executable(self, source_fd, expected_sha256, maximum_size):
+                raise OSError(38, "injected executable memfd unsupported")
+
+        try:
+            digest = hashlib.sha256(executable_path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(DDPolicyDenied, "cannot bind direct dd"):
+                RecallDDLaunchGate(
+                    self.root, self.name, mapper_fd=mapper_fd,
+                    executable_path=executable_path,
+                    expected_executable_sha256=digest,
+                    ops=BlockDescriptorOps(), mapper_verifier=lambda *_: True,
+                )
+        finally:
+            os.close(mapper_fd)
 
     def test_invalid_executable_identity_and_descriptor_acquisition_fail_closed(self):
         bad_exe = self.base / "not-elf-dd"

@@ -8,8 +8,10 @@ direct child processes only and never falls back to a numeric-PID signal.
 from __future__ import annotations
 
 import errno
+import ctypes
 import math
 import os
+import platform
 import secrets
 import select
 import signal
@@ -61,6 +63,8 @@ class Worker:
     stop_requested: bool = False
     errors: list[str] = field(default_factory=list)
     escalated: bool = False
+    containment_required: bool = False
+    containment_installed: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,122 @@ class LinuxPidfdOps:
 
     def fork(self) -> int:
         return os.fork()
+
+    def install_process_containment(self, expected_parent_pid: int) -> None:
+        """Bind the worker to its parent lifetime and deny process creation.
+
+        The pidfd supervisor owns one direct worker.  PR_SET_PDEATHSIG kills
+        that worker if the supervisor exits, while seccomp prevents the
+        worker from creating untracked fork/clone descendants.  Unknown
+        architectures or unavailable kernel support fail before the startup
+        gate is released.
+        """
+        machine = platform.machine().lower()
+        if machine in {"x86_64", "amd64"}:
+            audit_arch = 0xC000003E  # AUDIT_ARCH_X86_64
+            clone_number, fork_number, vfork_number = 56, 57, 58
+            prctl_number = 157
+            restricted_numbers = (
+                105, 106, 113, 114, 116, 117, 119, 122, 123, 126, 272, 308,
+                206, 209, 425,
+            )
+            reject_x32 = True
+        elif machine in {"aarch64", "arm64"}:
+            audit_arch = 0xC00000B7  # AUDIT_ARCH_AARCH64
+            clone_number, fork_number, vfork_number = 220, None, None
+            prctl_number = 167
+            restricted_numbers = (
+                143, 144, 145, 146, 147, 149, 151, 152, 159, 91, 97, 268,
+                0, 2, 425,
+            )
+            reject_x32 = False
+        else:
+            raise OSError(errno.ENOSYS, f"process containment unsupported on {machine}")
+
+        class SockFilter(ctypes.Structure):
+            _fields_ = [
+                ("code", ctypes.c_ushort),
+                ("jt", ctypes.c_ubyte),
+                ("jf", ctypes.c_ubyte),
+                ("k", ctypes.c_uint),
+            ]
+
+        class SockFprog(ctypes.Structure):
+            _fields_ = [("len", ctypes.c_ushort),
+                        ("filter", ctypes.POINTER(SockFilter))]
+
+        # Set the death signal first.  If the supervisor died between fork
+        # and this call, the parent identity check below refuses to proceed.
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl.restype = ctypes.c_int
+        if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+            error_number = ctypes.get_errno()
+            raise OSError(error_number, os.strerror(error_number))
+        if os.getppid() != expected_parent_pid:
+            raise OSError(errno.ESRCH, "supervisor exited before parent-death binding")
+
+        # classic BPF: require the native audit arch, then return EPERM for
+        # process creation syscalls and ALLOW for all other worker operations.
+        instructions = [
+            SockFilter(0x20, 0, 0, 4),  # BPF_LD | BPF_W | BPF_ABS: arch
+            SockFilter(0x15, 1, 0, audit_arch),  # BPF_JMP | BPF_JEQ | BPF_K
+            SockFilter(0x06, 0, 0, 0x80000000),  # SECCOMP_RET_KILL_PROCESS
+            SockFilter(0x20, 0, 0, 0),  # BPF_LD | BPF_W | BPF_ABS: syscall number
+        ]
+        if reject_x32:
+            instructions.extend((
+                SockFilter(0x54, 0, 0, 0x40000000),  # BPF_ALU | BPF_AND | BPF_K
+                SockFilter(0x15, 1, 0, 0),  # native ABI continues; x32 is killed
+                SockFilter(0x06, 0, 0, 0x80000000),
+                SockFilter(0x20, 0, 0, 0),  # reload syscall number
+            ))
+        deny_errno = 0x00050000 | errno.EPERM
+        if fork_number is not None:
+            instructions.extend((
+                SockFilter(0x15, 0, 1, fork_number), SockFilter(0x06, 0, 0, deny_errno),
+                SockFilter(0x15, 0, 1, vfork_number), SockFilter(0x06, 0, 0, deny_errno),
+            ))
+        # The worker must not clear PR_SET_PDEATHSIG after exec. Credential
+        # changes can also clear that setting on Linux. Namespace changes and
+        # asynchronous AIO context creation are unnecessary for the fixed
+        # synchronous dd roles, so deny those too; they could otherwise make
+        # worker identity or I/O lifetime harder to attest.
+        instructions.extend((
+            SockFilter(0x15, 0, 3, prctl_number),  # not prctl: continue
+            SockFilter(0x20, 0, 0, 16),  # prctl operation, seccomp_data.args[0]
+            SockFilter(0x15, 0, 1, 1),  # PR_SET_PDEATHSIG
+            SockFilter(0x06, 0, 0, deny_errno),
+        ))
+        for syscall_number in restricted_numbers:
+            instructions.extend((
+                SockFilter(0x15, 0, 1, syscall_number),
+                SockFilter(0x06, 0, 0, deny_errno),
+            ))
+        # A clone that creates a new process is denied.  CLONE_THREAD is
+        # allowed so a pinned utility may use threads; those threads remain
+        # in the same thread group and pidfd lifetime.  clone3's pointed-to
+        # flags cannot be inspected by classic BPF, so ENOSYS requests the
+        # runtime's clone fallback, which is checked above.
+        instructions.extend((
+            SockFilter(0x15, 0, 5, clone_number),  # not clone: continue at clone3
+            SockFilter(0x20, 0, 0, 16),  # seccomp_data.args[0], low word
+            SockFilter(0x54, 0, 0, 0x00010000),  # CLONE_THREAD
+            SockFilter(0x15, 1, 0, 0x00010000),
+            SockFilter(0x06, 0, 0, deny_errno),
+            SockFilter(0x06, 0, 0, 0x7FFF0000),  # thread clone: SECCOMP_RET_ALLOW
+            SockFilter(0x15, 0, 1, 435),  # clone3
+            SockFilter(0x06, 0, 0, 0x00050000 | errno.ENOSYS),
+            SockFilter(0x06, 0, 0, 0x7FFF0000),  # SECCOMP_RET_ALLOW
+        ))
+        filter_array = (SockFilter * len(instructions))(*instructions)
+        program = SockFprog(len(instructions), filter_array)
+
+        if libc.prctl(38, 1, 0, 0, 0) != 0:  # PR_SET_NO_NEW_PRIVS
+            error_number = ctypes.get_errno()
+            raise OSError(error_number, os.strerror(error_number))
+        if libc.prctl(22, 2, ctypes.byref(program), 0, 0) != 0:  # PR_SET_SECCOMP/FILTER
+            error_number = ctypes.get_errno()
+            raise OSError(error_number, os.strerror(error_number))
 
     def read(self, fd: int, size: int) -> bytes:
         return os.read(fd, size)
@@ -268,6 +388,7 @@ class GatedPidfdSupervisor:
         self.token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
         self._workers: dict[str, Worker] = {}
         self._closing = False
+        self._containment_failure_latched = False
 
     def _require_pidfd_support(self) -> None:
         if threading.current_thread() is not threading.main_thread() or threading.active_count() != 1:
@@ -382,10 +503,14 @@ class GatedPidfdSupervisor:
         executable_fd: int | None,
         pass_fds: tuple[int, ...],
         strict_fds: bool,
+        contain_process_tree: bool,
+        expected_parent_pid: int,
     ) -> None:
         # This path runs only in the forked, single-threaded child.  The worker
         # cannot run until the parent writes the start byte after pidfd_open.
         try:
+            if contain_process_tree:
+                self.ops.install_process_containment(expected_parent_pid)
             self.ops.close(gate_write_fd)
             self.ops.close(error_read_fd)
             token = _child_wait_for_gate(self.ops, gate_read_fd)
@@ -448,6 +573,32 @@ class GatedPidfdSupervisor:
         executable_fd: int | None = None,
         pass_fds: Sequence[int] = (),
         strict_fds: bool = False,
+        contain_process_tree: bool | None = None,
+    ) -> str:
+        required = (executable_fd is not None if contain_process_tree is None
+                    else contain_process_tree is True)
+        try:
+            return self._launch_impl(
+                argv, env=env, cwd=cwd, executable=executable,
+                executable_fd=executable_fd, pass_fds=pass_fds,
+                strict_fds=strict_fds, contain_process_tree=contain_process_tree,
+            )
+        except Exception:
+            if required:
+                self._containment_failure_latched = True
+            raise
+
+    def _launch_impl(
+        self,
+        argv: Sequence[str],
+        *,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+        executable: str | None = None,
+        executable_fd: int | None = None,
+        pass_fds: Sequence[int] = (),
+        strict_fds: bool = False,
+        contain_process_tree: bool | None = None,
     ) -> str:
         """Start argv behind a gate and return only after pidfd-backed exec."""
         if self._closing:
@@ -476,6 +627,14 @@ class GatedPidfdSupervisor:
             raise ValueError("executable must be an absolute NUL-free path")
         if type(strict_fds) is not bool:
             raise ValueError("strict_fds must be a boolean")
+        if contain_process_tree is not None and type(contain_process_tree) is not bool:
+            raise ValueError("contain_process_tree must be a boolean or None")
+        if contain_process_tree is None:
+            contain_process_tree = executable_fd is not None
+        if contain_process_tree and (executable_fd is None or not strict_fds):
+            raise ValueError("process containment requires a pinned executable and strict descriptors")
+        if executable_fd is not None and not contain_process_tree:
+            raise ValueError("pinned worker launches cannot disable process containment")
         if executable_fd is not None:
             if (isinstance(executable_fd, bool) or not isinstance(executable_fd, int)
                     or executable_fd < 0 or executable is None):
@@ -521,6 +680,7 @@ class GatedPidfdSupervisor:
                 preserve_required=bool(cleanup_errors),
             ) from exc
 
+        expected_parent_pid = os.getpid()
         try:
             pid = self.ops.fork()
         except Exception as exc:
@@ -538,6 +698,7 @@ class GatedPidfdSupervisor:
             self._child_exec(
                 gate_read_fd, gate_write_fd, error_read_fd, error_write_fd,
                 command, child_env, cwd, executable, executable_fd, inherited_fds, strict_fds,
+                contain_process_tree, expected_parent_pid,
             )
             os._exit(127)
 
@@ -577,6 +738,7 @@ class GatedPidfdSupervisor:
             pidfd=pidfd,
             exec_error_fd=error_read_fd,
             gate_write_fd=gate_write_fd,
+            containment_required=contain_process_tree,
         )
         self._workers[handle] = worker
 
@@ -608,6 +770,7 @@ class GatedPidfdSupervisor:
                 child_reaped=worker.reaped,
             ) from exc
         if outcome == "exec":
+            worker.containment_installed = contain_process_tree
             self._close_exec_error_fd(worker)
             return handle
 
@@ -718,6 +881,8 @@ class GatedPidfdSupervisor:
                     elif not worker.reaped:
                         worker.errors.append("worker exit and reap not confirmed; preserve backing")
 
+            if worker.containment_required and not worker.containment_installed:
+                worker.errors.append("process containment was not confirmed before exec")
             results.append(self._result(worker))
         return results
 
@@ -776,6 +941,9 @@ class GatedPidfdSupervisor:
             report_errors.append(
                 "omitted registered worker handles: " + ", ".join(sorted(missing))
             )
+
+        if self._containment_failure_latched:
+            report_errors.append("a process-contained launch failed; preserve backing")
 
         # Never let an incomplete caller list leave a registered worker alive.
         workers = tuple(self._workers.values())

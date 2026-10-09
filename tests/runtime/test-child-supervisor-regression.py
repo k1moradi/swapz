@@ -313,6 +313,163 @@ class SupervisorRootlessTests(unittest.TestCase):
                 os.close(unpassed_fd)
                 os.close(executable_fd)
 
+    def test_pinned_worker_cannot_create_process_descendants(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swapz-containment-fork-") as directory:
+            marker = Path(directory) / "fork-result"
+            executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                code = f"""
+import errno, os, signal, sys
+from pathlib import Path
+marker = Path({str(marker)!r})
+try:
+    child = os.fork()
+except OSError as error:
+    marker.write_text(str(error.errno))
+    raise SystemExit(0 if error.errno == errno.EPERM else 31)
+if child == 0:
+    os._exit(32)
+pidfd = os.pidfd_open(child)
+signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+os.waitpid(child, 0)
+marker.write_text('created')
+raise SystemExit(33)
+"""
+                supervisor = GatedPidfdSupervisor(term_grace=0.2, kill_grace=0.2)
+                handle = supervisor.launch(
+                    ("contained-worker", "-c", code, str(marker)),
+                    executable=f"/proc/self/fd/{executable_fd}",
+                    executable_fd=executable_fd,
+                    strict_fds=True,
+                )
+                worker = supervisor.worker_for_test(handle)
+                self.assertTrue(worker.containment_required)
+                self.assertTrue(worker.containment_installed)
+                result = supervisor.wait(handle, 3.0)
+                self.assertTrue(result.reaped, result.errors)
+                self.assertEqual(result.exit_code, 0, result.errors)
+                self.assertEqual(marker.read_text(), str(errno.EPERM))
+                report = supervisor.stop_all([handle])
+                self.assertTrue(report.cleanup_allowed, report)
+            finally:
+                os.close(executable_fd)
+
+    def test_pinned_worker_cannot_clear_parent_death_binding(self) -> None:
+        executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            code = """
+import ctypes
+import errno
+import os
+import platform
+
+setuid_denied = False
+try:
+    os.setuid(os.getuid())
+except OSError as error:
+    setuid_denied = error.errno == errno.EPERM
+
+libc = ctypes.CDLL(None, use_errno=True)
+libc.prctl.restype = ctypes.c_int
+ctypes.set_errno(0)
+pdeath_reset = libc.prctl(1, 0, 0, 0, 0)
+pdeath_denied = pdeath_reset == -1 and ctypes.get_errno() == errno.EPERM
+
+libc.syscall.restype = ctypes.c_long
+aio_setup = 206 if platform.machine().lower() in ("x86_64", "amd64") else 0
+async_denied = True
+for syscall_number in (aio_setup, 425):
+    ctypes.set_errno(0)
+    result = libc.syscall(syscall_number, 1, 0, 0, 0, 0, 0)
+    if result != -1 or ctypes.get_errno() != errno.EPERM:
+        async_denied = False
+
+raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
+"""
+            supervisor = GatedPidfdSupervisor(term_grace=0.2, kill_grace=0.2)
+            handle = supervisor.launch(
+                ("contained-worker", "-c", code),
+                executable=f"/proc/self/fd/{executable_fd}",
+                executable_fd=executable_fd,
+                strict_fds=True,
+            )
+            worker = supervisor.worker_for_test(handle)
+            self.assertTrue(worker.containment_installed)
+            result = supervisor.wait(handle, 3.0)
+            self.assertTrue(result.reaped, result.errors)
+            self.assertEqual(result.exit_code, 0, result.errors)
+            self.assertFalse(result.errors)
+            report = supervisor.stop_all([handle])
+            self.assertTrue(report.cleanup_allowed, report)
+        finally:
+            os.close(executable_fd)
+
+    def test_process_containment_setup_failure_denies_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swapz-containment-fail-") as directory:
+            marker = Path(directory) / "must-not-run"
+            executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+
+            class UnsupportedContainmentOps(LinuxPidfdOps):
+                def install_process_containment(self, expected_parent_pid: int) -> None:
+                    raise OSError(errno.ENOSYS, "injected seccomp/PDEATHSIG failure")
+
+            try:
+                supervisor = GatedPidfdSupervisor(ops=UnsupportedContainmentOps())
+                with self.assertRaises(SupervisorError) as caught:
+                    supervisor.launch(
+                        ("contained-worker", "-c",
+                         f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"),
+                        executable=f"/proc/self/fd/{executable_fd}",
+                        executable_fd=executable_fd,
+                        strict_fds=True,
+                    )
+                self.assertTrue(caught.exception.child_reaped)
+                self.assertFalse(marker.exists())
+                callbacks: list[str] = []
+                report, result = supervisor.cleanup_after_stop(
+                    [], lambda: callbacks.append("cleanup")
+                )
+                self.assertFalse(report.cleanup_allowed)
+                self.assertIsNone(result)
+                self.assertEqual(callbacks, [])
+                self.assertTrue(any("process-contained launch failed" in error
+                                    for error in report.errors))
+            finally:
+                os.close(executable_fd)
+
+    def test_two_process_contained_workers_are_accounted_before_cleanup(self) -> None:
+        executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            supervisor = GatedPidfdSupervisor(term_grace=0.3, kill_grace=0.3)
+            handles = []
+            for _ in range(2):
+                handles.append(supervisor.launch(
+                    ("contained-worker", "-c", "import time; time.sleep(0.05)"),
+                    executable=f"/proc/self/fd/{executable_fd}",
+                    executable_fd=executable_fd,
+                    strict_fds=True,
+                ))
+            self.assertEqual(len(handles), 2)
+            self.assertTrue(all(supervisor.worker_for_test(handle).containment_installed
+                                for handle in handles))
+            observed: list[tuple[bool, int]] = []
+
+            def cleanup() -> str:
+                observed.append((all(supervisor.worker_for_test(handle).reaped
+                                     for handle in handles), len(handles)))
+                return "all-contained-workers-reaped"
+
+            report, result = supervisor.cleanup_after_stop(
+                handles, cleanup
+            )
+            self.assertTrue(report.cleanup_allowed, report)
+            self.assertTrue(report.all_reaped)
+            self.assertEqual(result, "all-contained-workers-reaped")
+            self.assertEqual(observed, [(True, 2)])
+            self.assertTrue(all(row.reaped for row in report.results))
+        finally:
+            os.close(executable_fd)
+
     def test_invalid_pass_fds_fail_before_pipe_or_child_creation(self) -> None:
         ops = FaultOps()
         supervisor = GatedPidfdSupervisor(ops=ops)
@@ -327,6 +484,23 @@ class SupervisorRootlessTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "nonnegative integer"):
                 supervisor.launch((sys.executable, "-c", "pass"), pass_fds=(True,))
         self.assertEqual(ops.pipe_count, 0)
+
+    def test_pinned_executable_cannot_opt_out_of_process_containment(self) -> None:
+        ops = FaultOps()
+        supervisor = GatedPidfdSupervisor(ops=ops)
+        executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            with self.assertRaisesRegex(ValueError, "cannot disable process containment"):
+                supervisor.launch(
+                    ("pinned", "-c", "pass"),
+                    executable=f"/proc/self/fd/{executable_fd}",
+                    executable_fd=executable_fd,
+                    strict_fds=True,
+                    contain_process_tree=False,
+                )
+            self.assertEqual(ops.pipe_count, 0)
+        finally:
+            os.close(executable_fd)
 
     def test_stopped_child_gets_cont_then_term_through_one_pidfd(self) -> None:
         with tempfile.TemporaryDirectory(prefix="swapz-pidfd-stopped-") as tmp:

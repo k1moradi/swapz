@@ -1032,6 +1032,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         ))
         self.assertEqual(writer_options["executable_fd"], exec_fd)
         self.assertTrue(writer_options["strict_fds"])
+        self.assertTrue(writer_options["contain_process_tree"])
         self.assertNotIn(exec_fd, writer_options["pass_fds"])
         for role, (argv, options), page in zip(roles[1:], fake.launch_records[1:], (0, 4, 0, 5)):
             output_fd = int(argv[2].rsplit("/", 1)[1])
@@ -1042,6 +1043,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
             self.assertEqual(options["pass_fds"], (source_fd, mapper_fd, output_fd))
             self.assertEqual(options["executable_fd"], exec_fd)
             self.assertTrue(options["strict_fds"])
+            self.assertTrue(options["contain_process_tree"])
             self.assertEqual(Path(gate._directory_path / ("read-" + role)).name, "read-" + role)
         self.assertTrue(os.path.exists(f"/proc/self/fd/{exec_fd}"))
         self.assertEqual(client.call("stop_all", handles=handles)["status"], "complete")

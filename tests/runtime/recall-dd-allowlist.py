@@ -10,6 +10,8 @@ descriptor and a fake supervisor. No test starts dd or performs device I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import errno
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -76,6 +78,69 @@ class RecallDDFileOps:
     def access(self, path: str, mode: int) -> bool:
         return os.access(path, mode, effective_ids=True)
 
+    def create_sealed_executable(self, source_fd: int, expected_sha256: str,
+                                 maximum_size: int) -> int:
+        """Copy verified bytes into an executable, write-sealed memfd.
+
+        This closes the in-place modification window between hashing a pinned
+        package executable and the worker's execve. Older kernels or hosts
+        whose memfd policy disallows executable memfds fail closed.
+        """
+        if not callable(getattr(os, "memfd_create", None)):
+            raise OSError(errno.ENOSYS, "memfd_create is unavailable")
+        info = os.fstat(source_fd)
+        if info.st_size <= 0 or info.st_size > maximum_size:
+            raise OSError(errno.EINVAL, "executable size is outside the verification bound")
+        # MFD_EXEC is Linux UAPI 0x0010. Python versions may not expose the
+        # constant even when the running kernel supports it.
+        flags = (getattr(os, "MFD_CLOEXEC", 0x0001)
+                 | getattr(os, "MFD_ALLOW_SEALING", 0x0002)
+                 | getattr(os, "MFD_EXEC", 0x0010))
+        snapshot_fd = os.memfd_create("swapz-pinned-dd", flags)
+        try:
+            digest = hashlib.sha256()
+            offset = 0
+            while offset < info.st_size:
+                chunk = os.pread(source_fd, min(1024 * 1024, info.st_size - offset), offset)
+                if not chunk or len(chunk) > info.st_size - offset:
+                    raise OSError(errno.EIO, "trusted executable changed or truncated while snapshotting")
+                digest.update(chunk)
+                written_offset = 0
+                while written_offset < len(chunk):
+                    written = os.write(snapshot_fd, chunk[written_offset:])
+                    if written <= 0:
+                        raise OSError(errno.EIO, "short write while snapshotting trusted executable")
+                    written_offset += written
+                offset += len(chunk)
+            after = os.fstat(source_fd)
+            before_identity = (info.st_dev, info.st_ino, info.st_size,
+                               info.st_mtime_ns, info.st_ctime_ns)
+            after_identity = (after.st_dev, after.st_ino, after.st_size,
+                              after.st_mtime_ns, after.st_ctime_ns)
+            if (before_identity != after_identity
+                    or digest.hexdigest() != expected_sha256):
+                raise OSError(errno.EPERM, "pinned executable does not match trusted SHA-256 identity")
+
+            os.fchmod(snapshot_fd, 0o500)
+            required_seals = (getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+                              | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+                              | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+                              | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+                              | getattr(fcntl, "F_SEAL_EXEC", 0x0020))
+            fcntl.fcntl(snapshot_fd, getattr(fcntl, "F_ADD_SEALS", 1033), required_seals)
+            actual_seals = fcntl.fcntl(snapshot_fd, getattr(fcntl, "F_GET_SEALS", 1034))
+            if actual_seals & required_seals != required_seals:
+                raise OSError(errno.EPERM, "executable memfd is missing required write seals")
+            if os.get_inheritable(snapshot_fd):
+                raise OSError(errno.EBADF, "executable memfd is unexpectedly inheritable")
+            return snapshot_fd
+        except Exception as exc:
+            try:
+                os.close(snapshot_fd)
+            except Exception as close_error:
+                raise OSError(errno.EIO, f"sealed executable snapshot failed ({exc}); close failed ({close_error})") from exc
+            raise
+
 
 def _verify_dm_descriptor(fd: int, mapper_name: str, ops: RecallDDFileOps) -> None:
     info = ops.fstat(fd)
@@ -139,6 +204,7 @@ class RecallDDLaunchGate:
         *,
         mapper_fd: int,
         executable_path: Path = Path("/usr/bin/dd"),
+        expected_executable_sha256: str | None = None,
         ops: RecallDDFileOps | None = None,
         mapper_verifier=None,
     ) -> None:
@@ -156,6 +222,8 @@ class RecallDDLaunchGate:
         self._source_fd: int | None = None
         self._mapper_fd: int | None = None
         self._executable_fd: int | None = None
+        self._sealed_executable_identity: tuple[int, int, int] | None = None
+        self._expected_executable_sha256 = expected_executable_sha256
 
         if not isinstance(fixture_dir, Path) or not fixture_dir.is_absolute():
             raise DDPolicyDenied("fixture directory must be an absolute Path")
@@ -167,6 +235,16 @@ class RecallDDLaunchGate:
             raise DDPolicyDenied("trusted mapper descriptor is invalid")
         if self.ops.inheritable(mapper_fd):
             raise DDPolicyDenied("trusted mapper descriptor must be close-on-exec")
+        mapper_stat = self.ops.fstat(mapper_fd)
+        self._mapper_is_block = stat.S_ISBLK(mapper_stat.st_mode)
+        if expected_executable_sha256 is not None and re.fullmatch(
+            r"[0-9a-f]{64}", expected_executable_sha256
+        ) is None:
+            raise DDPolicyDenied("trusted executable SHA-256 must be 64 lowercase hexadecimal characters")
+        if self._mapper_is_block and expected_executable_sha256 is None:
+            raise DDPolicyDenied(
+                "block-mapper launch requires an independently trusted executable SHA-256"
+            )
         if not isinstance(executable_path, Path) or not executable_path.is_absolute():
             raise DDPolicyDenied("pinned dd executable path must be absolute")
 
@@ -203,10 +281,22 @@ class RecallDDLaunchGate:
             if mapper_verified is False:
                 raise DDPolicyDenied("trusted mapper descriptor identity was rejected")
 
-            self._executable_fd = self.ops.open(
+            executable_source_fd = self.ops.open(
                 str(executable_path), os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK,
             )
-            self._owned_fds.append(self._executable_fd)
+            self._owned_fds.append(executable_source_fd)
+            self._verify_executable_source(executable_source_fd)
+            if self._mapper_is_block:
+                assert self._expected_executable_sha256 is not None
+                self._executable_fd = self.ops.create_sealed_executable(
+                    executable_source_fd, self._expected_executable_sha256,
+                    128 * 1024 * 1024,
+                )
+                self._owned_fds.append(self._executable_fd)
+                snapshot = self.ops.fstat(self._executable_fd)
+                self._sealed_executable_identity = (snapshot.st_dev, snapshot.st_ino, snapshot.st_size)
+            else:
+                self._executable_fd = executable_source_fd
             self._verify_executable()
             try:
                 proc_fd = self.ops.stat("/proc/self/fd", dir_fd=self._directory_fd,
@@ -287,14 +377,69 @@ class RecallDDLaunchGate:
             except Exception as exc:
                 raise DDPolicyDenied(f"fixture path descriptor close failed: {exc}") from exc
 
+    @staticmethod
+    def _validate_executable_stat(info) -> None:
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in {0, os.geteuid()}
+                or info.st_mode & 0o022
+                or not info.st_mode & 0o111
+                or info.st_mode & (stat.S_ISUID | stat.S_ISGID)):
+            raise DDPolicyDenied("dd executable identity is not trusted ELF")
+
+    def _verify_executable_source(self, fd: int) -> None:
+        info = self.ops.fstat(fd)
+        self._validate_executable_stat(info)
+        if self.ops.pread(fd, 4, 0) != b"\x7fELF" or self.ops.inheritable(fd):
+            raise DDPolicyDenied("dd executable identity is not trusted ELF")
+        if self._mapper_is_block:
+            if info.st_uid != 0:
+                raise DDPolicyDenied("block-mapper executable must be root-owned")
+            assert self._expected_executable_sha256 is not None
+            if info.st_size <= 0 or info.st_size > 128 * 1024 * 1024:
+                raise DDPolicyDenied("trusted dd executable size is outside the verification bound")
+            digest = hashlib.sha256()
+            offset = 0
+            while offset < info.st_size:
+                chunk = self.ops.pread(fd, min(1024 * 1024, info.st_size - offset), offset)
+                if not chunk or len(chunk) > info.st_size - offset:
+                    raise DDPolicyDenied("trusted dd executable changed or truncated during hashing")
+                digest.update(chunk)
+                offset += len(chunk)
+            after = self.ops.fstat(fd)
+            before_identity = (info.st_dev, info.st_ino, info.st_size,
+                               info.st_mtime_ns, info.st_ctime_ns)
+            after_identity = (after.st_dev, after.st_ino, after.st_size,
+                              after.st_mtime_ns, after.st_ctime_ns)
+            if (before_identity != after_identity
+                    or digest.hexdigest() != self._expected_executable_sha256):
+                raise DDPolicyDenied("pinned dd executable does not match trusted SHA-256 identity")
+
     def _verify_executable(self) -> None:
         assert self._executable_fd is not None
         info = self.ops.fstat(self._executable_fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid not in {0, os.geteuid()}
-                or info.st_mode & 0o022 or not info.st_mode & 0o111
-                or self.ops.pread(self._executable_fd, 4, 0) != b"\x7fELF"
-                or self.ops.inheritable(self._executable_fd)):
+        self._validate_executable_stat(info)
+        if self.ops.pread(self._executable_fd, 4, 0) != b"\x7fELF":
             raise DDPolicyDenied("dd executable identity is not trusted ELF")
+        if self.ops.inheritable(self._executable_fd):
+            raise DDPolicyDenied("dd executable descriptor is not close-on-exec")
+        if self._mapper_is_block:
+            assert self._expected_executable_sha256 is not None
+            assert self._sealed_executable_identity is not None
+            if info.st_uid != os.geteuid() or self._sealed_executable_identity != (
+                info.st_dev, info.st_ino, info.st_size
+            ):
+                raise DDPolicyDenied("sealed executable identity changed")
+            required_seals = (getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+                              | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+                              | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+                              | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+                              | getattr(fcntl, "F_SEAL_EXEC", 0x0020))
+            try:
+                seals = fcntl.fcntl(self._executable_fd, getattr(fcntl, "F_GET_SEALS", 1034))
+            except OSError as exc:
+                raise DDPolicyDenied(f"cannot inspect executable memfd seals: {exc}") from exc
+            if seals & required_seals != required_seals:
+                raise DDPolicyDenied("executable memfd is not fully write-sealed")
         if not self.ops.access(f"/proc/self/fd/{self._executable_fd}", os.X_OK):
             raise DDPolicyDenied("pinned dd executable is not executable by the service")
 

@@ -381,6 +381,7 @@ class SupervisorControlService:
                 "executable_fd": launch.executable_fd,
                 "pass_fds": launch.pass_fds,
                 "strict_fds": True,
+                "contain_process_tree": True,
             }
         else:
             raise ProtocolError("command is not in the test worker allowlist", request_id=request_id)
