@@ -17,6 +17,14 @@ if [[ "$BACKEND_KIND" == nbd && ! "$NBD_DEVICE" =~ ^/dev/nbd[0-9]+$ ]]; then
   echo "ERROR: NBD backend requires an explicit unused SWAPZ_BENCH_NBD_DEVICE=/dev/nbdN" >&2
   exit 4
 fi
+# NBD benchmarking is intentionally disabled until its test-owned service
+# lifecycle is controlled through a retained pidfd. The historical Bash
+# background PID plus kill -TERM path can signal a reused numeric PID. This
+# guard executes before allocation, NBD attachment, or worker launch.
+if [[ "$BACKEND_KIND" == nbd ]]; then
+  echo "ERROR: NBD backend disabled: numeric-PID service ownership is not safe; preserve backing and use a separately reviewed pidfd-owned controller." >&2
+  exit 4
+fi
 BANDWIDTH=${SWAPZ_BENCH_MBPS:-20}
 LATENCY_NS=${SWAPZ_BENCH_LATENCY_NS:-500000}
 RUNTIME=${SWAPZ_BENCH_RUNTIME:-3}
