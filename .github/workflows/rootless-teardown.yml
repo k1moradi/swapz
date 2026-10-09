@@ -52,6 +52,9 @@ on:
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
+      - 'tests/runtime/streaming-benchmark-teardown.sh'
+      - 'tests/runtime/streaming-teardown-regression.sh'
+      - 'tests/runtime/size-aware-nbd-teardown-test.sh'
   pull_request:
     paths:
       - '.github/workflows/rootless-teardown.yml'
@@ -82,6 +85,13 @@ jobs:
           bash -n tests/runtime/pressure-runner-regression.sh
       - name: Rootless DM and loop teardown regression
         run: bash tests/runtime/test-stack-teardown-regression.sh
+      - name: Rootless NBD and streaming fail-closed teardown mocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/streaming-benchmark-teardown.sh tests/runtime/streaming-teardown-regression.sh tests/runtime/size-aware-nbd-teardown-test.sh
+          timeout 15s bash tests/runtime/size-aware-nbd-teardown-test.sh
+          timeout 15s bash tests/runtime/streaming-teardown-regression.sh
       - name: Rootless pressure teardown regression
         run: bash tests/runtime/pressure-teardown-regression.sh
       - name: Gated pidfd supervisor rootless safety regression
