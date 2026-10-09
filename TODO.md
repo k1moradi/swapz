@@ -954,3 +954,49 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       without separate operator authorization, qualified drain,
       repeated virtual and physical evidence and p99 review.
       V2.2 strategy/batch remains **UNDETERMINED**.
+
+### 2026-10-09 — GNU 9.11 review and rootless recall/fixture-release qualification
+
+- [x] Independently inspect Codex's GNU 9.11 qualification
+      code, build records, five-role execution claim and exact
+      GitHub Actions results; record trust-boundary gaps in
+      `docs/codex-gnu-9-11-review-2026-10-09.md`.
+- [x] Confirm Codex's follow-up `d168378c` removes unconfined
+      candidate version execution and independently hashes both
+      pinned build outputs before accepting the same-host record.
+      This does NOT establish independent builder reproducibility.
+- [x] Integrate GNU 9.11 source/ELF qualification-policy tests
+      and build-record tests explicitly into both mandatory
+      rootless workflows, with bounded timeouts and triggers.
+- [x] Include Codex's newly added signed/ordered fixture-release
+      **model** (five tests) in both workflows and retain its
+      separate backing-authorization semantics.
+- [x] Diagnose a previously intermittent positive rootless
+      readback mismatch: a short synthetic writer was still
+      populating the mapper's private ordinary file when readers
+      started. Use a bounded, exact-inode/expected-byte fixture
+      barrier rather than weaken worker READY or page-integrity
+      attestation. No production mapper/worker code is changed.
+- [x] Add bounded launch/WAIT error evidence, explicit
+      unconfirmed, malformed and duplicate READY handle negative
+      tests; denied synthetic backing remains preserved.
+- [x] Repeat six independent five-role positive sessions in
+      both workflows and fail on the first denial. Both
+      exact-revision rootless workflows PASS at
+      `f4c0be7eb7bc6d62c2d7485208018c527ee351af`:
+      https://github.com/k1moradi/swapz/actions/runs/37941810631
+      https://github.com/k1moradi/swapz/actions/runs/37941810576
+- [ ] Confirm GNU 9.11 from an **independent controlled build
+      host**, review production manifest and signing-key
+      provisioning, and independently verify the trusted OS
+      closure for dynamic OpenSSL/GPG verifiers.
+- [ ] Implement an independently privileged, enforceable exact
+      mapper owner, actual kernel-side I/O quiescence checks
+      and a separately qualified full-stack backing-release gate.
+      Session-HMAC report tests are policy models, not kernel data.
+- [ ] Keep testing repeated positive recall sessions across
+      different runner and scheduling conditions; six clean
+      sessions do not prove flake-free behavior. Never authorize
+      cleanup after a failed role receipt or partial writer.
+- [ ] No V2.2 batch or strategy winner until explicitly authorized
+      disposable virtual, then physical, drain/read-p99 experiments.
