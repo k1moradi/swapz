@@ -49,6 +49,8 @@ on:
       - 'tests/runtime/recall-io-drain-policy-test.py'
       - 'tests/runtime/recall-io-drain-orchestrator.py'
       - 'tests/runtime/recall-io-drain-orchestrator-test.py'
+      - 'tests/runtime/recall-fixture-release-policy.py'
+      - 'tests/runtime/recall-fixture-release-policy-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
       - 'tests/runtime/live-gc-latency-analyze.py'
       - 'tests/runtime/v22-drain-plateau-analyze.py'
@@ -268,6 +270,13 @@ jobs:
           python3 -m py_compile tests/runtime/recall-io-drain-policy.py tests/runtime/recall-io-drain-policy-test.py tests/runtime/recall-io-drain-orchestrator.py tests/runtime/recall-io-drain-orchestrator-test.py
           timeout 25s python3 -B tests/runtime/recall-io-drain-policy-test.py -v
           timeout 25s python3 -B tests/runtime/recall-io-drain-orchestrator-test.py -v
+      - name: Rootless authenticated fixture-release policy regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-fixture-release-policy.py tests/runtime/recall-fixture-release-policy-test.py
+          timeout 35s python3 -B tests/runtime/recall-fixture-release-policy-test.py -v
+          echo "FIXTURE_RELEASE_POLICY_MODEL_ONLY: PASS (no kernel drain or backing cleanup)"
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |
