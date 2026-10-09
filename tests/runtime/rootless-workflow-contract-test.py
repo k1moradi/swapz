@@ -153,6 +153,9 @@ def check_nbd_workflow(source: str) -> None:
     paths = _push_paths(source)
     _require(name in paths and "tests/runtime/" + SELF_TEST in paths,
              f"{name}: missing source or workflow push trigger")
+    for joint in WORKFLOWS:
+        _require(joint in paths,
+                 f"{name}: edits to dependent workflow {joint} must trigger NBD contract")
     body = _job_body(source)
     referenced = frozenset(RUNTIME_FILE.findall(body))
     _require(bool(referenced), f"{name}: no runtime sources discovered")
@@ -243,6 +246,14 @@ class RootlessWorkflowContractTests(unittest.TestCase):
 
     def test_standalone_nbd_gate_retains_static_syscall_and_stress_checks(self):
         check_nbd_workflow(self.nbd_source)
+
+    def test_nbd_must_recheck_joint_workflow_source_changes(self):
+        for joint in WORKFLOWS:
+            with self.subTest(workflow=joint):
+                path = f"      - '{joint}'\\n"
+                self.assertIn(path, self.nbd_source)
+                with self.assertRaisesRegex(WorkflowContractError, "dependent workflow"):
+                    check_nbd_workflow(self.nbd_source.replace(path, "", 1))
 
     def test_nbd_missing_runtime_source_trigger_is_rejected(self):
         item = "      - 'tests/runtime/nbd-pidfd-owned-session-test.py'\n"
