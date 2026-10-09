@@ -8,6 +8,8 @@ temporary regular files. No mapper, loop, NBD, swap, module or physical device.
 from __future__ import annotations
 
 import importlib.util
+import math
+import stat
 import os
 from pathlib import Path
 import signal
@@ -113,32 +115,83 @@ class RootlessDirectProcessSession:
         result = self.dispatch("WAIT", handle=handle, timeout_ms=5000)
         assert result["status"] == "reaped", result
 
-    def await_synthetic_writer_contents(self, deadline_seconds: float = 2.0) -> None:
-        """Fixture-only positive ordering barrier; NOT kernel I/O drain proof.
+    def _refuse_synthetic_writer_readiness(self, reason: str) -> None:
+        """Latch permanent denial at every rootless controller layer.
 
-        The protocol intentionally defers the writer WAIT until all reader
-        receipts have been verified. A fast reader otherwise races a tiny
-        36-KiB test writer, and gets a legitimate readback mismatch.
-        Check the exact private regular-file mapper's bytes and inode before
-        starting positive reads. This does not authorize backing cleanup.
+        This helper never deletes or truncates backing. Closing the control
+        socket requests only service-side preservation/reaping of test-owned
+        children; a successful reap is not a cleanup authorization.
         """
+        self.bridge.failed = True
+        self.adapter._denied = True
+        self.client._deny()
+        try:
+            self.client.close()
+        except OSError:
+            pass
+        raise RoleError(f"synthetic writer readiness unconfirmed: {reason[:160]}; preserve backing")
+
+    def await_synthetic_writer_contents(self, deadline_seconds: float = 2.0) -> None:
+        """Bounded fixture-only writer-data barrier; NOT a kernel drain proof.
+
+        We cannot WAIT on writer before all readers are attested, but a
+        concurrently launched reader must not read zero/partial page-cache
+        data. Check the exact original private regular-file inode, contents
+        and path binding *before* positive reader admission. This check
+        cannot prove that a writer will never write again or that a device
+        has drained; only the synthetic fixture may use it.
+        """
+        if (type(deadline_seconds) not in (float, int) or
+                not math.isfinite(deadline_seconds) or
+                not 0 < deadline_seconds <= 5):
+            self._refuse_synthetic_writer_readiness("invalid bounded deadline")
+
         target = self.root / "synthetic-mapper.bin"
-        initial = os.stat(target, follow_symlinks=False)
-        deadline = time.monotonic() + deadline_seconds
-        with target.open("rb") as stream:
-            pinned = os.fstat(stream.fileno())
-            if ((initial.st_dev, initial.st_ino) != (pinned.st_dev, pinned.st_ino)
-                    or pinned.st_size != len(self.expected)):
-                raise AssertionError("synthetic writer file identity changed; preserve backing")
-            while time.monotonic() < deadline:
-                stream.seek(0)
-                if stream.read(len(self.expected) + 1) == self.expected:
-                    after = os.stat(target, follow_symlinks=False)
-                    if (after.st_dev, after.st_ino) != (pinned.st_dev, pinned.st_ino):
-                        raise AssertionError("synthetic writer path replaced; preserve backing")
-                    return
-                time.sleep(0.001)
-        raise AssertionError("synthetic writer never populated expected bytes; preserve backing")
+        fd = None
+        try:
+            initial = os.lstat(target)
+            if not hasattr(os, "O_NOFOLLOW"):
+                raise RuntimeError("symlink-safe descriptor pinning unavailable")
+            fd = os.open(target, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            pinned = os.fstat(fd)
+            identity = lambda info: (
+                info.st_dev, info.st_ino, info.st_size, info.st_nlink,
+                stat.S_IMODE(info.st_mode), info.st_uid,
+            )
+            if (not stat.S_ISREG(pinned.st_mode) or pinned.st_uid != os.geteuid()
+                    or pinned.st_nlink != 1 or stat.S_IMODE(pinned.st_mode) != 0o600
+                    or pinned.st_size != len(self.expected)
+                    or identity(initial) != identity(pinned)):
+                raise RuntimeError("synthetic mapper inode, metadata or size differs")
+
+            deadline = time.monotonic() + deadline_seconds
+            while True:
+                if self.process.poll() is not None:
+                    raise RuntimeError("owned recall service exited before writer readiness")
+                current = os.lstat(target)
+                if identity(current) != identity(pinned):
+                    raise RuntimeError("synthetic mapper pathname or inode changed")
+                data = os.pread(fd, len(self.expected) + 1, 0)
+                if data == self.expected:
+                    final = os.lstat(target)
+                    if (identity(final) != identity(pinned)
+                            or self.process.poll() is not None):
+                        raise RuntimeError("writer identity changed or service exited at readiness")
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("synthetic writer never populated expected bytes")
+                time.sleep(min(0.002, remaining))
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._refuse_synthetic_writer_readiness(str(exc))
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError as exc:
+                    self._refuse_synthetic_writer_readiness(
+                        f"cannot close pinned writer observation: {exc}"
+                    )
 
     def run_five(self) -> tuple[str, ...]:
         writer = self.launch("writer")
