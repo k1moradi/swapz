@@ -49,6 +49,7 @@ MapperOwnerDenied = policy_module.MapperOwnerDenied
 WorkerCompletionEvidence = policy_module.WorkerCompletionEvidence
 MapperSuspendObservation = policy_module.MapperSuspendObservation
 MapperOpenersObservation = policy_module.MapperOpenersObservation
+MapperRemovalObservation = policy_module.MapperRemovalObservation
 worker_completion_payload = policy_module.worker_completion_payload
 RealRecallDDFileOps = RecallDDFileOps
 plan_module = load("recall_io_plan_allowlist_contract", HERE / "recall-io-plan.py")
@@ -533,7 +534,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 self.inventory_valid = True
                 self.remove_result = True
                 self.suspend_result = MapperSuspendObservation(
-                    True, True, False, False, True, True,
+                    True, True, False, False, True, True, True,
                 )
                 self.openers_result = MapperOpenersObservation(True, True, 0, ())
                 self.worker_key = b"rootless-test-owner-worker-attestation-key"
@@ -562,7 +563,9 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                     raise AssertionError("owner attempted unexpected mapping removal")
                 if self.remove_result:
                     self.entries = ()
-                return self.remove_result
+                return MapperRemovalObservation(
+                    self.remove_result, True, False, False, True,
+                )
 
             def suspend_mapping(self, identity, *, noflush):
                 self.events.append("suspend")
@@ -1234,7 +1237,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
 
         owner.close_admission()
         self.assertEqual(owner.state, MapperLifecycleOwner.ADMISSION_CLOSED)
-        owner.release_mapping(self._worker_evidence(owner))
+        release_report = owner.release_mapping(self._worker_evidence(owner))
 
         self.assertEqual(owner.state, MapperLifecycleOwner.MAPPING_RELEASED)
         self.assertTrue(owner.mapping_released)
@@ -1249,6 +1252,13 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         self.assertEqual(operations.events[remove_index + 1:], ["inventory"])
         self.assertEqual(identity, owner.identity)
         self.assertIsInstance(mapper_fd, int)
+        self.assertIsInstance(release_report, policy_module.MapperReleaseReport)
+        self.assertEqual(release_report.identity, identity)
+        self.assertTrue(release_report.suspend.pending_io_drained)
+        self.assertTrue(release_report.mapper_descriptor_closed)
+        self.assertEqual(release_report.openers.open_count, 0)
+        self.assertTrue(release_report.removal.normal_remove)
+        self.assertTrue(release_report.lease_released)
 
     def test_mapper_owner_missing_worker_or_descriptor_evidence_permanently_denies(self):
         path = self.base / "owner-incomplete-shutdown-dd"
@@ -1297,7 +1307,8 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 self.assertNotIn("remove", owner.operations.events)
 
     def test_mapper_owner_denies_unverified_suspend_and_openers(self):
-        for failure in ("suspend-timeout", "suspend-noflush", "open-count", "holders", "inventory"):
+        for failure in ("suspend-timeout", "suspend-noflush", "suspend-not-drained",
+                        "open-count", "holders", "inventory"):
             with self.subTest(failure=failure):
                 path = self.base / ("owner-drain-failure-" + failure)
                 path.write_bytes(self.static_elf_fixture())
@@ -1311,6 +1322,10 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 elif failure == "suspend-noflush":
                     operations.suspend_result = MapperSuspendObservation(
                         True, False, True, False, True, True,
+                    )
+                elif failure == "suspend-not-drained":
+                    operations.suspend_result = MapperSuspendObservation(
+                        True, True, False, False, True, True, False,
                     )
                 elif failure == "open-count":
                     operations.openers_result = MapperOpenersObservation(True, True, 1, ())
@@ -1388,6 +1403,29 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         self.assertTrue(owner.backing_must_be_preserved)
         self.assertFalse(owner.mapping_released)
         self.assertEqual(operations.entries, (owner.identity,))
+
+    def test_mapper_owner_rejects_malformed_normal_remove_receipt_types(self):
+        path = self.base / "owner-malformed-remove-observation"
+        path.write_bytes(self.static_elf_fixture())
+        path.chmod(0o755)
+        _fd, _ops, _identity, _lease, owner = self.block_fixture(path)
+        operations = owner.operations
+        original = operations.remove_mapping
+
+        def malformed(identity):
+            operations.events.append("remove")
+            original(identity)
+            return MapperRemovalObservation(1, True, False, False, True)
+
+        operations.remove_mapping = malformed
+        owner.authorize_role("writer")
+        owner.register_worker("remove-worker", "writer")
+        owner.close_admission()
+        with self.assertRaises(MapperOwnerDenied):
+            owner.release_mapping(self._worker_evidence(owner))
+        self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+        self.assertTrue(owner.backing_must_be_preserved)
+        self.assertEqual(operations.entries, ())
 
     def test_mapper_owner_rejects_bad_inventory_and_owner_loss(self):
         for failure_kind in ("invalid", "duplicate", "owner-lost-during-inventory",

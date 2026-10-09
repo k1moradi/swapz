@@ -239,6 +239,11 @@ class MapperLifecycleLease:
     def expected(self) -> MapperIdentity:
         return self._expected
 
+    @property
+    def closed(self) -> bool:
+        """Whether this exact cooperative lease has been permanently released."""
+        return self._closed
+
     def assert_held(self) -> None:
         """Fail unless this exact lease descriptor remains exclusively locked."""
         if self._closed or self._lock_fd is None:
@@ -736,6 +741,10 @@ class MapperSuspendObservation:
     timed_out: bool
     identity_matches: bool
     suspended: bool
+    # A real owner must derive this from a separately documented kernel
+    # completion observation. The rootless fakes set it explicitly; the
+    # default is deliberately fail-closed for old operation adapters.
+    pending_io_drained: bool = False
 
 
 @dataclass(frozen=True)
@@ -744,6 +753,41 @@ class MapperOpenersObservation:
     identity_matches: bool
     open_count: int
     holders: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MapperRemovalObservation:
+    """Outcome of the owner's fixed normal-remove operation."""
+
+    succeeded: bool
+    normal_remove: bool
+    force: bool
+    deferred: bool
+    identity_matches: bool
+
+
+@dataclass(frozen=True)
+class MapperReleaseReport:
+    """Exact observations returned only after MapperLifecycleOwner release.
+
+    This is an in-process report for the rootless fixture evidence producer.
+    It is not a kernel-authenticated receipt and cannot establish real DM I/O
+    drain. Its fields are populated from operation results captured by the
+    owner, rather than caller-supplied success flags.
+    """
+
+    session_id: str
+    identity: MapperIdentity
+    worker_completion: WorkerCompletionEvidence
+    inventory_before: MapperInventory
+    suspend: MapperSuspendObservation
+    mapper_descriptor_closed: bool
+    inventory_after_suspend: MapperInventory
+    openers: MapperOpenersObservation
+    inventory_before_remove: MapperInventory
+    removal: MapperRemovalObservation
+    inventory_after: MapperInventory
+    lease_released: bool
 
 
 def worker_completion_payload(evidence: WorkerCompletionEvidence) -> bytes:
@@ -995,7 +1039,7 @@ class MapperLifecycleOwner:
             self._check_owner_and_lease()
             self.state = self.ADMISSION_CLOSED
 
-    def release_mapping(self, evidence: WorkerCompletionEvidence) -> None:
+    def release_mapping(self, evidence: WorkerCompletionEvidence) -> MapperReleaseReport:
         with self._operation(self.ADMISSION_CLOSED):
             if type(evidence) is not WorkerCompletionEvidence:
                 self._deny("authenticated worker completion evidence is required")
@@ -1022,15 +1066,21 @@ class MapperLifecycleOwner:
             if authenticated is not True:
                 self._deny("worker completion authentication did not succeed")
             self._check_owner_and_lease()
-            self._inventory(present=True)
+            inventory_before = self._inventory(present=True)
             try:
                 suspended = self.operations.suspend_mapping(self.identity, noflush=False)
             except Exception as exc:
                 self._deny(f"ordinary DM suspend failed: {exc}")
             if (type(suspended) is not MapperSuspendObservation
+                    or any(type(value) is not bool for value in (
+                        suspended.succeeded, suspended.ordinary_flush, suspended.noflush,
+                        suspended.timed_out, suspended.identity_matches, suspended.suspended,
+                        suspended.pending_io_drained,
+                    ))
                     or suspended != MapperSuspendObservation(
                         succeeded=True, ordinary_flush=True, noflush=False,
-                        timed_out=False, identity_matches=True, suspended=True)):
+                        timed_out=False, identity_matches=True, suspended=True,
+                        pending_io_drained=True)):
                 self._deny("ordinary DM suspend or its identity/drain evidence is unverified")
             self._check_owner_and_lease()
             if self._mapper_fd is None:
@@ -1040,7 +1090,9 @@ class MapperLifecycleOwner:
                 self.file_ops.close(fd)
             except Exception as exc:
                 self._deny(f"retained mapper descriptor close failed: {exc}")
+            mapper_descriptor_closed = True
             self._check_owner_and_lease()
+            inventory_after_suspend = self._inventory(present=True)
             try:
                 openers = self.operations.inspect_openers(self.identity)
             except Exception as exc:
@@ -1052,20 +1104,42 @@ class MapperLifecycleOwner:
                     or type(openers.holders) is not tuple or openers.holders != ()):
                 self._deny("DM open-count or holder inventory is not positively empty")
             self._check_owner_and_lease()
+            inventory_before_remove = self._inventory(present=True)
             try:
                 removed = self.operations.remove_mapping(self.identity)
             except Exception as exc:
                 self._deny(f"normal exact mapper removal failed: {exc}")
-            if removed is not True:
+            if (type(removed) is not MapperRemovalObservation
+                    or any(type(value) is not bool for value in (
+                        removed.succeeded, removed.normal_remove, removed.force,
+                        removed.deferred, removed.identity_matches,
+                    ))
+                    or removed != MapperRemovalObservation(
+                        succeeded=True, normal_remove=True, force=False,
+                        deferred=False, identity_matches=True)):
                 self._deny("normal exact mapper removal was not confirmed")
             self._check_owner_and_lease()
-            self._inventory(present=False)
+            inventory_after = self._inventory(present=False)
             self._check_owner_and_lease()
             try:
                 self.lease.close()
             except Exception as exc:
                 self._deny(f"lease release failed after verified mapper absence: {exc}")
             self.state = self.MAPPING_RELEASED
+            return MapperReleaseReport(
+                session_id=self.lease.session_id,
+                identity=self.identity,
+                worker_completion=evidence,
+                inventory_before=inventory_before,
+                suspend=suspended,
+                mapper_descriptor_closed=mapper_descriptor_closed,
+                inventory_after_suspend=inventory_after_suspend,
+                openers=openers,
+                inventory_before_remove=inventory_before_remove,
+                removal=removed,
+                inventory_after=inventory_after,
+                lease_released=self.lease.closed,
+            )
 
 
 def _verify_dm_descriptor(fd: int, mapper_name: str, ops: RecallDDFileOps,
@@ -1757,5 +1831,6 @@ __all__ = [
     "TrustedGNUCoreutilsDD", "MapperIdentity", "MapperLifecycleLease",
     "MapperInventory", "MapperLifecycleOwner", "MapperOwnerDenied",
     "WorkerCompletionEvidence", "MapperSuspendObservation", "MapperOpenersObservation",
+    "MapperRemovalObservation", "MapperReleaseReport",
     "worker_completion_payload",
 ]

@@ -1,8 +1,9 @@
 # Recall fixture owner and backing-release evidence
 
-**Status: rootless policy qualification only.** No privileged broker, real DM
-mapping, swap transition, loop detach, or backing-file cleanup is implemented
-or qualified. Production direct-mapper admission remains disabled.
+**Status: rootless policy qualification only.** A rootless broker model exists,
+but no privileged broker, real DM mapping, swap transition, loop detach, or
+backing-file cleanup is implemented or qualified. Production direct-mapper
+admission remains disabled.
 
 ## Separate mapper release from backing release
 
@@ -36,7 +37,9 @@ acquire exact fixture lease before creation
   -> authenticate complete worker, service-exit and descriptor-closure report
   -> ordinary DM suspend with flushing semantics
   -> close the retained mapper descriptor
+  -> re-inventory exact mapper identity after suspend and descriptor close
   -> independently verify complete open-count and holder inventory is empty
+  -> re-inventory exact mapper identity immediately before removal
   -> normal removal, without force or deferred removal
   -> independently verify exact name, UUID and device number are absent
   -> release the cooperative lease
@@ -114,6 +117,76 @@ owner, remain outside worker IPC, and be bound to the current fixture session.
 The collector must produce evidence only after it directly verifies each
 underlying operation and its post-state. The test key used by the rootless
 regression is disposable and does not authenticate any actual system state.
+
+## Rootless broker and evidence producer
+
+`tests/runtime/recall-fixture-owner.py` adds a test-only owner broker and
+evidence producer. The producer creates its own session key, keeps the key and
+the release-policy instance private, and exposes no event-signing or
+submission method to worker requests. Workers may request only a fixed role
+launch with an opaque request ID. They cannot supply executable arguments,
+mapper identity, operation outcomes, keys or evidence receipts. The broker
+supplies worker handles from its injected supervisor launcher and registers
+each handle with `MapperLifecycleOwner`. Create, suspend, remove, swapoff,
+loop detach and evidence collection are owner-side methods; they are absent
+from the worker request schema.
+
+The producer calls injected operations and accepts only exact observation
+types. It derives worker evidence from the supervisor report, swap state from
+before/after inventory, DM release evidence from the typed report returned by
+`MapperLifecycleOwner`, and lower/loop evidence from fresh typed inventory
+results. `MapperLifecycleOwner` now requires an explicit pending-I/O-drained
+observation and a typed normal-removal result (`force=false`,
+`deferred=false`) before returning that report. The report binds the lease
+session and exact name, UUID, major/minor and table fingerprint, with fresh
+inventory snapshots after suspend/descriptor closure, before removal, and
+after removal. The producer submits canonical HMAC envelopes only to its
+private in-process validator; it returns a final assessment, not a reusable
+receipt or the key.
+
+The HMAC is not the source of truth. It protects the internal report format
+and session sequencing after the producer has inspected operation results. A
+rootless producer can still only prove what its injected fake says happened.
+The tests do not exercise kernel DM, swap, loop, holder, open-count or pending
+I/O observations, and they do not establish that the HMAC key is inaccessible
+to another process. Python object privacy is not a security boundary against
+same-process code. The production design must run the collector in a
+separately controlled owner process, derive peer credentials from the IPC
+transport, and keep the key inaccessible to workers and untrusted controller
+IPC.
+
+The broker state is one-way:
+
+```text
+NEW --trusted owner create--> ACTIVE
+ACTIVE --fixed worker-role IPC--> ACTIVE
+ACTIVE --trusted owner finalize--> FINALIZING
+FINALIZING --complete evidence sequence--> RELEASED
+any state --credential ambiguity / EOF / operation error / concurrency--> DENIED
+```
+
+`RELEASED` means that the synthetic sequence's backing-release policy
+accepted. It does not delete a backing file, invoke a production teardown
+command, or prove actual kernel quiescence. `MapperLifecycleOwner.mapping_released`
+remains a separate mapper-only result. The broker requires both values plus a
+clean terminal state before exposing `backing_release_authorized`.
+
+The rootless tests model the trusted peer authenticator with identity-bound
+Python objects. A real broker would need a private Unix socket, strict
+`SO_PEERCRED`/credential validation, a dedicated service identity, a
+root-controlled configuration directory, close-on-exec descriptors, and
+capabilities limited to the disposable fixture lifecycle. Worker processes
+must have no DM-control descriptor, `CAP_SYS_ADMIN`, swap-control privilege,
+or access to the evidence key. The worker protocol must remain role-only and
+must never accept arbitrary device paths or lifecycle commands. A host-root
+actor with sufficient kernel authority can still replace a table; namespaces
+and a cooperative lock do not prevent that.
+
+This prototype processes one DM mapping and its exact loop dependency. It
+does not implement a privileged multi-layer DM collector or NBD disconnect
+collector. A future layered implementation must repeat the exact ordered
+suspend, descriptor, open-count/holder, normal remove and absence observations
+for every bound layer before checking lower dependencies.
 
 ## Operating-system and kernel qualification
 
