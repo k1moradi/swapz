@@ -208,7 +208,7 @@ def _series(rows: list[dict[str, object]]) -> dict[str, object]:
     else:
         group["qualification"] = "PROVISIONAL - INDEPENDENT EVIDENCE REVIEW REQUIRED"
         group["provisional_selection_kib"] = chosen["batch_kib"]
-        group["reason"] = "Input provenance is asserted, not authenticated by this offline analyzer"
+        group["reason"] = "Input provenance is self-reported and not authenticated by this offline analyzer"
     return group
 
 
