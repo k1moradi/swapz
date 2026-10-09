@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/rootless-teardown.yml'
       - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-nbd.yml'
       - 'tests/runtime/test-stack-teardown.sh'
       - 'tests/runtime/test-stack-teardown-regression.sh'
       - 'tests/runtime/pressure-teardown.sh'
@@ -74,6 +75,7 @@ on:
     paths:
       - '.github/workflows/rootless-teardown.yml'
       - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-nbd.yml'
       - 'tests/runtime/**'
   workflow_dispatch:
 
