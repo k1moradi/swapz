@@ -290,6 +290,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/v22-drain-plateau-analyze.py tests/runtime/v22-drain-plateau-analyze-test.py
           timeout 25s python3 -B tests/runtime/v22-drain-plateau-analyze-test.py -v
+      - name: Offline V2.2 evidence bundle identity and artifact integrity policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/v22-evidence-bundle-check.py tests/runtime/v22-evidence-bundle-check-test.py
+          timeout 35s python3 -B tests/runtime/v22-evidence-bundle-check-test.py -v
+          echo "V22_OFFLINE_BUNDLE_CONSISTENCY_ONLY: PASS (not authenticated, no device access)"
       - name: Offline live GC analyzer tests
         run: python3 tests/runtime/live-gc-latency-analyze-test.py -v
       - name: Compile and run full NBD userspace protocol selftest
