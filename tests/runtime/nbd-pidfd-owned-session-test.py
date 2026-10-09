@@ -341,7 +341,9 @@ class OwnedSyntheticServerTests(unittest.TestCase):
                         pass_fds=(controller.fileno(),), close_fds=True,
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
+                        # The mock child keeps its own private server.log.
+                        # A never-consumed stderr pipe leaks a test descriptor.
+                        stderr=subprocess.DEVNULL,
                     )
                     controller.close()
                     payload, ancillary, msgflags, _ = monitor.recvmsg(
