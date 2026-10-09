@@ -30,11 +30,52 @@ fixture prefill or outside traffic contaminates the observation.
 
 ## JSON Lines observation schema
 
-Exactly these keys are required for **every** observation (no extra fields):
+The baseline `swapz-drain-observation-v1` format accepts a
+**self-reported** `read_count` and `read_p99_ns`. It remains readable
+for older synthetic fixtures and historical analysis, but its p99 was
+never computed from latency observations by this parser. As of the
+v2 safety gate, **v1 can no longer emit `provisional_selection_kib`**
+even when its `evidence` field claims `kernel` or `physical`.
+It may still display the unqualified algorithmic
+`candidate_batch_kib` for debugging.
+
+Use `swapz-drain-observation-v2` for the new internal-consistency
+check. It retains the v1 fields and adds **one strictly required**
+`read_latency_counts` field: a JSON list of sorted
+`[latency_ns, sample_count]` pairs, for example:
+
+```json
+"read_latency_counts": [[900000, 5000], [1000000, 7000]]
+```
+
+Each timestamp represents an **exact** counted latency value in
+nanoseconds (not a bucket midpoint, estimated percentile, or bucket
+upper limit). The list must contain 1–256 *strictly increasing*
+positive latencies, each with a positive integral count; the
+sum must exactly equal `read_count`, which must lie between 10,000
+and 10,000,000 inclusive. Latencies may not exceed 10¹³ ns.
+The parser independently computes nearest-rank p99: at count `N`,
+find the sample at rank `ceil(0.99 × N)` in the expanded, ordered
+count distribution. The supplied `read_p99_ns` must match exactly.
+A false count or falsely low p99 is rejected.
+
+**Practical constraint:** The 256-distinct-value limit is deliberate
+and conservative for a bounded 2 MiB JSONL input. Real workloads may
+produce thousands of distinct raw nanosecond values and therefore
+**cannot be represented exactly** in this initial v2 schema.
+Do not silently round, truncate or discard reads to make them fit.
+A future independently reviewed collector can use a separately
+specified conservative histogram/upper-bound format when real data
+requires more bins. Neither v1 nor v2 itself authenticates the
+collector, proves a sample happened, or independently establishes
+true kernel I/O drain.
+
+Exactly these common keys are required for **every** observation
+(no extra fields other than the one v2 addition):
 
 | Key | Meaning |
 | --- | --- |
-| `schema` | Fixed `swapz-drain-observation-v1` |
+| `schema` | Fixed `swapz-drain-observation-v1` (legacy) or `swapz-drain-observation-v2` (bounded exact-p99 check) |
 | `evidence` | `synthetic`, `kernel` or `physical`; self-reported, not authenticated |
 | `backend`, `profile` | Nonempty compact alphanumeric identifiers (also `._-`) |
 | `strategy` | `immediate`, `opportunistic`, or `staged` |
@@ -46,8 +87,9 @@ Exactly these keys are required for **every** observation (no extra fields):
 | `lower_write_sectors_before`, `lower_write_sectors_after` | The independently observed *same lower device's* 512-byte sector counters before and after the window |
 | `lower_write_ios_before`, `lower_write_ios_after` | Independent lower-device completed write request counters |
 | `logical_write_bytes` | Positive fio logical workload bytes; **never** used for lower-drain throughput |
-| `read_count` | At least 10,000 actual swap-in latency samples per run |
-| `read_p99_ns` | Strictly positive p99 from those raw samples, in nanoseconds |
+| `read_count` | Claimed number of swap-in latency samples, minimum 10,000 and maximum 10,000,000; recomputed against v2 counts |
+| `read_p99_ns` | Positive claimed read p99 in nanoseconds; exact nearest-rank recomputation is required only for v2 |
+| `read_latency_counts` *(v2 only)* | 1–256 strictly increasing `[exact_latency_ns, count]` pairs with counts summing to `read_count` |
 | `integrity_ok`, `quiescence_ok`, `flush_ok`, `all_reaped` | All must be literal JSON `true`; operator must justify each before calling the observation valid |
 | `source_kind` | Fixed `lower-device-counters`, not fio upper-bandwidth |
 
@@ -92,13 +134,20 @@ series, the analyzer:
    with medians, min/max repeat drain, sample counts and worst-run p99.
 
 There is no cross-backend, cross-profile, cross-strategy or cross-revision
-pooling. Input tagged `synthetic` is explicitly classified
+pooling **and no mixing of the v1 and v2 p99-integrity
+schemas**. Input tagged `synthetic` is explicitly classified
 `SYNTHETIC ONLY - NOT BENCHMARK EVIDENCE`; it can demonstrate how the
 algorithm behaves but can never produce a provisional performance
-selection. A `kernel` or `physical` series may yield only
-`PROVISIONAL - INDEPENDENT EVIDENCE REVIEW REQUIRED`, because any
-JSON file can falsely *claim* provenance. The analyzer cannot authenticate
-device counters, timing boundaries or the submitter's trustworthiness.
+selection. A `kernel` or `physical` **v1** series is explicitly
+`UNVERIFIED P99 - EXACT LATENCY DISTRIBUTION REQUIRED` and cannot
+produce a provisional selection. For **v2**, a fully matching,
+internally consistent `kernel` or `physical` series may yield only
+`PROVISIONAL - INDEPENDENT EVIDENCE REVIEW REQUIRED`. Any JSON file
+can falsely *claim* provenance or fabricate the histogram. Recomputed
+p99 proves arithmetic consistency, **not the existence, independence
+or representativeness** of 10,000 swap-in reads. The analyzer cannot
+authenticate device counters, timing boundaries, the sample origin
+or the submitter's trustworthiness.
 
 No confidence interval can be justified from only three repeats. The
 median/min/max and 10%-spread check are a deliberately conservative first
@@ -110,8 +159,11 @@ GC work and per-page correctness.
 ## CI and remaining work
 
 `v22-drain-plateau-analyze-test.py` generates **only fabricated synthetic
-observations**; it verifies success and refusal cases without opening
-devices or creating worker processes. Both rootless workflows run it.
+observations**; it verifies v1 provisional-selection denial,
+v2 nearest-rank p99 recomputation, a false sample count, malformed
+and duplicate latency bins, overlarge counters, schema separation,
+and refusal paths without opening devices or creating worker
+processes. Both rootless workflows run it.
 
 A future *separately authorized* collector must be reviewed and supplied
 with exact disposable device identities; rootless CI results do not
