@@ -10,6 +10,7 @@ on:
       - 'tests/runtime/test-stack-teardown-regression.sh'
       - 'tests/runtime/pressure-teardown.sh'
       - 'tests/runtime/pressure-teardown-regression.sh'
+      - 'tests/runtime/no-discard-livegc.sh'
       - 'tests/runtime/pressure_checkpoint.py'
       - 'tests/runtime/pressure-checkpoint-test.py'
       - 'tests/runtime/pressure-helper.py'
@@ -53,6 +54,7 @@ on:
       - 'tests/runtime/recall-fixture-release-policy-test.py'
       - 'tests/runtime/recall-fixture-owner.py'
       - 'tests/runtime/recall-fixture-owner-test.py'
+      - 'tests/runtime/rootless-workflow-contract-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
       - 'tests/runtime/live-gc-latency-analyze.py'
       - 'tests/runtime/v22-drain-plateau-analyze.py'
@@ -84,6 +86,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Guard rootless workflow safety gates and push-trigger coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/rootless-workflow-contract-test.py
+          timeout 20s python3 -B tests/runtime/rootless-workflow-contract-test.py -v
+          echo "ROOTLESS_WORKFLOW_CONTRACT: PASS (mandatory tests and source trigger coverage)"
       - name: Verify Bash syntax
         run: |
           set -euo pipefail
