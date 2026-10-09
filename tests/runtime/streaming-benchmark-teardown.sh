@@ -38,35 +38,14 @@ swapz_benchmark_cleanup_resources() {
     swapz_benchmark_remove_target || return 1
   fi
 
-  # Only after the exact test DM target is verified gone may the benchmark
-  # disconnect its explicit, virtual NBD backing. No force-kill or host device
-  # scanning: if the server does not exit cleanly, preserve its diagnostics.
+  # NBD is not qualified for safe backend teardown. Historical Bash PID
+  # liveness checks and numeric-PID kill/wait can target a reused PID. The
+  # streaming benchmark rejects NBD mode *before* any launch; retain this
+  # fail-closed guard as defense in depth for sourced callers. It deliberately
+  # does not signal, detach, or claim a clean server exit.
   if [[ "${BACKEND_KIND:-null_blk}" == "nbd" ]]; then
-    if [[ -n "${NBD_PID:-}" ]] && kill -0 "$NBD_PID" 2>/dev/null; then
-      if ! kill -TERM "$NBD_PID"; then
-        echo "ERROR: could not request graceful NBD shutdown for PID $NBD_PID" >&2
-        return 1
-      fi
-      local i state
-      for ((i=0; i<100; ++i)); do
-        if ! kill -0 "$NBD_PID" 2>/dev/null; then
-          break
-        fi
-        state=$(ps -o stat= -p "$NBD_PID" 2>/dev/null || true)
-        [[ "$state" == Z* ]] && break
-        sleep 0.1
-      done
-      state=$(ps -o stat= -p "$NBD_PID" 2>/dev/null || true)
-      if [[ -n "$state" && "$state" != Z* ]]; then
-        echo "ERROR: NBD server PID $NBD_PID did not stop; preserving backing session." >&2
-        return 1
-      fi
-      if ! wait "$NBD_PID"; then
-        echo "ERROR: NBD server reported an unsuccessful shutdown" >&2
-        return 1
-      fi
-    fi
-    return 0
+    echo "ERROR: NBD backend teardown requires a verified pidfd-owned server; preserving backing and diagnostics." >&2
+    return 1
   fi
 
   # Strict dependency ordering: never power off null_blk before removing DM.
