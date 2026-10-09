@@ -208,6 +208,10 @@ def _series(rows: list[dict[str, object]]) -> dict[str, object]:
         group["reason"] = "INCOMPLETE SWEEP: required batch sizes not all observed"
         return group
     points: list[dict[str, object]] = []
+    # Display rounding must NEVER change the 97% or 10% qualification
+    # comparisons. Retain full unrounded measurements separately.
+    raw_medians: dict[int, float] = {}
+    raw_worst_p99_ms: dict[int, float] = {}
     for size in expected:
         replicas = per_batch[size]
         if len(replicas) < MIN_REPEATS:
@@ -219,6 +223,8 @@ def _series(rows: list[dict[str, object]]) -> dict[str, object]:
         if not math.isfinite(middle) or middle <= 0 or spread > MAX_SPREAD:
             group["reason"] = f"UNSTABLE LOWER DRAIN: {size} KiB"
             return group
+        raw_medians[size] = middle
+        raw_worst_p99_ms[size] = max(row["read_p99_ns"] for row in replicas) / 10**6
         points.append({
             "batch_kib": size,
             "repeats": len(replicas),
@@ -235,18 +241,19 @@ def _series(rows: list[dict[str, object]]) -> dict[str, object]:
     if example["strategy"] == "immediate":
         group["reason"] = "SINGLE BATCH BASELINE: not a saturation sweep"
         return group
-    best_drain = max(item["lower_drained_mib_s_median"] for item in points)
+    best_drain = max(raw_medians.values())
     # Three largest adjacent required sizes (256, 512, 1024 KiB) must
     # independently reach >=97% of the observed series' drain peak.
+    # Qualify against UNROUNDED values; output rounding is display only.
     tail = points[-3:]
-    if any(item["lower_drained_mib_s_median"] < THROUGHPUT_TOLERANCE * best_drain
+    if any(raw_medians[item["batch_kib"]] < THROUGHPUT_TOLERANCE * best_drain
            for item in tail):
         group["reason"] = "NO STABLE HIGH-BATCH PLATEAU: final 3 sizes below 97% of peak"
         return group
     plateau = [item for item in points
-               if item["lower_drained_mib_s_median"] >= THROUGHPUT_TOLERANCE * best_drain]
-    best_p99 = min(item["read_p99_ms_worst_run"] for item in plateau)
-    choices = [item for item in plateau if item["read_p99_ms_worst_run"]
+               if raw_medians[item["batch_kib"]] >= THROUGHPUT_TOLERANCE * best_drain]
+    best_p99 = min(raw_worst_p99_ms[item["batch_kib"]] for item in plateau)
+    choices = [item for item in plateau if raw_worst_p99_ms[item["batch_kib"]]
                <= READ_P99_TOLERANCE * best_p99]
     if not choices:
         group["reason"] = "NO READ-P99-COMPATIBLE PLATEAU POINT"
