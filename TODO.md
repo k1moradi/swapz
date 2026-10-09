@@ -1041,3 +1041,48 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       service pidfd reaping NEVER authorize real backing deletion.
 - [ ] V2.2 performance comparison and read-p99 qualification
       remain blocked; winner UNDETERMINED.
+
+### 2026-10-09 — Broker test CI coverage, model risks and handoff
+
+- [x] Review the Codex `2f74389f` broker/evidence producer,
+      typed mapper release-report implementation, exact changed
+      files and claimed test counts. Record independently confirmed
+      security findings in
+      `docs/main-developer-broker-review-2026-10-09.md`.
+- [x] Gate `recall-fixture-owner.py` and its 15-case rootless test
+      suite in both mandatory combined and teardown workflows.
+      Expand teardown push paths for the new module and test.
+- [x] Add three fail-fast **fresh-process** repetitions of the full
+      15-case broker suite to **each** mandatory workflow, retaining
+      all existing recall/GNU/NBD/pressure/drain gates.
+- [x] Exact executable SHA
+      `5c8acc47efe40e07baa8dd5fa8090dd453d5e965`:
+      [combined PASS](https://github.com/k1moradi/swapz/actions/runs/37995672935);
+      [teardown PASS](https://github.com/k1moradi/swapz/actions/runs/37995673013).
+      Both logs confirm broker 15+3×15 rootless cases and
+      direct recall process 6/6; combined NBD stress 25/25.
+- [ ] **P0 — Codex:** Bind the immutable **five-role** recall
+      profile and verified phase/readback completion before any
+      positive broker backing authorization. Current model
+      explicitly permits release after only `writer,a,b`.
+      Require denied zero/truncated/reordered/duplicate role
+      inventories and unmatched handles.
+- [ ] **P0 — Codex:** Own ambiguous child launches before handle
+      acknowledgment; all created synthetic child PIDs/pidfds
+      must be registered and reaped or leave session irrevocably
+      backing-preserving. Current best-effort stop tracks only
+      handles already returned by `_worker_launcher`.
+- [ ] **P1 — Codex:** Replace fake peer-identity callbacks with
+      rootless Unix-socket kernel credential verification, and
+      correct or remove the permanently zero
+      `_request_inflight` pseudo-observation.
+- [ ] **P1 — Codex:** Model upper-to-lower DM dependencies and
+      NBD disconnect/absence separately from the current
+      one-mapper/loop fixture. Do not claim rootless HMAC evidence
+      proves actual kernel or host-root authority.
+- [ ] **External:** independently reproduce GNU static binary,
+      provision independently reviewed production signing/trust,
+      and obtain explicit authorization before any real virtual
+      device, kernel drain or physical read-p99 qualification.
+      Production mapper admission remains disabled; V2.2 winner
+      remains UNDETERMINED.
