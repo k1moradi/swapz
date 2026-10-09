@@ -14,7 +14,7 @@ CONFIGFS_MOUNTED_BY_US=0
 MOCK_EXISTS=1
 MOCK_BUSY=1
 MOCK_FALSE_REMOVE=0
-MOCK_RUNNING=1
+# No numeric PID operation is allowed, even under this mock.
 MOCK_SIGNAL_COUNT=0
 MOCK_WAIT_COUNT=0
 
@@ -33,17 +33,19 @@ dmsetup() {
   esac
 }
 kill() {
-  case "$1" in
-    -0) [[ "$2" == "$NBD_PID" ]] && (( MOCK_RUNNING )) ;;
-    -TERM)
-      [[ "$2" == "$NBD_PID" ]] || return 99
-      MOCK_SIGNAL_COUNT=$((MOCK_SIGNAL_COUNT + 1))
-      MOCK_RUNNING=0 ;;
-    *) return 99 ;;
-  esac
+  echo "FAIL: attempted numeric PID operation $*" >&2
+  MOCK_SIGNAL_COUNT=$((MOCK_SIGNAL_COUNT + 1))
+  return 99
 }
-ps() { return 0; }
-wait() { [[ "$1" == "$NBD_PID" ]] && MOCK_WAIT_COUNT=$((MOCK_WAIT_COUNT+1)); }
+ps() {
+  echo "FAIL: attempted numeric PID inspection $*" >&2
+  return 99
+}
+wait() {
+  echo "FAIL: attempted numeric PID wait $*" >&2
+  MOCK_WAIT_COUNT=$((MOCK_WAIT_COUNT + 1))
+  return 99
+}
 
 if swapz_benchmark_cleanup_resources; then
   echo "FAIL: busy DM target accepted by NBD teardown" >&2
@@ -62,9 +64,12 @@ fi
 echo "false-positive remove preserves NBD backend: PASS"
 
 MOCK_FALSE_REMOVE=0
-swapz_benchmark_cleanup_resources
+if swapz_benchmark_cleanup_resources; then
+  echo "FAIL: unqualified NBD shutdown was accepted after DM removal" >&2
+  exit 1
+fi
 (( ! MOCK_EXISTS && ! TARGET_ACTIVE ))
-(( MOCK_SIGNAL_COUNT == 1 && MOCK_WAIT_COUNT == 1 ))
-echo "verified DM removal precedes NBD shutdown: PASS"
+(( MOCK_SIGNAL_COUNT == 0 && MOCK_WAIT_COUNT == 0 ))
+echo "confirmed DM removal never authorizes unowned NBD shutdown: PASS"
 
 echo "V2.2 size-aware NBD teardown mock regression: PASS"
