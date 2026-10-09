@@ -2443,3 +2443,70 @@ fixture, fio/device benchmark, physical storage I/O or reboot occurred.
 The actual V2.2 winning strategy and batch remain **UNDETERMINED**.
 See `docs/v22-drain-plateau-offline.md` and
 `docs/v22-virtual-benchmark-qualification.md`.
+
+## 2026-10-09 — No false V2.2 streaming benchmark winner from one-run data
+
+**Fully qualified executable-source revision:**
+`ecd06d89b8c5f85bf67c6ec07b232625cce079ec`.
+
+`tests/runtime/streaming-benchmark.sh` previously reported
+`drained_write_mib_s = fio.logical_write_bytes / elapsed_flush_inclusive_s`
+and nominated `first_97pct` and `latency_guarded` winners from
+just one run for each batch. Neither constituted independently verified
+physical drain or a repeatable saturation plateau. This milestone fixes
+the *reporting path*, not the live benchmark setup:
+
+- Sample the timed workload/flush window using
+  `time.monotonic_ns()`, never wall-clock `date` time.
+- Preserve separate, explicitly named `logical_flush_window_mib_s`
+  (logical fio bytes per interval) and `lower_counter_window_mib_s`
+  (lower sysfs 512-byte sector delta per interval). A lower device can
+  have other clients, and neither this rate nor an upper flush by itself
+  proves independent I/O quiescence or isolated completed physical bytes.
+- Reject nonpositive elapsed time or decreasing/malformed lower counters
+  before emitting a data row.
+- Record actual fio `read_count` (`total_ios`) to expose too-short p99
+  windows; retain lower I/O counts, upper bandwidth, latency and status.
+- Remove the misleading `drained_write_mib_s` output field and
+  remove the one-run `best_drain`/`first_97pct`/
+  `latency_guarded` nomination entirely.
+- Add `streaming-benchmark-report.py` as a standalone read-only
+  JSONL report/check module. It verifies the numerator and denominator
+  of both diagnostic rates against the recorded counters/times and
+  rejects invalid status, missing samples, duplicate strategies/batches,
+  backend mismatches, malformed/inconsistent data and impossible p99.
+  The report always states `NO QUALIFIED WINNER` and
+  `PLATEAU NOT REACHED`.
+- Add `streaming-benchmark-report-test.py` (14 rootless tests), which
+  uses only fabricated regular-file JSON, including running the real
+  shell script's embedded fio/counter formatter in isolation to check
+  distinct 8 vs 1 MiB/s diagnostic calculations. It explicitly does
+  **not** source or execute the device benchmark shell script.
+
+**Same executable-source GitHub Actions revision, both PASS:**
+
+- Rootless teardown safety:
+  https://github.com/k1moradi/swapz/actions/runs/37909068184
+- Rootless combined source qualification:
+  https://github.com/k1moradi/swapz/actions/runs/37909068343
+
+The combined job logs identify
+`COMBINED_TESTED_HEAD=ecd06d89b8c5f85bf67c6ec07b232625cce079ec`,
+`Ran 14 tests` for the new reporting regression, 10/10 repeated
+pidfd IPC suites, and 25/25 repeated userspace NBD protocol selftests.
+All other existing mandatory rootless gates passed.
+
+Earlier unqualified test revisions encountered a malformed quote
+inside a fabricated invalid-JSON test literal; the final exact-source
+run above recompiled and passed both workflows. No false-positive
+live benchmark result was accepted.
+
+**Not established:** independent GNU `dd` and DM lifecycle trust,
+actual kernel physical drain, controlled backend isolation,
+10,000+ reads/run, repeated nine-size saturation, read-p99
+confidence, live production recall migration, or any V2.2 strategy/
+batch winner. See `docs/streaming-benchmark-reporting.md` and
+`docs/v22-drain-plateau-offline.md`.
+
+No real DM, loop, NBD attach, swap, kernel module, live pressure
+fixture, fio benchmark, device write or reboot was performed.
