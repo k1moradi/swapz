@@ -113,8 +113,36 @@ class RootlessDirectProcessSession:
         result = self.dispatch("WAIT", handle=handle, timeout_ms=5000)
         assert result["status"] == "reaped", result
 
+    def await_synthetic_writer_contents(self, deadline_seconds: float = 2.0) -> None:
+        """Fixture-only positive ordering barrier; NOT kernel I/O drain proof.
+
+        The protocol intentionally defers the writer WAIT until all reader
+        receipts have been verified. A fast reader otherwise races a tiny
+        36-KiB test writer, and gets a legitimate readback mismatch.
+        Check the exact private regular-file mapper's bytes and inode before
+        starting positive reads. This does not authorize backing cleanup.
+        """
+        target = self.root / "synthetic-mapper.bin"
+        initial = os.stat(target, follow_symlinks=False)
+        deadline = time.monotonic() + deadline_seconds
+        with target.open("rb") as stream:
+            pinned = os.fstat(stream.fileno())
+            if ((initial.st_dev, initial.st_ino) != (pinned.st_dev, pinned.st_ino)
+                    or pinned.st_size != len(self.expected)):
+                raise AssertionError("synthetic writer file identity changed; preserve backing")
+            while time.monotonic() < deadline:
+                stream.seek(0)
+                if stream.read(len(self.expected) + 1) == self.expected:
+                    after = os.stat(target, follow_symlinks=False)
+                    if (after.st_dev, after.st_ino) != (pinned.st_dev, pinned.st_ino):
+                        raise AssertionError("synthetic writer path replaced; preserve backing")
+                    return
+                time.sleep(0.001)
+        raise AssertionError("synthetic writer never populated expected bytes; preserve backing")
+
     def run_five(self) -> tuple[str, ...]:
         writer = self.launch("writer")
+        self.await_synthetic_writer_contents()
         first = self.launch("a")
         self.wait(first)
         second = self.launch("b")
@@ -183,6 +211,7 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
 
     def test_replaced_readback_path_cannot_fake_verified_output(self):
         self.session.launch("writer")
+        self.session.await_synthetic_writer_contents()
         reader = self.session.launch("a")
         original = self.session.directory / "read-a"
         original.rename(self.session.directory / "displaced-a")
