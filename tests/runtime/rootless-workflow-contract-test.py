@@ -18,6 +18,7 @@ WORKFLOWS = (
     ".github/workflows/rootless-teardown.yml",
     ".github/workflows/rootless-combined.yml",
 )
+NBD_WORKFLOW = ".github/workflows/rootless-nbd.yml"
 SELF_TEST = "rootless-workflow-contract-test.py"
 MANDATORY_TESTS = (
     SELF_TEST,
@@ -140,6 +141,45 @@ def check_workflow(name: str, source: str) -> None:
              f"{name}: five-role repeat failure or success signal missing")
 
 
+
+def check_nbd_workflow(source: str) -> None:
+    """Audit the separately triggered rootless NBD source-only gate."""
+    name = NBD_WORKFLOW
+    _require("permissions:\n  contents: read\n" in source,
+             f"{name}: missing read-only GITHUB_TOKEN policy")
+    paths = _push_paths(source)
+    _require(name in paths and "tests/runtime/" + SELF_TEST in paths,
+             f"{name}: missing source or workflow push trigger")
+    body = _job_body(source)
+    referenced = frozenset(RUNTIME_FILE.findall(body))
+    _require(bool(referenced), f"{name}: no runtime sources discovered")
+    _require(not (referenced - paths),
+             f"{name}: runtime sources omitted from push path filter: {sorted(referenced - paths)}")
+    _require(_python_test_executed(body, SELF_TEST),
+             f"{name}: workflow contract regression is not a bounded executed test")
+
+    static = _step(body, "Static syscall isolation gate (before any selftest)")
+    for token in ("shutdown_kernel_session", "selftest_failure_gates",
+                  "fake_fd", "fcntl.ioctl", "os.close"):
+        _require(token in static,
+                 f"{name}: missing static syscall isolation check: {token}")
+
+    selftest = _step(body, "Run rootless NBD selftest")
+    _require("run: python3 tests/runtime/size-aware-nbd.py selftest" in selftest,
+             f"{name}: missing real rootless selftest command")
+
+    repeats = _step(body, "Repeat rootless NBD selftest 25 times to catch socket races")
+    _require("for i in {1..25}; do" in repeats,
+             f"{name}: 25 independent NBD repeats are missing")
+    _require("if ! timeout 15s python3 tests/runtime/size-aware-nbd.py selftest" in repeats
+             and "exit 1" in repeats
+             and 'echo "NBD rootless selftest repetition $i/25: PASS"' in repeats,
+             f"{name}: NBD stress repetitions must be bounded and fail-fast")
+
+    _require(_python_test_executed(body, "nbd-pidfd-owned-session-test.py"),
+             f"{name}: pidfd-owned NBD mock lifecycle test is not executed")
+
+
 class RootlessWorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -147,6 +187,7 @@ class RootlessWorkflowContractTests(unittest.TestCase):
             name: (ROOT / name).read_text(encoding="utf-8")
             for name in WORKFLOWS
         }
+        cls.nbd_source = (ROOT / NBD_WORKFLOW).read_text(encoding="utf-8")
 
     def test_both_workflows_retain_source_only_qualification_contract(self):
         for name, source in self.sources.items():
@@ -187,6 +228,28 @@ class RootlessWorkflowContractTests(unittest.TestCase):
                 self.assertIn(command, source)
                 with self.assertRaisesRegex(WorkflowContractError, "gnu-coreutils"):
                     check_workflow(name, source.replace(command, "true", 1))
+
+
+    def test_standalone_nbd_gate_retains_static_syscall_and_stress_checks(self):
+        check_nbd_workflow(self.nbd_source)
+
+    def test_nbd_missing_runtime_source_trigger_is_rejected(self):
+        item = "      - 'tests/runtime/nbd-pidfd-owned-session-test.py'\n"
+        self.assertIn(item, self.nbd_source)
+        with self.assertRaisesRegex(WorkflowContractError, "omitted from push"):
+            check_nbd_workflow(self.nbd_source.replace(item, "", 1))
+
+    def test_nbd_unbounded_stress_is_rejected(self):
+        command = "if ! timeout 15s python3 tests/runtime/size-aware-nbd.py selftest"
+        self.assertIn(command, self.nbd_source)
+        with self.assertRaisesRegex(WorkflowContractError, "fail-fast"):
+            check_nbd_workflow(self.nbd_source.replace(command, command[5:], 1))
+
+    def test_nbd_missing_static_syscall_gate_is_rejected(self):
+        step = "      - name: Static syscall isolation gate (before any selftest)"
+        self.assertIn(step, self.nbd_source)
+        with self.assertRaisesRegex(WorkflowContractError, "Static syscall isolation"):
+            check_nbd_workflow(self.nbd_source.replace(step, "      - name: Empty gate", 1))
 
     def test_missing_workflow_contract_execution_is_rejected(self):
         for name, source in self.sources.items():
