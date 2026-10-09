@@ -2510,3 +2510,72 @@ batch winner. See `docs/streaming-benchmark-reporting.md` and
 
 No real DM, loop, NBD attach, swap, kernel module, live pressure
 fixture, fio benchmark, device write or reboot was performed.
+
+## 2026-10-09 — Synthetic DM drain orchestration and NBD PID-safety hold
+
+**Exact tested executable-source revision:**
+`4843e385e54a3389ab9156bc1ad08509affdd00c`.
+
+Codex's existing `DMIODrainPolicy` remains unchanged. Both mandatory
+CI workflows now explicitly run its eight policy regressions and 15
+new rootless synthetic-orchestrator tests.
+
+The new `RootlessMockDrainSession` drives the exact ordered evidence
+contract from admission closure, five-role worker-handle inventory
+and simulated swapoff through ordinary mock DM suspension,
+descriptor/holder/open checks, upper-to-lower removal, verified mock
+absence, loop dependency checks and simulated detach. It accepts
+only an explicitly synthetic fixture state provider. A synthetic
+backing marker is deleted **only after** successful state-machine
+authorization and a second same-inode/private-marker identity check.
+A failure at any of the 15 stages or in a separately tested inventory,
+swapoff, noflush, close, open count, table identity, holder, removal,
+loop or marker check permanently blocks that test session and preserves
+the marker. This is **mocked logic**, not authenticated kernel evidence,
+real Device Mapper suspend, real I/O drain or physical durability.
+
+The existing streaming NBD benchmark's former `NBD_PID=$!` and
+numeric `kill -0`/`kill -TERM` shutdown were **unsafe across PID
+reuse**. Until an independently qualified exact-child/pidfd controller
+exists, the streaming benchmark now rejects `SWAPZ_BENCH_BACKEND=nbd`
+**before any allocation or worker/device launch**. Its legacy
+`setup_nbd` function is an explicit refusal, and the separate
+teardown helper cannot signal any numeric NBD PID; it returns failure,
+preserving the backing session and diagnostics. This intentionally
+disables the *live NBD benchmark mode*, not the rootless userspace NBD
+protocol selftests. A distinct mocked NBD teardown regression now
+requires no PID signals even after a successful mock DM removal.
+
+**Both exact-revision rootless GitHub Actions: PASS**
+
+- Rootless teardown safety:
+  https://github.com/k1moradi/swapz/actions/runs/37910706506
+- Rootless combined source qualification:
+  https://github.com/k1moradi/swapz/actions/runs/37910706553
+
+Combined log:
+`COMBINED_TESTED_HEAD=4843e385e54a3389ab9156bc1ad08509affdd00c`,
+`Ran 8 tests` for Codex's original drain model,
+`Ran 15 tests` for the new rootless orchestrator,
+10/10 repeated pidfd IPC regressions,
+25/25 userspace NBD selftest repetitions, and
+`unqualified NBD preserves backing without numeric PID signaling: PASS`.
+The separately triggered NBD source-only suite also passed at
+`2425700c4b8ebea63f658bd92b80e9d36c9bb201`, which already
+included the changed NBD shutdown logic and its updated mock regression:
+https://github.com/k1moradi/swapz/actions/runs/37910604753.
+A preceding NBD workflow failed because the prior mocked teardown
+expected an unsafe numeric-PID SIGTERM; its expectation was
+deliberately replaced with the new fail-closed preservation contract.
+
+**Unresolved:** actual kernel DM drain/loop detach, independently
+anchored GNU coreutils trust, exclusive privileged mapper ownership,
+a pidfd-owned NBD service/controller suitable for restoring the
+NBD benchmark, production Bash recall migration and any real
+physical-drain/read-p99 strategy/batch selection. NBD benchmark mode
+must not be re-enabled by removing the guard without reviewing and
+qualifying its complete process/cleanup lifecycle.
+
+No real DM, loop, NBD attachment, swap, module operation, pressure
+fixture, fio/device benchmark, physical I/O or reboot was performed.
+See `docs/recall-io-drain-mock-integration.md`.
