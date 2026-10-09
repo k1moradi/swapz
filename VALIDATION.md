@@ -2382,3 +2382,64 @@ See `docs/recall-role-process-rootless.md` and
 `docs/v22-virtual-benchmark-qualification.md`. The next stage must
 combine Codex's trusted executable/mapper policy and independently
 reviewed I/O-drain evidence before operator-authorized virtual tests.
+
+## 2026-10-09 — Offline V2.2 lower-device drain/p99 plateau qualification
+
+**Tested executable-source revision:**
+`bca327fd11d841870715171693faec2abc054838`.
+
+A standalone strict, rootless JSONL observation analyzer was added at
+`tests/runtime/v22-drain-plateau-analyze.py`, with 15 adversarial
+selftests at `tests/runtime/v22-drain-plateau-analyze-test.py`. It
+**does not execute any benchmark or device I/O**.
+
+This corrects a reporting/evidence blind spot without modifying or
+running the production benchmark: the existing
+`streaming-benchmark.sh` field `drained_write_mib_s` is actually
+logical fio `write.io_bytes` divided by an elapsed flush-inclusive
+window, **not** independently observed lower-device drained bytes.
+The analyzer instead computes throughput from independently supplied
+lower-device 512-byte sector counter deltas over a positive monotonic
+window. Observation provenance, quiescence, source isolation and
+counter identity remain assertions that a separately approved collector
+and operator must independently substantiate.
+
+Validation enforces a complete 4..1024 KiB batched sweep, >=3 independent
+repeats per point, >=10,000 swap-in read samples per run, <=10%
+repeat-to-repeat drain spread, saturation at all final 256/512/1024 KiB
+points within 97% of the series maximum median drain, and a candidate
+read-p99 no more than 10% above the best worst-repeat p99 across eligible
+plateau points. Failed correctness, drain, flush or worker finalization
+flags are rejected outright, as are unknown schema fields, duplicate
+run IDs or JSON keys, malformed counters, missing batches and unstable
+data. The immediate 4 KiB baseline alone cannot assert saturation;
+missing evidence reports `PLATEAU NOT REACHED`. Backend, profile,
+strategy, code revision and evidence class are not pooled.
+
+Synthetic observation data may produce an *illustrative candidate only*;
+it never results in a provisional measured selection. `kernel` or
+`physical` observations remain explicitly self-reported and may
+produce only a provisional suggestion pending independent review.
+No real performance winner can be inferred from these selftests.
+
+**Both same-executable-revision source-only GitHub workflows: PASS**
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37907017405
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37907017408
+
+The combined run explicitly records
+`COMBINED_TESTED_HEAD=bca327fd11d841870715171693faec2abc054838`,
+`Ran 15 tests` for the new analyzer, 10/10 repeated pidfd IPC service
+regressions and 25/25 additional userspace NBD selftests, alongside
+existing rootless safety gates.
+
+An intermediate run failed because of a mismatched quote in a new
+invalid-JSON test literal; another caught an exact mismatch between
+test-expected provenance wording and the report. Both issues were fixed
+and the full suite rerun at the exact passing revision above.
+
+No real dmsetup, loop, NBD attachment, swap, module load, pressure
+fixture, fio/device benchmark, physical storage I/O or reboot occurred.
+The actual V2.2 winning strategy and batch remain **UNDETERMINED**.
+See `docs/v22-drain-plateau-offline.md` and
+`docs/v22-virtual-benchmark-qualification.md`.
