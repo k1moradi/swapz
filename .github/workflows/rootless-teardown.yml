@@ -56,6 +56,8 @@ on:
       - 'tests/runtime/recall-fixture-owner.py'
       - 'tests/runtime/recall-fixture-owner-test.py'
       - 'tests/runtime/recall-broker-external-contract-test.py'
+      - 'tests/runtime/recall-denial-telemetry.py'
+      - 'tests/runtime/recall-denial-telemetry-test.py'
       - 'tests/runtime/rootless-ci-evidence-inventory.py'
       - 'tests/runtime/rootless-ci-evidence-inventory-test.py'
       - 'tests/runtime/rootless-workflow-contract-test.py'
@@ -323,6 +325,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/rootless-ci-evidence-inventory.py tests/runtime/rootless-ci-evidence-inventory-test.py
           timeout 25s python3 -B tests/runtime/rootless-ci-evidence-inventory-test.py -v
+      - name: Offline synthetic recall-denial telemetry classification regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-denial-telemetry.py tests/runtime/recall-denial-telemetry-test.py
+          timeout 25s python3 -B tests/runtime/recall-denial-telemetry-test.py -v
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |
