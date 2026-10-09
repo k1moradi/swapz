@@ -10,6 +10,9 @@ on:
       - 'tests/runtime/streaming-teardown-regression.sh'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-teardown.sh'
+      - 'tests/runtime/nbd-pidfd-owned-session.py'
+      - 'tests/runtime/nbd-pidfd-owned-mock-child.py'
+      - 'tests/runtime/nbd-pidfd-owned-session-test.py'
   pull_request:
     paths:
       - '.github/workflows/rootless-nbd.yml'
@@ -18,6 +21,9 @@ on:
       - 'tests/runtime/streaming-teardown-regression.sh'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-teardown.sh'
+      - 'tests/runtime/nbd-pidfd-owned-session.py'
+      - 'tests/runtime/nbd-pidfd-owned-mock-child.py'
+      - 'tests/runtime/nbd-pidfd-owned-session-test.py'
   workflow_dispatch:
 
 permissions:
@@ -81,6 +87,12 @@ jobs:
           bash -n tests/runtime/streaming-benchmark.sh
           bash -n tests/runtime/streaming-benchmark-teardown.sh
           bash -n tests/runtime/size-aware-nbd-teardown-test.sh
+      - name: Rootless pidfd-owned NBD mock server lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/nbd-pidfd-owned-session.py tests/runtime/nbd-pidfd-owned-mock-child.py tests/runtime/nbd-pidfd-owned-session-test.py
+          timeout 35s python3 -B tests/runtime/nbd-pidfd-owned-session-test.py -v
       - name: Rootless NBD teardown mock
         run: bash tests/runtime/size-aware-nbd-teardown-test.sh
       - name: Rootless streaming teardown mock
