@@ -2795,3 +2795,92 @@ fio/device benchmark, real lower-device throughput measurement,
 physical I/O or reboot was performed. The V2.2 batch/strategy
 winner remains **UNDETERMINED**. See
 `docs/v22-drain-plateau-offline.md`.
+
+## 2026-10-09 — Primary-developer GNU review, recall ordering, and signed drain-model CI
+
+**Exact executable revision tested successfully in both mandatory workflows:**
+`f4c0be7eb7bc6d62c2d7485208018c527ee351af`.
+
+- [Rootless combined](https://github.com/k1moradi/swapz/actions/runs/37941810631): **PASS**.
+- [Rootless teardown](https://github.com/k1moradi/swapz/actions/runs/37941810576): **PASS**.
+
+### Independent review of Codex's GNU 9.11 qualification
+
+The main developer examined Codex's initial GNU source/build/worker
+qualification code and records (commit
+`9070372f5d8da9d78f0ffefda89e46fb2c3e9126`), rather than
+treating a successful generic CI workflow as proof that a real
+GNU binary was built or exercised. The original source inspector
+executed an untrusted candidate's `--version` in an unrestricted
+subprocess, and the original build-record verifier trusted two
+self-reported, identical build outputs without hashing both.
+
+Codex's follow-up commit
+`d168378c28f755908b872e1c05583ccf5efc604d` now makes candidate
+inspection passive, requires pinned descriptor/metadata/digest checks
+and rehashes both exact build outputs before accepting a repeatability
+claim. Main-developer code review confirms those checks are present;
+the independently sourced GNU archive, second independent builder,
+production signing credentials and real signed binary are **not**
+reproduced or provisioned by the GitHub Actions unit tests. Real GNU
+worker execution is supported by Codex's host record, not independently
+rerun by this main-developer CI change. See
+`docs/codex-gnu-9-11-review-2026-10-09.md`.
+
+Codex's later `837b0059`/`c0e9b7d6` add a session-HMAC,
+strictly ordered, identity-bound **model** for complete DM/loop drain
+and backing-release evidence. The HMAC verifies reports using an
+injected fixture-owner key, but no privileged evidence collector,
+kernel DM suspend/drain, or actual backing cleanup was run.
+The main developer independently wired its five model tests into
+both mandatory rootless workflows, in addition to the original
+eight DM policy and 15 synthetic orchestrator tests.
+
+### Rootless five-role readback race: cause and containment
+
+Earlier rootless combined/teardown runs had occasional safe denial
+on short direct-dd role admission and missing WAIT receipts. Bounded
+diagnostics now retain `service_status` and `service_error` rather
+than reporting only an absent `worker` field. A later failing
+positive test showed the exact error:
+`pinned readback does not match trusted 4096-byte page`.
+
+The test fixture had launched the small synthetic writer and begun
+the first reader while the writer was still populating the regular
+file. The pinning/attestation logic **correctly rejected** the
+inconsistent read; it was not evidence of an incorrect page oracle.
+The positive five-role test now waits with a bounded deadline until
+the original pinned, privately owned synthetic mapper inode contains
+the complete expected bytes **before** starting read roles. The
+writer handle remains outstanding under the protocol and is waited
+only after all four reader receipts are verified. There is no
+unconditional sleep or retry of a denied session, and no admission
+check was weakened. The corrupted-source negative test still expects
+fail-closed denial.
+
+Adversarial rootless tests also cover an unconfirmed launch, missing,
+malformed and duplicated READY handles and failure to grant backing
+cleanup after refusal. Each workflow repeats a full independent,
+positive five-role session **six times**, failing immediately on a
+single false admission. On the exact tested revision both
+`RECALL_DIRECT_ROLE_REPEAT 6/6` steps passed.
+
+### Exact source-only CI evidence
+
+At `f4c0be7eb7bc6d62c2d7485208018c527ee351af` both workflows
+explicitly ran the synthetic GNU provenance tests (7 cases), updated
+build-record binding tests (10 cases), Codex authenticated
+fixture-release-model tests (5 cases), original allowlist suite
+(81 cases), and the existing NBD, pidfd, recall, pressure,
+drain and offline plateau tests. The combined suite also reported
+`COMBINED_NBD_STRESS 25/25: PASS`; all success applies to
+**rootless source-only mocks/test-owned processes**.
+
+A green 6/6 positive repeat does not prove the absence of all
+scheduler races. Continue to preserve the bounded failure
+diagnostics and fail closed rather than making READY optional.
+No production GNU trust key/manifest, kernel-enforced mapper authority,
+ordinary DM suspend, real kernel I/O drain, loop/NBD detach,
+swap correctness under a real mapper, virtual benchmark or
+physical-device benchmark was performed. V2.2 strategy and
+batch size remain **UNDETERMINED**.
