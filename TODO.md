@@ -1109,11 +1109,17 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       [combined PASS](https://github.com/k1moradi/swapz/actions/runs/37996532854).
       Each ran 6/6 new contract tests, positive recall 6/6,
       and broker repeats 3/3; combined NBD 25/25.
-- [ ] Extend CI-maintenance trigger/step audit to the **standalone
-      rootless NBD** workflow, including its static syscall isolation
-      check and 25 independent stress repetitions. This is
-      separately owned by the main developer; avoid new privileged
-      NBD operations.
+- [x] Extend mandatory CI-maintenance contract to the
+      **standalone rootless NBD** workflow: protect its static
+      syscall-isolation gate, 25 strict fresh-process NBD stress
+      repetitions, pidfd-owned mock tests, exact push triggers,
+      and NBD-workflow-to-teardown trigger. The suite now runs
+      11/11 in all three workflows at exact executable commit
+      `00fbf74f155d537664b16252b92386636a34cc44`:
+      [NBD PASS](https://github.com/k1moradi/swapz/actions/runs/37996938322),
+      [teardown PASS](https://github.com/k1moradi/swapz/actions/runs/37996938227),
+      [combined PASS](https://github.com/k1moradi/swapz/actions/runs/37996938277).
+      No actual NBD attachment or privileged device I/O.
 - [ ] Add independent **exact-source/CI artifact reconciliation**
       for future externally supplied measurements: never compare
       throughput/p99 from different commits as a single V2.2
@@ -1123,3 +1129,24 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       fault diagnostics when Codex changes the trusted-owner
       architecture. All live device qualification and backing
       release remain blocked.
+
+### Additional independent, non-overlapping work while Codex owns the broker
+
+- [ ] **Offline evidence integrity:** reject mixed git-tree SHAs,
+      duplicate run IDs, unbound device identities and mismatched
+      collector/measurement session IDs when aggregating externally
+      produced V2.2 performance evidence. This must remain offline
+      and must not elevate simulated data to physical-device proof.
+- [ ] **Standalone CI artifact traceability:** record exact
+      workflow/source tree identity and selected safety-test
+      marker inventory in a machine-readable, bounded source-only
+      report; do not mistake the report for cryptographic
+      attestation or external trust.
+- [ ] **Synthetic recall failure telemetry:** analyze bounded
+      launch failure and service-error diagnostics across
+      repeated rootless sessions; never retry over a failed
+      positive session or turn a missing receipt into approval.
+- [ ] **Future Codex review:** independently test complete five-role
+      broker lifecycle and stable owned-child startup once those
+      interfaces land, without editing Codex-owned files or
+      authorizing kernel/device operations.
