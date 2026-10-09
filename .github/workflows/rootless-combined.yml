@@ -290,6 +290,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-broker-external-contract-test.py
           timeout 25s python3 -B tests/runtime/recall-broker-external-contract-test.py -v
+      - name: Offline exact-revision rootless CI evidence inventory regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/rootless-ci-evidence-inventory.py tests/runtime/rootless-ci-evidence-inventory-test.py
+          timeout 25s python3 -B tests/runtime/rootless-ci-evidence-inventory-test.py -v
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |

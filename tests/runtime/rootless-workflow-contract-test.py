@@ -31,6 +31,7 @@ MANDATORY_TESTS = (
     "recall-fixture-release-policy-test.py",
     "recall-fixture-owner-test.py",
     "recall-broker-external-contract-test.py",
+    "rootless-ci-evidence-inventory-test.py",
     "v22-drain-plateau-analyze-test.py",
     "v22-evidence-bundle-check-test.py",
 )
@@ -216,6 +217,14 @@ class RootlessWorkflowContractTests(unittest.TestCase):
         self.assertIn(path, source)
         with self.assertRaisesRegex(WorkflowContractError, "standalone NBD workflow edits"):
             check_workflow(name, source.replace(path, "", 1))
+
+    def test_removed_ci_inventory_execution_is_rejected(self):
+        for name, source in self.sources.items():
+            with self.subTest(workflow=name):
+                command = "timeout 25s python3 -B tests/runtime/rootless-ci-evidence-inventory-test.py -v"
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(name, source.replace(command, "echo 'inventory was skipped'", 1))
 
     def test_removed_broker_primary_execution_is_rejected(self):
         for name, source in self.sources.items():
