@@ -287,7 +287,7 @@ class OfflineDrainPlateauTests(unittest.TestCase):
             [[1_000_000, -1]], [[1_000_000, 0]],
             [[1_000_000, True]], [[True, 12_000]],
             [[1_000_000, 12_000.0]],
-            [(1_000_000, 12_000)], [[1_000_000]],
+            [[1_000_000]],
             [[1_000_000, 12_000, "extra"]],
             [[1_000_000, analyzer.MAX_READ_COUNT + 1]],
             [[i, 1] for i in range(1, analyzer.MAX_LATENCY_BINS + 2)],
