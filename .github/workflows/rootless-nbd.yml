@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/rootless-nbd.yml'
+      - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-teardown.yml'
       - 'tests/runtime/size-aware-nbd.py'
       - 'tests/runtime/size-aware-nbd-teardown-test.sh'
       - 'tests/runtime/streaming-teardown-regression.sh'
@@ -19,6 +21,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/rootless-nbd.yml'
+      - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-teardown.yml'
       - 'tests/runtime/size-aware-nbd.py'
       - 'tests/runtime/size-aware-nbd-teardown-test.sh'
       - 'tests/runtime/streaming-teardown-regression.sh'
