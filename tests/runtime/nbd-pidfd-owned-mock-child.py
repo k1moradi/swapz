@@ -17,7 +17,7 @@ import time
 
 MODES = frozenset(("normal", "wrong-ready", "exit-before-ready",
                    "exit-after-ready", "ignore-term", "fail-term",
-                   "slow-ready", "silent", "attempt-spawn", "pdeath-fail"))
+                   "slow-ready", "silent", "attempt-spawn", "pdeath-fail", "ignore-eof"))
 
 
 def _sigterm_ok(_signal: int, _frame: object) -> None:
@@ -72,6 +72,11 @@ def main() -> int:
             channel.sendall(reply)
             if mode == "exit-after-ready":
                 return 0
+            if mode == "ignore-eof":
+                # Adversarial mock: deliberately ignore control EOF so a
+                # controller-crash test must rely on PDEATHSIG (SIGKILL).
+                while True:
+                    signal.pause()
             if mode == "attempt-spawn":
                 try:
                     pid = os.fork()
