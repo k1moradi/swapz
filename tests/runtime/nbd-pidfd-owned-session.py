@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 CHILD = HERE / "nbd-pidfd-owned-mock-child.py"
 MODES = frozenset(("normal", "wrong-ready", "exit-before-ready",
                    "exit-after-ready", "ignore-term", "fail-term",
-                   "slow-ready", "silent"))
+                   "slow-ready", "silent", "attempt-spawn"))
 
 
 class OwnedServerDenied(RuntimeError):
@@ -82,7 +82,7 @@ class RootlessOwnedServer:
             try:
                 try:
                     self.process = subprocess.Popen(
-                        [sys.executable, "-B", str(CHILD), str(child.fileno()), self.mode],
+                        [sys.executable, "-B", str(CHILD), str(child.fileno()), self.mode, str(os.getpid())],
                         cwd=self.directory, pass_fds=(child.fileno(),),
                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                         stderr=logfd, close_fds=True,
