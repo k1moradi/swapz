@@ -214,7 +214,7 @@ class OfflineDrainPlateauTests(unittest.TestCase):
             analyzer.load_rows(self.path)
 
     def test_blank_nan_empty_oversized_inputs_rejected(self):
-        for value in ("\n", "{bad}\n", '{"x":NaN}\n", ""):
+        for value in ("\n", "{bad}\n", '{"x":NaN}\n', ""):
             with self.subTest(value=value):
                 self.path.write_text(value, encoding="utf-8")
                 with self.assertRaises(ValueError):
