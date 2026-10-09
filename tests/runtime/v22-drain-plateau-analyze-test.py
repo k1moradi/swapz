@@ -357,6 +357,24 @@ class OfflineDrainPlateauTests(unittest.TestCase):
         self.assertIn("INDEPENDENT EVIDENCE REVIEW", item["qualification"])
         self.assertNotIn("QUALIFIED WINNER", item["qualification"])
 
+    def test_rounded_display_never_creates_false_97pct_plateau(self):
+        # With a 10,000-second fabricated interval, a sector-count
+        # difference of TWO sectors at this scale is below the six-decimal
+        # report precision, but still below the real 97% threshold.
+        rows = sweep_v2()
+        for row in rows:
+            row["duration_ns"] = 10**13
+            sectors = (397_311_998 if row["batch_kib"] == 1024
+                       else 409_600_000)
+            row["lower_write_sectors_after"] = (
+                row["lower_write_sectors_before"] + sectors
+            )
+        item = self.analyze(rows)["series"][0]
+        self.assertAlmostEqual(item["points"][-1]["lower_drained_mib_s_median"],
+                               19.4, places=6)
+        self.assertIsNone(item["candidate_batch_kib"])
+        self.assertIn("NO STABLE HIGH-BATCH PLATEAU", item["reason"])
+
     def test_v2_jsonl_duplicate_histogram_field_is_rejected(self):
         row = as_v2(observation())
         payload = json.dumps(row)
