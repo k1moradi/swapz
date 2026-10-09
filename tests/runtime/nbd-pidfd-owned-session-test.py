@@ -15,6 +15,7 @@ import signal
 import stat
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -160,7 +161,9 @@ class OwnedSyntheticServerTests(unittest.TestCase):
         except Denied:
             self.assertEqual(session.state, "denied")
         else:
-            # The server may exit between successful readiness and shutdown.
+            # Wait for the fixed child to exit after READY before checking
+            # that an unsolicited successful exit cannot authorize shutdown.
+            time.sleep(0.12)
             with self.assertRaises(Denied):
                 session.shutdown()
         self.assertIsNotNone(session.process.returncode)
