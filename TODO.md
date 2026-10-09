@@ -863,3 +863,52 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Continue trusted GNU provenance and exclusive mapper owner
       work separately; actual V2.2 lower-device throughput, swap-in
       read-p99 plateau, strategy winner and batch remain UNDETERMINED.
+
+### 2026-10-09 — Main-developer Codex review and real-process mock crash containment
+
+- [x] Review Codex's `d2240b06e8a8fc5649d407d0c0344308896196e0`
+      trust-bootstrap/mapper-owner commit, including actual code,
+      changed-file scope, trust boundaries and same-revision CI;
+      record findings in `docs/codex-trust-bootstrap-review-2026-10-09.md`.
+- [ ] **HIGH:** Never use `MapperLifecycleOwner.cleanup_allowed` as
+      backing release authority. It attests only that *one mapping*
+      was removed; require independently verified worker/descriptor
+      receipts, DM kernel suspend/drain, complete stack/loop/NBD
+      dependencies and normal detach before real backing cleanup.
+      Codex owns any follow-up to this owner API.
+- [ ] **HIGH:** The static GNU `dd` build provenance, externally
+      provisioned Ed25519 key, compatible actual child seccomp run
+      and enforceable privileged DM table exclusivity remain unqualified.
+      Fixed-root-path cryptographic verification and injected owner
+      success are not substitutes.
+- [x] In the *fixed rootless synthetic NBD-like child*, register
+      Linux `PR_SET_PDEATHSIG=SIGKILL` before READY, recheck exact
+      expected parent identity, and treat missing/unsupported registration
+      as hard denial.
+- [x] Block synthetic mock descendants and executable replacement
+      via architecture-checked Linux seccomp BPF denying fork/vfork/
+      clone/clone3/execve/execveat, then explicitly attempt fork
+      and exec in the rootless mock to verify EPERM.
+- [x] Use a separate test-owned observer with `SCM_RIGHTS`
+      pidfd transfer to check exact child exit after controller
+      `os._exit` before READY, after READY and during idle,
+      including an EOF-resistant test mode to isolate PDEATHSIG.
+      The independent observer verifies exit, not orphan reaping.
+- [x] Preserve the retained child pidfd after failed SIGTERM,
+      failed SIGKILL and bounded wait; allow a later pidfd-only
+      `close()` retry without numeric-PID fallback.
+- [x] Run 24 non-skipped, real, fixed-child rootless regressions
+      and qualify all three source-only workflows at exact
+      executable revision
+      `14d1b9ae7b9a40906835b52d761640e58500e02e`:
+      https://github.com/k1moradi/swapz/actions/runs/37916615965
+      https://github.com/k1moradi/swapz/actions/runs/37916615903
+      https://github.com/k1moradi/swapz/actions/runs/37916615659
+- [ ] **Still blocked:** separately authenticate the actual
+      size-aware NBD server and control its full runtime/descendants,
+      prove exact device/kernel NBD session association and
+      independently verify kernel disconnect/drain and backing
+      dependencies before considering a separate live-device review.
+- [ ] Keep NBD streaming backend fail-closed and disabled; the mock
+      owner and child cannot authorize real device I/O, mapper
+      admission, lower backing detach or a V2.2 performance winner.
