@@ -195,6 +195,29 @@ class OwnedSyntheticServerTests(unittest.TestCase):
         self.assertIsNotNone(session.process.returncode)
         self.assert_backing_retained(session)
 
+    def test_failed_term_and_kill_retain_pidfd_until_later_verified_reap(self) -> None:
+        session = self.build()
+        session.start()
+
+        def fail_all_signals(*_args, **_kwargs):
+            raise OSError("injected untrusted pidfd send failure")
+
+        with mock.patch.object(owner.signal, "pidfd_send_signal",
+                               side_effect=fail_all_signals):
+            with self.assertRaises(Denied):
+                session.shutdown()
+        self.assertEqual(session.state, "denied")
+        self.assertIsNone(session.process.poll())
+        # SIGKILL was also injected as failing, so the stable pidfd must be
+        # retained; a failed wait must not discard our only identity token.
+        self.assertIsNotNone(session.pidfd)
+        self.assertFalse(session.cleanup_allowed)
+        session.close()  # now real pidfd SIGKILL is again available
+        self.assertIsNotNone(session.process.returncode)
+        self.assertIsNone(session.pidfd)
+        self.assertIn("SIGKILL", session.signal_log)
+        self.assert_backing_retained(session)
+
     def test_missing_pidfd_support_denies_before_spawning(self) -> None:
         session = self.build()
         with mock.patch.object(owner.os, "pidfd_open", None):
