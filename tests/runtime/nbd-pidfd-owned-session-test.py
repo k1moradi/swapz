@@ -337,7 +337,7 @@ class OwnedSyntheticServerTests(unittest.TestCase):
         self.assertTrue(session.shutdown()["exact_owned_process_reaped"])
         self.assert_backing_retained(session)
 
-    def test_unexpected_controller_death_reaps_exact_child_by_pidfd(self) -> None:
+    def test_unexpected_controller_death_observes_exact_child_exit_by_pidfd(self) -> None:
         if not hasattr(socket, "SCM_RIGHTS"):
             self.skipTest("SCM_RIGHTS unavailable")
         helper = HERE / "nbd-pidfd-crash-owner.py"
