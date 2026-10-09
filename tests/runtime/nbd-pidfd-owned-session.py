@@ -137,7 +137,9 @@ class RootlessOwnedServer:
             try:
                 self.process.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
-                # No numeric-PID rescue; caller must retain diagnostics.
+                # No numeric-PID rescue: preserve the retained pidfd so the
+                # exact still-unreaped child can be targeted on a later
+                # explicit close(). Never turn a wait timeout into cleanup.
                 pass
         self._release_descriptors()
 
@@ -145,7 +147,11 @@ class RootlessOwnedServer:
         if self.sock is not None:
             self.sock.close()
             self.sock = None
-        if self.pidfd is not None:
+        # CRITICAL: if the exact owned process is not proven reaped, the
+        # retained pidfd is the ONLY stable signal/identity capability.
+        # Do not close it on failed SIGKILL or a timed-out wait.
+        if (self.pidfd is not None
+                and (self.process is None or self.process.poll() is not None)):
             os.close(self.pidfd)
             self.pidfd = None
 
@@ -179,8 +185,8 @@ class RootlessOwnedServer:
             raise OwnedServerDenied(f"owned server shutdown denied: {type(exc).__name__}") from exc
 
     def close(self) -> None:
-        """Close the test session; an unfinished session is always denied."""
-        if self.state == "running":
+        """Deny active sessions and retry pidfd-only reap if still unresolved."""
+        if self.process is not None and self.process.poll() is None:
             self.state = "denied"
             self._abort_owned()
         else:
