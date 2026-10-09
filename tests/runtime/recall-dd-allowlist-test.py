@@ -374,7 +374,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         self.trust_key_root = self.base / "separately-provisioned-trust-anchor"
         self.trust_key_root.mkdir(mode=0o700)
         self.trust_key_root.chmod(0o700)
-        self.trust_public_key_path = self.trust_key_root / "gnu-coreutils-release-ed25519.pub"
+        self.trust_public_key_path = self.trust_key_root / "swapz-gnu-dd-manifest-ed25519.pub"
         shutil.copyfile(self.test_public_key, self.trust_public_key_path)
         self.trust_public_key_path.chmod(0o600)
 
@@ -1396,22 +1396,24 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
             )
 
     def test_dynamic_interpreter_is_not_admitted_for_mapper_io(self):
-        executable_path = self.base / "dynamic-dd"
-        dynamic = bytearray(self.static_elf_fixture())
-        dynamic[32:40] = (64).to_bytes(8, "little")
-        dynamic[54:56] = (56).to_bytes(2, "little")
-        dynamic[56:58] = (1).to_bytes(2, "little")
-        dynamic.extend((3).to_bytes(4, "little") + bytes(52))
-        executable_path.write_bytes(dynamic)
-        executable_path.chmod(0o755)
-        trusted = self.trusted_manifest(executable_path, bytes(dynamic))
-        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable_path)
-        with self.assertRaisesRegex(DDPolicyDenied, "dynamic dd"):
-            RecallDDLaunchGate(
-                self.root, self.name, mapper_fd=mapper_fd,
-                executable_path=executable_path, trusted_executable=trusted,
-                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
-            )
+        for program_type in (3, 2):  # PT_INTERP and PT_DYNAMIC
+            with self.subTest(program_type=program_type):
+                executable_path = self.base / f"dynamic-dd-{program_type}"
+                dynamic = bytearray(self.static_elf_fixture())
+                dynamic[32:40] = (64).to_bytes(8, "little")
+                dynamic[54:56] = (56).to_bytes(2, "little")
+                dynamic[56:58] = (1).to_bytes(2, "little")
+                dynamic.extend(program_type.to_bytes(4, "little") + bytes(52))
+                executable_path.write_bytes(dynamic)
+                executable_path.chmod(0o755)
+                trusted = self.trusted_manifest(executable_path, bytes(dynamic))
+                mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable_path)
+                with self.assertRaisesRegex(DDPolicyDenied, "dynamic dd"):
+                    RecallDDLaunchGate(
+                        self.root, self.name, mapper_fd=mapper_fd,
+                        executable_path=executable_path, trusted_executable=trusted,
+                        mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
+                    )
 
     def test_missing_executable_memfd_support_denies_mapper_launch(self):
         executable_path = self.base / "memfd-unavailable-dd"

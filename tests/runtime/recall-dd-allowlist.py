@@ -34,7 +34,7 @@ _READS = {"a": 0, "b": 4, "a2": 0, "b2": 5}
 _ROLES = frozenset(("writer", *_READS))
 _TRUSTED_DD_TOKEN = object()
 _TRUSTED_DD_BOOTSTRAP_DIR = Path("/etc/swapz/trust/gnu-coreutils-dd")
-_TRUSTED_DD_PUBLIC_KEY_PATH = Path("/usr/share/swapz/trust/gnu-coreutils-release-ed25519.pub")
+_TRUSTED_DD_PUBLIC_KEY_PATH = Path("/usr/share/swapz/trust/swapz-gnu-dd-manifest-ed25519.pub")
 _TRUSTED_DD_OWNER_UID = 0
 _TRUSTED_DD_OPENSSL_PATH = Path("/usr/bin/openssl")
 _TRUSTED_DD_REVOKED_MARKER = "REVOKED"
@@ -1145,8 +1145,7 @@ class RecallDDLaunchGate:
             self._verify_executable_source(executable_source_fd)
             source_info = self.ops.fstat(executable_source_fd)
             self._executable_source_identity = (source_info.st_dev, source_info.st_ino)
-            if self._mapper_is_block:
-                assert self._trusted_executable is not None
+            if self._trusted_executable is not None:
                 self._executable_fd = self.ops.create_sealed_executable(
                     executable_source_fd, self._trusted_executable.sha256,
                     128 * 1024 * 1024,
@@ -1290,7 +1289,7 @@ class RecallDDLaunchGate:
             raw_type = self.ops.pread(fd, 4, phoff + index * phentsize)
             if len(raw_type) != 4:
                 raise DDPolicyDenied("trusted dd ELF program-header table is truncated")
-            if int.from_bytes(raw_type, "little") == 3:  # PT_INTERP
+            if int.from_bytes(raw_type, "little") in {2, 3}:  # PT_DYNAMIC, PT_INTERP
                 return False
         return True
 
@@ -1300,8 +1299,8 @@ class RecallDDLaunchGate:
         self._verify_no_file_capabilities(fd)
         if self.ops.pread(fd, 4, 0) != b"\x7fELF" or self.ops.inheritable(fd):
             raise DDPolicyDenied("dd executable identity is not trusted ELF")
-        if self._mapper_is_block:
-            if info.st_uid != 0:
+        if self._trusted_executable is not None:
+            if self._mapper_is_block and info.st_uid != 0:
                 raise DDPolicyDenied("block-mapper executable must be root-owned")
             assert self._expected_executable_sha256 is not None
             if info.st_size <= 0 or info.st_size > 128 * 1024 * 1024:
@@ -1329,7 +1328,7 @@ class RecallDDLaunchGate:
 
     def _verify_executable(self) -> None:
         assert self._executable_fd is not None
-        if self._mapper_is_block:
+        if self._trusted_executable is not None:
             assert self._executable_source_fd is not None
             self._verify_executable_source(self._executable_source_fd)
             source_info = self.ops.fstat(self._executable_source_fd)
@@ -1344,12 +1343,13 @@ class RecallDDLaunchGate:
             raise DDPolicyDenied("dd executable identity is not trusted ELF")
         if self.ops.inheritable(self._executable_fd):
             raise DDPolicyDenied("dd executable descriptor is not close-on-exec")
-        if self._mapper_is_block:
+        if self._trusted_executable is not None:
             assert self._expected_executable_sha256 is not None
             assert self._sealed_executable_identity is not None
-            if info.st_uid != os.geteuid() or self._sealed_executable_identity != (
+            if ((self._mapper_is_block and info.st_uid != os.geteuid())
+                    or self._sealed_executable_identity != (
                 info.st_dev, info.st_ino, info.st_size
-            ):
+            )):
                 raise DDPolicyDenied("sealed executable identity changed")
             required_seals = (getattr(fcntl, "F_SEAL_WRITE", 0x0008)
                               | getattr(fcntl, "F_SEAL_GROW", 0x0004)

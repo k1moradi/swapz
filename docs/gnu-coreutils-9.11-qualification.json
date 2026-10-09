@@ -1,0 +1,164 @@
+{
+  "binary": {
+    "elf": {
+      "elf_class": "ELF64",
+      "elf_type": "ET_EXEC",
+      "endianness": "little",
+      "machine": "x86_64",
+      "static": true
+    },
+    "file_capabilities": false,
+    "mode": "0755",
+    "pinned_descriptor_path_rechecked": true,
+    "setid_bits": false,
+    "sha256": "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
+    "size": 939864,
+    "version_output": "dd (coreutils) 9.11\nCopyright (C) 2026 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Paul Rubin, David MacKenzie, and Stuart Kemp."
+  },
+  "build_logs": [
+    {
+      "build_log_sha256": "b421396c1f89cac8d60e6bc51e6804bd336c336920da6ee7e83c44cd0627af05",
+      "configure_log_sha256": "e0a2383c7feeea7ecb70f3b4772e106d0074309ba64dacd4991116f897c32a21"
+    },
+    {
+      "build_log_sha256": "5d31583fdf05fc05a3f36f7491ba50a869e56342a8059736fc76a7f8c80ad640",
+      "configure_log_sha256": "1fceef72bc4bd9e3b661596838e3d0d8555728a15b64c3645e423d183f69fa2f"
+    }
+  ],
+  "build_recipe": {
+    "configure": [
+      "./configure",
+      "--disable-nls",
+      "--disable-acl",
+      "--without-selinux"
+    ],
+    "environment": {
+      "CC": "/usr/bin/gcc",
+      "CFLAGS": "-O2 -g0 -ffile-prefix-map=<source-tree>=.",
+      "LANG": "C",
+      "LC_ALL": "C",
+      "LDFLAGS": "-static",
+      "SOURCE_DATE_EPOCH": "1776693733",
+      "TZ": "UTC"
+    },
+    "install_or_system_changes": false,
+    "make": [
+      "/usr/bin/make",
+      "-j2"
+    ]
+  },
+  "production_manifest_or_key_installed": false,
+  "qualification": "source authenticated; two same-host clean builds compared",
+  "rebuild_comparison": {
+    "build_count": 2,
+    "independent_builder_reproduction": "not performed",
+    "same_host_byte_identical": true,
+    "sha256_by_build": [
+      "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
+      "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180"
+    ]
+  },
+  "schema": "swapz.gnu-coreutils-dd-build.v1",
+  "source": {
+    "archive_layout": {
+      "configure_identity": "GNU coreutils 9.11",
+      "top_level_directory": "coreutils-9.11"
+    },
+    "archive_name": "coreutils-9.11.tar.xz",
+    "archive_sha256": "394024eda0a5955217ceda9cd1201e65dc8fa3aa29c2951135a49521d57c3cc3",
+    "archive_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.xz",
+    "gnu_keyring_sha256": "0fe55175b96a8ea1c4b670cc3fe11d56b341e4eff81b161ea49958ae550be6ca",
+    "gpg_verifier": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/gpg",
+      "resolved_path": "/usr/bin/gpg",
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754",
+      "size": 1186456,
+      "version": "gpg (GnuPG) 2.4.8"
+    },
+    "published_sha256_base64": "OUAk7aCllVIXztqc0SAeZdyPo6opwpURNaSVIdV8PMM=",
+    "release": "9.11",
+    "release_announcement": "https://lists.gnu.org/archive/html/coreutils-announce/2026-04/msg00000.html",
+    "release_commit": "c01fd163a47468a8296fb369f5233853bb551bb6",
+    "release_signature_epoch": 1776693733,
+    "release_signer_fingerprint": "6C37DC12121A5006BC1DB804DF6FD971306037D9",
+    "schema": "swapz.gnu-coreutils-source.v1",
+    "signature_sha256": "e2b9f147338cb22e41be28dcf76cd87c5197be359cc42033e66488a4a6b5c024",
+    "signature_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.xz.sig",
+    "source_authentication": "GNU detached signature verified; full key fingerprint pinned",
+    "trust_note": "This authenticates the GNU release source archive, not any locally built binary or production application key."
+  },
+  "toolchain": {
+    "architecture": "x86_64",
+    "archiver": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/ar",
+      "resolved_path": "/usr/bin/x86_64-linux-gnu-ar",
+      "sha256": "531473816bf553e863df5aab14c8177c72b732cf80c51dcf0fa990a50125041c",
+      "size": 55944,
+      "version": "GNU ar (GNU Binutils for Ubuntu) 2.46"
+    },
+    "assembler": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/as",
+      "resolved_path": "/usr/bin/x86_64-linux-gnu-as",
+      "sha256": "4e5fcaa3cdc160173cb5cfe7aa35dc39d7aa1f06ba8d75b8d923bbae5473991b",
+      "size": 826608,
+      "version": "GNU assembler (GNU Binutils for Ubuntu) 2.46"
+    },
+    "compiler_target": "x86_64-linux-gnu",
+    "gcc": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/gcc",
+      "resolved_path": "/usr/bin/x86_64-linux-gnu-gcc-15",
+      "sha256": "b5f1b773a7c733738352000c92a077dc5852a1a2fc6d836b1e411be1e9ec5f88",
+      "size": 1305304,
+      "version": "gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0"
+    },
+    "host_platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "kernel_release": "7.0.0-38-generic",
+    "linker": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/ld",
+      "resolved_path": "/usr/bin/x86_64-linux-gnu-ld.bfd",
+      "sha256": "97f48d93b8b076a92d2809ec29dcb17f0f37c8827358f832255e2ed22fef6075",
+      "size": 1890472,
+      "version": "GNU ld (GNU Binutils for Ubuntu) 2.46"
+    },
+    "make": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/make",
+      "resolved_path": "/usr/bin/make",
+      "sha256": "27c9f6d806aee15882b01c2c61848f7aa75caa14bc7b6f608ba422f9e46a7d49",
+      "size": 295120,
+      "version": "GNU Make 4.4.1"
+    },
+    "python": "3.14.4",
+    "ranlib": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/ranlib",
+      "resolved_path": "/usr/bin/x86_64-linux-gnu-ranlib",
+      "sha256": "369cf0d60a6167b11f39ed9b4bbb3d93903cc364975b244e1d084aaccf48dc92",
+      "size": 31368,
+      "version": "GNU ranlib (GNU Binutils for Ubuntu) 2.46"
+    },
+    "static_libc_archive": "/usr/lib/gcc/x86_64-linux-gnu/15/../../../x86_64-linux-gnu/libc.a",
+    "tar": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/tar",
+      "resolved_path": "/usr/bin/tar",
+      "sha256": "708692f9457a16a95a51fd881551b55b4ce72200d16b8c6d2bacbea857cfd9cc",
+      "size": 452624,
+      "version": "tar (GNU tar) 1.35"
+    }
+  },
+  "worker_seccomp_execution": "NOT RUN by build command"
+}

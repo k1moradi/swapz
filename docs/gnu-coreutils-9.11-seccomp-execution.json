@@ -1,0 +1,62 @@
+{
+  "binary": {
+    "elf": {
+      "elf_class": "ELF64",
+      "elf_type": "ET_EXEC",
+      "endianness": "little",
+      "machine": "x86_64",
+      "static": true
+    },
+    "file_capabilities": false,
+    "mode": "0755",
+    "pinned_descriptor_path_rechecked": true,
+    "setid_bits": false,
+    "sha256": "8b418fb762e099ca7f46ce34d5c8dafa006c757d317bd60f0194891ca4144180",
+    "size": 939864,
+    "version_output": "dd (coreutils) 9.11\nCopyright (C) 2026 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n\nWritten by Paul Rubin, David MacKenzie, and Stuart Kemp."
+  },
+  "build_record_sha256": "451ab81c8a2e82f311a37fd9f51776abef05d2126d5fea26b87c8c82c889bc70",
+  "cancellation": "actual short-lived dd copy cancelled and reaped via retained pidfd",
+  "execution": "actual authenticated GNU static dd ran through RecallDDLaunchGate, sealed memfd, strict pass_fds, pidfd supervisor, parent-death containment, and existing seccomp filter",
+  "mapper": "temporary ordinary regular file only; synthetic verifier; no DM device",
+  "production_manifest_or_key_installed": false,
+  "roles": [
+    "writer",
+    "a",
+    "b",
+    "a2",
+    "b2"
+  ],
+  "schema": "swapz.gnu-dd-seccomp-execution.v1",
+  "source": {
+    "archive_layout": {
+      "configure_identity": "GNU coreutils 9.11",
+      "top_level_directory": "coreutils-9.11"
+    },
+    "archive_name": "coreutils-9.11.tar.xz",
+    "archive_sha256": "394024eda0a5955217ceda9cd1201e65dc8fa3aa29c2951135a49521d57c3cc3",
+    "archive_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.xz",
+    "gnu_keyring_sha256": "0fe55175b96a8ea1c4b670cc3fe11d56b341e4eff81b161ea49958ae550be6ca",
+    "gpg_verifier": {
+      "mode": "0755",
+      "owner_uid": 0,
+      "requested_path": "/usr/bin/gpg",
+      "resolved_path": "/usr/bin/gpg",
+      "sha256": "c8f3dc07a34ab0a0a081368b482724b79a2a6d6b7aa856741c09edf7af854754",
+      "size": 1186456,
+      "version": "gpg (GnuPG) 2.4.8"
+    },
+    "published_sha256_base64": "OUAk7aCllVIXztqc0SAeZdyPo6opwpURNaSVIdV8PMM=",
+    "release": "9.11",
+    "release_announcement": "https://lists.gnu.org/archive/html/coreutils-announce/2026-04/msg00000.html",
+    "release_commit": "c01fd163a47468a8296fb369f5233853bb551bb6",
+    "release_signature_epoch": 1776693733,
+    "release_signer_fingerprint": "6C37DC12121A5006BC1DB804DF6FD971306037D9",
+    "schema": "swapz.gnu-coreutils-source.v1",
+    "signature_sha256": "e2b9f147338cb22e41be28dcf76cd87c5197be359cc42033e66488a4a6b5c024",
+    "signature_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.xz.sig",
+    "source_authentication": "GNU detached signature verified; full key fingerprint pinned",
+    "trust_note": "This authenticates the GNU release source archive, not any locally built binary or production application key."
+  },
+  "test_key": "ephemeral application manifest key; test-only; deleted with temporary directory"
+}

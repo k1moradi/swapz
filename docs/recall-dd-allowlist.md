@@ -31,8 +31,10 @@ manifest, digest, key, verifier, or path. It reads the detached manifest and
 signature from the fixed root-controlled directory
 `/etc/swapz/trust/gnu-coreutils-dd/`. The only permitted entries are
 `manifest.json`, `manifest.sig`, and an optional `REVOKED` marker. It reads the
-separately provisioned public key from the fixed package-data path
-`/usr/share/swapz/trust/gnu-coreutils-release-ed25519.pub`. Every path component is
+separately provisioned Swapz manifest-signing public key from the fixed
+package-data path
+`/usr/share/swapz/trust/swapz-gnu-dd-manifest-ed25519.pub`. This Ed25519
+application key is distinct from GNU's GPG release-signing key. Every path component is
 opened descriptor-relatively with `O_NOFOLLOW`; directories and regular files
 must be root-owned, single-link where applicable, and not group/world writable.
 Files are bounded, checked against their open descriptors, read from pinned
@@ -55,25 +57,24 @@ linkage. A manifest label and matching binary digest do not establish GNU
 semantics by themselves. The installer of the Ed25519 trust key and signer
 must independently establish the source/build chain before signing this
 manifest. GNU release announcements publish source archives, detached GPG
-signatures, checksums, and the release-signing key fingerprint; the bootstrap
-operator must verify the exact release artifacts against GNU's published
-fingerprint and checksum records ([example release announcement](https://lists.gnu.org/archive/html/coreutils-announce/2026-02/msg00000.html),
-[GNU Coreutils archive](https://ftp.gnu.org/gnu/coreutils/)). The code here does
-not itself validate GNU's GPG signature, build the source, or attest the
-compiler and build environment. A complete provenance record must also bind
-the source revision, build recipe, toolchain, static-link options, and output
-binary; an independently reproducible build or equivalent trusted build
-attestation is still required. The Ed25519 public key must be provisioned
-through a separate trusted administrator/package channel, with its fingerprint
-checked out of band. Installing a new key beside a manifest and treating that
-key as trusted would not meet this contract.
+signatures, checksums, and the release-signing key fingerprint. The separate
+qualification procedure verifies the 9.11 source archive and records its
+static build recipe, toolchain, output binary, and worker-boundary run; see
+[`gnu-coreutils-qualification.md`](gnu-coreutils-qualification.md) and the
+machine-readable [`9.11 qualification record`](gnu-coreutils-9.11-qualification.json).
+The two clean builds are same-host repeatability evidence, not independent
+builder reproduction. The Ed25519 application public key must still be
+provisioned through a separate trusted administrator/package channel, with its
+fingerprint checked out of band. Installing a new key beside a manifest and
+treating that key as trusted would not meet this contract.
 
-No verified GNU static binary, GNU release verification record, reproducible
-build record, or production signing key is provisioned on this host or shipped
-in the repository. The host `/usr/bin/dd` is not accepted as provenance merely
-because of its pathname. The direct mapper path therefore remains unavailable.
-Disposable Ed25519 keys and synthetic ELF fixtures in the regression suite
-test signature mechanics only; they are not production authentication.
+The qualification host's `/usr/bin/dd` is not accepted as provenance merely
+because of its pathname. The actual test used a GNU coreutils 9.11 binary built
+from the authenticated release source. The production direct mapper path
+remains unavailable because no production application key or manifest is
+installed and trusted exclusive DM ownership and kernel I/O-drain qualification
+are still outstanding. Disposable Ed25519 application keys in rootless tests
+exercise signature mechanics only; they are not production authentication.
 
 ### OpenSSL and direct-exec compatibility assumptions
 
@@ -94,12 +95,11 @@ machine and absence of `PT_INTERP`, then copies it to a write-sealed executable
 memfd requiring `MFD_EXEC` and `F_SEAL_EXEC`. Unsupported kernels, architectures,
 memfd policy, or seals deny admission. The existing child seccomp setup permits
 `execve` of the already selected descriptor-backed image but blocks process
-creation, credential changes, namespace changes, and asynchronous I/O. This is
-an architectural compatibility review, not runtime evidence for an actual GNU
-static build: no verified GNU artifact has been launched under that seccomp
-profile. The future qualification must run the exact trusted build through the
-real gate against temporary ordinary files before mapper admission is
-considered.
+creation, credential changes, namespace changes, and asynchronous I/O. GNU
+coreutils 9.11 was run through this gate on the qualification host against
+temporary regular files, including all five fixed roles and pidfd cancellation.
+That result is host-specific; see the execution record and procedure. It does
+not qualify a different kernel, architecture, memfd policy, or a real mapper.
 
 ## Exact mapper owner state controller
 
@@ -175,6 +175,7 @@ configuration, synthetic static/dynamic/wrong-architecture ELF, digest
 mismatch, setid and capability rejection, pinned path mutation/replacement,
 sealed snapshots, fake DM identities, lock replacement, owner loss, inventory
 ambiguity, concurrent lifecycle calls, descriptor-close failure, and exact
-normal-removal/absence ordering. These rootless checks do not authenticate a
-GNU artifact or prove real exclusive DM authority. Existing direct-`dd` worker
-integration uses only temporary regular files; it is not a mapper test.
+normal-removal/absence ordering. These policy tests do not independently
+reproduce the GNU binary build or prove real exclusive DM authority. The GNU
+qualification runner uses the actual authenticated-source build against
+temporary regular files; it is not a mapper test.
