@@ -1167,7 +1167,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       marker inventory in a machine-readable, bounded source-only
       report; do not mistake the report for cryptographic
       attestation or external trust.
-- [ ] **Synthetic recall failure telemetry:** analyze bounded
+- [x] **Synthetic recall failure telemetry:** analyze bounded
       launch failure and service-error diagnostics across
       repeated rootless sessions; never retry over a failed
       positive session or turn a missing receipt into approval.
@@ -1192,7 +1192,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       no locally generated file can attest trusted
       external identity by itself. Keep this separate
       from Codex's privileged owner/evidence producer.
-- [ ] Add offline, bounded **telemetry fault classification**
+- [x] Add offline, bounded **telemetry fault classification**
       for observed pidfd/recall launch and WAIT denial
       categories without creating positive cleanup authority.
       Codex owns the broker implementation.

@@ -3306,3 +3306,55 @@ Codex concurrently owns the unresolved broker finalization-denial race
 does not edit that implementation. This validation-only commit comes after
 the executable source commit, and should not be conflated with the exact
 tested SHA recorded above.
+
+
+## 2026-10-09 — Independent rootless recall-denial telemetry classification
+
+**Exact executable commit:** `8857cad43e0df19056637280be370c4ab7cf1396`
+([source-only feature](https://github.com/k1moradi/swapz/commit/8857cad43e0df19056637280be370c4ab7cf1396)).
+
+ChatGPT implemented independently:
+- `tests/runtime/recall-denial-telemetry.py`: a bounded source-only analyzer
+  for JSONL **already-denied synthetic recall sessions**. Categorizes
+  LAUNCH, READY, WAIT, READBACK, WRITER_READY, CHANNEL, PIDFD, FINALIZE,
+  and STOP failures. Verifies exact asserted source revision, unique session
+  identity, typed negative status/verdict, and SHA-256 of original bytes.
+- `tests/runtime/recall-denial-telemetry-test.py`: **40** adversarial
+  rootless tests for category precedence, malformed/fabricated receipts,
+  duplicate fields/sessions, input framing/size, symlink and hardlink
+  rejection, mixed revisions, zero exit-code denial, and stderr-only
+  failed CLI behavior.
+- `docs/recall-denial-telemetry-offline.md`: schema, invocation,
+  and strict no-authorization/trust limitations.
+- Both joint workflows execute the telemetry suite under a timeout;
+  the static workflow contract includes a negative mutation gate,
+  increasing from 13 to **14 tests**.
+
+**Three GitHub workflows all green at this exact source revision:**
+
+- [Combined 38002755119](https://github.com/k1moradi/swapz/actions/runs/38002755119)
+- [Teardown 38002755147](https://github.com/k1moradi/swapz/actions/runs/38002755147)
+- [Standalone NBD 38002755084](https://github.com/k1moradi/swapz/actions/runs/38002755084)
+
+Both joint workflow logs record **40 telemetry tests** and
+**14 workflow-contract tests** passed. The combined log includes
+`COMBINED_TESTED_HEAD=8857cad43e0df19056637280be370c4ab7cf1396`,
+`RECALL_DIRECT_ROLE_REPEAT 6/6: PASS`,
+`FIXTURE_OWNER_BROKER_REPEAT 3/3: PASS`, and
+`COMBINED_NBD_STRESS 25/25: PASS`.
+
+This classifies **synthetically asserted** failures only. The analyzer
+does not itself obtain or authenticate actual service logs, kernel
+observations, device state, physical drain, or benchmark samples.
+Its successful output hard-codes negative cleanup, backing release,
+kernel drain, physical selection, and production qualification.
+No real DM, loop, NBD, swap, module, physical I/O or destructive
+cleanup occurred. V2.2 strategy/batch-size winner: **UNDETERMINED**.
+
+A later Codex commit
+`ae5f812e7647236ec91e8cae2102cceef0d6d9d5`
+updated the broker's finalization/concurrent-denial implementation;
+its joint workflow results must be reconciled **separately**. Do not
+extend the three-way green telemetry revision claim to this newer
+source without its own evidence. This validation-only commit changes
+documentation, not the source revision tested above.
