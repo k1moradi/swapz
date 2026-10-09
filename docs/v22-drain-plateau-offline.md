@@ -7,21 +7,26 @@ emits JSON. It never invokes fio, DM, NBD, swap or kernel sysfs operations.
 
 ## Why this was added
 
-The current **live** `tests/runtime/streaming-benchmark.sh` computes
+The original **live** `tests/runtime/streaming-benchmark.sh` calculated
 `drained_write_mib_s` using fio's **logical** `write.io_bytes` divided by
-elapsed time (including an explicit flush). That is a useful end-to-end
-logical completion timing but **not an independent lower-device drained-byte
-measurement**. The script does collect `lower_write_sectors` deltas; however,
-its final inline 97% frontier decision uses one run per point and assumes a
-plateau whenever a point is within 97% of the maximum. That logic cannot
-establish saturated physical drain, reproducibility, or a defensible p99.
+elapsed time including a flush. It also nominated a 97%-frontier "winner"
+from only one observation per batch. Neither constituted a qualified
+physical-device throughput plateau.
 
-This new analyzer requires **lower-device sector deltas** for its numerator.
-It does not alter or execute the live benchmark script. The future authorized
-collector still needs independent review to make these counters trustworthy:
-isolate the backend, prove counter attribution, sample a valid drain window,
-complete fsync and kernel I/O quiescence, and ensure no fixture prefill or
-outside traffic contaminates the observation.
+The source-only reporting fix now emits two **distinct diagnostics**:
+`logical_flush_window_mib_s` (logical fio bytes divided by a monotonic
+flush-inclusive elapsed interval) and `lower_counter_window_mib_s`
+(the lower sysfs sector delta divided by that interval). Its separate
+`streaming-benchmark-report.py` explicitly prints `NO QUALIFIED WINNER`
+and `PLATEAU NOT REACHED`, never a one-shot optimizer verdict.
+See [`streaming-benchmark-reporting.md`](streaming-benchmark-reporting.md).
+
+This stricter analyzer requires **lower-device sector deltas** for its
+numerator, plus independent repeats and sufficient raw read samples.
+The future authorized collector still needs independent review to make
+counters trustworthy: isolate the backend, prove counter attribution, sample
+a valid drain window, complete fsync and kernel I/O quiescence, and ensure no
+fixture prefill or outside traffic contaminates the observation.
 
 ## JSON Lines observation schema
 
@@ -60,8 +65,9 @@ python3 tests/runtime/v22-drain-plateau-analyze.py --observations /path/to/obser
 ```
 
 No fixture currently emits automatically valid production observations for
-this schema. In particular, **do not relabel** the existing live script's
-`drained_write_mib_s` as lower-device physical drain.
+this schema. In particular, **do not relabel** the new live script's
+`lower_counter_window_mib_s` as independently verified physical drain or
+convert its one-run diagnostics into repeated observations.
 
 ## Selection criteria
 
