@@ -31,7 +31,7 @@ MANDATORY_TESTS = (
     "recall-fixture-owner-test.py",
     "v22-drain-plateau-analyze-test.py",
 )
-RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\\.(?:py|sh)\\b")
+RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
 STEP_LINE = re.compile(r"^      - name: (.+)$", re.MULTILINE)
 
@@ -84,8 +84,8 @@ def _python_test_executed(body: str, filename: str) -> bool:
     # Test must execute under a deadline, not merely be mentioned in
     # comments, py_compile, grep/echo output or the trigger list.
     target = re.escape("tests/runtime/" + filename)
-    command = (r"(?m)^\\s*(?:if ! )?timeout [1-9][0-9]*s "
-               r"python3 (?:-B )?" + target + r"\\s+-v(?:\\s|$)")
+    command = (r"(?m)^\s*(?:if ! )?timeout [1-9][0-9]*s "
+               r"python3 (?:-B )?" + target + r"\s+-v(?:\s|$)")
     return re.search(command, body) is not None
 
 
@@ -119,7 +119,7 @@ def check_workflow(name: str, source: str) -> None:
              f"{name}: missing 3 independent fixture-owner repetitions")
     _require(re.search(
         r"if ! timeout 25s python3 -B "
-        r"tests/runtime/recall-fixture-owner-test\\.py -q", owner) is not None,
+        r"tests/runtime/recall-fixture-owner-test\.py -q", owner) is not None,
         f"{name}: broker repeat cannot fail fast")
     _require('echo "FIXTURE_OWNER_BROKER_REPEAT $attempt/3: PASS"' in owner
              and "exit 1" in owner,
@@ -130,10 +130,10 @@ def check_workflow(name: str, source: str) -> None:
              f"{name}: missing six independent five-role repetitions")
     _require(re.search(
         r"if ! timeout 20s python3 -B "
-        r"tests/runtime/recall-role-process-integration-test\\.py"
-        r"\\s+ActualServiceAndDirectDDTests"
-        r"\\.test_real_service_process_five_pinned_workers_and_exact_readback"
-        r"\\s+-q", readers) is not None,
+        r"tests/runtime/recall-role-process-integration-test\.py"
+        r"\s+ActualServiceAndDirectDDTests"
+        r"\.test_real_service_process_five_pinned_workers_and_exact_readback"
+        r"\s+-q", readers) is not None,
         f"{name}: full five-role repeat is not fail-fast")
     _require('echo "RECALL_DIRECT_ROLE_REPEAT $attempt/6: PASS"' in readers
              and "exit 1" in readers,
