@@ -31,6 +31,7 @@ MANDATORY_TESTS = (
     "recall-fixture-release-policy-test.py",
     "recall-fixture-owner-test.py",
     "v22-drain-plateau-analyze-test.py",
+    "v22-evidence-bundle-check-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
