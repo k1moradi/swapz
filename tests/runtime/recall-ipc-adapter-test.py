@@ -205,6 +205,25 @@ class AdapterFakeProtocolTests(unittest.TestCase):
         with self.assertRaises(RecallIPCError):
             self.adapter.wait_reaped(handle)
 
+    def test_missing_wait_receipt_includes_bounded_failure_status_and_denies(self) -> None:
+        for status in ("lifecycle_failure", "protocol_error", "unknown_failure"):
+            with self.subTest(status=status):
+                client = FakeClient()
+                adapter = RecallIPCAdapter(client, FakeProcess())
+                handle = adapter.launch_test("exit", code=0)
+                client.override["wait"] = {
+                    "ok": False, "cleanup_allowed": False,
+                    "preserve_backing": True, "all_reaped": False,
+                    "status": status, "error": "injected rootless failure",
+                }
+                with self.assertRaisesRegex(
+                    RecallIPCError, "service_status=" + status
+                ):
+                    adapter.wait_reaped(handle)
+                self.assertFalse(adapter.cleanup_authorized)
+                with self.assertRaises(RecallIPCError):
+                    adapter.stop_all()
+
     def test_wait_running_is_not_reap_confirmation(self) -> None:
         handle = self.adapter.launch_test("sleep", duration_ms=50)
         self.client.override["wait"] = lambda d: {**d, "status": "running",
