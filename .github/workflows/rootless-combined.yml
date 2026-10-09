@@ -221,6 +221,12 @@ jobs:
           bash -n tests/runtime/streaming-benchmark.sh
           python3 -m py_compile tests/runtime/streaming-benchmark-report.py tests/runtime/streaming-benchmark-report-test.py
           timeout 25s python3 -B tests/runtime/streaming-benchmark-report-test.py -v
+      - name: Rootless pidfd-owned NBD mock server lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/nbd-pidfd-owned-session.py tests/runtime/nbd-pidfd-owned-mock-child.py tests/runtime/nbd-pidfd-owned-session-test.py
+          timeout 35s python3 -B tests/runtime/nbd-pidfd-owned-session-test.py -v
       - name: Rootless DM IO drain policy and synthetic orchestration
         shell: bash
         run: |
