@@ -22,7 +22,7 @@ HERE = Path(__file__).resolve().parent
 CHILD = HERE / "nbd-pidfd-owned-mock-child.py"
 MODES = frozenset(("normal", "wrong-ready", "exit-before-ready",
                    "exit-after-ready", "ignore-term", "fail-term",
-                   "slow-ready", "silent", "attempt-spawn"))
+                   "slow-ready", "silent", "attempt-spawn", "pdeath-fail"))
 
 
 class OwnedServerDenied(RuntimeError):
