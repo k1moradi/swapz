@@ -2884,3 +2884,67 @@ ordinary DM suspend, real kernel I/O drain, loop/NBD detach,
 swap correctness under a real mapper, virtual benchmark or
 physical-device benchmark was performed. V2.2 strategy and
 batch size remain **UNDETERMINED**.
+
+## 2026-10-09 — Adversarial fail-closed synthetic writer readiness
+
+The main developer independently reviewed Codex's updated passive GNU
+qualification, two-output build-record verification, mapper-only release
+and session-HMAC drain policy (see
+`docs/main-developer-fixture-owner-review-2026-10-09.md`).
+No Codex-owned source was modified.
+
+**Exact executable/source revision validated by BOTH mandatory workflows:**
+`08f28d60648ce501ad6c86648db4f486f404994d`.
+
+- [Combined CI PASS](https://github.com/k1moradi/swapz/actions/runs/37957362142).
+- [Teardown CI PASS](https://github.com/k1moradi/swapz/actions/runs/37957362071).
+
+Previously the positive rootless five-role recall fixture checked
+regular-file writer bytes before starting readers, but an unsuccessful
+writer-readiness assertion did not explicitly latch the bridge,
+role adapter and IPC client as permanently denied. The main
+developer hardened the fixture-only observation to require Linux
+`O_NOFOLLOW`, a pinned regular-file descriptor and unchanged
+dev/inode/owner/links/mode 0600/size; each read uses the pinned
+descriptor and checks pathname identity and service process life.
+A bounded deadline and strict exact-byte comparison precede
+positive reader admission.
+
+On any failed observation, the bridge, adapter and client
+authorization are permanently denied, the control socket closes,
+no additional reader roles can launch, and the synthetic backing
+marker remains intact. The service's rootless EOF recovery may
+reap its own worker, but that never grants cleanup. The writer
+WAIT remains deferred until all four successful reader receipts
+in the positive five-role protocol.
+
+The expanded separate-process suite now includes **20 tests**;
+10 newly added adversarial cases cover deterministic delayed
+completion, missing bytes/timeout, truncation, correct-size wrong
+page, replacement of pathname after pinning, symlink substitution
+before pinning, read interruption, service EOF, invalid deadline,
+and denial after a real writer was admitted but its data
+observation was unconfirmed. All 20 passed in BOTH workflows;
+each also ran **six independent positive five-role processes**
+and reported `RECALL_DIRECT_ROLE_REPEAT 6/6: PASS`.
+
+Other exact-revision proof from combined CI:
+- GNU source/ELF policy **7 tests**, strict build-record policy
+  **10 tests**; no live GNU source build or real-GNU execution.
+- Direct dd allowlist **81 tests**.
+- Authenticated fixture release **model: 5 tests**.
+- Offline drain plateau **27 tests**.
+- NBD rootless separate-process stress `25/25: PASS`.
+
+Two earlier runs at `d1e232a1` failed a *new test's exact
+error-wording assertion*; the data-integrity check had correctly
+denied a substituted inode at its final verification stage.
+`08f28d60` corrected only the assertion to accept either
+identity-denial branch. Neither admission nor cleanup policy
+was weakened.
+
+This validates a **private regular-file test ordering barrier**,
+not a kernel I/O fence, a completed writer protocol receipt,
+nonvolatile persistence or physical DM/loop/NBD disappearance.
+Production mapper admission and backing deletion remain blocked.
+V2.2 strategy/batch winner remains **UNDETERMINED**.
