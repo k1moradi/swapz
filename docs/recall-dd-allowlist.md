@@ -1,126 +1,139 @@
-# V2.2 proposed direct-`dd` launch gate
+# V2.2 direct-`dd` admission policy
 
-**Status:** role admission is connected to the pidfd service API behind an
-explicit trusted-configuration gate. The service CLI and default service
-configuration still admit only the fixed `sleep` and `exit` test workers. No
-production `buffer-recall.sh` integration or real mapper I/O is enabled.
+**Status: production mapper admission remains disabled.** The normal pidfd
+service CLI still admits only its fixed `sleep` and `exit` test workers. No
+production recall integration or mapper I/O is enabled. The source-only
+changes below provide stricter bootstrap contracts and mock-tested rejection
+paths; they do not supply the separately controlled privileged fixture owner
+or a real GNU trust anchor required to turn that path on.
 
-The IPC form is role-only:
+## Fixed role interface
+
+The direct-I/O policy accepts only the five fixture roles. IPC supplies a role
+string; it cannot choose argv, executable, environment, working directory,
+numeric PID, mapper name, source path, or output path.
+
+| Role | Fixed operation |
+| --- | --- |
+| `writer` | Nine 4 KiB blocks from the pinned `pages.bin` descriptor to the pinned mapper descriptor. |
+| `a` | Read page 0 to the exclusive `read-a` output descriptor. |
+| `b` | Read page 4 to the exclusive `read-b` output descriptor. |
+| `a2` | Concurrent read of page 0 to `read-a2`. |
+| `b2` | Concurrent read of page 5 to `read-b2`. |
+
+The writer must be admitted before any reader; each role is one-use. The
+service's ordinary CLI and its fixed test-worker allowlist are unchanged.
+
+## GNU executable provenance
+
+`RecallDDLaunchGate` reuses the existing pinned-descriptor hashing and sealed
+executable memfd implementation. For a real block mapper, a bare
+`expected_executable_sha256` string is rejected. The digest must come from a
+strict signed manifest passed through `TrustedGNUCoreutilsDD.from_signed_manifest`.
+The signed payload binds all of these fields:
 
 ```json
-{"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"}
+{
+  "format": 1,
+  "vendor": "GNU Project",
+  "package": "coreutils",
+  "binary": "dd",
+  "version": "<trusted build version>",
+  "executable": "/absolute/path/to/dd",
+  "sha256": "<binary digest>",
+  "source_sha256": "<GNU release source digest>",
+  "linkage": "static"
+}
 ```
 
-Only the trusted in-process bootstrap may construct a
-`RecallDDLaunchGate` and pass it to
-`SupervisorControlService(enable_direct_dd=True, recall_dd_gate=...)`. The
-normal `--fd` CLI calls the service with its default configuration, so an IPC
-caller cannot turn this mode on. A separately reviewed launcher/bridge change
-is required before any fixture can enable it.
+The verifier callback is deliberately mandatory and has no default. Trusted
+bootstrap code must verify the detached signature against a separately
+controlled public key or another independently managed build/package trust
+root. It must not compute the executable's digest and then sign or accept that
+digest as trust configuration. Rootless tests use a fake signature verifier
+and synthetic ELF data; those tests prove schema and fail-closed behavior,
+not GNU package identity. No trusted GNU manifest or signing key is shipped
+by this repository, so the live mapper path stays unavailable.
 
-The service accepts no caller-supplied executable, argv, environment, working
-directory, numeric PID, mapper name, input path, or output path. Extra fields
-are a protocol error. The fixed `sleep` and `exit` test workers remain
-unchanged.
+The gate opens the exact absolute manifest path without `PATH` lookup, checks
+the pinned descriptor, rejects setuid/setgid bits and any file-capability
+xattr, hashes the pinned bytes against the signed digest, and creates the
+existing write-sealed executable memfd snapshot. It also rechecks the source
+descriptor and path identity before each role. A replaced pathname or
+in-place mutation closes admission permanently. A path check is not treated
+as a substitute for the retained descriptor.
 
-## Exactly approved roles
+Only little-endian static ELF is admitted for mapper I/O. A dynamic executable
+would resolve its ELF interpreter (`PT_INTERP`) and shared libraries from the
+host at exec time; hashing and sealing only `dd` would not pin those objects.
+This prototype rejects dynamic GNU coreutils builds rather than assuming the
+loader and library closure are trusted. A future design could admit a
+dynamically linked build only after a separately reviewed system-image or
+package-closure trust mechanism binds the interpreter and every loaded
+library through launch. A matching executable hash alone does not prove GNU
+semantics; the signed provenance must identify an actual GNU coreutils build.
 
-The policy allows each role once, requires `writer` before any reader, and
-permanently closes role admission after a rejected role or identity check.
-The concurrent A/B phase must still launch `a2` and `b2` before waiting for
-either; that sequencing remains in the separate recall I/O plan.
+The supervisor still starts the direct executable behind its pidfd gate and
+passes only explicitly approved close-on-exec descriptors. No shell or
+background wrapper is added. No numeric-PID signaling fallback exists.
 
-| Role | Direct `dd` arguments after descriptor binding |
-| --- | --- |
-| `writer` | `if=/proc/self/fd/<source-fd> of=/proc/self/fd/<mapper-fd> bs=4096 count=9 oflag=direct conv=notrunc status=none` |
-| `a` | `if=/proc/self/fd/<mapper-fd> of=/proc/self/fd/<output-fd> bs=4096 skip=0 count=1 iflag=direct status=none` |
-| `b` | Same read form, `skip=4`, output `read-b` |
-| `a2` | Same read form, `skip=0`, output `read-a2` |
-| `b2` | Same read form, `skip=5`, output `read-b2` |
+## Mapper identity and lifecycle
 
-`RecallDDLaunchGate` pins these resources before a role is admitted:
+`open_test_mapper_fd` requires an explicit mapper name matching
+`swapz-v22-recall-[A-Za-z0-9_-]{1,48}` and a `MapperLifecycleLease` from trusted
+fixture bootstrap. The retained descriptor must be a block device whose
+major/minor matches the fixture identity. The helper checks kernel sysfs
+`dm/name`, `dm/uuid`, and `dev`; before every role the lease's identity reader
+must also return the exact mapper name, UUID, device number, and SHA-256 of the
+active DM table.
 
-1. It walks the absolute fixture path one directory component at a time with
-   `O_NOFOLLOW`, retains the directory descriptor, and requires a private
-   directory owned by the service UID.
-2. It opens `pages.bin` relative to that directory with `O_NOFOLLOW`, then
-   retains and checks a single-link regular-file descriptor of exactly
-   36,864 bytes. It rechecks that the directory path and source entry still
-   identify the pinned objects before each role.
-3. The trusted bootstrap opens the grammar-checked
-   `/dev/mapper/swapz-v22-recall-...` path with `open_test_mapper_fd()`. The
-   helper pins the block-device descriptor and verifies the descriptor's
-   major/minor resolves through sysfs to the exact DM name. The IPC caller
-   never provides this name or descriptor. The mapping and its table must
-   remain exclusively controlled by the test fixture while the service runs.
-4. It opens a fixed trusted `dd` executable path, checks the pinned inode is
-   an executable ELF owned by root or the service UID and not writable by
-   group/other, then launches by `/proc/self/fd/<executable-fd>` rather than
-   resolving `dd` through `PATH`.
-5. Reader outputs are created relative to the retained fixture directory
-   using `O_CREAT|O_EXCL|O_NOFOLLOW`. A stale regular file, FIFO, hardlink or
-   symlink makes admission fail. The generated `dd` argv names the inherited
-   output descriptor, so replacing the directory entry after admission does
-   not redirect the worker's write.
+The lease is backed by a private, single-link fixture lock file. The bootstrap
+must acquire its exclusive `flock` before creating the mapping, retain it
+through every role, and serialize all fixture table, rename, removal, and
+recreation operations through that lock. The policy opens the lock path a
+second time to verify that the owner lock remains held; if the lock is
+released, replaced, unreadable, or cannot be independently checked, admission
+is denied. A mismatch in UUID, device number, or table fingerprint permanently
+closes role admission.
 
-The supervisor's direct-launch extension requires the exact proc-fd
-executable path, a close-on-exec executable descriptor, and an explicit list
-of close-on-exec descriptors to pass. It starts the child behind the existing
-startup gate, retains the pidfd before releasing the gate, closes every other
-child descriptor in strict mode, and makes only the requested input/output
-descriptors inheritable in the forked child immediately before `execve`.
-Parent descriptors remain close-on-exec. The direct child is `dd` itself;
-there is no shell or background Bash wrapper. All stop signals still use the
-retained pidfd.
+A table fingerprint detects an observed change. It does not prevent a
+privileged actor from replacing a table between the check and the worker's
+open. The `flock` is cooperative, not a kernel-enforced DM table lock. The
+exclusive-owner assumption is valid only when a separately controlled
+privileged fixture owner is the sole authority allowed to create, reload,
+rename, or remove this disposable mapping and every such operation obeys the
+lease. That owner and its signed GNU build manifest are not implemented here;
+the normal service cannot construct this configuration from IPC.
 
-When every registered worker is reaped, `stop_all` closes the gate's retained
-source, mapper, executable and output descriptors. Any close failure is
-reported as a lifecycle failure and permanently denies cleanup authorization.
-An unreaped worker prevents descriptor cleanup and device cleanup
-authorization. The existing full stop-report reconciliation, successful
-shutdown, and observed zero service exit requirements remain unchanged.
+The table identity reader must query the live kernel table (for example,
+through a read-only `DM_TABLE_STATUS`/table-status operation) and hash a
+canonical, key-safe representation. It must reject incomplete, ambiguous, or
+changing output. The sysfs name/UUID/dev checks alone do not identify table
+contents. Tests inject a fake reader over ordinary temporary files and never
+open `/dev/mapper`. The regular-file mapper branch is accepted only with an
+explicit injected synthetic verifier for rootless tests. The default mapper
+verifier rejects regular files; this test seam is not a production mapper
+configuration.
 
-## Boundary and limitations
+## Remaining process and descriptor boundaries
 
-The descriptor-based argv removes the pathname replacement race for the
-source, mapper and output object between admission and worker `open()`. A
-path-only check cannot provide this guarantee; the older
-`RecallDDAllowlist.admit()` planner remains only a command-description API.
+The fixed direct child is the intended I/O process; retained pidfds identify
+and signal that direct process. pidfds do not contain arbitrary descendants or
+automatically kill workers after supervisor crash. The prior seccomp process
+creation restrictions and parent-death handling remain relevant, but neither
+removes the need for a separately verified process containment and kernel
+I/O-drain barrier. A service crash, lost response, descriptor close error,
+worker lifecycle error, or unverified mapper identity means preserve the
+backing image.
 
-The pinned source inode can still be modified in place by another process
-with the same UID. The fixture must keep the private directory and source
-under exclusive trusted ownership and retain an independent expected-data
-reference. The fd does not freeze the DM table: a privileged actor could
-reload or otherwise alter a mapping while it is open. The fixture must own the
-test mapping and prohibit concurrent table changes.
+## Tests and qualification limits
 
-The service mode is not exposed by the CLI and the current rootless tests
-never call `open_test_mapper_fd()`, open `/dev/mapper`, or execute `dd`. The
-role-level service tests use a synthetic regular-file descriptor as the
-mapper and a fake supervisor that captures argv and descriptor lists. The
-pidfd descriptor pass-through itself is tested with a short-lived Python
-child, not with a block device.
-
-A pidfd identifies only the direct `dd` child. It does not contain
-grandchildren, automatically kill a worker after supervisor crash, or prove
-that the kernel stopped I/O after the service disappears. GNU `dd` is
-expected to be a direct non-forking worker, but this behavior and the exact
-binary must be reviewed for the target environment. A service crash or lost
-response always means preserve backing; it is not a cleanup authorization.
-Before production recall integration, an independently owned cgroup or
-equivalent containment is still required if any I/O-producing descendants
-are possible.
-
-## Source-only qualification
-
-Run `python3 tests/runtime/recall-dd-allowlist-test.py -v` for the path-only
-planner and descriptor-bound gate cases, and the service regression for the
-explicit role mode. Tests cover all five exact role vectors, role ordering,
-failure latching, file and directory replacement, stale output types,
-executable identity, fd acquisition/closure errors, fake-supervisor startup
-failure, worker failure, and default-mode rejection. They do not validate GNU
-`dd` behavior through `/proc/self/fd`, DM open semantics, staged recall,
-backing cleanup, or production process containment.
-
-The existing production recall fixture still uses Bash background jobs and
-numeric-PID teardown. This work does not eliminate that race.
+`python3 tests/runtime/recall-dd-allowlist-test.py -v` exercises signed-manifest
+parsing with a fake verifier, synthetic static/dynamic ELF, digest mismatch,
+capability and setid rejection, pinned path mutation/replacement, sealed
+snapshots, fake sysfs identities, the fixture lock, table fingerprint changes,
+and sticky denial. Existing direct-`dd` worker integration uses only temporary
+regular files. These are source-only and rootless checks. They do not prove
+that a supplied signature key is trusted, that a particular executable is GNU
+coreutils, that a privileged mapper owner enforces the cooperative lock, or
+that real DM/loop I/O has drained.

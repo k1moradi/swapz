@@ -3,8 +3,9 @@
 
 The path-only ``RecallDDAllowlist`` is a source-only command planner. The
 separately opt-in ``RecallDDLaunchGate`` binds descriptors for a trusted
-service bootstrap; tests provide an ordinary synthetic file as the mapper
-descriptor and a fake supervisor. No test starts dd or performs device I/O.
+service bootstrap; policy tests provide synthetic files and fake kernel DM
+identity. A separate worker integration test starts dd only against temporary
+ordinary files; no mapper or device I/O is performed.
 """
 
 from __future__ import annotations
@@ -12,12 +13,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import errno
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import stat
 import fcntl
-from typing import Sequence
+from typing import Callable, Sequence
 
 
 PAGE_SIZE = 4096
@@ -25,6 +27,11 @@ PAGES = 9
 _MAPPER = re.compile(r"swapz-v22-recall-[A-Za-z0-9_-]{1,48}\Z")
 _READS = {"a": 0, "b": 4, "a2": 0, "b2": 5}
 _ROLES = frozenset(("writer", *_READS))
+_TRUSTED_DD_TOKEN = object()
+_TRUSTED_DD_FIELDS = frozenset((
+    "format", "vendor", "package", "binary", "version", "executable",
+    "sha256", "source_sha256", "linkage",
+))
 
 
 class DDPolicyDenied(ValueError):
@@ -51,6 +58,227 @@ class PinnedDDLaunch:
     output_path: Path | None = None
 
 
+@dataclass(frozen=True, init=False)
+class TrustedGNUCoreutilsDD:
+    """Digest and provenance parsed only from a verified bootstrap manifest.
+
+    The signature verifier is supplied by trusted bootstrap code and must be
+    anchored to an independently managed key. Tests may inject a fake
+    verifier, which proves parser policy only, not GNU binary provenance.
+    """
+
+    executable_path: Path
+    sha256: str
+    version: str
+    source_sha256: str
+    manifest_sha256: str
+    _token: object
+
+    def __init__(self, executable_path: Path, sha256: str, version: str,
+                 source_sha256: str, manifest_sha256: str, *, _token: object):
+        if _token is not _TRUSTED_DD_TOKEN:
+            raise DDPolicyDenied("trusted GNU dd identities require a verified manifest")
+        object.__setattr__(self, "executable_path", executable_path)
+        object.__setattr__(self, "sha256", sha256)
+        object.__setattr__(self, "version", version)
+        object.__setattr__(self, "source_sha256", source_sha256)
+        object.__setattr__(self, "manifest_sha256", manifest_sha256)
+        object.__setattr__(self, "_token", _token)
+
+    @classmethod
+    def from_signed_manifest(
+        cls,
+        payload: bytes,
+        signature: bytes,
+        verifier: Callable[[bytes, bytes], bool],
+    ) -> "TrustedGNUCoreutilsDD":
+        """Verify and parse a strict signed manifest; never trust candidate bytes.
+
+        ``verifier`` is part of the trusted bootstrap and must verify the
+        detached signature with a separately controlled trust anchor. There
+        is intentionally no default verifier or PATH/package-manager fallback.
+        """
+        if (not isinstance(payload, bytes) or not payload or len(payload) > 16384
+                or not isinstance(signature, bytes) or not signature
+                or len(signature) > 8192 or not callable(verifier)):
+            raise DDPolicyDenied("trusted GNU dd manifest or verifier is invalid")
+        try:
+            verified = verifier(payload, signature)
+        except Exception as exc:
+            raise DDPolicyDenied(f"trusted GNU dd manifest verification failed: {exc}") from exc
+        if verified is not True:
+            raise DDPolicyDenied("trusted GNU dd manifest signature was not verified")
+
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError(f"duplicate manifest key: {key}")
+                result[key] = value
+            return result
+
+        try:
+            document = json.loads(payload, object_pairs_hook=unique_object)
+            if not isinstance(document, dict) or set(document) != _TRUSTED_DD_FIELDS:
+                raise ValueError("manifest fields do not match the required schema")
+            executable = document["executable"]
+            if (type(document["format"]) is not int or document["format"] != 1
+                    or document["vendor"] != "GNU Project"
+                    or document["package"] != "coreutils"
+                    or document["binary"] != "dd"
+                    or not isinstance(document["version"], str)
+                    or re.fullmatch(r"[A-Za-z0-9.+_-]{1,64}", document["version"]) is None
+                    or not isinstance(executable, str)
+                    or not os.path.isabs(executable) or "\x00" in executable
+                    or os.path.normpath(executable) != executable
+                    or not isinstance(document["sha256"], str)
+                    or re.fullmatch(r"[0-9a-f]{64}", document["sha256"]) is None
+                    or not isinstance(document["source_sha256"], str)
+                    or re.fullmatch(r"[0-9a-f]{64}", document["source_sha256"]) is None
+                    or document["linkage"] != "static"):
+                raise ValueError("manifest does not name a trusted static GNU coreutils dd build")
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise DDPolicyDenied(f"trusted GNU dd manifest is malformed: {exc}") from exc
+        return cls(
+            Path(executable), document["sha256"], document["version"],
+            document["source_sha256"], hashlib.sha256(payload).hexdigest(),
+            _token=_TRUSTED_DD_TOKEN,
+        )
+
+
+@dataclass(frozen=True)
+class MapperIdentity:
+    """Expected kernel-visible identity from a trusted fixture owner."""
+
+    name: str
+    uuid: str
+    major: int
+    minor: int
+    table_sha256: str
+
+    def __post_init__(self) -> None:
+        if (not isinstance(self.name, str) or _MAPPER.fullmatch(self.name) is None
+                or not isinstance(self.uuid, str) or not self.uuid
+                or len(self.uuid) > 128 or any(ord(c) < 0x21 or ord(c) > 0x7e for c in self.uuid)
+                or isinstance(self.major, bool) or not isinstance(self.major, int)
+                or isinstance(self.minor, bool) or not isinstance(self.minor, int)
+                or not 0 <= self.major <= 4095 or not 0 <= self.minor <= 1048575
+                or not isinstance(self.table_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", self.table_sha256) is None):
+            raise DDPolicyDenied("trusted mapper identity is malformed")
+
+
+class MapperLifecycleLease:
+    """Cooperative exclusive lifecycle lock plus exact identity revalidation.
+
+    The trusted fixture owner must acquire this lock *before* creating the DM
+    mapping and keep exclusive control of every table/name lifecycle operation.
+    A fingerprint comparison detects change; the lock is only a guarantee when
+    every privileged fixture operation obeys this owner protocol.
+    """
+
+    def __init__(self, lock_fd: int, lock_path: Path, expected: MapperIdentity,
+                 identity_reader: Callable[[int, str, "RecallDDFileOps"], MapperIdentity],
+                 *, ops: "RecallDDFileOps") -> None:
+        if type(expected) is not MapperIdentity or not callable(identity_reader):
+            raise DDPolicyDenied("mapper lifecycle identity provider is unavailable")
+        if (not isinstance(lock_path, Path) or not lock_path.is_absolute()
+                or str(lock_path) != os.path.normpath(str(lock_path))):
+            raise DDPolicyDenied("fixture mapper lifecycle lock path is invalid")
+        self.ops = ops
+        self._expected = expected
+        self.identity_reader = identity_reader
+        self._lock_path = lock_path
+        self._closed = False
+        self._lock_fd: int | None = None
+        try:
+            if self.ops.inheritable(lock_fd):
+                raise DDPolicyDenied("fixture owner lock descriptor must be close-on-exec")
+            self._lock_fd = self.ops.dup_cloexec(lock_fd)
+            info = self.ops.fstat(self._lock_fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_nlink != 1 or info.st_mode & 0o077
+                    or self.ops.inheritable(self._lock_fd)):
+                raise DDPolicyDenied("mapper lifecycle lock is not a private owned file")
+            self._verify_owner_lock_held()
+        except Exception as exc:
+            try:
+                self.close()
+            except Exception as close_error:
+                raise DDPolicyDenied(
+                    f"mapper lifecycle lease acquisition failed ({exc}); descriptor close failed ({close_error})"
+                ) from exc
+            if isinstance(exc, DDPolicyDenied):
+                raise
+            raise DDPolicyDenied(f"cannot verify exclusive fixture owner lock: {exc}") from exc
+
+    def verify(self, mapper_fd: int, mapper_name: str,
+               ops: "RecallDDFileOps") -> None:
+        if self._closed or self._lock_fd is None:
+            raise DDPolicyDenied("mapper lifecycle lease is closed")
+        if mapper_name != self.expected.name:
+            raise DDPolicyDenied("mapper name does not match trusted lifecycle lease")
+        try:
+            lock_info = ops.fstat(self._lock_fd)
+            if (not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != os.geteuid()
+                    or lock_info.st_nlink != 1 or lock_info.st_mode & 0o077
+                    or ops.inheritable(self._lock_fd)):
+                raise DDPolicyDenied("mapper lifecycle lock identity changed")
+            self._verify_owner_lock_held(ops)
+            observed = self.identity_reader(mapper_fd, mapper_name, ops)
+        except DDPolicyDenied:
+            raise
+        except Exception as exc:
+            raise DDPolicyDenied(f"cannot verify mapper lifecycle identity: {exc}") from exc
+        if type(observed) is not MapperIdentity or observed != self.expected:
+            raise DDPolicyDenied("DM name, UUID, device number, or table fingerprint changed")
+
+    @property
+    def expected(self) -> MapperIdentity:
+        return self._expected
+
+    def _verify_owner_lock_held(self, ops: "RecallDDFileOps" | None = None) -> None:
+        file_ops = self.ops if ops is None else ops
+        if self._lock_fd is None:
+            raise DDPolicyDenied("fixture mapper owner lock descriptor is closed")
+        owner_info = file_ops.fstat(self._lock_fd)
+        try:
+            probe_fd = file_ops.open(
+                str(self._lock_path), os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
+            )
+        except Exception as exc:
+            raise DDPolicyDenied(f"cannot independently inspect fixture owner lock: {exc}") from exc
+        try:
+            probe_info = file_ops.fstat(probe_fd)
+            if (not stat.S_ISREG(probe_info.st_mode)
+                    or (probe_info.st_dev, probe_info.st_ino)
+                    != (owner_info.st_dev, owner_info.st_ino)
+                    or probe_info.st_uid != os.geteuid() or probe_info.st_nlink != 1
+                    or probe_info.st_mode & 0o077 or file_ops.inheritable(probe_fd)):
+                raise DDPolicyDenied("fixture owner lock pathname or metadata changed")
+            try:
+                fcntl.flock(probe_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                if exc.errno not in {errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK}:
+                    raise DDPolicyDenied(f"cannot verify fixture owner lock: {exc}") from exc
+            else:
+                fcntl.flock(probe_fd, fcntl.LOCK_UN)
+                raise DDPolicyDenied("fixture owner does not hold the exclusive lifecycle lock")
+        finally:
+            try:
+                file_ops.close(probe_fd)
+            except Exception as exc:
+                raise DDPolicyDenied(f"cannot close fixture owner lock probe: {exc}") from exc
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._lock_fd is not None:
+            fd, self._lock_fd = self._lock_fd, None
+            self.ops.close(fd)
+
+
 class RecallDDFileOps:
     """Replaceable filesystem boundary for launch-policy regression tests."""
 
@@ -66,6 +294,9 @@ class RecallDDFileOps:
     def stat(self, path: str, *, dir_fd: int, follow_symlinks: bool) -> os.stat_result:
         return os.stat(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
 
+    def path_stat(self, path: Path, *, follow_symlinks: bool) -> os.stat_result:
+        return os.stat(path, follow_symlinks=follow_symlinks)
+
     def dup_cloexec(self, fd: int) -> int:
         return fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3)
 
@@ -77,6 +308,20 @@ class RecallDDFileOps:
 
     def access(self, path: str, mode: int) -> bool:
         return os.access(path, mode, effective_ids=True)
+
+    def getxattr(self, fd: int, name: str) -> bytes:
+        return os.getxattr(fd, name)
+
+    def read_dm_sysfs_attr(self, major: int, minor: int, attribute: str) -> str:
+        if attribute not in {"name", "uuid", "dev"}:
+            raise ValueError("unsupported Device Mapper sysfs attribute")
+        path = Path(f"/sys/dev/block/{major}:{minor}/dm/{attribute}") if attribute != "dev" else Path(
+            f"/sys/dev/block/{major}:{minor}/dev")
+        with path.open("r", encoding="ascii") as handle:
+            value = handle.read(256)
+        if not value.endswith("\n") or len(value) > 256:
+            raise OSError(errno.EIO, "malformed Device Mapper sysfs identity")
+        return value[:-1]
 
     def create_sealed_executable(self, source_fd: int, expected_sha256: str,
                                  maximum_size: int) -> int:
@@ -142,22 +387,33 @@ class RecallDDFileOps:
             raise
 
 
-def _verify_dm_descriptor(fd: int, mapper_name: str, ops: RecallDDFileOps) -> None:
+def _verify_dm_descriptor(fd: int, mapper_name: str, ops: RecallDDFileOps,
+                          lifecycle_lease: MapperLifecycleLease | None = None) -> None:
     info = ops.fstat(fd)
     if not stat.S_ISBLK(info.st_mode):
         raise DDPolicyDenied("trusted mapper descriptor is not a block device")
+    if lifecycle_lease is None:
+        raise DDPolicyDenied("trusted exclusive mapper lifecycle lease is required")
     major, minor = os.major(info.st_rdev), os.minor(info.st_rdev)
-    dm_name = Path(f"/sys/dev/block/{major}:{minor}/dm/name")
+    expected = lifecycle_lease.expected
+    if (major, minor) != (expected.major, expected.minor):
+        raise DDPolicyDenied("mapper descriptor device number differs from trusted identity")
     try:
-        with dm_name.open("r", encoding="ascii") as handle:
-            actual = handle.read(256)
+        actual_name = ops.read_dm_sysfs_attr(major, minor, "name")
+        actual_uuid = ops.read_dm_sysfs_attr(major, minor, "uuid")
+        actual_dev = ops.read_dm_sysfs_attr(major, minor, "dev")
     except OSError as exc:
         raise DDPolicyDenied(f"cannot verify DM identity for mapper descriptor: {exc}") from exc
-    if actual != mapper_name + "\n":
+    if (actual_name != mapper_name or actual_uuid != expected.uuid
+            or actual_dev != f"{major}:{minor}"):
         raise DDPolicyDenied("mapper descriptor does not identify the bound test mapping")
+    lifecycle_lease.verify(fd, mapper_name, ops)
+    return True
 
 
-def open_test_mapper_fd(mapper_name: str, *, ops: RecallDDFileOps | None = None) -> int:
+def open_test_mapper_fd(mapper_name: str, *,
+                        lifecycle_lease: MapperLifecycleLease | None = None,
+                        ops: RecallDDFileOps | None = None) -> int:
     """Open and verify only the trusted, grammar-checked test mapper name.
 
     This helper is for a trusted service bootstrap, never an IPC operation.
@@ -166,16 +422,19 @@ def open_test_mapper_fd(mapper_name: str, *, ops: RecallDDFileOps | None = None)
     """
     if not isinstance(mapper_name, str) or _MAPPER.fullmatch(mapper_name) is None:
         raise DDPolicyDenied("test mapper name not allowlisted")
+    if (type(lifecycle_lease) is not MapperLifecycleLease
+            or lifecycle_lease.expected.name != mapper_name):
+        raise DDPolicyDenied("trusted fixture mapper lifecycle identity is required")
     file_ops = ops if ops is not None else RecallDDFileOps()
     path = f"/dev/mapper/{mapper_name}"
     try:
         fd = file_ops.open(path, os.O_RDWR | os.O_CLOEXEC | os.O_NONBLOCK)
-    except OSError as exc:
+    except Exception as exc:
         raise DDPolicyDenied(f"cannot open bound test mapper: {exc}") from exc
     try:
         if file_ops.inheritable(fd):
             raise DDPolicyDenied("mapper descriptor is not close-on-exec")
-        _verify_dm_descriptor(fd, mapper_name, file_ops)
+        _verify_dm_descriptor(fd, mapper_name, file_ops, lifecycle_lease)
         return fd
     except Exception as original:
         try:
@@ -192,9 +451,11 @@ class RecallDDLaunchGate:
 
     This is deliberately separate from ``RecallDDAllowlist`` and is disabled
     unless an explicitly configured service is constructed with an instance.
-    The mapper fd must come from ``open_test_mapper_fd`` or another trusted
-    bootstrap that verified the exact test mapping.  IPC callers provide only
-    a role string; they can never choose a path, executable, fd, or argv.
+    A real block mapper requires a signed GNU static executable manifest and a
+    pre-held fixture-owner lifecycle lease. The mapper fd must come from
+    ``open_test_mapper_fd`` or another trusted bootstrap that verified the
+    exact test mapping. IPC callers provide only a role string; they can never
+    choose a path, executable, fd, or argv.
     """
 
     def __init__(
@@ -205,10 +466,16 @@ class RecallDDLaunchGate:
         mapper_fd: int,
         executable_path: Path = Path("/usr/bin/dd"),
         expected_executable_sha256: str | None = None,
+        trusted_executable: TrustedGNUCoreutilsDD | None = None,
+        mapper_lifecycle_lease: MapperLifecycleLease | None = None,
         ops: RecallDDFileOps | None = None,
         mapper_verifier=None,
     ) -> None:
         self.ops = ops if ops is not None else RecallDDFileOps()
+        if trusted_executable is not None and type(trusted_executable) is not TrustedGNUCoreutilsDD:
+            raise DDPolicyDenied("direct dd identity must come from a verified GNU manifest")
+        if mapper_lifecycle_lease is not None and type(mapper_lifecycle_lease) is not MapperLifecycleLease:
+            raise DDPolicyDenied("mapper lifecycle proof must come from the trusted fixture owner")
         self._closed = False
         self._close_attempted = False
         self._close_errors: tuple[str, ...] = ()
@@ -221,9 +488,18 @@ class RecallDDLaunchGate:
         self._source_identity: tuple[int, int] | None = None
         self._source_fd: int | None = None
         self._mapper_fd: int | None = None
+        self._synthetic_mapper_identity: tuple[int, int] | None = None
         self._executable_fd: int | None = None
+        self._executable_source_fd: int | None = None
         self._sealed_executable_identity: tuple[int, int, int] | None = None
-        self._expected_executable_sha256 = expected_executable_sha256
+        self._trusted_executable = trusted_executable
+        self._expected_executable_sha256 = (
+            trusted_executable.sha256 if trusted_executable is not None
+            else expected_executable_sha256
+        )
+        self._mapper_lifecycle_lease = mapper_lifecycle_lease
+        self._executable_path = executable_path
+        self._executable_source_identity: tuple[int, int] | None = None
 
         if not isinstance(fixture_dir, Path) or not fixture_dir.is_absolute():
             raise DDPolicyDenied("fixture directory must be an absolute Path")
@@ -237,19 +513,43 @@ class RecallDDLaunchGate:
             raise DDPolicyDenied("trusted mapper descriptor must be close-on-exec")
         mapper_stat = self.ops.fstat(mapper_fd)
         self._mapper_is_block = stat.S_ISBLK(mapper_stat.st_mode)
+        if not self._mapper_is_block:
+            if (not stat.S_ISREG(mapper_stat.st_mode)
+                    or mapper_stat.st_uid != os.geteuid()
+                    or mapper_stat.st_nlink != 1
+                    or mapper_verifier is None):
+                raise DDPolicyDenied(
+                    "non-DM mapper descriptor requires an owned regular test file and explicit synthetic verifier"
+                )
+            self._synthetic_mapper_identity = (mapper_stat.st_dev, mapper_stat.st_ino)
+        if trusted_executable is not None:
+            if executable_path != trusted_executable.executable_path:
+                raise DDPolicyDenied("dd executable path differs from verified trust manifest")
+            if expected_executable_sha256 is not None:
+                raise DDPolicyDenied("do not combine a trusted manifest with a caller digest")
         if expected_executable_sha256 is not None and re.fullmatch(
             r"[0-9a-f]{64}", expected_executable_sha256
         ) is None:
             raise DDPolicyDenied("trusted executable SHA-256 must be 64 lowercase hexadecimal characters")
-        if self._mapper_is_block and expected_executable_sha256 is None:
+        if self._mapper_is_block and trusted_executable is None:
             raise DDPolicyDenied(
-                "block-mapper launch requires an independently trusted executable SHA-256"
+                "block-mapper launch requires a signed GNU coreutils trust manifest"
+            )
+        if self._mapper_is_block and mapper_lifecycle_lease is None:
+            raise DDPolicyDenied(
+                "block-mapper launch requires a trusted exclusive lifecycle lease"
             )
         if not isinstance(executable_path, Path) or not executable_path.is_absolute():
             raise DDPolicyDenied("pinned dd executable path must be absolute")
 
         verify_mapper = _verify_dm_descriptor if mapper_verifier is None else mapper_verifier
+        if self._mapper_is_block and mapper_verifier is not None:
+            # A caller-supplied boolean verifier must not replace the identity
+            # checks and lifecycle lock required for a real mapped device.
+            verify_mapper = _verify_dm_descriptor
         self._mapper_verifier = verify_mapper
+        if self._mapper_is_block and mapper_lifecycle_lease.expected.name != mapper_name:
+            raise DDPolicyDenied("mapper lifecycle lease name does not match requested mapping")
         try:
             self._directory_fd = self._open_directory_chain(fixture_dir)
             self._owned_fds.append(self._directory_fd)
@@ -277,19 +577,27 @@ class RecallDDLaunchGate:
             self._owned_fds.append(self._mapper_fd)
             if self.ops.inheritable(self._mapper_fd):
                 raise DDPolicyDenied("retained mapper descriptor is not close-on-exec")
-            mapper_verified = verify_mapper(self._mapper_fd, mapper_name, self.ops)
-            if mapper_verified is False:
-                raise DDPolicyDenied("trusted mapper descriptor identity was rejected")
+            if self._mapper_is_block:
+                mapper_verified = verify_mapper(
+                    self._mapper_fd, mapper_name, self.ops, mapper_lifecycle_lease,
+                )
+            else:
+                mapper_verified = verify_mapper(self._mapper_fd, mapper_name, self.ops)
+            if mapper_verified is not True:
+                raise DDPolicyDenied("trusted mapper descriptor identity was not positively verified")
 
             executable_source_fd = self.ops.open(
                 str(executable_path), os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK,
             )
+            self._executable_source_fd = executable_source_fd
             self._owned_fds.append(executable_source_fd)
             self._verify_executable_source(executable_source_fd)
+            source_info = self.ops.fstat(executable_source_fd)
+            self._executable_source_identity = (source_info.st_dev, source_info.st_ino)
             if self._mapper_is_block:
-                assert self._expected_executable_sha256 is not None
+                assert self._trusted_executable is not None
                 self._executable_fd = self.ops.create_sealed_executable(
-                    executable_source_fd, self._expected_executable_sha256,
+                    executable_source_fd, self._trusted_executable.sha256,
                     128 * 1024 * 1024,
                 )
                 self._owned_fds.append(self._executable_fd)
@@ -386,9 +694,54 @@ class RecallDDLaunchGate:
                 or info.st_mode & (stat.S_ISUID | stat.S_ISGID)):
             raise DDPolicyDenied("dd executable identity is not trusted ELF")
 
+    def _verify_no_file_capabilities(self, fd: int) -> None:
+        try:
+            value = self.ops.getxattr(fd, "security.capability")
+        except OSError as exc:
+            if exc.errno in {getattr(errno, "ENODATA", 61), getattr(errno, "ENOATTR", 61)}:
+                return
+            raise DDPolicyDenied(f"cannot inspect dd file capabilities: {exc}") from exc
+        if value:
+            raise DDPolicyDenied("dd executable has file capabilities")
+
+    def _is_static_elf(self, fd: int, size: int) -> bool:
+        ident = self.ops.pread(fd, 16, 0)
+        if (len(ident) != 16 or ident[:4] != b"\x7fELF"
+                or ident[4] not in (1, 2) or ident[5] != 1 or ident[6] != 1):
+            raise DDPolicyDenied("trusted GNU dd must be a valid little-endian ELF")
+        if ident[4] == 1:
+            header = self.ops.pread(fd, 52, 0)
+            if len(header) != 52:
+                raise DDPolicyDenied("trusted dd ELF header is truncated")
+            phoff = int.from_bytes(header[28:32], "little")
+            phentsize = int.from_bytes(header[42:44], "little")
+            phnum = int.from_bytes(header[44:46], "little")
+            minimum_phdr = 32
+        else:
+            header = self.ops.pread(fd, 64, 0)
+            if len(header) != 64:
+                raise DDPolicyDenied("trusted dd ELF header is truncated")
+            phoff = int.from_bytes(header[32:40], "little")
+            phentsize = int.from_bytes(header[54:56], "little")
+            phnum = int.from_bytes(header[56:58], "little")
+            minimum_phdr = 56
+        if phnum == 0:
+            return True
+        if (phentsize < minimum_phdr or phnum > 1024
+                or phoff > size or phentsize * phnum > size - phoff):
+            raise DDPolicyDenied("trusted dd ELF program-header table is malformed")
+        for index in range(phnum):
+            raw_type = self.ops.pread(fd, 4, phoff + index * phentsize)
+            if len(raw_type) != 4:
+                raise DDPolicyDenied("trusted dd ELF program-header table is truncated")
+            if int.from_bytes(raw_type, "little") == 3:  # PT_INTERP
+                return False
+        return True
+
     def _verify_executable_source(self, fd: int) -> None:
         info = self.ops.fstat(fd)
         self._validate_executable_stat(info)
+        self._verify_no_file_capabilities(fd)
         if self.ops.pread(fd, 4, 0) != b"\x7fELF" or self.ops.inheritable(fd):
             raise DDPolicyDenied("dd executable identity is not trusted ELF")
         if self._mapper_is_block:
@@ -413,9 +766,22 @@ class RecallDDLaunchGate:
             if (before_identity != after_identity
                     or digest.hexdigest() != self._expected_executable_sha256):
                 raise DDPolicyDenied("pinned dd executable does not match trusted SHA-256 identity")
+            if not self._is_static_elf(fd, info.st_size):
+                raise DDPolicyDenied(
+                    "dynamic dd is not admitted; its interpreter and shared-library closure are not pinned"
+                )
 
     def _verify_executable(self) -> None:
         assert self._executable_fd is not None
+        if self._mapper_is_block:
+            assert self._executable_source_fd is not None
+            self._verify_executable_source(self._executable_source_fd)
+            source_info = self.ops.fstat(self._executable_source_fd)
+            if self._executable_source_identity != (source_info.st_dev, source_info.st_ino):
+                raise DDPolicyDenied("pinned GNU dd source pathname identity changed")
+            path_info = self.ops.path_stat(self._executable_path, follow_symlinks=False)
+            if self._executable_source_identity != (path_info.st_dev, path_info.st_ino):
+                raise DDPolicyDenied("GNU dd executable pathname was replaced")
         info = self.ops.fstat(self._executable_fd)
         self._validate_executable_stat(info)
         if self.ops.pread(self._executable_fd, 4, 0) != b"\x7fELF":
@@ -465,10 +831,24 @@ class RecallDDLaunchGate:
             mapper_info = self.ops.fstat(self._mapper_fd)
             if self.ops.inheritable(self._mapper_fd):
                 self._deny("retained mapper descriptor became inheritable")
-            if (not stat.S_ISREG(mapper_info.st_mode) and not stat.S_ISBLK(mapper_info.st_mode)):
-                self._deny("retained mapper descriptor type changed")
-            mapper_verified = self._mapper_verifier(self._mapper_fd, self._mapper_name, self.ops)
-            if mapper_verified is False:
+            if self._mapper_is_block:
+                if not stat.S_ISBLK(mapper_info.st_mode):
+                    self._deny("retained mapper descriptor type changed")
+            elif (not stat.S_ISREG(mapper_info.st_mode)
+                    or (mapper_info.st_dev, mapper_info.st_ino) != self._synthetic_mapper_identity
+                    or mapper_info.st_uid != os.geteuid() or mapper_info.st_nlink != 1):
+                self._deny("synthetic mapper file identity or ownership changed")
+            if self._mapper_is_block:
+                assert self._mapper_lifecycle_lease is not None
+                mapper_verified = self._mapper_verifier(
+                    self._mapper_fd, self._mapper_name, self.ops,
+                    self._mapper_lifecycle_lease,
+                )
+            else:
+                mapper_verified = self._mapper_verifier(
+                    self._mapper_fd, self._mapper_name, self.ops,
+                )
+            if mapper_verified is not True:
                 self._deny("retained mapper descriptor identity no longer matches")
             self._verify_executable()
         except DDPolicyDenied:
@@ -544,6 +924,11 @@ class RecallDDLaunchGate:
             except Exception as exc:
                 errors.append(f"close direct dd descriptor {fd}: {exc}")
         self._owned_fds.clear()
+        if self._mapper_lifecycle_lease is not None:
+            try:
+                self._mapper_lifecycle_lease.close()
+            except Exception as exc:
+                errors.append(f"close mapper lifecycle lease: {exc}")
         self._close_errors = tuple(errors)
         return self._close_errors
 
@@ -656,4 +1041,5 @@ class RecallDDAllowlist:
 __all__ = [
     "RecallDDAllowlist", "RecallDDLaunchGate", "PinnedDDLaunch", "RecallDDFileOps",
     "open_test_mapper_fd", "DDPolicyDenied", "DirectDDCommand",
+    "TrustedGNUCoreutilsDD", "MapperIdentity", "MapperLifecycleLease",
 ]
