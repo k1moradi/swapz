@@ -58,6 +58,8 @@ on:
       - 'tests/runtime/nbd-pidfd-owned-session.py'
       - 'tests/runtime/nbd-pidfd-owned-mock-child.py'
       - 'tests/runtime/nbd-pidfd-owned-session-test.py'
+      - 'tests/runtime/nbd-pidfd-crash-owner.py'
+      - 'tests/runtime/nbd_pidfd_child_policy.py'
   pull_request:
     paths:
       - '.github/workflows/rootless-teardown.yml'
@@ -92,7 +94,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tests/runtime/nbd-pidfd-owned-session.py tests/runtime/nbd-pidfd-owned-mock-child.py tests/runtime/nbd-pidfd-owned-session-test.py
+          python3 -m py_compile tests/runtime/nbd-pidfd-owned-session.py tests/runtime/nbd-pidfd-owned-mock-child.py tests/runtime/nbd-pidfd-owned-session-test.py tests/runtime/nbd-pidfd-crash-owner.py tests/runtime/nbd_pidfd_child_policy.py
           timeout 35s python3 -B tests/runtime/nbd-pidfd-owned-session-test.py -v
       - name: Rootless NBD and streaming fail-closed teardown mocks
         shell: bash
