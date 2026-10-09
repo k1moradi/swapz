@@ -2948,3 +2948,67 @@ not a kernel I/O fence, a completed writer protocol receipt,
 nonvolatile persistence or physical DM/loop/NBD disappearance.
 Production mapper admission and backing deletion remain blocked.
 V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+## 2026-10-09 — Main-developer broker CI gate and independent security review
+
+**Exact tested executable source:** `5c8acc47efe40e07baa8dd5fa8090dd453d5e965`.
+
+- [Rootless combined](https://github.com/k1moradi/swapz/actions/runs/37995672935): **PASS**, exact `COMBINED_TESTED_HEAD` matches this SHA.
+- [Rootless teardown](https://github.com/k1moradi/swapz/actions/runs/37995673013): **PASS**, same GitHub run head SHA.
+
+The main developer inspected Codex's new `2f74389` broker/producer
+implementation, the test bodies, typed mapper release-report changes and
+the corresponding design reasoning. Full findings in
+`docs/main-developer-broker-review-2026-10-09.md`.
+
+Codex's 15-test `recall-fixture-owner-test.py` previously ran only
+locally; both green generic workflows at `2f74389` **omitted** the new
+suite. Both workflows now explicitly compile the broker and its test
+and execute the **15 cases** with a 45-second timeout. Both then run
+the complete 15-case suite in **three independent fresh Python
+processes**, with 25-second timeouts and immediate failure on the
+first unsuccessful repetition. Each workflow logged:
+`FIXTURE_OWNER_BROKER_MODEL_ONLY: PASS`,
+`FIXTURE_OWNER_BROKER_REPEAT 1/3: PASS`,
+`2/3: PASS`, `3/3: PASS`.
+The teardown push trigger includes
+`recall-fixture-owner.py` and `recall-fixture-owner-test.py`;
+the combined workflow covers `tests/runtime/**` already.
+
+Both workflows also reported `RECALL_DIRECT_ROLE_REPEAT 6/6: PASS`;
+the combined workflow additionally reported
+`COMBINED_NBD_STRESS 25/25: PASS`. Existing GNU qualification,
+allowlist, fake DM drain/loop, pressure, recall and offline
+plateau gates remain intact.
+
+**Two security blockers remain despite all green rootless CI:**
+
+1. The broker's positive end-to-end test admits only
+   `writer,a,b` but obtains
+   `backing_release_authorized=True`. The fixed V2.2 recall
+   protocol requires `writer,a,b,a2,b2`, with complete per-role
+   outcomes and reader phase integrity. The producer currently
+   derives its 'expected' handles from the already admitted set,
+   not from the immutable fixture profile. Thus a truncated
+   session can receive a positive model verdict.
+2. The broker appends an opaque child handle only after its
+   injected launcher returns. A launcher that starts a child and
+   then fails before returning a valid handle can leave that
+   child outside `_issued_handles` and the modeled best-effort
+   stop inventory. Stable pidfd-owned child creation/handshake
+   is not yet independently proved by this broker model.
+
+These are assigned to Codex and remain NOT QUALIFIED by a
+passing 15-case suite; the new main-developer workflow changes
+do not alter Codex-owned policy. The model also uses fake peer
+identity, a non-incrementing `_request_inflight` field, fake
+kernel operation results and only one DM/loop layer, with no
+NBD disconnect. Session HMAC and typed records prove modeled
+sequencing, not actual kernel I/O drain or privileged authority.
+
+No real DM, loop, NBD, swap, physical I/O, kernel module, device
+benchmark or destructive backing cleanup occurred. Production
+mapper admission and backing cleanup remain disabled. Independently
+reproduced GNU static worker, production trust signing/provisioning,
+true kernel drain and physical read-p99 qualification are still
+outstanding. V2.2 batch and strategy winner **UNDETERMINED**.
