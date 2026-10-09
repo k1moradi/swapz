@@ -154,9 +154,19 @@ class AttestedClient(service.SupervisorControlClient):
         super().__init__(sock, service_process=service_process, timeout=timeout)
         self.roles: dict[str, str] = {}
         self.receipts: dict[str, str] = {}
+        # Rootless-only diagnostic: unconfirmed READY must be distinguishable
+        # from a bad handle or duplicate. This is never cleanup evidence.
+        self.last_launch_diagnostic: dict[str, str] | None = None
 
     def call(self, operation: str, **fields: Any) -> dict[str, Any]:
         response = super().call(operation, **fields)
+        if operation == "launch":
+            self.last_launch_diagnostic = {
+                "status": str(response.get("status", "<missing>"))[:48],
+                "error": str(response.get("error", "<none>"))[:200],
+                "has_handle": str(isinstance(response.get("handle"), str)),
+                "preserve_backing": str(response.get("preserve_backing")),
+            }
         if operation == "launch" and response.get("status") == "ready":
             if fields.get("command") != "recall-dd" or fields.get("role") not in {
                 "writer", *PAGES
