@@ -1153,6 +1153,15 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       [combined](https://github.com/k1moradi/swapz/actions/runs/37997610606);
       [standalone NBD](https://github.com/k1moradi/swapz/actions/runs/37997610596)
       also passed at that exact revision.
+
+- [ ] **Concurrent broker finalize denial:** address
+      [issue #2](https://github.com/k1moradi/swapz/issues/2):
+      finalizer must never return success or continue lifecycle teardown
+      after another request has latched denial. Independent negative
+      rootless broker contracts (5/5) and all three workflows are green
+      at `c166228e7c7a5aa3dce1a3bf7df8e236ca7be177`, but backing-release
+      permission being false does not make contradictory successful
+      finalization safe. Codex owns the fix and strong regression.
 - [ ] **Standalone CI artifact traceability:** record exact
       workflow/source tree identity and selected safety-test
       marker inventory in a machine-readable, bounded source-only
@@ -1162,7 +1171,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       launch failure and service-error diagnostics across
       repeated rootless sessions; never retry over a failed
       positive session or turn a missing receipt into approval.
-- [ ] **Future Codex review:** independently test complete five-role
+- [x] **Future Codex review:** independently test complete five-role
       broker lifecycle and stable owned-child startup once those
       interfaces land, without editing Codex-owned files or
       authorizing kernel/device operations.

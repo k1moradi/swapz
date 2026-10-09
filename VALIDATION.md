@@ -3207,3 +3207,51 @@ mapper owner, authenticated kernel I/O drain and physical
 p99 measurements remain unavailable. Production direct
 mapper admission and backing cleanup stay disabled; V2.2
 strategy and batch-size winner remain **UNDETERMINED**.
+
+
+## 2026-10-09 — Independent five-role fixture broker policy review
+
+The **exact executable source revision** is
+`c166228e7c7a5aa3dce1a3bf7df8e236ca7be177`
+([commit](https://github.com/k1moradi/swapz/commit/c166228e7c7a5aa3dce1a3bf7df8e236ca7be177)).
+This source-only commit added
+`tests/runtime/recall-broker-external-contract-test.py`
+with five independent synthetic contract tests, made that suite mandatory in
+both joint workflows, and extended the static workflow contract to enforce
+the new bounded execution gate. It did not edit Codex-owned implementation.
+
+All three rootless workflows completed successfully at this **same SHA**:
+
+- [combined run 37999730905](https://github.com/k1moradi/swapz/actions/runs/37999730905)
+- [teardown run 37999730780](https://github.com/k1moradi/swapz/actions/runs/37999730780)
+- [standalone NBD run 37999730759](https://github.com/k1moradi/swapz/actions/runs/37999730759)
+
+Job-step/log inspection confirms 5/5 independent broker tests passed in
+both joint workflows; Codex's 31-test broker suite and all 3 fresh-process
+broker repetitions passed; the six direct five-role repetitions passed;
+the 12-test workflow contract passed; combined NBD selftest repetitions
+reached 25/25, as did standalone NBD.
+
+Independent audit: 
+`docs/recall-broker-2eab914-independent-review.md`.
+The formerly incomplete three-role admission policy now checks the exact
+five-role sequence twice (broker and producer), and the ambiguous-child
+launcher contract now requires best-effort cleanup of both unconfirmed and
+registered worker handles. These are **rootless policy-model protections**
+only. Actual crash-safe descendant containment and independently observed
+kernel DM drain remain unqualified.
+
+**Open concurrency issue**:
+[GitHub #2](https://github.com/k1moradi/swapz/issues/2).
+A concurrent request can latch DENIED while finalization holds the lock,
+yet the finalizer lacks a post-collection denial check and may report
+RELEASED/True. The exposed backing-authorization property stays false,
+as the independent negative test confirms; this does not qualify safe
+cancellation of modeled mapper/loop teardown or privileged operations.
+Codex owns the implementation fix and stronger fail-stop regression.
+
+This documentation change follows the executable source revision above;
+do **not** treat this later documentation-only SHA as separately exercised
+by all three workflows. No real DM, loop, NBD, swap, physical I/O,
+backing deletion, or production privilege operation was performed.
+V2.2 strategy and batch-size winner remain **UNDETERMINED**.
