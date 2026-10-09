@@ -196,7 +196,7 @@ class OwnedSyntheticServerTests(unittest.TestCase):
         self.assert_backing_retained(session)
 
     def test_failed_term_and_kill_retain_pidfd_until_later_verified_reap(self) -> None:
-        session = self.build()
+        session = self.build("ignore-eof")
         session.start()
 
         def fail_all_signals(*_args, **_kwargs):
