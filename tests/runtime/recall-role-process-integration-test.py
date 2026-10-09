@@ -94,7 +94,17 @@ class RootlessDirectProcessSession:
         return self.bridge.dispatch({"id": self.request_id, "op": op, **data})
 
     def launch(self, role: str) -> str:
-        result = self.dispatch("LAUNCH_ROLE", role=role)
+        try:
+            result = self.dispatch("LAUNCH_ROLE", role=role)
+        except (RoleError, bridge_module.BridgeError) as exc:
+            # Preserve the original fail-closed error type and add only
+            # bounded *rootless test* evidence for fast-child READY races.
+            diagnostic = self.client.last_launch_diagnostic
+            raise type(exc)(
+                f"{exc}; synthetic_launch_role={role}; "
+                f"service_launch={diagnostic!r}; "
+                f"service_returncode={self.process.poll()!r}"
+            ) from exc
         assert result["status"] == "ready"
         return result["handle"]
 
@@ -188,8 +198,12 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
         mutated[4096 * 4] ^= 0xFF
         source.write_bytes(mutated)
         self.session.launch("writer")
-        reader = self.session.launch("b")
+        # A very short-lived 4 KiB dd can finish before the supervisor
+        # confirms READY. Such unconfirmed admission is itself an
+        # acceptable, sticky failure and must preserve backing. If launch
+        # is confirmed, the corrupted page must be rejected on WAIT.
         with self.assertRaises((RoleError, bridge_module.BridgeError)):
+            reader = self.session.launch("b")
             self.session.wait(reader)
         self.assertTrue(self.session.cleanup_marker.exists())
         self.assertFalse(self.session.adapter.cleanup_authorized)
