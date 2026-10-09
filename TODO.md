@@ -1120,11 +1120,20 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       [teardown PASS](https://github.com/k1moradi/swapz/actions/runs/37996938227),
       [combined PASS](https://github.com/k1moradi/swapz/actions/runs/37996938277).
       No actual NBD attachment or privileged device I/O.
-- [ ] Add independent **exact-source/CI artifact reconciliation**
-      for future externally supplied measurements: never compare
-      throughput/p99 from different commits as a single V2.2
-      qualification run. Keep all measurements offline until
-      operator-authorized real testing exists.
+- [x] Enforce **offline exact-artifact/run identity consistency**
+      for supplied V2.2 JSONL plus a separate bounded manifest,
+      including exact file/line digests, one claimed 40-hex Git
+      revision, session, collector, lower-device, backend, profile,
+      evidence and unique ordered run IDs. Never pool mixed records.
+      Reject unauthenticated measured V1 p99. This is NOT
+      cryptographic provenance, physical device proof or a
+      production selection decision. See
+      `docs/v22-evidence-bundle-offline.md`.
+- [ ] Obtain independently **authenticated collector provenance**
+      and root-controlled production trust for actual measurements;
+      reconcile original measurement artifacts with trusted Git
+      tree identities and physical device inventory before any
+      physical throughput/p99 qualification.
 - [ ] Continue rootless regression monitoring and separate-process
       fault diagnostics when Codex changes the trusted-owner
       architecture. All live device qualification and backing
@@ -1132,11 +1141,18 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 
 ### Additional independent, non-overlapping work while Codex owns the broker
 
-- [ ] **Offline evidence integrity:** reject mixed git-tree SHAs,
-      duplicate run IDs, unbound device identities and mismatched
-      collector/measurement session IDs when aggregating externally
-      produced V2.2 performance evidence. This must remain offline
-      and must not elevate simulated data to physical-device proof.
+- [x] **Offline evidence-bundle consistency:** independent
+      rootless checker and **20 synthetic adversarial tests**
+      reject conflicting asserted Git SHA, duplicate/missing run
+      IDs, run order, claimed device/session/collector identity,
+      malformed V2 nearest-rank p99 or altered original bytes.
+      The manifest is self-reported and cannot authenticate the
+      claimed lower device. Full gate passes in both workflows
+      at `cf0752da282465bdf63b763c2b5621ce693b46a7`:
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/37997610540),
+      [combined](https://github.com/k1moradi/swapz/actions/runs/37997610606);
+      [standalone NBD](https://github.com/k1moradi/swapz/actions/runs/37997610596)
+      also passed at that exact revision.
 - [ ] **Standalone CI artifact traceability:** record exact
       workflow/source tree identity and selected safety-test
       marker inventory in a machine-readable, bounded source-only
@@ -1150,3 +1166,24 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       broker lifecycle and stable owned-child startup once those
       interfaces land, without editing Codex-owned files or
       authorizing kernel/device operations.
+
+### Parallel follow-ups — integrity without privileged device access
+
+- [x] Make the standalone NBD gate rerun when either
+      `rootless-teardown.yml` or `rootless-combined.yml`
+      changes; the NBD workflow invokes the shared
+      `rootless-workflow-contract-test.py` and must not
+      silently accept a stale version of its dependencies.
+      Its contract now includes a negative test for dropped
+      joint-workflow triggers (**12/12 tests** in each
+      exact-source workflow).
+- [ ] Develop a deterministic **source-only CI evidence
+      inventory** recording SHA, workflow name and required
+      test completion markers with explicit limitations:
+      no locally generated file can attest trusted
+      external identity by itself. Keep this separate
+      from Codex's privileged owner/evidence producer.
+- [ ] Add offline, bounded **telemetry fault classification**
+      for observed pidfd/recall launch and WAIT denial
+      categories without creating positive cleanup authority.
+      Codex owns the broker implementation.
