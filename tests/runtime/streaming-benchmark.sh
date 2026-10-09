@@ -319,12 +319,13 @@ rate_iops=100
 EOF
 
   before=$(read_stat)
-  start_ns=$(date +%s%N)
+  # An elapsed interval cannot use wall-clock time (date can jump).
+  start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   fio "$fiofile" --output-format=json --output="$json"
   # Staged upper completions may precede physical drain. Include the explicit
   # flush in the end-to-end drain clock.
   flush_device "$path"
-  end_ns=$(date +%s%N)
+  end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   after=$(read_stat)
   status=$(dmsetup status "$TARGET")
   grep -q "failed=0" <<<"$status"
@@ -352,12 +353,27 @@ a = [int(x) for x in after.split()]
 s = status_map(status)
 logical = int(w.get("io_bytes", 0))
 elapsed_s = (int(end_ns) - int(start_ns)) / 1e9
+if elapsed_s <= 0:
+    raise SystemExit("nonpositive monotonic benchmark interval; preserve artifacts")
+if len(a) != 4 or len(b) != 4 or any(x < 0 for x in a + b):
+    raise SystemExit("missing or corrupt lower-device counters; preserve artifacts")
+read_count = int(r.get("total_ios", 0))
+lower_sectors = a[3] - b[3]
+lower_ios = a[2] - b[2]
+if lower_sectors < 0 or lower_ios < 0:
+    raise SystemExit("lower-device counters decreased; preserve artifacts")
 row = {
     "backend": backend, "strategy": strategy, "batch_kib": int(batch),
     "write_qd": int(jobs["writer"]["job options"].get("iodepth", 0) or 0),
     "logical_write_bytes": logical,
     "upper_write_mib_s": float(w.get("bw_bytes", 0)) / 1048576,
-    "drained_write_mib_s": logical / 1048576 / elapsed_s if elapsed_s else 0,
+    # This is a logical completion rate including a flush, NOT drained physical bytes.
+    "logical_flush_window_mib_s": logical / 1048576 / elapsed_s,
+    # Separate sysfs lower-device counter window; shared-I/O attribution and
+    # kernel quiescence remain unproven until a trusted collector is available.
+    "lower_counter_window_mib_s": lower_sectors * 512 / 1048576 / elapsed_s,
+    "drain_window_s": elapsed_s,
+    "read_count": read_count,
     "write_avg_ms": float(w.get("clat_ns", {}).get("mean", 0)) / 1e6,
     "write_p99_ms": p(w, "99.000000"),
     "read_avg_ms": float(r.get("clat_ns", {}).get("mean", 0)) / 1e6,
@@ -366,7 +382,7 @@ row = {
     "usr_cpu_pct": float(w.get("usr_cpu", 0)) + float(r.get("usr_cpu", 0)),
     "sys_cpu_pct": float(w.get("sys_cpu", 0)) + float(r.get("sys_cpu", 0)),
     "lower_read_ios": a[0]-b[0], "lower_read_sectors": a[1]-b[1],
-    "lower_write_ios": a[2]-b[2], "lower_write_sectors": a[3]-b[3],
+    "lower_write_ios": lower_ios, "lower_write_sectors": lower_sectors,
     "status": s,
 }
 row["staged_hits"] = int(s.get("staged_hits", 0))
@@ -400,35 +416,10 @@ for strategy in $STRATEGIES; do
   done
 done
 
-python3 - "$RESULTS" <<'PY'
-import json, sys
-rows = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-print("\n=== THROUGHPUT / SWAP-IN LATENCY FRONTIER ===")
-for strategy in sorted({r["strategy"] for r in rows}):
-    group = sorted((r for r in rows if r["strategy"] == strategy), key=lambda r: r["batch_kib"])
-    best = max(r["drained_write_mib_s"] for r in group)
-    plateau = [r for r in group if r["drained_write_mib_s"] >= best * 0.97]
-    first = min(plateau, key=lambda r: r["batch_kib"])
-    min_p99 = min(r["read_p99_ms"] for r in plateau)
-    guarded = [r for r in plateau if r["read_p99_ms"] <= min_p99 * 1.10]
-    winner = min(guarded, key=lambda r: r["batch_kib"])
-    print(
-        f"{strategy}: best_drain={best:.3f} MiB/s "
-        f"first_97pct={first['batch_kib']}KiB "
-        f"latency_guarded={winner['batch_kib']}KiB "
-        f"read_p99={winner['read_p99_ms']:.3f}ms "
-        f"upper={winner['upper_write_mib_s']:.3f}MiB/s"
-    )
-    for r in group:
-        print(
-            f"  {r['batch_kib']:4d}KiB "
-            f"upper={r['upper_write_mib_s']:8.3f} "
-            f"drain={r['drained_write_mib_s']:8.3f} "
-            f"read_p99={r['read_p99_ms']:8.3f}ms "
-            f"read_max={r['read_max_ms']:8.3f}ms "
-            f"lower_wios={r['lower_write_ios']:7d} "
-            f"early={r['staged_early']:7d}"
-        )
-PY
+# Diagnostic reporting must not infer a physical-drain plateau or nominate a
+# "winner" from one logical-completion timing per batch. The read-only
+# reporter instead cross-checks lower-sector deltas and states the missing
+# independent I/O-drain and p99 sample/repetition evidence explicitly.
+python3 "$ROOT/tests/runtime/streaming-benchmark-report.py" --results "$RESULTS"
 
-echo "V2.2 streaming plateau/latency sweep: PASS"
+echo "V2.2 streaming single-sweep diagnostics: PASS (NO QUALIFIED WINNER)"
