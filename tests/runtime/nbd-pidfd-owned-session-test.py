@@ -9,7 +9,11 @@ scripts created by this test case and bounded by the session controller.
 from __future__ import annotations
 
 import importlib.util
+from array import array
 import os
+import select
+import socket
+import subprocess
 from pathlib import Path
 import signal
 import stat
@@ -280,6 +284,108 @@ class OwnedSyntheticServerTests(unittest.TestCase):
         self.assertIsNone(session.pidfd)
         self.assertIsNotNone(session.process.returncode)
         self.assert_backing_retained(session)
+
+    def test_control_socket_eof_revokes_owner_readiness(self) -> None:
+        session = self.build()
+        session.start()
+        # The exact synthetic child must not survive owner channel closure
+        # even while the controller process itself is still alive.
+        session.sock.close()
+        session.sock = None
+        self.assertEqual(session.process.wait(timeout=1.0), 0)
+        with self.assertRaises(Denied):
+            session.shutdown()
+        self.assertEqual(session.state, "denied")
+        self.assert_backing_retained(session)
+
+    def test_parent_death_guard_failure_never_announces_ready(self) -> None:
+        session = self.build("pdeath-fail")
+        with self.assertRaises(Denied):
+            session.start()
+        self.assertEqual(session.state, "denied")
+        self.assertIsNotNone(session.process.returncode)
+        self.assert_backing_retained(session)
+
+    def test_post_ready_descendant_and_exec_attempts_denied_by_seccomp(self) -> None:
+        session = self.build("attempt-spawn")
+        session.start()
+        self.assertEqual(session.sock.recv(128), b"FORK_DENIED")
+        self.assertEqual(session.sock.recv(128), b"EXEC_DENIED")
+        self.assertTrue(session.shutdown()["exact_owned_process_reaped"])
+        self.assert_backing_retained(session)
+
+    def test_unexpected_controller_death_reaps_exact_child_by_pidfd(self) -> None:
+        if not hasattr(socket, "SCM_RIGHTS"):
+            self.skipTest("SCM_RIGHTS unavailable")
+        helper = HERE / "nbd-pidfd-crash-owner.py"
+        cases = (
+            ("pre-ready", b"PRE_READY"),
+            ("post-ready", b"READY"),
+            ("idle", b"READY"),
+            ("ignore-term-idle", b"READY"),
+        )
+        for stage, expected in cases:
+            with self.subTest(stage=stage):
+                self.counter += 1
+                base = self.root / f"crash-case-{self.counter}"
+                base.mkdir(mode=0o700)
+                monitor, controller = socket.socketpair(
+                    socket.AF_UNIX, socket.SOCK_SEQPACKET
+                )
+                monitor.settimeout(3.0)
+                observer_fd = None
+                try:
+                    owner_proc = subprocess.Popen(
+                        [sys.executable, "-B", str(helper),
+                         str(controller.fileno()), stage, str(base)],
+                        pass_fds=(controller.fileno(),), close_fds=True,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                    )
+                    controller.close()
+                    payload, ancillary, msgflags, _ = monitor.recvmsg(
+                        64, socket.CMSG_SPACE(array("i", [0]).itemsize))
+                    self.assertEqual(payload, expected)
+                    self.assertFalse(msgflags & socket.MSG_CTRUNC)
+                    fds = []
+                    for level, kind, value in ancillary:
+                        if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                            received = array("i")
+                            received.frombytes(value[:len(value) - (len(value) % received.itemsize)])
+                            fds.extend(received)
+                    self.assertEqual(len(fds), 1)
+                    observer_fd = fds[0]
+                    if stage in ("idle", "ignore-term-idle"):
+                        monitor.sendall(b"CRASH")
+                    controller_rc = owner_proc.wait(timeout=2.0)
+                    self.assertNotEqual(controller_rc, 0)
+                    poller = select.poll()
+                    poller.register(observer_fd, select.POLLIN | select.POLLHUP | select.POLLERR)
+                    self.assertTrue(
+                        poller.poll(2000),
+                        "exact synthetic child did not exit after owner crash",
+                    )
+                    self.assert_backing_retained(self.build())
+                finally:
+                    if observer_fd is not None:
+                        # If the test fails, still direct recovery to the
+                        # exact kernel pidfd. Never use a recyclable PID.
+                        try:
+                            if not select.select([observer_fd], [], [], 0)[0]:
+                                signal.pidfd_send_signal(observer_fd, signal.SIGKILL, None, 0)
+                        except OSError:
+                            pass
+                        os.close(observer_fd)
+                    controller.close()
+                    monitor.close()
+                    if "owner_proc" in locals() and owner_proc.poll() is None:
+                        try:
+                            owner_proc.wait(timeout=0.2)
+                        except subprocess.TimeoutExpired:
+                            # The helper has no production side effects;
+                            # numeric PID signaling is forbidden here too.
+                            self.fail("test-owned crash helper failed to exit")
 
     def test_source_forbids_numeric_pid_signal_fallback_or_nbd_attachment(self) -> None:
         source = (HERE / "nbd-pidfd-owned-session.py").read_text(encoding="utf-8")
