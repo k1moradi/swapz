@@ -159,62 +159,11 @@ setup_nullblk() {
 # NBD is strictly opt-in. The operator must identify an unused *virtual*
 # /dev/nbdN; this harness will never pick or touch a physical device.
 setup_nbd() {
-  [[ -b "$NBD_DEVICE" ]] || {
-    echo "ERROR: $NBD_DEVICE is unavailable. Load the NBD kernel driver separately before testing." >&2
-    return 1
-  }
-  (( BANDWIDTH > 0 )) || {
-    echo "ERROR: NBD requires positive bandwidth; zero means unthrottled null_blk only." >&2
-    return 1
-  }
-  (( LATENCY_NS >= 0 && LATENCY_NS % 1000 == 0 )) || {
-    echo "ERROR: NBD completion latency must be a nonnegative whole number of microseconds." >&2
-    return 1
-  }
-  local cmd=(
-    python3 "$ROOT/tests/runtime/size-aware-nbd.py" serve
-    --device "$NBD_DEVICE" --size-mib 256
-    --mbps "$BANDWIDTH" --latency-us "$((LATENCY_NS / 1000))"
-    --ready-file "$NBD_READY" --stats-file "$NBD_STATS"
-  )
-  (( BENCH_DISCARD )) && cmd+=(--allow-trim)
-  "${cmd[@]}" >"$NBD_LOG" 2>&1 &
-  NBD_PID=$!
-  BACKING="$NBD_DEVICE"
-  BACKING_KNAME=${NBD_DEVICE##*/}
-  BACKEND="size-aware-nbd-${BANDWIDTH}MiBps-${LATENCY_NS}ns-serialized"
-  local i
-  for ((i=0; i<100; ++i)); do
-    if [[ -s "$NBD_READY" && -e "/sys/class/block/$BACKING_KNAME/stat" ]]; then
-      break
-    fi
-    if ! kill -0 "$NBD_PID" 2>/dev/null; then
-      echo "ERROR: size-aware NBD server failed during startup:" >&2
-      cat "$NBD_LOG" >&2
-      return 1
-    fi
-    sleep 0.1
-  done
-  [[ -s "$NBD_READY" && -e "/sys/class/block/$BACKING_KNAME/stat" ]] || {
-    echo "ERROR: size-aware NBD server did not become ready" >&2
-    return 1
-  }
-  local backing_bytes=""
-  for ((i=0; i<50; ++i)); do
-    backing_bytes=$(blockdev --getsize64 "$BACKING" 2>/dev/null || true)
-    [[ "$backing_bytes" == 268435456 ]] && break
-    if ! kill -0 "$NBD_PID" 2>/dev/null; then
-      echo "ERROR: size-aware NBD server exited before geometry was ready" >&2
-      cat "$NBD_LOG" >&2
-      return 1
-    fi
-    sleep 0.1
-  done
-  [[ "$backing_bytes" == 268435456 ]] || {
-    echo "ERROR: size-aware NBD device has unexpected capacity: $backing_bytes" >&2
-    return 1
-  }
-  return 0
+  # Defense in depth: the top-level backend guard must already reject NBD.
+  # Never spawn a server without an independently qualified pidfd-owned
+  # service/controller and a safe, exact-child shutdown acknowledgment.
+  echo "ERROR: NBD backend launch is disabled pending verified process ownership." >&2
+  return 4
 }
 
 if [[ "$BACKEND_KIND" == nbd ]]; then
