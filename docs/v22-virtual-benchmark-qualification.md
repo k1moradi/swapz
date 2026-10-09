@@ -99,6 +99,31 @@ cleanup. Publish confidence ranges; do not average away p99 regressions.
 Document the alternative if the constraints conflict, without silently
 relaxing either criterion.
 
+## Offline evidence preflight (rootless only)
+
+The standalone `v22-drain-plateau-analyze.py` is a **read-only**
+validator for future independently collected lower-device write-sector
+deltas and 10,000+ swap-in samples per run. Its input is a strict
+`swapz-drain-observation-v1` JSONL schema, described in
+[`v22-drain-plateau-offline.md`](v22-drain-plateau-offline.md).
+
+The existing `streaming-benchmark.sh` reports
+`drained_write_mib_s = logical_write_bytes / elapsed`; that metric
+**must not be relabeled** as independently measured lower-device drained
+throughput. Although it records lower-write sector counters, the script
+does not yet emit complete, independently reviewed drain-window and
+quiescence attestations for this new schema.
+
+The offline validator requires the full batch sweep (except the immediate
+single-batch baseline), three repeats per configuration, 10,000+ actual
+swap-in latency samples per repeat, stable lower-device throughput, and
+the three largest batches at >=97% of the measured peak before proposing
+a plateau candidate. It guards the 10% read-p99 constraint using the
+**worst repeat** at each candidate size, not only its mean. Missing,
+unstable or contradictory data reports `PLATEAU NOT REACHED`. Synthetic
+data never yields an empirical winner. Even `kernel`/`physical`
+provenance labels remain self-reported until independently reviewed.
+
 ## Gate D — Physical media (distinct authorization)
 
 Only after passing the disposable virtual stack and receiving a separate
