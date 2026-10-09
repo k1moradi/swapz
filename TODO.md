@@ -754,3 +754,32 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Obtain distinct operator approval before physical media;
       V2.2 strategy, batch and throughput plateau remain
       **NOT ESTABLISHED** by rootless testing.
+
+### 2026-10-09 — Safer live benchmark *reporting* (source-only)
+
+- [x] Eliminate `streaming-benchmark.sh`'s false
+      `drained_write_mib_s` label and its one-run
+      `first_97pct/latency_guarded` winner nomination.
+- [x] Record separate `logical_flush_window_mib_s` and
+      `lower_counter_window_mib_s` using a monotonic timed window,
+      plus fio's actual `read_count`, without relabeling the lower
+      counter rate as independently attested physical drain.
+- [x] Add read-only `streaming-benchmark-report.py` which
+      validates the fio/sysfs numerator arithmetic and always reports
+      `NO QUALIFIED WINNER / PLATEAU NOT REACHED` for a one-run sweep.
+- [x] Qualify 14 purely fabricated-fio rootless regressions, including
+      extracting and running the actual embedded fio JSON formatter
+      *without ever invoking the live benchmark shell*.
+- [x] Both mandatory GitHub workflows PASS at executable revision
+      `ecd06d89b8c5f85bf67c6ec07b232625cce079ec`:
+      https://github.com/k1moradi/swapz/actions/runs/37909068184
+      https://github.com/k1moradi/swapz/actions/runs/37909068343
+- [ ] After Codex's GNU/DM identity and kernel I/O-drain gate,
+      independently review a trusted, **operator-authorized**
+      collector for lower counters, exclusive backend ownership,
+      raw p99 samples, real quiescence, >=3 independent runs/size,
+      and completeness under the `swapz-drain-observation-v1` schema.
+- [ ] Keep existing one-run streaming output strictly diagnostic.
+      Do not promote any nominal 97% point to V2.2 strategy/batch
+      winner without qualified virtual and separately authorized
+      physical tests. Actual winner remains **UNDETERMINED**.
