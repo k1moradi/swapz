@@ -33,6 +33,10 @@ on:
       - 'tests/runtime/recall-role-bridge-regression.sh'
       - 'tests/runtime/recall-dd-allowlist.py'
       - 'tests/runtime/recall-dd-allowlist-test.py'
+      - 'tests/runtime/gnu-coreutils-qualification.py'
+      - 'tests/runtime/gnu-coreutils-qualification-test.py'
+      - 'tests/runtime/recall-gnu-dd-seccomp-qualification.py'
+      - 'tests/runtime/recall-gnu-dd-seccomp-qualification-test.py'
       - 'tests/runtime/recall-dd-worker-integration-test.py'
       - 'tests/runtime/recall-readback-identity.py'
       - 'tests/runtime/recall-readback-identity-test.py'
@@ -185,6 +189,14 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-dd-allowlist.py tests/runtime/recall-dd-allowlist-test.py
           timeout 20s python3 tests/runtime/recall-dd-allowlist-test.py -v
+      - name: GNU provenance and worker build-record binding unit tests (synthetic only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/gnu-coreutils-qualification.py tests/runtime/gnu-coreutils-qualification-test.py tests/runtime/recall-gnu-dd-seccomp-qualification.py tests/runtime/recall-gnu-dd-seccomp-qualification-test.py
+          timeout 30s python3 -B tests/runtime/gnu-coreutils-qualification-test.py -v
+          timeout 20s python3 -B tests/runtime/recall-gnu-dd-seccomp-qualification-test.py -v
+          echo "GNU_POLICY_UNIT_TESTS_ONLY: PASS (no authenticated GNU build or real worker executed)"
       - name: Rootless pinned direct dd worker integration regression
         shell: bash
         run: |
