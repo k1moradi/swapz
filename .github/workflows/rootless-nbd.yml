@@ -15,6 +15,7 @@ on:
       - 'tests/runtime/nbd-pidfd-owned-session-test.py'
       - 'tests/runtime/nbd-pidfd-crash-owner.py'
       - 'tests/runtime/nbd_pidfd_child_policy.py'
+      - 'tests/runtime/rootless-workflow-contract-test.py'
   pull_request:
     paths:
       - '.github/workflows/rootless-nbd.yml'
@@ -28,6 +29,7 @@ on:
       - 'tests/runtime/nbd-pidfd-owned-session-test.py'
       - 'tests/runtime/nbd-pidfd-crash-owner.py'
       - 'tests/runtime/nbd_pidfd_child_policy.py'
+      - 'tests/runtime/rootless-workflow-contract-test.py'
   workflow_dispatch:
 
 permissions:
@@ -39,6 +41,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Guard standalone rootless NBD source and syscall/stress gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/rootless-workflow-contract-test.py
+          timeout 20s python3 -B tests/runtime/rootless-workflow-contract-test.py -v
+          echo "ROOTLESS_NBD_WORKFLOW_CONTRACT: PASS (no real device attachment)"
       - name: Static syscall isolation gate (before any selftest)
         run: |
           python3 - <<'PY'
