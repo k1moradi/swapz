@@ -128,7 +128,9 @@ series, the analyzer:
    the series point's median (noisy/incomparable evidence).
 5. Requires **all three largest measured adjacent sizes**, 256, 512 and
    1024 KiB, to have median drained MiB/s within 97% of the maximum measured
-   batch median. Otherwise returns `PLATEAU NOT REACHED`.
+   batch median, using **unrounded** sector-derived rates. Otherwise returns
+   `PLATEAU NOT REACHED`. Six-decimal report rounding is presentation
+   only and cannot turn a value just below 97% into a passing plateau.
 6. Finds each qualifying batch's **worst individual run's read p99** and
    permits a candidate only if that p99 is within 10% of the lowest such
    worst-run p99 on the plateau.
