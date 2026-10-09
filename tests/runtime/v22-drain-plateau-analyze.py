@@ -18,6 +18,13 @@ from pathlib import Path
 from statistics import median
 
 SCHEMA = "swapz-drain-observation-v1"
+SCHEMA_V2 = "swapz-drain-observation-v2"
+# V2 requires an exact, run-length-encoded latency distribution. These are
+# still caller-asserted counts, not authenticated device observations.
+MAX_LATENCY_BINS = 256
+MAX_READ_COUNT = 10_000_000
+MAX_NS = 10**13
+MAX_COUNTER = (1 << 64) - 1
 SECTOR_BYTES = 512
 MIB = 1024 * 1024
 BATCHES = (4, 8, 16, 32, 64, 128, 256, 512, 1024)
@@ -45,6 +52,42 @@ INTEGER_FIELDS = (
     "read_p99_ns",
 )
 BOOL_FIELDS = ("integrity_ok", "quiescence_ok", "flush_ok", "all_reaped")
+FIELDS_V2 = FIELDS | {"read_latency_counts"}
+
+
+def _validate_latency_counts(row: dict[str, object], line: int) -> None:
+    """Recompute exact nearest-rank p99 from a bounded histogram.
+
+    Each [latency_ns, count] pair represents an exact observed latency,
+    NOT a coarse bucket upper bound. Counts are still supplied by an
+    external, unauthenticated collector; source-only checks cannot prove
+    the observations actually occurred.
+    """
+    histogram = row["read_latency_counts"]
+    if (type(histogram) is not list or not 1 <= len(histogram) <= MAX_LATENCY_BINS):
+        raise ValueError(f"line {line}: invalid bounded read latency distribution")
+    previous_latency = 0
+    total = 0
+    cumulative: list[tuple[int, int]] = []
+    for pair in histogram:
+        if (type(pair) is not list or len(pair) != 2
+                or type(pair[0]) is not int or type(pair[1]) is not int):
+            raise ValueError(f"line {line}: invalid latency/count pair")
+        latency, count = pair
+        if (not previous_latency < latency <= MAX_NS
+                or not 0 < count <= MAX_READ_COUNT):
+            raise ValueError(f"line {line}: nonpositive, duplicate, unsorted or oversized latency bucket")
+        previous_latency = latency
+        total += count
+        if total > MAX_READ_COUNT:
+            raise ValueError(f"line {line}: read latency count exceeds limit")
+        cumulative.append((latency, total))
+    if total != row["read_count"]:
+        raise ValueError(f"line {line}: read_count differs from exact latency distribution")
+    rank = (99 * total + 99) // 100  # ceil(0.99 * n), one-based nearest rank
+    p99 = next(latency for latency, observed in cumulative if observed >= rank)
+    if row["read_p99_ns"] != p99:
+        raise ValueError(f"line {line}: read_p99_ns differs from recomputed nearest-rank p99")
 
 
 def _unique_object(items: list[tuple[str, object]]) -> dict[str, object]:
@@ -61,10 +104,13 @@ def _reject_constant(value: str) -> object:
 
 
 def validate(row: object, line: int) -> dict[str, object]:
-    if not isinstance(row, dict) or set(row) != FIELDS:
+    if not isinstance(row, dict):
         raise ValueError(f"line {line}: missing or unexpected observation fields")
-    if row["schema"] != SCHEMA:
+    if type(row.get("schema")) is not str or row["schema"] not in (SCHEMA, SCHEMA_V2):
         raise ValueError(f"line {line}: unsupported observation schema")
+    required = FIELDS_V2 if row["schema"] == SCHEMA_V2 else FIELDS
+    if set(row) != required:
+        raise ValueError(f"line {line}: missing or unexpected observation fields")
     if type(row["evidence"]) is not str or row["evidence"] not in EVIDENCE:
         raise ValueError(f"line {line}: invalid evidence class")
     if type(row["strategy"]) is not str or row["strategy"] not in STRATEGIES:
@@ -79,16 +125,19 @@ def validate(row: object, line: int) -> dict[str, object]:
                 or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for char in text)):
             raise ValueError(f"line {line}: invalid or missing {key}")
     for key in INTEGER_FIELDS:
-        if type(row[key]) is not int or row[key] < 0:
-            raise ValueError(f"line {line}: invalid nonnegative integer {key}")
+        if type(row[key]) is not int or not 0 <= row[key] <= MAX_COUNTER:
+            raise ValueError(f"line {line}: invalid bounded nonnegative integer {key}")
     if row["batch_kib"] not in BATCHES:
         raise ValueError(f"line {line}: unsupported batch size")
     if row["strategy"] == "immediate" and row["batch_kib"] != 4:
         raise ValueError(f"line {line}: immediate strategy has only the 4 KiB baseline")
     if not (0 < row["duration_ns"] <= 10**13):
         raise ValueError(f"line {line}: invalid drain observation duration")
-    if row["read_count"] < MIN_READS_PER_RUN or row["read_p99_ns"] <= 0:
+    if (not MIN_READS_PER_RUN <= row["read_count"] <= MAX_READ_COUNT
+            or not 0 < row["read_p99_ns"] <= MAX_NS):
         raise ValueError(f"line {line}: insufficient p99 samples or invalid p99")
+    if row["schema"] == SCHEMA_V2:
+        _validate_latency_counts(row, line)
     if row["lower_write_sectors_after"] <= row["lower_write_sectors_before"]:
         raise ValueError(f"line {line}: missing or decreasing physical-sector write evidence")
     if row["lower_write_ios_after"] <= row["lower_write_ios_before"]:
@@ -136,6 +185,10 @@ def _measurement(row: dict[str, object]) -> float:
 def _series(rows: list[dict[str, object]]) -> dict[str, object]:
     example = rows[0]
     group = {
+        "schema": example["schema"],
+        "read_p99_integrity": ("RECOMPUTED FROM EXACT LATENCY COUNTS"
+                               if example["schema"] == SCHEMA_V2
+                               else "SELF-REPORTED - NOT VERIFIED"),
         "evidence": example["evidence"],
         "backend": example["backend"],
         "profile": example["profile"],
@@ -205,27 +258,38 @@ def _series(rows: list[dict[str, object]]) -> dict[str, object]:
     if example["evidence"] == "synthetic":
         group["qualification"] = "SYNTHETIC ONLY - NOT BENCHMARK EVIDENCE"
         group["reason"] = "Illustrative candidate only; no measured kernel or physical drain"
+    elif example["schema"] == SCHEMA:
+        group["qualification"] = "UNVERIFIED P99 - EXACT LATENCY DISTRIBUTION REQUIRED"
+        group["reason"] = (
+            "V1 read_count and read_p99_ns are self-reported; no provisional "
+            "selection without recomputing p99 from exact latency counts"
+        )
     else:
         group["qualification"] = "PROVISIONAL - INDEPENDENT EVIDENCE REVIEW REQUIRED"
         group["provisional_selection_kib"] = chosen["batch_kib"]
-        group["reason"] = "Input provenance is self-reported and not authenticated by this offline analyzer"
+        group["reason"] = (
+            "Exact latency histogram is internally consistent, but raw "
+            "samples, collector provenance and lower-device drain are unauthenticated"
+        )
     return group
 
 
 def analyze(rows: list[dict[str, object]]) -> dict[str, object]:
-    groups: dict[tuple[str, str, str, str, str], list[dict[str, object]]] = defaultdict(list)
-    # Never pool measurement provenance, backend, profile, strategy or
-    # compiled source revision into a fake cross-configuration plateau.
+    groups: dict[tuple[str, str, str, str, str, str], list[dict[str, object]]] = defaultdict(list)
+    # Never pool schema/p99 integrity, measurement provenance, backend,
+    # profile, strategy or revision into a fake cross-configuration plateau.
     for row in rows:
         key = tuple(row[name] for name in (
-            "evidence", "backend", "profile", "strategy", "source_revision"
+            "schema", "evidence", "backend", "profile", "strategy", "source_revision"
         ))
         groups[key].append(row)
     results = [_series(groups[key]) for key in sorted(groups)]
     return {
         "schema": "swapz-drain-analysis-v1",
         "status": "OFFLINE ANALYSIS - NO DEVICE ACCESS",
-        "warning": "Provenance self-reported; operator must verify counter source and kernel I/O drain",
+        "warning": ("Counter and latency-distribution origins are self-reported; "
+                    "v2 proves only internal nearest-rank p99 consistency, "
+                    "not the existence of real swap-in samples or kernel I/O drain"),
         "observation_count": len(rows),
         "series": results,
     }
