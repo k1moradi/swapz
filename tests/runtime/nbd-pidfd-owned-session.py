@@ -122,6 +122,12 @@ class RootlessOwnedServer:
 
     def _abort_owned(self) -> None:
         """Best-effort pidfd-only termination, never an authorization path."""
+        # If pidfd_open failed after spawn, close the private readiness channel
+        # first. The fixed synthetic child exits when the handshake sees EOF.
+        # Do NOT try an unowned numeric-PID signal in this failure branch.
+        if self.pidfd is None and self.sock is not None:
+            self.sock.close()
+            self.sock = None
         if self.process is not None:
             if self.pidfd is not None and self.process.poll() is None:
                 try:
