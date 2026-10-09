@@ -51,6 +51,8 @@ on:
       - 'tests/runtime/recall-io-drain-orchestrator-test.py'
       - 'tests/runtime/recall-fixture-release-policy.py'
       - 'tests/runtime/recall-fixture-release-policy-test.py'
+      - 'tests/runtime/recall-fixture-owner.py'
+      - 'tests/runtime/recall-fixture-owner-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
       - 'tests/runtime/live-gc-latency-analyze.py'
       - 'tests/runtime/v22-drain-plateau-analyze.py'
@@ -277,6 +279,13 @@ jobs:
           python3 -m py_compile tests/runtime/recall-fixture-release-policy.py tests/runtime/recall-fixture-release-policy-test.py
           timeout 35s python3 -B tests/runtime/recall-fixture-release-policy-test.py -v
           echo "FIXTURE_RELEASE_POLICY_MODEL_ONLY: PASS (no kernel drain or backing cleanup)"
+      - name: Rootless fixture-owner broker and evidence producer policy suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-fixture-owner.py tests/runtime/recall-fixture-owner-test.py
+          timeout 45s python3 -B tests/runtime/recall-fixture-owner-test.py -v
+          echo "FIXTURE_OWNER_BROKER_MODEL_ONLY: PASS (fake peers, fake kernel observations; no device cleanup)"
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |
