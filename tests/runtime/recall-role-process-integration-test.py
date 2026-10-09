@@ -340,6 +340,27 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
         self.assertTrue(replaced)
         self.assert_writer_barrier_failed_closed()
 
+    def test_launched_writer_with_unconfirmed_data_denies_all_later_roles(self):
+        # A genuine owned worker has been admitted, but the rootless data
+        # observer is forced to receive no conclusive bytes. Its worker
+        # handle must not turn missing readiness into reader admission.
+        self.session.launch("writer")
+        with mock.patch.object(os, "pread", return_value=b""), \
+                mock.patch.object(time, "monotonic", side_effect=(300.0, 300.1)):
+            with self.assertRaisesRegex(RoleError, "never populated expected bytes"):
+                self.session.await_synthetic_writer_contents(deadline_seconds=0.01)
+        self.assert_writer_barrier_failed_closed(roles=("writer",))
+
+    def test_symlink_substitution_before_pin_denies_even_with_correct_page_bytes(self):
+        target = self.session.root / "synthetic-mapper.bin"
+        substitute = self.session.root / "attacker-owned-regular-copy.bin"
+        substitute.write_bytes(self.session.expected)
+        target.unlink()
+        target.symlink_to(substitute)
+        with self.assertRaises(RoleError):
+            self.session.await_synthetic_writer_contents(deadline_seconds=0.1)
+        self.assert_writer_barrier_failed_closed()
+
     def test_writer_observation_interrupted_denies_and_prevents_reader(self):
         with mock.patch.object(os, "pread", side_effect=InterruptedError("test interrupted read")):
             with self.assertRaisesRegex(RoleError, "test interrupted read"):
