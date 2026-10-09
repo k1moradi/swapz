@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import secrets
 import stat
 import subprocess
 import threading
@@ -187,6 +188,7 @@ class MapperLifecycleLease:
             raise DDPolicyDenied("fixture mapper lifecycle lock path is invalid")
         self.ops = ops
         self._expected = expected
+        self.session_id = secrets.token_hex(16)
         self.identity_reader = identity_reader
         self._lock_path = lock_path
         self._closed = False
@@ -708,6 +710,62 @@ class MapperInventory:
     entries: tuple[MapperIdentity, ...]
 
 
+@dataclass(frozen=True)
+class WorkerCompletionEvidence:
+    """Authenticated service result required before mapper-only release.
+
+    The authenticator is verified by the trusted fixture-owner operations
+    object. It is not a caller-supplied boolean and is bound to one lease
+    session and the owner's registered opaque handles.
+    """
+
+    session_id: str
+    expected_handles: tuple[str, ...]
+    reaped_handles: tuple[str, ...]
+    role_descriptors_closed: tuple[str, ...]
+    service_exit_status: int
+    errors: tuple[str, ...]
+    authenticator: bytes
+
+
+@dataclass(frozen=True)
+class MapperSuspendObservation:
+    succeeded: bool
+    ordinary_flush: bool
+    noflush: bool
+    timed_out: bool
+    identity_matches: bool
+    suspended: bool
+
+
+@dataclass(frozen=True)
+class MapperOpenersObservation:
+    inventory_valid: bool
+    identity_matches: bool
+    open_count: int
+    holders: tuple[str, ...]
+
+
+def worker_completion_payload(evidence: WorkerCompletionEvidence) -> bytes:
+    """Canonical bytes the dedicated worker service must authenticate."""
+    if type(evidence) is not WorkerCompletionEvidence:
+        raise MapperOwnerDenied("worker completion evidence has the wrong type")
+    value = {
+        "schema": "swapz.fixture-worker-completion.v1",
+        "session_id": evidence.session_id,
+        "expected_handles": list(evidence.expected_handles),
+        "reaped_handles": list(evidence.reaped_handles),
+        "role_descriptors_closed": list(evidence.role_descriptors_closed),
+        "service_exit_status": evidence.service_exit_status,
+        "errors": list(evidence.errors),
+    }
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=True, allow_nan=False).encode("ascii")
+    except (TypeError, ValueError) as exc:
+        raise MapperOwnerDenied(f"worker completion evidence is not serializable: {exc}") from exc
+
+
 class MapperOwnerDenied(RuntimeError):
     """The fixture owner cannot prove one safe mapper lifecycle."""
 
@@ -725,7 +783,7 @@ class MapperLifecycleOwner:
     NEW = "new"
     ACTIVE = "active"
     ADMISSION_CLOSED = "admission_closed"
-    RELEASED = "released"
+    MAPPING_RELEASED = "mapping_released"
     DENIED = "denied"
 
     def __init__(self, identity: MapperIdentity, lease: MapperLifecycleLease,
@@ -734,7 +792,8 @@ class MapperLifecycleOwner:
             raise MapperOwnerDenied("mapper owner needs one exact identity and lifecycle lease")
         if lease.expected != identity:
             raise MapperOwnerDenied("mapper owner and lifecycle lease identities differ")
-        for method in ("owner_alive", "inventory", "create_mapping", "remove_mapping"):
+        for method in ("owner_alive", "inventory", "create_mapping", "suspend_mapping",
+                       "inspect_openers", "remove_mapping", "verify_worker_completion"):
             if not callable(getattr(operations, method, None)):
                 raise MapperOwnerDenied(f"mapper owner operation {method} is unavailable")
         self.identity = identity
@@ -745,14 +804,19 @@ class MapperLifecycleOwner:
         self._denial: str | None = None
         self._mapper_fd: int | None = None
         self._operation_lock = threading.Lock()
+        self._worker_handles: list[str] = []
+        self._worker_roles: list[str] = []
+        self._admitted_roles: list[str] = []
 
     @property
-    def cleanup_allowed(self) -> bool:
-        return self.state == self.RELEASED and self._denial is None
+    def mapping_released(self) -> bool:
+        """The exact DM mapping was normally removed; this is not backing permission."""
+        return self.state == self.MAPPING_RELEASED and self._denial is None
 
     @property
-    def preserve_backing(self) -> bool:
-        return not self.cleanup_allowed
+    def backing_must_be_preserved(self) -> bool:
+        """This mapper-only controller never authorizes backing-file release."""
+        return True
 
     @property
     def denial(self) -> str | None:
@@ -761,6 +825,45 @@ class MapperLifecycleOwner:
     @property
     def mapper_fd(self) -> int | None:
         return self._mapper_fd
+
+    @property
+    def registered_worker_handles(self) -> tuple[str, ...]:
+        return tuple(self._worker_handles)
+
+    def register_worker(self, handle: str, role: str) -> None:
+        with self._operation(self.ACTIVE):
+            self._check_owner_and_lease()
+            if (not isinstance(handle, str)
+                    or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", handle) is None
+                    or handle.isdecimal() or handle in self._worker_handles
+                    or len(self._worker_handles) >= 256):
+                self._deny("worker handle is invalid, duplicated, or outside the bounded inventory")
+            if (not isinstance(role, str) or role not in _ROLES
+                    or len(self._worker_roles) >= len(self._admitted_roles)
+                    or role != self._admitted_roles[len(self._worker_roles)]):
+                self._deny("worker handle is not bound to the next authorized role")
+            self._worker_handles.append(handle)
+            self._worker_roles.append(role)
+
+    def authorize_role(self, role: str) -> None:
+        """Admit one fixed recall role after exact owner/DM revalidation."""
+        with self._operation(self.ACTIVE):
+            self._check_owner_and_lease()
+            if (not isinstance(role, str) or role not in _ROLES
+                    or role in self._admitted_roles
+                    or (role != "writer" and "writer" not in self._admitted_roles)):
+                self._deny("mapper owner rejected an unknown, repeated, or premature role")
+            if self._mapper_fd is None:
+                self._deny("mapper owner has no retained descriptor during role admission")
+            self._verify_descriptor(self._mapper_fd)
+            self._inventory(present=True)
+            self._check_owner_and_lease()
+            self._admitted_roles.append(role)
+
+    def authorize_table_reload(self) -> None:
+        """Deny table reloads: this owner exposes no reload capability."""
+        with self._operation(self.ACTIVE):
+            self._deny("table reload is not an authorized operation in a recall session")
 
     @contextlib.contextmanager
     def _operation(self, required_state: str):
@@ -884,27 +987,70 @@ class MapperLifecycleOwner:
     def close_admission(self) -> None:
         with self._operation(self.ACTIVE):
             self._check_owner_and_lease()
+            if self._worker_roles != self._admitted_roles:
+                self._deny("every admitted role must be registered to one worker before admission closes")
             assert self._mapper_fd is not None
             self._verify_descriptor(self._mapper_fd)
             self._inventory(present=True)
             self._check_owner_and_lease()
             self.state = self.ADMISSION_CLOSED
 
-    def finalize_teardown(self, *, workers_reaped: bool,
-                           descriptors_closed: bool) -> None:
+    def release_mapping(self, evidence: WorkerCompletionEvidence) -> None:
         with self._operation(self.ADMISSION_CLOSED):
-            if workers_reaped is not True or descriptors_closed is not True:
-                self._deny("workers or role descriptors are not positively quiesced")
+            if type(evidence) is not WorkerCompletionEvidence:
+                self._deny("authenticated worker completion evidence is required")
+            expected = tuple(self._worker_handles)
+            if (type(evidence.session_id) is not str
+                    or evidence.session_id != self.lease.session_id
+                    or type(evidence.expected_handles) is not tuple
+                    or type(evidence.reaped_handles) is not tuple
+                    or type(evidence.role_descriptors_closed) is not tuple
+                    or type(evidence.errors) is not tuple
+                    or evidence.expected_handles != expected
+                    or evidence.reaped_handles != expected
+                    or evidence.role_descriptors_closed != expected
+                    or evidence.errors != ()
+                    or type(evidence.service_exit_status) is not int
+                    or evidence.service_exit_status != 0
+                    or type(evidence.authenticator) is not bytes
+                    or len(evidence.authenticator) != 32):
+                self._deny("worker completion inventory, session, or exit status is incomplete")
+            try:
+                authenticated = self.operations.verify_worker_completion(evidence)
+            except Exception as exc:
+                self._deny(f"worker completion authentication failed: {exc}")
+            if authenticated is not True:
+                self._deny("worker completion authentication did not succeed")
             self._check_owner_and_lease()
             self._inventory(present=True)
+            try:
+                suspended = self.operations.suspend_mapping(self.identity, noflush=False)
+            except Exception as exc:
+                self._deny(f"ordinary DM suspend failed: {exc}")
+            if (type(suspended) is not MapperSuspendObservation
+                    or suspended != MapperSuspendObservation(
+                        succeeded=True, ordinary_flush=True, noflush=False,
+                        timed_out=False, identity_matches=True, suspended=True)):
+                self._deny("ordinary DM suspend or its identity/drain evidence is unverified")
             self._check_owner_and_lease()
             if self._mapper_fd is None:
-                self._deny("retained mapper descriptor disappeared before teardown")
+                self._deny("retained mapper descriptor disappeared before mapping release")
             fd, self._mapper_fd = self._mapper_fd, None
             try:
                 self.file_ops.close(fd)
             except Exception as exc:
                 self._deny(f"retained mapper descriptor close failed: {exc}")
+            self._check_owner_and_lease()
+            try:
+                openers = self.operations.inspect_openers(self.identity)
+            except Exception as exc:
+                self._deny(f"DM open-count or holder inspection failed: {exc}")
+            if (type(openers) is not MapperOpenersObservation
+                    or type(openers.inventory_valid) is not bool or openers.inventory_valid is not True
+                    or type(openers.identity_matches) is not bool or openers.identity_matches is not True
+                    or type(openers.open_count) is not int or openers.open_count != 0
+                    or type(openers.holders) is not tuple or openers.holders != ()):
+                self._deny("DM open-count or holder inventory is not positively empty")
             self._check_owner_and_lease()
             try:
                 removed = self.operations.remove_mapping(self.identity)
@@ -919,7 +1065,7 @@ class MapperLifecycleOwner:
                 self.lease.close()
             except Exception as exc:
                 self._deny(f"lease release failed after verified mapper absence: {exc}")
-            self.state = self.RELEASED
+            self.state = self.MAPPING_RELEASED
 
 
 def _verify_dm_descriptor(fd: int, mapper_name: str, ops: RecallDDFileOps,
@@ -1409,6 +1555,8 @@ class RecallDDLaunchGate:
                 )
             if mapper_verified is not True:
                 self._deny("retained mapper descriptor identity no longer matches")
+            if self._mapper_owner is not None:
+                self._mapper_owner.authorize_role(role)
             self._verify_executable()
         except DDPolicyDenied:
             self._closed = True
@@ -1608,4 +1756,6 @@ __all__ = [
     "open_test_mapper_fd", "DDPolicyDenied", "DirectDDCommand",
     "TrustedGNUCoreutilsDD", "MapperIdentity", "MapperLifecycleLease",
     "MapperInventory", "MapperLifecycleOwner", "MapperOwnerDenied",
+    "WorkerCompletionEvidence", "MapperSuspendObservation", "MapperOpenersObservation",
+    "worker_completion_payload",
 ]

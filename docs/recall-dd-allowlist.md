@@ -117,44 +117,82 @@ ACTIVE
   -> recheck owner, lease, descriptor, UUID, device and table before each role
   -> close role admission
 ADMISSION_CLOSED
-  -> require positive worker-reaped and role-descriptor-closed evidence
+  -> verify session-bound worker reaped + role-descriptor-closed attestation
+  -> ordinary DM suspend (no --noflush); require positive drained state
   -> close retained mapper descriptor
+  -> verify complete open count is zero and holders are empty
   -> normal exact removal
   -> independently confirm the bound identity is absent
   -> release the lease
-RELEASED (cleanup_allowed)
+MAPPING_RELEASED (mapper-only result; backing must still be preserved)
 ```
 
 Every failed or ambiguous owner check, inventory, identity comparison,
 descriptor operation, removal, or lease operation latches `DENIED`. The owner
-never reports cleanup permission after denial. Duplicate names, UUIDs or
-device numbers are rejected. Only the exact configured identity is passed to
-the injected create/remove operations; IPC never selects a device. The model
-also rejects a concurrent operation and rechecks owner/lease state on both
-sides of injected inventory operations.
+does not expose a `cleanup_allowed` property. Its `mapping_released` property
+means only that the exact mapping was normally removed and observed absent;
+`backing_must_be_preserved` stays true even after that state. It is deliberately
+not a backing-file release authority. Duplicate names, UUIDs or device numbers
+are rejected. Only the exact configured identity is passed to the injected
+create, ordinary suspend, open-count/holder inspection, and normal remove
+operations; IPC never selects a device or invokes privileged lifecycle
+commands. The owner admits only the five fixed roles, closes role admission
+before teardown, and exposes no table-reload operation. A detected table
+fingerprint change permanently denies the session. It rejects concurrent
+operations and rechecks owner/lease state around inventory observations.
+
+Before mapper-only release, the owner requires a typed completion report bound
+to its random session identifier. It reconciles the exact handles it registered
+against reaped handles and per-handle role-descriptor closure, requires an
+error-free service exit status of zero, and calls the injected trusted-owner
+verifier on the report authenticator. Caller booleans such as
+`workers_reaped=True` are no longer accepted. The fixture owner then requires
+ordinary suspend with flush semantics, closes its retained mapper descriptor,
+checks a complete zero-open-count and empty-holder observation, performs normal
+removal, verifies exact name/UUID/device-number absence, and releases its
+cooperative lease. Failures preserve the backing and latch denial.
+
+Each admitted role must be paired with exactly one opaque worker handle in
+admission order before `close_admission()` succeeds. An admitted role without a
+registered worker, a handle without a prior matching role, or a role/handle
+inventory mismatch permanently denies release. This prevents an empty worker
+receipt from standing in for I/O that was authorized but never entered the
+owner's inventory.
 
 This is an injected state controller, not a privileged Device Mapper
 implementation. Its fake operations are ordinary test code. The flock lease is
 cooperative: it detects a replaced lock file and an owner that released the
 lock, but it cannot stop a privileged process that ignores the protocol. Table
 fingerprints detect observed changes but cannot prevent a privileged table
-reload between verification and use. A real fixture owner must acquire its
-exclusive lifecycle authority before mapping creation and be the only process
-authorized to create, reload, rename, or remove that one disposable mapping.
-It must retain root-controlled ownership of the trusted service and DM control
-interface, prohibit other actors from issuing lifecycle ioctls, bind a single
-fixture identity, and hold authority through verified removal. Merely running
-in a mount or device namespace or holding an ordinary flock does not prove that
-no other privileged process can alter the table. Until that credential and
-exclusive-control boundary is implemented and audited, live mapper admission
-must remain disabled.
+reload between verification and use. A future fixture owner needs a dedicated
+privileged broker that acquires exclusive lifecycle authority before mapping
+creation, retains the only authorized DM control capability, and serializes
+create, role admission, ordinary suspend, normal removal, and exact absence
+verification. The worker IPC process must have no DM control descriptor or
+`CAP_SYS_ADMIN`; only the small owner/broker may hold the privilege required by
+the chosen DM control mechanism. Use a root-controlled executable/configuration,
+dedicated service credentials, close-on-exec descriptors, and a private
+authenticated channel. A mount or device namespace and an ordinary flock do
+not exclude host-root. An unrelated host-root actor with sufficient kernel
+authority cannot be excluded by a cooperative lock. Until an independently
+reviewed credential and exclusive-control boundary exists, live mapper
+admission remains disabled.
 
-The controller's `workers_reaped` and `descriptors_closed` inputs are required
-positive evidence, but process reaping alone does not prove that previously
-submitted kernel block I/O has drained. Backing teardown also requires the
-separate DM I/O-drain barrier documented in
-[`recall-io-drain.md`](recall-io-drain.md). No operation in this controller
-executes `dmsetup`, opens a real `/dev/mapper` node, or removes a real mapping.
+Mapper-only release and backing release are separate authorities. A new
+session-bound evidence policy requires authenticated reports for admission
+closure, complete worker/service/descriptor reconciliation, independent swap
+inspection, ordinary flushing DM suspend, descriptor closure, complete
+open-count and holder checks, normal removal, exact name/UUID/device-number
+absence, upper/lower dependency resolution, and normal loop detach followed by
+verified absence. Every event has a monotonic sequence and an HMAC over the
+session, event, sequence, and canonical payload. The key belongs only to a
+future trusted fixture owner and is not accepted over worker IPC. Missing,
+stale, conflicting, unauthenticated or failed evidence keeps backing
+preservation latched. This HMAC test model does not authenticate real kernel
+observations; only a privileged, separately qualified collector can do that.
+Successful pidfd reaping is not a kernel I/O barrier. No operation in either
+model executes `dmsetup`, opens a real `/dev/mapper` node, or removes a real
+mapping.
 
 ## Remaining process and storage boundaries
 

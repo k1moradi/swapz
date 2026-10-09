@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import fcntl
 import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -45,6 +46,10 @@ MapperLifecycleLease = policy_module.MapperLifecycleLease
 MapperLifecycleOwner = policy_module.MapperLifecycleOwner
 MapperInventory = policy_module.MapperInventory
 MapperOwnerDenied = policy_module.MapperOwnerDenied
+WorkerCompletionEvidence = policy_module.WorkerCompletionEvidence
+MapperSuspendObservation = policy_module.MapperSuspendObservation
+MapperOpenersObservation = policy_module.MapperOpenersObservation
+worker_completion_payload = policy_module.worker_completion_payload
 RealRecallDDFileOps = RecallDDFileOps
 plan_module = load("recall_io_plan_allowlist_contract", HERE / "recall-io-plan.py")
 
@@ -527,6 +532,11 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 self.events: list[str] = []
                 self.inventory_valid = True
                 self.remove_result = True
+                self.suspend_result = MapperSuspendObservation(
+                    True, True, False, False, True, True,
+                )
+                self.openers_result = MapperOpenersObservation(True, True, 0, ())
+                self.worker_key = b"rootless-test-owner-worker-attestation-key"
                 self.after_inventory = None
 
             def owner_alive(self):
@@ -553,6 +563,25 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 if self.remove_result:
                     self.entries = ()
                 return self.remove_result
+
+            def suspend_mapping(self, identity, *, noflush):
+                self.events.append("suspend")
+                if identity != expected or noflush is not False:
+                    raise AssertionError("owner did not request ordinary exact-mapping suspend")
+                return self.suspend_result
+
+            def inspect_openers(self, identity):
+                self.events.append("openers")
+                if identity != expected:
+                    raise AssertionError("owner inspected an unexpected mapper identity")
+                return self.openers_result
+
+            def verify_worker_completion(self, evidence):
+                self.events.append("worker-attestation")
+                expected_mac = hmac.new(
+                    self.worker_key, worker_completion_payload(evidence), hashlib.sha256,
+                ).digest()
+                return hmac.compare_digest(evidence.authenticator, expected_mac)
 
         owner_operations = FakeOwnerOperations()
         owner = MapperLifecycleOwner(
@@ -1071,7 +1100,9 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         trusted = self.trusted_manifest(executable_path, contents)
         expected = MapperIdentity(self.name, "SWAPZ-TEST-IDENTITY", 253, 17, "b" * 64)
         changed = MapperIdentity(self.name, "SWAPZ-TEST-IDENTITY", 253, 17, "c" * 64)
-        observations = iter((expected, expected, expected, changed))
+        # Owner verification occurs at construction, then at both descriptor
+        # checks surrounding the first role admission, before the next role.
+        observations = iter((expected, expected, expected, expected, changed))
         mapper_fd, ops, _identity, lease, owner = self.block_fixture(
             executable_path, identity_reader=lambda *_: next(observations),
         )
@@ -1161,6 +1192,30 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 ops=ops,
             )
 
+    @staticmethod
+    def _worker_evidence(owner, *, reaped=None, descriptors_closed=None,
+                         session_id=None, exit_status=0, errors=(), authenticator=None):
+        expected = owner.registered_worker_handles
+        reaped_handles = expected if reaped is None else tuple(reaped)
+        closed_handles = expected if descriptors_closed is None else tuple(descriptors_closed)
+        evidence = WorkerCompletionEvidence(
+            session_id=owner.lease.session_id if session_id is None else session_id,
+            expected_handles=expected, reaped_handles=reaped_handles,
+            role_descriptors_closed=closed_handles, service_exit_status=exit_status,
+            errors=tuple(errors), authenticator=b"\0" * 32,
+        )
+        if authenticator is None:
+            authenticator = hmac.new(
+                owner.operations.worker_key, worker_completion_payload(evidence), hashlib.sha256,
+            ).digest()
+        return WorkerCompletionEvidence(
+            session_id=evidence.session_id, expected_handles=evidence.expected_handles,
+            reaped_handles=evidence.reaped_handles,
+            role_descriptors_closed=evidence.role_descriptors_closed,
+            service_exit_status=evidence.service_exit_status, errors=evidence.errors,
+            authenticator=authenticator,
+        )
+
     def test_mapper_owner_releases_only_after_exact_remove_and_absence(self):
         path = self.base / "owner-lifecycle-dd"
         data = self.static_elf_fixture()
@@ -1169,18 +1224,27 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         mapper_fd, _file_ops, identity, lease, owner = self.block_fixture(path)
         operations = owner.operations
         self.assertEqual(owner.state, MapperLifecycleOwner.ACTIVE)
-        self.assertFalse(owner.cleanup_allowed)
+        self.assertFalse(owner.mapping_released)
+        self.assertTrue(owner.backing_must_be_preserved)
+        self.assertFalse(hasattr(owner, "cleanup_allowed"))
+        for role, handle in zip(("writer", "a", "b"),
+                                ("worker-A", "worker-B", "worker-C")):
+            owner.authorize_role(role)
+            owner.register_worker(handle, role)
 
         owner.close_admission()
         self.assertEqual(owner.state, MapperLifecycleOwner.ADMISSION_CLOSED)
-        owner.finalize_teardown(workers_reaped=True, descriptors_closed=True)
+        owner.release_mapping(self._worker_evidence(owner))
 
-        self.assertEqual(owner.state, MapperLifecycleOwner.RELEASED)
-        self.assertTrue(owner.cleanup_allowed)
-        self.assertFalse(owner.preserve_backing)
+        self.assertEqual(owner.state, MapperLifecycleOwner.MAPPING_RELEASED)
+        self.assertTrue(owner.mapping_released)
+        self.assertTrue(owner.backing_must_be_preserved)
         self.assertIsNone(owner.mapper_fd)
         self.assertTrue(lease._closed)
         self.assertEqual(operations.entries, ())
+        self.assertLess(operations.events.index("worker-attestation"), operations.events.index("suspend"))
+        self.assertLess(operations.events.index("suspend"), operations.events.index("openers"))
+        self.assertLess(operations.events.index("openers"), operations.events.index("remove"))
         remove_index = operations.events.index("remove")
         self.assertEqual(operations.events[remove_index + 1:], ["inventory"])
         self.assertEqual(identity, owner.identity)
@@ -1193,13 +1257,73 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         path.chmod(0o755)
         _mapper_fd, _file_ops, _identity, _lease, owner = self.block_fixture(path)
         operations = owner.operations
+        owner.authorize_role("writer")
+        owner.register_worker("worker-A", "writer")
         owner.close_admission()
-        with self.assertRaisesRegex(MapperOwnerDenied, "not positively quiesced"):
-            owner.finalize_teardown(workers_reaped=False, descriptors_closed=True)
+        with self.assertRaisesRegex(MapperOwnerDenied, "completion inventory"):
+            owner.release_mapping(self._worker_evidence(owner, reaped=()))
         self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
-        self.assertFalse(owner.cleanup_allowed)
-        self.assertTrue(owner.preserve_backing)
+        self.assertFalse(owner.mapping_released)
+        self.assertTrue(owner.backing_must_be_preserved)
         self.assertNotIn("remove", operations.events)
+
+    def test_mapper_owner_rejects_unauthenticated_or_incomplete_worker_receipts(self):
+        cases = ("wrong-session", "bad-mac", "descriptor-open", "nonzero-exit", "reported-error")
+        for case in cases:
+            with self.subTest(case=case):
+                path = self.base / ("owner-bad-worker-receipt-" + case)
+                path.write_bytes(self.static_elf_fixture())
+                path.chmod(0o755)
+                _fd, _ops, _identity, _lease, owner = self.block_fixture(path)
+                owner.authorize_role("writer")
+                owner.register_worker("worker-A", "writer")
+                owner.close_admission()
+                options = {}
+                if case == "wrong-session":
+                    options["session_id"] = "0" * 32
+                elif case == "bad-mac":
+                    options["authenticator"] = b"x" * 32
+                elif case == "descriptor-open":
+                    options["descriptors_closed"] = ()
+                elif case == "nonzero-exit":
+                    options["exit_status"] = 1
+                elif case == "reported-error":
+                    options["errors"] = ("worker failure",)
+                with self.assertRaises(MapperOwnerDenied):
+                    owner.release_mapping(self._worker_evidence(owner, **options))
+                self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+                self.assertTrue(owner.backing_must_be_preserved)
+                self.assertNotIn("suspend", owner.operations.events)
+                self.assertNotIn("remove", owner.operations.events)
+
+    def test_mapper_owner_denies_unverified_suspend_and_openers(self):
+        for failure in ("suspend-timeout", "suspend-noflush", "open-count", "holders", "inventory"):
+            with self.subTest(failure=failure):
+                path = self.base / ("owner-drain-failure-" + failure)
+                path.write_bytes(self.static_elf_fixture())
+                path.chmod(0o755)
+                _fd, _ops, _identity, _lease, owner = self.block_fixture(path)
+                operations = owner.operations
+                if failure == "suspend-timeout":
+                    operations.suspend_result = MapperSuspendObservation(
+                        True, True, False, True, True, False,
+                    )
+                elif failure == "suspend-noflush":
+                    operations.suspend_result = MapperSuspendObservation(
+                        True, False, True, False, True, True,
+                    )
+                elif failure == "open-count":
+                    operations.openers_result = MapperOpenersObservation(True, True, 1, ())
+                elif failure == "holders":
+                    operations.openers_result = MapperOpenersObservation(True, True, 0, ("dm-253:99",))
+                else:
+                    operations.openers_result = MapperOpenersObservation(False, True, 0, ())
+                owner.close_admission()
+                with self.assertRaises(MapperOwnerDenied):
+                    owner.release_mapping(self._worker_evidence(owner))
+                self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+                self.assertTrue(owner.backing_must_be_preserved)
+                self.assertNotIn("remove", operations.events)
 
     def test_mapper_owner_rejects_duplicate_or_out_of_order_lifecycle_calls(self):
         path = self.base / "owner-duplicate-operation-dd"
@@ -1210,7 +1334,46 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         with self.assertRaisesRegex(MapperOwnerDenied, "invalid in state active"):
             owner.create()
         self.assertEqual(operations.events.count("create"), create_count)
-        self.assertTrue(owner.preserve_backing)
+        self.assertTrue(owner.backing_must_be_preserved)
+
+    def test_mapper_owner_rejects_premature_roles_and_any_table_reload(self):
+        for operation in ("reader-first", "reload"):
+            with self.subTest(operation=operation):
+                path = self.base / ("owner-role-or-reload-" + operation)
+                path.write_bytes(b"owner policy fixture")
+                _fd, _ops, _identity, _lease, owner = self.block_fixture(path)
+                before = tuple(owner.operations.events)
+                with self.assertRaises(MapperOwnerDenied):
+                    if operation == "reader-first":
+                        owner.authorize_role("a")
+                    else:
+                        owner.authorize_table_reload()
+                self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+                self.assertEqual(tuple(owner.operations.events), before)
+                self.assertTrue(owner.backing_must_be_preserved)
+
+    def test_mapper_owner_requires_exact_worker_for_each_admitted_role(self):
+        path = self.base / "owner-missing-role-worker-dd"
+        path.write_bytes(self.static_elf_fixture())
+        path.chmod(0o755)
+        _fd, _ops, _identity, _lease, owner = self.block_fixture(path)
+        owner.authorize_role("writer")
+        with self.assertRaisesRegex(MapperOwnerDenied, "every admitted role"):
+            owner.close_admission()
+        self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+        self.assertNotIn("suspend", owner.operations.events)
+        self.assertNotIn("remove", owner.operations.events)
+        self.assertTrue(owner.backing_must_be_preserved)
+
+        path = self.base / "owner-misbound-role-worker-dd"
+        path.write_bytes(self.static_elf_fixture())
+        path.chmod(0o755)
+        _fd, _ops, _identity, _lease, owner = self.block_fixture(path)
+        owner.authorize_role("writer")
+        with self.assertRaisesRegex(MapperOwnerDenied, "next authorized role"):
+            owner.register_worker("worker-A", "a")
+        self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+        self.assertTrue(owner.backing_must_be_preserved)
 
     def test_failed_mapping_removal_preserves_backing_and_denies_cleanup(self):
         path = self.base / "owner-remove-failure-dd"
@@ -1220,10 +1383,10 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         operations.remove_result = False
         owner.close_admission()
         with self.assertRaisesRegex(MapperOwnerDenied, "not confirmed"):
-            owner.finalize_teardown(workers_reaped=True, descriptors_closed=True)
+            owner.release_mapping(self._worker_evidence(owner))
         self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
-        self.assertTrue(owner.preserve_backing)
-        self.assertFalse(owner.cleanup_allowed)
+        self.assertTrue(owner.backing_must_be_preserved)
+        self.assertFalse(owner.mapping_released)
         self.assertEqual(operations.entries, (owner.identity,))
 
     def test_mapper_owner_rejects_bad_inventory_and_owner_loss(self):
@@ -1249,7 +1412,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 with self.assertRaises(MapperOwnerDenied):
                     owner.verify_role(owner.mapper_fd)
                 self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
-                self.assertFalse(owner.cleanup_allowed)
+                self.assertFalse(owner.mapping_released)
                 self.assertNotIn("remove", operations.events)
 
     def test_mapper_owner_rejects_replaced_lock_and_table_identity_change(self):
@@ -1264,7 +1427,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         lock_path.chmod(0o600)
         with self.assertRaisesRegex(MapperOwnerDenied, "lock identity changed"):
             owner.verify_role(mapper_fd)
-        self.assertTrue(owner.preserve_backing)
+        self.assertTrue(owner.backing_must_be_preserved)
 
         changed_path = self.base / "owner-table-change-dd"
         changed_path.write_bytes(data)
@@ -1277,7 +1440,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(MapperOwnerDenied, "table fingerprint changed"):
             changed_owner.verify_role(changed_fd)
-        self.assertFalse(changed_owner.cleanup_allowed)
+        self.assertFalse(changed_owner.mapping_released)
 
     def test_mapper_owner_rejects_name_uuid_and_device_inventory_changes(self):
         for changed_identity in ("name", "uuid", "device"):
@@ -1305,7 +1468,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 owner.operations.entries = (replacement,)
                 with self.assertRaises(MapperOwnerDenied):
                     owner.verify_role(owner.mapper_fd)
-                self.assertTrue(owner.preserve_backing)
+                self.assertTrue(owner.backing_must_be_preserved)
 
     def test_mapper_owner_rejects_incomplete_operations_interface(self):
         path = self.base / "owner-incomplete-operations-dd"
@@ -1322,7 +1485,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
             def create_mapping(self, _identity):
                 return mapper_fd
 
-        with self.assertRaisesRegex(MapperOwnerDenied, "remove_mapping is unavailable"):
+        with self.assertRaisesRegex(MapperOwnerDenied, "suspend_mapping is unavailable"):
             MapperLifecycleOwner(identity, lease, IncompleteOwnerOperations())
 
     def test_mapper_owner_descriptor_close_failure_denies_removal(self):
@@ -1342,8 +1505,8 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
 
         file_ops.close = fail_mapper_close
         with self.assertRaisesRegex(MapperOwnerDenied, "descriptor close failed"):
-            owner.finalize_teardown(workers_reaped=True, descriptors_closed=True)
-        self.assertFalse(owner.cleanup_allowed)
+            owner.release_mapping(self._worker_evidence(owner))
+        self.assertFalse(owner.mapping_released)
         self.assertNotIn("remove", owner.operations.events)
 
     def test_concurrent_mapper_owner_operation_sticks_denial(self):
@@ -1378,7 +1541,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         self.assertFalse(worker.is_alive(), "mapper-owner test thread failed to stop")
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], MapperOwnerDenied)
-        self.assertFalse(owner.cleanup_allowed)
+        self.assertFalse(owner.mapping_released)
 
     def test_static_elf_architecture_mismatch_is_rejected(self):
         path = self.base / "wrong-machine-dd"
