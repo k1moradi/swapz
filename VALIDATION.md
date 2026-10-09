@@ -3012,3 +3012,60 @@ mapper admission and backing cleanup remain disabled. Independently
 reproduced GNU static worker, production trust signing/provisioning,
 true kernel drain and physical read-p99 qualification are still
 outstanding. V2.2 batch and strategy winner **UNDETERMINED**.
+
+## 2026-10-09 — Rootless workflow trigger/qualification drift regression
+
+**Executable/source revision:**
+`866002a13e74a8800a18c1cd3a3dc43fb9cf6292`.
+
+- [Rootless teardown workflow](https://github.com/k1moradi/swapz/actions/runs/37996532817): **PASS**.
+- [Rootless combined workflow](https://github.com/k1moradi/swapz/actions/runs/37996532854): **PASS**, `COMBINED_TESTED_HEAD` matches exact source SHA.
+
+Independent main-developer safety audit found a concrete trigger omission:
+`rootless-teardown.yml` executes `bash -n
+tests/runtime/no-discard-livegc.sh`, yet the push path filter did not
+include that file. A standalone modification to the checked shell
+source could therefore skip this mandatory teardown workflow.
+
+The teardown push filter now includes
+`tests/runtime/no-discard-livegc.sh` and the new
+`tests/runtime/rootless-workflow-contract-test.py` regression.
+Both rootless workflows now explicitly run the six-test
+source-only workflow contract under `timeout 20s`, using only
+the Python standard library. Each CI log reports
+`Ran 6 tests` and `ROOTLESS_WORKFLOW_CONTRACT: PASS`.
+
+The guard checks that:
+- Each runtime `.py`/`.sh` file mentioned in the teardown
+  job is covered by its push trigger list (or an all-runtime
+  wildcard). This includes syntax-only Bash sources.
+- Both workflow YAML files and key runtime files trigger
+  the relevant CI after modification.
+- Mandatory GNU policy, fixture owner, authenticated release,
+  I/O drain, recall role and offline plateau test scripts
+  **actually execute as bounded Python tests**, not only appear
+  in comments, compilation, or an unconditional PASS echo.
+- The fixture-owner suite retains three independent, strict
+  fail-fast repetitions; the five-role positive recall
+  integration retains six.
+- Both workflows have a read-only `GITHUB_TOKEN`.
+- Adversarial selftests deliberately delete a push trigger,
+  replace a broker/GNU/guard test command, or remove
+  fail-fast behavior, and confirm the contract rejects it.
+
+Both exact-source workflows also log
+`RECALL_DIRECT_ROLE_REPEAT 6/6: PASS` and
+`FIXTURE_OWNER_BROKER_REPEAT 3/3: PASS`.
+The combined workflow additionally logs
+`COMBINED_NBD_STRESS 25/25: PASS`.
+These are **rootless/source-only tests**, with no real
+DM/loop/NBD, swap, kernel drain or backing cleanup.
+The contract is a static CI maintenance guard, not
+an authenticated production security boundary.
+
+Codex still owns fixing the new broker's incomplete five-role
+positive release and unconfirmed-launch ownership gaps. The
+main-developer workflow-contract task did not edit Codex's
+owner, release, or GNU modules. Production direct-mapper
+admission and backing deletion remain disabled, and the
+V2.2 strategy/batch winner remains UNDETERMINED.
