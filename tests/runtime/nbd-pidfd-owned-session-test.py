@@ -200,6 +200,27 @@ class OwnedSyntheticServerTests(unittest.TestCase):
         self.assertEqual(session.state, "denied")
         self.assert_backing_retained(session)
 
+    def test_pidfd_acquisition_failure_after_spawn_closes_channel_and_reaps(self) -> None:
+        session = self.build()
+        real_open = owner.os.pidfd_open
+        calls = []
+
+        def fail_second(pid, flags=0):
+            calls.append(pid)
+            if len(calls) == 2:
+                raise OSError("synthetic post-spawn pidfd acquisition failed")
+            return real_open(pid, flags)
+
+        with mock.patch.object(owner.os, "pidfd_open", side_effect=fail_second):
+            with self.assertRaisesRegex(Denied, "synthetic startup denied"):
+                session.start()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(session.state, "denied")
+        self.assertIsNotNone(session.process)
+        self.assertIsNotNone(session.process.returncode)
+        self.assertIsNone(session.pidfd)
+        self.assert_backing_retained(session)
+
     def test_missing_pidfd_signal_support_denies_before_spawning(self) -> None:
         session = self.build()
         with mock.patch.object(owner.signal, "pidfd_send_signal", None):
