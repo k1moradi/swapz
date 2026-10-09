@@ -2316,3 +2316,69 @@ No real device, DM/loop/NBD attach, swap/systemd, module load, pressure
 fixture, production recall, fio benchmark, physical I/O or reboot was
 performed. See `docs/recall-role-bridge.md` for the integration and
 ownership boundary.
+
+## 2026-10-08 — Real cross-process pidfd and pinned readback rootless qualification
+
+**Tested executable-source revision:** `f1e07734b44ea88ebcb2f956773b92bd51cdc6ea`.
+
+This milestone adds `recall-role-process-fixture.py` and
+`recall-role-process-integration-test.py` and gates them in **both**
+source-only CI workflows. These are not fake-supervisor or fake-process tests:
+a real `Popen` service communicates over a private AF_UNIX stream, and its
+real `GatedPidfdSupervisor` launches five direct workers with the existing
+pinned-`dd` role policy and new seccomp/PDEATHSIG containment.
+
+All I/O is against private regular files, never actual DM/loop/NBD devices
+or swap. The fixture rejects root execution and non-regular synthetic
+mappers. Its test executable is the installed `/usr/bin/dd` and is **not**
+independently qualified as GNU coreutils.
+
+**Exact readback binding:** a separate-service gate wrapper records the
+trusted directory/output descriptor and inode identity *before* the worker
+launch. Following confirmed zero-exit pidfd wait/reap, the same service
+verifies each original pinned output against deterministic immutable 4096-B
+reference data independent of the mutable source. The private `wait`
+receipt binds role, opaque handle, verified result and exact expected-page
+SHA-256. A rootless-only client validates receipt shape, digest and replay
+before the existing base IPC validator; the role adapter also requires
+receipt identity, all five waits and normal finalization rules. The default
+service and bridge CLIs remain test-only and cannot opt into direct-`dd`
+via remote role JSON.
+
+**Mandatory same-executable-revision GitHub Actions: PASS**
+
+- Teardown: https://github.com/k1moradi/swapz/actions/runs/37878408360
+- Combined: https://github.com/k1moradi/swapz/actions/runs/37878408375
+
+The combined job explicitly prints
+`COMBINED_TESTED_HEAD=f1e07734b44ea88ebcb2f956773b92bd51cdc6ea`,
+`Ran 7 tests` for the new genuine cross-process integration, the three
+earlier real-pinned-`dd` tests, 10/10 repeated pidfd IPC suites,
+`ROLE_BRIDGE_BASH_FIVE_ROLES: PASS` for the existing **synthetic-only**
+Bash fixture, and `COMBINED_NBD_STRESS 25/25: PASS` after the initial
+NBD selftest. All remaining rootless safety gates passed.
+
+Adversarial process tests covered output-path substitution, source mutation,
+premature writer/concurrent reader waits, abrupt service SIGKILL delivered
+through a test-owned service pidfd, and controller-channel EOF. None of
+those outcomes authorized synthetic backing cleanup. A fully successful
+session verified all four reader pages, waited/reaped the staged writer,
+confirmed all five handle receipts, completed stop/reap and service-process
+exit, closed the control channel and removed *only* a synthetic marker.
+
+Initial CI at `c72492f62557e2f972aade3a5a55568ed3bd18c0` intentionally
+remains visible as **FAILED**, exposing a test-only mapper name outside the
+existing `swapz-v22-recall-*` allowlist. The sole code correction was the
+synthetic mapper name, in `f1e07734...`. Do not cite earlier failed
+workflow runs as passing.
+
+**Limits:** This does not authenticate GNU package provenance, bind a real
+DM UUID/table lifecycle, guarantee kernel BIO drain after worker kill,
+eliminate a same-UID in-place inode mutation after comparison, migrate
+production `buffer-recall.sh`, run a real Bash bridge against device I/O,
+or measure staged swap performance. No actual DM/loop/NBD attachment,
+swap/module/pressure fixture, fio/device operation or benchmark was run.
+See `docs/recall-role-process-rootless.md` and
+`docs/v22-virtual-benchmark-qualification.md`. The next stage must
+combine Codex's trusted executable/mapper policy and independently
+reviewed I/O-drain evidence before operator-authorized virtual tests.
