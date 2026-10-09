@@ -25,6 +25,13 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+      - name: Guard rootless workflow safety gates and push-trigger coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/rootless-workflow-contract-test.py
+          timeout 20s python3 -B tests/runtime/rootless-workflow-contract-test.py -v
+          echo "ROOTLESS_WORKFLOW_CONTRACT: PASS (mandatory tests and source trigger coverage)"
       - name: Record exact joint source identity
         shell: bash
         run: |
