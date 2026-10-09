@@ -1086,3 +1086,40 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       device, kernel drain or physical read-p99 qualification.
       Production mapper admission remains disabled; V2.2 winner
       remains UNDETERMINED.
+
+### 2026-10-09 — Main-developer independent CI safety maintenance
+
+- [x] Audit teardown workflow push triggers against **all runtime
+      scripts referenced by executed job steps**, not only test
+      entrypoints. Found `tests/runtime/no-discard-livegc.sh`
+      omitted even though the workflow syntax-checked it.
+- [x] Add the missing trigger and explicitly trigger on
+      `tests/runtime/rootless-workflow-contract-test.py` updates.
+- [x] Implement six rootless standard-library workflow-contract
+      tests asserting complete script-trigger coverage, bounded
+      execution of critical GNU/recall/drain/fixture-owner tests,
+      three fail-fast broker repetitions, six fail-fast positive
+      recall repetitions, and read-only workflow token rights.
+      Inject deliberate missing trigger / disabled gate / non-failfast
+      mutations to prove the contract denies unsafe edits.
+- [x] Make the contract a mandatory early gate in both workflows.
+      **Exact executable SHA**
+      `866002a13e74a8800a18c1cd3a3dc43fb9cf6292`:
+      [teardown PASS](https://github.com/k1moradi/swapz/actions/runs/37996532817),
+      [combined PASS](https://github.com/k1moradi/swapz/actions/runs/37996532854).
+      Each ran 6/6 new contract tests, positive recall 6/6,
+      and broker repeats 3/3; combined NBD 25/25.
+- [ ] Extend CI-maintenance trigger/step audit to the **standalone
+      rootless NBD** workflow, including its static syscall isolation
+      check and 25 independent stress repetitions. This is
+      separately owned by the main developer; avoid new privileged
+      NBD operations.
+- [ ] Add independent **exact-source/CI artifact reconciliation**
+      for future externally supplied measurements: never compare
+      throughput/p99 from different commits as a single V2.2
+      qualification run. Keep all measurements offline until
+      operator-authorized real testing exists.
+- [ ] Continue rootless regression monitoring and separate-process
+      fault diagnostics when Codex changes the trusted-owner
+      architecture. All live device qualification and backing
+      release remain blocked.
