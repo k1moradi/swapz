@@ -335,7 +335,7 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
             return data
 
         with mock.patch.object(os, "pread", side_effect=replace_during_read):
-            with self.assertRaisesRegex(RoleError, "pathname or inode changed"):
+            with self.assertRaisesRegex(RoleError, "identity changed|pathname or inode changed"):
                 self.session.await_synthetic_writer_contents(deadline_seconds=0.1)
         self.assertTrue(replaced)
         self.assert_writer_barrier_failed_closed()
