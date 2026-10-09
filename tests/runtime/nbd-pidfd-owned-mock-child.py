@@ -17,7 +17,7 @@ import time
 
 MODES = frozenset(("normal", "wrong-ready", "exit-before-ready",
                    "exit-after-ready", "ignore-term", "fail-term",
-                   "slow-ready", "silent", "attempt-spawn"))
+                   "slow-ready", "silent", "attempt-spawn", "pdeath-fail"))
 
 
 def _sigterm_ok(_signal: int, _frame: object) -> None:
@@ -39,6 +39,8 @@ def main() -> int:
         # Arming PDEATHSIG and checking parent identity before READY prevents
         # a controller crash from leaving a live unowned mock. The parent's
         # numeric PID is compared, NEVER used for signaling.
+        if mode == "pdeath-fail":
+            raise ContainmentDenied("injected PDEATHSIG registration failure")
         arm_parent_death(int(sys.argv[3]))
         deny_descendants_and_exec()
         with socket.socket(fileno=fd) as channel:
