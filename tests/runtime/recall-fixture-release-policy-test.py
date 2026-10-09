@@ -26,6 +26,7 @@ class FixtureBackingReleaseTests(unittest.TestCase):
     SESSION = "0123456789abcdef0123456789abcdef"
     KEY = b"rootless test only session HMAC key 0123456789"
     HANDLE = "worker-A"
+    ROLE = "writer"
     IDENTITY = policy_module.DMIdentity(
         "swapz-v22-recall-test", "SWAPZ-TEST-UUID", 253, 77, "a" * 64,
     )
@@ -40,6 +41,7 @@ class FixtureBackingReleaseTests(unittest.TestCase):
             session_id=self.SESSION, key=self.KEY, dm_identities=(self.IDENTITY,),
             loop_device=self.LOOP, mapper_name=self.IDENTITY.name,
             expected_worker_handles=(self.HANDLE,),
+            expected_worker_roles=(self.ROLE,),
         )
 
     @staticmethod
@@ -64,6 +66,11 @@ class FixtureBackingReleaseTests(unittest.TestCase):
                 "errors_empty": True, "worker_service_exit_status": 0,
                 "expected_handles": worker, "reaped_handles": worker,
                 "role_descriptors_closed": worker, "worker_errors": [],
+                "expected_roles": [self.ROLE],
+                "role_results": [{
+                    "role": self.ROLE, "handle": self.HANDLE, "exit_status": 0,
+                    "reaped": True, "descriptor_closed": True, "errors": [],
+                }],
             }),
             ("swap_quiescent", {
                 "session_id": session, "inventory_valid": True,
@@ -182,6 +189,31 @@ class FixtureBackingReleaseTests(unittest.TestCase):
             self.policy.submit(self._envelope(0, "workers_reaped", self.payloads[1][1]))
         self.assertFalse(self.policy.backing_release_authorized)
         self.assertTrue(self.policy.backing_must_be_preserved)
+
+    def test_worker_role_results_are_exact_and_successful(self):
+        mutations = (
+            lambda p: p.pop("expected_roles"),
+            lambda p: p.update(role_results=[]),
+            lambda p: p["role_results"][0].update(role="a"),
+            lambda p: p["role_results"][0].update(handle="other-worker"),
+            lambda p: p["role_results"][0].update(exit_status=1),
+            lambda p: p["role_results"][0].update(reaped=False),
+            lambda p: p["role_results"][0].update(descriptor_closed=False),
+            lambda p: p["role_results"][0].update(errors=["close failed"]),
+            lambda p: p.update(inventory_complete=False),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                policy = self._new_policy()
+                event, payload = self.payloads[0]
+                policy.submit(self._envelope(0, event, payload))
+                event, payload = self.payloads[1]
+                changed = copy.deepcopy(payload)
+                mutate(changed)
+                with self.assertRaises(policy_module.DrainEvidenceDenied):
+                    policy.submit(self._envelope(1, event, changed))
+                self.assertTrue(policy.backing_must_be_preserved)
+                self.assertFalse(policy.backing_release_authorized)
         incomplete = self._new_policy()
         for sequence, (event, payload) in enumerate(self.payloads[:-1]):
             incomplete.submit(self._envelope(sequence, event, payload))
@@ -253,12 +285,20 @@ class FixtureBackingReleaseTests(unittest.TestCase):
                 session_id=self.SESSION, key=b"x", dm_identities=(self.IDENTITY,),
                 loop_device=self.LOOP, mapper_name=self.IDENTITY.name,
                 expected_worker_handles=(self.HANDLE,),
+                expected_worker_roles=(self.ROLE,),
             )
         with self.assertRaises(policy_module.DrainEvidenceDenied):
             policy_module.FixtureBackingReleasePolicy(
                 session_id=self.SESSION, key=self.KEY,
                 dm_identities=(self.IDENTITY, self.IDENTITY), loop_device=self.LOOP,
                 mapper_name=self.IDENTITY.name, expected_worker_handles=(self.HANDLE,),
+                expected_worker_roles=(self.ROLE,),
+            )
+        with self.assertRaises(policy_module.DrainEvidenceDenied):
+            policy_module.FixtureBackingReleasePolicy(
+                session_id=self.SESSION, key=self.KEY, dm_identities=(self.IDENTITY,),
+                loop_device=self.LOOP, mapper_name=self.IDENTITY.name,
+                expected_worker_handles=(self.HANDLE,), expected_worker_roles=(),
             )
 
 

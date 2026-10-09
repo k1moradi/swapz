@@ -716,6 +716,18 @@ class MapperInventory:
 
 
 @dataclass(frozen=True)
+class WorkerRoleResult:
+    """One role-bound completion in the authenticated worker-service report."""
+
+    role: str
+    handle: str
+    exit_status: int
+    reaped: bool
+    descriptor_closed: bool
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class WorkerCompletionEvidence:
     """Authenticated service result required before mapper-only release.
 
@@ -731,6 +743,7 @@ class WorkerCompletionEvidence:
     service_exit_status: int
     errors: tuple[str, ...]
     authenticator: bytes
+    role_results: tuple[WorkerRoleResult, ...]
 
 
 @dataclass(frozen=True)
@@ -802,6 +815,17 @@ def worker_completion_payload(evidence: WorkerCompletionEvidence) -> bytes:
         "role_descriptors_closed": list(evidence.role_descriptors_closed),
         "service_exit_status": evidence.service_exit_status,
         "errors": list(evidence.errors),
+        "role_results": [
+            {
+                "role": result.role,
+                "handle": result.handle,
+                "exit_status": result.exit_status,
+                "reaped": result.reaped,
+                "descriptor_closed": result.descriptor_closed,
+                "errors": list(result.errors),
+            }
+            for result in evidence.role_results
+        ],
     }
     try:
         return json.dumps(value, sort_keys=True, separators=(",", ":"),

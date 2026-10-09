@@ -1201,11 +1201,16 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         expected = owner.registered_worker_handles
         reaped_handles = expected if reaped is None else tuple(reaped)
         closed_handles = expected if descriptors_closed is None else tuple(descriptors_closed)
+        role_results = tuple(
+            policy_module.WorkerRoleResult(role, handle, exit_status, True, True, ())
+            for role, handle in zip(owner._worker_roles, expected)
+        )
         evidence = WorkerCompletionEvidence(
             session_id=owner.lease.session_id if session_id is None else session_id,
             expected_handles=expected, reaped_handles=reaped_handles,
             role_descriptors_closed=closed_handles, service_exit_status=exit_status,
             errors=tuple(errors), authenticator=b"\0" * 32,
+            role_results=role_results,
         )
         if authenticator is None:
             authenticator = hmac.new(
@@ -1216,7 +1221,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
             reaped_handles=evidence.reaped_handles,
             role_descriptors_closed=evidence.role_descriptors_closed,
             service_exit_status=evidence.service_exit_status, errors=evidence.errors,
-            authenticator=authenticator,
+            authenticator=authenticator, role_results=evidence.role_results,
         )
 
     def test_mapper_owner_releases_only_after_exact_remove_and_absence(self):

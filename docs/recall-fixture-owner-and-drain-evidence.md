@@ -121,28 +121,62 @@ regression is disposable and does not authenticate any actual system state.
 ## Rootless broker and evidence producer
 
 `tests/runtime/recall-fixture-owner.py` adds a test-only owner broker and
-evidence producer. The producer creates its own session key, keeps the key and
-the release-policy instance private, and exposes no event-signing or
-submission method to worker requests. Workers may request only a fixed role
-launch with an opaque request ID. They cannot supply executable arguments,
-mapper identity, operation outcomes, keys or evidence receipts. The broker
-supplies worker handles from its injected supervisor launcher and registers
-each handle with `MapperLifecycleOwner`. Create, suspend, remove, swapoff,
-loop detach and evidence collection are owner-side methods; they are absent
-from the worker request schema.
+evidence producer. At session creation it binds the immutable
+`v22-recall-five-role` profile: exactly `writer`, `a`, `b`, `a2`, and `b2`, in
+that order. A three-role or otherwise partial run cannot be finalized. Each
+role has one unique opaque handle and one authenticated completion result with
+exit status zero, confirmed reap, closed role descriptor, and no errors. The
+session HMAC policy receives the same ordered handle and role inventories and
+rejects missing, duplicate, reordered, contradictory, or unsuccessful rows.
 
-The producer calls injected operations and accepts only exact observation
-types. It derives worker evidence from the supervisor report, swap state from
+The two final read roles use a two-phase launch. The broker requires both
+`a2` and `b2` to return pidfd-owned READY receipts while held behind their
+start gates, then calls the supervisor's group-release operation. The first
+role's IPC reply says `ready_gated`; the pair does not begin until both are
+registered. The fixed profile cannot be changed by worker IPC. A separately
+named optional NBD profile uses the same five roles and adds independent NBD
+release checks.
+
+The injected launcher contract is `launch(role, startup_timeout)`, returning
+only after the direct child is owned by a pidfd, has completed a bounded READY
+handshake, and remains gated. The broker registers the opaque handle before
+releasing work. The launcher must retain all children created before a usable
+handle is returned and implement `stop_unconfirmed()`; cleanup calls this
+even when no handle was registered. It then stops registered handles through
+the supervisor. Both inventories are attempted independently, so a failure
+stopping unconfirmed children does not skip attempts for registered handles;
+either failure still latches denial and preserves backing. Launcher errors,
+lost READY, duplicate handles, release errors, incomplete stop reports, or
+unresolved request accounting latch denial. A delayed READY is never
+acknowledged. The injected launcher is a
+trusted component boundary: Python cannot safely preempt a malicious or
+permanently blocked in-process callback. A production launcher must enforce
+its own monotonic startup deadline and retain its private child inventory.
+
+The broker's `serve_worker_connection()` accepts one bounded AF_UNIX stream.
+It reads PID, UID, and GID from kernel `SO_PEERCRED`, compares all three with
+the identity captured by trusted bootstrap, pins one connection for the
+session, and rejects replacement connections. Frames have a fixed maximum
+size, an absolute read deadline, unique JSON keys, exact request fields, and
+one-use request IDs. The role-only request contains no credentials, mapper,
+PID, executable, argv, output path, operation result, key, or receipt. The
+direct `worker_request(peer, ...)` method remains only an injected unit-test
+seam; live adapters must use the socket method. Rootless tests include a
+separate client process so the kernel-reported peer PID differs from the
+broker PID. The socket test is not a security boundary against host root or
+another process running under the same fixture-owner credentials.
+
+The producer creates its own session HMAC key, keeps the key and
+release-policy instance private, and exposes no event-signing or submission
+method to worker requests. Create, suspend, remove, swapoff, loop detach and
+evidence collection are owner-side methods; they are absent from the worker
+request schema. Worker evidence includes the full fixed role results, not
+just the handles observed after the fact. It derives swap state from
 before/after inventory, DM release evidence from the typed report returned by
 `MapperLifecycleOwner`, and lower/loop evidence from fresh typed inventory
-results. `MapperLifecycleOwner` now requires an explicit pending-I/O-drained
-observation and a typed normal-removal result (`force=false`,
-`deferred=false`) before returning that report. The report binds the lease
-session and exact name, UUID, major/minor and table fingerprint, with fresh
-inventory snapshots after suspend/descriptor closure, before removal, and
-after removal. The producer submits canonical HMAC envelopes only to its
-private in-process validator; it returns a final assessment, not a reusable
-receipt or the key.
+results. The owner still requires ordinary flushing suspend, a positive
+pending-I/O-drained observation, complete zero-opener/empty-holder evidence,
+typed normal removal, and exact post-removal absence.
 
 The HMAC is not the source of truth. It protects the internal report format
 and session sequencing after the producer has inspected operation results. A
@@ -171,22 +205,56 @@ command, or prove actual kernel quiescence. `MapperLifecycleOwner.mapping_releas
 remains a separate mapper-only result. The broker requires both values plus a
 clean terminal state before exposing `backing_release_authorized`.
 
-The rootless tests model the trusted peer authenticator with identity-bound
-Python objects. A real broker would need a private Unix socket, strict
-`SO_PEERCRED`/credential validation, a dedicated service identity, a
-root-controlled configuration directory, close-on-exec descriptors, and
-capabilities limited to the disposable fixture lifecycle. Worker processes
-must have no DM-control descriptor, `CAP_SYS_ADMIN`, swap-control privilege,
-or access to the evidence key. The worker protocol must remain role-only and
-must never accept arbitrary device paths or lifecycle commands. A host-root
-actor with sufficient kernel authority can still replace a table; namespaces
-and a cooperative lock do not prevent that.
+The process tests start short-lived children that can write only a role marker
+to a private regular file. The child waits behind a pipe gate. Its parent
+opens and retains a pidfd before releasing the gate, waits for READY, registers
+the opaque handle, then issues GO. The test uses `Popen(close_fds=True,
+pass_fds=...)` to make inherited descriptors explicit. If pidfd acquisition
+or READY fails, the launcher aborts and reaps the still-gated child; an
+unregistered child is never treated as complete. These tests exercise real
+Linux child processes, but they do not run GNU `dd` or any device I/O.
 
-This prototype processes one DM mapping and its exact loop dependency. It
-does not implement a privileged multi-layer DM collector or NBD disconnect
-collector. A future layered implementation must repeat the exact ordered
-suspend, descriptor, open-count/holder, normal remove and absence observations
-for every bound layer before checking lower dependencies.
+The synthetic worker sets `PR_SET_PDEATHSIG(SIGTERM)` and checks its expected
+parent PID after exec. A crash test exits its test supervisor while the direct
+child is active and confirms that the child exits and is reaped by a test
+subreaper. This does not contain grandchildren. Parent-death signals are not
+inherited as a process-tree guarantee, a released worker may fork, and a
+Python broker cannot retain descriptors after its own process dies. The
+current model does not prove that all descendants stop after production-owner
+crash. A real privileged owner needs a separately controlled crash-survival
+supervisor or cgroup policy, plus worker admission that forbids untracked
+descendants.
+
+The AF_UNIX regression uses an actual listener and a separate rootless client
+process. Kernel `SO_PEERCRED` supplies the PID/UID/GID; the broker rejects
+credential mismatches, duplicate request IDs, malformed/oversized/partial
+frames, early EOF, and replacement connections. This does not protect against
+host root or another process sharing the fixture owner's UID/GID. A future
+privileged deployment needs a distinct owner identity, private socket path,
+strict peer credentials, close-on-exec descriptors, and capabilities limited
+to the disposable fixture lifecycle. Workers must have no DM-control
+descriptor, `CAP_SYS_ADMIN`, swap-control privilege, or access to the evidence
+key. A host-root actor with sufficient kernel authority can still replace a
+table; namespaces and a cooperative lock do not prevent that.
+
+`LayeredDMReleaseModel` accepts an immutable upper-to-lower tuple of one to
+eight unique DM identities. Every layer must independently report matching identity,
+ordinary flush suspend (never `noflush`), drained pending I/O, closed
+descriptors, zero openers, no holders, normal removal without force/deferred
+mode, and exact name/UUID/device-number disappearance. Any failed layer
+permanently denies the sequence. Its result is named
+`mapper_dependencies_released`; `backing_must_be_preserved` remains true.
+This rootless model is not wired into the current single-mapping owner report
+and does not authorize actual backing cleanup.
+
+The separate `v22-recall-five-role-nbd` profile binds a session-specific NBD
+device and pidfd-owned server handle. It requires normal disconnect, a
+confirmed server reap with its pidfd identity retained through disconnect,
+server descriptor closure, and a fresh exact device/major/minor inventory
+proving absence. NBD evidence is a separate producer precondition before
+lower-dependency and loop checks. Loop detach never establishes NBD absence;
+NBD disconnect never establishes loop absence. The model does not attach NBD
+or prove actual kernel disconnect behavior.
 
 ## Operating-system and kernel qualification
 

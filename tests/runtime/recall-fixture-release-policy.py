@@ -76,7 +76,8 @@ class FixtureBackingReleasePolicy:
 
     def __init__(self, *, session_id: str, key: bytes,
                  dm_identities: tuple[DMIdentity, ...], loop_device: str,
-                 mapper_name: str, expected_worker_handles: tuple[str, ...]) -> None:
+                 mapper_name: str, expected_worker_handles: tuple[str, ...],
+                 expected_worker_roles: tuple[str, ...]) -> None:
         if (type(session_id) is not str or re.fullmatch(r"[0-9a-f]{32}", session_id) is None
                 or type(key) is not bytes or len(key) < 32):
             raise DrainEvidenceDenied("trusted session identity or key is unavailable")
@@ -103,6 +104,13 @@ class FixtureBackingReleasePolicy:
                        or handle.isdecimal() for handle in expected_worker_handles)
                 or len(set(expected_worker_handles)) != len(expected_worker_handles)):
             raise DrainEvidenceDenied("expected worker handle inventory is malformed")
+        if (type(expected_worker_roles) is not tuple
+                or len(expected_worker_roles) != len(expected_worker_handles)
+                or any(type(role) is not str
+                       or re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", role) is None
+                       for role in expected_worker_roles)
+                or len(set(expected_worker_roles)) != len(expected_worker_roles)):
+            raise DrainEvidenceDenied("expected worker role inventory is malformed")
 
         self.session_id = session_id
         self._key = key
@@ -110,6 +118,7 @@ class FixtureBackingReleasePolicy:
         self.loop_device = loop_device
         self.mapper_name = mapper_name
         self.expected_worker_handles = expected_worker_handles
+        self.expected_worker_roles = expected_worker_roles
         self._policy = _DRAIN_MODULE.DMIODrainPolicy(
             tuple(item.name for item in dm_identities), loop_device,
         )
@@ -206,16 +215,40 @@ class FixtureBackingReleasePolicy:
             self._exact_context(payload, {
                 "session_id", "inventory_complete", "all_reaped", "errors_empty",
                 "worker_service_exit_status", "expected_handles", "reaped_handles",
-                "role_descriptors_closed", "worker_errors",
+                "role_descriptors_closed", "worker_errors", "expected_roles", "role_results",
             })
             expected = list(self.expected_worker_handles)
+            expected_roles = list(self.expected_worker_roles)
+            role_results = payload["role_results"]
+            role_result_keys = {
+                "role", "handle", "exit_status", "reaped", "descriptor_closed", "errors",
+            }
             if (payload["worker_service_exit_status"] != 0
                     or type(payload["worker_service_exit_status"]) is not int
                     or payload["expected_handles"] != expected
                     or payload["reaped_handles"] != expected
                     or payload["role_descriptors_closed"] != expected
-                    or payload["worker_errors"] != []):
+                    or payload["worker_errors"] != []
+                    or payload["expected_roles"] != expected_roles
+                    or type(role_results) is not list
+                    or len(role_results) != len(expected_roles)
+                    or type(payload["inventory_complete"]) is not bool
+                    or payload["inventory_complete"] is not True
+                    or type(payload["all_reaped"]) is not bool
+                    or payload["all_reaped"] is not True
+                    or type(payload["errors_empty"]) is not bool
+                    or payload["errors_empty"] is not True):
                 raise DrainEvidenceDenied("worker exit or complete reaped/descriptor inventory is invalid")
+            for index, result in enumerate(role_results):
+                if (type(result) is not dict or set(result) != role_result_keys
+                        or result["role"] != expected_roles[index]
+                        or result["handle"] != expected[index]
+                        or type(result["exit_status"]) is not int or result["exit_status"] != 0
+                        or type(result["reaped"]) is not bool or result["reaped"] is not True
+                        or type(result["descriptor_closed"]) is not bool
+                        or result["descriptor_closed"] is not True
+                        or type(result["errors"]) is not list or result["errors"] != []):
+                    raise DrainEvidenceDenied("worker role result is missing, reordered, or unsuccessful")
             return {key: payload[key] for key in (
                 "inventory_complete", "all_reaped", "errors_empty",
             )}
