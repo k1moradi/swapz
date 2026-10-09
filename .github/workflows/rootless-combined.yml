@@ -149,6 +149,18 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-role-process-fixture.py tests/runtime/recall-role-process-integration-test.py
           timeout 65s python3 -B tests/runtime/recall-role-process-integration-test.py -v
+      - name: Repeated separate-process readback admission qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if ! timeout 20s python3 -B tests/runtime/recall-role-process-integration-test.py               ActualServiceAndDirectDDTests.test_real_service_process_five_pinned_workers_and_exact_readback -q               >"$RUNNER_TEMP/recall-direct-process-repeat.log" 2>&1; then
+              echo "RECALL_DIRECT_ROLE_REPEAT $attempt/6: FAIL — preserve backing, do not retry this session"
+              cat "$RUNNER_TEMP/recall-direct-process-repeat.log"
+              exit 1
+            fi
+            echo "RECALL_DIRECT_ROLE_REPEAT $attempt/6: PASS"
+          done
       - name: Genuine Bash synthetic role coprocess lifecycle
         shell: bash
         run: |
