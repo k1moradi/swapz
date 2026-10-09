@@ -2638,3 +2638,83 @@ the validated 19-case NBD mock result.
 No real NBD attachment, DM/loop command, swap, kernel-module
 operation, fio/device benchmark, actual block I/O or physical-device
 operation occurred. See `docs/nbd-pidfd-owned-rootless.md`.
+
+## 2026-10-09 — Main-developer Codex review and synthetic NBD crash containment
+
+### Code review of Codex's trusted GNU + mapper owner commit
+
+Primary developer reviewed `d2240b06e8a8fc5649d407d0c0344308896196e0`,
+the diff's three owner-assigned files, and its exact-revision CI.
+Full independent findings are in
+`docs/codex-trust-bootstrap-review-2026-10-09.md`.
+
+- **HIGH integration scope:** `MapperLifecycleOwner.cleanup_allowed`
+  means the *one mapper lifecycle* has released. It does not attest a
+  full DM stack drain, lower dependencies, or backing-file safety.
+  `finalize_teardown()` also requires truthful externally supplied
+  worker-reap and descriptor-close evidence, not arbitrary IPC booleans.
+- **HIGH production blockers:** no independently authenticated actual
+  static GNU `dd` source/build and trust provision, no verified
+  GNU-under-seccomp execution and no privileged enforcement of
+  exclusive DM table authority. Its cooperative lock is not such an
+  authority.
+- **MEDIUM deployment assumption:** pinned `/usr/bin/openssl` is
+  dynamically linked; its interpreter/libraries/providers depend on
+  a separately trusted host OS closure. Codex documented that fact.
+- **Review disposition:** source-only contract is stronger and
+  rootless policy tests passed; **not** production or mapper admission
+  approval. Codex retains ownership of its GNU bootstrap files.
+
+### Rootless synthetic NBD parent-crash and descendant safety
+
+**Exact same executable-source revision tested in all three workflows:**
+`14d1b9ae7b9a40906835b52d761640e58500e02e`.
+
+The fixed synthetic NBD-like child now arms
+`PR_SET_PDEATHSIG=SIGKILL` and immediately compares its expected
+parent PID *only as identity evidence*, before reporting readiness.
+The parent/child have separate private readiness/control channels;
+control EOF normally terminates the mock. Linux-specific seccomp BPF
+denies fork, vfork, clone, clone3, execve and execveat for the
+recognized x86-64/AArch64 syscall ABIs and fails closed if filter
+installation or architecture validation fails.
+
+The separate fixed owner-crash fixture sends the child's retained
+pidfd over AF_UNIX `SCM_RIGHTS` to an independent rootless observer,
+then deliberately `os._exit`s before READY, immediately after READY,
+or while idle. The observer polls **the exact pidfd** for child exit,
+including a fixed mock variant that ignores channel EOF: this tests
+kernel parent-death behavior independently of channel closure.
+Observer exit proof is **not** a `wait()`/reap of the orphaned child.
+Other tests inject PDEATHSIG registration refusal, fork/exec
+attempts (both return EPERM), SIGTERM ignore, both failed pidfd
+signal attempts, and failed bounded reap. The latter keeps the
+stable pidfd for a later pidfd-only retry rather than losing process
+identity. No numeric-PID signaling rescue path is permitted.
+
+**24 real, non-skipped rootless process tests PASS** in:
+- NBD source safety:
+  https://github.com/k1moradi/swapz/actions/runs/37916615965
+- Rootless teardown safety:
+  https://github.com/k1moradi/swapz/actions/runs/37916615903
+- Rootless combined qualification:
+  https://github.com/k1moradi/swapz/actions/runs/37916615659
+
+Combined job log identifies
+`COMBINED_TESTED_HEAD=14d1b9ae7b9a40906835b52d761640e58500e02e`,
+`Ran 24 tests`, `PIDFD_IPC_REPEAT 10/10: PASS`,
+`PRESSURE_TOKEN_REPEAT 10/10: PASS` and
+`COMBINED_NBD_STRESS 25/25: PASS`. No skipped child tests or
+`ResourceWarning` appeared in the final NBD suite.
+
+**Do not infer production NBD safety:** this is a fixed, already
+executing synthetic Python child and a restricted test-only owner,
+not the actual size-aware NBD server or its kernel session. No
+trusted real server/argv/descendant closure, real kernel NBD
+disconnect, actual DM I/O suspend/drain, loop dependency release
+or backing cleanup authorization is established. Live
+`SWAPZ_BENCH_BACKEND=nbd` remains explicitly disabled and the
+V2.2 physical drain/read-p99 strategy winner remains UNDETERMINED.
+
+No real DM, loop, NBD attach, swap, kernel module, fio/device
+benchmark, physical storage IO or reboot was performed.
