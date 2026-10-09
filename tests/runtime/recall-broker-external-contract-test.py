@@ -95,11 +95,11 @@ class IndependentBrokerContractTests(unittest.TestCase):
         self._assert_no_teardown(fixture)
 
     def test_concurrent_denial_while_finalizing_never_authorizes_backing(self):
-        """Current negative-authorization invariant; finalization return is under review.
+        """Concurrent denial must abort finalization before further teardown.
 
-        A second request can latch denial while the trusted finalizer holds its
-        lock. This test proves the exposed backing permission stays false, not
-        that in-flight teardown is canceled. See independent review documentation.
+        The synthetic worker-completion barrier tests the linearization of a
+        competing request against the finalizer without live device access.
+        A completion report never overrides a latched denial.
         """
         fixture = self._new_fixture()
         fixture._start_workers()
@@ -135,6 +135,13 @@ class IndependentBrokerContractTests(unittest.TestCase):
         self.assertIsNotNone(fixture.broker.denial)
         self.assertFalse(fixture.broker.backing_release_authorized)
         self.assertTrue(fixture.broker.backing_must_be_preserved)
+        self.assertIsInstance(outcomes[0], fixture_module.FixtureOwnerDenied)
+        self.assertEqual(fixture.broker.state, fixture.broker.DENIED)
+        self.assertFalse(fixture.broker.mapping_released)
+        self.assertNotIn("swapoff_exact_mapper", fixture.drain_ops.trace)
+        self.assertNotIn("dm_suspend", fixture.mapper_ops.trace)
+        self.assertNotIn("dm_remove_normal", fixture.mapper_ops.trace)
+        self.assertNotIn("loop_detach_normal", fixture.drain_ops.trace)
 
 
 if __name__ == "__main__":
