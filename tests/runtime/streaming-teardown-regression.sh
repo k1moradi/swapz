@@ -84,4 +84,22 @@ swapz_benchmark_cleanup_resources
 (( TARGET_ACTIVE == 0 && MOCK_EXISTS == 0 && MOCK_RMDIR_CALLED == 1 ))
 echo "confirmed removal precedes backing poweroff: PASS"
 
+# Case 4: NBD shutdown must be a preservation-only path until pidfd
+# ownership is available. Numeric test PID must NEVER be signaled or probed.
+BACKEND_KIND=nbd
+NBD_PID=424242
+TARGET_ACTIVE=1
+MOCK_EXISTS=1
+MOCK_FALSE_REMOVAL=0
+MOCK_BUSY=0
+printf '1\n' >"$NULL_CFG/power"
+kill() { echo "FAIL: numeric PID signaling/probing attempted: $*" >&2; exit 97; }
+if swapz_benchmark_cleanup_resources; then
+  echo "FAIL: unqualified NBD teardown authorized cleanup" >&2
+  exit 1
+fi
+[[ $(cat "$NULL_CFG/power") == 1 ]]
+(( MOCK_EXISTS == 0 && TARGET_ACTIVE == 0 ))
+echo "unqualified NBD preserves backing without numeric PID signaling: PASS"
+
 echo "V2.2 benchmark teardown safety: PASS"
