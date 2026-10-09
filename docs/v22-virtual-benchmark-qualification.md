@@ -107,12 +107,16 @@ deltas and 10,000+ swap-in samples per run. Its input is a strict
 `swapz-drain-observation-v1` JSONL schema, described in
 [`v22-drain-plateau-offline.md`](v22-drain-plateau-offline.md).
 
-The existing `streaming-benchmark.sh` reports
-`drained_write_mib_s = logical_write_bytes / elapsed`; that metric
-**must not be relabeled** as independently measured lower-device drained
-throughput. Although it records lower-write sector counters, the script
-does not yet emit complete, independently reviewed drain-window and
-quiescence attestations for this new schema.
+The corrected `streaming-benchmark.sh` no longer emits the
+misleading `drained_write_mib_s` or a one-shot "winner." It reports
+`logical_flush_window_mib_s` separately from a raw
+`lower_counter_window_mib_s` derived from sysfs lower-sector deltas and
+a monotonic elapsed interval. Its read-only reporter always states
+`NO QUALIFIED WINNER`. These are **unqualified diagnostics**, not
+an independently attested lower-device I/O drain; the script does
+not yet emit independently reviewed quiescence attestations for this
+strict schema. See
+[`streaming-benchmark-reporting.md`](streaming-benchmark-reporting.md).
 
 The offline validator requires the full batch sweep (except the immediate
 single-batch baseline), three repeats per configuration, 10,000+ actual
