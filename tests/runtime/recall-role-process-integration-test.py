@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 FIXTURE_PATH = HERE / "recall-role-process-fixture.py"
@@ -207,6 +208,44 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
             self.session.wait(reader)
         self.assertTrue(self.session.cleanup_marker.exists())
         self.assertFalse(self.session.adapter.cleanup_authorized)
+
+    def test_unconfirmed_startup_receipt_cannot_authorize_synthetic_cleanup(self):
+        # Fully rootless fault injection. No actual worker is admitted by
+        # the forged launch response, and the unrelated test-owned service
+        # is closed by the fixture's normal teardown.
+        refused = {
+            "status": "launch_failure", "ok": False,
+            "cleanup_allowed": False, "preserve_backing": True,
+            "all_reaped": False,
+            "error": "child-exit before verified exec READY",
+        }
+        with mock.patch.object(self.session.client, "call", return_value=refused):
+            with self.assertRaisesRegex(RoleError, "unconfirmed or duplicated"):
+                self.session.launch("writer")
+        self.assertTrue(self.session.bridge.failed)
+        self.assertTrue(self.session.cleanup_marker.exists())
+        self.assertFalse(self.session.adapter.cleanup_authorized)
+        self.assertFalse(self.session.client.cleanup_authorized)
+
+    def test_missing_or_duplicated_ready_handle_fails_closed(self):
+        # Test bad READY receipts without launching any real dd worker.
+        for handle in (None, "", 17, "!!!"):
+            with self.subTest(handle=handle):
+                session = RootlessDirectProcessSession()
+                try:
+                    forged = {
+                        "status": "ready", "ok": True, "cleanup_allowed": False,
+                        "preserve_backing": True, "all_reaped": False,
+                        "handle": handle,
+                    }
+                    with mock.patch.object(session.client, "call", return_value=forged):
+                        with self.assertRaises(RoleError):
+                            session.launch("writer")
+                    self.assertTrue(session.cleanup_marker.exists())
+                    self.assertFalse(session.adapter.cleanup_authorized)
+                    self.assertTrue(session.bridge.failed)
+                finally:
+                    session.close()
 
     def test_premature_writer_wait_and_missing_phase_preserve_backing(self):
         writer = self.session.launch("writer")
