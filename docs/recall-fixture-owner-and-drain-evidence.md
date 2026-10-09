@@ -189,15 +189,46 @@ separately controlled owner process, derive peer credentials from the IPC
 transport, and keep the key inaccessible to workers and untrusted controller
 IPC.
 
-The broker state is one-way:
+The broker lifecycle is one-way, with a synchronized abort boundary:
 
 ```text
 NEW --trusted owner create--> ACTIVE
 ACTIVE --fixed worker-role IPC--> ACTIVE
 ACTIVE --trusted owner finalize--> FINALIZING
 FINALIZING --complete evidence sequence--> RELEASED
-any state --credential ambiguity / EOF / operation error / concurrency--> DENIED
+any pre-commit state --credential ambiguity / EOF / operation error / concurrency--> DENIED
 ```
+
+`FixtureOwnerBroker` uses a short-held state lock and an active-operation
+reservation. The reservation serializes owner creation, each role request,
+EOF handling, and finalization without holding a mutex across injected calls
+that may block. The state lock protects the reservation, denial latch,
+admission flag, request-inflight count, and final release commit. A competing
+lifecycle call sees the reservation, takes the state lock, and latches
+`DENIED`; it does not mutate worker ownership or stop workers while the active
+operation owns the worker inventory. The active operation checks the latch
+before its next modeled operation. On unwinding, it clears the reservation
+before best-effort `stop_unconfirmed()` and `stop_all()` are attempted. Both
+stop paths are attempted independently, and any failure leaves denial sticky.
+
+The state-lock acquisition is the linearization point for both denial and
+successful final release. A finalizer may commit `RELEASED` only while holding
+that lock and only if no denial has already latched. If denial wins, the
+finalizer cannot return success and the next operation checkpoint raises
+before another modeled operation begins. If the commit wins first, the session
+is terminal; later calls are rejected without rewriting the already committed
+result. Operations already past their checkpoint may finish, so this model
+does not preempt a blocked operation. It checks again before every following
+operation. No lock is held while waiting for injected worker/evidence calls or
+while stopping workers.
+
+`MapperLifecycleOwner.release_mapping()` accepts the broker's private
+checkpoint callback and checks it before authentication/inventory, ordinary
+suspend, retained-descriptor close, holder inspection, normal removal, absence
+verification, and lease release. The producer likewise checks before swap,
+DM, NBD, lower-dependency, and loop operations. This defines rootless control
+flow and does not make the callback atomic with kernel state or an unrelated
+privileged actor.
 
 `RELEASED` means that the synthetic sequence's backing-release policy
 accepted. It does not delete a backing file, invoke a production teardown

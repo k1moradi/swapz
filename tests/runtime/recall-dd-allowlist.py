@@ -1063,8 +1063,25 @@ class MapperLifecycleOwner:
             self._check_owner_and_lease()
             self.state = self.ADMISSION_CLOSED
 
-    def release_mapping(self, evidence: WorkerCompletionEvidence) -> MapperReleaseReport:
+    def release_mapping(self, evidence: WorkerCompletionEvidence, *,
+                        before_step: Callable[[str], None] | None = None) -> MapperReleaseReport:
+        """Release only the mapper after checked worker evidence.
+
+        ``before_step`` is an optional caller-owned cancellation checkpoint.
+        It is invoked immediately before each externally modeled operation so
+        a broker can stop a sequence after asynchronous denial.  The callback
+        is deliberately not used to claim that the operation itself is atomic
+        with respect to privileged kernel actors.
+        """
+        if before_step is not None and not callable(before_step):
+            raise MapperOwnerDenied("release checkpoint is not callable")
+
+        def checkpoint(name: str) -> None:
+            if before_step is not None:
+                before_step(name)
+
         with self._operation(self.ADMISSION_CLOSED):
+            checkpoint("worker_completion_authentication")
             if type(evidence) is not WorkerCompletionEvidence:
                 self._deny("authenticated worker completion evidence is required")
             expected = tuple(self._worker_handles)
@@ -1090,7 +1107,9 @@ class MapperLifecycleOwner:
             if authenticated is not True:
                 self._deny("worker completion authentication did not succeed")
             self._check_owner_and_lease()
+            checkpoint("dm_inventory_before_suspend")
             inventory_before = self._inventory(present=True)
+            checkpoint("dm_suspend")
             try:
                 suspended = self.operations.suspend_mapping(self.identity, noflush=False)
             except Exception as exc:
@@ -1109,6 +1128,7 @@ class MapperLifecycleOwner:
             self._check_owner_and_lease()
             if self._mapper_fd is None:
                 self._deny("retained mapper descriptor disappeared before mapping release")
+            checkpoint("mapper_descriptor_close")
             fd, self._mapper_fd = self._mapper_fd, None
             try:
                 self.file_ops.close(fd)
@@ -1116,7 +1136,9 @@ class MapperLifecycleOwner:
                 self._deny(f"retained mapper descriptor close failed: {exc}")
             mapper_descriptor_closed = True
             self._check_owner_and_lease()
+            checkpoint("dm_inventory_after_suspend")
             inventory_after_suspend = self._inventory(present=True)
+            checkpoint("dm_openers")
             try:
                 openers = self.operations.inspect_openers(self.identity)
             except Exception as exc:
@@ -1128,7 +1150,9 @@ class MapperLifecycleOwner:
                     or type(openers.holders) is not tuple or openers.holders != ()):
                 self._deny("DM open-count or holder inventory is not positively empty")
             self._check_owner_and_lease()
+            checkpoint("dm_inventory_before_remove")
             inventory_before_remove = self._inventory(present=True)
+            checkpoint("dm_remove")
             try:
                 removed = self.operations.remove_mapping(self.identity)
             except Exception as exc:
@@ -1143,8 +1167,10 @@ class MapperLifecycleOwner:
                         deferred=False, identity_matches=True)):
                 self._deny("normal exact mapper removal was not confirmed")
             self._check_owner_and_lease()
+            checkpoint("dm_inventory_after_remove")
             inventory_after = self._inventory(present=False)
             self._check_owner_and_lease()
+            checkpoint("lifecycle_lease_release")
             try:
                 self.lease.close()
             except Exception as exc:

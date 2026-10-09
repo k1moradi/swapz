@@ -305,10 +305,14 @@ class NBDReleaseModel:
     def nbd_released(self) -> bool:
         return self._denial is None and self._released
 
-    def disconnect_and_verify(self, disconnect, inspect) -> bool:
+    def disconnect_and_verify(self, disconnect, inspect, *, before_step=None) -> bool:
         if self._denial is not None or self._released:
             raise FixtureOwnerDenied("NBD release is denied or already completed")
+        if before_step is not None and not callable(before_step):
+            raise FixtureOwnerDenied("NBD release checkpoint is not callable")
         try:
+            if before_step is not None:
+                before_step("nbd_disconnect")
             outcome = disconnect(self.server, self.device)
             if (type(outcome) is not NBDDisconnectObservation
                     or outcome.succeeded is not True or outcome.normal_disconnect is not True
@@ -321,6 +325,8 @@ class NBDReleaseModel:
                     or (outcome.major, outcome.minor) != (self.server.major, self.server.minor)):
                 self._deny("normal NBD disconnect did not match the owned server")
             self.events.append("nbd_disconnected")
+            if before_step is not None:
+                before_step("nbd_inventory")
             inventory = inspect(self.server, self.device)
             if (type(inventory) is not NBDInventoryObservation
                     or inventory.valid is not True or inventory.exact_device_present is not False
@@ -478,6 +484,8 @@ class FixtureDrainEvidenceProducer:
                 or owner._worker_roles != list(self._profile.expected_roles)
                 or owner._admitted_roles != list(self._profile.expected_roles)):
             self._deny("broker admission or registered worker/role inventory is not closed and complete")
+
+        checkpoint = self._admission_gate._begin_operation
         dm_identity = DMIdentity(
             identity.name, identity.uuid, identity.major, identity.minor,
             identity.table_sha256,
@@ -491,6 +499,7 @@ class FixtureDrainEvidenceProducer:
 
         # The state transition is owned here; no worker request contains a
         # success flag or can submit an admission receipt.
+        checkpoint("mapper_close_admission")
         owner.close_admission()
         if owner.state != owner.ADMISSION_CLOSED:
             self._deny("mapper owner did not close role admission")
@@ -500,9 +509,11 @@ class FixtureDrainEvidenceProducer:
             "no_more_roles": admission.closed and admission.request_inflight == 0,
         })
 
+        checkpoint("worker_completion_collection")
         worker = self._operations.collect_worker_completion(handles)
         self._validate_worker(worker, handles, self._profile.expected_roles)
         try:
+            checkpoint("worker_completion_verification")
             verified = owner.operations.verify_worker_completion(worker)
         except Exception as exc:
             self._deny(f"worker completion authentication failed: {exc}")
@@ -530,13 +541,16 @@ class FixtureDrainEvidenceProducer:
             ],
         })
 
+        checkpoint("swap_inventory_before")
         swap_before = self._swap_snapshot(identity)
         swapoff = SwapoffObservation(False, False, True)
         if swap_before.mapper_active:
+            checkpoint("swapoff")
             swapoff = self._operations.swapoff(identity)
             if (type(swapoff) is not SwapoffObservation or swapoff.attempted is not True
                     or swapoff.succeeded is not True or swapoff.identity_matches is not True):
                 self._deny("exact test mapper swapoff did not succeed")
+        checkpoint("swap_inventory_after")
         swap_after = self._swap_snapshot(identity)
         if swap_after.mapper_active:
             self._deny("fresh swap inventory still shows the test mapper active")
@@ -553,7 +567,9 @@ class FixtureDrainEvidenceProducer:
 
         # MapperLifecycleOwner executes ordinary suspend, descriptor close,
         # exact open/holder inspection, normal remove and a fresh absence scan.
-        report = owner.release_mapping(worker)
+        checkpoint("mapper_release")
+        report = owner.release_mapping(worker, before_step=checkpoint)
+        checkpoint("mapper_release_report")
         self._validate_release_report(report, identity, worker)
         absent_rows = self._inventory_rows(report.inventory_after)
         assert absent_rows is not None
@@ -625,8 +641,10 @@ class FixtureDrainEvidenceProducer:
                     self._deny(f"NBD operation {method} is unavailable")
             self._nbd_release.disconnect_and_verify(
                 self._operations.disconnect_nbd, self._operations.inspect_nbd,
+                before_step=checkpoint,
             )
 
+        checkpoint("lower_dependencies")
         lower = self._operations.inspect_lower_dependencies(identity, self._loop_device)
         if (type(lower) is not LowerDependencyObservation
                 or lower.inventory_valid is not True or lower.dm_stack_absent is not True
@@ -645,10 +663,12 @@ class FixtureDrainEvidenceProducer:
             "holder_inventory_sha256": lower.inventory_sha256,
         })
 
+        checkpoint("loop_detach")
         detach = self._operations.detach_loop(self._loop_device)
         if (type(detach) is not LoopDetachObservation or detach.succeeded is not True
                 or detach.normal_detach is not True or detach.identity_matches is not True):
             self._deny("normal exact loop detach did not succeed")
+        checkpoint("loop_inventory")
         loop_after = self._operations.inspect_loop(self._loop_device)
         if (type(loop_after) is not LoopInventoryObservation
                 or loop_after.valid is not True or loop_after.exact_loop_present is not False
@@ -661,6 +681,7 @@ class FixtureDrainEvidenceProducer:
             "loop_device": self._loop_device,
             "loop_inventory_sha256": loop_after.inventory_sha256,
         })
+        checkpoint("backing_evidence_commit")
         if not self._policy.backing_release_authorized:
             self._deny("complete evidence sequence did not authorize backing release")
         self._completed = True
@@ -854,6 +875,14 @@ class FixtureOwnerBroker:
         self._state = self.NEW
         self._admission_open = False
         self._denial: str | None = None
+        # ``_state_lock`` protects a single active-operation reservation and
+        # is always short-held. The reservation serializes ownership mutation
+        # without holding a mutex across injected calls that may block. A
+        # contender can latch denial while such a call is active, but cannot
+        # mutate its worker inventory or stop workers until its owner unwinds.
+        self._state_lock = threading.Lock()
+        self._active_operation: object | None = None
+        self._release_committed = False
         self._request_ids: set[str] = set()
         self._issued_handles: list[str] = []
         self._issued_roles: list[str] = []
@@ -865,11 +894,11 @@ class FixtureOwnerBroker:
         self._connection_required_close = False
         self._peer_closed = False
         self._peer_credentials: PeerCredentials | None = None
-        self._lock = threading.Lock()
 
     @property
     def state(self) -> str:
-        return self._state
+        with self._state_lock:
+            return self._state
 
     @property
     def mapping_released(self) -> bool:
@@ -877,8 +906,10 @@ class FixtureOwnerBroker:
 
     @property
     def backing_release_authorized(self) -> bool:
-        return (self._state == self.RELEASED and self._denial is None
-                and self.mapping_released and self._producer.backing_release_authorized)
+        with self._state_lock:
+            return (self._release_committed and self._state == self.RELEASED
+                    and self._denial is None and self.mapping_released
+                    and self._producer.backing_release_authorized)
 
     @property
     def backing_must_be_preserved(self) -> bool:
@@ -886,7 +917,8 @@ class FixtureOwnerBroker:
 
     @property
     def denial(self) -> str | None:
-        return self._denial or self._producer.denial
+        with self._state_lock:
+            return self._denial or self._producer.denial
 
     @property
     def evidence_events(self) -> tuple[str, ...]:
@@ -898,18 +930,24 @@ class FixtureOwnerBroker:
 
     @property
     def request_inflight(self) -> int:
-        return self._request_inflight
+        with self._state_lock:
+            return self._request_inflight
 
     def owner_create(self) -> None:
         with self._serialized():
-            if self._state != self.NEW:
+            if self.state != self.NEW:
                 self._deny("fixture mapping creation is out of order")
+            self._begin_operation("dm_create")
             try:
                 self.mapper_owner.create()
             except Exception as exc:
                 self._deny(f"fixture mapping creation failed: {exc}")
-            self._admission_open = True
-            self._state = self.ACTIVE
+            self._begin_operation("admission_open")
+            with self._state_lock:
+                if self._denial is not None:
+                    raise FixtureOwnerDenied(self._denial)
+                self._admission_open = True
+                self._state = self.ACTIVE
 
     def worker_request(self, peer: object, request: object) -> dict[str, object]:
         """Injected unit-test entry; live callers use SO_PEERCRED socket API."""
@@ -958,7 +996,7 @@ class FixtureOwnerBroker:
                 if frame is None:
                     with self._serialized():
                         if (self._issued_roles != list(self.session_profile.expected_roles)
-                                or self._request_inflight != 0):
+                                or self.request_inflight != 0):
                             self._deny("worker control EOF arrived before the exact role inventory")
                         self._peer_closed = True
                     return processed
@@ -972,7 +1010,12 @@ class FixtureOwnerBroker:
 
     def _worker_request_principal(self, principal: str | None,
                                   request: object) -> dict[str, object]:
-        if self._state != self.ACTIVE or not self._admission_open:
+        with self._state_lock:
+            active = self._state == self.ACTIVE and self._admission_open
+            denial = self._denial
+        if denial is not None:
+            raise FixtureOwnerDenied(denial)
+        if not active:
             self._deny("worker request arrived outside open fixture admission")
         if principal != "worker":
             self._deny("worker IPC credential is invalid or ambiguous")
@@ -994,10 +1037,15 @@ class FixtureOwnerBroker:
         if role != expected_role:
             self._deny(f"role order violation: expected {expected_role}, received {role}")
         self._request_ids.add(request_id)
-        self._request_inflight += 1
+        with self._state_lock:
+            if self._denial is not None or not self._admission_open:
+                raise FixtureOwnerDenied(self._denial or "worker admission is closed")
+            self._request_inflight += 1
         try:
+            self._begin_operation("role_authorization")
             self.mapper_owner.authorize_role(role)
             self._launch_ambiguous = True
+            self._begin_operation("worker_launch")
             launch_started = time.monotonic()
             receipt = self._worker_launcher.launch(
                 role, startup_timeout=_STARTUP_TIMEOUT_SECONDS,
@@ -1021,14 +1069,15 @@ class FixtureOwnerBroker:
             self._issued_handles.append(handle)
             self._issued_roles.append(role)
             self._role_handles[role] = handle
+            self._begin_operation("worker_registration")
             self.mapper_owner.register_worker(handle, role)
             self._launch_ambiguous = False
-            if self._denial is not None:
-                self._deny("fixture was denied while role launch was in flight")
+            self._begin_operation("worker_gate_release")
             group = next((item for item in self.session_profile.concurrent_groups
                           if role in item), None)
             if group is not None and not all(item in self._role_handles for item in group):
                 self._gated_roles.add(role)
+                self._begin_operation("worker_ready_acknowledgment")
                 return {"request_id": request_id, "status": "ready_gated",
                         "handle": handle, "started": False}
             release_roles = group if group is not None else (role,)
@@ -1036,6 +1085,7 @@ class FixtureOwnerBroker:
             self._worker_launcher.release_group(release_handles)
             self._gated_roles.difference_update(release_roles)
             self._launch_ambiguous = False
+            self._begin_operation("worker_launch_acknowledgment")
             return {"request_id": request_id, "status": "launched",
                     "handle": handle, "started": True}
         except FixtureOwnerDenied:
@@ -1044,30 +1094,41 @@ class FixtureOwnerBroker:
             self._launch_ambiguous = True
             self._deny(f"fixed role launch failed or became ambiguous: {exc}")
         finally:
-            self._request_inflight -= 1
-            if self._request_inflight == 0 and self._denial is not None:
-                self._best_effort_stop()
+            with self._state_lock:
+                self._request_inflight -= 1
 
     def finalize(self) -> bool:
         """Trusted owner event-loop entry point; never exposed on worker IPC."""
         with self._serialized():
-            if self._state != self.ACTIVE or not self._admission_open:
+            with self._state_lock:
+                state = self._state
+                admission_open = self._admission_open
+                denial = self._denial
+            if denial is not None:
+                raise FixtureOwnerDenied(denial)
+            if state != self.ACTIVE or not admission_open:
                 self._deny("fixture finalization is out of order")
             if self._issued_roles != list(self.session_profile.expected_roles):
                 self._deny("fixed recall session is missing one or more required roles")
-            if self._request_inflight != 0:
+            if self.request_inflight != 0:
                 self._deny("fixture finalization overlaps an unresolved worker request")
             if self._connection_required_close and not self._peer_closed:
                 self._deny("worker control connection has not closed after complete admission")
-            self._admission_open = False
-            self._state = self.FINALIZING
+            with self._state_lock:
+                if self._denial is not None:
+                    raise FixtureOwnerDenied(self._denial)
+                if self._state != self.ACTIVE or not self._admission_open:
+                    raise FixtureOwnerDenied("fixture finalization preconditions changed")
+                self._admission_open = False
+                self._state = self.FINALIZING
             try:
                 self._producer.collect()
             except Exception as exc:
                 self._deny(f"fixture drain sequence failed: {exc}")
+            self._begin_operation("finalization_commit")
             if not self._producer.backing_release_authorized or not self.mapping_released:
                 self._deny("mapper-only or drain evidence is insufficient for backing release")
-            self._state = self.RELEASED
+            self._commit_release()
             return True
 
     def worker_control_eof(self, peer: object) -> None:
@@ -1075,7 +1136,7 @@ class FixtureOwnerBroker:
             if self._principal(peer) != "worker":
                 self._deny("control EOF came from an unverified worker channel")
             if (self._issued_roles != list(self.session_profile.expected_roles)
-                    or self._request_inflight != 0):
+                    or self.request_inflight != 0):
                 self._deny("worker control channel ended before the exact role inventory")
             self._peer_closed = True
 
@@ -1100,11 +1161,15 @@ class FixtureOwnerBroker:
 
     def _admission_snapshot(self) -> AdmissionGateObservation:
         """Internal producer view; no worker IPC operation returns this object."""
+        with self._state_lock:
+            state = self._state
+            closed = not self._admission_open
+            request_inflight = self._request_inflight
         return AdmissionGateObservation(
             session_id=self.mapper_owner.lease.session_id,
-            broker_state=self._state,
-            closed=not self._admission_open,
-            request_inflight=self._request_inflight,
+            broker_state=state,
+            closed=closed,
+            request_inflight=request_inflight,
             registered_handles=self.mapper_owner.registered_worker_handles,
             expected_roles=self.session_profile.expected_roles,
             registered_roles=tuple(self._issued_roles),
@@ -1176,36 +1241,110 @@ class FixtureOwnerBroker:
     class _Guard:
         def __init__(self, broker: "FixtureOwnerBroker") -> None:
             self.broker = broker
+            self.token = object()
 
         def __enter__(self):
-            if not self.broker._lock.acquire(blocking=False):
-                self.broker._latch("concurrent fixture lifecycle request")
-                self.broker._best_effort_stop()
-                raise FixtureOwnerDenied(self.broker._denial)
-            if self.broker._denial is not None:
-                self.broker._lock.release()
-                raise FixtureOwnerDenied(self.broker._denial)
-            return self.broker
+            with self.broker._state_lock:
+                denial = self.broker._denial
+                committed = self.broker._release_committed
+                active = self.broker._active_operation is not None
+                if (denial is None and not committed and not active):
+                    self.broker._active_operation = self.token
+                    return self.broker
+                if denial is None and not committed and active:
+                    denial = self.broker._latch_locked("concurrent fixture lifecycle request")
+            if denial is not None:
+                if not active:
+                    self.broker._best_effort_stop()
+                raise FixtureOwnerDenied(denial)
+            if committed:
+                raise FixtureOwnerDenied("fixture session is already finalized")
+            raise FixtureOwnerDenied("fixture lifecycle reservation is unavailable")
 
         def __exit__(self, exc_type, exc, traceback):
-            self.broker._lock.release()
+            with self.broker._state_lock:
+                if self.broker._active_operation is not self.token:
+                    self.broker._latch_locked("fixture lifecycle reservation was lost")
+                if exc_type is not None:
+                    self.broker._latch_locked(
+                        f"lifecycle operation raised {exc_type.__name__}: {exc}"
+                    )
+                if self.broker._active_operation is self.token:
+                    self.broker._active_operation = None
+                denial = self.broker._denial
+            if denial is not None:
+                self.broker._best_effort_stop()
+                if exc_type is None:
+                    raise FixtureOwnerDenied(denial)
             return False
 
     def _serialized(self):
         return self._Guard(self)
 
-    def _latch(self, message: str) -> None:
+    def _request_abort(self, message: str) -> str | None:
+        """Latch a denial without waiting for the lifecycle owner lock.
+
+        The state-lock acquisition is the denial linearization point. A
+        successful finalization commit takes the same lock; whichever wins
+        determines whether this session is denied or terminally released.
+        Callers never stop workers here because the active lifecycle operation
+        still owns the mutable worker inventory.
+        """
+        with self._state_lock:
+            if self._release_committed:
+                return None
+            return self._latch_locked(message)
+
+    def _latch_locked(self, message: str) -> str:
+        """Latch denial with ``_state_lock`` held."""
+        if self._release_committed:
+            return "fixture session is already finalized"
         if self._denial is None:
             self._denial = message
         self._admission_open = False
         self._state = self.DENIED
+        return self._denial
+
+    def _latch(self, message: str) -> str:
+        reason = self._request_abort(message)
+        return reason if reason is not None else "fixture session is already finalized"
+
+    def _begin_operation(self, name: str) -> None:
+        """Linearize the next modeled operation against asynchronous denial.
+
+        The checkpoint is that operation's start boundary. A denial after it
+        may not cancel an already-started injected operation, but every later
+        operation must pass a new checkpoint.
+        """
+        if type(name) is not str or not name:
+            raise FixtureOwnerDenied("operation checkpoint name is invalid")
+        with self._state_lock:
+            if self._denial is not None:
+                raise FixtureOwnerDenied(self._denial)
+            if self._release_committed or self._state == self.RELEASED:
+                raise FixtureOwnerDenied("fixture session is already finalized")
+            if self._state == self.DENIED:
+                raise FixtureOwnerDenied("fixture session is denied")
+
+    def _commit_release(self) -> None:
+        """Commit the one terminal success only if no abort won the race."""
+        with self._state_lock:
+            if self._denial is not None or self._state == self.DENIED:
+                raise FixtureOwnerDenied(self._denial or "fixture session is denied")
+            if self._state != self.FINALIZING or self._release_committed:
+                raise FixtureOwnerDenied("fixture release commit is out of order")
+            self._admission_open = False
+            self._state = self.RELEASED
+            self._release_committed = True
 
     def _best_effort_stop(self) -> None:
-        if self._request_inflight:
-            return
-        if self._stop_attempted:
-            return
-        self._stop_attempted = True
+        with self._state_lock:
+            if (self._release_committed or self._denial is None
+                    or self._request_inflight or self._active_operation is not None
+                    or self._stop_attempted):
+                return
+            self._stop_attempted = True
+            handles = tuple(self._issued_handles)
         # The launcher owns every child from fork until a confirmed READY
         # receipt. This call is mandatory even when no handle was registered.
         errors = []
@@ -1220,22 +1359,23 @@ class FixtureOwnerBroker:
         # failure for an unconfirmed child. This is best effort only: either
         # error still latches denial and backing preservation.
         try:
-            stopped = self._worker_launcher.stop_all(tuple(self._issued_handles))
+            stopped = self._worker_launcher.stop_all(handles)
             if (type(stopped) is not WorkerStopReport
                     or stopped.all_reaped is not True or stopped.errors != ()):
                 errors.append("registered worker inventory was not reaped cleanly")
         except Exception as exc:
             errors.append(f"registered worker stop failed: {exc}")
         if errors:
-            self._denial = ((self._denial or "worker stop/reap failed")
-                            + "; worker stop error: " + "; ".join(errors))
+            with self._state_lock:
+                self._denial = ((self._denial or "worker stop/reap failed")
+                                + "; worker stop error: " + "; ".join(errors))
 
     def _deny(self, message: str):
-        self._latch(message)
-        # Best-effort stopping uses only opaque handles. Any failure still
-        # preserves backing; this path never attempts device teardown.
-        self._best_effort_stop()
-        raise FixtureOwnerDenied(self._denial)
+        reason = self._latch(message)
+        # Stop/reap is deferred to Guard.__exit__, after lifecycle ownership
+        # has been released. This avoids racing worker cleanup with evidence
+        # collection or launch registration.
+        raise FixtureOwnerDenied(reason)
 
 
 __all__ = [

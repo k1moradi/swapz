@@ -189,6 +189,11 @@ class FakeOwnedWorkerLauncher:
             raise OSError("injected gate release failure")
         if any(handle not in self.pending for handle in handles):
             raise AssertionError("only known gated handles can be released")
+        if "partial_release" in self.fail and len(handles) > 1:
+            first = handles[0]
+            self.pending.remove(first)
+            self.release_calls.append((first,))
+            raise OSError("injected failure after first concurrent gate release")
         self.release_calls.append(tuple(handles))
         for handle in handles:
             self.pending.remove(handle)
@@ -201,9 +206,13 @@ class FakeOwnedWorkerLauncher:
         return WorkerStopReport(True, ())
 
     def stop_all(self, handles):
-        self.stop_calls.append(tuple(handles))
+        handles = tuple(handles)
+        self.stop_calls.append(handles)
         if "stop_all" in self.fail:
             return WorkerStopReport(False, ("worker remains",))
+        for handle in handles:
+            if handle in self.pending:
+                self.pending.remove(handle)
         return WorkerStopReport(True, ())
 
 
@@ -1489,10 +1498,261 @@ s.close()
         release.set()
         thread.join(timeout=2.0)
         self.assertFalse(thread.is_alive())
+        self.assertEqual(len(launched), 1)
+        self.assertIsInstance(launched[0], FixtureOwnerDenied,
+                              "the in-flight launch must not receive a success acknowledgment")
         self.assertFalse(self.broker.backing_release_authorized)
         self.assertEqual(self.stop_calls, [("owned-writer-thread",)])
+        self.assertEqual(self.broker.state, self.broker.DENIED)
+        self.assertEqual(self.broker._issued_roles, ["writer"])
+        self.assertEqual(self.owner._worker_roles, [],
+                         "denial before registration cannot authorize a mapper role")
+        self.assertEqual(self.launcher.release_calls, [],
+                         "the role gate must not be released after the concurrent denial")
+        self.assertNotIn("worker_report", self.drain_ops.trace)
         with self.assertRaises(FixtureOwnerDenied):
             self.broker.finalize()
+
+    def test_denial_during_worker_evidence_collection_aborts_before_swap_or_dm(self):
+        for denial_method in ("owner_control_eof", "producer_died"):
+            with self.subTest(denial_method=denial_method):
+                case = self._new_case()
+                handles = case._start_workers()
+                collecting = threading.Event()
+                continue_collection = threading.Event()
+                original = case.drain_ops.collect_worker_completion
+
+                def blocked_collection(worker_handles):
+                    collecting.set()
+                    if not continue_collection.wait(timeout=3.0):
+                        raise TimeoutError("test barrier did not release worker evidence collection")
+                    return original(worker_handles)
+
+                case.drain_ops.collect_worker_completion = blocked_collection
+                outcomes: list[object] = []
+
+                def finalize():
+                    try:
+                        outcomes.append(case.broker.finalize())
+                    except Exception as exc:
+                        outcomes.append(exc)
+
+                thread = threading.Thread(target=finalize, daemon=True)
+                thread.start()
+                self.assertTrue(collecting.wait(timeout=2.0), "finalizer did not reach evidence barrier")
+                with self.assertRaises(FixtureOwnerDenied):
+                    getattr(case.broker, denial_method)()
+                self.assertEqual(case.broker.state, case.broker.DENIED)
+                self.assertFalse(case.broker.backing_release_authorized)
+                self.assertEqual(case.stop_calls, [],
+                                 "worker stop must wait until the active collector unwinds")
+                continue_collection.set()
+                thread.join(timeout=4.0)
+                self.assertFalse(thread.is_alive(), "finalizer did not stop at next checkpoint")
+                self.assertEqual(len(outcomes), 1)
+                self.assertIsInstance(outcomes[0], FixtureOwnerDenied)
+                self.assertEqual(case.broker.state, case.broker.DENIED)
+                self.assertFalse(case.broker.backing_release_authorized)
+                self.assertEqual(case.stop_calls, [handles])
+                self.assertIn("worker_report", case.drain_ops.trace)
+                self.assertNotIn("swap_inventory", case.drain_ops.trace)
+                self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
+                self.assertNotIn("dm_suspend", case.mapper_ops.trace)
+                self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+                self.assertNotIn("lower_dependencies", case.drain_ops.trace)
+                self.assertNotIn("loop_detach_normal", case.drain_ops.trace)
+
+    def test_denial_at_each_teardown_checkpoint_prevents_the_next_operation(self):
+        cases = (
+            ("dm_suspend", "dm_suspend", "dm_remove_normal"),
+            ("dm_remove", "dm_remove_normal", "lower_dependencies"),
+            ("lower_dependencies", "lower_dependencies", "loop_detach_normal"),
+            ("loop_detach", "loop_detach_normal", "loop_inventory"),
+        )
+        for checkpoint_name, forbidden_operation, later_operation in cases:
+            with self.subTest(checkpoint=checkpoint_name):
+                case = self._new_case()
+                case._start_workers()
+                reached = threading.Event()
+                resume = threading.Event()
+                original = case.broker._begin_operation
+
+                def pause_before(name):
+                    if name == checkpoint_name:
+                        reached.set()
+                        if not resume.wait(timeout=3.0):
+                            raise TimeoutError(f"test barrier for {name} was not released")
+                    return original(name)
+
+                case.broker._begin_operation = pause_before
+                outcomes: list[object] = []
+
+                def finalize():
+                    try:
+                        outcomes.append(case.broker.finalize())
+                    except Exception as exc:
+                        outcomes.append(exc)
+
+                thread = threading.Thread(target=finalize, daemon=True)
+                thread.start()
+                self.assertTrue(reached.wait(timeout=3.0),
+                                f"finalizer did not reach {checkpoint_name} checkpoint")
+                with self.assertRaises(FixtureOwnerDenied):
+                    case.broker.owner_control_eof()
+                self.assertEqual(case.broker.state, case.broker.DENIED)
+                self.assertFalse(case.broker.backing_release_authorized)
+                resume.set()
+                thread.join(timeout=4.0)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(len(outcomes), 1)
+                self.assertIsInstance(outcomes[0], FixtureOwnerDenied)
+                self.assertNotIn(forbidden_operation,
+                                 case.mapper_ops.trace + case.drain_ops.trace)
+                self.assertNotIn(later_operation,
+                                 case.mapper_ops.trace + case.drain_ops.trace)
+                self.assertFalse(case.broker.backing_release_authorized)
+                self.assertEqual(case.broker.state, case.broker.DENIED)
+                self.assertEqual(case.stop_calls, [tuple(case.handles)])
+
+    def test_partial_a2_b2_gate_release_denies_and_reaps_the_entire_inventory(self):
+        case = self._new_case()
+        prior = case._start_workers(("writer", "a", "b", "a2"))
+        case.launcher.fail.add("partial_release")
+        with self.assertRaises(FixtureOwnerDenied):
+            case._request("partial-pair-release", "b2")
+        all_handles = tuple(case.handles)
+        self.assertEqual(len(all_handles), 5)
+        self.assertEqual(case.launcher.release_calls[-1], (prior[-1],),
+                         "the mock must model exactly one gate released before failure")
+        self.assertEqual(case.stop_calls, [all_handles])
+        self.assertEqual(case.launcher.pending, [])
+        self.assertEqual(case.broker.state, case.broker.DENIED)
+        self.assertFalse(case.broker.backing_release_authorized)
+        self.assertNotIn("worker_report", case.drain_ops.trace)
+        self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+
+    def test_unconfirmed_stop_failure_still_attempts_registered_workers(self):
+        case = self._new_case()
+        registered = case._start_workers(("writer",))
+        case.launcher.fail.update({"launch_after_child", "stop_unconfirmed"})
+        with self.assertRaises(FixtureOwnerDenied):
+            case._request("ambiguous-second-child", "a")
+        self.assertEqual(case.launcher.unconfirmed_stop_calls, 1)
+        self.assertEqual(case.stop_calls, [registered],
+                         "registered children need their own stop_all pass after ambiguous spawn")
+        self.assertEqual(case.owner._worker_roles, ["writer"])
+        self.assertEqual(case.launcher.pending, [case.handles[-1]],
+                         "failed unconfirmed cleanup must remain visibly unresolved")
+        self.assertEqual(case.broker.state, case.broker.DENIED)
+        self.assertFalse(case.broker.backing_release_authorized)
+        self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
+        case.launcher.pending.clear()
+
+    def test_worker_stop_failure_after_concurrent_denial_remains_sticky(self):
+        case = self._new_case()
+        handles = case._start_workers()
+        collecting = threading.Event()
+        resume = threading.Event()
+        original = case.drain_ops.collect_worker_completion
+
+        def blocked_collection(worker_handles):
+            collecting.set()
+            if not resume.wait(timeout=3.0):
+                raise TimeoutError("worker evidence barrier was not released")
+            return original(worker_handles)
+
+        case.drain_ops.collect_worker_completion = blocked_collection
+        case.launcher.fail.add("stop_all")
+        outcomes: list[object] = []
+
+        def finalize():
+            try:
+                outcomes.append(case.broker.finalize())
+            except Exception as exc:
+                outcomes.append(exc)
+
+        thread = threading.Thread(target=finalize, daemon=True)
+        thread.start()
+        self.assertTrue(collecting.wait(timeout=2.0))
+        with self.assertRaises(FixtureOwnerDenied):
+            case.broker.producer_died()
+        self.assertEqual(case.stop_calls, [], "no stop callback may race collection")
+        resume.set()
+        thread.join(timeout=4.0)
+        self.assertFalse(thread.is_alive())
+        self.assertIsInstance(outcomes[0], FixtureOwnerDenied)
+        self.assertEqual(case.stop_calls, [handles])
+        self.assertIn("registered worker inventory was not reaped cleanly",
+                      case.broker.denial)
+        self.assertEqual(case.broker.state, case.broker.DENIED)
+        self.assertFalse(case.broker.backing_release_authorized)
+        self.assertNotIn("swap_inventory", case.drain_ops.trace)
+        self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+
+    def test_denial_after_last_checkpoint_wins_against_atomic_release_commit(self):
+        case = self._new_case()
+        case._start_workers()
+        at_commit = threading.Event()
+        resume = threading.Event()
+        original = case.broker._begin_operation
+
+        def pause_after_commit_checkpoint(name):
+            result = original(name)
+            if name == "finalization_commit":
+                at_commit.set()
+                if not resume.wait(timeout=3.0):
+                    raise TimeoutError("release-commit barrier was not released")
+            return result
+
+        case.broker._begin_operation = pause_after_commit_checkpoint
+        outcomes: list[object] = []
+
+        def finalize():
+            try:
+                outcomes.append(case.broker.finalize())
+            except Exception as exc:
+                outcomes.append(exc)
+
+        thread = threading.Thread(target=finalize, daemon=True)
+        thread.start()
+        self.assertTrue(at_commit.wait(timeout=3.0), "finalizer did not reach release commit")
+        with self.assertRaises(FixtureOwnerDenied):
+            case.broker.producer_died()
+        resume.set()
+        thread.join(timeout=4.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsInstance(outcomes[0], FixtureOwnerDenied)
+        self.assertEqual(case.broker.state, case.broker.DENIED)
+        self.assertFalse(case.broker.backing_release_authorized)
+        self.assertTrue(case.broker.backing_must_be_preserved)
+        self.assertTrue(case.broker.mapping_released,
+                        "earlier synthetic mapper operations cannot be rolled back")
+
+    def test_repeated_finalization_is_terminal_and_never_reverses_outcome(self):
+        self._start_workers()
+        trace_before = tuple(self.drain_ops.trace)
+        self.assertTrue(self.broker.finalize())
+        completed_trace = tuple(self.drain_ops.trace)
+        with self.assertRaises(FixtureOwnerDenied):
+            self.broker.finalize()
+        self.assertGreater(len(completed_trace), len(trace_before))
+        self.assertEqual(tuple(self.drain_ops.trace), completed_trace)
+        self.assertEqual(self.broker.state, self.broker.RELEASED)
+        self.assertTrue(self.broker.backing_release_authorized)
+
+        case = self._new_case()
+        case.broker.owner_create()
+        with self.assertRaises(FixtureOwnerDenied):
+            case._request("invalid-before-denied-finalize", "a")
+        denial = case.broker.denial
+        stop_calls = tuple(case.stop_calls)
+        with self.assertRaises(FixtureOwnerDenied):
+            case.broker.finalize()
+        self.assertEqual(case.broker.denial, denial)
+        self.assertEqual(tuple(case.stop_calls), stop_calls)
+        self.assertEqual(case.broker.state, case.broker.DENIED)
+        self.assertFalse(case.broker.backing_release_authorized)
 
 
 if __name__ == "__main__":
