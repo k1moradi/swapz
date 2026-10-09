@@ -144,7 +144,15 @@ class RecallIPCAdapter:
         try:
             result = self._worker(response["worker"])
         except (KeyError, ValueError, TypeError) as exc:
-            self._reject(f"untrusted wait worker: {exc}")
+            # Fail closed as before, but retain bounded diagnostic evidence
+            # for a service that sent lifecycle_failure/protocol_error without
+            # a worker receipt. No remote field ever authorizes cleanup here.
+            status = str(response.get("status", "<missing>"))[:48]
+            detail = str(response.get("error", "<none>"))[:160]
+            self._reject(
+                f"untrusted wait worker: {exc}; service_status={status}; "
+                f"service_error={detail}"
+            )
         if (response.get("status") != "reaped" or response.get("ok") is not True
                 or result.handle != handle or result.reaped is not True
                 or result.errors or result.exit_code != 0):
