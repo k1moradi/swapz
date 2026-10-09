@@ -36,8 +36,10 @@ for older synthetic fixtures and historical analysis, but its p99 was
 never computed from latency observations by this parser. As of the
 v2 safety gate, **v1 can no longer emit `provisional_selection_kib`**
 even when its `evidence` field claims `kernel` or `physical`.
-It may still display the unqualified algorithmic
-`candidate_batch_kib` for debugging.
+For v1 `kernel` or `physical` claims, both
+`candidate_batch_kib` and `provisional_selection_kib` are null.
+Only `synthetic` v1 records may display an illustrative algorithmic
+candidate; it is never a measured winner.
 
 Use `swapz-drain-observation-v2` for the new internal-consistency
 check. It retains the v1 fields and adds **one strictly required**
