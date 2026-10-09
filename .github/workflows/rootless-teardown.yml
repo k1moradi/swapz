@@ -41,6 +41,10 @@ on:
       - 'tests/runtime/recall-control-bridge-regression.sh'
       - 'tests/runtime/recall-io-plan.py'
       - 'tests/runtime/recall-io-plan-test.py'
+      - 'tests/runtime/recall-io-drain-policy.py'
+      - 'tests/runtime/recall-io-drain-policy-test.py'
+      - 'tests/runtime/recall-io-drain-orchestrator.py'
+      - 'tests/runtime/recall-io-drain-orchestrator-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
       - 'tests/runtime/live-gc-latency-analyze.py'
       - 'tests/runtime/v22-drain-plateau-analyze.py'
@@ -212,6 +216,13 @@ jobs:
           bash -n tests/runtime/streaming-benchmark.sh
           python3 -m py_compile tests/runtime/streaming-benchmark-report.py tests/runtime/streaming-benchmark-report-test.py
           timeout 25s python3 -B tests/runtime/streaming-benchmark-report-test.py -v
+      - name: Rootless DM IO drain policy and synthetic orchestration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-io-drain-policy.py tests/runtime/recall-io-drain-policy-test.py tests/runtime/recall-io-drain-orchestrator.py tests/runtime/recall-io-drain-orchestrator-test.py
+          timeout 25s python3 -B tests/runtime/recall-io-drain-policy-test.py -v
+          timeout 25s python3 -B tests/runtime/recall-io-drain-orchestrator-test.py -v
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |
