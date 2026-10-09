@@ -55,6 +55,9 @@ on:
       - 'tests/runtime/streaming-benchmark-teardown.sh'
       - 'tests/runtime/streaming-teardown-regression.sh'
       - 'tests/runtime/size-aware-nbd-teardown-test.sh'
+      - 'tests/runtime/nbd-pidfd-owned-session.py'
+      - 'tests/runtime/nbd-pidfd-owned-mock-child.py'
+      - 'tests/runtime/nbd-pidfd-owned-session-test.py'
   pull_request:
     paths:
       - '.github/workflows/rootless-teardown.yml'
@@ -85,6 +88,12 @@ jobs:
           bash -n tests/runtime/pressure-runner-regression.sh
       - name: Rootless DM and loop teardown regression
         run: bash tests/runtime/test-stack-teardown-regression.sh
+      - name: Rootless pidfd-owned NBD mock server lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/nbd-pidfd-owned-session.py tests/runtime/nbd-pidfd-owned-mock-child.py tests/runtime/nbd-pidfd-owned-session-test.py
+          timeout 35s python3 -B tests/runtime/nbd-pidfd-owned-session-test.py -v
       - name: Rootless NBD and streaming fail-closed teardown mocks
         shell: bash
         run: |
