@@ -1000,3 +1000,44 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       cleanup after a failed role receipt or partial writer.
 - [ ] No V2.2 batch or strategy winner until explicitly authorized
       disposable virtual, then physical, drain/read-p99 experiments.
+
+### 2026-10-09 — Exact-inode writer-readiness fault coverage and Codex owner audit
+
+- [x] Independently inspect Codex's follow-up GNU build binding,
+      `MapperLifecycleOwner` and session-HMAC fixture-release
+      model; confirm passive executable inspection, two real output
+      hashes and removal of mapper-only `cleanup_allowed`.
+      See `docs/main-developer-fixture-owner-review-2026-10-09.md`.
+- [x] Add a fail-closed **rootless test-only** writer-readiness
+      controller latch: bridge and adapter deny further role
+      admission, IPC client denies any cleanup and closes the
+      control socket; never delete the synthetic backing marker.
+- [x] Require pinned private regular-file identity and exact
+      full-buffer content under a bounded deadline before positive
+      reader launches. Refuse symlink, path/inode substitution,
+      truncated/wrong output, interrupted reads and service exit.
+- [x] Add ten adversarial writer-readiness cases, including
+      refusal **after a real writer role was admitted**. Full
+      separate-process suite **20/20 PASS**, strict positive
+      independent five-role repetition **6/6 PASS** in both
+      same-source workflows.
+- [x] Exact source revision
+      `08f28d60648ce501ad6c86648db4f486f404994d`:
+      https://github.com/k1moradi/swapz/actions/runs/37957362142
+      https://github.com/k1moradi/swapz/actions/runs/37957362071
+      GNU policy 7+10, owner-release model 5 and NBD mock
+      stress 25/25 remain included in combined rootless CI.
+- [ ] Codex: implement separately privileged fixture owner and
+      independently sourced kernel drain observation producer.
+      A session HMAC on synthetic positive event reports does
+      not establish a real kernel postcondition.
+- [ ] Independent administrator: reproduce signed GNU source
+      and static binary on a different controlled build host,
+      review and provision the root-owned application manifest
+      trust anchor, and verify OS verifier loader/library closure.
+- [ ] Only after independent operator authorization, qualify
+      disposable real DM mapping/suspend/removal and exact
+      holder/loop/NBD absence. Rootless writer polling and
+      service pidfd reaping NEVER authorize real backing deletion.
+- [ ] V2.2 performance comparison and read-p99 qualification
+      remain blocked; winner UNDETERMINED.
