@@ -51,15 +51,17 @@ def main() -> int:
                 reply = b"READY " + b"0" * 32
                 if reply == b"READY " + hello[6:]:
                     reply = b"READY " + b"1" * 32
-            channel.sendall(reply)
-            if mode == "exit-after-ready":
-                return 0
             if mode == "ignore-term":
                 signal.signal(signal.SIGTERM, signal.SIG_IGN)
             elif mode == "fail-term":
                 signal.signal(signal.SIGTERM, _sigterm_fail)
             else:
                 signal.signal(signal.SIGTERM, _sigterm_ok)
+            # Install the SIGTERM behavior BEFORE READY. Otherwise the
+            # controller can receive READY and terminate before the handler.
+            channel.sendall(reply)
+            if mode == "exit-after-ready":
+                return 0
             channel.settimeout(None)
             while True:
                 signal.pause()
