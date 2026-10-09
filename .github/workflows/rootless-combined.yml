@@ -143,6 +143,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-role-service-integration-test.py
           timeout 35s python3 tests/runtime/recall-role-service-integration-test.py -v
+      - name: Separate-process pinned direct dd recall and attested readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-role-process-fixture.py tests/runtime/recall-role-process-integration-test.py
+          timeout 65s python3 -B tests/runtime/recall-role-process-integration-test.py -v
       - name: Genuine Bash synthetic role coprocess lifecycle
         shell: bash
         run: |
