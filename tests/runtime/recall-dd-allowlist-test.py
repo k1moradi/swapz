@@ -10,11 +10,13 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -40,7 +42,50 @@ DDPolicyDenied = policy_module.DDPolicyDenied
 TrustedGNUCoreutilsDD = policy_module.TrustedGNUCoreutilsDD
 MapperIdentity = policy_module.MapperIdentity
 MapperLifecycleLease = policy_module.MapperLifecycleLease
+MapperLifecycleOwner = policy_module.MapperLifecycleOwner
+MapperInventory = policy_module.MapperInventory
+MapperOwnerDenied = policy_module.MapperOwnerDenied
+RealRecallDDFileOps = RecallDDFileOps
 plan_module = load("recall_io_plan_allowlist_contract", HERE / "recall-io-plan.py")
+
+
+class RootOwnedBootstrapTestOps(RealRecallDDFileOps):
+    """Fake root-owned metadata for disposable files under a test trust root."""
+
+    def __init__(self):
+        self.directory_fds: set[int] = set()
+        self.trust_file_fds: set[int] = set()
+
+    def open(self, path, flags, mode=0o777, *, dir_fd=None):
+        fd = super().open(path, flags, mode, dir_fd=dir_fd)
+        if flags & os.O_DIRECTORY:
+            self.directory_fds.add(fd)
+        elif dir_fd in self.directory_fds:
+            self.trust_file_fds.add(fd)
+        return fd
+
+    def fstat(self, fd):
+        info = super().fstat(fd)
+        if fd in self.directory_fds:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | (stat.S_IMODE(info.st_mode) & ~0o022),
+                st_uid=0, st_nlink=info.st_nlink, st_dev=info.st_dev,
+                st_ino=info.st_ino, st_size=info.st_size,
+                st_mtime_ns=info.st_mtime_ns, st_ctime_ns=info.st_ctime_ns,
+            )
+        if fd in self.trust_file_fds:
+            return SimpleNamespace(
+                st_mode=stat.S_IFREG | (stat.S_IMODE(info.st_mode) & ~0o022),
+                st_uid=0, st_nlink=info.st_nlink, st_dev=info.st_dev,
+                st_ino=info.st_ino, st_size=info.st_size,
+                st_mtime_ns=info.st_mtime_ns, st_ctime_ns=info.st_ctime_ns,
+            )
+        return info
+
+    def close(self, fd):
+        self.directory_fds.discard(fd)
+        self.trust_file_fds.discard(fd)
+        return super().close(fd)
 
 
 class DummySupervisor:
@@ -277,9 +322,12 @@ class DDAllowlistTests(unittest.TestCase):
 
     def test_does_not_expose_numeric_pid_or_launch_processes(self):
         tree = ast.parse((HERE / "recall-dd-allowlist.py").read_text())
+        allowlist = next(node for node in tree.body
+                         if isinstance(node, ast.ClassDef)
+                         and node.name == "RecallDDAllowlist")
         banned = {"kill", "fork", "Popen", "run", "system", "execv",
                   "execve", "posix_spawn", "ioctl", "swapon", "swapoff"}
-        for node in ast.walk(tree):
+        for node in ast.walk(allowlist):
             if isinstance(node, ast.Call):
                 name = getattr(node.func, "attr", getattr(node.func, "id", ""))
                 self.assertNotIn(name, banned)
@@ -288,6 +336,27 @@ class DDAllowlistTests(unittest.TestCase):
 
 
 class PinnedDDLaunchGateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.test_key_dir = tempfile.TemporaryDirectory(prefix="swapz-test-ed25519-")
+        cls.test_key_root = Path(cls.test_key_dir.name)
+        cls.test_private_key = cls.test_key_root / "test-only-private.pem"
+        cls.test_public_key = cls.test_key_root / "test-only-public.pem"
+        subprocess.run(
+            ["/usr/bin/openssl", "genpkey", "-algorithm", "ED25519",
+             "-out", str(cls.test_private_key)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["/usr/bin/openssl", "pkey", "-in", str(cls.test_private_key),
+             "-pubout", "-out", str(cls.test_public_key)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.test_key_dir.cleanup()
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -299,6 +368,15 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         self.source.write_bytes(self.original)
         self.source.chmod(0o600)
         self.name = "swapz-v22-recall-source-only"
+        self.trust_root = self.base / "trusted-bootstrap"
+        self.trust_root.mkdir(mode=0o700)
+        self.trust_root.chmod(0o700)
+        self.trust_key_root = self.base / "separately-provisioned-trust-anchor"
+        self.trust_key_root.mkdir(mode=0o700)
+        self.trust_key_root.chmod(0o700)
+        self.trust_public_key_path = self.trust_key_root / "gnu-coreutils-release-ed25519.pub"
+        shutil.copyfile(self.test_public_key, self.trust_public_key_path)
+        self.trust_public_key_path.chmod(0o600)
 
     def make_gate(self, *, executable: Path | None = None,
                   ops: RecallDDFileOps | None = None):
@@ -325,7 +403,9 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         header = bytearray(64)
         header[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         header[16:18] = (2).to_bytes(2, "little")
-        header[18:20] = (62).to_bytes(2, "little")
+        machine = {"x86_64": 62, "amd64": 62, "aarch64": 183,
+                   "arm64": 183}.get(platform.machine().lower(), 62)
+        header[18:20] = machine.to_bytes(2, "little")
         header[20:24] = (1).to_bytes(4, "little")
         header[52:54] = (64).to_bytes(2, "little")
         header[54:56] = (56).to_bytes(2, "little")
@@ -334,7 +414,8 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         return bytes(header)
 
     def trusted_manifest(self, executable: Path, contents: bytes,
-                         *, vendor: str = "GNU Project", linkage: str = "static"):
+                         *, vendor: str = "GNU Project", linkage: str = "static",
+                         signing_key: Path | None = None):
         document = {
             "format": 1, "vendor": vendor, "package": "coreutils", "binary": "dd",
             "version": "9.7", "executable": str(executable),
@@ -342,11 +423,28 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
             "source_sha256": "a" * 64, "linkage": linkage,
         }
         payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-        return TrustedGNUCoreutilsDD.from_signed_manifest(
-            payload, b"test-only-signature", lambda raw, signature: (
-                signature == b"test-only-signature" and raw == payload
-            ),
+        self.install_signed_payload(payload, signing_key=signing_key)
+        return self.load_trusted_manifest()
+
+    def install_signed_payload(self, payload: bytes, *, signing_key: Path | None = None):
+        manifest_path = self.trust_root / "manifest.json"
+        signature_path = self.trust_root / "manifest.sig"
+        manifest_path.write_bytes(payload)
+        manifest_path.chmod(0o600)
+        subprocess.run(
+            ["/usr/bin/openssl", "pkeyutl", "-sign", "-rawin", "-inkey",
+             str(signing_key or self.test_private_key), "-in", str(manifest_path),
+             "-out", str(signature_path)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
+        signature_path.chmod(0o600)
+
+    def load_trusted_manifest(self):
+        with mock.patch.object(policy_module, "_TRUSTED_DD_BOOTSTRAP_DIR", self.trust_root), \
+                mock.patch.object(policy_module, "_TRUSTED_DD_PUBLIC_KEY_PATH",
+                                  self.trust_public_key_path), \
+                mock.patch.object(policy_module, "RecallDDFileOps", RootOwnedBootstrapTestOps):
+            return TrustedGNUCoreutilsDD.from_trusted_bootstrap()
 
     def block_fixture(self, executable: Path, *, identity_reader=None,
                       expected_override=None,
@@ -362,6 +460,13 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
             def __init__(self):
                 self.block_fds = {mapper_fd}
                 self.executable_fds = set()
+                self.closed_block_fds = set()
+
+            def close(self, fd):
+                if fd in self.block_fds:
+                    self.closed_block_fds.add(fd)
+                    self.block_fds.discard(fd)
+                return super().close(fd)
 
             def dup_cloexec(self, fd):
                 duplicate = super().dup_cloexec(fd)
@@ -414,9 +519,51 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
             lock_fd, lock_path, expected, reader, ops=ops,
         )
         os.close(lock_fd)
+
+        class FakeOwnerOperations:
+            def __init__(self):
+                self.alive = True
+                self.entries: tuple[MapperIdentity, ...] = ()
+                self.events: list[str] = []
+                self.inventory_valid = True
+                self.remove_result = True
+                self.after_inventory = None
+
+            def owner_alive(self):
+                return self.alive
+
+            def inventory(self):
+                self.events.append("inventory")
+                inventory = MapperInventory(self.inventory_valid, self.entries)
+                if self.after_inventory is not None:
+                    self.after_inventory()
+                return inventory
+
+            def create_mapping(self, identity):
+                self.events.append("create")
+                if identity != expected or self.entries:
+                    raise AssertionError("owner attempted unexpected or duplicate mapping creation")
+                self.entries = (identity,)
+                return mapper_fd
+
+            def remove_mapping(self, identity):
+                self.events.append("remove")
+                if identity != expected:
+                    raise AssertionError("owner attempted unexpected mapping removal")
+                if self.remove_result:
+                    self.entries = ()
+                return self.remove_result
+
+        owner_operations = FakeOwnerOperations()
+        owner = MapperLifecycleOwner(
+            expected, lease, owner_operations, file_ops=ops,
+        )
+        owner.create()
         self.addCleanup(lease.close)
-        self.addCleanup(os.close, mapper_fd)
-        return mapper_fd, ops, expected, lease
+        self.addCleanup(
+            lambda: os.close(mapper_fd) if mapper_fd not in ops.closed_block_fds else None,
+        )
+        return mapper_fd, ops, expected, lease, owner
 
     def test_all_five_roles_have_exact_fd_bound_argv_and_cloexec_parent(self):
         gate = self.make_gate()
@@ -677,14 +824,14 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable_path = self.base / "candidate-dd"
         executable_path.write_bytes(self.static_elf_fixture())
         executable_path.chmod(0o755)
-        mapper_fd, ops, _identity, lease = self.block_fixture(executable_path)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable_path)
         digest = hashlib.sha256(executable_path.read_bytes()).hexdigest()
         with self.assertRaisesRegex(DDPolicyDenied, "signed GNU coreutils trust manifest"):
             RecallDDLaunchGate(
                 self.root, self.name, mapper_fd=mapper_fd,
                 executable_path=executable_path,
                 expected_executable_sha256=digest,
-                mapper_lifecycle_lease=lease, ops=ops,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
             )
 
     def test_signed_manifest_is_strict_and_binds_static_gnu_identity(self):
@@ -695,19 +842,178 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         trusted = self.trusted_manifest(path, data)
         self.assertEqual(trusted.executable_path, path)
         self.assertEqual(trusted.sha256, hashlib.sha256(data).hexdigest())
+        payload = (self.trust_root / "manifest.json").read_bytes()
+        signature_path = self.trust_root / "manifest.sig"
+        signature = bytearray(signature_path.read_bytes())
+        signature[-1] ^= 1
+        signature_path.write_bytes(signature)
         with self.assertRaisesRegex(DDPolicyDenied, "signature"):
-            TrustedGNUCoreutilsDD.from_signed_manifest(
-                b"{}", b"bad", lambda _payload, _signature: False,
-            )
+            self.load_trusted_manifest()
         with self.assertRaisesRegex(DDPolicyDenied, "GNU coreutils"):
             self.trusted_manifest(path, data, vendor="uutils")
         with self.assertRaisesRegex(DDPolicyDenied, "GNU coreutils"):
             self.trusted_manifest(path, data, linkage="dynamic")
         duplicate = b'{"format":1,"format":1}'
+        self.install_signed_payload(duplicate)
         with self.assertRaisesRegex(DDPolicyDenied, "duplicate"):
-            TrustedGNUCoreutilsDD.from_signed_manifest(
-                duplicate, b"test-only-signature", lambda *_: True,
-            )
+            self.load_trusted_manifest()
+
+    def test_detached_signature_rejects_wrong_key_and_untrusted_api_arguments(self):
+        path = self.base / "signature-test-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        wrong_private = self.base / "wrong-private.pem"
+        subprocess.run(
+            ["/usr/bin/openssl", "genpkey", "-algorithm", "ED25519",
+             "-out", str(wrong_private)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        document = {
+            "format": 1, "vendor": "GNU Project", "package": "coreutils",
+            "binary": "dd", "version": "9.7", "executable": str(path),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "source_sha256": "a" * 64, "linkage": "static",
+        }
+        payload = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+        self.install_signed_payload(payload, signing_key=wrong_private)
+        with self.assertRaisesRegex(DDPolicyDenied, "signature"):
+            self.load_trusted_manifest()
+        with self.assertRaises(TypeError):
+            TrustedGNUCoreutilsDD.from_trusted_bootstrap(lambda *_: True)
+        self.assertFalse(hasattr(TrustedGNUCoreutilsDD, "from_signed_manifest"))
+        self.assertFalse(hasattr(TrustedGNUCoreutilsDD, "_from_verified_manifest"))
+
+    def test_revoked_missing_and_unavailable_trust_configuration_denies(self):
+        path = self.base / "revocation-test-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        self.trusted_manifest(path, data)
+        (self.trust_root / "REVOKED").write_text("revoked by trusted administrator\n")
+        with self.assertRaisesRegex(DDPolicyDenied, "revoked"):
+            self.load_trusted_manifest()
+        (self.trust_root / "REVOKED").unlink()
+        self.trust_public_key_path.unlink()
+        with self.assertRaisesRegex(DDPolicyDenied, "cannot open trusted bootstrap"):
+            self.load_trusted_manifest()
+
+    def test_non_ed25519_trust_key_is_rejected(self):
+        path = self.base / "wrong-key-type-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        self.trusted_manifest(path, data)
+        rsa_private = self.base / "not-ed25519-private.pem"
+        rsa_public = self.base / "not-ed25519-public.pem"
+        subprocess.run(
+            ["/usr/bin/openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt",
+             "rsa_keygen_bits:1024", "-out", str(rsa_private)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        subprocess.run(
+            ["/usr/bin/openssl", "pkey", "-in", str(rsa_private), "-pubout",
+             "-out", str(rsa_public)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        shutil.copyfile(rsa_public, self.trust_public_key_path)
+        self.trust_public_key_path.chmod(0o600)
+        with self.assertRaisesRegex(DDPolicyDenied, "not an Ed25519"):
+            self.load_trusted_manifest()
+
+    def test_bootstrap_metadata_and_close_failures_deny(self):
+        path = self.base / "bootstrap-fault-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        self.trusted_manifest(path, data)
+
+        original_fstat = RootOwnedBootstrapTestOps.fstat
+
+        def fail_trust_file_stat(ops, fd):
+            if fd in ops.trust_file_fds:
+                raise OSError("injected trusted-file metadata EIO")
+            return original_fstat(ops, fd)
+
+        with mock.patch.object(RootOwnedBootstrapTestOps, "fstat", fail_trust_file_stat):
+            with self.assertRaisesRegex(DDPolicyDenied, "cannot read trusted bootstrap"):
+                self.load_trusted_manifest()
+
+        original_close = RootOwnedBootstrapTestOps.close
+
+        def fail_trust_file_close(ops, fd):
+            is_trust_file = fd in ops.trust_file_fds
+            original_close(ops, fd)
+            if is_trust_file:
+                raise OSError("injected trusted-file close EIO")
+
+        with mock.patch.object(RootOwnedBootstrapTestOps, "close", fail_trust_file_close):
+            with self.assertRaisesRegex(DDPolicyDenied, "descriptor close failed"):
+                self.load_trusted_manifest()
+
+    def test_bootstrap_directory_and_file_symlinks_are_rejected(self):
+        path = self.base / "bootstrap-symlink-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        self.trusted_manifest(path, data)
+
+        alias = self.base / "bootstrap-alias"
+        alias.symlink_to(self.trust_root, target_is_directory=True)
+        with mock.patch.object(policy_module, "_TRUSTED_DD_BOOTSTRAP_DIR", alias), \
+                mock.patch.object(policy_module, "_TRUSTED_DD_PUBLIC_KEY_PATH",
+                                  self.trust_public_key_path), \
+                mock.patch.object(policy_module, "RecallDDFileOps", RootOwnedBootstrapTestOps):
+            with self.assertRaisesRegex(DDPolicyDenied, "cannot inspect trusted bootstrap path"):
+                TrustedGNUCoreutilsDD.from_trusted_bootstrap()
+
+        manifest = self.trust_root / "manifest.json"
+        saved_manifest = self.base / "manifest.saved"
+        manifest.rename(saved_manifest)
+        manifest.symlink_to(saved_manifest)
+        with self.assertRaisesRegex(DDPolicyDenied, "cannot open trusted bootstrap manifest"):
+            self.load_trusted_manifest()
+        manifest.unlink()
+        saved_manifest.rename(manifest)
+
+        real_key = self.base / "real-trust-key.pem"
+        shutil.copyfile(self.trust_public_key_path, real_key)
+        self.trust_public_key_path.unlink()
+        self.trust_public_key_path.symlink_to(real_key)
+        with self.assertRaisesRegex(DDPolicyDenied, "cannot open trusted bootstrap"):
+            self.load_trusted_manifest()
+
+    def test_bootstrap_directory_and_file_symlinks_are_rejected(self):
+        path = self.base / "bootstrap-symlink-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        self.trusted_manifest(path, data)
+
+        alias = self.base / "bootstrap-alias"
+        alias.symlink_to(self.trust_root, target_is_directory=True)
+        with mock.patch.object(policy_module, "_TRUSTED_DD_BOOTSTRAP_DIR", alias), \
+                mock.patch.object(policy_module, "_TRUSTED_DD_PUBLIC_KEY_PATH",
+                                  self.trust_public_key_path), \
+                mock.patch.object(policy_module, "RecallDDFileOps", RootOwnedBootstrapTestOps):
+            with self.assertRaisesRegex(DDPolicyDenied, "cannot inspect trusted bootstrap path"):
+                TrustedGNUCoreutilsDD.from_trusted_bootstrap()
+
+        manifest = self.trust_root / "manifest.json"
+        saved_manifest = self.base / "manifest.saved"
+        manifest.rename(saved_manifest)
+        manifest.symlink_to(saved_manifest)
+        with self.assertRaisesRegex(DDPolicyDenied, "cannot open trusted bootstrap manifest"):
+            self.load_trusted_manifest()
+        manifest.unlink()
+        saved_manifest.rename(manifest)
+
+        real_key = self.base / "real-trust-key.pem"
+        shutil.copyfile(self.trust_public_key_path, real_key)
+        self.trust_public_key_path.unlink()
+        self.trust_public_key_path.symlink_to(real_key)
+        with self.assertRaisesRegex(DDPolicyDenied, "cannot open trusted bootstrap"):
+            self.load_trusted_manifest()
 
     def test_signed_digest_mismatch_and_unknown_candidate_are_rejected(self):
         path = self.base / "manifest-mismatch-dd"
@@ -716,12 +1022,12 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         path.write_bytes(candidate_bytes)
         path.chmod(0o755)
         trusted = self.trusted_manifest(path, trusted_bytes)
-        mapper_fd, ops, _identity, lease = self.block_fixture(path)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(path)
         with self.assertRaisesRegex(DDPolicyDenied, "does not match trusted SHA-256"):
             RecallDDLaunchGate(
                 self.root, self.name, mapper_fd=mapper_fd,
                 executable_path=path, trusted_executable=trusted,
-                mapper_lifecycle_lease=lease, ops=ops,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
             )
 
         # A canonical path does not make the candidate a trusted GNU build.
@@ -738,11 +1044,11 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable_path.write_bytes(expected_bytes)
         executable_path.chmod(0o755)
         trusted = self.trusted_manifest(executable_path, expected_bytes)
-        mapper_fd, ops, _identity, lease = self.block_fixture(executable_path)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable_path)
         gate = RecallDDLaunchGate(
             self.root, self.name, mapper_fd=mapper_fd,
             executable_path=executable_path, trusted_executable=trusted,
-            mapper_lifecycle_lease=lease, ops=ops,
+            mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
         )
         self.addCleanup(gate.close)
         launch = gate.admit("writer")
@@ -765,14 +1071,14 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         trusted = self.trusted_manifest(executable_path, contents)
         expected = MapperIdentity(self.name, "SWAPZ-TEST-IDENTITY", 253, 17, "b" * 64)
         changed = MapperIdentity(self.name, "SWAPZ-TEST-IDENTITY", 253, 17, "c" * 64)
-        observations = iter((expected, expected, changed))
-        mapper_fd, ops, _identity, lease = self.block_fixture(
+        observations = iter((expected, expected, expected, changed))
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(
             executable_path, identity_reader=lambda *_: next(observations),
         )
         gate = RecallDDLaunchGate(
             self.root, self.name, mapper_fd=mapper_fd,
             executable_path=executable_path, trusted_executable=trusted,
-            mapper_lifecycle_lease=lease, ops=ops,
+            mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
         )
         self.addCleanup(gate.close)
         gate.admit("writer")
@@ -791,7 +1097,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 executable.write_bytes(data)
                 executable.chmod(0o755)
                 trusted = self.trusted_manifest(executable, data)
-                mapper_fd, ops, _identity, lease = self.block_fixture(executable)
+                mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable)
                 original = ops.read_dm_sysfs_attr
                 ops.read_dm_sysfs_attr = lambda major, minor, key, orig=original, attr=attribute, value=wrong: (
                     value if key == attr else orig(major, minor, key)
@@ -800,7 +1106,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                     RecallDDLaunchGate(
                         self.root, self.name, mapper_fd=mapper_fd,
                         executable_path=executable, trusted_executable=trusted,
-                        mapper_lifecycle_lease=lease, ops=ops,
+                        mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
                     )
 
     def test_mapper_major_minor_mismatch_denies_before_executable_open(self):
@@ -809,15 +1115,26 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable.write_bytes(data)
         executable.chmod(0o755)
         trusted = self.trusted_manifest(executable, data)
-        wrong_device = MapperIdentity(self.name, "SWAPZ-TEST-IDENTITY", 254, 17, "b" * 64)
-        mapper_fd, ops, _identity, lease = self.block_fixture(
-            executable, expected_override=wrong_device,
-        )
-        with self.assertRaisesRegex(DDPolicyDenied, "device number"):
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable)
+        original_fstat = ops.fstat
+
+        def changed_major_minor(fd):
+            info = original_fstat(fd)
+            if fd in ops.block_fds:
+                return SimpleNamespace(
+                    st_mode=info.st_mode, st_rdev=os.makedev(254, 17),
+                    st_uid=info.st_uid, st_dev=info.st_dev, st_ino=info.st_ino,
+                    st_size=info.st_size, st_mtime_ns=info.st_mtime_ns,
+                    st_ctime_ns=info.st_ctime_ns, st_nlink=info.st_nlink,
+                )
+            return info
+
+        ops.fstat = changed_major_minor
+        with self.assertRaisesRegex(DDPolicyDenied, "exact DM object"):
             RecallDDLaunchGate(
                 self.root, self.name, mapper_fd=mapper_fd,
                 executable_path=executable, trusted_executable=trusted,
-                mapper_lifecycle_lease=lease, ops=ops,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
             )
 
     def test_missing_owner_and_mapper_lease_fail_closed(self):
@@ -825,7 +1142,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         data = self.static_elf_fixture()
         path.write_bytes(data)
         path.chmod(0o755)
-        mapper_fd, ops, expected, lease = self.block_fixture(path)
+        mapper_fd, ops, expected, lease, owner = self.block_fixture(path)
         unlocked_path = self.base / "unlocked-owner-lock"
         unlocked_path.touch(mode=0o600)
         unlocked_path.chmod(0o600)
@@ -844,6 +1161,240 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 ops=ops,
             )
 
+    def test_mapper_owner_releases_only_after_exact_remove_and_absence(self):
+        path = self.base / "owner-lifecycle-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        mapper_fd, _file_ops, identity, lease, owner = self.block_fixture(path)
+        operations = owner.operations
+        self.assertEqual(owner.state, MapperLifecycleOwner.ACTIVE)
+        self.assertFalse(owner.cleanup_allowed)
+
+        owner.close_admission()
+        self.assertEqual(owner.state, MapperLifecycleOwner.ADMISSION_CLOSED)
+        owner.finalize_teardown(workers_reaped=True, descriptors_closed=True)
+
+        self.assertEqual(owner.state, MapperLifecycleOwner.RELEASED)
+        self.assertTrue(owner.cleanup_allowed)
+        self.assertFalse(owner.preserve_backing)
+        self.assertIsNone(owner.mapper_fd)
+        self.assertTrue(lease._closed)
+        self.assertEqual(operations.entries, ())
+        remove_index = operations.events.index("remove")
+        self.assertEqual(operations.events[remove_index + 1:], ["inventory"])
+        self.assertEqual(identity, owner.identity)
+        self.assertIsInstance(mapper_fd, int)
+
+    def test_mapper_owner_missing_worker_or_descriptor_evidence_permanently_denies(self):
+        path = self.base / "owner-incomplete-shutdown-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        _mapper_fd, _file_ops, _identity, _lease, owner = self.block_fixture(path)
+        operations = owner.operations
+        owner.close_admission()
+        with self.assertRaisesRegex(MapperOwnerDenied, "not positively quiesced"):
+            owner.finalize_teardown(workers_reaped=False, descriptors_closed=True)
+        self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+        self.assertFalse(owner.cleanup_allowed)
+        self.assertTrue(owner.preserve_backing)
+        self.assertNotIn("remove", operations.events)
+
+    def test_mapper_owner_rejects_duplicate_or_out_of_order_lifecycle_calls(self):
+        path = self.base / "owner-duplicate-operation-dd"
+        path.write_bytes(b"owner policy fixture")
+        _mapper_fd, _file_ops, _identity, _lease, owner = self.block_fixture(path)
+        operations = owner.operations
+        create_count = operations.events.count("create")
+        with self.assertRaisesRegex(MapperOwnerDenied, "invalid in state active"):
+            owner.create()
+        self.assertEqual(operations.events.count("create"), create_count)
+        self.assertTrue(owner.preserve_backing)
+
+    def test_failed_mapping_removal_preserves_backing_and_denies_cleanup(self):
+        path = self.base / "owner-remove-failure-dd"
+        path.write_bytes(b"owner policy fixture")
+        _mapper_fd, _file_ops, _identity, _lease, owner = self.block_fixture(path)
+        operations = owner.operations
+        operations.remove_result = False
+        owner.close_admission()
+        with self.assertRaisesRegex(MapperOwnerDenied, "not confirmed"):
+            owner.finalize_teardown(workers_reaped=True, descriptors_closed=True)
+        self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+        self.assertTrue(owner.preserve_backing)
+        self.assertFalse(owner.cleanup_allowed)
+        self.assertEqual(operations.entries, (owner.identity,))
+
+    def test_mapper_owner_rejects_bad_inventory_and_owner_loss(self):
+        for failure_kind in ("invalid", "duplicate", "owner-lost-during-inventory",
+                             "owner-inspection-error"):
+            with self.subTest(failure_kind=failure_kind):
+                path = self.base / ("owner-inventory-" + failure_kind)
+                data = self.static_elf_fixture()
+                path.write_bytes(data)
+                path.chmod(0o755)
+                _mapper_fd, _file_ops, identity, _lease, owner = self.block_fixture(path)
+                operations = owner.operations
+                if failure_kind == "invalid":
+                    operations.inventory_valid = False
+                elif failure_kind == "duplicate":
+                    operations.entries = (identity, identity)
+                elif failure_kind == "owner-lost-during-inventory":
+                    operations.after_inventory = lambda: setattr(operations, "alive", False)
+                else:
+                    operations.owner_alive = lambda: (_ for _ in ()).throw(
+                        OSError("injected owner status EIO"),
+                    )
+                with self.assertRaises(MapperOwnerDenied):
+                    owner.verify_role(owner.mapper_fd)
+                self.assertEqual(owner.state, MapperLifecycleOwner.DENIED)
+                self.assertFalse(owner.cleanup_allowed)
+                self.assertNotIn("remove", operations.events)
+
+    def test_mapper_owner_rejects_replaced_lock_and_table_identity_change(self):
+        path = self.base / "owner-replacement-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        mapper_fd, _file_ops, identity, lease, owner = self.block_fixture(path)
+        lock_path = lease._lock_path
+        lock_path.unlink()
+        lock_path.touch(mode=0o600)
+        lock_path.chmod(0o600)
+        with self.assertRaisesRegex(MapperOwnerDenied, "lock identity changed"):
+            owner.verify_role(mapper_fd)
+        self.assertTrue(owner.preserve_backing)
+
+        changed_path = self.base / "owner-table-change-dd"
+        changed_path.write_bytes(data)
+        changed_path.chmod(0o755)
+        changed = MapperIdentity(identity.name, identity.uuid, identity.major,
+                                 identity.minor, "c" * 64)
+        observations = iter((identity, changed))
+        changed_fd, _changed_ops, _identity, _changed_lease, changed_owner = self.block_fixture(
+            changed_path, identity_reader=lambda *_: next(observations),
+        )
+        with self.assertRaisesRegex(MapperOwnerDenied, "table fingerprint changed"):
+            changed_owner.verify_role(changed_fd)
+        self.assertFalse(changed_owner.cleanup_allowed)
+
+    def test_mapper_owner_rejects_name_uuid_and_device_inventory_changes(self):
+        for changed_identity in ("name", "uuid", "device"):
+            with self.subTest(changed_identity=changed_identity):
+                path = self.base / ("owner-inventory-change-" + changed_identity)
+                data = self.static_elf_fixture()
+                path.write_bytes(data)
+                path.chmod(0o755)
+                _mapper_fd, _file_ops, identity, _lease, owner = self.block_fixture(path)
+                if changed_identity == "name":
+                    replacement = MapperIdentity(
+                        "swapz-v22-recall-other", identity.uuid, identity.major,
+                        identity.minor, identity.table_sha256,
+                    )
+                elif changed_identity == "uuid":
+                    replacement = MapperIdentity(
+                        identity.name, "SWAPZ-OTHER-UUID", identity.major,
+                        identity.minor, identity.table_sha256,
+                    )
+                else:
+                    replacement = MapperIdentity(
+                        identity.name, identity.uuid, identity.major + 1,
+                        identity.minor, identity.table_sha256,
+                    )
+                owner.operations.entries = (replacement,)
+                with self.assertRaises(MapperOwnerDenied):
+                    owner.verify_role(owner.mapper_fd)
+                self.assertTrue(owner.preserve_backing)
+
+    def test_mapper_owner_rejects_incomplete_operations_interface(self):
+        path = self.base / "owner-incomplete-operations-dd"
+        path.write_bytes(b"owner policy fixture")
+        mapper_fd, _file_ops, identity, lease, _owner = self.block_fixture(path)
+
+        class IncompleteOwnerOperations:
+            def owner_alive(self):
+                return True
+
+            def inventory(self):
+                return MapperInventory(True, ())
+
+            def create_mapping(self, _identity):
+                return mapper_fd
+
+        with self.assertRaisesRegex(MapperOwnerDenied, "remove_mapping is unavailable"):
+            MapperLifecycleOwner(identity, lease, IncompleteOwnerOperations())
+
+    def test_mapper_owner_descriptor_close_failure_denies_removal(self):
+        path = self.base / "owner-close-failure-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        _mapper_fd, file_ops, _identity, _lease, owner = self.block_fixture(path)
+        owner.close_admission()
+        original_close = file_ops.close
+        mapper_fd = owner.mapper_fd
+
+        def fail_mapper_close(fd):
+            if fd == mapper_fd:
+                raise OSError("injected mapper descriptor close failure")
+            original_close(fd)
+
+        file_ops.close = fail_mapper_close
+        with self.assertRaisesRegex(MapperOwnerDenied, "descriptor close failed"):
+            owner.finalize_teardown(workers_reaped=True, descriptors_closed=True)
+        self.assertFalse(owner.cleanup_allowed)
+        self.assertNotIn("remove", owner.operations.events)
+
+    def test_concurrent_mapper_owner_operation_sticks_denial(self):
+        path = self.base / "owner-concurrent-dd"
+        data = self.static_elf_fixture()
+        path.write_bytes(data)
+        path.chmod(0o755)
+        mapper_fd, _file_ops, _identity, _lease, owner = self.block_fixture(path)
+        entered = threading.Event()
+        release = threading.Event()
+        errors = []
+
+        def blocked_owner_check():
+            entered.set()
+            return release.wait(2) is True
+
+        owner.operations.owner_alive = blocked_owner_check
+
+        def first_operation():
+            try:
+                owner.verify_role(mapper_fd)
+            except Exception as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=first_operation)
+        worker.start()
+        self.assertTrue(entered.wait(1), "first owner operation did not enter its gate")
+        with self.assertRaisesRegex(MapperOwnerDenied, "concurrent"):
+            owner.verify_role(mapper_fd)
+        release.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive(), "mapper-owner test thread failed to stop")
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], MapperOwnerDenied)
+        self.assertFalse(owner.cleanup_allowed)
+
+    def test_static_elf_architecture_mismatch_is_rejected(self):
+        path = self.base / "wrong-machine-dd"
+        data = bytearray(self.static_elf_fixture())
+        data[18:20] = (3).to_bytes(2, "little")
+        path.write_bytes(data)
+        path.chmod(0o755)
+        trusted = self.trusted_manifest(path, bytes(data))
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(path)
+        with self.assertRaisesRegex(DDPolicyDenied, "architecture is unsupported"):
+            RecallDDLaunchGate(
+                self.root, self.name, mapper_fd=mapper_fd,
+                executable_path=path, trusted_executable=trusted,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
+            )
+
     def test_dynamic_interpreter_is_not_admitted_for_mapper_io(self):
         executable_path = self.base / "dynamic-dd"
         dynamic = bytearray(self.static_elf_fixture())
@@ -854,12 +1405,12 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable_path.write_bytes(dynamic)
         executable_path.chmod(0o755)
         trusted = self.trusted_manifest(executable_path, bytes(dynamic))
-        mapper_fd, ops, _identity, lease = self.block_fixture(executable_path)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable_path)
         with self.assertRaisesRegex(DDPolicyDenied, "dynamic dd"):
             RecallDDLaunchGate(
                 self.root, self.name, mapper_fd=mapper_fd,
                 executable_path=executable_path, trusted_executable=trusted,
-                mapper_lifecycle_lease=lease, ops=ops,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
             )
 
     def test_missing_executable_memfd_support_denies_mapper_launch(self):
@@ -868,14 +1419,14 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable_path.write_bytes(data)
         executable_path.chmod(0o755)
         trusted = self.trusted_manifest(executable_path, data)
-        mapper_fd, ops, _identity, lease = self.block_fixture(
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(
             executable_path, fail_snapshot=True,
         )
         with self.assertRaisesRegex(DDPolicyDenied, "cannot bind direct dd"):
             RecallDDLaunchGate(
                 self.root, self.name, mapper_fd=mapper_fd,
                 executable_path=executable_path, trusted_executable=trusted,
-                mapper_lifecycle_lease=lease, ops=ops,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
             )
 
     def test_memfd_seal_verification_failure_denies_mapper_launch(self):
@@ -884,7 +1435,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable.write_bytes(data)
         executable.chmod(0o755)
         trusted = self.trusted_manifest(executable, data)
-        mapper_fd, ops, _identity, lease = self.block_fixture(executable)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable)
         original_fcntl = policy_module.fcntl.fcntl
         get_seals = getattr(policy_module.fcntl, "F_GET_SEALS", 1034)
 
@@ -898,7 +1449,7 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 RecallDDLaunchGate(
                     self.root, self.name, mapper_fd=mapper_fd,
                     executable_path=executable, trusted_executable=trusted,
-                    mapper_lifecycle_lease=lease, ops=ops,
+                    mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
                 )
 
     def test_mapper_sysfs_inspection_failure_is_sticky_denial(self):
@@ -907,13 +1458,13 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable.write_bytes(data)
         executable.chmod(0o755)
         trusted = self.trusted_manifest(executable, data)
-        mapper_fd, ops, _identity, lease = self.block_fixture(executable)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable)
         ops.read_dm_sysfs_attr = lambda *_: (_ for _ in ()).throw(OSError("injected sysfs EIO"))
         with self.assertRaisesRegex(DDPolicyDenied, "cannot verify DM identity"):
             RecallDDLaunchGate(
                 self.root, self.name, mapper_fd=mapper_fd,
                 executable_path=executable, trusted_executable=trusted,
-                mapper_lifecycle_lease=lease, ops=ops,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
             )
 
     def test_released_fixture_lifecycle_lock_denies_future_role(self):
@@ -922,11 +1473,11 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
         executable.write_bytes(data)
         executable.chmod(0o755)
         trusted = self.trusted_manifest(executable, data)
-        mapper_fd, ops, _identity, lease = self.block_fixture(executable)
+        mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable)
         gate = RecallDDLaunchGate(
             self.root, self.name, mapper_fd=mapper_fd,
             executable_path=executable, trusted_executable=trusted,
-            mapper_lifecycle_lease=lease, ops=ops,
+            mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
         )
         self.addCleanup(gate.close)
         lease.close()
@@ -949,6 +1500,19 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
 
         with self.assertRaisesRegex(DDPolicyDenied, "cannot bind direct dd"):
             self.make_gate(ops=FailingOps())
+
+        wrapper = self.base / "signed-shell-wrapper-dd"
+        wrapper_bytes = b"#!/bin/sh\nexec /bin/busybox dd \"$@\"\n"
+        wrapper.write_bytes(wrapper_bytes)
+        wrapper.chmod(0o755)
+        trusted = self.trusted_manifest(wrapper, wrapper_bytes)
+        mapper_fd, block_ops, _identity, lease, owner = self.block_fixture(wrapper)
+        with self.assertRaisesRegex(DDPolicyDenied, "trusted ELF"):
+            RecallDDLaunchGate(
+                self.root, self.name, mapper_fd=mapper_fd,
+                executable_path=wrapper, trusted_executable=trusted,
+                mapper_lifecycle_lease=lease, mapper_owner=owner, ops=block_ops,
+            )
 
     def test_executable_path_replacement_cannot_change_pinned_executable(self):
         pinned_path = self.base / "trusted-dd"
@@ -974,11 +1538,11 @@ class PinnedDDLaunchGateTests(unittest.TestCase):
                 executable.write_bytes(contents)
                 executable.chmod(0o755)
                 trusted = self.trusted_manifest(executable, contents)
-                mapper_fd, ops, _identity, lease = self.block_fixture(executable)
+                mapper_fd, ops, _identity, lease, owner = self.block_fixture(executable)
                 gate = RecallDDLaunchGate(
                     self.root, self.name, mapper_fd=mapper_fd,
                     executable_path=executable, trusted_executable=trusted,
-                    mapper_lifecycle_lease=lease, ops=ops,
+                    mapper_lifecycle_lease=lease, mapper_owner=owner, ops=ops,
                 )
                 self.addCleanup(gate.close)
                 gate.admit("writer")

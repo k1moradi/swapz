@@ -2,16 +2,16 @@
 
 **Status: production mapper admission remains disabled.** The normal pidfd
 service CLI still admits only its fixed `sleep` and `exit` test workers. No
-production recall integration or mapper I/O is enabled. The source-only
-changes below provide stricter bootstrap contracts and mock-tested rejection
-paths; they do not supply the separately controlled privileged fixture owner
-or a real GNU trust anchor required to turn that path on.
+production recall integration or mapper I/O is enabled. The trusted GNU
+bootstrap and mapper owner below are source-only policy components. Their
+tests use temporary files and injected fake DM operations; they do not prove a
+real signing provenance chain or kernel-enforced exclusive DM ownership.
 
 ## Fixed role interface
 
-The direct-I/O policy accepts only the five fixture roles. IPC supplies a role
-string; it cannot choose argv, executable, environment, working directory,
-numeric PID, mapper name, source path, or output path.
+Direct-I/O policy accepts only five fixture roles. IPC supplies a role string;
+it cannot choose argv, executable, environment, working directory, numeric
+PID, mapper name, source path, or output path.
 
 | Role | Fixed operation |
 | --- | --- |
@@ -21,119 +21,160 @@ numeric PID, mapper name, source path, or output path.
 | `a2` | Concurrent read of page 0 to `read-a2`. |
 | `b2` | Concurrent read of page 5 to `read-b2`. |
 
-The writer must be admitted before any reader; each role is one-use. The
-service's ordinary CLI and its fixed test-worker allowlist are unchanged.
+The writer must be admitted before any reader, and each role is one-use. The
+ordinary service CLI and its fixed test-worker allowlist are unchanged.
 
-## GNU executable provenance
+## GNU trust bootstrap
 
-`RecallDDLaunchGate` reuses the existing pinned-descriptor hashing and sealed
-executable memfd implementation. For a real block mapper, a bare
-`expected_executable_sha256` string is rejected. The digest must come from a
-strict signed manifest passed through `TrustedGNUCoreutilsDD.from_signed_manifest`.
-The signed payload binds all of these fields:
+`TrustedGNUCoreutilsDD.from_trusted_bootstrap()` accepts no caller-supplied
+manifest, digest, key, verifier, or path. It reads the detached manifest and
+signature from the fixed root-controlled directory
+`/etc/swapz/trust/gnu-coreutils-dd/`. The only permitted entries are
+`manifest.json`, `manifest.sig`, and an optional `REVOKED` marker. It reads the
+separately provisioned public key from the fixed package-data path
+`/usr/share/swapz/trust/gnu-coreutils-release-ed25519.pub`. Every path component is
+opened descriptor-relatively with `O_NOFOLLOW`; directories and regular files
+must be root-owned, single-link where applicable, and not group/world writable.
+Files are bounded, checked against their open descriptors, read from pinned
+descriptors, and closed successfully. Any missing, revoked, changed,
+malformed, or uninspectable item denies admission.
 
-```json
-{
-  "format": 1,
-  "vendor": "GNU Project",
-  "package": "coreutils",
-  "binary": "dd",
-  "version": "<trusted build version>",
-  "executable": "/absolute/path/to/dd",
-  "sha256": "<binary digest>",
-  "source_sha256": "<GNU release source digest>",
-  "linkage": "static"
-}
+The signature adapter verifies an Ed25519 detached signature using the fixed
+`/usr/bin/openssl` executable opened without following symlinks and held by an
+inherited descriptor for the verifier subprocess. The manifest, signature,
+and key bytes are passed through sealed memfds; no shell or PATH search selects
+the verifier. The OpenSSL child receives only those descriptors, a fixed
+argument vector, a minimal environment, and a five-second timeout. It rejects
+SUID/SGID and file-capability metadata. Verification, descriptor-close, or
+timeout errors all fail closed. The old API that accepted a caller verifier is
+removed; manifest parsing follows successful verification of the fixed files.
+
+The expected manifest schema remains strict and binds the named GNU coreutils
+`dd`, version, executable path and SHA-256, source archive SHA-256, and static
+linkage. A manifest label and matching binary digest do not establish GNU
+semantics by themselves. The installer of the Ed25519 trust key and signer
+must independently establish the source/build chain before signing this
+manifest. GNU release announcements publish source archives, detached GPG
+signatures, checksums, and the release-signing key fingerprint; the bootstrap
+operator must verify the exact release artifacts against GNU's published
+fingerprint and checksum records ([example release announcement](https://lists.gnu.org/archive/html/coreutils-announce/2026-02/msg00000.html),
+[GNU Coreutils archive](https://ftp.gnu.org/gnu/coreutils/)). The code here does
+not itself validate GNU's GPG signature, build the source, or attest the
+compiler and build environment. A complete provenance record must also bind
+the source revision, build recipe, toolchain, static-link options, and output
+binary; an independently reproducible build or equivalent trusted build
+attestation is still required. The Ed25519 public key must be provisioned
+through a separate trusted administrator/package channel, with its fingerprint
+checked out of band. Installing a new key beside a manifest and treating that
+key as trusted would not meet this contract.
+
+No verified GNU static binary, GNU release verification record, reproducible
+build record, or production signing key is provisioned on this host or shipped
+in the repository. The host `/usr/bin/dd` is not accepted as provenance merely
+because of its pathname. The direct mapper path therefore remains unavailable.
+Disposable Ed25519 keys and synthetic ELF fixtures in the regression suite
+test signature mechanics only; they are not production authentication.
+
+### OpenSSL and direct-exec compatibility assumptions
+
+The verifier pins the OpenSSL executable descriptor for its subprocess, but
+does not seal or independently hash the host's OpenSSL installation. OpenSSL
+is dynamically linked on the tested host; its ELF interpreter, shared
+libraries, and provider modules are trusted as part of the root-controlled
+host operating-system package set. `OPENSSL_CONF` is fixed to `/dev/null`, and
+the application does not permit an IPC caller to select a provider, config,
+binary, or library path. A deployment that cannot trust and maintain that OS
+closure must replace this bootstrap verifier with a separately reviewed
+implementation or keep admission disabled.
+
+The proposed direct worker must be a little-endian static ELF for the same
+architecture as the supervisor: currently only x86-64 and AArch64 are
+recognized. The launch gate hashes the pinned executable, checks its ELF
+machine and absence of `PT_INTERP`, then copies it to a write-sealed executable
+memfd requiring `MFD_EXEC` and `F_SEAL_EXEC`. Unsupported kernels, architectures,
+memfd policy, or seals deny admission. The existing child seccomp setup permits
+`execve` of the already selected descriptor-backed image but blocks process
+creation, credential changes, namespace changes, and asynchronous I/O. This is
+an architectural compatibility review, not runtime evidence for an actual GNU
+static build: no verified GNU artifact has been launched under that seccomp
+profile. The future qualification must run the exact trusted build through the
+real gate against temporary ordinary files before mapper admission is
+considered.
+
+## Exact mapper owner state controller
+
+`MapperLifecycleOwner` represents one exact mapper identity for one fixture
+session: grammar-checked name, UUID, major/minor, and table SHA-256. It requires
+a pre-held `MapperLifecycleLease` and injected trusted-owner operations. Its
+state sequence is:
+
+```text
+NEW
+  -> check owner + lease + complete DM inventory
+  -> create exact mapping, retain its descriptor
+  -> verify descriptor and exact inventory
+ACTIVE
+  -> recheck owner, lease, descriptor, UUID, device and table before each role
+  -> close role admission
+ADMISSION_CLOSED
+  -> require positive worker-reaped and role-descriptor-closed evidence
+  -> close retained mapper descriptor
+  -> normal exact removal
+  -> independently confirm the bound identity is absent
+  -> release the lease
+RELEASED (cleanup_allowed)
 ```
 
-The verifier callback is deliberately mandatory and has no default. Trusted
-bootstrap code must verify the detached signature against a separately
-controlled public key or another independently managed build/package trust
-root. It must not compute the executable's digest and then sign or accept that
-digest as trust configuration. Rootless tests use a fake signature verifier
-and synthetic ELF data; those tests prove schema and fail-closed behavior,
-not GNU package identity. No trusted GNU manifest or signing key is shipped
-by this repository, so the live mapper path stays unavailable.
+Every failed or ambiguous owner check, inventory, identity comparison,
+descriptor operation, removal, or lease operation latches `DENIED`. The owner
+never reports cleanup permission after denial. Duplicate names, UUIDs or
+device numbers are rejected. Only the exact configured identity is passed to
+the injected create/remove operations; IPC never selects a device. The model
+also rejects a concurrent operation and rechecks owner/lease state on both
+sides of injected inventory operations.
 
-The gate opens the exact absolute manifest path without `PATH` lookup, checks
-the pinned descriptor, rejects setuid/setgid bits and any file-capability
-xattr, hashes the pinned bytes against the signed digest, and creates the
-existing write-sealed executable memfd snapshot. It also rechecks the source
-descriptor and path identity before each role. A replaced pathname or
-in-place mutation closes admission permanently. A path check is not treated
-as a substitute for the retained descriptor.
+This is an injected state controller, not a privileged Device Mapper
+implementation. Its fake operations are ordinary test code. The flock lease is
+cooperative: it detects a replaced lock file and an owner that released the
+lock, but it cannot stop a privileged process that ignores the protocol. Table
+fingerprints detect observed changes but cannot prevent a privileged table
+reload between verification and use. A real fixture owner must acquire its
+exclusive lifecycle authority before mapping creation and be the only process
+authorized to create, reload, rename, or remove that one disposable mapping.
+It must retain root-controlled ownership of the trusted service and DM control
+interface, prohibit other actors from issuing lifecycle ioctls, bind a single
+fixture identity, and hold authority through verified removal. Merely running
+in a mount or device namespace or holding an ordinary flock does not prove that
+no other privileged process can alter the table. Until that credential and
+exclusive-control boundary is implemented and audited, live mapper admission
+must remain disabled.
 
-Only little-endian static ELF is admitted for mapper I/O. A dynamic executable
-would resolve its ELF interpreter (`PT_INTERP`) and shared libraries from the
-host at exec time; hashing and sealing only `dd` would not pin those objects.
-This prototype rejects dynamic GNU coreutils builds rather than assuming the
-loader and library closure are trusted. A future design could admit a
-dynamically linked build only after a separately reviewed system-image or
-package-closure trust mechanism binds the interpreter and every loaded
-library through launch. A matching executable hash alone does not prove GNU
-semantics; the signed provenance must identify an actual GNU coreutils build.
+The controller's `workers_reaped` and `descriptors_closed` inputs are required
+positive evidence, but process reaping alone does not prove that previously
+submitted kernel block I/O has drained. Backing teardown also requires the
+separate DM I/O-drain barrier documented in
+[`recall-io-drain.md`](recall-io-drain.md). No operation in this controller
+executes `dmsetup`, opens a real `/dev/mapper` node, or removes a real mapping.
 
-The supervisor still starts the direct executable behind its pidfd gate and
-passes only explicitly approved close-on-exec descriptors. No shell or
-background wrapper is added. No numeric-PID signaling fallback exists.
+## Remaining process and storage boundaries
 
-## Mapper identity and lifecycle
-
-`open_test_mapper_fd` requires an explicit mapper name matching
-`swapz-v22-recall-[A-Za-z0-9_-]{1,48}` and a `MapperLifecycleLease` from trusted
-fixture bootstrap. The retained descriptor must be a block device whose
-major/minor matches the fixture identity. The helper checks kernel sysfs
-`dm/name`, `dm/uuid`, and `dev`; before every role the lease's identity reader
-must also return the exact mapper name, UUID, device number, and SHA-256 of the
-active DM table.
-
-The lease is backed by a private, single-link fixture lock file. The bootstrap
-must acquire its exclusive `flock` before creating the mapping, retain it
-through every role, and serialize all fixture table, rename, removal, and
-recreation operations through that lock. The policy opens the lock path a
-second time to verify that the owner lock remains held; if the lock is
-released, replaced, unreadable, or cannot be independently checked, admission
-is denied. A mismatch in UUID, device number, or table fingerprint permanently
-closes role admission.
-
-A table fingerprint detects an observed change. It does not prevent a
-privileged actor from replacing a table between the check and the worker's
-open. The `flock` is cooperative, not a kernel-enforced DM table lock. The
-exclusive-owner assumption is valid only when a separately controlled
-privileged fixture owner is the sole authority allowed to create, reload,
-rename, or remove this disposable mapping and every such operation obeys the
-lease. That owner and its signed GNU build manifest are not implemented here;
-the normal service cannot construct this configuration from IPC.
-
-The table identity reader must query the live kernel table (for example,
-through a read-only `DM_TABLE_STATUS`/table-status operation) and hash a
-canonical, key-safe representation. It must reject incomplete, ambiguous, or
-changing output. The sysfs name/UUID/dev checks alone do not identify table
-contents. Tests inject a fake reader over ordinary temporary files and never
-open `/dev/mapper`. The regular-file mapper branch is accepted only with an
-explicit injected synthetic verifier for rootless tests. The default mapper
-verifier rejects regular files; this test seam is not a production mapper
-configuration.
-
-## Remaining process and descriptor boundaries
-
-The fixed direct child is the intended I/O process; retained pidfds identify
-and signal that direct process. pidfds do not contain arbitrary descendants or
-automatically kill workers after supervisor crash. The prior seccomp process
-creation restrictions and parent-death handling remain relevant, but neither
-removes the need for a separately verified process containment and kernel
-I/O-drain barrier. A service crash, lost response, descriptor close error,
-worker lifecycle error, or unverified mapper identity means preserve the
-backing image.
+The direct worker is intended to be the actual I/O process, with no shell
+wrapper or background function. Retained pidfds bind signals to that direct
+child, but do not contain arbitrary descendants or automatically kill workers
+after supervisor crash. Seccomp restrictions and parent-death handling remain
+useful constraints, not a complete process-tree or kernel-I/O-drain proof. A
+service crash, lost response, lifecycle error, close error, unverified mapper
+identity, or unavailable drain evidence means preserve the backing image.
 
 ## Tests and qualification limits
 
-`python3 tests/runtime/recall-dd-allowlist-test.py -v` exercises signed-manifest
-parsing with a fake verifier, synthetic static/dynamic ELF, digest mismatch,
-capability and setid rejection, pinned path mutation/replacement, sealed
-snapshots, fake sysfs identities, the fixture lock, table fingerprint changes,
-and sticky denial. Existing direct-`dd` worker integration uses only temporary
-regular files. These are source-only and rootless checks. They do not prove
-that a supplied signature key is trusted, that a particular executable is GNU
-coreutils, that a privileged mapper owner enforces the cooperative lock, or
-that real DM/loop I/O has drained.
+`python3 tests/runtime/recall-dd-allowlist-test.py -v` checks detached
+Ed25519 verification with disposable test keys, wrong-key and malformed
+manifest rejection, the separately provisioned-key path, revoked or missing
+configuration, synthetic static/dynamic/wrong-architecture ELF, digest
+mismatch, setid and capability rejection, pinned path mutation/replacement,
+sealed snapshots, fake DM identities, lock replacement, owner loss, inventory
+ambiguity, concurrent lifecycle calls, descriptor-close failure, and exact
+normal-removal/absence ordering. These rootless checks do not authenticate a
+GNU artifact or prove real exclusive DM authority. Existing direct-`dd` worker
+integration uses only temporary regular files; it is not a mapper test.
