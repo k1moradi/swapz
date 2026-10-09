@@ -827,3 +827,39 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       and later distinct physical media testing. Strategy and batch
       remain **UNDETERMINED** without repeated valid lower-device
       drain and read-p99 measurements.
+
+### 2026-10-09 — Fixed synthetic NBD server, stable pidfd ownership
+
+- [x] Implement rootless `nbd-pidfd-owned-session.py`, which launches
+      **one fixed synthetic child** over an inherited private AF_UNIX
+      socket, pins it with `os.pidfd_open`, verifies a nonce-bound
+      READY packet, delivers TERM/KILL only through the retained pidfd,
+      and uses its exact `Popen.wait` result. No arbitrary executable,
+      PID, NBD device or command arrives via an IPC field.
+- [x] Qualify 19 actual separate-process rootless tests for normal
+      verified exit, wrong/absent/delayed readiness, abort, exit
+      failure, SIGTERM timeout/ignore, failed pidfd signal,
+      missing pidfd APIs, lost pidfd acquisition after spawn,
+      reused lifecycle calls, forged worker modes and path safety.
+- [x] Preserve all synthetic backing in **every** result, including
+      a zero-exit process; explicit return flags never imply real
+      NBD detach, DM drain or backing cleanup.
+- [x] Run the same 19-case suite in rootless NBD, teardown and
+      combined GitHub workflows, all PASS at executable revision
+      `3a039d7207c301f8b12a7aac4bd98bb8bc51a51c`:
+      https://github.com/k1moradi/swapz/actions/runs/37913643602
+      https://github.com/k1moradi/swapz/actions/runs/37913643708
+      https://github.com/k1moradi/swapz/actions/runs/37913643598
+- [ ] Prove real server descendants and parent-crash containment,
+      independent server binary/argv and NBD session identity,
+      fail-closed kernel NBD disconnect and device absence, and
+      proper integration with the real DM suspend/drain evidence
+      chain under a separately controlled privileged fixture.
+- [ ] The currently disabled `SWAPZ_BENCH_BACKEND=nbd` must
+      **remain disabled** until the entire actual server and kernel
+      lifecycle is reviewed and separately authorized on disposable
+      virtual resources; passing rootless pidfd mock tests is
+      insufficient to re-enable it.
+- [ ] Continue trusted GNU provenance and exclusive mapper owner
+      work separately; actual V2.2 lower-device throughput, swap-in
+      read-p99 plateau, strategy winner and batch remain UNDETERMINED.
