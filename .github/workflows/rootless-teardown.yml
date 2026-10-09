@@ -43,6 +43,8 @@ on:
       - 'tests/runtime/recall-io-plan-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
       - 'tests/runtime/live-gc-latency-analyze.py'
+      - 'tests/runtime/v22-drain-plateau-analyze.py'
+      - 'tests/runtime/v22-drain-plateau-analyze-test.py'
   pull_request:
     paths:
       - '.github/workflows/rootless-teardown.yml'
@@ -200,5 +202,11 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless offline physical drain plateau evidence regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/v22-drain-plateau-analyze.py tests/runtime/v22-drain-plateau-analyze-test.py
+          timeout 25s python3 -B tests/runtime/v22-drain-plateau-analyze-test.py -v
       - name: Offline GC latency analyzer regression
         run: python3 tests/runtime/live-gc-latency-analyze-test.py -v
