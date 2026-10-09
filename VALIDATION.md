@@ -2579,3 +2579,62 @@ qualifying its complete process/cleanup lifecycle.
 No real DM, loop, NBD attachment, swap, module operation, pressure
 fixture, fio/device benchmark, physical I/O or reboot was performed.
 See `docs/recall-io-drain-mock-integration.md`.
+
+## 2026-10-09 — Real pidfd-owned synthetic NBD-like server process
+
+**Tested executable-source revision:**
+`3a039d7207c301f8b12a7aac4bd98bb8bc51a51c`.
+
+A dedicated **test-only** exact-child service controller was added at
+`tests/runtime/nbd-pidfd-owned-session.py`, with a single fixed
+rootless mock child, `nbd-pidfd-owned-mock-child.py`.
+Unlike the earlier static preservation guards, the new tests actually
+start a separate non-root Python process, obtain a retained pidfd,
+exchange a nonce-bound exact `SOCK_SEQPACKET` READY message,
+deliver SIGTERM through `signal.pidfd_send_signal`, and verify the
+exact owning `Popen.wait()` exit code. No reusable-PID signaling
+fallback is provided. An abnormal shutdown escalates through that
+same retained pidfd to SIGKILL and requires an owned reap.
+
+**19 rootless adversarial tests** exercise a zero-exit stop, early
+server exit, wrong/missing readiness, start timeout, ignored SIGTERM,
+nonzero exit, spontaneous post-READY exit, failed pidfd signaling,
+missing pidfd APIs, pidfd acquisition failure **after the owned child
+has started** (resolved by closing the private channel and observing
+the child's EOF-driven exit), illegal user-supplied mode/path,
+non-private/symlinked fixture, repeated stop, premature context exit,
+private diagnostic logs, and a static check prohibiting raw-PID
+signal and device attachment code.
+
+The controller's successful return explicitly labels
+`exact_owned_process_reaped=True` and `zero_exit=True`, but
+**`kernel_nbd_disconnected=False`, `dm_io_drained=False` and
+`backing_cleanup_authorized=False`**. A parent-crash
+descendant-containment guarantee, real NBD association/disconnect,
+kernel request quiescence, and exclusive device identity are not
+established. The live `SWAPZ_BENCH_BACKEND=nbd` gate remains
+disabled, as does its numeric-PID shutdown path.
+
+**All three exact-revision GitHub source-only workflows passed:**
+
+- Rootless NBD safety:
+  https://github.com/k1moradi/swapz/actions/runs/37913643602
+- Rootless teardown safety:
+  https://github.com/k1moradi/swapz/actions/runs/37913643708
+- Rootless combined source qualification:
+  https://github.com/k1moradi/swapz/actions/runs/37913643598
+
+The combined job identifies
+`COMBINED_TESTED_HEAD=3a039d7207c301f8b12a7aac4bd98bb8bc51a51c`,
+shows `Ran 19 tests` for the new suite with actual `ok` results,
+`PIDFD_IPC_REPEAT 10/10: PASS`,
+`PRESSURE_TOKEN_REPEAT 10/10: PASS` and
+`COMBINED_NBD_STRESS 25/25: PASS`.
+An initial rootless test revision rejected `PosixPath` instances
+using an incorrect exact class check; the check was corrected before
+the fully passing same-source CI. There are no skipped tests in
+the validated 19-case NBD mock result.
+
+No real NBD attachment, DM/loop command, swap, kernel-module
+operation, fio/device benchmark, actual block I/O or physical-device
+operation occurred. See `docs/nbd-pidfd-owned-rootless.md`.
