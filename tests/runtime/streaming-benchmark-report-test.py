@@ -229,6 +229,21 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn('streaming-benchmark-report.py" --results "$RESULTS"', self.script)
         self.assertIn("time.monotonic_ns()", self.script)
 
+    def test_unsafe_nbd_mode_fails_closed_before_any_backing_creation(self):
+        source = self.script
+        gate = 'if [[ "$BACKEND_KIND" == nbd ]]; then\n  echo "ERROR: NBD backend disabled:'
+        self.assertIn(gate, source)
+        self.assertLess(source.index(gate), source.index('TMP=$(mktemp -d'))
+        self.assertNotIn('NBD_PID=$!', source)
+        self.assertNotIn('kill -0 "$NBD_PID"', source)
+        self.assertNotIn('kill -TERM "$NBD_PID"', source)
+        teardown = (HERE / "streaming-benchmark-teardown.sh").read_text(
+            encoding="utf-8")
+        self.assertNotIn('kill -TERM "$NBD_PID"', teardown)
+        self.assertNotIn('kill -0 "$NBD_PID"', teardown)
+        self.assertIn('NBD backend teardown requires a verified pidfd-owned server',
+                      teardown)
+
     def test_reporter_source_has_no_live_device_commands(self):
         content = REPORTER_PATH.read_text(encoding="utf-8")
         self.assertNotIn("subprocess.", content)
