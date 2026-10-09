@@ -139,7 +139,7 @@ class StreamingReportingTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 self.read([value])
-        for value in ("", "not json\n", "\n", '{"backend":Infinity}\n"):
+        for value in ("", "not json\n", "\n", '{"backend":Infinity}\n'):
             with self.subTest(value=value):
                 self.jsonl.write_text(value, encoding="utf-8")
                 with self.assertRaises(ValueError):
