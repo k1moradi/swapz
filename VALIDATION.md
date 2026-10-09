@@ -3255,3 +3255,54 @@ do **not** treat this later documentation-only SHA as separately exercised
 by all three workflows. No real DM, loop, NBD, swap, physical I/O,
 backing deletion, or production privilege operation was performed.
 V2.2 strategy and batch-size winner remain **UNDETERMINED**.
+
+
+## 2026-10-09 — Source-only exact-revision CI evidence inventory
+
+**Executable source commit:** `f9ee2ce35dfb84e78bd26ee2420b1588213af35f`
+([commit](https://github.com/k1moradi/swapz/commit/f9ee2ce35dfb84e78bd26ee2420b1588213af35f)).
+
+ChatGPT independently implemented:
+- `tests/runtime/rootless-ci-evidence-inventory.py`: a standard-library-only,
+  bounded regular-file/JSON validator for caller-supplied GitHub-shaped metadata
+  of the exact three mandatory rootless workflows. It checks source SHA,
+  run/job identity and attempt, ordered step metadata, selected safety step
+  successes, and contradictory/missing/skipped/canceled outcomes.
+- `tests/runtime/rootless-ci-evidence-inventory-test.py`: 33 rootless tests,
+  including duplicate JSON keys, symlink and oversized-file rejection,
+  mixed SHA/attempts, missing/failed mandatory tests, and fabricated
+  step-name PASS claims.
+- `docs/rootless-ci-evidence-inventory.md`: exact input schema, usage,
+  limits and explicit negative authorization outcomes.
+- Both joint workflows run the new suite under a 25-second timeout; the
+  static workflow contract gates its execution and includes a new negative
+  mutation test. The workflow contract increased from 12 to **13** tests.
+
+**All three GitHub workflows passed against this exact executable SHA**:
+- [Combined run 38001273677](https://github.com/k1moradi/swapz/actions/runs/38001273677): PASS.
+- [Teardown run 38001273697](https://github.com/k1moradi/swapz/actions/runs/38001273697): PASS.
+- [Standalone NBD run 38001273692](https://github.com/k1moradi/swapz/actions/runs/38001273692): PASS.
+
+The two joint workflow logs recorded **33 inventory tests passed**
+and **13 workflow-contract tests passed**, and their new inventory steps
+have successful completed job-step metadata. The combined workflow also
+recorded `COMBINED_TESTED_HEAD=f9ee2ce35dfb84e78bd26ee2420b1588213af35f`,
+`RECALL_DIRECT_ROLE_REPEAT 6/6: PASS`,
+`FIXTURE_OWNER_BROKER_REPEAT 3/3: PASS`, and
+`COMBINED_NBD_STRESS 25/25: PASS`.
+
+**Qualification boundary:** A positive inventory verdict establishes only
+internally consistent *caller-supplied GitHub-shaped metadata*. It does
+not authenticate the provider, runner, worker execution, physical device,
+kernel drain, benchmark collector, or backing release. Repetition counts
+remain unverified as independent execution attestations. All production
+authorization flags are hard-coded false and the V2.2 strategy/batch
+winner remains **UNDETERMINED**. No privileged kernel, loop, NBD, swap,
+device-pressure, physical benchmark, or destructive cleanup operations
+were run.
+
+Codex concurrently owns the unresolved broker finalization-denial race
+([issue #2](https://github.com/k1moradi/swapz/issues/2)); this contribution
+does not edit that implementation. This validation-only commit comes after
+the executable source commit, and should not be conflated with the exact
+tested SHA recorded above.

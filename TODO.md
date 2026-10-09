@@ -1162,7 +1162,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       at `c166228e7c7a5aa3dce1a3bf7df8e236ca7be177`, but backing-release
       permission being false does not make contradictory successful
       finalization safe. Codex owns the fix and strong regression.
-- [ ] **Standalone CI artifact traceability:** record exact
+- [x] **Standalone CI artifact traceability:** record exact
       workflow/source tree identity and selected safety-test
       marker inventory in a machine-readable, bounded source-only
       report; do not mistake the report for cryptographic
@@ -1186,7 +1186,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       Its contract now includes a negative test for dropped
       joint-workflow triggers (**12/12 tests** in each
       exact-source workflow).
-- [ ] Develop a deterministic **source-only CI evidence
+- [x] Develop a deterministic **source-only CI evidence
       inventory** recording SHA, workflow name and required
       test completion markers with explicit limitations:
       no locally generated file can attest trusted
