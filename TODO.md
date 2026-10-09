@@ -720,3 +720,37 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       tests and, separately, physical benchmarks. V2.2 strategy and batch
       remain **UNDETERMINED**; do not substitute the rootless CI results
       for measured kernel performance.
+
+### 2026-10-09 — Rootless evidence gate for V2.2 batch/strategy choice
+
+- [x] Implement `v22-drain-plateau-analyze.py` as an offline
+      strict-schema, no-device benchmark evidence validator, using
+      **independent lower-write sector deltas** rather than logical fio
+      completion for the drain throughput numerator.
+- [x] Implement 15 rootless selftests for candidate selection, 97%
+      high-batch plateau requirement, 10% worst-repeat read-p99,
+      incomplete/noisy sweeps, insufficient samples, impossible sector
+      deltas, failed safety flags, contradictory/duplicate JSON, and
+      explicit synthetic-vs-measured result classification.
+- [x] Run source-only regression in both mandatory GitHub workflows
+      at exact executable revision
+      `bca327fd11d841870715171693faec2abc054838`:
+      https://github.com/k1moradi/swapz/actions/runs/37907017405
+      https://github.com/k1moradi/swapz/actions/runs/37907017408
+- [x] Document current `streaming-benchmark.sh` performance
+      mislabeling: `drained_write_mib_s` is logical fio bytes /
+      elapsed time, **not** physical lower-device bytes /
+      measurement window. Never select a V2.2 winner using that
+      field without independent physical-counter qualification.
+- [ ] Separately review and instrument the *authorized virtual*
+      benchmark collection path to capture verified lower-device
+      sectors, completed I/O count, monotonic drain window, exclusive
+      backend ownership, kernel I/O-drain proof, raw read-latency
+      samples/count and robust experiment metadata.
+- [ ] Rerun the nine-size strategy sweep with >=3 independent
+      calibrated runs each under approved disposable virtual
+      stacks; do not declare a plateau with missing, unstable or
+      p99-incompatible data.
+- [ ] Obtain distinct operator approval before physical media;
+      V2.2 strategy, batch and throughput plateau remain
+      **NOT ESTABLISHED** by rootless testing.
