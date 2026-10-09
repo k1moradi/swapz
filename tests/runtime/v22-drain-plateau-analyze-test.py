@@ -70,6 +70,22 @@ def sweep(*, evidence="synthetic", backend="synthetic-backend",
     ]
 
 
+def as_v2(row, *, histogram=None):
+    """Synthetic exact-value latency distribution, not actual read traces."""
+    row = dict(row)
+    row["schema"] = analyzer.SCHEMA_V2
+    row["run_id"] += "-v2"
+    row["read_latency_counts"] = (
+        histogram if histogram is not None
+        else [[row["read_p99_ns"], row["read_count"]]]
+    )
+    return row
+
+
+def sweep_v2(**kwargs):
+    return [as_v2(row) for row in sweep(**kwargs)]
+
+
 class OfflineDrainPlateauTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="swapz-plateau-rootless-")
@@ -95,12 +111,23 @@ class OfflineDrainPlateauTests(unittest.TestCase):
         self.assertEqual(item["points"][-1]["batch_kib"], 1024)
         self.assertAlmostEqual(item["points"][-1]["lower_drained_mib_s_median"], 20.0, places=3)
 
-    def test_provisional_kernel_evidence_requires_independent_review(self):
+    def test_legacy_v1_kernel_self_report_never_provides_provisional_selection(self):
         report = self.analyze(sweep(evidence="kernel"))
         item = report["series"][0]
+        self.assertEqual(item["candidate_batch_kib"], 64)
+        self.assertIsNone(item["provisional_selection_kib"])
+        self.assertIn("UNVERIFIED P99", item["qualification"])
+        self.assertIn("SELF-REPORTED", item["read_p99_integrity"])
+        self.assertIn("self-reported", item["reason"].lower())
+
+    def test_v2_exact_latency_counts_recompute_provisional_kernel_p99(self):
+        report = self.analyze(sweep_v2(evidence="kernel"))
+        item = report["series"][0]
+        self.assertEqual(item["schema"], analyzer.SCHEMA_V2)
         self.assertEqual(item["provisional_selection_kib"], 64)
         self.assertIn("INDEPENDENT EVIDENCE REVIEW", item["qualification"])
-        self.assertIn("self-reported", item["reason"].lower())
+        self.assertIn("RECOMPUTED", item["read_p99_integrity"])
+        self.assertIn("unauthenticated", item["reason"])
 
     def test_worst_run_p99_guards_small_fast_batch(self):
         rows = sweep()
@@ -221,6 +248,121 @@ class OfflineDrainPlateauTests(unittest.TestCase):
                     analyzer.load_rows(self.path)
         self.path.write_bytes(b"x" * (analyzer.MAX_INPUT_BYTES + 1))
         with self.assertRaisesRegex(ValueError, "too large"):
+            analyzer.load_rows(self.path)
+
+    def test_nearest_rank_histogram_changes_p99_at_exact_99pct_boundary(self):
+        # 10,000 samples means nearest-rank p99 is exactly the 9,900th.
+        row = as_v2(observation())
+        row["read_count"] = 10_000
+        row["read_p99_ns"] = 1_000_000
+        row["read_latency_counts"] = [[1_000_000, 9900], [2_000_000, 100]]
+        self.assertEqual(analyzer.validate(row, 1), row)
+        changed = copy.deepcopy(row)
+        changed["read_latency_counts"] = [[1_000_000, 9899], [2_000_000, 101]]
+        with self.assertRaisesRegex(ValueError, "recomputed nearest-rank p99"):
+            analyzer.validate(changed, 1)
+        changed["read_p99_ns"] = 2_000_000
+        self.assertEqual(analyzer.validate(changed, 1), changed)
+
+    def test_v2_false_p99_and_fabricated_sample_count_rejected(self):
+        for changed in (
+            {"read_p99_ns": 1_100_000},
+            {"read_count": 12_001},
+            {"read_count": 11_999},
+            {"read_latency_counts": [[1_000_000, 11_999]]},
+        ):
+            with self.subTest(changed=changed):
+                row = as_v2(observation())
+                row.update(changed)
+                with self.assertRaisesRegex(ValueError, "read_count differs|recomputed nearest-rank"):
+                    self.analyze([row])
+
+    def test_v2_histogram_strictly_ordered_positive_exact_latency_bins(self):
+        malformed = (
+            [], "not histogram", None, True, {},
+            [[1_000_000, 6000], [1_000_000, 6000]],
+            [[2_000_000, 6000], [1_000_000, 6000]],
+            [[0, 12_000]], [[-1, 12_000]],
+            [[analyzer.MAX_NS + 1, 12_000]],
+            [[1_000_000, -1]], [[1_000_000, 0]],
+            [[1_000_000, True]], [[True, 12_000]],
+            [[1_000_000, 12_000.0]],
+            [(1_000_000, 12_000)], [[1_000_000]],
+            [[1_000_000, 12_000, "extra"]],
+            [[1_000_000, analyzer.MAX_READ_COUNT + 1]],
+            [[i, 1] for i in range(1, analyzer.MAX_LATENCY_BINS + 2)],
+        )
+        for value in malformed:
+            with self.subTest(value=str(value)[:75]):
+                row = as_v2(observation())
+                row["read_latency_counts"] = value
+                with self.assertRaisesRegex(ValueError, "latency|read_count"):
+                    self.analyze([row])
+
+    def test_v2_histogram_cannot_overflow_aggregate_sample_ceiling(self):
+        row = as_v2(observation())
+        row["read_count"] = analyzer.MAX_READ_COUNT
+        row["read_latency_counts"] = [
+            [100, analyzer.MAX_READ_COUNT], [200, 1],
+        ]
+        with self.assertRaisesRegex(ValueError, "exceeds limit"):
+            self.analyze([row])
+
+    def test_v1_and_v2_never_pool_into_one_spurious_plateau(self):
+        rows = sweep(evidence="kernel") + sweep_v2(evidence="kernel")
+        report = self.analyze(rows)
+        self.assertEqual(len(report["series"]), 2)
+        legacy, verified = report["series"]
+        self.assertEqual(legacy["schema"], analyzer.SCHEMA)
+        self.assertIsNone(legacy["provisional_selection_kib"])
+        self.assertEqual(verified["schema"], analyzer.SCHEMA_V2)
+        self.assertEqual(verified["provisional_selection_kib"], 64)
+        self.assertEqual(report["observation_count"], 54)
+
+    def test_v2_missing_or_unexpected_histogram_fails_closed(self):
+        row = as_v2(observation())
+        missing = dict(row)
+        del missing["read_latency_counts"]
+        with self.assertRaisesRegex(ValueError, "missing or unexpected"):
+            self.analyze([missing])
+        v1_with_hist = observation()
+        v1_with_hist["read_latency_counts"] = [[1_000_000, 12_000]]
+        with self.assertRaisesRegex(ValueError, "missing or unexpected"):
+            self.analyze([v1_with_hist])
+
+    def test_bounded_64bit_counter_and_read_sample_limits(self):
+        for key, value in (
+            ("lower_write_sectors_before", analyzer.MAX_COUNTER + 1),
+            ("lower_write_ios_after", analyzer.MAX_COUNTER + 1),
+            ("logical_write_bytes", analyzer.MAX_COUNTER + 1),
+            ("read_count", analyzer.MAX_READ_COUNT + 1),
+            ("read_p99_ns", analyzer.MAX_NS + 1),
+        ):
+            with self.subTest(key=key):
+                row = as_v2(observation())
+                row[key] = value
+                with self.assertRaises(ValueError):
+                    self.analyze([row])
+
+    def test_v2_synthetic_histogram_cannot_claim_measured_winner(self):
+        item = self.analyze(sweep_v2())["series"][0]
+        self.assertIsNone(item["provisional_selection_kib"])
+        self.assertEqual(item["candidate_batch_kib"], 64)
+        self.assertIn("SYNTHETIC ONLY", item["qualification"])
+        self.assertIn("RECOMPUTED", item["read_p99_integrity"])
+
+    def test_v2_self_labeled_physical_remains_provisional_not_qualified(self):
+        item = self.analyze(sweep_v2(evidence="physical"))["series"][0]
+        self.assertEqual(item["provisional_selection_kib"], 64)
+        self.assertIn("INDEPENDENT EVIDENCE REVIEW", item["qualification"])
+        self.assertNotIn("QUALIFIED WINNER", item["qualification"])
+
+    def test_v2_jsonl_duplicate_histogram_field_is_rejected(self):
+        row = as_v2(observation())
+        payload = json.dumps(row)
+        self.path.write_text(
+            payload[:-1] + ', "read_latency_counts": []}\n', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate JSON"):
             analyzer.load_rows(self.path)
 
     def test_command_line_reads_only_jsonl_and_reports_not_device_access(self):
