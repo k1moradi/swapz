@@ -268,6 +268,15 @@ jobs:
           python3 -m py_compile tests/runtime/recall-fixture-owner.py tests/runtime/recall-fixture-owner-test.py
           timeout 45s python3 -B tests/runtime/recall-fixture-owner-test.py -v
           echo "FIXTURE_OWNER_BROKER_MODEL_ONLY: PASS (fake peers, fake kernel observations; no device cleanup)"
+          for attempt in {1..3}; do
+            if ! timeout 25s python3 -B tests/runtime/recall-fixture-owner-test.py -q \
+                >"$RUNNER_TEMP/fixture-owner-broker-repeat.log" 2>&1; then
+              echo "FIXTURE_OWNER_BROKER_REPEAT $attempt/3: FAIL (do not authorize backing)"
+              cat "$RUNNER_TEMP/fixture-owner-broker-repeat.log"
+              exit 1
+            fi
+            echo "FIXTURE_OWNER_BROKER_REPEAT $attempt/3: PASS"
+          done
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |
