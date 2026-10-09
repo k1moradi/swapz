@@ -35,7 +35,7 @@ class RootlessOwnedServer:
     def __init__(self, directory: Path, *, mode: str = "normal",
                  start_timeout: float = 0.4, stop_timeout: float = 0.3):
         if (type(mode) is not str or mode not in MODES
-                or type(directory) is not Path or not directory.is_absolute()
+                or not isinstance(directory, Path) or not directory.is_absolute()
                 or type(start_timeout) not in (float, int)
                 or type(stop_timeout) not in (float, int)
                 or not 0.05 <= start_timeout <= 5.0
