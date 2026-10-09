@@ -227,7 +227,7 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
         self.assertFalse(self.session.adapter.cleanup_authorized)
         self.assertFalse(self.session.client.cleanup_authorized)
 
-    def test_missing_or_duplicated_ready_handle_fails_closed(self):
+    def test_missing_or_malformed_ready_handle_fails_closed(self):
         # Test bad READY receipts without launching any real dd worker.
         for handle in (None, "", 17, "!!!"):
             with self.subTest(handle=handle):
@@ -246,6 +246,24 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
                     self.assertTrue(session.bridge.failed)
                 finally:
                     session.close()
+
+    def test_duplicate_ready_handle_fails_closed_and_preserves_backing(self):
+        # Even if a trusted IPC client erroneously forwarded a duplicate
+        # READY handle, the role adapter must reject it locally.
+        token = "synthetic-duplicate-role-handle"
+        self.assertTrue(self.session.adapter._valid_handle(token))
+        self.session.adapter.handles.append(token)
+        forged = {
+            "status": "ready", "ok": True, "cleanup_allowed": False,
+            "preserve_backing": True, "all_reaped": False,
+            "handle": token,
+        }
+        with mock.patch.object(self.session.client, "call", return_value=forged):
+            with self.assertRaisesRegex(RoleError, "unconfirmed or duplicated"):
+                self.session.launch("writer")
+        self.assertTrue(self.session.cleanup_marker.exists())
+        self.assertFalse(self.session.adapter.cleanup_authorized)
+        self.assertTrue(self.session.bridge.failed)
 
     def test_premature_writer_wait_and_missing_phase_preserve_backing(self):
         writer = self.session.launch("writer")
