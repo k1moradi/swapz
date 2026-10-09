@@ -114,7 +114,7 @@ class OfflineDrainPlateauTests(unittest.TestCase):
     def test_legacy_v1_kernel_self_report_never_provides_provisional_selection(self):
         report = self.analyze(sweep(evidence="kernel"))
         item = report["series"][0]
-        self.assertEqual(item["candidate_batch_kib"], 64)
+        self.assertIsNone(item["candidate_batch_kib"])
         self.assertIsNone(item["provisional_selection_kib"])
         self.assertIn("UNVERIFIED P99", item["qualification"])
         self.assertIn("SELF-REPORTED", item["read_p99_integrity"])
