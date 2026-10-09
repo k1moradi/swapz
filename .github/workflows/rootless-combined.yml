@@ -284,6 +284,12 @@ jobs:
             fi
             echo "FIXTURE_OWNER_BROKER_REPEAT $attempt/3: PASS"
           done
+      - name: Independent rootless five-role broker and ambiguous-child contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/recall-broker-external-contract-test.py
+          timeout 25s python3 -B tests/runtime/recall-broker-external-contract-test.py -v
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |

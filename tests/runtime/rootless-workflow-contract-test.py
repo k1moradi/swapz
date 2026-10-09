@@ -30,6 +30,7 @@ MANDATORY_TESTS = (
     "recall-io-drain-orchestrator-test.py",
     "recall-fixture-release-policy-test.py",
     "recall-fixture-owner-test.py",
+    "recall-broker-external-contract-test.py",
     "v22-drain-plateau-analyze-test.py",
     "v22-evidence-bundle-check-test.py",
 )
