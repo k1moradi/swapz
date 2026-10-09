@@ -912,3 +912,45 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Keep NBD streaming backend fail-closed and disabled; the mock
       owner and child cannot authorize real device I/O, mapper
       admission, lower backing detach or a V2.2 performance winner.
+
+### 2026-10-09 — Strict read-p99 evidence and unrounded plateau qualification
+
+- [x] Review offline V2.2 analyzer for evidence that directly
+      substantiates its `read_count` and `read_p99_ns` claims;
+      identify that legacy v1 trusted arbitrary self-reported
+      values even on `kernel`/`physical`-labeled observations.
+- [x] Add strict `swapz-drain-observation-v2` with a bounded sorted
+      exact-value `read_latency_counts` array, integral per-value
+      counts, a verified sum matching `read_count`, and an
+      independently recomputed nearest-rank 99th percentile.
+- [x] Deny both algorithmic candidate and provisional batch selection
+      for v1 `kernel`/`physical` claims. Preserve synthetic v1
+      as explicitly illustrative only; do not pool v1/v2 series.
+      Even v2 self-labeled device evidence remains provisional and
+      requires independently verified collector provenance.
+- [x] Use unrounded sector-derived repeat medians in the 97% lower-
+      device drain check; keep 6-decimal formatting for display only.
+      Reject a fabricated 19.3999999-vs-20.0 MiB/s false plateau.
+- [x] Add 12 new rootless adversarial tests; total offline suite:
+      **27 tests**. Strict type, duplicate, sort, count, positive
+      latency, sample ceilings, schema mixing, percentile edge
+      and raw-threshold regression gates PASS.
+- [x] Qualify both mandatory workflows against exact executable
+      revision `6f42f13fb00296e8c809eee79b4780fb67a0cfec`:
+      https://github.com/k1moradi/swapz/actions/runs/37917836052
+      https://github.com/k1moradi/swapz/actions/runs/37917836051
+- [ ] A future **independently authenticated** real collector must
+      preserve actual per-read latency evidence with a vetted
+      schema suitable for workloads with >256 distinct timestamps;
+      v2's exact histogram is bounded and may reject such data.
+      Verify backend isolation, monotonic window, real kernel
+      quiescence, swap-in sample origin and 10,000+ reads/run.
+- [ ] Separately investigate an intermittent existing combined
+      CI failure: separate-process direct-dd role admission rejected
+      a worker as `unconfirmed or duplicated` in earlier runs.
+      Do not conflate a final green run with deterministic
+      reliability; maintain fail-closed behavior.
+- [ ] Do not run a live device sweep or nominate a V2.2 winner
+      without separate operator authorization, qualified drain,
+      repeated virtual and physical evidence and p99 review.
+      V2.2 strategy/batch remains **UNDETERMINED**.
