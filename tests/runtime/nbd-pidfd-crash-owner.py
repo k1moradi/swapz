@@ -24,7 +24,7 @@ module = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
-STAGES = frozenset(("pre-ready", "post-ready", "idle", "ignore-term-idle"))
+STAGES = frozenset(("pre-ready", "post-ready", "idle", "ignore-term-idle", "pdeath-only"))
 
 
 def share_fd(channel: socket.socket, fd: int, marker: bytes) -> None:
@@ -45,7 +45,8 @@ def main() -> int:
         fixture.mkdir(mode=0o700)
         session = module.RootlessOwnedServer(
             fixture,
-            mode="ignore-term" if stage == "ignore-term-idle" else "normal",
+            mode=("ignore-term" if stage == "ignore-term-idle" else
+                  "ignore-eof" if stage == "pdeath-only" else "normal"),
             start_timeout=0.6, stop_timeout=0.2,
         )
         if stage == "pre-ready":
