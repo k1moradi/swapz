@@ -410,7 +410,8 @@ raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
             executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
 
             class UnsupportedContainmentOps(LinuxPidfdOps):
-                def install_process_containment(self, expected_parent_pid: int) -> None:
+                def install_process_containment(self, expected_parent_pid: int,
+                                                expected_parent_pidfd: int) -> None:
                     raise OSError(errno.ENOSYS, "injected seccomp/PDEATHSIG failure")
 
             try:
@@ -423,7 +424,7 @@ raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
                         executable_fd=executable_fd,
                         strict_fds=True,
                     )
-                self.assertTrue(caught.exception.child_reaped)
+                self.assertTrue(caught.exception.child_reaped, repr(caught.exception))
                 self.assertFalse(marker.exists())
                 callbacks: list[str] = []
                 report, result = supervisor.cleanup_after_stop(
@@ -436,6 +437,78 @@ raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
                                     for error in report.errors))
             finally:
                 os.close(executable_fd)
+
+    def test_recycled_parent_pid_cannot_pass_stable_parent_pidfd_check(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="swapz-parent-pidfd-") as directory:
+            marker = Path(directory) / "must-not-run"
+
+            class ExitedParentPidfdOps(RecordingOps):
+                parent_identity_fd: int | None = None
+
+                def open_parent_pidfd(self) -> int:
+                    self.parent_identity_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
+                    return self.parent_identity_fd
+
+                def pidfd_exited(self, pidfd: int) -> bool:
+                    if (os.getpid() != self.parent_pid
+                            and pidfd == self.parent_identity_fd):
+                        return True
+                    return super().pidfd_exited(pidfd)
+
+            ops = ExitedParentPidfdOps()
+            executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                supervisor = GatedPidfdSupervisor(ops=ops)
+                with self.assertRaises(SupervisorError) as caught:
+                    supervisor.launch(
+                        ("contained-worker", "-c",
+                         f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"),
+                        executable=f"/proc/self/fd/{executable_fd}",
+                        executable_fd=executable_fd,
+                        strict_fds=True,
+                    )
+                self.assertTrue(caught.exception.child_reaped, repr(caught.exception))
+                self.assertFalse(marker.exists())
+                report = supervisor.stop_all([])
+                self.assertFalse(report.cleanup_allowed)
+                self.assertTrue(any("process-contained launch failed" in error
+                                    for error in report.errors))
+            finally:
+                os.close(executable_fd)
+
+    def test_parent_pidfd_failure_prevents_fork_and_permanently_denies_cleanup(self) -> None:
+        class ParentPidfdUnavailableOps(RecordingOps):
+            def open_parent_pidfd(self) -> int:
+                raise OSError(errno.EPERM, "injected supervisor pidfd permission failure")
+
+            def fork(self) -> int:
+                raise AssertionError("child creation must wait for stable parent identity")
+
+        ops = ParentPidfdUnavailableOps()
+        executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            supervisor = GatedPidfdSupervisor(ops=ops)
+            with self.assertRaises(PidfdUnavailable) as caught:
+                supervisor.launch(
+                    ("contained-worker", "-c", "pass"),
+                    executable=f"/proc/self/fd/{executable_fd}",
+                    executable_fd=executable_fd,
+                    strict_fds=True,
+                )
+            self.assertFalse(caught.exception.preserve_required)
+            report = supervisor.stop_all([])
+            self.assertFalse(report.cleanup_allowed)
+            self.assertTrue(any("process-contained launch failed" in error
+                                for error in report.errors))
+        finally:
+            os.close(executable_fd)
+
+    def test_unsupported_endianness_fails_before_containment_syscalls(self) -> None:
+        ops = LinuxPidfdOps()
+        with patch.object(supervisor_module.sys, "byteorder", "big"):
+            with self.assertRaises(OSError) as caught:
+                ops.install_process_containment(os.getpid(), -1)
+        self.assertEqual(caught.exception.errno, errno.ENOSYS)
 
     def test_two_process_contained_workers_are_accounted_before_cleanup(self) -> None:
         executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
@@ -499,6 +572,10 @@ raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
                     contain_process_tree=False,
                 )
             self.assertEqual(ops.pipe_count, 0)
+            report = supervisor.stop_all([])
+            self.assertFalse(report.cleanup_allowed)
+            self.assertTrue(any("process-contained launch failed" in error
+                                for error in report.errors))
         finally:
             os.close(executable_fd)
 

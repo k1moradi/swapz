@@ -74,8 +74,8 @@ class CrashOps(supervisor_module.LinuxPidfdOps):
             with open(root / "worker-pids", "a", encoding="ascii") as handle:
                 handle.write(str(pid) + "\n")
         return pid
-    def install_process_containment(self, expected_parent_pid):
-        super().install_process_containment(expected_parent_pid)
+    def install_process_containment(self, expected_parent_pid, expected_parent_pidfd):
+        super().install_process_containment(expected_parent_pid, expected_parent_pidfd)
         mark("containment-ready")
     def pidfd_open(self, pid):
         if stage == "before-pidfd":

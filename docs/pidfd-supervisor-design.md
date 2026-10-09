@@ -20,11 +20,13 @@ For each launch, the supervisor:
 1. Validates the command and allocates a unique, nonnumeric opaque handle
    before creating a child.
 2. Creates a start-gate pipe and a close-on-exec exec-error pipe.
-3. Forks a direct child. Before it blocks on the gate, a contained launch sets
-   `PR_SET_PDEATHSIG(SIGKILL)`, checks that its parent is still the exact
-   supervisor process observed before `fork()`, sets `PR_SET_NO_NEW_PRIVS`,
-   and installs a seccomp filter. It cannot execute the requested worker
-   command yet.
+3. For a contained launch, opens a pidfd for the supervisor itself, then
+   forks a direct child. Before it blocks on the gate, the child sets
+   `PR_SET_PDEATHSIG(SIGKILL)`, checks that the inherited supervisor pidfd is
+   still live, and verifies `getppid()` still matches the pre-fork parent.
+   The pidfd check prevents a recycled numeric parent PID from satisfying
+   that identity check. The child then sets `PR_SET_NO_NEW_PRIVS` and installs
+   a seccomp filter. It cannot execute the requested worker command yet.
 4. Opens a pidfd for that unreaped child and stores it in the supervisor's
    private worker record.
 5. Sends the one-byte start token through the gate. If this fails, it sends an
@@ -41,8 +43,9 @@ an explicit worker-side marker; they do not treat READY as an application-level
 readiness probe.
 
 If Python pidfd APIs are missing, or pipe/fork/pidfd setup fails, the gate is
-never released. If pidfd acquisition fails after fork, the supervisor aborts
-the gated child and waits for the direct child using `waitpid` only. `waitpid`
+never released. If the supervisor pidfd cannot be opened, no child is created.
+If the worker pidfd acquisition fails after fork, the supervisor aborts the
+gated child and waits for the direct child using `waitpid` only. `waitpid`
 is used to reap a child owned by this supervisor; it is never used to signal.
 If that child cannot be confirmed reaped, the raised `SupervisorError` sets
 `preserve_required=True`. There is no PID-only fallback.
@@ -53,7 +56,10 @@ filter rejects `fork`, `vfork`, and `clone` calls that create another process;
 `clone3` returns `ENOSYS` so a runtime may fall back to the filtered `clone`
 interface. `CLONE_THREAD` is allowed for utilities that use threads, since
 threads remain in the same thread group and are killed with the direct worker.
-The filter also denies attempts to clear `PR_SET_PDEATHSIG`, credential
+The filter is installed only on little-endian x86_64 and aarch64, matching the
+classic-BPF syscall-argument loads and audited syscall-number tables. Other
+byte orders and architectures fail closed. The filter also denies attempts
+to clear `PR_SET_PDEATHSIG`, credential
 changes that Linux can use to clear the parent-death setting, namespace
 changes, and legacy AIO/io_uring context creation. The latter interfaces are
 not needed by the fixed synchronous `dd` roles. The filter is inherited across
@@ -61,6 +67,14 @@ not needed by the fixed synchronous `dd` roles. The filter is inherited across
 to install either mechanism fail before the gate opens. These
 containment requirements apply to pinned executable launches; unpinned test
 commands are not advertised as crash-contained.
+
+The initial `execve` must enter the trusted, fixed direct worker. Classic
+seccomp cannot distinguish that first exec from a later exec by the same
+process. The allowlisted GNU `dd` role is expected not to execute another
+program; admitting any worker that can perform a later set-user-ID or
+file-capability exec would need a stronger launcher design because Linux may
+clear `PR_SET_PDEATHSIG` on that transition. No generic executable or shell
+worker is admitted by the service.
 
 The implementation uses `os.pidfd_open()` and
 `signal.pidfd_send_signal()`. Those Python APIs were added in Python 3.9;

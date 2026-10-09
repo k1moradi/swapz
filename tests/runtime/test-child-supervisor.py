@@ -16,6 +16,7 @@ import secrets
 import select
 import signal
 import struct
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -109,7 +110,15 @@ class LinuxPidfdOps:
     def fork(self) -> int:
         return os.fork()
 
-    def install_process_containment(self, expected_parent_pid: int) -> None:
+    def open_parent_pidfd(self) -> int:
+        """Open a stable reference to this supervisor before fork()."""
+        opener = getattr(os, "pidfd_open", None)
+        if not callable(opener):
+            raise OSError(errno.ENOSYS, "os.pidfd_open is unavailable")
+        return opener(os.getpid(), 0)
+
+    def install_process_containment(self, expected_parent_pid: int,
+                                    expected_parent_pidfd: int) -> None:
         """Bind the worker to its parent lifetime and deny process creation.
 
         The pidfd supervisor owns one direct worker.  PR_SET_PDEATHSIG kills
@@ -119,6 +128,11 @@ class LinuxPidfdOps:
         gate is released.
         """
         machine = platform.machine().lower()
+        # The classic-BPF argument loads below inspect the low word of native
+        # syscall arguments.  Do not install that filter with different
+        # endianness assumptions.
+        if sys.byteorder != "little":
+            raise OSError(errno.ENOSYS, "process containment BPF is qualified only for little-endian hosts")
         if machine in {"x86_64", "amd64"}:
             audit_arch = 0xC000003E  # AUDIT_ARCH_X86_64
             clone_number, fork_number, vfork_number = 56, 57, 58
@@ -159,8 +173,16 @@ class LinuxPidfdOps:
         if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
             error_number = ctypes.get_errno()
             raise OSError(error_number, os.strerror(error_number))
-        if os.getppid() != expected_parent_pid:
-            raise OSError(errno.ESRCH, "supervisor exited before parent-death binding")
+        try:
+            # getppid() alone could match a recycled numeric PID.  This
+            # inherited pidfd continues to identify the original supervisor.
+            if (self.pidfd_exited(expected_parent_pidfd)
+                    or os.getppid() != expected_parent_pid):
+                raise OSError(errno.ESRCH, "supervisor exited before parent-death binding")
+        finally:
+            # The child retains no descriptor for the supervisor after this
+            # check.  A close failure aborts the gated launch.
+            self.close(expected_parent_pidfd)
 
         # classic BPF: require the native audit arch, then return EPERM for
         # process creation syscalls and ALLOW for all other worker operations.
@@ -415,6 +437,8 @@ class GatedPidfdSupervisor:
             )
         if not callable(getattr(self.ops, "pidfd_open", None)):
             raise PidfdUnavailable("pidfd_open unavailable", preserve_required=False)
+        if not callable(getattr(self.ops, "open_parent_pidfd", None)):
+            raise PidfdUnavailable("supervisor identity pidfd unavailable", preserve_required=False)
         if not callable(getattr(self.ops, "pidfd_send_signal", None)):
             raise PidfdUnavailable("pidfd_send_signal unavailable", preserve_required=False)
 
@@ -505,12 +529,16 @@ class GatedPidfdSupervisor:
         strict_fds: bool,
         contain_process_tree: bool,
         expected_parent_pid: int,
+        expected_parent_pidfd: int | None,
     ) -> None:
         # This path runs only in the forked, single-threaded child.  The worker
         # cannot run until the parent writes the start byte after pidfd_open.
         try:
             if contain_process_tree:
-                self.ops.install_process_containment(expected_parent_pid)
+                if expected_parent_pidfd is None:
+                    raise OSError(errno.EBADF, "supervisor identity pidfd missing")
+                self.ops.install_process_containment(expected_parent_pid,
+                                                     expected_parent_pidfd)
             self.ops.close(gate_write_fd)
             self.ops.close(error_read_fd)
             token = _child_wait_for_gate(self.ops, gate_read_fd)
@@ -575,8 +603,10 @@ class GatedPidfdSupervisor:
         strict_fds: bool = False,
         contain_process_tree: bool | None = None,
     ) -> str:
-        required = (executable_fd is not None if contain_process_tree is None
-                    else contain_process_tree is True)
+        # Any attempt to use a pinned executable or explicitly request
+        # containment makes failures sticky, including an explicit attempt
+        # to disable containment for a pinned worker.
+        required = executable_fd is not None or contain_process_tree is True
         try:
             return self._launch_impl(
                 argv, env=env, cwd=cwd, executable=executable,
@@ -661,6 +691,20 @@ class GatedPidfdSupervisor:
         self._require_pidfd_support()
         handle = self._new_handle()
 
+        expected_parent_pid = os.getpid()
+        parent_pidfd: int | None = None
+        if contain_process_tree:
+            try:
+                parent_pidfd = self.ops.open_parent_pidfd()
+                if (isinstance(parent_pidfd, bool) or not isinstance(parent_pidfd, int)
+                        or parent_pidfd < 0):
+                    raise OSError(errno.EBADF, "open_parent_pidfd returned an invalid descriptor")
+            except Exception as exc:
+                raise PidfdUnavailable(
+                    f"supervisor identity pidfd acquisition failed: {exc}",
+                    preserve_required=False,
+                ) from exc
+
         gate_read_fd: int | None = None
         gate_write_fd: int | None = None
         error_read_fd: int | None = None
@@ -674,17 +718,18 @@ class GatedPidfdSupervisor:
             self._close_fd(gate_write_fd, cleanup_errors, "gate writer")
             self._close_fd(error_read_fd, cleanup_errors, "exec-error reader")
             self._close_fd(error_write_fd, cleanup_errors, "exec-error writer")
+            self._close_fd(parent_pidfd, cleanup_errors, "supervisor identity pidfd")
             suffix = "; ".join(cleanup_errors)
             raise SupervisorError(
                 f"startup gate creation failed: {exc}" + (f"; {suffix}" if suffix else ""),
                 preserve_required=bool(cleanup_errors),
             ) from exc
 
-        expected_parent_pid = os.getpid()
         try:
             pid = self.ops.fork()
         except Exception as exc:
             cleanup_errors: list[str] = []
+            self._close_fd(parent_pidfd, cleanup_errors, "supervisor identity pidfd")
             for fd, label in ((gate_read_fd, "gate reader"), (gate_write_fd, "gate writer"),
                               (error_read_fd, "exec-error reader"), (error_write_fd, "exec-error writer")):
                 self._close_fd(fd, cleanup_errors, label)
@@ -698,13 +743,15 @@ class GatedPidfdSupervisor:
             self._child_exec(
                 gate_read_fd, gate_write_fd, error_read_fd, error_write_fd,
                 command, child_env, cwd, executable, executable_fd, inherited_fds, strict_fds,
-                contain_process_tree, expected_parent_pid,
+                contain_process_tree, expected_parent_pid, parent_pidfd,
             )
             os._exit(127)
 
         # The direct child is blocked in the gate read.  Until this point it
         # cannot execute argv and the parent has not sent it any signal.
         parent_close_errors: list[str] = []
+        self._close_fd(parent_pidfd, parent_close_errors, "supervisor identity pidfd")
+        parent_pidfd = None
         self._close_fd(gate_read_fd, parent_close_errors, "child gate reader")
         self._close_fd(error_write_fd, parent_close_errors, "child exec-error writer")
         gate_read_fd = None
@@ -720,7 +767,7 @@ class GatedPidfdSupervisor:
 
         try:
             pidfd = self.ops.pidfd_open(pid)
-            if not isinstance(pidfd, int) or pidfd < 0:
+            if isinstance(pidfd, bool) or not isinstance(pidfd, int) or pidfd < 0:
                 raise OSError(errno.EBADF, "pidfd_open returned an invalid descriptor")
         except Exception as exc:
             reaped, abort_errors = self._abort_gated_child(pid, gate_write_fd)
