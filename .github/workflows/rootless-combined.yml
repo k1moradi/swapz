@@ -214,6 +214,13 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless streaming single-sweep reporting safety regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/streaming-benchmark.sh
+          python3 -m py_compile tests/runtime/streaming-benchmark-report.py tests/runtime/streaming-benchmark-report-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-report-test.py -v
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |
