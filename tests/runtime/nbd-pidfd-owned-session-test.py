@@ -323,6 +323,7 @@ class OwnedSyntheticServerTests(unittest.TestCase):
             ("post-ready", b"READY"),
             ("idle", b"READY"),
             ("ignore-term-idle", b"READY"),
+            ("pdeath-only", b"READY"),
         )
         for stage, expected in cases:
             with self.subTest(stage=stage):
@@ -358,7 +359,7 @@ class OwnedSyntheticServerTests(unittest.TestCase):
                             fds.extend(received)
                     self.assertEqual(len(fds), 1)
                     observer_fd = fds[0]
-                    if stage in ("idle", "ignore-term-idle"):
+                    if stage in ("idle", "ignore-term-idle", "pdeath-only"):
                         monitor.sendall(b"CRASH")
                     controller_rc = owner_proc.wait(timeout=2.0)
                     self.assertNotEqual(controller_rc, 0)
