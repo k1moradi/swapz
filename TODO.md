@@ -1154,14 +1154,15 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       [standalone NBD](https://github.com/k1moradi/swapz/actions/runs/37997610596)
       also passed at that exact revision.
 
-- [ ] **Concurrent broker finalize denial:** address
-      [issue #2](https://github.com/k1moradi/swapz/issues/2):
-      finalizer must never return success or continue lifecycle teardown
-      after another request has latched denial. Independent negative
-      rootless broker contracts (5/5) and all three workflows are green
-      at `c166228e7c7a5aa3dce1a3bf7df8e236ca7be177`, but backing-release
-      permission being false does not make contradictory successful
-      finalization safe. Codex owns the fix and strong regression.
+- [x] **Concurrent broker finalize denial — rootless model only:**
+      [issue #2](https://github.com/k1moradi/swapz/issues/2) closed after
+      Codex's `ae5f812e7647236ec91e8cae2102cceef0d6d9d5` monotonic
+      abort/checkpoint fix and main-developer stronger independent contract
+      `1d026ae61dbaa7717cdb64ee8fe744f60811c648`.
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38003419963)
+      and [teardown](https://github.com/k1moradi/swapz/actions/runs/38003420160)
+      green at exact independent test SHA; rootless closure is not
+      privileged kernel drain or backing-release qualification.
 - [x] **Standalone CI artifact traceability:** record exact
       workflow/source tree identity and selected safety-test
       marker inventory in a machine-readable, bounded source-only

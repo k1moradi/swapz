@@ -64,3 +64,31 @@ weaken the five-role, credential, pidfd, or HMAC gates to make that test pass.
 
 The added tests do not perform real mapper/swap/loop/NBD operations and cannot
 authorize backing cleanup or any live experiment.
+
+## Follow-up: monotonic denial implemented and independently gated
+
+Codex delivered the narrow rootless lifecycle correction in
+`ae5f812e7647236ec91e8cae2102cceef0d6d9d5`. A separate
+broker state lock linearizes asynchronous denial against the terminal
+successful release commit. The producer now checks cancellation before
+each subsequent modeled worker, swap, mapper, and lower-dependency step;
+the mapper owner accepts a before-step cancellation callback. Worker
+stop/reap is deferred until active lifecycle ownership exits. Already-
+started injected operations are not retroactively canceled.
+
+ChatGPT independently strengthened
+`tests/runtime/recall-broker-external-contract-test.py` in
+`1d026ae61dbaa7717cdb64ee8fe744f60811c648` to require
+DENIED state, a failed finalization return, an unreleased mapper, and
+absence of subsequent synthetic swapoff, DM suspend/remove, or loop
+detach after the competing request wins. The independent five-case
+suite passed in both [combined](https://github.com/k1moradi/swapz/actions/runs/38003419963)
+and [teardown](https://github.com/k1moradi/swapz/actions/runs/38003420160)
+at that exact executable revision, along with Codex's 38 broker tests
+and 3/3 separate broker repetitions. The specific rootless race
+[issue #2](https://github.com/k1moradi/swapz/issues/2) is closed.
+
+The 2eab914 findings above remain historical, not current-main claims.
+No result here establishes privileged owner isolation, full process-tree
+crash containment, genuine kernel I/O drain, physical-device authority,
+or safe backing deletion.

@@ -102,6 +102,16 @@ invalid types, insufficient reads, nonfinite numbers, blank rows, excessively
 large inputs and contradictory provenance fail the entire input before
 analysis.
 
+Input-opening hardening (source-only): from
+`bf95cbfce163a8c6fee3d0ac696fab85bcb9cd42`, the analyzer opens a
+single retained `O_NOFOLLOW` regular-file descriptor, rejects additional
+hard links and nonregular inputs, bounds original bytes to 2 MiB, and
+rechecks inode/device/mode/size/link count and modification metadata after
+reading. This prevents the earlier separate check/stat/open pathname race.
+Adversarial symlink, hardlink, FIFO and invalid-UTF-8 tests are mandatory.
+It **does not authenticate** files written by the same principal or prove
+physical-device observation provenance.
+
 Example invocation **on already collected observations only**:
 
 ```sh

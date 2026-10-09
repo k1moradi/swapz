@@ -3358,3 +3358,52 @@ its joint workflow results must be reconciled **separately**. Do not
 extend the three-way green telemetry revision claim to this newer
 source without its own evidence. This validation-only commit changes
 documentation, not the source revision tested above.
+
+
+## 2026-10-09 — Pinned plateau input and monotonic denial external regression
+
+**Source-only plateau input hardening:**
+`bf95cbfce163a8c6fee3d0ac696fab85bcb9cd42`
+([commit](https://github.com/k1moradi/swapz/commit/bf95cbfce163a8c6fee3d0ac696fab85bcb9cd42)).
+The main developer eliminated a check/stat/open race in
+`v22-drain-plateau-analyze.py` by reading from one bounded
+retained no-symlink regular descriptor and checking before/after
+metadata. Four adversarial tests covered symlink/hardlink/FIFO/UTF-8
+denials; the original numerical qualification and p99 predicates
+were unchanged. **31/31** plateau tests passed in the exact-source
+[combined](https://github.com/k1moradi/swapz/actions/runs/38003239290)
+and [teardown](https://github.com/k1moradi/swapz/actions/runs/38003239480)
+workflows. This does not authenticate the collector or device and
+does not solve the 256-distinct-raw-latency-value v2 schema limit.
+
+**Independent broker fix verification:**
+Codex's monotonic-denial source revision
+`ae5f812e7647236ec91e8cae2102cceef0d6d9d5`
+passed both joint workflows, followed by ChatGPT's independent stronger
+test commit
+`1d026ae61dbaa7717cdb64ee8fe744f60811c648`
+([commit](https://github.com/k1moradi/swapz/commit/1d026ae61dbaa7717cdb64ee8fe744f60811c648)).
+Its synthetic contention test now rejects a positive finalization
+return and confirms no subsequent modeled swapoff, DM suspend/remove,
+or loop detach after denial. Both
+[combined run 38003419963](https://github.com/k1moradi/swapz/actions/runs/38003419963)
+and
+[teardown run 38003420160](https://github.com/k1moradi/swapz/actions/runs/38003420160)
+passed on the **same exact executable revision**. Both logs include
+**38 broker tests**, **5 independent broker tests**, **40 telemetry
+tests**, **31 plateau tests**, and **14 workflow-contract tests**.
+The combined workflow also completed 25/25 NBD selftest stress
+repetitions. [Issue #2](https://github.com/k1moradi/swapz/issues/2)
+is closed **for the rootless lifecycle model**. Production privileged
+containment, authenticated kernel drain and real backing release remain
+unqualified.
+
+The latest standalone NBD source-only workflow pass belongs to the
+earlier
+`8857cad43e0df19056637280be370c4ab7cf1396`
+revision; no standalone NBD workflow ran on this later independent
+broker-contract revision. Do not mix different exact SHAs into a
+three-way green claim. No live physical/kernel/device operation was
+authorized or executed. V2.2 strategy and batch winner remain
+**UNDETERMINED**. This subsequent validation documentation change
+is documentation-only, not a new executable test revision.
