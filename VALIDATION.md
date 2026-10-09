@@ -3069,3 +3069,65 @@ main-developer workflow-contract task did not edit Codex's
 owner, release, or GNU modules. Production direct-mapper
 admission and backing deletion remain disabled, and the
 V2.2 strategy/batch winner remains UNDETERMINED.
+
+## 2026-10-09 — Three-workflow source-only safety contract, exact revision
+
+**Final executable/source SHA:**
+`00fbf74f155d537664b16252b92386636a34cc44`.
+
+All three rootless workflows have passed at this identical commit:
+
+- [Rootless teardown PASS](https://github.com/k1moradi/swapz/actions/runs/37996938227).
+- [Rootless combined PASS](https://github.com/k1moradi/swapz/actions/runs/37996938277);
+  log says `COMBINED_TESTED_HEAD=00fbf74f155d537664b16252b92386636a34cc44`.
+- [Rootless NBD source safety PASS](https://github.com/k1moradi/swapz/actions/runs/37996938322).
+
+The independently authored
+`tests/runtime/rootless-workflow-contract-test.py` has **11
+standard-library tests**, all passing in every workflow. It audits
+both mandatory joint workflow scripts and the standalone NBD
+workflow. Six original checks cover source push-trigger completeness,
+mandatory bounded test execution, broker repeated tests, six
+strict five-role recall repetitions, and negative mutations that
+remove a trigger or a critical test command. Five extra checks
+enforce the standalone NBD syscall-isolation gate, exact runtime
+push-trigger coverage, 25 fail-fast NBD repetitions, pidfd-owned
+mock test execution, and NBD workflow edits triggering teardown.
+All tests are synthetic static workflow policy tests, not device
+operations.
+
+Previously, teardown ran a syntax check on
+`no-discard-livegc.sh` without listing it in its push-path
+triggers. This is now included. The teardown workflow now also
+triggers when `.github/workflows/rootless-nbd.yml` changes;
+otherwise shared NBD workflow contract changes would leave a
+stale green teardown run. Both push and PR filters include the
+cross-workflow dependency.
+
+Standalone rootless NBD source safety now runs the same
+workflow-contract suite before its AST-based syscall isolation,
+NBD selftest and NBD mock pidfd lifecycle suite. Its own push/PR
+filters include the workflow-contract source so edits cannot
+silently bypass the standalone NBD gate.
+
+Exactly verified log signals:
+- Each workflow: `Ran 11 tests` and its own
+  `ROOTLESS_*WORKFLOW_CONTRACT: PASS` message.
+- Teardown and combined: `RECALL_DIRECT_ROLE_REPEAT 6/6: PASS`,
+  `FIXTURE_OWNER_BROKER_REPEAT 3/3: PASS`.
+- Combined: `COMBINED_NBD_STRESS 25/25: PASS`.
+- Standalone NBD: `NBD rootless selftest repetition 25/25: PASS`
+  and static syscall isolation PASS.
+
+Several intermediate revisions failed **because the new contract
+correctly refused an incomplete cross-workflow rollout** (one
+workflow edited before its dependency). The *final identical*
+three-workflow revision above is fully green. No admission/readback
+verification was weakened to obtain a PASS.
+
+No real DM, NBD/loop attachment, swap, kernel drain, physical I/O
+or backing-file deletion was performed. Codex owns immutable five-role
+broker completion, ambiguous child ownership, and real owner
+authority/trust follow-ups. The main developer edited only workflows,
+its own static regression suite, and docs. Production admission is
+disabled and V2.2 strategy/batch winner remains **UNDETERMINED**.
