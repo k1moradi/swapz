@@ -4038,3 +4038,52 @@ and no real durability or performance claim follows from this source-only
 qualification. V2.2 strategy/batch winner remains **UNDETERMINED**.
 
 See `docs/v22-inflight-finalize-preflight-audit.md`.
+
+## October 10, 2026 — Independent upper-BIO ownership recovery
+
+The main developer independently reviewed the stream-buffer/pack/queue
+ownership state machine after prior native results from Codex.
+Previously, `swapz_complete_buffer_bios()` could only discover pending
+upper BIOs by walking mutable `block_count` and `record_count`. A
+post-submission malformed count could conceal an intact BIO and strand
+upper completion after the target failed.
+
+[PR #8](https://github.com/k1moradi/swapz/pull/8) reuses existing
+per-BIO intrusive list nodes to track all pending upper writes
+independently per stream buffer without new allocations. Failed BIO
+fanout drains this ledger; successful completion unlinks its node
+before `bio_endio()`. The finalizer performs a bounded cross-check
+between pending descriptor pointers and registered owner count before
+mapping publication, rejecting mismatch and preserving possible
+acknowledged staged data. Failed-target staged readback rejects
+unacknowledged writes.
+
+The mandatory exact-production-C owner contract has an executable
+old-code zero-count stranded-BIO mutant. It covers repack movement,
+separate stream buffers, early completion, pack ownership, malformed
+counts and logical indices. Existing exact-C suites also qualify
+late-callback finalization and failed-target staged readback.
+
+**Exact post-merge executable SHA:**
+[`80ea94452e0cdeeb9d83934dbc3e56009ac408b5`](https://github.com/k1moradi/swapz/commit/80ea94452e0cdeeb9d83934dbc3e56009ac408b5).
+
+- [Kernel source 38056177917](https://github.com/k1moradi/swapz/actions/runs/38056177917): **PASS**. Owner suite 7/7; async reaper 28/28; staged read 8/8.
+- [Combined source 38056177901](https://github.com/k1moradi/swapz/actions/runs/38056177901): **PASS**.
+- [Teardown safety 38056177898](https://github.com/k1moradi/swapz/actions/runs/38056177898): **PASS**.
+- [Standalone NBD source safety 38056177903](https://github.com/k1moradi/swapz/actions/runs/38056177903): **PASS**.
+
+The exact PR head
+`aa4daa9e13786c8b171df54f1b380ec79659da85`
+also passed the same four workflows before merge.
+Rootless exact-C programs run mocked list/BIO/IO primitives; this
+does not establish loaded Linux correctness, arbitrary memory
+corruption recovery or physical storage durability. Descriptor
+pointer swapping while preserving owner count, or corrupting
+per-BIO list nodes, is not covered by the narrow owner census.
+Codex's most recent *provided* native Linux build report remains at
+older `4704995c`; it cannot be attributed to PR #8.
+
+No real DM, swap, loop/NBD, module loading, privileged or device/fault
+work was performed. V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+See `docs/v22-independent-upper-bio-ownership-audit.md`.
