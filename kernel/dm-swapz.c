@@ -1116,6 +1116,9 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 					struct swapz_stream_buffer *buffer)
 {
 	u32 block_index;
+	u32 pending_record_bios = 0;
+	u32 pending_owned_bios = 0;
+	const struct list_head *node;
 	int error = buffer->io_error;
 
 	/*
@@ -1151,6 +1154,12 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 				      record->flags != SWAPZ_MAP_COMPRESSED)))
 				goto corrupt;
 
+			if (record->bio) {
+				if (unlikely(record->upper_completed))
+					goto corrupt;
+				pending_record_bios++;
+			}
+
 			if (record->flags == 0) {
 				if (unlikely(block->record_count != 1 ||
 					     record->stored_length != SWAPZ_BLOCK_BYTES))
@@ -1162,6 +1171,23 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 			}
 		}
 	}
+
+	/*
+	 * Counts and pointers in resident descriptors cannot be the only
+	 * evidence of who still owns an upper BIO. In particular, a valid
+	 * record_count with a lost record->bio must not silently reset a
+	 * buffer that still has registered outstanding owners. Bound the
+	 * independent list traversal to the allocated batch capacity.
+	 */
+	for (node = buffer->owned_bios.next;
+	     node != &buffer->owned_bios;
+	     node = node->next) {
+		if (unlikely(++pending_owned_bios >
+			     context->max_batch_blocks * SWAPZ_MAX_PACKED_RECORDS))
+			goto corrupt;
+	}
+	if (unlikely(pending_record_bios != pending_owned_bios))
+		goto corrupt;
 
 	if (error) {
 		bool retain = false;
