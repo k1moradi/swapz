@@ -8,6 +8,7 @@ on:
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
       - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - 'tests/runtime/swapz-async-reap-contract-test.py'
       - '.github/workflows/rootless-kernel-source.yml'
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
       - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - 'tests/runtime/swapz-async-reap-contract-test.py'
       - '.github/workflows/rootless-kernel-source.yml'
   workflow_dispatch:
 
@@ -44,7 +46,8 @@ jobs:
             tests/runtime/swapz-kernel-range-contract-test.py \
             tests/runtime/swapz-gc-source-contract-test.py \
             tests/runtime/swapz-gc-compressed-contract-test.py \
-            tests/runtime/swapz-generation-gc-transaction-test.py
+            tests/runtime/swapz-generation-gc-transaction-test.py \
+            tests/runtime/swapz-async-reap-contract-test.py
 
       - name: Execute exact production-C range guards
         shell: bash
@@ -69,3 +72,9 @@ jobs:
         run: |
           set -euo pipefail
           timeout 25s python3 -B tests/runtime/swapz-generation-gc-transaction-test.py -v
+
+      - name: Execute callback, watchdog and late reaper exact-C contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-async-reap-contract-test.py -v
