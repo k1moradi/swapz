@@ -64,6 +64,9 @@ class ExactV3SidecarTests(unittest.TestCase):
         self._set_records(self.row, [(1_000_000, 10000)])
 
     def _set_records(self, row, records, *, name=None, endian="!"):
+        # The test fixture builds a finite synthetic distribution before
+        # serializing it; the production verifier itself remains streaming.
+        records = tuple(records)
         path = self.folder / (name or f"{row['run_id']}.latbin")
         with path.open("wb") as stream:
             for latency, count in records:
