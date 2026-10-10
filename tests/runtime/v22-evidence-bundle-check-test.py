@@ -106,6 +106,25 @@ class EvidenceBundleTests(unittest.TestCase):
         report = self.check(data=data, manifest=manifest)
         self.assertFalse(report["physical_selection_authorized"])
 
+    def test_v3_synthetic_sidecar_is_not_verified_by_jsonl_only_manifest(self):
+        rows = [observation("trial-v3", schema=bundle.plateau.SCHEMA_V3)]
+        rows[0]["read_latency_sidecar"] = "trial-v3.latbin"
+        rows[0]["read_latency_sha256"] = "a" * 64
+        data, manifest = payload(rows)
+        with self.assertRaisesRegex(ValueError, "V3 sidecar evidence is not bound"):
+            self.check(data=data, manifest=manifest)
+
+    def test_v3_physical_sidecar_cannot_claim_bundle_provenance(self):
+        rows = [observation("trial-v3", evidence="physical",
+                            schema=bundle.plateau.SCHEMA_V3)]
+        rows[0]["read_latency_sidecar"] = "trial-v3.latbin"
+        rows[0]["read_latency_sha256"] = "a" * 64
+        data, manifest = payload(rows)
+        manifest["evidence"] = "physical"
+        manifest["runs"][0]["evidence"] = "physical"
+        with self.assertRaisesRegex(ValueError, "V3 sidecar evidence is not bound"):
+            self.check(data=data, manifest=manifest)
+
     def test_old_self_reported_p99_cannot_enter_measured_bundle(self):
         rows = [observation("trial-01", evidence="kernel",
                             schema=bundle.plateau.SCHEMA)]

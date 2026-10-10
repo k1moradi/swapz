@@ -153,6 +153,11 @@ def check_bytes(observations: bytes, manifest_raw: bytes) -> dict[str, object]:
             if run[key] != manifest[key]:
                 raise ValueError(f"run {index}: conflicting {key} metadata")
         row = plateau.validate(_parse_json(line), index)
+        # Manifest v1 binds only JSONL bytes. V3 exact p99 requires opening
+        # independently digested binary sidecars from a pinned directory.
+        # Never treat a matching JSONL digest as proof of sidecar content.
+        if row["schema"] == plateau.SCHEMA_V3:
+            raise ValueError(f"run {index}: V3 sidecar evidence is not bound by bundle manifest v1")
         if row["schema"] != plateau.SCHEMA_V2 and row["evidence"] != "synthetic":
             raise ValueError(f"run {index}: measured evidence requires exact-latency v2")
         for key in ("source_revision", "backend", "profile", "evidence", "run_id"):

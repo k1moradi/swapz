@@ -48,6 +48,18 @@ document; different rows must use separately named sidecars even if
 their contents happen to be equal. Different schemas and evidence labels
 never merge into the same plateau series.
 
+## Legacy bundle manifest boundary
+
+The existing `swapz-v22-evidence-bundle-v1` verifier accepts a
+JSONL artifact plus a self-reported manifest only. It has no mechanism
+to read, bind, or verify binary sidecar bytes. It therefore **rejects
+all V3 rows**, including synthetic and self-reported physical rows,
+rather than claiming a hash-only JSONL manifest verifies them. A future
+independently reviewed bundle schema must bind each distinct V3
+sidecar's original bytes and collector/device/session identities before
+this restriction can be revisited. The V3 plateau parser's own
+sidecar digest is an *internal consistency* check only.
+
 ## Input trust and resource limits
 
 The main JSONL file is limited to 2 MiB and 5000 observations. It and
