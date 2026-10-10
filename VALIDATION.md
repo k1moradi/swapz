@@ -3691,3 +3691,55 @@ No live module, DM, loop, NBD, swap, physical media or privileged
 cleanup was executed by the new kernel workflow. Authorized kernel
 quiescence/collector provenance and the V2.2 strategy/batch winner
 remain **UNDETERMINED**.
+
+## 2026-10-10 — Exact-C async callback, watchdog and late-reap qualification
+
+**Executable SHA:** `7ae05dedb66bdea71f1a39a2ced510c8a5f9628e`
+([commit](https://github.com/k1moradi/swapz/commit/7ae05dedb66bdea71f1a39a2ced510c8a5f9628e)).
+
+The main developer inspected the serialized kernel dm-io submission,
+watchdog, async callback, completion reaper, staged mapping
+publication, and teardown lifetime. A pending lower write **must not**
+lose ownership of its stream memory simply because a watchdog has
+reported a timeout. The source already keeps that buffer INFLIGHT,
+fails outstanding upper BIOs once, retains previously acknowledged
+resident staged data where authoritative, and waits on the actual
+callback count before context destruction. No new reproducible
+kernel defect was established, so production `kernel/dm-swapz.c`
+was not modified in this increment.
+
+New `tests/runtime/swapz-async-reap-contract-test.py` extracts and
+compiles seven exact production C functions using deterministic
+userspace stand-ins for Linux completion, queue, BIO and mapping
+primitives. It tests nonblocking and blocking timeout, repeat
+timeouts, late successful/error callbacks, timeout-boundary wins,
+shutdown callback queue suppression, stale generation rejection,
+acknowledged staged data retention and exactly-once upper BIO
+completion. Deliberately invalid mutations of callback-ref draining,
+submission error publication, premature buffer recycling, lost
+BIO ownership and staged-data retention are rejected.
+
+**All exact-SHA CI:**
+- [Isolated kernel source 38035848146](https://github.com/k1moradi/swapz/actions/runs/38035848146):
+  PASS, 22/22 new async, 21/21 generation,
+  15/15 GC compressed, 17/17 GC source, 30/30 range.
+- [Rootless combined 38035848163](https://github.com/k1moradi/swapz/actions/runs/38035848163):
+  PASS, 22/22 async plus the four existing kernel contract
+  suites, 22/22 workflow-contract tests, and 25/25 NBD stress.
+- [Rootless teardown 38035848200](https://github.com/k1moradi/swapz/actions/runs/38035848200):
+  PASS, same exact SHA and all new/previous kernel contracts
+  plus 22/22 workflow-contract tests.
+
+A later Codex commit `3e8dacf9213d45688e78f649bfcec14b4d7473f2`
+changed only `tests/runtime/recall-fixture-owner-test.py` relative to
+the tested async revision; it is not a substitute for the exact
+executable SHA above.
+
+**Limits:** The exact production C functions run against bounded
+synthetic user-mode scheduling and mapping primitives. These tests
+are not actual kernel workqueue/dm-io interleavings, module-build
+results, physical device fault injection, swap performance,
+kernel I/O quiescence or backing-release authorization. Never-
+completing callbacks remain a fail-closed teardown/liveness risk,
+not a license to free memory. No physical or privileged action
+was performed. V2.2 strategy/batch winner **UNDETERMINED**.

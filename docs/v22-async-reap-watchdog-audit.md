@@ -61,3 +61,16 @@ and independent backing-release authorization.
 This work uses no module, mapper, swap, loop/NBD device, real backing,
 pressure workload, privileged process or destructive cleanup.
 Strategy/batch winner: UNDETERMINED.
+
+## Exact executable qualification
+
+All tests are green at
+`7ae05dedb66bdea71f1a39a2ced510c8a5f9628e`:
+[isolated kernel source run 38035848146](https://github.com/k1moradi/swapz/actions/runs/38035848146),
+[combined run 38035848163](https://github.com/k1moradi/swapz/actions/runs/38035848163),
+and [teardown run 38035848200](https://github.com/k1moradi/swapz/actions/runs/38035848200).
+22/22 new async-C source and mutation tests passed, together with
+21/21 generation, 15/15 GC-compressed, 17/17 GC-source, 30/30
+range and 22/22 workflow-contract cases. Combined qualified 25/25
+NBD stress repetitions. These are rootless tests, not live-kernel
+I/O-fault or actual hardware durability qualification.

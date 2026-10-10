@@ -1360,3 +1360,27 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Separately qualify real kernel GC, asynchronous dm-io callback
       failure/timeout, physical block readback, REQ_FUA/PREFLUSH and
       privileged teardown under fresh external authorization.
+
+### 2026-10-10 — Async reaper, timeout and callback ownership (source-only)
+
+- [x] Independently audit lower-write submission, watchdog reporting,
+      late callbacks, reaper finalization, staged-data retention,
+      upper BIO exactly-once completion and teardown callback lifetime.
+      No proven new production-kernel defect: preserved production
+      reaper/worker code rather than risking speculative changes.
+- [x] Compile and run seven verbatim production C functions in a
+      bounded rootless harness with stubbed Linux synchronization,
+      mapping and BIO primitives. All **22/22** async scenarios and
+      source-mutant cases passed on exact executable SHA
+      `7ae05dedb66bdea71f1a39a2ced510c8a5f9628e`.
+- [x] Require the new async test on the isolated kernel source
+      workflow and both mandatory joint workflows; expand the
+      workflow-contract suite to **22/22** negative/positive checks.
+      [Isolated kernel source](https://github.com/k1moradi/swapz/actions/runs/38035848146):
+      PASS; [combined](https://github.com/k1moradi/swapz/actions/runs/38035848163):
+      PASS; [teardown](https://github.com/k1moradi/swapz/actions/runs/38035848200):
+      PASS, all at exact SHA. Combined NBD stress 25/25.
+- [ ] Kernel in-situ injection of asynchronous write failure,
+      boundary completion races, never-completing lower requests,
+      true LZ4 readback, and REQ_FUA/PREFLUSH durability under
+      independently authorized disposable infrastructure.
