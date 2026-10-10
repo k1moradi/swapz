@@ -77,6 +77,7 @@ on:
       - 'tests/runtime/swapz-generation-gc-transaction-test.py'
       - 'tests/runtime/swapz-async-reap-contract-test.py'
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
+      - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -342,6 +343,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-denial-telemetry.py tests/runtime/recall-denial-telemetry-test.py
           timeout 25s python3 -B tests/runtime/recall-denial-telemetry-test.py -v
+      - name: Compiled mapping live-reference replacement and failure contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-mapping-accounting-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-mapping-accounting-contract-test.py -v
       - name: Compiled preflush and FUA ordering and batch-flag contract
         shell: bash
         run: |

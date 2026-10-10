@@ -539,25 +539,31 @@ static void swapz_install_mapping(struct swapz_context *context, u32 logical_pag
 {
 	struct swapz_mapping *mapping = &context->mappings[logical_page];
 	u32 segment = physical_block / SWAPZ_SEGMENT_BLOCKS;
+	bool replacing_same_block;
 
 	/*
-	 * A lower completion may arrive after an unrelated error has failed the
-	 * target.  In that case the replacement must not disturb the previously
-	 * authoritative mapping.  Check failure before unaccounting the old map,
-	 * then check again in case unaccounting itself detects corruption.
+	 * Validate the destination *before* unaccounting the old authoritative
+	 * mapping.  Otherwise a corrupt replacement can fail the target while
+	 * leaving its old mapping in place with one missing live reference.
+	 *
+	 * Replacing a record in the same full physical block is legitimate:
+	 * unaccounting the previous record makes room for the replacement.
 	 */
 	if (unlikely(context->failed))
 		return;
-	swapz_unaccount_mapping(context, mapping);
-	if (unlikely(context->failed))
-		return;
-
+	replacing_same_block = swapz_mapping_valid(mapping) &&
+			      mapping->physical_block == physical_block;
 	if (WARN_ON_ONCE(physical_block >= context->physical_blocks ||
 			 segment >= context->segment_count ||
-			 context->block_live_records[physical_block] >= SWAPZ_MAX_PACKED_RECORDS)) {
+			 (context->block_live_records[physical_block] >=
+			  SWAPZ_MAX_PACKED_RECORDS && !replacing_same_block))) {
 		swapz_set_failed(context, -EUCLEAN);
 		return;
 	}
+
+	swapz_unaccount_mapping(context, mapping);
+	if (unlikely(context->failed))
+		return;
 
 	if (!context->block_live_records[physical_block])
 		context->segment_live_blocks[segment]++;
