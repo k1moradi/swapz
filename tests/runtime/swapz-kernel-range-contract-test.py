@@ -248,7 +248,8 @@ class ExactKernelRangeContractTests(unittest.TestCase):
     def test_source_staged_publication_requires_current_generation(self):
         source = extract_function(self.source, "swapz_finalize_stream_buffer")
         self.assertIn("swapz_stream_record_current(context, record)", source)
-        self.assertLess(source.index("swapz_stream_record_current(context, record)",source.index("swapz_install_mapping"))
+        self.assertLess(source.index("swapz_stream_record_current(context, record)"),
+                        source.index("swapz_install_mapping"))
 
     def test_source_4k_page_and_sector_geometry_remain_bound(self):
         self.assertIn("#if PAGE_SIZE != 4096", self.source)
