@@ -131,4 +131,22 @@ kernel version**. V2.2 strategy and batch-size winner remain
 
 ## Revision-specific evidence
 
-Pending PR head, merge SHA, and exact post-merge workflow run IDs.
+[PR #12](https://github.com/k1moradi/swapz/pull/12) merged the
+pending-pack owner repair at executable SHA
+[`13451799dc44dd9126d59720568d8116acd9fb61`](https://github.com/k1moradi/swapz/commit/13451799dc44dd9126d59720568d8116acd9fb61).
+Exact PR head `ffe16e4cd76522a65decbbde3ded4054b1cd2688`
+passed all four applicable rootless workflows before merge.
+
+Four **post-merge** rootless workflows completed successfully on the
+same executable SHA:
+
+- [Kernel source contracts, run 38063553855](https://github.com/k1moradi/swapz/actions/runs/38063553855): **PASS**
+  (new pack owner 11/11; real C staging/FUA 9/9).
+- [Combined source qualification, run 38063553874](https://github.com/k1moradi/swapz/actions/runs/38063553874): **PASS**
+- [Teardown safety, run 38063553857](https://github.com/k1moradi/swapz/actions/runs/38063553857): **PASS**
+- [Standalone NBD source safety, run 38063553854](https://github.com/k1moradi/swapz/actions/runs/38063553854): **PASS**
+
+Codex's last supplied native evidence and previous six-suite
+read-only GC review qualified older `24e2794b` and do not establish
+a native module build for this PR #12 source. No loaded-kernel or
+real-device validation occurred.
