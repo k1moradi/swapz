@@ -310,6 +310,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/swapz-mapping-accounting-contract-test.py
           timeout 25s python3 -B tests/runtime/swapz-mapping-accounting-contract-test.py -v
+      - name: Compiled malformed compressed-container compaction contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-compaction-container-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-compaction-container-contract-test.py -v
       - name: Compiled preflush and FUA ordering and batch-flag contract
         shell: bash
         run: |
