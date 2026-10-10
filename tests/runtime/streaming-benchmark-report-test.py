@@ -232,8 +232,8 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn('log_entries=32768', self.script)
 
     def test_embedded_collector_rejects_exact_latency_count_mismatch(self):
-        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\\'PY\\'\\n'
-        embedded = self.script.split(marker, 1)[1].split("\\nPY\\n", 1)[0]
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
+        embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio-mismatch.json"
         fio.write_text(json.dumps({"jobs":[
             {"jobname":"writer","job options":{"iodepth":"1"},
