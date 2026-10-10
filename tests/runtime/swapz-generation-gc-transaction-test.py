@@ -74,6 +74,13 @@ def contract(source: str) -> None:
         raise AssertionError("previous generation not fully committed before replacement")
     if "if (!swapz_page_has_uncommitted_generation(context, logical_page))" not in previous:
         raise AssertionError("previous generation uncommitted check missing")
+    preflight = "if (unlikely(!swapz_pack_bios_match(context)))"
+    if preflight not in previous or previous.index(preflight) >= previous.index(
+            "swapz_page_has_uncommitted_generation(context, logical_page)"):
+        raise AssertionError("prior generation pack identity preflight missing or too late")
+    if "swapz_set_failed(context, -EUCLEAN);" not in previous or \
+            "return -EUCLEAN;" not in previous:
+        raise AssertionError("malformed pack must fail closed before generation advance")
     if not (gc_part.index("swapz_decode_loaded_mapping") <
             gc_part.index("error = swapz_store_page") <
             gc_part.index("swapz_flush_write_batch") <
@@ -131,6 +138,14 @@ struct swapz_context {
 };
 static void event(struct swapz_context *c, char ch) {
     if (c->trace_len < sizeof(c->trace) - 1) c->trace[c->trace_len++] = ch;
+}
+static bool swapz_pack_bios_match(struct swapz_context *c) {
+    /* This fixture models only healthy slots. The dedicated scan test
+     * compiles the actual pending-pack identity validation function. */
+    return c->pack_record_count <= SWAPZ_MAX_PACKED_RECORDS;
+}
+static void swapz_set_failed(struct swapz_context *c,int err) {
+    (void)c;(void)err;
 }
 static int swapz_flush_pack(struct swapz_context *, bool, bool);
 static int swapz_flush_write_batch(struct swapz_context *);
@@ -384,6 +399,14 @@ class ForegroundGenerationContract(unittest.TestCase):
         self.assertIn(old, self.source)
         mutated = self.source.replace(old, "1, /* fabricated GC generation */", 1)
         with self.assertRaisesRegex(AssertionError, "GC should preserve"):
+            contract(mutated)
+
+    def test_mutant_removed_pack_identity_preflight_rejected(self):
+        body = extract(self.source, "swapz_commit_previous_generation")
+        guard = "if (unlikely(!swapz_pack_bios_match(context)))"
+        self.assertIn(guard, body)
+        mutated = self.source.replace(body, body.replace(guard, "if (false)", 1), 1)
+        with self.assertRaisesRegex(AssertionError, "preflight"):
             contract(mutated)
 
     def test_mutant_previous_batch_flush_removed_rejected(self):

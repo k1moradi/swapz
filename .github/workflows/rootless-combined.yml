@@ -334,6 +334,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/swapz-stream-submit-bounds-contract-test.py
           timeout 25s python3 -B tests/runtime/swapz-stream-submit-bounds-contract-test.py -v
+      - name: Compiled generation-scan prior-pack bounded identity contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py -v
+
       - name: Compiled independent compressed pack BIO ownership and count bounds
         shell: bash
         run: |

@@ -8,6 +8,7 @@ on:
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
       - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - 'tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py'
       - 'tests/runtime/swapz-async-reap-contract-test.py'
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
@@ -25,6 +26,7 @@ on:
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
       - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - 'tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py'
       - 'tests/runtime/swapz-async-reap-contract-test.py'
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
@@ -63,6 +65,7 @@ jobs:
             tests/runtime/swapz-gc-source-contract-test.py \
             tests/runtime/swapz-gc-compressed-contract-test.py \
             tests/runtime/swapz-generation-gc-transaction-test.py \
+            tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py \
             tests/runtime/swapz-async-reap-contract-test.py \
             tests/runtime/swapz-flush-fua-contract-test.py \
             tests/runtime/swapz-mapping-accounting-contract-test.py \
@@ -90,6 +93,12 @@ jobs:
         run: |
           set -euo pipefail
           timeout 25s python3 -B tests/runtime/swapz-gc-compressed-contract-test.py -v
+
+      - name: Execute exact-C generation scan pack identity preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py -v
 
       - name: Execute foreground generation and nested GC transaction contract
         shell: bash

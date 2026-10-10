@@ -2387,6 +2387,18 @@ static int swapz_commit_previous_generation(struct swapz_context *context,
 {
 	int error;
 
+	/*
+	 * The generation scan itself walks pending[]. Validate the independent
+	 * pack owner identities and the fixed array bound before looking for an
+	 * older resident generation, including when a staged ref is already set.
+	 * Otherwise an oversized count can read beyond pending[] and a truncated
+	 * count can hide an accepted BIO from the rewrite barrier.
+	 */
+	if (unlikely(!swapz_pack_bios_match(context))) {
+		swapz_set_failed(context, -EUCLEAN);
+		return -EUCLEAN;
+	}
+
 	if (!swapz_page_has_uncommitted_generation(context, logical_page))
 		return 0;
 

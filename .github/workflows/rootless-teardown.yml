@@ -75,6 +75,7 @@ on:
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
       - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - 'tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py'
       - 'tests/runtime/swapz-async-reap-contract-test.py'
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
@@ -379,6 +380,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/swapz-stream-submit-bounds-contract-test.py
           timeout 25s python3 -B tests/runtime/swapz-stream-submit-bounds-contract-test.py -v
+      - name: Compiled generation-scan prior-pack bounded identity contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py -v
+
       - name: Compiled independent compressed pack BIO ownership and count bounds
         shell: bash
         run: |
