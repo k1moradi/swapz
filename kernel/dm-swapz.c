@@ -752,6 +752,7 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 		const struct swapz_container_disk *container = (const void *)block_data;
 		unsigned int record_count = block->record_count;
 		unsigned int descriptor_end;
+		unsigned int previous_payload_start = SWAPZ_BLOCK_BYTES;
 		unsigned int record_index;
 
 		/* Bound the in-memory array before inspecting any of its records. */
@@ -783,7 +784,6 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 			const struct swapz_write_batch_record *record =
 				&block->records[record_index];
 			const struct swapz_record_disk *disk_record;
-			unsigned int previous_index;
 			unsigned int offset;
 			unsigned int length;
 
@@ -805,24 +805,15 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 				return -EUCLEAN;
 
 			/*
-			 * The packer stores each payload once. Overlapping extents could
-			 * make repacking expand one reserved source block into many output
-			 * blocks, overwriting staged input and physical reservations.
+			 * Both the packer and repacker append payloads from the end of
+			 * the page towards the header, in ascending descriptor order.
+			 * The next payload must finish at or before the preceding
+			 * payload's start. Reject overlapping or reordered extents in
+			 * one pass, rather than comparing every descriptor pair.
 			 */
-			for (previous_index = 0; previous_index < record_index;
-			     ++previous_index) {
-				const struct swapz_record_disk *previous_disk_record =
-					swapz_container_record_const(block_data,
-							     previous_index);
-				unsigned int previous_offset =
-					le16_to_cpu(previous_disk_record->offset);
-				unsigned int previous_length =
-					le16_to_cpu(previous_disk_record->length);
-
-				if (offset < previous_offset + previous_length &&
-				    previous_offset < offset + length)
-					return -EUCLEAN;
-			}
+			if (offset + length > previous_payload_start)
+				return -EUCLEAN;
+			previous_payload_start = offset;
 		}
 	}
 
