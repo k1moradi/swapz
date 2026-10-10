@@ -21,6 +21,7 @@ KERNEL = ROOT / "kernel" / "dm-swapz.c"
 
 FUNCTIONS = (
     "swapz_stream_record_current",
+    "swapz_stream_bios_match",
     "swapz_repack_can_fit",
     "swapz_update_repacked_ref",
     "swapz_emit_repack_container",
@@ -83,6 +84,10 @@ typedef uint64_t u64;
 #define WARN_ON_ONCE(condition) (condition)
 #define min(left, right) ((left) < (right) ? (left) : (right))
 #define min_t(type, left, right) ((type)(left) < (type)(right) ? (type)(left) : (type)(right))
+#define list_for_each_entry(entry,head,member) \
+    for (struct list_head *iter=(head)->next; \
+         iter!=(head) && ((entry)=(struct swapz_per_bio *)((char *)iter - offsetof(struct swapz_per_bio,member)),1); \
+         iter=iter->next)
 #define likely(condition) (condition)
 #define unlikely(condition) (condition)
 
@@ -100,7 +105,7 @@ static void list_del_init(struct list_head *item) {
     INIT_LIST_HEAD(item);
 }
 struct bio;
-struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct swapz_per_bio { struct list_head list; struct bio *bio; u8 block_index, record_index; };
 struct bio { struct swapz_per_bio entry; int completions; int last_error; };
 struct swapz_record_disk {
     u32 logical_page;
@@ -174,6 +179,11 @@ swapz_container_record_const(const void *buffer, unsigned int index)
 {
     return (const struct swapz_record_disk *)((const u8 *)buffer +
         SWAPZ_CONTAINER_BASE_BYTES + index * sizeof(struct swapz_record_disk));
+}
+static struct swapz_per_bio *dm_per_bio_data(struct bio *bio, size_t size)
+{
+    (void)size;
+    return &bio->entry;
 }
 static void swapz_set_failed(struct swapz_context *context, int error)
 {
@@ -406,6 +416,8 @@ static int run_case(unsigned int scenario, bool mutant)
     if (scenario == 7 || scenario == 10) {
         record->bio = &pending_bio;
         pending_bio.entry.bio = &pending_bio;
+        pending_bio.entry.block_index = corrupt_block;
+        pending_bio.entry.record_index = 0;
         INIT_LIST_HEAD(&pending_bio.entry.list);
         list_add_tail(&pending_bio.entry.list, &buffer.owned_bios);
     }
