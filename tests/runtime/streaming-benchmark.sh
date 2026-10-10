@@ -44,6 +44,7 @@ REQUESTED_BATCHES=${SWAPZ_BENCH_BATCHES:-auto}
 if ! BATCHES=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-plan.py" \
     --backend "$BACKEND_KIND" --mbps "$BANDWIDTH" \
     --latency-ns "$LATENCY_NS" --strategies "$STRATEGIES" \
+    --runtime "$RUNTIME" --qd "$WRITE_QD" --compress "$COMPRESS" \
     --batches "$REQUESTED_BATCHES" --repeats 1 --emit-batches); then
   echo "ERROR: benchmark pre-device plan rejected configuration; no fixture allocated." >&2
   exit 4
