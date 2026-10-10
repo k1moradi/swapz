@@ -358,7 +358,17 @@ import json, sys
 path, before, after, status, strategy, batch, start_ns, end_ns, backend, latency_summary = sys.argv[1:]
 with open(path, encoding="utf-8") as f:
     root = json.load(f)
-jobs = {job["jobname"]: job for job in root["jobs"]}
+source_jobs = root.get("jobs") if isinstance(root, dict) else None
+if (type(source_jobs) is not list or len(source_jobs) != 2 or
+        any(type(job) is not dict or type(job.get("jobname")) is not str
+            for job in source_jobs)):
+    raise SystemExit("fio JSON must contain exactly two named jobs; preserve artifacts")
+jobs = {job["jobname"]: job for job in source_jobs}
+if set(jobs) != {"writer", "reader"} or len(jobs) != len(source_jobs):
+    raise SystemExit("fio JSON missing/duplicate writer or reader; preserve artifacts")
+if any(type(job.get("error")) is not int or job["error"] != 0
+       for job in source_jobs):
+    raise SystemExit("fio job-level error or missing status; preserve artifacts")
 w = jobs["writer"]["write"]
 r = jobs["reader"]["read"]
 def status_map(text):
@@ -388,7 +398,7 @@ if (type(exact_count) is not int or exact_count != read_count or
     raise SystemExit("invalid/mismatched exact reader latency; preserve artifacts")
 lower_sectors = a[3] - b[3]
 lower_ios = a[2] - b[2]
-if lower_sectors < 0 or lower_ios < 0:
+if any(a[index] < b[index] for index in range(4)):
     raise SystemExit("lower-device counters decreased; preserve artifacts")
 row = {
     "backend": backend, "strategy": strategy, "batch_kib": int(batch),
