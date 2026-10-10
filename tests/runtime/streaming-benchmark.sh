@@ -27,6 +27,12 @@ LATENCY_NS=${SWAPZ_BENCH_LATENCY_NS:-500000}
 RUNTIME=${SWAPZ_BENCH_RUNTIME:-3}
 WRITE_QD=${SWAPZ_BENCH_QD:-64}
 COMPRESS=${SWAPZ_BENCH_COMPRESS:-50}
+READ_IOPS=${SWAPZ_BENCH_READ_IOPS:-100}
+# Validate independently of fio before even checking privileges or devices.
+if [[ ! "$READ_IOPS" =~ ^[1-9][0-9]{0,3}$ ]] || (( READ_IOPS > 2000 )); then
+  echo "ERROR: SWAPZ_BENCH_READ_IOPS must be an integer in 1..2000" >&2
+  exit 4
+fi
 # Keep exact fio latency artifacts only when explicitly requested; preserving
 # these diagnostics never upgrades them to independent benchmark evidence.
 KEEP_ARTIFACTS=${SWAPZ_BENCH_KEEP_ARTIFACTS:-0}
@@ -295,26 +301,29 @@ size=${COLD_MIB}M
 iodepth=1
 # Exact, unaveraged completion-latency samples for this sole reader job.
 # Fio's per_job_logs=0 removes a job-index suffix from the CLAT log.
-rate_iops=100
+rate_iops=$READ_IOPS
 write_lat_log=$read_log_prefix
 log_avg_msec=0
 per_job_logs=0
+# Avoid reallocating fio's default 1024 log entries during common 30-60s diagnostics.
+log_entries=32768
 EOF
 
   before=$(read_stat)
   # An elapsed interval cannot use wall-clock time (date can jump).
   start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   fio "$fiofile" --output-format=json --output="$json"
+  # Stop the flush-inclusive physical-counter window immediately after the
+  # drain; parsing large CLAT logs beforehand would bias its duration and
+  # let background writes progress outside the intended measurement phase.
+  flush_device "$path"
+  end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
+  after=$(read_stat)
   # Require one exact latency for every completed reader I/O; a missing,
   # aggregated, or inconsistent fio log fails the case before publication.
   latency_summary=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-read-latency.py" \
       --fio-json "$json" --fio-clat-log "${read_log_prefix}_clat.log" \
       --sidecar "$TMP/${strategy}-${batch}.latbin") || return 1
-  # Staged upper completions may precede physical drain. Include the explicit
-  # flush in the end-to-end drain clock.
-  flush_device "$path"
-  end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
-  after=$(read_stat)
   status=$(dmsetup status "$TARGET")
   grep -q "failed=0" <<<"$status"
 
@@ -346,6 +355,12 @@ if elapsed_s <= 0:
 if len(a) != 4 or len(b) != 4 or any(x < 0 for x in a + b):
     raise SystemExit("missing or corrupt lower-device counters; preserve artifacts")
 read_count = int(r.get("total_ios", 0))
+exact_latency = json.loads(latency_summary)
+exact_count = exact_latency.get("read_count") if isinstance(exact_latency, dict) else None
+exact_p99 = exact_latency.get("read_p99_ns") if isinstance(exact_latency, dict) else None
+if (type(exact_count) is not int or exact_count != read_count or
+        type(exact_p99) is not int or exact_p99 <= 0):
+    raise SystemExit("invalid/mismatched exact reader latency; preserve artifacts")
 lower_sectors = a[3] - b[3]
 lower_ios = a[2] - b[2]
 if lower_sectors < 0 or lower_ios < 0:
@@ -365,7 +380,9 @@ row = {
     "write_avg_ms": float(w.get("clat_ns", {}).get("mean", 0)) / 1e6,
     "write_p99_ms": p(w, "99.000000"),
     "read_avg_ms": float(r.get("clat_ns", {}).get("mean", 0)) / 1e6,
-    "read_p95_ms": p(r, "95.000000"), "read_p99_ms": p(r, "99.000000"),
+    "read_p95_ms": p(r, "95.000000"),
+    "read_p99_ms": exact_p99 / 1e6,
+    "fio_summary_read_p99_ms": p(r, "99.000000"),
     "read_max_ms": float(r.get("clat_ns", {}).get("max", 0)) / 1e6,
     "usr_cpu_pct": float(w.get("usr_cpu", 0)) + float(r.get("usr_cpu", 0)),
     "sys_cpu_pct": float(w.get("sys_cpu", 0)) + float(r.get("sys_cpu", 0)),
@@ -374,7 +391,7 @@ row = {
     "status": s,
     # Exact fio read samples are retained separately from the non-qualifying
     # summarized fio read_p99_ms and unverified lower-counter window.
-    "exact_read_latency": json.loads(latency_summary),
+    "exact_read_latency": exact_latency,
 }
 row["staged_hits"] = int(s.get("staged_hits", 0))
 row["staged_early"] = int(s.get("staged_early", 0))
@@ -396,6 +413,7 @@ echo "LOWER_DISCARD=$BENCH_DISCARD"
 echo "NBD_DEVICE=${NBD_DEVICE:-not-used}"
 echo "BATCHES=$BATCHES"
 echo "STRATEGIES=$STRATEGIES"
+echo "READ_IOPS_TARGET=$READ_IOPS (actual completions validated per case)"
 echo "KEEP_ARTIFACTS=$KEEP_ARTIFACTS"
 
 for strategy in $STRATEGIES; do
