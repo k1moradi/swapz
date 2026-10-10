@@ -727,6 +727,87 @@ static int swapz_emit_repack_container(struct swapz_context *context,
 	return 0;
 }
 
+/*
+ * Validate the complete resident batch before compaction mutates any source
+ * block, upper-BIO ownership metadata, or authoritative staged reference.
+ * The stream contains locally generated records, but corruption here must
+ * fail closed without turning an earlier acknowledged RAM copy unreachable.
+ *
+ * Only the serialized stream worker calls this; neither the lower-I/O
+ * completion callback nor the watchdog accesses mutable batch metadata.
+ */
+static int swapz_validate_compact_fill_buffer(const struct swapz_context *context,
+					       const struct swapz_stream_buffer *buffer)
+{
+	u32 block_index;
+
+	if (buffer->block_count > context->max_batch_blocks)
+		return -EUCLEAN;
+
+	for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+		const struct swapz_write_batch_block *block =
+			&buffer->blocks[block_index];
+		const u8 *block_data =
+			(const u8 *)buffer->data + block_index * SWAPZ_BLOCK_BYTES;
+		const struct swapz_container_disk *container = (const void *)block_data;
+		unsigned int record_count = block->record_count;
+		unsigned int descriptor_end;
+		unsigned int record_index;
+
+		/* Bound the in-memory array before inspecting any of its records. */
+		if (!record_count || record_count > SWAPZ_MAX_PACKED_RECORDS)
+			return -EUCLEAN;
+
+		if (!(block->records[0].flags & SWAPZ_MAP_COMPRESSED)) {
+			const struct swapz_write_batch_record *record =
+				&block->records[0];
+
+			if (record_count != 1 || record->flags ||
+			    record->record_index || record->stored_length != SWAPZ_BLOCK_BYTES ||
+			    record->logical_page >= context->logical_pages)
+				return -EUCLEAN;
+			continue;
+		}
+
+		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
+		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    le16_to_cpu(container->record_count) != record_count)
+			return -EUCLEAN;
+
+		descriptor_end = SWAPZ_CONTAINER_BASE_BYTES +
+			record_count * sizeof(struct swapz_record_disk);
+		if (descriptor_end > SWAPZ_BLOCK_BYTES)
+			return -EUCLEAN;
+
+		for (record_index = 0; record_index < record_count; ++record_index) {
+			const struct swapz_write_batch_record *record =
+				&block->records[record_index];
+			const struct swapz_record_disk *disk_record;
+			unsigned int offset;
+			unsigned int length;
+
+			if (record->flags != SWAPZ_MAP_COMPRESSED ||
+			    record->record_index != record_index ||
+			    record->logical_page >= context->logical_pages)
+				return -EUCLEAN;
+
+			disk_record =
+				swapz_container_record_const(block_data, record_index);
+			offset = le16_to_cpu(disk_record->offset);
+			length = le16_to_cpu(disk_record->length);
+			if (le32_to_cpu(disk_record->logical_page) != record->logical_page ||
+			    !length || length != record->stored_length ||
+			    length > SWAPZ_MAX_COMPRESSED_BYTES ||
+			    offset < descriptor_end ||
+			    offset > SWAPZ_BLOCK_BYTES ||
+			    length > SWAPZ_BLOCK_BYTES - offset)
+				return -EUCLEAN;
+		}
+	}
+
+	return 0;
+}
+
 static void swapz_compact_fill_buffer(struct swapz_context *context,
 				      struct swapz_stream_buffer *buffer)
 {
@@ -738,6 +819,11 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 
 	if (!old_count)
 		return;
+
+	/* Preflight every record: a late corruption error must not partially repack. */
+	error = swapz_validate_compact_fill_buffer(context, buffer);
+	if (error)
+		goto fail;
 
 	memset(context->repack_buffer, 0, SWAPZ_BLOCK_BYTES);
 	memset(&context->repack_block, 0, sizeof(context->repack_block));
