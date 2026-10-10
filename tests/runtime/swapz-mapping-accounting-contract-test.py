@@ -231,15 +231,30 @@ class MappingAccountingContracts(unittest.TestCase):
             raise AssertionError("mandatory userspace C compiler unavailable")
         cls.tmp=tempfile.TemporaryDirectory(prefix="swapz-mapping-c-")
         cls.binary=Path(cls.tmp.name)/"mapping-accounting"
-        program=Path(cls.tmp.name)/"mapping-accounting.c"
-        program.write_text(PREFIX + "\n" +
-            "\n".join(exact_function(cls.src,n) for n in FUNCTIONS) +
-            "\n" + SUFFIX, encoding="utf-8")
-        r=subprocess.run([cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
-            "-o",str(cls.binary),str(program)],
-            capture_output=True,text=True,timeout=15)
-        if r.returncode:
-            raise AssertionError("exact mapping production C compile failed: "+r.stderr)
+        cls.legacy_binary=Path(cls.tmp.name)/"unaccount-first-mutation"
+        compiled_functions="\n".join(exact_function(cls.src,n) for n in FUNCTIONS)
+        # Executable counterexample: move the real unaccount call ahead of
+        # destination validation, reproducing the previous ordering bug.
+        installed=exact_function(cls.src,"swapz_install_mapping")
+        old_call="\tswapz_unaccount_mapping(context, mapping);"
+        legacy=installed.replace(old_call,"",1)
+        insertion=legacy.index("\tif (WARN_ON_ONCE(physical_block >=")
+        legacy=legacy[:insertion]+old_call+"\n"+legacy[insertion:]
+        if legacy==installed:
+            raise AssertionError("unable to create old-ordering executable mutant")
+        mutant_functions=compiled_functions.replace(installed,legacy,1)
+        for label,binary,functions in (
+            ("mapping-accounting",cls.binary,compiled_functions),
+            ("unaccount-first-mutation",cls.legacy_binary,mutant_functions),
+        ):
+            program=Path(cls.tmp.name)/(label+".c")
+            program.write_text(PREFIX + "\n" + functions + "\n" + SUFFIX,
+                               encoding="utf-8")
+            r=subprocess.run([cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                "-o",str(binary),str(program)],
+                capture_output=True,text=True,timeout=15)
+            if r.returncode:
+                raise AssertionError(label+" production C compile failed: "+r.stderr)
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
@@ -254,6 +269,20 @@ class MappingAccountingContracts(unittest.TestCase):
         for case in range(16):
             with self.subTest(case=case):
                 self.run_case(case)
+
+    def test_original_order_executable_mutant_loses_old_live_reference(self):
+        for case in (2, 3, 4):
+            with self.subTest(case=case):
+                # Under the old order, invalid new destinations are denied
+                # only after the old authoritative block was unaccounted.
+                old=subprocess.run([str(self.legacy_binary),str(case)],
+                                   capture_output=True,text=True,timeout=3)
+                self.assertNotEqual(old.returncode,0,
+                                    "old-ordering mutant unexpectedly preserved accounting")
+                now=subprocess.run([str(self.binary),str(case)],
+                                   capture_output=True,text=True,timeout=3)
+                self.assertEqual(now.returncode,0,
+                                 f"corrected implementation: {now.stdout} {now.stderr}")
 
     def test_source_order_is_fail_closed(self):
         enforce_contract(self.src)
