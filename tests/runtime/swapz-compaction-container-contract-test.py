@@ -314,8 +314,19 @@ static int run_case(unsigned int scenario, bool mutant)
                 .generation=1, .buffer_id=0, .block_index=0,
                 .record_index=record_index, .valid=1};
         }
-    } else if (scenario == 21) {
+    } else if (scenario == 21 || scenario == 22) {
         prepare_adjacent_block(&buffer);
+        if (scenario == 22) {
+            /* Reversed descriptor extents are non-overlapping but never
+             * emitted by the append-from-end packer or repacker. */
+            struct swapz_record_disk *first =
+                swapz_container_record(data, 0);
+            struct swapz_record_disk *second =
+                swapz_container_record(data, 1);
+            u16 previous_offset = first->offset;
+            first->offset = second->offset;
+            second->offset = previous_offset;
+        }
         context.staged_refs[0] = (struct swapz_staged_ref){
             .generation=1, .buffer_id=0, .block_index=0,
             .record_index=0, .valid=1};
@@ -324,7 +335,7 @@ static int run_case(unsigned int scenario, bool mutant)
             .record_index=1, .valid=1};
     }
 
-    if (scenario != 19 && scenario != 20 && scenario != 21) {
+    if (scenario != 19 && scenario != 20 && scenario != 21 && scenario != 22) {
         context.staged_refs[0] = (struct swapz_staged_ref){
             .generation=1, .buffer_id=0, .block_index=0,
             .record_index=0, .valid=1};
@@ -368,6 +379,7 @@ static int run_case(unsigned int scenario, bool mutant)
     case 19: break; /* 64 compressed records alias the same payload extent. */
     case 20: break; /* 64 compressed extents overlap pairwise. */
     case 21: break; /* Adjacent payload ranges remain valid. */
+    case 22: break; /* Reversed, non-overlapping extents are noncanonical. */
     default: return 60;
     }
 
@@ -446,7 +458,7 @@ int main(int argc, char **argv)
     if (argc != 3)
         return 80;
     scenario = strtoul(argv[1], &end, 10);
-    if (!end || *end || scenario > 21)
+    if (!end || *end || scenario > 22)
         return 81;
     error = run_case((unsigned int)scenario, argv[2][0] == 'm');
     if (!error)
@@ -519,7 +531,7 @@ class CompactionContainerContracts(unittest.TestCase):
                 self.run_contract(scenario)
 
     def test_corrupted_metadata_rejected_without_partial_repack(self):
-        for scenario in (*range(1, 13), 14, 15, 16, 17, 18, 19, 20):
+        for scenario in (*range(1, 13), 14, 15, 16, 17, 18, 19, 20, 22):
             with self.subTest(scenario=scenario):
                 self.run_contract(scenario)
 

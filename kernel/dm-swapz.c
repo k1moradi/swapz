@@ -752,6 +752,7 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 		const struct swapz_container_disk *container = (const void *)block_data;
 		unsigned int record_count = block->record_count;
 		unsigned int descriptor_end;
+		unsigned int previous_payload_start = SWAPZ_BLOCK_BYTES;
 		unsigned int record_index;
 
 		/* Bound the in-memory array before inspecting any of its records. */
@@ -783,7 +784,6 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 			const struct swapz_write_batch_record *record =
 				&block->records[record_index];
 			const struct swapz_record_disk *disk_record;
-			unsigned int previous_index;
 			unsigned int offset;
 			unsigned int length;
 
@@ -805,24 +805,15 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 				return -EUCLEAN;
 
 			/*
-			 * The packer stores each payload once. Overlapping extents could
-			 * make repacking expand one reserved source block into many output
-			 * blocks, overwriting staged input and physical reservations.
+			 * Both the packer and repacker append payloads from the end of
+			 * the page towards the header, in ascending descriptor order.
+			 * The next payload must finish at or before the preceding
+			 * payload's start. Reject overlapping or reordered extents in
+			 * one pass, rather than comparing every descriptor pair.
 			 */
-			for (previous_index = 0; previous_index < record_index;
-			     ++previous_index) {
-				const struct swapz_record_disk *previous_disk_record =
-					swapz_container_record_const(block_data,
-							     previous_index);
-				unsigned int previous_offset =
-					le16_to_cpu(previous_disk_record->offset);
-				unsigned int previous_length =
-					le16_to_cpu(previous_disk_record->length);
-
-				if (offset < previous_offset + previous_length &&
-				    previous_offset < offset + length)
-					return -EUCLEAN;
-			}
+			if (offset + length > previous_payload_start)
+				return -EUCLEAN;
+			previous_payload_start = offset;
 		}
 	}
 
@@ -1651,7 +1642,15 @@ static int swapz_decode_loaded_mapping(u32 logical_page,
 				       const void *source_block,
 				       void *destination)
 {
+	/* A published mapping must be either a full raw page or compressed. */
+	if (mapping->flags != SWAPZ_MAP_VALID &&
+	    mapping->flags != (SWAPZ_MAP_VALID | SWAPZ_MAP_COMPRESSED))
+		return -EIO;
+
 	if (!(mapping->flags & SWAPZ_MAP_COMPRESSED)) {
+		if (mapping->record_index ||
+		    mapping->stored_length != SWAPZ_BLOCK_BYTES)
+			return -EIO;
 		memcpy(destination, source_block, SWAPZ_BLOCK_BYTES);
 		return 0;
 	}
@@ -1665,6 +1664,8 @@ static int swapz_decode_loaded_mapping(u32 logical_page,
 
 		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
 		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    !le16_to_cpu(container->record_count) ||
+		    le16_to_cpu(container->record_count) > SWAPZ_MAX_PACKED_RECORDS ||
 		    mapping->record_index >= le16_to_cpu(container->record_count) ||
 		    mapping->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 			return -EIO;
@@ -2015,6 +2016,16 @@ static int swapz_read_staged(struct swapz_context *context,
 	    ref->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 		return -EUCLEAN;
 	record = &block->records[ref->record_index];
+	/*
+	 * The staged slot and its descriptor index are identical when staged
+	 * and remain identical after repacking. Do not follow a corrupted
+	 * in-memory descriptor index or treat unknown flags as a raw page.
+	 */
+	if (record->record_index != ref->record_index ||
+	    record->record_index >= SWAPZ_MAX_PACKED_RECORDS)
+		return -EUCLEAN;
+	if (record->flags != 0 && record->flags != SWAPZ_MAP_COMPRESSED)
+		return -EUCLEAN;
 	if (record->logical_page != logical_page ||
 	    record->generation != ref->generation ||
 	    !swapz_stream_record_current(context, record))
@@ -2023,6 +2034,11 @@ static int swapz_read_staged(struct swapz_context *context,
 	block_data = (const u8 *)buffer->data +
 		ref->block_index * SWAPZ_BLOCK_BYTES;
 	if (!(record->flags & SWAPZ_MAP_COMPRESSED)) {
+		/* A raw page has exactly one full-size record in its block. */
+		if (block->record_count != 1 ||
+		    record->record_index != 0 ||
+		    record->stored_length != SWAPZ_BLOCK_BYTES)
+			return -EUCLEAN;
 		memcpy(destination, block_data, SWAPZ_BLOCK_BYTES);
 	} else {
 		const struct swapz_container_disk *container = block_data;
@@ -2031,8 +2047,13 @@ static int swapz_read_staged(struct swapz_context *context,
 		u16 length;
 		int decompressed;
 
+		/*
+		 * Stream blocks were packed locally and may be repacked, but the
+		 * on-block descriptor count must still match the resident metadata.
+		 */
 		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
 		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    le16_to_cpu(container->record_count) != block->record_count ||
 		    record->record_index >= le16_to_cpu(container->record_count))
 			return -EIO;
 
@@ -2041,6 +2062,7 @@ static int swapz_read_staged(struct swapz_context *context,
 		offset = le16_to_cpu(disk_record->offset);
 		length = le16_to_cpu(disk_record->length);
 		if (le32_to_cpu(disk_record->logical_page) != logical_page ||
+		    !length || length > SWAPZ_MAX_COMPRESSED_BYTES ||
 		    length != record->stored_length ||
 		    offset < SWAPZ_CONTAINER_BASE_BYTES +
 			     le16_to_cpu(container->record_count) *
