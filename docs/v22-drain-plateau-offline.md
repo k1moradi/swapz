@@ -61,16 +61,14 @@ find the sample at rank `ceil(0.99 × N)` in the expanded, ordered
 count distribution. The supplied `read_p99_ns` must match exactly.
 A false count or falsely low p99 is rejected.
 
-**Practical constraint:** The 256-distinct-value limit is deliberate
-and conservative for a bounded 2 MiB JSONL input. Real workloads may
+**Practical constraint:** The V2 256-distinct-value limit is deliberate
+and conservative for bounded 2 MiB JSONL input. Real workloads may
 produce thousands of distinct raw nanosecond values and therefore
-**cannot be represented exactly** in this initial v2 schema.
-Do not silently round, truncate or discard reads to make them fit.
-A future independently reviewed collector can use a separately
-specified conservative histogram/upper-bound format when real data
-requires more bins. Neither v1 nor v2 itself authenticates the
-collector, proves a sample happened, or independently establishes
-true kernel I/O drain.
+**cannot be represented exactly** in V2. Do not silently round, truncate
+or discard reads to fit. **V3** adds a binary, lossless exact-RLE
+sidecar; see `docs/v22-latency-v3-sidecar.md`. Neither V1, V2 nor
+V3 authenticates the collector, independently proves a sample
+happened, or establishes real kernel I/O drain.
 
 Exactly these common keys are required for **every** observation
 (no extra fields other than the one v2 addition):
