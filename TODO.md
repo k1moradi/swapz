@@ -1555,3 +1555,15 @@ See `docs/v22-inflight-finalize-preflight-audit.md`.
 - [ ] Measure ledger/census overhead, GC amplification, and stream strategy/batch performance before choosing a V2.2 winner: **UNDETERMINED**.
 
 See `docs/v22-independent-upper-bio-ownership-audit.md`.
+
+### 2026-10-10 — Exact upper-BIO identity and rootless checkpoint safety
+
+- [x] Independently review PR #8's owner ledger and count-based finalization admission. Reproduce count-preserving duplicate, swapped, foreign-buffer and stale-location BIO mismatches with compiled exact-production-C tests and an executable count-only mutant.
+- [x] Implement per-BIO stable stream slot identity in [PR #9](https://github.com/k1moradi/swapz/pull/9), update slots through production compaction/repacking, and check one-to-one identity before compaction or mapping publication. O(records + owners), no new hot-path allocation or on-disk change.
+- [x] Qualify [PR #9](https://github.com/k1moradi/swapz/pull/9), merged as `89c4aeedb7632913e91c8c530fb7af679b3b7a13`: exact post-merge kernel (38060222060), combined (38060222088) and teardown (38060222038) **PASS**.
+- [x] Catch and close a test-wiring omission: [PR #10](https://github.com/k1moradi/swapz/pull/10) explicitly runs production two-block pending-BIO owner relocation case 23. Exact PR head kernel (38060310127), combined (38060310069) and teardown (38060310111) **PASS**. Post-merge kernel (38060472581) and teardown (38060472580) **PASS**.
+- [x] Investigate PR #10's [failed combined run 38060472567](https://github.com/k1moradi/swapz/actions/runs/38060472567) rather than suppressing it. Identify a legitimate atomic-link publication race in rootless pressure checkpoint verification. [PR #11](https://github.com/k1moradi/swapz/pull/11) repairs it with a bounded fail-closed retry and deterministic regular-file/hardlink tests. Exact post-merge combined (38060923597) and teardown (38060923539) **PASS**.
+- [x] Record Codex's latest native Linux PR #8 baseline: `24e2794b173a405c9f9ccfe739c4f733ebc41508`, 92/92 rootless tests and `W=1` native module build PASS, no C-source warnings, no module loading.
+- [ ] Independently qualify the newer PR #9 kernel source on native Linux at current main (W=1 module, exact-C ownership/async/compaction tests) after Codex's separate read-only GC/lifecycle assignment. Do not attribute PR #8's prior native report to it.
+- [ ] Investigate only demonstrated outstanding owner-list corruption, cross-buffer callback or GC edge cases; no arbitrary-corruption-recovery or real-device durability claims.
+- [ ] Measure actual per-BIO slot and O(records + owners) admission CPU/RAM costs before any policy/batch decision. V2.2 winner stays **UNDETERMINED**.
