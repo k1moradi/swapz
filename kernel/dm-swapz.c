@@ -153,6 +153,12 @@ struct swapz_context;
 
 struct swapz_stream_buffer {
 	struct swapz_context *context;
+	/*
+	 * Independent ownership of upper BIOs not yet completed.  The intrusive
+	 * nodes already live in dm_per_bio_data, so repacking can move descriptors
+	 * without ever moving or allocating an ownership node.
+	 */
+	struct list_head owned_bios;
 	void *data;
 	struct swapz_write_batch_block *blocks;
 	u32 start_block;
@@ -503,9 +509,27 @@ static void swapz_copy_to_bio(struct bio *bio, const void *source)
 
 static void swapz_complete_bio(struct bio *bio, int error)
 {
+	struct swapz_per_bio *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+	/*
+	 * This node is either already detached from the worker queue or belongs
+	 * to exactly one stream-buffer ownership ledger. Remove it before endio
+	 * can release the BIO and its per-bio metadata.
+	 */
+	list_del_init(&entry->list);
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
 	bio_endio(bio);
+}
+
+static void swapz_register_owned_bio(struct swapz_stream_buffer *buffer,
+				     struct bio *bio)
+{
+	struct swapz_per_bio *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+	/* The serialized worker detached this BIO from its local work list. */
+	WARN_ON_ONCE(!list_empty(&entry->list));
+	list_add_tail(&entry->list, &buffer->owned_bios);
 }
 
 static void swapz_unaccount_mapping(struct swapz_context *context,
@@ -1008,6 +1032,7 @@ static void swapz_complete_buffer_bios(struct swapz_context *context,
 				       struct swapz_stream_buffer *buffer,
 				       int error)
 {
+	struct swapz_per_bio *entry;
 	u32 block_index;
 
 	if (unlikely(buffer->block_count > context->max_batch_blocks))
@@ -1039,9 +1064,24 @@ static void swapz_complete_buffer_bios(struct swapz_context *context,
 					       block_index, record->record_index);
 			else
 				swapz_set_failed(context, -EUCLEAN);
-			swapz_complete_bio(record->bio, error);
+			/*
+			 * Metadata may be corrupt. Invalidate only bounded descriptor
+			 * pointers; the independent owned_bios list is authoritative
+			 * for actual completion.
+			 */
 			record->bio = NULL;
 		}
+	}
+
+	/*
+	 * Even a zeroed record_count or truncated block_count cannot hide an
+	 * accepted upper BIO from this list. Complete each registered BIO once
+	 * without following any resident record index.
+	 */
+	while (!list_empty(&buffer->owned_bios)) {
+		entry = list_first_entry(&buffer->owned_bios,
+					 struct swapz_per_bio, list);
+		swapz_complete_bio(entry->bio, error);
 	}
 }
 
@@ -1076,6 +1116,9 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 					struct swapz_stream_buffer *buffer)
 {
 	u32 block_index;
+	u32 pending_record_bios = 0;
+	u32 pending_owned_bios = 0;
+	const struct list_head *node;
 	int error = buffer->io_error;
 
 	/*
@@ -1111,6 +1154,12 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 				      record->flags != SWAPZ_MAP_COMPRESSED)))
 				goto corrupt;
 
+			if (record->bio) {
+				if (unlikely(record->upper_completed))
+					goto corrupt;
+				pending_record_bios++;
+			}
+
 			if (record->flags == 0) {
 				if (unlikely(block->record_count != 1 ||
 					     record->stored_length != SWAPZ_BLOCK_BYTES))
@@ -1122,6 +1171,23 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 			}
 		}
 	}
+
+	/*
+	 * Counts and pointers in resident descriptors cannot be the only
+	 * evidence of who still owns an upper BIO. In particular, a valid
+	 * record_count with a lost record->bio must not silently reset a
+	 * buffer that still has registered outstanding owners. Bound the
+	 * independent list traversal to the allocated batch capacity.
+	 */
+	for (node = buffer->owned_bios.next;
+	     node != &buffer->owned_bios;
+	     node = node->next) {
+		if (unlikely(++pending_owned_bios >
+			     context->max_batch_blocks * SWAPZ_MAX_PACKED_RECORDS))
+			goto corrupt;
+	}
+	if (unlikely(pending_record_bios != pending_owned_bios))
+		goto corrupt;
 
 	if (error) {
 		bool retain = false;
@@ -1501,6 +1567,8 @@ retry:
 			&batch_block->records[record_index];
 
 		target->bio = source->bio;
+		if (source->bio)
+			swapz_register_owned_bio(buffer, source->bio);
 		target->logical_page = source->logical_page;
 		target->generation = source->generation;
 		target->stored_length = source->stored_length;
@@ -2104,6 +2172,13 @@ static int swapz_read_staged(struct swapz_context *context,
 	    record->generation != ref->generation ||
 	    !swapz_stream_record_current(context, record))
 		return -EUCLEAN;
+	/*
+	 * Once the target has failed, only already-acknowledged staged writes
+	 * may supply readback. An unacknowledged failed upper BIO cannot make
+	 * its RAM-only generation authoritative.
+	 */
+	if (context->failed && !record->upper_completed)
+		return -ENOENT;
 
 	block_data = (const u8 *)buffer->data +
 		ref->block_index * SWAPZ_BLOCK_BYTES;
@@ -3021,6 +3096,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 			error = -ENOMEM;
 			goto fail;
 		}
+		INIT_LIST_HEAD(&buffer->owned_bios);
 		init_completion(&buffer->completion);
 		INIT_DELAYED_WORK(&buffer->watchdog_work, swapz_stream_watchdog);
 		swapz_reset_stream_buffer(context, buffer,

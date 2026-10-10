@@ -59,6 +59,7 @@ PREFIX = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stddef.h>
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -85,7 +86,22 @@ typedef uint64_t u64;
 #define likely(condition) (condition)
 #define unlikely(condition) (condition)
 
-struct bio { int completions; int last_error; };
+struct list_head { struct list_head *next, *prev; };
+#define INIT_LIST_HEAD(item) do { (item)->next=(item); (item)->prev=(item); } while(0)
+#define list_empty(head) ((head)->next==(head))
+#define list_first_entry(head,type,member) \
+    ((type *)((char *)(head)->next - offsetof(type,member)))
+static void list_add_tail(struct list_head *item, struct list_head *head) {
+    item->prev=head->prev;item->next=head;
+    head->prev->next=item;head->prev=item;
+}
+static void list_del_init(struct list_head *item) {
+    item->prev->next=item->next;item->next->prev=item->prev;
+    INIT_LIST_HEAD(item);
+}
+struct bio;
+struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct bio { struct swapz_per_bio entry; int completions; int last_error; };
 struct swapz_record_disk {
     u32 logical_page;
     u16 offset;
@@ -119,6 +135,7 @@ struct swapz_staged_ref {
     u8 valid;
 };
 struct swapz_stream_buffer {
+    struct list_head owned_bios;
     void *data;
     struct swapz_write_batch_block *blocks;
     u32 block_count;
@@ -166,6 +183,7 @@ static void swapz_set_failed(struct swapz_context *context, int error)
 }
 static void swapz_complete_bio(struct bio *bio, int error)
 {
+    list_del_init(&bio->entry.list);
     bio->completions++;
     bio->last_error = error;
 }
@@ -300,6 +318,7 @@ static int run_case(unsigned int scenario, bool mutant)
     context.segment_write_block = (scenario == 19 || scenario == 20) ? 1 : 2;
     buffer.data = data;
     buffer.blocks = blocks;
+    INIT_LIST_HEAD(&buffer.owned_bios);
     buffer.block_count = scenario == 18 ? 3 : (scenario == 11 ? 2 : 1);
     prepare_block(&buffer, 0, 0);
     if (buffer.block_count >= 2)
@@ -384,8 +403,12 @@ static int run_case(unsigned int scenario, bool mutant)
     }
 
     /* Exercise failure fanout with one incomplete BIO on adversarial records. */
-    if (scenario == 7 || scenario == 10)
+    if (scenario == 7 || scenario == 10) {
         record->bio = &pending_bio;
+        pending_bio.entry.bio = &pending_bio;
+        INIT_LIST_HEAD(&pending_bio.entry.list);
+        list_add_tail(&pending_bio.entry.list, &buffer.owned_bios);
+    }
 
     memcpy(original_data, data, sizeof(data));
     memcpy(original_blocks, blocks, sizeof(blocks));

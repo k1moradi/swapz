@@ -48,6 +48,7 @@ MANDATORY_TESTS = (
     "swapz-staged-read-contract-test.py",
     "swapz-published-read-bounds-contract-test.py",
     "swapz-stream-submit-bounds-contract-test.py",
+    "swapz-upper-bio-ownership-contract-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
@@ -241,6 +242,17 @@ class RootlessWorkflowContractTests(unittest.TestCase):
                 self.assertIn(path, source)
                 with self.assertRaisesRegex(WorkflowContractError, "kernel source changes"):
                     check_workflow(name, source.replace(path, "", 1))
+
+    def test_removed_upper_bio_ownership_execution_is_rejected(self):
+        for name, source in self.sources.items():
+            with self.subTest(workflow=name):
+                command = ("timeout 25s python3 -B "
+                           "tests/runtime/swapz-upper-bio-ownership-contract-test.py -v")
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(
+                        WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(name, source.replace(
+                        command, "echo 'upper BIO ownership gate skipped'", 1))
 
     def test_removed_stream_submit_bounds_execution_is_rejected(self):
         for name, source in self.sources.items():

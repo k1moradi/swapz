@@ -128,7 +128,22 @@ struct work_struct { int flag; };
 struct stub_queue { int queues; };
 struct stub_atomic { int value; };
 struct stub_wait { int wakes; };
-struct bio { int completes, error; };
+struct list_head { struct list_head *next, *prev; };
+#define INIT_LIST_HEAD(head) do { (head)->next=(head); (head)->prev=(head); } while(0)
+#define list_empty(head) ((head)->next==(head))
+#define list_first_entry(head,type,member) \
+    ((type *)((char *)(head)->next - offsetof(type,member)))
+static void list_add_tail(struct list_head *node, struct list_head *head) {
+    node->next=head;node->prev=head->prev;
+    head->prev->next=node;head->prev=node;
+}
+static void list_del_init(struct list_head *node) {
+    node->prev->next=node->next;node->next->prev=node->prev;
+    INIT_LIST_HEAD(node);
+}
+struct bio;
+struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct bio { struct swapz_per_bio entry; int completes, error; };
 struct swapz_context;
 struct swapz_write_batch_record {
     struct bio *bio;
@@ -143,6 +158,7 @@ struct swapz_write_batch_block {
     struct swapz_write_batch_record records[SWAPZ_MAX_PACKED_RECORDS];
 };
 struct swapz_stream_buffer {
+    struct list_head owned_bios;
     struct swapz_context *context;
     struct swapz_write_batch_block *blocks;
     u32 start_block, block_count;
@@ -193,6 +209,7 @@ static void swapz_set_failed(struct swapz_context *c, int err) {
     (void)err; c->failed=true; c->failed_events++;
 }
 static void swapz_complete_bio(struct bio *b, int err) {
+    list_del_init(&b->entry.list);
     b->completes++; b->error=err;
 }
 static void swapz_install_mapping(struct swapz_context *c, u32 pg,
@@ -222,10 +239,15 @@ static void setup(bool outstanding, bool early) {
     memset(blocks,0,sizeof(blocks));
     memset(&b,0,sizeof(b));
     memset(&b2,0,sizeof(b2));
+    b2.entry.bio=&b2;
+    INIT_LIST_HEAD(&b2.entry.list);
     memset(&q,0,sizeof(q));
     boundary_race=0;
     stream=&c.stream_buffers[0];
     stream->context=&c;
+    INIT_LIST_HEAD(&stream->owned_bios);
+    b.entry.bio=&b;
+    INIT_LIST_HEAD(&b.entry.list);
     stream->blocks=&block;
     stream->block_count=1;
     stream->start_block=9;
@@ -246,7 +268,10 @@ static void setup(bool outstanding, bool early) {
     block.records[0].stored_length=4;
     block.records[0].flags=SWAPZ_MAP_COMPRESSED;
     block.records[0].upper_completed=early;
-    if (outstanding) block.records[0].bio=&b;
+    if (outstanding) {
+        block.records[0].bio=&b;
+        list_add_tail(&b.entry.list,&stream->owned_bios);
+    }
     c.staged_refs[0].valid=1;
     c.staged_refs[0].generation=7;
 }
@@ -359,6 +384,7 @@ static int scenario(int id) {
         }
         if (id==23) {
             b.completes=1; /* Upper BIO was already acknowledged. */
+            list_del_init(&b.entry.list);
             block.records[0].bio=NULL;
             block.records[0].upper_completed=true;
         }
@@ -381,6 +407,7 @@ static int scenario(int id) {
         blocks[1].records[0].stored_length=4;
         blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
         blocks[1].records[0].bio=&b2;
+        list_add_tail(&b2.entry.list,&s->owned_bios);
         c.generations[1]=7;
         c.staged_refs[1]=(struct swapz_staged_ref){
             .valid=1,.generation=7,.buffer_id=0,.block_index=1,.record_index=0};
@@ -419,6 +446,18 @@ static int scenario(int id) {
                 block.records[0].bio != NULL)
                 return 41;
         }
+    } else if (id==30) {
+        /* Descriptor lost its BIO pointer, but independent ownership remains.
+         * Reject the whole finalization before mapping publication or reset. */
+        setup(true,false);
+        block.records[0].bio=NULL;
+        swapz_stream_io_complete(0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed || c.installed || c.resets ||
+            b.completes!=1 || b.error!=-EUCLEAN ||
+            !list_empty(&s->owned_bios) ||
+            s->state!=SWAPZ_BUFFER_INFLIGHT)
+            return 42;
     } else if (id==25 || id==26 || id==27) {
         setup(true,false);
         if (id==25) s->start_block=c.physical_blocks;
@@ -433,7 +472,7 @@ static int scenario(int id) {
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>29) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>30) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -462,6 +501,14 @@ class AsyncReapExactC(unittest.TestCase):
             raise AssertionError("cannot identify full finalization preflight")
         old_finalize=(finalizer[:start]+finalizer[end+1:corrupt]+
                       "\n}")
+        for declaration in (
+            "\tu32 pending_record_bios = 0;\n",
+            "\tu32 pending_owned_bios = 0;\n",
+            "\tconst struct list_head *node;\n",
+        ):
+            if old_finalize.count(declaration) != 1:
+                raise AssertionError("old finalizer mutant declaration changed")
+            old_finalize = old_finalize.replace(declaration, "", 1)
         for label,binary,body in (
             ("async-exact-c",cls.binary,finalizer),
             ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
@@ -508,6 +555,9 @@ class AsyncReapExactC(unittest.TestCase):
                           text=True,timeout=3)
         self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
         self.assertIn("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION",cp.stdout)
+
+    def test_missing_record_bio_pointer_cannot_orphan_registered_owner(self):
+        self.run_case(30)
 
     def test_no_inflight(self): self.run_case(0)
     def test_incomplete_nonblocking_reap(self): self.run_case(1)

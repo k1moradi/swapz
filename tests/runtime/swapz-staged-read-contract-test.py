@@ -126,6 +126,7 @@ struct swapz_staged_ref {
 };
 
 struct swapz_context {
+    bool failed;
     struct swapz_staged_ref staged_refs[1];
     u32 generations[1];
     struct swapz_stream_buffer stream_buffers[2];
@@ -295,6 +296,11 @@ static int run_case(unsigned int scenario, bool old_flags_mutant)
         break;
     case 8: context.staged_refs[0].valid = 0; break; /* Missing staged ref. */
     case 9: record->flags = 6; break; /* Compressed plus unknown flag. */
+    case 17: context.failed = true; break; /* Unacknowledged, fail closed. */
+    case 18:
+        context.failed = true;
+        record->upper_completed = true; /* Acknowledged staged readback. */
+        break;
     default: return 80;
     }
 
@@ -307,14 +313,15 @@ static int run_case(unsigned int scenario, bool old_flags_mutant)
         return 0;
     }
 
-    if (scenario == 0 || scenario == 4) {
+    if (scenario == 0 || scenario == 4 || scenario == 18) {
         if (result || context.stats.staged_read_hits != 1 ||
-            (scenario == 0 && (decode_calls != 1 || destination[0] != 'Z')) ||
+            ((scenario == 0 || scenario == 18) &&
+             (decode_calls != 1 || destination[0] != 'Z')) ||
             (scenario == 4 && (decode_calls || destination[0] != 'R')))
             return 82;
         return 0;
     }
-    if (scenario == 8) {
+    if (scenario == 8 || scenario == 17) {
         if (result != -ENOENT || context.stats.staged_read_hits || decode_calls)
             return 83;
         return 0;
@@ -334,8 +341,8 @@ int main(int argc, char **argv)
 
     if (argc != 3) return 85;
     scenario = strtoul(argv[1], &end, 10);
-    if (end == argv[1] || *end || scenario > 16) return 86;
-    if (scenario >= 10)
+    if (end == argv[1] || *end || scenario > 18) return 86;
+    if (scenario >= 10 && scenario <= 16)
         result = run_mapping_case((unsigned int)scenario, argv[2][0] == 'm');
     else
         result = run_case((unsigned int)scenario, argv[2][0] == 'm');
@@ -406,6 +413,10 @@ class StagedReadMetadataContracts(unittest.TestCase):
                       if scenario == 13 else
                       "OLD_UNKNOWN_FLAGS_ACCEPTED_AS_RAW")
             self.assertIn(marker, process.stdout)
+
+    def test_failed_target_allows_only_early_acknowledged_staged_readback(self):
+        self.execute(17)
+        self.execute(18)
 
     def test_valid_compressed_and_raw_staged_reads(self):
         for scenario in (0, 4, 8):
