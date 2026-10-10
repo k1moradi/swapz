@@ -74,6 +74,7 @@ on:
       - 'tests/runtime/swapz-kernel-range-contract-test.py'
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
+      - 'tests/runtime/swapz-generation-gc-transaction-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -339,6 +340,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-denial-telemetry.py tests/runtime/recall-denial-telemetry-test.py
           timeout 25s python3 -B tests/runtime/recall-denial-telemetry-test.py -v
+      - name: Compiled foreground generation and nested GC transaction contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-generation-gc-transaction-test.py
+          timeout 25s python3 -B tests/runtime/swapz-generation-gc-transaction-test.py -v
       - name: Compiled GC compressed scratch lifetime and nested batch contract
         shell: bash
         run: |
