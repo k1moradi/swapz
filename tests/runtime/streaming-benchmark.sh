@@ -66,6 +66,18 @@ if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )
   echo "ERROR: null_blk mbps may requeue a 1 MiB GC DISCARD forever; use SWAPZ_BENCH_DISCARD=0 with bandwidth throttling." >&2
   exit 4
 fi
+# The Python Fiona package also installs a CLI named 'fio'. Reject it before
+# root checks, null_blk setup or any DM creation; actual fio CLAT compatibility
+# is exercised independently by the rootless regular-file integration test.
+if ! command -v fio >/dev/null 2>&1; then
+  echo "ERROR: Flexible I/O Tester (fio) unavailable before device setup" >&2
+  exit 4
+fi
+if ! FIO_VERSION=$(fio --version 2>/dev/null) ||
+   [[ ! "$FIO_VERSION" =~ ^fio-[0-9]+(\.[0-9]+)+ ]]; then
+  echo "ERROR: fio executable is not Flexible I/O Tester (got '${FIO_VERSION:-unknown}'); refusing device setup" >&2
+  exit 4
+fi
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
 for tool in awk blockdev cmp dd dmsetup fio modprobe python3; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
