@@ -13,6 +13,7 @@ on:
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
       - 'tests/runtime/swapz-compaction-container-contract-test.py'
       - 'tests/runtime/swapz-staged-read-contract-test.py'
+      - 'tests/runtime/swapz-published-read-bounds-contract-test.py'
       - '.github/workflows/rootless-kernel-source.yml'
   pull_request:
     paths:
@@ -26,6 +27,7 @@ on:
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
       - 'tests/runtime/swapz-compaction-container-contract-test.py'
       - 'tests/runtime/swapz-staged-read-contract-test.py'
+      - 'tests/runtime/swapz-published-read-bounds-contract-test.py'
       - '.github/workflows/rootless-kernel-source.yml'
   workflow_dispatch:
 
@@ -59,7 +61,8 @@ jobs:
             tests/runtime/swapz-flush-fua-contract-test.py \
             tests/runtime/swapz-mapping-accounting-contract-test.py \
             tests/runtime/swapz-compaction-container-contract-test.py \
-            tests/runtime/swapz-staged-read-contract-test.py
+            tests/runtime/swapz-staged-read-contract-test.py \
+            tests/runtime/swapz-published-read-bounds-contract-test.py
 
       - name: Execute exact production-C range guards
         shell: bash
@@ -101,6 +104,12 @@ jobs:
         run: |
           set -euo pipefail
           timeout 25s python3 -B tests/runtime/swapz-staged-read-contract-test.py -v
+
+      - name: Reject out-of-backing published reads with exact production C
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-published-read-bounds-contract-test.py -v
 
       - name: Execute exact-C preflush and FUA flags contract
         shell: bash
