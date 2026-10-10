@@ -80,6 +80,7 @@ typedef uint64_t u64;
 #define le16_to_cpu(value) (value)
 #define le32_to_cpu(value) (value)
 #define WARN_ON_ONCE(condition) (condition)
+#define min(left, right) ((left) < (right) ? (left) : (right))
 #define min_t(type, left, right) ((type)(left) < (type)(right) ? (type)(left) : (type)(right))
 #define likely(condition) (condition)
 #define unlikely(condition) (condition)
@@ -231,16 +232,16 @@ static int run_case(unsigned int scenario, bool mutant)
     context.segment_write_block = 2;
     buffer.data = data;
     buffer.blocks = blocks;
-    buffer.block_count = scenario == 11 ? 2 : 1;
+    buffer.block_count = scenario == 18 ? 3 : (scenario == 11 ? 2 : 1);
     prepare_block(&buffer, 0, 0);
-    if (buffer.block_count == 2)
+    if (buffer.block_count >= 2)
         prepare_block(&buffer, 1, 1);
 
     context.staged_refs[0] = (struct swapz_staged_ref){
         .generation=1, .buffer_id=0, .block_index=0, .record_index=0, .valid=1};
     context.staged_refs[1] = (struct swapz_staged_ref){
         .generation=1, .buffer_id=0, .block_index=1, .record_index=0,
-        .valid=buffer.block_count == 2};
+        .valid=buffer.block_count >= 2};
 
     container = (void *)(data + corrupt_block * SWAPZ_BLOCK_BYTES);
     disk_record = swapz_container_record(container, 0);
@@ -273,6 +274,7 @@ static int run_case(unsigned int scenario, bool mutant)
     case 15: blocks[0].record_count = 0; break;
     case 16: container->record_count = 65; break;
     case 17: record->flags |= 4; break;
+    case 18: break; /* Resident block count exceeds allocated capacity. */
     default: return 60;
     }
 
@@ -307,7 +309,7 @@ static int run_case(unsigned int scenario, bool mutant)
     }
 
     if (!context.failed || context.stats.io_errors != 1 ||
-        buffer.block_count != (scenario == 11 ? 2U : 1U) ||
+        buffer.block_count != (scenario == 18 ? 3U : (scenario == 11 ? 2U : 1U)) ||
         memcmp(data, original_data, sizeof(data)) ||
         memcmp(blocks, original_blocks, sizeof(blocks)) ||
         memcmp(context.staged_refs, original_refs, sizeof(original_refs)))
@@ -330,7 +332,7 @@ int main(int argc, char **argv)
     if (argc != 3)
         return 80;
     scenario = strtoul(argv[1], &end, 10);
-    if (!end || *end || scenario > 17)
+    if (!end || *end || scenario > 18)
         return 81;
     error = run_case((unsigned int)scenario, argv[2][0] == 'm');
     if (!error)
@@ -400,7 +402,7 @@ class CompactionContainerContracts(unittest.TestCase):
                 self.run_contract(scenario)
 
     def test_corrupted_metadata_rejected_without_partial_repack(self):
-        for scenario in (*range(1, 13), 14, 15, 16, 17):
+        for scenario in (*range(1, 13), 14, 15, 16, 17, 18):
             with self.subTest(scenario=scenario):
                 self.run_contract(scenario)
 
