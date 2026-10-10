@@ -518,7 +518,9 @@ class AsyncReapExactC(unittest.TestCase):
             ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
         ):
             fragments=[body if name=="swapz_finalize_stream_buffer"
-                       else compiled[name] for name in PURE]
+                       else compiled[name] for name in PURE
+                       if not (label=="missing-finalize-preflight" and
+                               name=="swapz_stream_bios_match")]
             program=Path(cls.tmp.name)/(label+".c")
             program.write_text(PREFIX+"\n"+"\n".join(fragments)+"\n"+SUFFIX,
                                encoding="utf-8")
