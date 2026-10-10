@@ -3872,10 +3872,10 @@ At executable SHA
   **PASS**.
 - [PR NBD source safety run 38044600630](https://github.com/k1moradi/swapz/actions/runs/38044600630):
   **PASS**.
-- [PR combined run 38044600541](https://github.com/k1moradi/swapz/actions/runs/38044600541)
-  and [PR teardown run 38044600642](https://github.com/k1moradi/swapz/actions/runs/38044600642):
-  recorded here as **not yet verified successful**; inspect their
-  conclusions before calling the candidate fully qualified.
+- [PR combined run 38044600541](https://github.com/k1moradi/swapz/actions/runs/38044600541):
+  **PASS** at the same executable SHA.
+- [PR teardown run 38044600642](https://github.com/k1moradi/swapz/actions/runs/38044600642):
+  **PASS** at the same executable SHA.
 
 Additional draft-PR documentation-only commits after this executable
 SHA are **not** silently assigned these prior run conclusions.
