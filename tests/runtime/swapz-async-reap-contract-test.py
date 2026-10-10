@@ -385,6 +385,25 @@ static int scenario(int id) {
         if (result || c.failed || c.installed!=2 || c.resets!=1 ||
             b.completes!=1 || b2.completes!=1 ||
             c.staged_refs[0].valid || c.staged_refs[1].valid) return 33;
+    } else if (id==28) {
+        /* Executable old-behavior counterexample: a late descriptor has
+         * a mismatched record index, but an earlier mapping is published. */
+        setup(true,false);
+        c.max_batch_blocks=2;
+        s->block_count=2;
+        c.generations[1]=7;
+        blocks[1].record_count=1;
+        blocks[1].records[0].logical_page=1;
+        blocks[1].records[0].generation=7;
+        blocks[1].records[0].record_index=1; /* Invalid slot. */
+        blocks[1].records[0].stored_length=4;
+        blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        swapz_stream_io_complete(0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result || c.failed || c.installed!=2 || c.resets!=1 ||
+            b.completes!=1 || b.error || block.records[0].bio)
+            return 40;
+        puts("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION");
     } else if (id==25 || id==26 || id==27) {
         setup(true,false);
         if (id==25) s->start_block=c.physical_blocks;
@@ -399,7 +418,7 @@ static int scenario(int id) {
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>27) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>28) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -418,14 +437,30 @@ class AsyncReapExactC(unittest.TestCase):
             raise AssertionError("required rootless userspace C compiler missing")
         cls.tmp=tempfile.TemporaryDirectory(prefix="swapz-async-exact-c-")
         cls.binary=Path(cls.tmp.name)/"async-exact-c"
-        program=Path(cls.tmp.name)/"async-exact-c.c"
-        program.write_text(PREFIX+"\n"+"\n".join(function(cls.source,f) for f in PURE)+
-                           "\n"+SUFFIX,encoding="utf-8")
-        cp=subprocess.run([cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
-                           "-o",str(cls.binary),str(program)],
-                          capture_output=True,text=True,timeout=15)
-        if cp.returncode:
-            raise AssertionError("production C compilation failed: "+cp.stderr)
+        cls.mutant_binary=Path(cls.tmp.name)/"missing-finalize-preflight"
+        compiled={name:function(cls.source,name) for name in PURE}
+        finalizer=compiled["swapz_finalize_stream_buffer"]
+        start=finalizer.index("\t/*\n\t * The callback only reports I/O completion")
+        end=finalizer.index("\n\tif (error) {",start)
+        corrupt=finalizer.rindex("\ncorrupt:\n")
+        if not start or corrupt<=end:
+            raise AssertionError("cannot identify full finalization preflight")
+        old_finalize=(finalizer[:start]+finalizer[end+1:corrupt]+
+                      "\n}")
+        for label,binary,body in (
+            ("async-exact-c",cls.binary,finalizer),
+            ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
+        ):
+            fragments=[body if name=="swapz_finalize_stream_buffer"
+                       else compiled[name] for name in PURE]
+            program=Path(cls.tmp.name)/(label+".c")
+            program.write_text(PREFIX+"\n"+"\n".join(fragments)+"\n"+SUFFIX,
+                               encoding="utf-8")
+            cp=subprocess.run([cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                               "-o",str(binary),str(program)],
+                              capture_output=True,text=True,timeout=15)
+            if cp.returncode:
+                raise AssertionError(label+" production C compilation failed: "+cp.stderr)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -449,6 +484,12 @@ class AsyncReapExactC(unittest.TestCase):
         for i in (25,26,27):
             with self.subTest(case=i):
                 self.run_case(i)
+
+    def test_removed_preflight_allows_partial_mapping_publication(self):
+        cp=subprocess.run([str(self.mutant_binary),"28"],capture_output=True,
+                          text=True,timeout=3)
+        self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
+        self.assertIn("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION",cp.stdout)
 
     def test_no_inflight(self): self.run_case(0)
     def test_incomplete_nonblocking_reap(self): self.run_case(1)
