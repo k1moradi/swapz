@@ -1703,6 +1703,13 @@ static int swapz_read_mapping(struct swapz_context *context, u32 logical_page,
 		return 0;
 	}
 
+	/*
+	 * A corrupt published physical address must never escape the target's
+	 * usable backing extent. Validate before issuing lower-device I/O.
+	 */
+	if (unlikely(mapping.physical_block >= context->physical_blocks))
+		return -EUCLEAN;
+
 	error = swapz_read_block(context, mapping.physical_block, context->io_buffer);
 	if (error)
 		return error;
