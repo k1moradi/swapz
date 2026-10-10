@@ -253,7 +253,9 @@ class ExactV3SidecarTests(unittest.TestCase):
 
         def mutate(fd, size):
             data = real_read(fd, size)
-            if data and not mutated[0]:
+            # The parser opens the JSONL before the sidecar. Inject the
+            # mutation only after the exact sidecar FD has been read.
+            if data and not mutated[0] and os.fstat(fd).st_size == PACK.size:
                 mutated[0] = True
                 with target.open("ab") as writer:
                     writer.write(PACK.pack(2_000_000, 1))
