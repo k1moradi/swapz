@@ -1330,3 +1330,33 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Revisit nested foreground generation increment and GC relocation
       under failpoints, generation wrap, failed or timed-out lower I/O,
       flush/FUA and real kernel concurrency; no production claims yet.
+
+### 2026-10-10 — Foreground generation transaction under nested GC
+
+- [x] Review the foreground write's transient generation advance and
+      reentrant GC source path without inventing a data-loss defect.
+      Existing previous-generation commit and failed-store rollback
+      ordering were retained because the source review did not prove
+      that transient GC relabeling itself loses data.
+- [x] Add 21 rootless regression/negative tests that compile actual
+      production C range/current-record/previous-generation/write
+      functions with deterministic nested-GC and lower-failure
+      substitutes. Cover uncommitted pack/ref barriers, rejected
+      lower batch, source-bound GC, failed new-write rollback,
+      U32_MAX rollover, bad sectors and five negative mutations.
+- [x] Add independently executable `rootless-kernel-source.yml`
+      so kernel correctness qualification runs even when Codex's
+      supervisor/service integration is under development.
+      Exact executable SHA
+      `ea41bae05b23d62128013864229ebf9a28658a46`:
+      [isolated kernel source qualification](https://github.com/k1moradi/swapz/actions/runs/38034762176)
+      PASS (21 generation + 30 range + 17 GC source + 15 GC output).
+- [ ] Cross-system combined and teardown gates still need a green
+      integration revision. As of the preceding
+      `9707bffaee190ec991bf1c99e62d72763f5322ff`,
+      both were blocked in Codex's recall IPC adapter tests by a
+      strict worker-result field-schema mismatch, before the
+      kernel generation gate. Do not count this as kernel CI green.
+- [ ] Separately qualify real kernel GC, asynchronous dm-io callback
+      failure/timeout, physical block readback, REQ_FUA/PREFLUSH and
+      privileged teardown under fresh external authorization.

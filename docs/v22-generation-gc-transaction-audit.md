@@ -87,3 +87,23 @@ No production device or swap operation is authorized by this
 qualification. No module, loop device, DM table, NBD server, swap,
 physical media, pressure run or privileged cleanup is exercised.
 The V2.2 strategy and batch-size winner remain **UNDETERMINED**.
+
+## Exact kernel-only source qualification
+
+The dedicated
+[Rootless kernel source contracts CI run 38034762176](https://github.com/k1moradi/swapz/actions/runs/38034762176)
+passed on executable SHA
+`ea41bae05b23d62128013864229ebf9a28658a46`.
+It ran 21 exact-C generation transaction tests, 30 kernel-range
+tests, 17 GC source snapshot tests and 15 GC compressed-payload tests.
+The workflow is triggered on kernel source, these contract tests,
+and its own definition.
+
+Cross-system combined/teardown remained unqualified at that point:
+Codex's simultaneously introduced supervisor worker-row shape
+conflicted with the strict
+`tests/runtime/recall-ipc-adapter.py` consumer, producing
+`worker result has incorrect fields` before the kernel gate ran.
+The isolated workflow specifically prevents unrelated
+workstream development from blocking source-level kernel evidence;
+it does not waive future combined/teardown qualification.

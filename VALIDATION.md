@@ -3650,3 +3650,44 @@ cleanup approval. No privileged kernel/module, live swap/DM/loop/NBD
 or destructive operations were performed. No Codex owner or broker
 files were changed. The V2.2 strategy/batch winner is
 **UNDETERMINED**.
+
+## 2026-10-10 — Exact-C foreground generation / nested-GC transition qualification
+
+**Executable SHA:** `ea41bae05b23d62128013864229ebf9a28658a46`.
+[Rootless kernel source workflow run 38034762176](https://github.com/k1moradi/swapz/actions/runs/38034762176):
+**PASS on exact SHA**, 21/21 new generation/GC transaction cases,
+30/30 kernel-range guards, 17/17 GC source snapshot and 15/15 GC
+compressed output cases.
+
+`tests/runtime/swapz-generation-gc-transaction-test.py` extracts
+five **verbatim production C functions**: logical-page range check,
+stale stream-record check, uncommitted-generation check,
+previous-generation commit and foreground write processing. It compiles
+them with deterministic rootless stand-ins for nested GC relocation,
+BIO copying and lower writes. Failure and rollback transitions,
+`UINT32_MAX` rollover, committed-old-content preservation, and
+out-of-bounds sector denial are executable in the userspace harness.
+Five negative source mutants are rejected. The test does **not**
+execute the actual kernel GC/reaper/dm-io/LZ4 pipeline.
+
+The source audit did **not** demonstrate an independent second
+generation-ordering defect requiring a production kernel change;
+avoiding an unproven change to asynchronous BIO ownership is
+intentional. Existing kernel production source at this commit remains
+the separately verified GC scratch-buffer corrections.
+
+A separate, non-overlapping Codex integration update to the same main
+branch changed the recall supervisor worker result schema. The
+combined and teardown workflows at
+`9707bffaee190ec991bf1c99e62d72763f5322ff` were **red** in
+`Rootless recall IPC adapter regression` due to
+`ValueError: worker result has incorrect fields`; the unchanged adapter
+still requires the previous strict shape. This is a cross-system
+compatibility blocker, not a failure of the isolated kernel source
+workflow. No combined/teardown green claim applies to the new
+executable revision until Codex's adapter fix is independently green.
+
+No live module, DM, loop, NBD, swap, physical media or privileged
+cleanup was executed by the new kernel workflow. Authorized kernel
+quiescence/collector provenance and the V2.2 strategy/batch winner
+remain **UNDETERMINED**.
