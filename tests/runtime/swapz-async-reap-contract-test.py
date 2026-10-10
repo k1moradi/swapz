@@ -22,6 +22,7 @@ PURE = (
     "swapz_clear_staged_ref",
     "swapz_stream_io_complete",
     "swapz_complete_buffer_bios",
+    "swapz_stream_bios_match",
     "swapz_finalize_stream_buffer",
     "swapz_reap_inflight",
 )
@@ -133,6 +134,10 @@ struct list_head { struct list_head *next, *prev; };
 #define list_empty(head) ((head)->next==(head))
 #define list_first_entry(head,type,member) \
     ((type *)((char *)(head)->next - offsetof(type,member)))
+#define list_for_each_entry(entry,head,member) \
+    for (struct list_head *iter=(head)->next; \
+         iter!=(head) && ((entry)=list_first_entry(iter->prev,struct swapz_per_bio,member),1); \
+         iter=iter->next)
 static void list_add_tail(struct list_head *node, struct list_head *head) {
     node->next=head;node->prev=head->prev;
     head->prev->next=node;head->prev=node;
@@ -142,7 +147,7 @@ static void list_del_init(struct list_head *node) {
     INIT_LIST_HEAD(node);
 }
 struct bio;
-struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct swapz_per_bio { struct list_head list; struct bio *bio; u8 block_index, record_index; };
 struct bio { struct swapz_per_bio entry; int completes, error; };
 struct swapz_context;
 struct swapz_write_batch_record {
@@ -247,6 +252,8 @@ static void setup(bool outstanding, bool early) {
     stream->context=&c;
     INIT_LIST_HEAD(&stream->owned_bios);
     b.entry.bio=&b;
+    b.entry.block_index=0;
+    b.entry.record_index=0;
     INIT_LIST_HEAD(&b.entry.list);
     stream->blocks=&block;
     stream->block_count=1;
@@ -407,6 +414,8 @@ static int scenario(int id) {
         blocks[1].records[0].stored_length=4;
         blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
         blocks[1].records[0].bio=&b2;
+        b2.entry.block_index=1;
+        b2.entry.record_index=0;
         list_add_tail(&b2.entry.list,&s->owned_bios);
         c.generations[1]=7;
         c.staged_refs[1]=(struct swapz_staged_ref){
@@ -501,14 +510,9 @@ class AsyncReapExactC(unittest.TestCase):
             raise AssertionError("cannot identify full finalization preflight")
         old_finalize=(finalizer[:start]+finalizer[end+1:corrupt]+
                       "\n}")
-        for declaration in (
-            "\tu32 pending_record_bios = 0;\n",
-            "\tu32 pending_owned_bios = 0;\n",
-            "\tconst struct list_head *node;\n",
-        ):
-            if old_finalize.count(declaration) != 1:
-                raise AssertionError("old finalizer mutant declaration changed")
-            old_finalize = old_finalize.replace(declaration, "", 1)
+        # The older executable variant strips the preflight but still
+        # includes the genuine separately compiled identity helper.
+        # No now-removed count-local declarations are necessary.
         for label,binary,body in (
             ("async-exact-c",cls.binary,finalizer),
             ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
