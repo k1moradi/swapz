@@ -25,6 +25,7 @@ FUNCTIONS = (
     "swapz_update_repacked_ref",
     "swapz_emit_repack_container",
     "swapz_compact_fill_buffer",
+    "swapz_complete_buffer_bios",
 )
 VALIDATOR = "swapz_validate_compact_fill_buffer"
 VALIDATOR_CALL = (
@@ -79,8 +80,11 @@ typedef uint64_t u64;
 #define le16_to_cpu(value) (value)
 #define le32_to_cpu(value) (value)
 #define WARN_ON_ONCE(condition) (condition)
+#define min_t(type, left, right) ((type)(left) < (type)(right) ? (type)(left) : (type)(right))
+#define likely(condition) (condition)
+#define unlikely(condition) (condition)
 
-struct bio { int unused; };
+struct bio { int completions; int last_error; };
 struct swapz_record_disk {
     u32 logical_page;
     u16 offset;
@@ -159,6 +163,11 @@ static void swapz_set_failed(struct swapz_context *context, int error)
     context->failed = true;
     context->stats.io_errors++;
 }
+static void swapz_complete_bio(struct bio *bio, int error)
+{
+    bio->completions++;
+    bio->last_error = error;
+}
 static void swapz_clear_staged_ref(struct swapz_context *context,
                                    u32 logical_page, u32 generation,
                                    u8 buffer_id, u8 block_index,
@@ -200,6 +209,7 @@ static void prepare_block(struct swapz_stream_buffer *buffer,
 static int run_case(unsigned int scenario, bool mutant)
 {
     struct swapz_context context = {0};
+    struct bio pending_bio = {0};
     struct swapz_stream_buffer buffer = {0};
     struct swapz_write_batch_block blocks[2] = {0};
     struct swapz_write_batch_block original_blocks[2];
@@ -266,6 +276,10 @@ static int run_case(unsigned int scenario, bool mutant)
     default: return 60;
     }
 
+    /* Exercise failure fanout with one incomplete BIO on adversarial records. */
+    if (scenario == 7 || scenario == 10)
+        record->bio = &pending_bio;
+
     memcpy(original_data, data, sizeof(data));
     memcpy(original_blocks, blocks, sizeof(blocks));
     memcpy(original_refs, context.staged_refs, sizeof(original_refs));
@@ -298,6 +312,12 @@ static int run_case(unsigned int scenario, bool mutant)
         memcmp(blocks, original_blocks, sizeof(blocks)) ||
         memcmp(context.staged_refs, original_refs, sizeof(original_refs)))
         return 74;
+    if (scenario == 7 || scenario == 10) {
+        swapz_complete_buffer_bios(&context, &buffer, -EIO);
+        if (pending_bio.completions != 1 || pending_bio.last_error != -EIO ||
+            record->bio != NULL || !context.failed)
+            return 75;
+    }
     return 0;
 }
 
@@ -335,7 +355,7 @@ class CompactionContainerContracts(unittest.TestCase):
         if compactor.count(VALIDATOR_CALL) != 1:
             raise AssertionError("compactor must call complete preflight exactly once")
         functions = [exact_function(cls.source, name) for name in FUNCTIONS]
-        functions.insert(-1, preflight)
+        functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer"), preflight)
 
         def compile_contract(name: str, bodies: list[str]) -> Path:
             path = directory / (name + ".c")
