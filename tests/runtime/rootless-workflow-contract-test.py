@@ -41,6 +41,7 @@ MANDATORY_TESTS = (
     "swapz-gc-source-contract-test.py",
     "swapz-gc-compressed-contract-test.py",
     "swapz-generation-gc-transaction-test.py",
+    "swapz-generation-scan-pack-preflight-contract-test.py",
     "swapz-async-reap-contract-test.py",
     "swapz-flush-fua-contract-test.py",
     "swapz-mapping-accounting-contract-test.py",
@@ -243,6 +244,17 @@ class RootlessWorkflowContractTests(unittest.TestCase):
                 self.assertIn(path, source)
                 with self.assertRaisesRegex(WorkflowContractError, "kernel source changes"):
                     check_workflow(name, source.replace(path, "", 1))
+
+    def test_removed_generation_scan_owner_preflight_is_rejected(self):
+        for workflow, source in self.sources.items():
+            with self.subTest(workflow=workflow):
+                command = ("timeout 25s python3 -B "
+                           "tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py -v")
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(
+                        WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(workflow, source.replace(
+                        command, "echo 'generation scan gate skipped'", 1))
 
     def test_removed_pending_pack_ownership_execution_is_rejected(self):
         for name, source in self.sources.items():
