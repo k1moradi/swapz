@@ -126,11 +126,15 @@ struct swapz_context {
     u32 max_batch_blocks;
     u32 segment_write_block;
     bool failed;
-    u8 repack_buffer[SWAPZ_BLOCK_BYTES];
+    /* Production scratch fields are void pointers, not byte arrays. */
+    void *repack_buffer;
+    u8 repack_storage[SWAPZ_BLOCK_BYTES];
     struct swapz_write_batch_block repack_block;
     struct swapz_write_batch_block compact_source_block;
-    u8 io_buffer[SWAPZ_BLOCK_BYTES];
-    u8 compressed_buffer[SWAPZ_BLOCK_BYTES];
+    void *io_buffer;
+    u8 io_storage[SWAPZ_BLOCK_BYTES];
+    void *compressed_buffer;
+    u8 compressed_storage[SWAPZ_BLOCK_BYTES];
     struct {
         u64 staged_cancellations;
         u64 staged_cancelled_blocks;
@@ -207,6 +211,9 @@ static int run_case(unsigned int scenario, bool mutant)
     struct swapz_write_batch_record *record;
     unsigned int corrupt_block = scenario == 11 ? 1 : 0;
 
+    context.repack_buffer = context.repack_storage;
+    context.io_buffer = context.io_storage;
+    context.compressed_buffer = context.compressed_storage;
     context.logical_pages = 4;
     context.generations[0] = 1;
     context.generations[1] = 1;
