@@ -152,6 +152,7 @@ STAGE_C = r"""
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 #include <errno.h>
 typedef uint32_t u32;
 typedef uint16_t u16;
@@ -168,12 +169,19 @@ typedef uint32_t blk_opf_t;
 #define SWAPZ_MAP_COMPRESSED 2U
 #define SWAPZ_STRATEGY_STAGED 2U
 #define WARN_ON_ONCE(x) (x)
-struct bio { u32 bi_opf; int completes,error; };
+struct list_head { struct list_head *next,*prev; };
+struct bio;
+struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct bio { struct swapz_per_bio entry; u32 bi_opf; int completes,error; };
+static struct swapz_per_bio *dm_per_bio_data(struct bio *b, size_t size) {
+    (void)size;return &b->entry;
+}
+static void list_del_init(struct list_head *node) {(void)node;}
 struct swapz_pending_record { struct bio *bio;u32 logical_page,generation;u16 stored_length;u8 record_index; };
 struct swapz_write_batch_record { struct bio *bio;u32 logical_page,generation;u16 stored_length;u8 record_index,flags;bool upper_completed; };
 struct swapz_write_batch_block { u8 record_count;bool compaction;struct swapz_write_batch_record records[64]; };
 struct swapz_stream_buffer { u8 data[8192];struct swapz_write_batch_block blocks[2];u32 start_block,block_count;blk_opf_t write_flags;u8 id,state; };
-struct swapz_context { struct swapz_stream_buffer stream;u32 max_batch_blocks,strategy,physical;int failed,ensure_error,staged;struct { u32 staged_early_completions; } stats; };
+struct swapz_context { struct swapz_stream_buffer stream;struct swapz_pending_record pending[64];u32 max_batch_blocks,strategy,physical;int failed,ensure_error,staged;struct { u32 staged_early_completions; } stats; };
 static struct swapz_stream_buffer *swapz_fill_buffer(struct swapz_context *c){return &c->stream;}
 static int swapz_submit_fill_buffer(struct swapz_context *c){(void)c;return -EIO;}
 static int swapz_reap_inflight(struct swapz_context *c,bool wait){(void)c;(void)wait;return -EIO;}
