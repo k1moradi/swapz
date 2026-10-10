@@ -95,6 +95,7 @@ typedef uint16_t u16;
 typedef uint8_t u8;
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+#define unlikely(x) (x)
 #define cpu_to_le16(x) (x)
 #define cpu_to_le32(x) (x)
 struct bio { int unused; };
@@ -144,6 +145,16 @@ static int swapz_ensure_physical_block(struct swapz_context *c, bool rotate) {
     /* Adversarial nested write-batch compaction clobbers its own scratch. */
     memset(c->compressed_buffer, 'X', SWAPZ_BLOCK_BYTES);
     return c->fail_ensure ? -EIO : 0;
+}
+static bool swapz_pack_bios_match(struct swapz_context *c) {
+    (void)c;return true; /* Scratch-isolation fixture has no upper BIOs. */
+}
+static void swapz_set_failed(struct swapz_context *c,int error) {
+    (void)c;(void)error;
+}
+static void swapz_register_pending_bio(struct swapz_context *c,
+                                        struct bio *bio,u8 index) {
+    (void)c;(void)bio;(void)index;
 }
 static int swapz_flush_pack(struct swapz_context *c, bool compact, bool rotate) {
     (void)compact;
