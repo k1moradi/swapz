@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -249,6 +250,17 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertLess(planner, allocation)
         self.assertIn('rate_iops=$READ_IOPS', self.script)
         self.assertIn('log_entries=32768', self.script)
+
+    def test_invalid_reader_iops_fails_before_privilege_or_device_checks(self):
+        for invalid in ("0", "2001", "-1", "1.5", "nan", "1;true", "0001"):
+            with self.subTest(value=invalid):
+                env = os.environ.copy()
+                env["SWAPZ_BENCH_READ_IOPS"] = invalid
+                run = subprocess.run(["bash", str(BENCHMARK_PATH)], env=env,
+                                     capture_output=True, text=True, timeout=5)
+                self.assertEqual(run.returncode, 4)
+                self.assertIn("SWAPZ_BENCH_READ_IOPS must be", run.stderr)
+                self.assertNotIn("root required", run.stderr)
 
     def test_embedded_collector_rejects_exact_latency_count_mismatch(self):
         marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
