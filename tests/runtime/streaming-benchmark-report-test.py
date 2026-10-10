@@ -229,12 +229,12 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn('lower_counter_window_mib_s', embedded)
         fio = self.directory / "fabricated-fio.json"
         fio.write_text(json.dumps({"jobs": [
-            {"jobname": "writer", "job options": {"iodepth": "64"},
+            {"jobname":"writer", "error": 0, "job options": {"iodepth": "64"},
              "write": {"io_bytes": 16 * MIB, "bw_bytes": 123 * MIB,
                        "clat_ns": {"mean": 1_000_000, "max": 3_000_000,
                                    "percentile": {"99.000000": 2_000_000}}},
              "usr_cpu": 3, "sys_cpu": 5},
-            {"jobname": "reader",
+            {"jobname":"reader", "error": 0,
              "read": {"total_ios": 200,
                       "clat_ns": {"mean": 1_000_000, "max": 3_000_000,
                                   "percentile": {"95.000000": 2_000_000,
@@ -301,9 +301,9 @@ class StreamingReportingTests(unittest.TestCase):
         embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio-mismatch.json"
         fio.write_text(json.dumps({"jobs":[
-            {"jobname":"writer","job options":{"iodepth":"1"},
+            {"jobname":"writer", "error": 0,"job options":{"iodepth":"1"},
              "write":{"io_bytes":MIB,"bw_bytes":MIB}},
-            {"jobname":"reader","read":{"total_ios":20}}
+            {"jobname":"reader", "error": 0,"read":{"total_ios":20}}
         ]}), encoding="utf-8")
         args = [sys.executable, "-c", embedded, str(fio),
                 "10 1000 20 2000", "12 1016 30 6096", "failed=0",
@@ -319,9 +319,9 @@ class StreamingReportingTests(unittest.TestCase):
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio.json"
         fio.write_text(json.dumps({"jobs":[
-            {"jobname":"writer","job options":{"iodepth":"1"},
+            {"jobname":"writer", "error": 0,"job options":{"iodepth":"1"},
              "write":{"io_bytes":MIB,"bw_bytes":MIB}},
-            {"jobname":"reader","read":{"total_ios":20}}
+            {"jobname":"reader", "error": 0,"read":{"total_ios":20}}
         ]}), encoding="utf-8")
         args=[sys.executable,"-c",embedded,str(fio),"10 1000 20 2000",
               "10 1000 19 1900","failed=0","staged","128",
@@ -330,6 +330,34 @@ class StreamingReportingTests(unittest.TestCase):
         result=subprocess.run(args,capture_output=True,text=True,timeout=5)
         self.assertNotEqual(result.returncode,0)
         self.assertIn("counters decreased",result.stderr)
+
+    def test_embedded_collector_rejects_fio_job_errors_or_duplicate_jobs(self):
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
+        embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        fio = self.directory / "fio-error.json"
+        writer = {"jobname": "writer", "error": 0,
+                  "job options": {"iodepth": "1"},
+                  "write": {"io_bytes": MIB, "bw_bytes": MIB}}
+        reader = {"jobname": "reader", "error": 0,
+                  "read": {"total_ios": 20}}
+        args = [sys.executable, "-c", embedded, str(fio),
+                "10 1000 20 2000", "12 1016 30 6096", "failed=0",
+                "staged", "128", "1000000000", "3000000000", "backend",
+                json.dumps({"read_count": 20, "read_p99_ns": 1000000})]
+        for jobs, error in (
+            ([writer, {**reader, "error": 5}], "fio job-level error"),
+            ([{**writer, "error": True}, reader], "fio job-level error"),
+            ([writer, {k: v for k, v in reader.items() if k != "error"}],
+             "fio job-level error"),
+            ([writer, writer], "fio JSON missing/duplicate"),
+            ([reader], "exactly two named jobs"),
+        ):
+            with self.subTest(jobs=jobs):
+                fio.write_text(json.dumps({"jobs": jobs}), encoding="utf-8")
+                result = subprocess.run(args, capture_output=True, text=True,
+                                        timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
 
     def test_benchmark_shell_only_reports_and_does_not_nominate_from_single_run(self):
         self.assertNotIn('"drained_write_mib_s"', self.script)
