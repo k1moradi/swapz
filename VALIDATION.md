@@ -3787,3 +3787,58 @@ loop, NBD, module, pressure, physical-device manipulation,
 reboot or cleanup occurred. See
 `docs/v22-flush-fua-durability-audit.md`.
 Strategy/batch winner: **UNDETERMINED**.
+
+## 2026-10-10 — Production-C mapping replacement live-reference preservation
+
+**Qualified exact executable SHA:**
+`89ddc5fbd1a98979aa6c661085370a6bc0cff53d`
+([commit](https://github.com/k1moradi/swapz/commit/89ddc5fbd1a98979aa6c661085370a6bc0cff53d)).
+
+A source audit confirmed that `swapz_install_mapping` formerly
+unaccounted the authoritative old physical record before validating
+the candidate replacement block. On an out-of-bounds or full
+different destination, the target failed but the old mapping still
+pointed to its physical block while its block/segment live count
+had already decreased. This is a source-level failed-transaction
+accounting defect, not a real-device corruption observation.
+
+The kernel patch validates destination bounds and capacity first;
+a full same-block replacement is allowed because unaccounting its
+previous record releases a slot. No on-disk format or scheduling
+policy changed.
+
+New `tests/runtime/swapz-mapping-accounting-contract-test.py`
+compiles five **verbatim production C functions** for mapping
+validity, mapping segment, old live decrement, invalidation and
+replacement. Seven Python tests cover 16 bounded C cases, four
+structural source mutants and a separately compiled executable
+counterexample restoring the old unsafe ordering. The counterexample
+fails all targeted invalid-destination preservation cases while
+the corrected code passes.
+
+**All three mandatory/test-focused CI runs green on exactly the
+same executable revision:**
+
+- [Rootless kernel 38039927758](https://github.com/k1moradi/swapz/actions/runs/38039927758):
+  PASS — 7/7 new mapping, 9/9 FUA, 22/22 async, 21/21
+  generation, 15/15 GC compression, 17/17 GC source, 30/30
+  kernel range.
+- [Combined 38039927690](https://github.com/k1moradi/swapz/actions/runs/38039927690):
+  PASS — new mapping gate, 24/24 workflow contracts, fresh
+  broker processes 3/3, NBD stress 25/25.
+- [Teardown 38039927750](https://github.com/k1moradi/swapz/actions/runs/38039927750):
+  PASS — same SHA, mapping gate and 24/24 workflow contracts.
+
+The first new-test revision failed due to a **negative test
+assertion type**, not a kernel runtime failure; the corrected
+revision and the executable old-ordering mutant passed the exact
+qualifications above. Standalone NBD passed at an earlier
+kernel-identical revision, not at this final test SHA.
+
+The C harness is rootless and uses synthetic arrays, not kernel
+module execution, real GC, dm-io, LZ4 or physical devices.
+It establishes the corrected source transition and conservative
+counter accounting, not kernel I/O drain or backing release
+authority. No real DM/loop/NBD/swap/module/physical device,
+pressure, reboot, or destructive/privileged operation occurred.
+V2.2 strategy/batch winner remains **UNDETERMINED**.

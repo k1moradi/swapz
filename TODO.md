@@ -1410,3 +1410,28 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       persistence and independent device I/O quiescence remain
       separately authorized work; rootless C flags are not
       proof of physical durability.
+
+### 2026-10-10 — Mapping replacement failure-state accounting
+
+- [x] Fix `swapz_install_mapping` unaccounting the old live mapping
+      *before* validating replacement block bounds and capacity.
+      Reject the invalid replacement without decrementing the
+      still-authoritative old block or segment; permit a full
+      same-physical-block replacement when the old record makes space.
+- [x] Compile the five actual production C mapping helpers with
+      bounded metadata and exercise 16 success/failure scenarios.
+      Execute a second old-ordering mutation binary to prove that
+      invalid new blocks previously left old live-reference
+      accounting inconsistent. New suite 7/7.
+- [x] Require mapping accounting in isolated kernel, combined,
+      teardown CI and the workflow-contract suite (24/24).
+      Exact executable SHA
+      `89ddc5fbd1a98979aa6c661085370a6bc0cff53d`:
+      [kernel](https://github.com/k1moradi/swapz/actions/runs/38039927758),
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38039927690),
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38039927750),
+      all PASS; combined NBD 25/25.
+- [ ] Exercise real GC mapping/counter publication failures and
+      segment recycle on separately authorized disposable kernel
+      infrastructure; rootless failure-state checks are not device
+      corruption, device drain or physical persistence evidence.
