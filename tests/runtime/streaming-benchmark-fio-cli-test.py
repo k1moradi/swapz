@@ -90,6 +90,20 @@ class RealFioReaderLogIntegration(unittest.TestCase):
                  "seek=31", "oflag=direct", "conv=notrunc", "status=none"],
                 check=True, capture_output=True, text=True, timeout=10,
             )
+            # Preseed the whole writer region with checksummed 4 KiB pages
+            # before the concurrent workload, mirroring the live benchmark.
+            prefill = subprocess.run(
+                [fio, "--name=writer-prefill", f"--filename={data}",
+                 "--ioengine=libaio", "--iodepth=4", "--direct=1",
+                 "--bs=4k", "--rw=write", "--offset=64k", "--size=60k",
+                 "--verify=crc32c", "--do_verify=0",
+                 "--refill_buffers=1", "--buffer_compress_percentage=50",
+                 "--buffer_compress_chunk=512", "--output-format=json",
+                 f"--output={root / 'writer-prefill.json'}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(prefill.returncode, 0,
+                             prefill.stderr + prefill.stdout)
             prefix = root / "paired-reader"
             job = root / "paired.fio"
             output = root / "paired.json"
@@ -112,6 +126,8 @@ class RealFioReaderLogIntegration(unittest.TestCase):
                 "refill_buffers=1\n"
                 "buffer_compress_percentage=50\n"
                 "buffer_compress_chunk=512\n"
+                "verify=crc32c\n"
+                "do_verify=0\n"
                 "\n[reader]\n"
                 f"filename={data}\n"
                 "rw=randread\n"
@@ -154,6 +170,21 @@ class RealFioReaderLogIntegration(unittest.TestCase):
                 check=True, capture_output=True, text=True, timeout=10,
             )
             self.assertEqual(readback.read_bytes(), sentinel)
+            # Both fio jobs shared the same ordinary file and timing window;
+            # now verify CRC/offset metadata for every writer page separately.
+            verify_output = root / "paired-post-writer-verify.json"
+            checked = subprocess.run(
+                [fio, "--name=writer-verify", f"--filename={data}",
+                 "--ioengine=libaio", "--iodepth=1", "--direct=1",
+                 "--bs=4k", "--rw=read", "--offset=64k", "--size=60k",
+                 "--verify=crc32c", "--output-format=json",
+                 f"--output={verify_output}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(checked.returncode, 0,
+                             checked.stderr + checked.stdout)
+            readback_result = writer_verify.validate(verify_output, 60 * 1024)
+            self.assertEqual(readback_result["writer_verified_pages"], 15)
 
 
     def test_full_writer_range_crc32c_after_time_based_random_overwrites(self):
