@@ -103,10 +103,10 @@ Candidate executable `e3e45f5c8ab7e52e5db20375d12661b97088f0a2`:
   **PASS** at the same candidate SHA.
 - [PR NBD source-safety run 38044600630](https://github.com/k1moradi/swapz/actions/runs/38044600630):
   **PASS** at the same candidate SHA.
-- [PR combined run 38044600541](https://github.com/k1moradi/swapz/actions/runs/38044600541)
-  and [teardown run 38044600642](https://github.com/k1moradi/swapz/actions/runs/38044600642):
-  conclusions must be checked independently before claiming full
-  qualification; they were running during initial document authoring.
+- [PR combined run 38044600541](https://github.com/k1moradi/swapz/actions/runs/38044600541):
+  **PASS** at the same candidate SHA.
+- [PR teardown run 38044600642](https://github.com/k1moradi/swapz/actions/runs/38044600642):
+  **PASS** at the same candidate SHA.
 
 The test compiles selected C routines, not the entire module, and
 does not execute real LZ4, workqueues, DMA, dm-io, or a kernel swap
