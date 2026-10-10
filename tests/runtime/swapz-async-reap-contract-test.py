@@ -501,6 +501,14 @@ class AsyncReapExactC(unittest.TestCase):
             raise AssertionError("cannot identify full finalization preflight")
         old_finalize=(finalizer[:start]+finalizer[end+1:corrupt]+
                       "\n}")
+        for declaration in (
+            "\tu32 pending_record_bios = 0;\n",
+            "\tu32 pending_owned_bios = 0;\n",
+            "\tconst struct list_head *node;\n",
+        ):
+            if old_finalize.count(declaration) != 1:
+                raise AssertionError("old finalizer mutant declaration changed")
+            old_finalize = old_finalize.replace(declaration, "", 1)
         for label,binary,body in (
             ("async-exact-c",cls.binary,finalizer),
             ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
