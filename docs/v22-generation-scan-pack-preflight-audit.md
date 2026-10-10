@@ -101,4 +101,30 @@ remains **UNDETERMINED**.
 
 ## Exact commit and workflow qualification
 
-To be recorded after exact PR-head and post-merge workflow completion.
+[PR #13](https://github.com/k1moradi/swapz/pull/13) merged as
+[`9bb280588a2f0f4ffcc7764ab616ee873fed5352`](https://github.com/k1moradi/swapz/commit/9bb280588a2f0f4ffcc7764ab616ee873fed5352).
+All four applicable rootless workflows passed on the PR head
+`0f12ccf79607fdd14dea4a712502f587d847b534`:
+
+- [Kernel source 38065446412](https://github.com/k1moradi/swapz/actions/runs/38065446412): **PASS**
+- [Combined source 38065446448](https://github.com/k1moradi/swapz/actions/runs/38065446448): **PASS**
+- [Teardown safety 38065446416](https://github.com/k1moradi/swapz/actions/runs/38065446416): **PASS**
+- [NBD source safety 38065446429](https://github.com/k1moradi/swapz/actions/runs/38065446429): **PASS**
+
+The four **exact post-merge** workflows on the executable merge SHA
+also passed:
+
+- [Kernel source 38065599090](https://github.com/k1moradi/swapz/actions/runs/38065599090): **PASS**
+- [Combined source 38065599097](https://github.com/k1moradi/swapz/actions/runs/38065599097): **PASS**
+- [Teardown safety 38065599100](https://github.com/k1moradi/swapz/actions/runs/38065599100): **PASS**
+- [NBD source safety 38065599105](https://github.com/k1moradi/swapz/actions/runs/38065599105): **PASS**
+
+Kernel source CI reports **13/13** new generation-scan methods
+(including both deliberately unguarded mutants) and **22/22**
+foreground generation/GC methods. These are rootless source-contract
+results, not native module or real-device qualification.
+
+At the time of this audit, Codex had been assigned separate native
+Linux validation of the older PR #12 executable revision; that result
+has not been provided in this turn. Neither that assignment nor its
+PR #9 native report qualifies the newly changed PR #13 source.
