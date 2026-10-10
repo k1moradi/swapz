@@ -22,6 +22,11 @@ SPEC = importlib.util.spec_from_file_location("swapz_real_fio_clat", CONVERTER)
 assert SPEC is not None and SPEC.loader is not None
 collector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector)
+VERIFY_PATH = HERE / "streaming-benchmark-writer-verify.py"
+VERIFY_SPEC = importlib.util.spec_from_file_location("swapz_full_writer_verify", VERIFY_PATH)
+assert VERIFY_SPEC is not None and VERIFY_SPEC.loader is not None
+writer_verify = importlib.util.module_from_spec(VERIFY_SPEC)
+VERIFY_SPEC.loader.exec_module(writer_verify)
 
 
 class RealFioReaderLogIntegration(unittest.TestCase):
@@ -169,7 +174,7 @@ class RealFioReaderLogIntegration(unittest.TestCase):
                 output = root / f"{name}.json"
                 proc = subprocess.run(
                     [fio, f"--name={name}", f"--filename={data}", "--bs=4k",
-                     "--ioengine=sync", "--direct=1",
+                     "--ioengine=libaio", "--iodepth=4", "--direct=1",
                      f"--offset={offset}", f"--size={size}",
                      "--verify=crc32c", *args,
                      "--output-format=json", f"--output={output}"],
@@ -201,9 +206,13 @@ class RealFioReaderLogIntegration(unittest.TestCase):
                          "--buffer_compress_percentage=50")
             self.assertGreater(writer["write"]["total_ios"], 15)
 
-            verify = run("verify", "--rw=read")
+            verify = run("writer-verify", "--rw=read")
             self.assertEqual(verify["read"]["io_bytes"], size)
             self.assertEqual(verify["read"]["total_ios"], size // 4096)
+            passed = writer_verify.validate(root / "writer-verify.json", size)
+            self.assertIs(passed["full_writer_readback_ok"], True)
+            self.assertEqual(passed["writer_verified_bytes"], size)
+            self.assertEqual(passed["writer_verified_pages"], 15)
 
             # One changed payload byte anywhere in the writer extent must fail.
             with data.open("r+b", buffering=0) as stream:
@@ -213,6 +222,8 @@ class RealFioReaderLogIntegration(unittest.TestCase):
                 stream.seek(offset + 4096 + 256)
                 stream.write(bytes([byte[0] ^ 0x01]))
             run("verify-bad", "--rw=read", expect_success=False)
+            with self.assertRaisesRegex(ValueError, "job identity"):
+                writer_verify.validate(root / "verify-bad.json", size)
 
 
 if __name__ == "__main__":
