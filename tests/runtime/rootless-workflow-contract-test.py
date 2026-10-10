@@ -42,6 +42,7 @@ MANDATORY_TESTS = (
     "swapz-gc-compressed-contract-test.py",
     "swapz-generation-gc-transaction-test.py",
     "swapz-async-reap-contract-test.py",
+    "swapz-flush-fua-contract-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
@@ -235,6 +236,14 @@ class RootlessWorkflowContractTests(unittest.TestCase):
                 self.assertIn(path, source)
                 with self.assertRaisesRegex(WorkflowContractError, "kernel source changes"):
                     check_workflow(name, source.replace(path, "", 1))
+
+    def test_removed_fua_preflush_contract_execution_is_rejected(self):
+        for name, source in self.sources.items():
+            with self.subTest(workflow=name):
+                command = "timeout 25s python3 -B tests/runtime/swapz-flush-fua-contract-test.py -v"
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(name, source.replace(command, "echo 'FUA contract skipped'", 1))
 
     def test_removed_async_reap_execution_is_rejected(self):
         for name, source in self.sources.items():

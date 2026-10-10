@@ -304,6 +304,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-denial-telemetry.py tests/runtime/recall-denial-telemetry-test.py
           timeout 25s python3 -B tests/runtime/recall-denial-telemetry-test.py -v
+      - name: Compiled preflush and FUA ordering and batch-flag contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-flush-fua-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-flush-fua-contract-test.py -v
       - name: Compiled async callback, watchdog and reaper ownership contract
         shell: bash
         run: |
