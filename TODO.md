@@ -1436,7 +1436,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       infrastructure; rootless failure-state checks are not device
       corruption, device drain or physical persistence evidence.
 
-### 2026-10-10 — Compaction-container rootless audit candidate (PR #3)
+### 2026-10-10 — Compaction-container rootless audit merged (PR #3)
 
 - [x] Audit `swapz_compact_fill_buffer()` against read/staged decoders on
       source `1fd24f6ba8368a35153e7d2f1405ac633bac86c7`.
@@ -1448,8 +1448,12 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [x] Add mandatory isolated-kernel, combined and teardown rootless test gates.
 - [x] Obtain isolated kernel source and NBD source-safety PASS at candidate
       executable `e3e45f5c8ab7e52e5db20375d12661b97088f0a2`.
-- [ ] Verify final combined/teardown conclusions on one exact final PR SHA,
-      reconcile any concurrent changes, then decide whether to merge PR #3.
+- [x] Verify all four mandatory rootless workflows at PR head
+      `ffdd28aaabc5511aae294d676c0e57e1a6debf77`, merge PR #3, then
+      requalify all four workflows on exact merge commit
+      `57af151c4f47b24a3ad0533ea1377d289c13a2c1`.
+      Run IDs: kernel 38044908279; combined 38044908328;
+      teardown 38044908268; NBD source 38044908271.
 - [ ] Measure any impact of the extra bounded metadata scan before final
       V2.2 performance-policy selection; no winner is established.
 - [ ] Reserve real kernel fault injection and physical backing release for a
