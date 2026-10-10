@@ -3998,3 +3998,43 @@ V2.2 strategy and batch winner remain **UNDETERMINED**.
 
 See `docs/v22-published-mapping-read-bounds-audit.md` and
 `docs/v22-stream-submit-bounds-audit.md`.
+
+## October 10, 2026 — Finalization preflight and post-merge qualification
+
+The main developer independently audited completed stream-buffer finalization.
+Previously `swapz_finalize_stream_buffer()` trusted mutable block/record
+counts and record logical-page indices before processing lower-I/O success or
+failure, which could produce unsafe access and partial mapping publication
+under fault-injected late in-memory corruption.
+
+[PR #7](https://github.com/k1moradi/swapz/pull/7) adds an O(records),
+read-only complete-batch preflight ahead of mapping, staged reference or BIO
+ownership mutation, failing closed and retaining completed buffers when
+metadata is malformed. The mandatory exact-production-C asynchronous reaper
+suite passed **27 test methods**, including genuine partial publication from
+an executable old-finalizer mutant and valid/stale/timeout/lower-failure
+ownership cases. It does **not** establish recovery of pending BIOs whose
+identifying metadata was itself destroyed.
+
+The exact executable PR head
+`16c05ce6c03bc38143de422f33ae819ee33a619a`
+passed kernel, combined and teardown rootless workflows. The
+[merged executable revision `0f355b30b2ae5c61b31b75a460e3149600d31a1f`](https://github.com/k1moradi/swapz/commit/0f355b30b2ae5c61b31b75a460e3149600d31a1f)
+independently passed the **same three required, actually-triggered workflows**:
+
+- [Kernel source 38054166754](https://github.com/k1moradi/swapz/actions/runs/38054166754): **PASS**
+- [Combined source 38054166731](https://github.com/k1moradi/swapz/actions/runs/38054166731): **PASS**
+- [Teardown safety 38054166734](https://github.com/k1moradi/swapz/actions/runs/38054166734): **PASS**
+
+The standalone NBD source workflow did not trigger for the kernel-only
+change. NBD's rootless selftests run within the combined workflow, but no
+separate standalone-NBD PASS is claimed for this revision.
+
+Codex's previous native `W=1` build and four test suite passes apply to
+older `9a4e16824fc5457028005c13d60c6b56d72077bc` only; no newer
+Codex native report was available at the time of this integration.
+No kernel module was loaded, no privileged or real DM/swap/device tests ran,
+and no real durability or performance claim follows from this source-only
+qualification. V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+See `docs/v22-inflight-finalize-preflight-audit.md`.
