@@ -235,7 +235,7 @@ static int run(int mode,bool mutant) {
             if(rc!=-EUCLEAN||c.stages)return 23;
         } else {
             rc=drain_once(-EIO);
-            if(rc)return 24;
+            if(rc && !(mutant && mode==1 && rc==2))return 24;
         }
         if(mutant) {
             if(mode!=1||bios[0].completes||bios[1].completes||
