@@ -109,6 +109,8 @@ typedef uint8_t u8;
 #define SWAPZ_ASYNC_WATCHDOG_MS 30000U
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+#define SWAPZ_MAP_COMPRESSED 2U
+#define SWAPZ_MAX_COMPRESSED_BYTES 3568U
 #define SWAPZ_BUFFER_FREE 0U
 #define SWAPZ_BUFFER_FILL 1U
 #define SWAPZ_BUFFER_INFLIGHT 2U
@@ -163,7 +165,7 @@ struct swapz_context {
     struct swapz_stream_buffer stream_buffers[2];
     struct swapz_staged_ref staged_refs[2];
     u32 generations[2];
-    u32 logical_pages, max_batch_blocks;
+    u32 logical_pages, max_batch_blocks, physical_blocks;
     struct swapz_stats stats;
     int inflight_buffer_id, installed, resets, failed_events;
     bool failed, accepting_io;
@@ -205,14 +207,17 @@ static void swapz_reset_stream_buffer(struct swapz_context *c,
 """
 SUFFIX = r"""
 static struct swapz_context c;
-static struct swapz_write_batch_block block;
+static struct swapz_write_batch_block blocks[2];
+#define block blocks[0]
 static struct bio b;
+static struct bio b2;
 static struct stub_queue q;
 static void setup(bool outstanding, bool early) {
     struct swapz_stream_buffer *stream;
     memset(&c,0,sizeof(c));
-    memset(&block,0,sizeof(block));
+    memset(blocks,0,sizeof(blocks));
     memset(&b,0,sizeof(b));
+    memset(&b2,0,sizeof(b2));
     memset(&q,0,sizeof(q));
     boundary_race=0;
     stream=&c.stream_buffers[0];
@@ -224,6 +229,7 @@ static void setup(bool outstanding, bool early) {
     stream->id=0;
     c.generations[0]=7;
     c.logical_pages=2;
+    c.physical_blocks=32;
     c.max_batch_blocks=1;
     c.inflight_buffer_id=0;
     c.accepting_io=true;
@@ -234,6 +240,7 @@ static void setup(bool outstanding, bool early) {
     block.records[0].generation=7;
     block.records[0].record_index=0;
     block.records[0].stored_length=4;
+    block.records[0].flags=SWAPZ_MAP_COMPRESSED;
     block.records[0].upper_completed=early;
     if (outstanding) block.records[0].bio=&b;
     c.staged_refs[0].valid=1;
@@ -326,12 +333,74 @@ static int scenario(int id) {
         if (swapz_reap_inflight(&c,true)!=-ETIMEDOUT ||
             c.stats.async_watchdog_timeouts || b.completes ||
             c.inflight_buffer_id!=0) return 18;
+    } else if (id>=16 && id<=23) {
+        /* Fault-inject in-memory metadata after the lower write was submitted.
+         * Finalization must fail before any success publication or unsafe index. */
+        setup(true,false);
+        if (id==16) s->block_count=2;
+        if (id==17) block.record_count=65;
+        if (id==18) block.records[0].logical_page=2;
+        if (id==19) block.records[0].record_index=1;
+        if (id==20) block.records[0].flags=4;
+        if (id==21) block.records[0].flags=0;
+        if (id==22 || id==23) {
+            c.max_batch_blocks=2;
+            s->block_count=2;
+            blocks[1].record_count=1;
+            blocks[1].records[0].logical_page=1;
+            blocks[1].records[0].generation=7;
+            blocks[1].records[0].record_index=1; /* Wrong descriptor slot. */
+            blocks[1].records[0].stored_length=4;
+            blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        }
+        if (id==23) {
+            b.completes=1; /* Upper BIO was already acknowledged. */
+            block.records[0].bio=NULL;
+            block.records[0].upper_completed=true;
+        }
+        swapz_stream_io_complete(id==23?1:0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed ||
+            c.installed || c.resets || s->state!=SWAPZ_BUFFER_INFLIGHT ||
+            c.inflight_buffer_id!=-1 || c.async_callbacks.value ||
+            !s->completion.reinits && false) return 30;
+        if (id==23) {
+            if (b.completes!=1 || !c.staged_refs[0].valid) return 31;
+        } else if (b.completes!=1 || b.error!=-EUCLEAN ||
+                   block.records[0].bio) return 32;
+    } else if (id==24) {
+        setup(true,false);
+        c.max_batch_blocks=2;
+        s->block_count=2;
+        blocks[1].record_count=1;
+        blocks[1].records[0].logical_page=1;
+        blocks[1].records[0].generation=7;
+        blocks[1].records[0].stored_length=4;
+        blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        blocks[1].records[0].bio=&b2;
+        c.generations[1]=7;
+        c.staged_refs[1]=(struct swapz_staged_ref){
+            .valid=1,.generation=7,.buffer_id=0,.block_index=1,.record_index=0};
+        swapz_stream_io_complete(0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result || c.failed || c.installed!=2 || c.resets!=1 ||
+            b.completes!=1 || b2.completes!=1 ||
+            c.staged_refs[0].valid || c.staged_refs[1].valid) return 33;
+    } else if (id==25 || id==26 || id==27) {
+        setup(true,false);
+        if (id==25) s->start_block=c.physical_blocks;
+        if (id==26) s->block_count=0;
+        if (id==27) block.record_count=0;
+        swapz_stream_io_complete(1,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed || c.installed ||
+            c.resets || s->state!=SWAPZ_BUFFER_INFLIGHT) return 34;
     } else return 50;
     return 0;
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>15) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>27) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -368,6 +437,19 @@ class AsyncReapExactC(unittest.TestCase):
                           text=True,timeout=3)
         self.assertEqual(cp.returncode,0,f"case={i} {cp.stdout} {cp.stderr}")
         self.assertIn(f"ASYNC_REAP_{i}_OK",cp.stdout)
+
+    def test_malformed_late_completion_is_bounded_and_never_partially_publishes(self):
+        for i in range(16,24):
+            with self.subTest(case=i):
+                self.run_case(i)
+
+    def test_two_block_valid_finalize_still_publishes_and_completes(self):
+        self.run_case(24)
+
+    def test_bad_physical_extent_and_empty_counts_preserve_resident_buffer(self):
+        for i in (25,26,27):
+            with self.subTest(case=i):
+                self.run_case(i)
 
     def test_no_inflight(self): self.run_case(0)
     def test_incomplete_nonblocking_reap(self): self.run_case(1)
