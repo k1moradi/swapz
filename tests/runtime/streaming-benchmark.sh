@@ -27,6 +27,13 @@ LATENCY_NS=${SWAPZ_BENCH_LATENCY_NS:-500000}
 RUNTIME=${SWAPZ_BENCH_RUNTIME:-3}
 WRITE_QD=${SWAPZ_BENCH_QD:-64}
 COMPRESS=${SWAPZ_BENCH_COMPRESS:-50}
+# Keep exact fio latency artifacts only when explicitly requested; preserving
+# these diagnostics never upgrades them to independent benchmark evidence.
+KEEP_ARTIFACTS=${SWAPZ_BENCH_KEEP_ARTIFACTS:-0}
+case "$KEEP_ARTIFACTS" in
+  0|1) ;;
+  *) echo "ERROR: SWAPZ_BENCH_KEEP_ARTIFACTS must be 0 or 1" >&2; exit 4 ;;
+esac
 # Throttled null_blk also charges DISCARD by request size. GC discards a
 # full 1 MiB segment and can permanently requeue above the 50 Hz budget.
 # Disable lower DISCARD in the synthetic bandwidth tests; its correctness
@@ -100,7 +107,11 @@ cleanup() {
     if [[ "$BACKEND_KIND" == nbd && -s "$NBD_STATS" ]]; then
       echo "SIZE_AWARE_NBD_STATS=$(cat "$NBD_STATS")"
     fi
-    rm -rf "$TMP"
+    if [[ "$KEEP_ARTIFACTS" == 1 ]]; then
+      echo "DIAGNOSTIC_ARTIFACTS=$TMP (UNQUALIFIED; no independent drain/quiescence attestation)"
+    else
+      rm -rf "$TMP"
+    fi
   else
     echo "Benchmark exited with status $rc; diagnostic artifacts preserved at $TMP" >&2
   fi
@@ -237,7 +248,8 @@ run_case() {
   local path="/dev/mapper/$TARGET"
   local fiofile="$TMP/${strategy}-${batch}.fio"
   local json="$TMP/${strategy}-${batch}.json"
-  local before after status start_ns end_ns
+  local before after status start_ns end_ns read_log_prefix latency_summary
+  read_log_prefix="$TMP/${strategy}-${batch}-reader"
 
   # Never reuse the target name if a prior case failed to remove it.
   if (( TARGET_ACTIVE )) || dmsetup info "$TARGET" >/dev/null 2>&1; then
@@ -281,13 +293,23 @@ rw=randread
 offset=0
 size=${COLD_MIB}M
 iodepth=1
+# Exact, unaveraged completion-latency samples for this sole reader job.
+# Fio's per_job_logs=0 removes a job-index suffix from the CLAT log.
 rate_iops=100
+write_lat_log=$read_log_prefix
+log_avg_msec=0
+per_job_logs=0
 EOF
 
   before=$(read_stat)
   # An elapsed interval cannot use wall-clock time (date can jump).
   start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   fio "$fiofile" --output-format=json --output="$json"
+  # Require one exact latency for every completed reader I/O; a missing,
+  # aggregated, or inconsistent fio log fails the case before publication.
+  latency_summary=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-read-latency.py" \
+      --fio-json "$json" --fio-clat-log "${read_log_prefix}_clat.log" \
+      --sidecar "$TMP/${strategy}-${batch}.latbin") || return 1
   # Staged upper completions may precede physical drain. Include the explicit
   # flush in the end-to-end drain clock.
   flush_device "$path"
@@ -297,9 +319,9 @@ EOF
   grep -q "failed=0" <<<"$status"
 
   python3 - "$json" "$before" "$after" "$status" "$strategy" "$batch" \
-      "$start_ns" "$end_ns" "$BACKEND" >>"$RESULTS" <<'PY'
+      "$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<'PY'
 import json, sys
-path, before, after, status, strategy, batch, start_ns, end_ns, backend = sys.argv[1:]
+path, before, after, status, strategy, batch, start_ns, end_ns, backend, latency_summary = sys.argv[1:]
 with open(path, encoding="utf-8") as f:
     root = json.load(f)
 jobs = {job["jobname"]: job for job in root["jobs"]}
@@ -350,6 +372,9 @@ row = {
     "lower_read_ios": a[0]-b[0], "lower_read_sectors": a[1]-b[1],
     "lower_write_ios": lower_ios, "lower_write_sectors": lower_sectors,
     "status": s,
+    # Exact fio read samples are retained separately from the non-qualifying
+    # summarized fio read_p99_ms and unverified lower-counter window.
+    "exact_read_latency": json.loads(latency_summary),
 }
 row["staged_hits"] = int(s.get("staged_hits", 0))
 row["staged_early"] = int(s.get("staged_early", 0))
@@ -371,6 +396,7 @@ echo "LOWER_DISCARD=$BENCH_DISCARD"
 echo "NBD_DEVICE=${NBD_DEVICE:-not-used}"
 echo "BATCHES=$BATCHES"
 echo "STRATEGIES=$STRATEGIES"
+echo "KEEP_ARTIFACTS=$KEEP_ARTIFACTS"
 
 for strategy in $STRATEGIES; do
   if [[ "$strategy" == immediate ]]; then
