@@ -91,3 +91,26 @@ Record exact PR and post-merge workflow identities and conclusions
 before advancing this candidate to a qualified implementation. Native
 Linux compilation evidence obtained independently by Codex must be
 pinned to the SHA actually tested.
+
+## Integration outcome
+
+The candidate merged as
+[`0f355b30b2ae5c61b31b75a460e3149600d31a1f`](https://github.com/k1moradi/swapz/commit/0f355b30b2ae5c61b31b75a460e3149600d31a1f).
+All three workflows triggered for this kernel-only change passed at the
+**exact post-merge SHA**:
+
+- [Kernel exact-C source contracts](https://github.com/k1moradi/swapz/actions/runs/38054166754)
+- [Combined source qualification](https://github.com/k1moradi/swapz/actions/runs/38054166731)
+- [Rootless teardown safety](https://github.com/k1moradi/swapz/actions/runs/38054166734)
+
+The PR executable head
+`16c05ce6c03bc38143de422f33ae819ee33a619a` separately passed the
+same three gates. The exact-C async-reaper suite reports **27/27**
+passing Python test methods on the qualified revision, including the
+separate executable preflight-removal mutant.
+
+The standalone NBD source workflow was not triggered by this diff;
+its source tests are part of the passed combined suite, not an
+independent standalone run. Native compilation of this newer revision,
+real-device operation, power-loss and privileged lifecycle testing remain
+unqualified. Rootless containment and target correctness are distinct.
