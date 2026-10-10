@@ -45,7 +45,7 @@ typedef uint32_t u32;
 typedef uint16_t u16;
 typedef uint8_t u8;
 #define SWAPZ_MAX_PACKED_RECORDS 64U
-#define WARN_ON_ONCE(x) (x)
+#define WARN_ON_ONCE(x) ((void)(x))
 #define unlikely(x) (x)
 #define likely(x) (x)
 #define min(a,b) ((a)<(b)?(a):(b))
@@ -69,7 +69,7 @@ struct bio;
 struct swapz_per_bio { struct list_head list; struct bio *bio; };
 struct bio {
     struct swapz_per_bio entry;
-    int completes, status;
+    int completes, bi_status;
 };
 struct swapz_write_batch_record {
     struct bio *bio;
@@ -184,7 +184,7 @@ static int run_case(int n, bool mutant) {
         swapz_complete_bio(&bios[0],0);
         blocks[0][0].records[0].bio=NULL;
         swapz_complete_buffer_bios(&c,&buffers[0],-EIO);
-        if (bios[0].status!=0||bios[0].completes!=1) return 26;
+        if (bios[0].bi_status!=0||bios[0].completes!=1) return 26;
         break;
     case 7:
         blocks[0][0].records[0].logical_page=UINT32_MAX;
@@ -207,7 +207,7 @@ static int run_case(int n, bool mutant) {
         blocks[0][0].records[0].bio=NULL;
         blocks[0][0].records[0].upper_completed=true;
         swapz_complete_buffer_bios(&c,&buffers[0],-EIO);
-        if(bios[0].completes!=1||bios[0].status) return 30;
+        if(bios[0].completes!=1||bios[0].bi_status) return 30;
         break;
     case 10:
         /* A pending pack BIO is still detached from any stream ledger. */
@@ -227,8 +227,8 @@ static int run_case(int n, bool mutant) {
         return 0;
     }
     if(bios[0].completes!=1||bios[1].completes!=1||
-       (n!=6 && bios[0].status!=-EIO)||
-       bios[1].status!=-EIO||
+       (n!=6 && bios[0].bi_status!=-EIO)||
+       bios[1].bi_status!=-EIO||
        !list_empty(&buffers[0].owned_bios))
         return 70;
     return 0;
