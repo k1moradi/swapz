@@ -37,6 +37,7 @@ MANDATORY_TESTS = (
     "v22-latency-v3-test.py",
     "v22-evidence-bundle-check-test.py",
     "v22-evidence-bundle-v3-test.py",
+    "swapz-kernel-range-contract-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
@@ -108,6 +109,8 @@ def check_workflow(name: str, source: str) -> None:
              f"{name}: combined workflow changes cannot trigger the gate")
     _require(".github/workflows/rootless-nbd.yml" in paths,
              f"{name}: standalone NBD workflow edits must trigger the joint safety gate")
+    _require("kernel/dm-swapz.c" in paths,
+             f"{name}: kernel source changes must trigger the rootless range contract")
 
     # Unlike combined, teardown enumerates each runtime path explicitly.
     # Account for every actual runtime script referred to by the job,
@@ -220,6 +223,22 @@ class RootlessWorkflowContractTests(unittest.TestCase):
         self.assertIn(path, source)
         with self.assertRaisesRegex(WorkflowContractError, "standalone NBD workflow edits"):
             check_workflow(name, source.replace(path, "", 1))
+
+    def test_kernel_source_change_must_trigger_both_joint_workflows(self):
+        for name, source in self.sources.items():
+            with self.subTest(workflow=name):
+                path = "      - 'kernel/dm-swapz.c'\n"
+                self.assertIn(path, source)
+                with self.assertRaisesRegex(WorkflowContractError, "kernel source changes"):
+                    check_workflow(name, source.replace(path, "", 1))
+
+    def test_removed_kernel_range_execution_is_rejected(self):
+        for name, source in self.sources.items():
+            with self.subTest(workflow=name):
+                command = "timeout 25s python3 -B tests/runtime/swapz-kernel-range-contract-test.py -v"
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(name, source.replace(command, "echo 'kernel range skipped'", 1))
 
     def test_removed_v3_bundle_binding_execution_is_rejected(self):
         for name, source in self.sources.items():

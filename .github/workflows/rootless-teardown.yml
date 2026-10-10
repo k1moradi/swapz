@@ -7,6 +7,7 @@ on:
       - '.github/workflows/rootless-teardown.yml'
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
+      - 'kernel/dm-swapz.c'
       - 'tests/runtime/test-stack-teardown.sh'
       - 'tests/runtime/test-stack-teardown-regression.sh'
       - 'tests/runtime/pressure-teardown.sh'
@@ -70,6 +71,7 @@ on:
       - 'tests/runtime/v22-evidence-bundle-check-test.py'
       - 'tests/runtime/v22-evidence-bundle-v3.py'
       - 'tests/runtime/v22-evidence-bundle-v3-test.py'
+      - 'tests/runtime/swapz-kernel-range-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -86,6 +88,7 @@ on:
       - '.github/workflows/rootless-teardown.yml'
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
+      - 'kernel/dm-swapz.c'
       - 'tests/runtime/**'
   workflow_dispatch:
 
@@ -334,6 +337,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-denial-telemetry.py tests/runtime/recall-denial-telemetry-test.py
           timeout 25s python3 -B tests/runtime/recall-denial-telemetry-test.py -v
+      - name: Compiled exact kernel range guards and GC order contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-kernel-range-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-kernel-range-contract-test.py -v
       - name: Rootless offline physical drain plateau evidence regression
         shell: bash
         run: |

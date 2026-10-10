@@ -1960,15 +1960,49 @@ static int swapz_commit_previous_generation(struct swapz_context *context,
 	return error;
 }
 
+/*
+ * Pure range guards: test their exact production C bodies in rootless CI.
+ * Never narrow sector_t before the full logical extent is checked.
+ */
+static int swapz_checked_page_index(u32 logical_pages, sector_t sector,
+				    u32 *logical_page)
+{
+	sector_t index = sector / SWAPZ_BLOCK_SECTORS;
+
+	if (sector % SWAPZ_BLOCK_SECTORS)
+		return -EINVAL;
+	if (index >= logical_pages)
+		return -ERANGE;
+	*logical_page = (u32)index;
+	return 0;
+}
+
+static int swapz_checked_discard_range(u32 logical_pages, sector_t sector,
+				       sector_t remaining)
+{
+	sector_t first_page = sector / SWAPZ_BLOCK_SECTORS;
+	sector_t page_count = remaining / SWAPZ_BLOCK_SECTORS;
+
+	if (sector % SWAPZ_BLOCK_SECTORS ||
+	    remaining % SWAPZ_BLOCK_SECTORS)
+		return -EINVAL;
+	if (remaining && (first_page >= logical_pages ||
+			  page_count > logical_pages - first_page))
+		return -ERANGE;
+	return 0;
+}
+
 static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 {
-	u32 logical_page = (u32)(bio->bi_iter.bi_sector / SWAPZ_BLOCK_SECTORS);
+	u32 logical_page;
 	u32 previous_generation;
 	u32 generation;
 	int error;
 
-	if (logical_page >= context->logical_pages)
-		return -ERANGE;
+	error = swapz_checked_page_index(context->logical_pages,
+					bio->bi_iter.bi_sector, &logical_page);
+	if (error)
+		return error;
 
 	error = swapz_commit_previous_generation(context, logical_page);
 	if (error)
@@ -1997,11 +2031,13 @@ static int swapz_process_write(struct swapz_context *context, struct bio *bio)
 
 static int swapz_process_read(struct swapz_context *context, struct bio *bio)
 {
-	u32 logical_page = (u32)(bio->bi_iter.bi_sector / SWAPZ_BLOCK_SECTORS);
+	u32 logical_page;
 	int error;
 
-	if (logical_page >= context->logical_pages)
-		return -ERANGE;
+	error = swapz_checked_page_index(context->logical_pages,
+					bio->bi_iter.bi_sector, &logical_page);
+	if (error)
+		return error;
 
 	/*
 	 * Move any just-compressed foreground record into the fill buffer, but do
@@ -2033,6 +2069,12 @@ static int swapz_process_discard(struct swapz_context *context, struct bio *bio)
 	sector_t remaining = bio_sectors(bio);
 	int error;
 
+	/* Reject the entire range before staging or invalidating any page. */
+	error = swapz_checked_discard_range(context->logical_pages,
+					   sector, remaining);
+	if (error)
+		return error;
+
 	/*
 	 * Stage any current pack so generation invalidation can suppress its later
 	 * publication.  Do not drain stream buffers: an unsent staged block whose
@@ -2048,11 +2090,8 @@ static int swapz_process_discard(struct swapz_context *context, struct bio *bio)
 		u32 logical_page;
 		u32 generation;
 
-		if (sector % SWAPZ_BLOCK_SECTORS || remaining < SWAPZ_BLOCK_SECTORS)
-			return -EINVAL;
+		/* The complete range was checked before any mutation. */
 		logical_page = (u32)(sector / SWAPZ_BLOCK_SECTORS);
-		if (logical_page >= context->logical_pages)
-			return -ERANGE;
 
 		generation = ++context->generations[logical_page];
 		if (unlikely(!generation))
