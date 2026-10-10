@@ -3843,9 +3843,9 @@ authority. No real DM/loop/NBD/swap/module/physical device,
 pressure, reboot, or destructive/privileged operation occurred.
 V2.2 strategy/batch winner remains **UNDETERMINED**.
 
-## 2026-10-10 — Compressed-container compaction preflight candidate
+## 2026-10-10 — Compressed-container compaction preflight integration
 
-The draft [PR #3](https://github.com/k1moradi/swapz/pull/3)
+Merged [PR #3](https://github.com/k1moradi/swapz/pull/3)
 introduces read-only full-batch validation before
 `swapz_compact_fill_buffer` mutates RAM-resident source blocks or
 authoritative staged references. This addresses source-proven acceptance
@@ -3886,3 +3886,21 @@ fault classes, mutation evidence and scope limits.
 containment and backing release, independent I/O drain, real kernel
 fault injection, physical-media durability or V2.2 strategy/batch
 performance winner.
+
+### Exact merge-commit requalification (October 10, 2026)
+
+PR head `ffdd28aaabc5511aae294d676c0e57e1a6debf77` passed isolated kernel,
+combined, teardown, and NBD source-safety workflows before integration.
+
+[Merge commit `57af151c4f47b24a3ad0533ea1377d289c13a2c1`](https://github.com/k1moradi/swapz/commit/57af151c4f47b24a3ad0533ea1377d289c13a2c1)
+also passed all four rootless workflows:
+
+- [Kernel source 38044908279](https://github.com/k1moradi/swapz/actions/runs/38044908279): PASS.
+- [Combined 38044908328](https://github.com/k1moradi/swapz/actions/runs/38044908328): PASS.
+- [Teardown 38044908268](https://github.com/k1moradi/swapz/actions/runs/38044908268): PASS.
+- [NBD source safety 38044908271](https://github.com/k1moradi/swapz/actions/runs/38044908271): PASS.
+
+The subsequent documentation-only update changes no executable kernel, workflow,
+or test source; do not attribute the earlier runs to a later documentation SHA.
+All qualification remains rootless/source-scoped. No device or privileged I/O
+or independent kernel I/O-drain evidence was obtained in this task.
