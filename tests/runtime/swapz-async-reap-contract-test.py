@@ -89,7 +89,8 @@ def source_contract(source: str) -> None:
         raise AssertionError("failed lower write discards acknowledged staged data")
     if "if (unlikely(context->failed))" not in install:
         raise AssertionError("late lower success can publish mapping after failure")
-    if not (teardown.index("swapz_wait_async_callbacks(context)") <
+    if ("swapz_wait_async_callbacks(context)" not in teardown or
+            teardown.index("swapz_wait_async_callbacks(context)") >=
             teardown.index("swapz_free_context(context)")):
         raise AssertionError("context freed before callback ownership drained")
 
@@ -397,9 +398,13 @@ class AsyncReapExactC(unittest.TestCase):
 
     def test_missing_callback_refwait_mutation_rejected(self):
         marker="swapz_wait_async_callbacks(context);"
-        self.assertIn(marker,self.source)
+        start=self.source.index("static void swapz_dtr(")
+        end=self.source.index("static int swapz_ctr(",start)
+        teardown=self.source[start:end]
+        self.assertIn(marker,teardown)
+        changed=teardown.replace(marker,"/* mutant skip callback drain */",1)
         with self.assertRaisesRegex(AssertionError,"freed before callback"):
-            source_contract(self.source.replace(marker,"/* mutant skip */",1))
+            source_contract(self.source.replace(teardown,changed,1))
 
     def test_missing_submit_rejection_token_mutation_rejected(self):
         original=function(self.source,"swapz_submit_stream_buffer")
