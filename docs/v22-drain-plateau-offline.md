@@ -41,6 +41,18 @@ For v1 `kernel` or `physical` claims, both
 Only `synthetic` v1 records may display an illustrative algorithmic
 candidate; it is never a measured winner.
 
+Use `swapz-drain-observation-v3` with a bounded, lossless binary
+sidecar when a run has more than 256 distinct exact nanosecond
+latencies. V3 adds `read_latency_sidecar` (unique same-directory
+`.latbin` basename) and `read_latency_sha256` (lowercase digest)
+instead of `read_latency_counts`. The streaming verifier checks
+sorted unsigned 64-bit network-order exact (latency_ns, count)
+pairs, total read_count, original bytes, exact p99, and retained
+descriptor identity without loading all sample values into memory.
+See [the V3 sidecar specification](v22-latency-v3-sidecar.md).
+The existing V1 measurement-bundle manifest rejects V3 until
+a sidecar-aware bundle contract is developed.
+
 Use `swapz-drain-observation-v2` for the new internal-consistency
 check. It retains the v1 fields and adds **one strictly required**
 `read_latency_counts` field: a JSON list of sorted

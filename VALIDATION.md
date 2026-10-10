@@ -3407,3 +3407,63 @@ three-way green claim. No live physical/kernel/device operation was
 authorized or executed. V2.2 strategy and batch winner remain
 **UNDETERMINED**. This subsequent validation documentation change
 is documentation-only, not a new executable test revision.
+
+
+## 2026-10-09 — Main-developer lossless V3 latency sidecar qualification
+
+**Exact tested executable source:**
+`ea18d3b6d81a5d307a855ce45228d3aabb07915f`
+([code commit](https://github.com/k1moradi/swapz/commit/ea18d3b6d81a5d307a855ce45228d3aabb07915f)).
+Initial prototype/test-fixture revisions were not green; only this
+corrected exact source commit is recorded as the final gate.
+
+Independent main-developer changes:
+- The V2.2 plateau analyzer now accepts additive
+  `swapz-drain-observation-v3` with strictly ordered
+  exact-nanosecond RLE records, encoded as fixed 16-byte big-endian
+  unsigned 64-bit latency/count pairs.
+- Original sidecar bytes are hashed with SHA-256 during streaming,
+  exact read_count is verified, and p99 is recomputed via the
+  integer nearest-rank definition; neither coarsening nor discarded
+  samples can manufacture a smaller p99.
+- V3 sidecars are opened by basename relative to the same retained
+  directory as the JSONL input and must be singly-linked, regular,
+  no-symlink, uniquely bound, byte-aligned files. At most 512 MiB of
+  sidecar bytes are processed per invocation, up to 10 million
+  samples per run. V1/V2 interpretation and numerical plateau
+  criteria remain unchanged.
+- Added 39 targeted rootless V3 tests, a standalone format
+  specification, mandatory 35-second test execution in each joint
+  workflow, and a negative workflow-contract mutation check.
+- The existing legacy V2.2 evidence-bundle schema verifies JSONL
+  bytes only, not V3 sidecar bytes. It now explicitly rejects every
+  V3 row instead of promoting an unverified sidecar hash into a
+  positive manifest claim; two negative tests raise the bundle
+  suite to 22 tests.
+
+**Exact-revision GitHub Actions evidence:**
+- [Combined 38026623024](https://github.com/k1moradi/swapz/actions/runs/38026623024): PASS.
+- [Teardown 38026623030](https://github.com/k1moradi/swapz/actions/runs/38026623030): PASS.
+
+Both job-step logs verified **39/39 V3 sidecar tests**,
+**22/22 evidence-bundle tests**, **31/31 legacy plateau tests**,
+and **15/15 workflow-contract tests**. The combined log records
+`COMBINED_TESTED_HEAD=ea18d3b6d81a5d307a855ce45228d3aabb07915f`
+and **25/25 NBD stress repetitions**. No standalone NBD run
+for this exact commit was required or triggered.
+
+**Rootless parser microbenchmark, not device performance:**
+100,000 distinct sample timestamps encoded into 1,600,000 original
+sidecar bytes were parsed with exact p99 in **0.2103 s** in combined
+CI and **0.2850 s** in teardown CI. Both runs printed
+**141,749 bytes** of peak Python-traced allocation for the parser
+test. This is not full process RSS, and cannot be compared with
+physical I/O throughput or swap-in latency.
+
+**Qualification boundary:** The V3 sidecar digest binds only locally
+supplied bytes. No trusted collector, signed source, independent
+lower-device identity, kernel drain, genuine swap-in sampling,
+production owner, actual backing deletion, live device, or physical
+experiment was established or authorized. V2.2 strategy/batch winner:
+**UNDETERMINED**. The later documentation-only commit must never
+be substituted for the exact executable SHA verified above.

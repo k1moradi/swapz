@@ -940,9 +940,10 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       https://github.com/k1moradi/swapz/actions/runs/37917836052
       https://github.com/k1moradi/swapz/actions/runs/37917836051
 - [ ] A future **independently authenticated** real collector must
-      preserve actual per-read latency evidence with a vetted
-      schema suitable for workloads with >256 distinct timestamps;
-      v2's exact histogram is bounded and may reject such data.
+      supply exact per-read latency evidence via the now-reviewed
+      `swapz-drain-observation-v3` binary RLE sidecar format
+      (no longer limited to 256 distinct timestamps). V3 integrity
+      checks alone do not prove sample or kernel I/O origin.
       Verify backend isolation, monotonic window, real kernel
       quiescence, swap-in sample origin and 10,000+ reads/run.
 - [ ] Separately investigate an intermittent existing combined
@@ -1197,3 +1198,30 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       for observed pidfd/recall launch and WAIT denial
       categories without creating positive cleanup authority.
       Codex owns the broker implementation.
+
+### 2026-10-09 — Main-developer lossless V3 latency evidence
+
+- [x] Introduce `swapz-drain-observation-v3` with a bounded
+      exact 16-byte per-distinct-nanosecond-count sidecar, direct
+      original-byte SHA-256 validation, monotonic sorted counts, and
+      integer nearest-rank p99 recomputation, keeping v1/v2 unchanged.
+- [x] Bound V3 parsing to at most 10,000,000 reads per run and
+      512 MiB of sidecar bytes per invocation, with a fixed-size
+      streaming parser, retained regular-file descriptors and
+      sibling-path traversal protection. Rootless test suite 39/39.
+- [x] Enforce fail-closed V3 exclusion from the legacy JSONL-only
+      bundle manifest, whose schema cannot bind binary sidecar
+      bytes. Evidence-bundle policy suite now 22/22.
+- [x] Verify mandatory joint workflow contracts (15/15)
+      and old plateau suite (31/31); all the above passed at
+      `ea18d3b6d81a5d307a855ce45228d3aabb07915f`:
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38026623024)
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38026623030).
+- [ ] Design a separate V3-aware measurement bundle schema that
+      cryptographically binds each sidecar to run/session/device
+      metadata. This is offline consistency only; independent
+      collector signatures and production trust remain prerequisites.
+- [ ] Independently audit kernel V2 staged-write generation
+      invalidation and live GC relocation under concurrent I/O,
+      without enabling production mapper/device operations.
+
