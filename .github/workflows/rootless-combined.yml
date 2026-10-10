@@ -243,6 +243,12 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless V2.2 benchmark plan and pre-device admission contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-plan.py tests/runtime/streaming-benchmark-plan-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-plan-test.py -v
       - name: Rootless streaming single-sweep reporting safety regression
         shell: bash
         run: |

@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-[[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in awk blockdev dmsetup fio modprobe python3; do
-  command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
-done
-
+# Validate benchmark policy and null_blk request sizes before checking root
+# privileges, allocating fixture files, or touching any kernel resources.
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 BACKEND_KIND=${SWAPZ_BENCH_BACKEND:-null_blk}
 case "$BACKEND_KIND" in
@@ -39,16 +36,28 @@ case "$BENCH_DISCARD" in
   0|1) ;;
   *) echo "ERROR: SWAPZ_BENCH_DISCARD must be 0 or 1" >&2; exit 4 ;;
 esac
+STRATEGIES=${SWAPZ_BENCH_STRATEGIES:-"immediate opportunistic staged"}
+REQUESTED_BATCHES=${SWAPZ_BENCH_BATCHES:-auto}
+# The rootless planner admits only serviceable null_blk requests; an explicit
+# 512/1024 KiB batch under a 20 MiB/s throttle is rejected before even
+# creating a null_blk configfs entry. With "auto", use only feasible sizes.
+if ! BATCHES=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-plan.py" \
+    --backend "$BACKEND_KIND" --mbps "$BANDWIDTH" \
+    --latency-ns "$LATENCY_NS" --strategies "$STRATEGIES" \
+    --runtime "$RUNTIME" --qd "$WRITE_QD" --compress "$COMPRESS" \
+    --batches "$REQUESTED_BATCHES" --repeats 1 --emit-batches); then
+  echo "ERROR: benchmark pre-device plan rejected configuration; no fixture allocated." >&2
+  exit 4
+fi
 if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )); then
   echo "ERROR: null_blk mbps may requeue a 1 MiB GC DISCARD forever; use SWAPZ_BENCH_DISCARD=0 with bandwidth throttling." >&2
   exit 4
 fi
-BATCHES=${SWAPZ_BENCH_BATCHES:-"4 8 16 32 64 128 256 512 1024"}
-STRATEGIES=${SWAPZ_BENCH_STRATEGIES:-"immediate opportunistic staged"}
-# null_blk's mbps throttle replenishes bytes at 50 ticks/second. A request
-# larger than one tick's byte budget is permanently requeued by null_blk and
-# can never complete. Keep this backend limitation explicit so a large swapz
-# batch cannot be misreported as a swapz timeout.
+[[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
+for tool in awk blockdev dmsetup fio modprobe python3; do
+  command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
+done
+# Preserve a second fail-closed guard after setup as defense in depth.
 NULLBLK_TICKS_PER_SEC=50
 NULLBLK_TICK_BYTES=$(( BANDWIDTH > 0 ? (1048576 / NULLBLK_TICKS_PER_SEC) * BANDWIDTH : 0 ))
 LOGICAL_MIB=32
