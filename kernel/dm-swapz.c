@@ -416,6 +416,17 @@ static int swapz_submit_stream_buffer(struct swapz_context *context,
 			 context->inflight_buffer_id >= 0))
 		return -EUCLEAN;
 
+	/*
+	 * Even a corrupted resident batch must not direct a lower write
+	 * outside the target's usable block extent or allocated batch size.
+	 * Reject before publishing in-flight ownership or callback state.
+	 */
+	if (unlikely(buffer->block_count > context->max_batch_blocks ||
+		     buffer->start_block >= context->physical_blocks ||
+		     buffer->block_count >
+			     context->physical_blocks - buffer->start_block))
+		return -EUCLEAN;
+
 	region.bdev = context->backing->bdev;
 	region.sector = swapz_physical_sector(buffer->start_block);
 	region.count = (sector_t)buffer->block_count * SWAPZ_BLOCK_SECTORS;
