@@ -1665,6 +1665,8 @@ static int swapz_decode_loaded_mapping(u32 logical_page,
 
 		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
 		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    !le16_to_cpu(container->record_count) ||
+		    le16_to_cpu(container->record_count) > SWAPZ_MAX_PACKED_RECORDS ||
 		    mapping->record_index >= le16_to_cpu(container->record_count) ||
 		    mapping->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 			return -EIO;
@@ -2015,6 +2017,16 @@ static int swapz_read_staged(struct swapz_context *context,
 	    ref->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 		return -EUCLEAN;
 	record = &block->records[ref->record_index];
+	/*
+	 * The staged slot and its descriptor index are identical when staged
+	 * and remain identical after repacking. Do not follow a corrupted
+	 * in-memory descriptor index or treat unknown flags as a raw page.
+	 */
+	if (record->record_index != ref->record_index ||
+	    record->record_index >= SWAPZ_MAX_PACKED_RECORDS)
+		return -EUCLEAN;
+	if (record->flags != 0 && record->flags != SWAPZ_MAP_COMPRESSED)
+		return -EUCLEAN;
 	if (record->logical_page != logical_page ||
 	    record->generation != ref->generation ||
 	    !swapz_stream_record_current(context, record))
@@ -2023,6 +2035,11 @@ static int swapz_read_staged(struct swapz_context *context,
 	block_data = (const u8 *)buffer->data +
 		ref->block_index * SWAPZ_BLOCK_BYTES;
 	if (!(record->flags & SWAPZ_MAP_COMPRESSED)) {
+		/* A raw page has exactly one full-size record in its block. */
+		if (block->record_count != 1 ||
+		    record->record_index != 0 ||
+		    record->stored_length != SWAPZ_BLOCK_BYTES)
+			return -EUCLEAN;
 		memcpy(destination, block_data, SWAPZ_BLOCK_BYTES);
 	} else {
 		const struct swapz_container_disk *container = block_data;
@@ -2031,8 +2048,13 @@ static int swapz_read_staged(struct swapz_context *context,
 		u16 length;
 		int decompressed;
 
+		/*
+		 * Stream blocks were packed locally and may be repacked, but the
+		 * on-block descriptor count must still match the resident metadata.
+		 */
 		if (le32_to_cpu(container->magic) != SWAPZ_CONTAINER_MAGIC ||
 		    le16_to_cpu(container->version) != SWAPZ_CONTAINER_VERSION ||
+		    le16_to_cpu(container->record_count) != block->record_count ||
 		    record->record_index >= le16_to_cpu(container->record_count))
 			return -EIO;
 
@@ -2041,6 +2063,7 @@ static int swapz_read_staged(struct swapz_context *context,
 		offset = le16_to_cpu(disk_record->offset);
 		length = le16_to_cpu(disk_record->length);
 		if (le32_to_cpu(disk_record->logical_page) != logical_page ||
+		    !length || length > SWAPZ_MAX_COMPRESSED_BYTES ||
 		    length != record->stored_length ||
 		    offset < SWAPZ_CONTAINER_BASE_BYTES +
 			     le16_to_cpu(container->record_count) *
