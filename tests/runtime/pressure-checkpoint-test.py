@@ -97,6 +97,34 @@ class PressureCheckpointTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(errors, [])
 
+    def test_atomic_link_publication_window_never_accepts_two_links(self) -> None:
+        temporary = self.directory / ".publishing-filled"
+        temporary.write_bytes(_expected(TOKEN, "filled"))
+        marker = self.directory / "filled"
+        os.link(temporary, marker)
+        self.assertEqual(marker.stat().st_nlink, 2)
+
+        thread, errors = self.worker(lambda: (time.sleep(0.01),
+                                               temporary.unlink()))
+        # The publisher's complete marker is visible, but its temporary
+        # name has not yet been removed. The reader must wait until the
+        # final inode has exactly one link before accepting the release.
+        publish_release(self.directory, TOKEN, "filled")
+        thread.join(timeout=1)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(marker.stat().st_nlink, 1)
+        self.assertEqual((self.directory / "release-filled").read_bytes(),
+                         _expected(TOKEN, "filled"))
+
+    def test_permanent_hardlink_is_not_readiness(self) -> None:
+        temporary = self.directory / ".foreign-link"
+        temporary.write_bytes(_expected(TOKEN, "filled"))
+        os.link(temporary, self.directory / "filled")
+        with self.assertRaisesRegex(ValueError, "unsafe pressure checkpoint"):
+            publish_release(self.directory, TOKEN, "filled")
+        self.assertFalse((self.directory / "release-filled").exists())
+
     def test_malformed_or_stale_release_fails_closed(self) -> None:
         (self.directory / "release-filled").write_text("filled:wrong-token\n")
         with self.assertRaises(ValueError):
