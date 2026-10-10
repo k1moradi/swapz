@@ -3842,3 +3842,47 @@ counter accounting, not kernel I/O drain or backing release
 authority. No real DM/loop/NBD/swap/module/physical device,
 pressure, reboot, or destructive/privileged operation occurred.
 V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+## 2026-10-10 — Compressed-container compaction preflight candidate
+
+The draft [PR #3](https://github.com/k1moradi/swapz/pull/3)
+introduces read-only full-batch validation before
+`swapz_compact_fill_buffer` mutates RAM-resident source blocks or
+authoritative staged references. This addresses source-proven acceptance
+of malformed container versions/metadata and late-error partial-mutation
+risk. The verified counterexample compiles the real compactor with the
+preflight call deliberately removed, accepting and re-emitting a
+version-2 container as version 1. Ordinary valid-buffer reachability
+of the malformed input is **not established**.
+
+The same candidate bounds resident record/block counts and logical
+indices in upper-BIO error fanout and staged-read validation.
+The new `swapz-compaction-container-contract-test.py` runs actual
+production C with in-memory stand-ins and a deliberately broken mutation;
+it does not run real kernel LZ4, dm-io or storage hardware. The older
+async source-contract harness was adjusted mechanically for the new
+production completion routine's fields and bounds.
+
+At executable SHA
+`e3e45f5c8ab7e52e5db20375d12661b97088f0a2`:
+
+- [Isolated kernel run 38044596044](https://github.com/k1moradi/swapz/actions/runs/38044596044):
+  **PASS**.
+- [PR kernel run 38044600544](https://github.com/k1moradi/swapz/actions/runs/38044600544):
+  **PASS**.
+- [PR NBD source safety run 38044600630](https://github.com/k1moradi/swapz/actions/runs/38044600630):
+  **PASS**.
+- [PR combined run 38044600541](https://github.com/k1moradi/swapz/actions/runs/38044600541)
+  and [PR teardown run 38044600642](https://github.com/k1moradi/swapz/actions/runs/38044600642):
+  recorded here as **not yet verified successful**; inspect their
+  conclusions before calling the candidate fully qualified.
+
+Additional draft-PR documentation-only commits after this executable
+SHA are **not** silently assigned these prior run conclusions.
+See `docs/v22-compaction-container-validation-audit.md` for exact
+fault classes, mutation evidence and scope limits.
+
+**Not authorized/qualified:** production installation, privileged
+containment and backing release, independent I/O drain, real kernel
+fault injection, physical-media durability or V2.2 strategy/batch
+performance winner.
