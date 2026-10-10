@@ -1460,3 +1460,34 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       separately authorized disposable fixture and independently trusted owner.
 
 See `docs/v22-compaction-container-validation-audit.md`.
+
+### 2026-10-10 — Staged-read and loaded mapping decoder hardening (PR #4)
+
+- [x] Main developer reviewed the separate overlap-validation commit at
+      `9a4e16824fc5457028005c13d60c6b56d72077bc`. Its isolated kernel,
+      combined and teardown source workflows passed.
+- [x] Independent native Linux agent reported all four assigned rootless tests
+      and a `W=1` module build passing at that earlier revision, Ubuntu
+      26.04.1 / kernel 7.0.0-38-generic / GCC 15.2; exact BTF/toolchain
+      warning details are still pending, and the result does not cover PR #4.
+- [x] Main developer fixed unknown staged-record flags, descriptor-index
+      mismatches, contradictory compressed-container counts, invalid raw
+      record shapes, oversized committed container counts and unknown
+      valid-mapping flags.
+- [x] Main developer replaced pairwise overlapping-payload comparisons with
+      a linear canonical descending-extent check, retaining the existing
+      writer/repacker layout and adding reordered-extent rejection.
+- [x] Execute compiled exact-C readback admission and old-acceptance mutants.
+      Seven Python contract tests passed at the integrated revision.
+- [x] Merge PR #4 as `9ef86baa3c981efe28e0a64db8d9f203c11bdd10`
+      after four green rootless gates at PR head, then requalify kernel
+      (38046079346), combined (38046079305), teardown (38046079319),
+      NBD source (38046079218) at the merge commit itself: all PASS.
+- [ ] Obtain independent native kernel `W=1` compilation on this newer
+      executable source SHA, with full warnings and a precise no-load report.
+- [ ] Keep real kernel/DM/loop/NBD/swap runtime and physical-media
+      acceptance blocked until exact separate authorization.
+- [ ] Measure any compactor metadata-scan cost before selecting V2.2
+      strategy and batch size; winner remains UNDETERMINED.
+
+See `docs/v22-staged-read-metadata-audit.md`.
