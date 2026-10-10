@@ -1491,3 +1491,39 @@ See `docs/v22-compaction-container-validation-audit.md`.
       strategy and batch size; winner remains UNDETERMINED.
 
 See `docs/v22-staged-read-metadata-audit.md`.
+
+### 2026-10-10 — Independently audited lower-I/O physical extent boundaries
+
+- [x] Read path: verify published physical mapping is inside the
+      segment-aligned usable backing extent before calling
+      `swapz_read_block()` / dm-io. Exact-C positive, rejection and
+      old-code mutant scenarios executed with only ordinary RAM.
+      [PR #5](https://github.com/k1moradi/swapz/pull/5),
+      merged as `03e6e6459fed5317918d1314f3ccf0bdab47564a`.
+- [x] PR #5 post-merge SHA: rootless kernel (38046890497), combined
+      (38046890454), teardown (38046890382) and NBD (38046890405)
+      all **PASS**.
+- [x] Write path: check batch allocation and physical extent with
+      subtraction-safe bounds before constructing a lower dm-io
+      submission and publishing callback/in-flight ownership.
+      Exact-C normal/rejection/sync-error and old-code mutant
+      scenarios passed. [PR #6](https://github.com/k1moradi/swapz/pull/6),
+      merged as `49b062a0180990a03b0b81fd40c1c3e41c2f620f`.
+- [x] PR #6 post-merge SHA: rootless kernel (38047254236), combined
+      (38047254217), teardown (38047254245) and NBD (38047254206)
+      all **PASS**.
+- [ ] Audit error-path in-flight buffer finalization against a
+      fault-injected record-count / logical-page metadata corruption
+      after submission; only fix a reproduced source-level defect.
+- [ ] Requalify the current executable kernel SHA with native
+      Linux `W=1` compilation and full warning provenance once
+      the Codex Linux host is available; prior native evidence is
+      pinned to older `9a4e168`, **not** PR #5 or #6.
+- [ ] Real loaded DM, swap, loop/NBD, privileged teardown, physical
+      backing and device fault-injection tests remain unapproved
+      and unqualified.
+- [ ] Benchmark physical streaming/compactor overhead before
+      selecting V2.2 policy/batch winner: **UNDETERMINED**.
+
+See `docs/v22-published-mapping-read-bounds-audit.md` and
+`docs/v22-stream-submit-bounds-audit.md`.
