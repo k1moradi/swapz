@@ -197,7 +197,11 @@ static void swapz_complete_bio(struct bio *b, int err) {
 }
 static void swapz_install_mapping(struct swapz_context *c, u32 pg,
                                   u32 phys, u16 length, u8 idx, u8 flags) {
-    (void)pg; (void)phys; (void)length; (void)idx; (void)flags;
+    (void)pg; (void)length; (void)idx; (void)flags;
+    if (phys >= c->physical_blocks) {
+        swapz_set_failed(c,-EUCLEAN);
+        return;
+    }
     if (!c->failed) c->installed++;
 }
 static void swapz_reset_stream_buffer(struct swapz_context *c,
@@ -385,25 +389,36 @@ static int scenario(int id) {
         if (result || c.failed || c.installed!=2 || c.resets!=1 ||
             b.completes!=1 || b2.completes!=1 ||
             c.staged_refs[0].valid || c.staged_refs[1].valid) return 33;
-    } else if (id==28) {
-        /* Executable old-behavior counterexample: a late descriptor has
-         * a mismatched record index, but an earlier mapping is published. */
+    } else if (id==28 || id==29) {
+        /* Late-corrupted two-block extent: block 9 is valid, block 10
+         * crosses the usable physical boundary. Without a read-only
+         * preflight, block 9 is published before block 10 fails. */
         setup(true,false);
         c.max_batch_blocks=2;
+        c.physical_blocks=10;
+        s->start_block=9;
         s->block_count=2;
         c.generations[1]=7;
         blocks[1].record_count=1;
         blocks[1].records[0].logical_page=1;
         blocks[1].records[0].generation=7;
-        blocks[1].records[0].record_index=1; /* Invalid slot. */
+        blocks[1].records[0].record_index=0;
         blocks[1].records[0].stored_length=4;
         blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
         swapz_stream_io_complete(0,s);
         result=swapz_reap_inflight(&c,false);
-        if (result || c.failed || c.installed!=2 || c.resets!=1 ||
-            b.completes!=1 || b.error || block.records[0].bio)
-            return 40;
-        puts("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION");
+        if (id==28) {
+            if (result!=-EUCLEAN || !c.failed || c.installed!=1 ||
+                c.resets || b.completes!=1 || b.error ||
+                block.records[0].bio)
+                return 40;
+            puts("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION");
+        } else {
+            if (result!=-EUCLEAN || !c.failed || c.installed ||
+                c.resets || b.completes!=1 || b.error!=-EUCLEAN ||
+                block.records[0].bio != NULL)
+                return 41;
+        }
     } else if (id==25 || id==26 || id==27) {
         setup(true,false);
         if (id==25) s->start_block=c.physical_blocks;
@@ -418,7 +433,7 @@ static int scenario(int id) {
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>28) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>29) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -484,6 +499,9 @@ class AsyncReapExactC(unittest.TestCase):
         for i in (25,26,27):
             with self.subTest(case=i):
                 self.run_case(i)
+
+    def test_late_two_block_extent_corruption_stops_all_publication(self):
+        self.run_case(29)
 
     def test_removed_preflight_allows_partial_mapping_publication(self):
         cp=subprocess.run([str(self.mutant_binary),"28"],capture_output=True,
