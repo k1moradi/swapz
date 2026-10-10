@@ -63,7 +63,7 @@ def gc_contract(source: str) -> None:
     if not (cleaned.index("swapz_read_block") <
             cleaned.index("for (record_index = 0; record_index < record_count") <
             cleaned.index("swapz_decode_loaded_mapping") <
-            cleaned.index("swapz_store_page")):
+            cleaned.index("error = swapz_store_page(")):
         raise AssertionError("GC source decode/store order changed")
     if "context->io_buffer" in cleaned:
         raise AssertionError("GC must not reload or decode a source from compaction scratch")
