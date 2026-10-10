@@ -5,6 +5,8 @@ on:
     paths:
       - 'tests/runtime/streaming-benchmark-read-latency.py'
       - 'tests/runtime/streaming-benchmark-writer-verify.py'
+      - 'tests/runtime/v22-fast-screen.py'
+      - 'tests/runtime/v22-fast-screen-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-fio-cli-test.py'
       - '.github/workflows/rootless-fio-clat.yml'
@@ -23,6 +25,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fio
+      - name: Rootless fast three-policy benchmark plan and artifact gate
+        run: |
+          timeout 20s python3 -B tests/runtime/v22-fast-screen-test.py -v
+          timeout 5s python3 -B tests/runtime/v22-fast-screen.py --plan fast
+          timeout 5s python3 -B tests/runtime/v22-fast-screen.py --plan full
       - name: Real fio reader CLAT log and V3 conversion on ordinary file
         run: |
           # No root, /dev, null_blk, Device Mapper, NBD, loop, or swap.
