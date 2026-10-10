@@ -1540,3 +1540,18 @@ See `docs/v22-published-mapping-read-bounds-audit.md` and
 - [ ] Benchmark finalization scan overhead before any V2.2 batch or policy decision; winner remains **UNDETERMINED**.
 
 See `docs/v22-inflight-finalize-preflight-audit.md`.
+
+### 2026-10-10 — Independent upper-BIO ownership ledger (PR #8)
+
+- [x] Audit all upper BIO ownership handoffs: queue to pack to fill/in-flight, early staged completion, compaction/repacking, watchdog, failed finalization and late dm-io completion.
+- [x] Reproduce malformed-count stranded upper-BIO failure with a real-production-C completion harness and a deliberately old count-dependent executable mutant.
+- [x] Reuse existing `dm_per_bio_data` intrusive nodes as per-stream independent owner lists; register at staging and unlink before `bio_endio()` (zero hot-path allocations).
+- [x] Validate that finalization's resident BIO pointer count matches the independently registered owners **before** any mapping publication; reject pointer-loss mismatch and drain the ledger through bounded failure completion.
+- [x] Restrict failed-target staged reads to already-acknowledged records, preventing failed unacknowledged upper writes from overriding the earlier mapping.
+- [x] Merge [PR #8](https://github.com/k1moradi/swapz/pull/8) as `80ea94452e0cdeeb9d83934dbc3e56009ac408b5`. On that exact merge SHA: rootless kernel (38056177917), combined (38056177901), teardown (38056177898), NBD source safety (38056177903) all **PASS**. Exact C suite: owner 7/7, async-reap 28/28, staged read 8/8.
+- [ ] Obtain a new independent native Linux `W=1` module compilation and rootless verification report from Codex for the current executable SHA. Codex's last provided native report qualified earlier `4704995c` only.
+- [ ] Evaluate pointer identity / duplicate-pointer corruption separately. The current cross-check detects count and missing-pointer failures but does not guarantee recovery from arbitrary descriptor pointer swaps or corrupted per-BIO list nodes.
+- [ ] No privileged or real module/DM/loop/NBD/swap/physical-device/pressure/fault qualification without separate explicit authorization.
+- [ ] Measure ledger/census overhead, GC amplification, and stream strategy/batch performance before choosing a V2.2 winner: **UNDETERMINED**.
+
+See `docs/v22-independent-upper-bio-ownership-audit.md`.
