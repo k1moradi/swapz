@@ -1,0 +1,169 @@
+name: Rootless authenticated GNU dd worker qualification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rootless-gnu-dd-worker.yml'
+      - 'tests/runtime/gnu-coreutils-qualification.py'
+      - 'tests/runtime/gnu-coreutils-qualification-test.py'
+      - 'tests/runtime/recall-gnu-dd-seccomp-qualification.py'
+      - 'tests/runtime/recall-gnu-dd-seccomp-qualification-test.py'
+      - 'tests/runtime/recall-dd-allowlist.py'
+      - 'tests/runtime/test-child-supervisor.py'
+      - 'tests/runtime/test-child-supervisor-service.py'
+      - 'tests/runtime/recall-fixture-owner.py'
+      - 'docs/gnu-coreutils-qualification.md'
+      - 'docs/recall-dd-allowlist.md'
+  pull_request:
+    paths:
+      - '.github/workflows/rootless-gnu-dd-worker.yml'
+      - 'tests/runtime/gnu-coreutils-qualification.py'
+      - 'tests/runtime/gnu-coreutils-qualification-test.py'
+      - 'tests/runtime/recall-gnu-dd-seccomp-qualification.py'
+      - 'tests/runtime/recall-gnu-dd-seccomp-qualification-test.py'
+      - 'tests/runtime/recall-dd-allowlist.py'
+      - 'tests/runtime/test-child-supervisor.py'
+      - 'tests/runtime/test-child-supervisor-service.py'
+      - 'tests/runtime/recall-fixture-owner.py'
+      - 'docs/gnu-coreutils-qualification.md'
+      - 'docs/recall-dd-allowlist.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authenticated-static-gnu-worker:
+    runs-on: ubuntu-latest
+    # Each of two static coreutils builds has bounded configure/build phases.
+    # Keep the overall job finite while leaving room for slow hosted runners.
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rootless build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            gcc make libc6-dev xz-utils gnupg openssl curl python3
+
+      - name: Create private qualification workspace and fetch official GNU inputs
+        id: workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/swapz-gnu-dd-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          install -d -m 0700 "$work"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.xz \
+            --output "$work/coreutils-9.11.tar.xz"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            https://ftp.gnu.org/gnu/coreutils/coreutils-9.11.tar.xz.sig \
+            --output "$work/coreutils-9.11.tar.xz.sig"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 \
+            https://ftp.gnu.org/gnu/gnu-keyring.gpg \
+            --output "$work/gnu-keyring.gpg"
+          echo "path=$work" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate the exact GNU 9.11 source archive
+        shell: bash
+        env:
+          QUAL_DIR: ${{ steps.workspace.outputs.path }}
+        run: |
+          set -euo pipefail
+          timeout 30s python3 -B tests/runtime/gnu-coreutils-qualification.py verify-source \
+            --archive "$QUAL_DIR/coreutils-9.11.tar.xz" \
+            --signature "$QUAL_DIR/coreutils-9.11.tar.xz.sig" \
+            --keyring "$QUAL_DIR/gnu-keyring.gpg" \
+            --version 9.11 \
+            --record "$QUAL_DIR/source-record.json"
+
+      - name: Build and compare two static GNU coreutils outputs
+        shell: bash
+        env:
+          QUAL_DIR: ${{ steps.workspace.outputs.path }}
+        run: |
+          set -euo pipefail
+          python3 -B tests/runtime/gnu-coreutils-qualification.py build-static \
+            --archive "$QUAL_DIR/coreutils-9.11.tar.xz" \
+            --signature "$QUAL_DIR/coreutils-9.11.tar.xz.sig" \
+            --keyring "$QUAL_DIR/gnu-keyring.gpg" \
+            --version 9.11 \
+            --output-dir "$QUAL_DIR/build" \
+            > "$QUAL_DIR/build-command-record.json"
+
+      - name: Run genuine GNU dd through the pinned recall worker boundary
+        shell: bash
+        env:
+          QUAL_DIR: ${{ steps.workspace.outputs.path }}
+        run: |
+          set -euo pipefail
+          timeout 180s python3 -B tests/runtime/recall-gnu-dd-seccomp-qualification.py \
+            --archive "$QUAL_DIR/coreutils-9.11.tar.xz" \
+            --signature "$QUAL_DIR/coreutils-9.11.tar.xz.sig" \
+            --gnu-keyring "$QUAL_DIR/gnu-keyring.gpg" \
+            --binary "$QUAL_DIR/build/copy-1/source/coreutils-9.11/src/dd" \
+            --build-record "$QUAL_DIR/build/qualification-record.json" \
+            --record "$QUAL_DIR/worker-execution-record.json" \
+            -v
+
+      - name: Validate qualification records and exact five-role result
+        shell: bash
+        env:
+          QUAL_DIR: ${{ steps.workspace.outputs.path }}
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["QUAL_DIR"])
+          build = json.loads((root / "build/qualification-record.json").read_text())
+          execution = json.loads((root / "worker-execution-record.json").read_text())
+          assert build["source"]["release"] == "9.11"
+          assert build["source"]["archive_sha256"] == \
+              "394024eda0a5955217ceda9cd1201e65dc8fa3aa29c2951135a49521d57c3cc3"
+          assert build["source"]["release_signer_fingerprint"] == \
+              "6C37DC12121A5006BC1DB804DF6FD971306037D9"
+          assert len(build["binary"]["sha256"]) == 64
+          assert all(ch in "0123456789abcdef" for ch in build["binary"]["sha256"])
+          assert build["binary"]["elf"]["static"] is True
+          assert build["binary"]["elf"]["machine"] == "x86_64"
+          assert build["rebuild_comparison"]["build_count"] == 2
+          assert build["rebuild_comparison"]["same_host_byte_identical"] is True
+          assert build["rebuild_comparison"]["independent_builder_reproduction"] == "not performed"
+          assert build["production_manifest_or_key_installed"] is False
+          assert execution["roles"] == ["writer", "a", "b", "a2", "b2"]
+          assert execution["service_client_broker_lifecycle"].startswith("PASS: actual SupervisorControlService")
+          assert execution["binary"]["sha256"] == build["binary"]["sha256"]
+          assert execution["production_manifest_or_key_installed"] is False
+          assert execution["mapper"].startswith("temporary ordinary regular file only")
+          print("AUTHENTIC_GNU_DD_WORKER_QUALIFICATION: PASS")
+          print(f"GNU_COREUTILS_RELEASE=9.11")
+          print(f"GNU_DD_SHA256={execution['binary']['sha256']}")
+          print("INDEPENDENT_BUILDER=NOT PERFORMED")
+          print("PRODUCTION_TRUST_INSTALLED=NO")
+          print("REAL_MAPPER_IO=NOT PERFORMED")
+          PY
+
+      - name: Upload source, build and worker qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnu-dd-worker-qualification-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 30
+          path: |
+            ${{ steps.workspace.outputs.path }}/source-record.json
+            ${{ steps.workspace.outputs.path }}/build/qualification-record.json
+            ${{ steps.workspace.outputs.path }}/worker-execution-record.json
+            ${{ steps.workspace.outputs.path }}/build/copy-1/source/coreutils-9.11/src/dd
+            ${{ steps.workspace.outputs.path }}/build/copy-2/source/coreutils-9.11/src/dd
+            ${{ steps.workspace.outputs.path }}/build/copy-1/build/configure.log
+            ${{ steps.workspace.outputs.path }}/build/copy-1/build/build.log
+            ${{ steps.workspace.outputs.path }}/build/copy-2/build/configure.log
+            ${{ steps.workspace.outputs.path }}/build/copy-2/build/build.log

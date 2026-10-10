@@ -6,8 +6,12 @@ GNU coreutils 9.11 source authentication and two byte-identical same-host
 static builds were verified on the qualification host. The actual resulting
 GNU `dd` executable ran the five fixed recall roles through the existing sealed-executable launch
 gate, pidfd supervisor, strict descriptor allowlist, parent-death setup, and
-seccomp filter against temporary ordinary files. A separate test interrupted
-and reaped a long copy through the retained pidfd.
+seccomp filter against temporary ordinary files. The same GNU executable also
+ran through an actual rootless `SupervisorControlService` / client session and
+`SupervisorServiceWorkerLauncher`: the test checked the protocol READY receipts,
+the complete service lifecycle snapshot, all five role results, jointly gated
+`a2`/`b2` release, direct-child reaping, and service exit. A separate test
+interrupted and reaped a long copy through the retained pidfd.
 
 This is a source/build and rootless worker qualification, not production
 artifact approval. The two clean builds in the qualification tool are a
@@ -127,6 +131,16 @@ security boundary for these regular-file operations. It does not prove that a
 different architecture, kernel, seccomp policy, memfd policy, or OpenSSL
 installation will behave the same way.
 
+The dedicated bounded source workflow is
+[`rootless-gnu-dd-worker.yml`](../.github/workflows/rootless-gnu-dd-worker.yml).
+It authenticates the pinned GNU 9.11 archive, performs two static builds,
+executes the actual worker qualification under a timeout, checks that the
+execution record names the exact tested binary and five roles, and uploads the
+source/build/execution records. A failed download, signature check, build,
+worker test, or record assertion fails the job; the workflow has no skip or
+continue-on-error path. CI uses its ephemeral worker-test key only for the
+bootstrap API test and does not provision production trust material.
+
 ## Administrator-controlled production bootstrap
 
 The runtime continues to require a separate root-controlled Ed25519
@@ -181,7 +195,11 @@ Keep these results distinct:
    outstanding.
 3. **Worker security boundary:** the exact local static GNU `dd` ran the five
    fixed roles and cancellation case through the actual rootless gate,
-   supervisor and seccomp filter on this host.
+   supervisor and seccomp filter on this host. It also ran all five roles
+   through the actual service/client/worker-launcher protocol and completed a
+   verified service stop and exit. These are trusted-process model assertions,
+   not independently authenticated production attestations or kernel I/O
+   drain evidence.
 4. **Real mapper lifecycle:** not run. Production admission remains disabled
    until trusted fixture ownership can exclude privileged table mutation and
    the independent kernel-side I/O-drain barrier has been implemented and

@@ -250,6 +250,27 @@ class GNUQualificationTests(unittest.TestCase):
             with self.assertRaisesRegex(qualification.QualificationError, "file capabilities"):
                 qualification._tool_identity(str(tool))
 
+    def test_real_gnu_worker_workflow_authenticates_build_and_does_not_skip(self) -> None:
+        workflow = (HERE.parent.parent / ".github/workflows/rootless-gnu-dd-worker.yml").read_text()
+        for required in (
+            "workflow_dispatch:",
+            "timeout-minutes: 110",
+            "gnu-coreutils-qualification.py verify-source",
+            "gnu-coreutils-qualification.py build-static",
+            "recall-gnu-dd-seccomp-qualification.py",
+            "SupervisorControlService",
+            "service_client_broker_lifecycle",
+            "timeout 180s",
+            "production_manifest_or_key_installed",
+            "independent_builder_reproduction",
+            "actions/upload-artifact@v4",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, workflow)
+        self.assertNotIn("continue-on-error:", workflow)
+        self.assertNotIn("if: false", workflow)
+        self.assertNotIn("GNU_POLICY_UNIT_TESTS_ONLY", workflow)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

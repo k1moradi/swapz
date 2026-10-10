@@ -19,6 +19,7 @@ from pathlib import PurePosixPath
 import platform
 import re
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -44,6 +45,8 @@ def load_module(name: str, filename: str):
 policy = load_module("recall_gnu_dd_qualification_policy", "recall-dd-allowlist.py")
 supervisor_module = load_module("recall_gnu_dd_qualification_supervisor", "test-child-supervisor.py")
 provenance = load_module("recall_gnu_dd_qualification_provenance", "gnu-coreutils-qualification.py")
+service_module = load_module("recall_gnu_dd_qualification_service", "test-child-supervisor-service.py")
+owner_module = load_module("recall_gnu_dd_qualification_owner", "recall-fixture-owner.py")
 
 
 class _RootOwnedBootstrapOps(policy.RecallDDFileOps):
@@ -242,6 +245,176 @@ class AuthenticatedGNUWorkerQualification(unittest.TestCase):
             self.assertEqual(len(output), 4096)
             self.assertEqual(output, self.page_data[page * 4096:(page + 1) * 4096])
         self.assertEqual(self.gate.roles_issued, ("writer", "a", "b", "a2", "b2"))
+
+    def test_real_gnu_dd_lifecycle_reaches_broker_adapter_from_same_service(self) -> None:
+        """Bind genuine GNU role work to the actual service/client receipt chain.
+
+        The mapper is a private regular file, and the application signing key
+        is the disposable test key created by setUpClass. No production trust
+        material or mapper operation is involved.
+        """
+        session_id = os.urandom(16).hex()
+        mapper_name = "swapz-v22-recall-gnu-service"
+        mapper_fd = os.open(self.mapper_path, os.O_RDWR | os.O_CLOEXEC)
+        parent_sock, child_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        bootstrap = r'''
+import importlib.util, os, socket, stat, sys
+from pathlib import Path
+from types import SimpleNamespace
+runtime, fixture, mapper_name, mapper_fd_text, socket_fd_text, session, bootstrap_root, public_key_path, dd_path = sys.argv[1:]
+sys.path.insert(0, runtime)
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, Path(runtime) / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+service_module = load("gnu_worker_service_process", "test-child-supervisor-service.py")
+policy = service_module._ALLOWLIST_MODULE
+OriginalFileOps = policy.RecallDDFileOps
+class RootMetadataOps(policy.RecallDDFileOps):
+    def __init__(self):
+        self.directory_fds = set()
+        self.trust_fds = set()
+    def open(self, path, flags, mode=0o777, *, dir_fd=None):
+        fd = super().open(path, flags, mode, dir_fd=dir_fd)
+        if flags & os.O_DIRECTORY:
+            self.directory_fds.add(fd)
+        elif dir_fd in self.directory_fds:
+            self.trust_fds.add(fd)
+        return fd
+    def fstat(self, fd):
+        info = super().fstat(fd)
+        if fd in self.directory_fds:
+            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=0,
+                st_nlink=info.st_nlink, st_dev=info.st_dev, st_ino=info.st_ino,
+                st_size=info.st_size, st_mtime_ns=info.st_mtime_ns,
+                st_ctime_ns=info.st_ctime_ns)
+        if fd in self.trust_fds:
+            return SimpleNamespace(st_mode=info.st_mode, st_uid=0,
+                st_nlink=info.st_nlink, st_dev=info.st_dev, st_ino=info.st_ino,
+                st_size=info.st_size, st_mtime_ns=info.st_mtime_ns,
+                st_ctime_ns=info.st_ctime_ns)
+        return info
+    def close(self, fd):
+        self.directory_fds.discard(fd)
+        self.trust_fds.discard(fd)
+        return super().close(fd)
+policy._TRUSTED_DD_BOOTSTRAP_DIR = Path(bootstrap_root)
+policy._TRUSTED_DD_PUBLIC_KEY_PATH = Path(public_key_path)
+policy.RecallDDFileOps = RootMetadataOps
+trusted = policy.TrustedGNUCoreutilsDD.from_trusted_bootstrap()
+policy.RecallDDFileOps = OriginalFileOps
+mapper_fd = int(mapper_fd_text)
+os.set_inheritable(mapper_fd, False)
+def verify_mapper(fd, name, ops):
+    info = ops.fstat(fd)
+    return name == mapper_name and stat.S_ISREG(info.st_mode) and info.st_size == 9 * 4096
+gate = policy.RecallDDLaunchGate(
+    Path(fixture), mapper_name, mapper_fd=mapper_fd,
+    executable_path=Path(dd_path), trusted_executable=trusted,
+    mapper_verifier=verify_mapper,
+)
+control = socket.socket(fileno=int(socket_fd_text))
+outcome = service_module.SupervisorControlService(
+    io_timeout=8.0, recall_dd_gate=gate, enable_direct_dd=True,
+    session_id=session,
+).serve(control)
+control.close()
+raise SystemExit(outcome.exit_code)
+'''
+        process = None
+        client = None
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-c", bootstrap, str(HERE), str(self.fixture),
+                 mapper_name, str(mapper_fd), str(child_sock.fileno()), session_id,
+                 str(self.bootstrap_root), str(self.public_key_path), str(self.dd_binary)],
+                pass_fds=(mapper_fd, child_sock.fileno()), close_fds=True,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            )
+            child_sock.close()
+            client = service_module.SupervisorControlClient(
+                parent_sock, service_process=process, timeout=20.0,
+            )
+            launcher = owner_module.SupervisorServiceWorkerLauncher(client, session_id)
+            handles: list[str] = []
+
+            def release_and_wait(roles: tuple[str, ...]) -> None:
+                group_handles = tuple(
+                    launcher.launch(role, session_id=session_id, startup_timeout=3.0).handle
+                    for role in roles
+                )
+                handles.extend(group_handles)
+                launcher.release_group(group_handles)
+                for handle in group_handles:
+                    response = launcher.wait(handle, 10.0)
+                    self.assertEqual(response["status"], "reaped", response)
+                    self.assertEqual(response["worker"]["exit_code"], 0, response)
+
+            release_and_wait(("writer",))
+            self.assertEqual(self.mapper_path.read_bytes(), self.page_data)
+            release_and_wait(("a",))
+            release_and_wait(("b",))
+            # Both READY workers exist before the one fixed A2/B2 release call.
+            release_and_wait(("a2", "b2"))
+
+            for role, page in (("a", 0), ("b", 4), ("a2", 0), ("b2", 5)):
+                output = (self.fixture / f"read-{role}").read_bytes()
+                self.assertEqual(len(output), 4096)
+                self.assertEqual(output, self.page_data[page * 4096:(page + 1) * 4096])
+
+            receipts = launcher.registered_launch_receipts(tuple(handles))
+            self.assertEqual(tuple(receipt.role for receipt in receipts),
+                             ("writer", "a", "b", "a2", "b2"))
+            self.assertTrue(all(
+                receipt.ready and receipt.pidfd_owned and receipt.gate_held
+                and receipt.containment_profile == "seccomp-no-fork-pdeathsig-v1"
+                for receipt in receipts
+            ))
+            stopped = launcher.stop_all(tuple(handles))
+            self.assertTrue(stopped.all_reaped, stopped.errors)
+            self.assertFalse(stopped.errors)
+            self.assertTrue(client.cleanup_authorized)
+            observation = launcher.containment_observation(session_id, tuple(handles))
+            self.assertTrue(observation.inventory_complete)
+            self.assertEqual(observation.expected_handles, tuple(handles))
+            self.assertEqual(observation.service_exit_status, 0)
+            self.assertEqual(tuple(row.role for row in observation.workers),
+                             ("writer", "a", "b", "a2", "b2"))
+            self.assertEqual(tuple(row.handle for row in observation.workers), tuple(handles))
+            self.assertEqual(len({row.domain_id for row in observation.workers}), 5)
+            self.assertTrue(all(
+                row.direct_child_reaped and row.exit_code == 0
+                and row.filter_installed_before_exec and row.process_creation_denied
+                and row.parent_death_bound and row.scope == "seccomp-no-fork-pdeathsig-v1"
+                and not row.live_descendant_handles and not row.errors
+                for row in observation.workers
+            ))
+            self.assertEqual(process.wait(timeout=1.0), 0)
+        finally:
+            if process is not None and process.poll() is None:
+                try:
+                    parent_sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                try:
+                    process.wait(timeout=8.0)
+                except subprocess.TimeoutExpired:
+                    # This is the exact service process created above. Its
+                    # parent-death handling stops any still-gated worker.
+                    process.kill()
+                    process.wait(timeout=2.0)
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+            else:
+                parent_sock.close()
+            if child_sock.fileno() >= 0:
+                child_sock.close()
+            os.close(mapper_fd)
 
     def test_gnu_worker_descriptor_isolation_and_pidfd_cancellation(self) -> None:
         worker_fd = self.gate._executable_fd
@@ -673,6 +846,11 @@ def _main() -> int:
                 "build_record_sha256": hashlib.sha256(build_bytes).hexdigest(),
                 "binary": binary,
                 "execution": "actual authenticated GNU static dd ran through RecallDDLaunchGate, sealed memfd, strict pass_fds, pidfd supervisor, parent-death containment, and existing seccomp filter",
+                "service_client_broker_lifecycle": (
+                    "PASS: actual SupervisorControlService and SupervisorControlClient protocol-v2 "
+                    "with SupervisorServiceWorkerLauncher; five fixed roles, joint a2/b2 release, "
+                    "complete lifecycle snapshot, stop/reap, and service exit verified"
+                ),
                 "roles": ["writer", "a", "b", "a2", "b2"],
                 "mapper": "temporary ordinary regular file only; synthetic verifier; no DM device",
                 "cancellation": "actual short-lived dd copy cancelled and reaped via retained pidfd",
