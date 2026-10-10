@@ -185,7 +185,7 @@ class StreamingReportingTests(unittest.TestCase):
              "read": {"total_ios": 200,
                       "clat_ns": {"mean": 1_000_000, "max": 3_000_000,
                                   "percentile": {"95.000000": 2_000_000,
-                                                 "99.000000": 2_500_000}}},
+                                                 "99.000000": 2_900_000}}},
              "usr_cpu": 1, "sys_cpu": 2},
         ]}), encoding="utf-8")
         cmd = [
@@ -203,9 +203,50 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertNotIn("drained_write_mib_s", parsed)
         self.assertEqual(parsed["lower_write_sectors"], 4096)
         self.assertEqual(parsed["read_count"], 200)
+        # The diagnostic displayed p99 must come from the exact CLAT sidecar,
+        # not fio's independently bucketed/rounded percentile summary.
+        self.assertEqual(parsed["read_p99_ms"], 2.5)
+        self.assertEqual(parsed["fio_summary_read_p99_ms"], 2.9)
         self.assertAlmostEqual(parsed["logical_flush_window_mib_s"], 8)
         self.assertAlmostEqual(parsed["lower_counter_window_mib_s"], 1)
         self.assertIn("NO QUALIFIED WINNER", reporter.report(reporter.read_rows(self.write([parsed]))))
+
+    def test_runner_stops_drain_clock_before_clat_parsing(self):
+        fio_run = self.script.index('fio "$fiofile" --output-format=json --output="$json"')
+        drain = self.script.index('flush_device "$path"', fio_run)
+        stop_clock = self.script.index('end_ns=$(python3 -c', drain)
+        after_counters = self.script.index('after=$(read_stat)', stop_clock)
+        convert = self.script.index('latency_summary=$(python3 -B', fio_run)
+        self.assertLess(fio_run, drain)
+        self.assertLess(drain, stop_clock)
+        self.assertLess(stop_clock, after_counters)
+        self.assertLess(after_counters, convert)
+
+    def test_reader_iops_target_validated_before_device_setup(self):
+        validation = self.script.index('SWAPZ_BENCH_READ_IOPS must be an integer')
+        planner = self.script.index('BATCHES=$(python3 -B')
+        allocation = self.script.index('TMP=$(mktemp')
+        self.assertLess(validation, planner)
+        self.assertLess(planner, allocation)
+        self.assertIn('rate_iops=$READ_IOPS', self.script)
+        self.assertIn('log_entries=32768', self.script)
+
+    def test_embedded_collector_rejects_exact_latency_count_mismatch(self):
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\\'PY\\'\\n'
+        embedded = self.script.split(marker, 1)[1].split("\\nPY\\n", 1)[0]
+        fio = self.directory / "fio-mismatch.json"
+        fio.write_text(json.dumps({"jobs":[
+            {"jobname":"writer","job options":{"iodepth":"1"},
+             "write":{"io_bytes":MIB,"bw_bytes":MIB}},
+            {"jobname":"reader","read":{"total_ios":20}}
+        ]}), encoding="utf-8")
+        args = [sys.executable, "-c", embedded, str(fio),
+                "10 1000 20 2000", "12 1016 30 6096", "failed=0",
+                "staged", "128", "1000000000", "3000000000", "backend",
+                json.dumps({"read_count": 19, "read_p99_ns": 2000000})]
+        result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mismatched exact reader latency", result.stderr)
 
     def test_embedded_collector_rejects_counter_regression(self):
         source = self.script
