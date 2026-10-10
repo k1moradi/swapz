@@ -79,6 +79,7 @@ on:
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
       - 'tests/runtime/swapz-compaction-container-contract-test.py'
+      - 'tests/runtime/swapz-staged-read-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -356,6 +357,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/swapz-compaction-container-contract-test.py
           timeout 25s python3 -B tests/runtime/swapz-compaction-container-contract-test.py -v
+      - name: Compiled staged-read metadata and mapping decoder contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-staged-read-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-staged-read-contract-test.py -v
       - name: Compiled preflush and FUA ordering and batch-flag contract
         shell: bash
         run: |
