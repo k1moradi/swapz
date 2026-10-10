@@ -3904,3 +3904,43 @@ The subsequent documentation-only update changes no executable kernel, workflow,
 or test source; do not attribute the earlier runs to a later documentation SHA.
 All qualification remains rootless/source-scoped. No device or privileged I/O
 or independent kernel I/O-drain evidence was obtained in this task.
+
+## October 10, 2026 — Staged-read metadata correction and integration
+
+The main developer independently reviewed the overlap-validation commit
+`9a4e16824fc5457028005c13d60c6b56d72077bc`.
+Codex separately reported four rootless suites and a native `W=1` module
+build PASS on Ubuntu 26.04.1 / kernel 7.0.0-38-generic / GCC 15.2 with
+matching headers at this older SHA, without loading the module. Exact
+toolchain/BTF warnings have not yet been provided and are not silently
+classified as harmless. This native evidence must not be attributed to
+later kernel source revisions.
+
+The subsequent main-developer
+[PR #4](https://github.com/k1moradi/swapz/pull/4)
+fixed staged and committed read metadata admission, introduced the
+seven-test exact-production-C staged-read and mapping decoder
+contract with old-acceptance mutants, and reduced compressed container
+extent validation from pairwise O(n²) comparison to a canonical O(n)
+descending-order check. No format/API changes or new allocations.
+
+[Merge commit `9ef86baa3c981efe28e0a64db8d9f203c11bdd10`](https://github.com/k1moradi/swapz/commit/9ef86baa3c981efe28e0a64db8d9f203c11bdd10)
+passed all mandatory rootless workflows on the identical SHA:
+
+- [Kernel source 38046079346](https://github.com/k1moradi/swapz/actions/runs/38046079346): **PASS**.
+- [Combined 38046079305](https://github.com/k1moradi/swapz/actions/runs/38046079305): **PASS**.
+- [Teardown 38046079319](https://github.com/k1moradi/swapz/actions/runs/38046079319): **PASS**.
+- [NBD source safety 38046079218](https://github.com/k1moradi/swapz/actions/runs/38046079218): **PASS**.
+
+The executable kernel/source-test PR head
+`3b25b1fc76394d03d4b683af2905dc07a1557458`
+also passed the same four workflows before merging.
+
+The rootless suites compile selected real C routines with stand-ins,
+not a loaded kernel module or real physical storage; real LZ4/kernel
+swap, privileged containment, independent I/O-drain evidence,
+durability, host pressure and on-device performance are **not**
+qualified by this work. The V2.2 strategy/batch winner remains
+**UNDETERMINED**.
+
+See `docs/v22-staged-read-metadata-audit.md`.
