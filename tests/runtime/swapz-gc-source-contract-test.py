@@ -102,6 +102,7 @@ typedef uint8_t u8;
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_MAX_PACKED_RECORDS 64
+#define SWAPZ_MAP_VALID 1
 #define SWAPZ_MAP_COMPRESSED 2
 #define SWAPZ_CONTAINER_BASE_BYTES ((unsigned int)sizeof(struct swapz_container_disk))
 #define le32_to_cpu(x) (x)
@@ -161,9 +162,9 @@ static void prepare(unsigned char *memory) {
 int main(int argc, char **argv) {
     unsigned char gc_source[4096], shared_io[4096], decoded[4096];
     struct swapz_mapping first = {.stored_length=4, .record_index=0,
-                                   .flags=SWAPZ_MAP_COMPRESSED};
+                                   .flags=SWAPZ_MAP_VALID | SWAPZ_MAP_COMPRESSED};
     struct swapz_mapping second = {.stored_length=4, .record_index=1,
-                                    .flags=SWAPZ_MAP_COMPRESSED};
+                                    .flags=SWAPZ_MAP_VALID | SWAPZ_MAP_COMPRESSED};
     u32 generation = 8;
     struct swapz_context state = {.generations=&generation};
     struct swapz_write_batch_record pending = {.logical_page=0, .generation=8};
@@ -187,7 +188,7 @@ int main(int argc, char **argv) {
         if (error != -EIO) return 14;
         puts("OLD_SHARED_SCRATCH_FAILED");
     } else if (!strcmp(argv[1], "raw")) {
-        struct swapz_mapping raw = {.stored_length=4096, .flags=0};
+        struct swapz_mapping raw = {.stored_length=4096, .flags=SWAPZ_MAP_VALID};
         memset(shared_io, 0xff, 4096);
         error = swapz_decode_loaded_mapping(0, &raw, gc_source, decoded);
         if (error || decoded[100] != 'A') return 15;
