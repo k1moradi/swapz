@@ -3944,3 +3944,57 @@ qualified by this work. The V2.2 strategy/batch winner remains
 **UNDETERMINED**.
 
 See `docs/v22-staged-read-metadata-audit.md`.
+
+## October 10, 2026 — Independent lower-device read/write range audits
+
+Main-developer work was separate from Codex's native-Linux
+execution and preserved both protected local `.state` files.
+Both identified failure classes concern fault-injected/inconsistent
+in-memory metadata; no normal-workload trigger or deployed device
+incident was demonstrated.
+
+**Published mapping read admission**:
+[PR #5](https://github.com/k1moradi/swapz/pull/5) checks the
+published physical block against `context->physical_blocks`
+before initiating lower reads. Its exact-source userspace C test
+uses a deterministic in-memory read stub and a deliberately
+broken version proving the prior out-of-bounds lower request.
+Merge commit
+[`03e6e6459fed5317918d1314f3ccf0bdab47564a`](https://github.com/k1moradi/swapz/commit/03e6e6459fed5317918d1314f3ccf0bdab47564a)
+passed:
+
+- [Kernel source 38046890497](https://github.com/k1moradi/swapz/actions/runs/38046890497): **PASS**
+- [Combined source 38046890454](https://github.com/k1moradi/swapz/actions/runs/38046890454): **PASS**
+- [Teardown safety 38046890382](https://github.com/k1moradi/swapz/actions/runs/38046890382): **PASS**
+- [NBD source safety 38046890405](https://github.com/k1moradi/swapz/actions/runs/38046890405): **PASS**
+
+**Lower stream write submission**:
+[PR #6](https://github.com/k1moradi/swapz/pull/6) checks the
+physical start and count and batch allocation size before
+submitting dm-io or changing asynchronous callback ownership.
+Its exact-source C harness models synchronous rejection and
+valid submissions, and demonstrates illegal regions entering
+the mocked dm-io after removing the guard. Four Python
+test methods pass. Merge commit
+[`49b062a0180990a03b0b81fd40c1c3e41c2f620f`](https://github.com/k1moradi/swapz/commit/49b062a0180990a03b0b81fd40c1c3e41c2f620f)
+passed:
+
+- [Kernel source 38047254236](https://github.com/k1moradi/swapz/actions/runs/38047254236): **PASS**
+- [Combined source 38047254217](https://github.com/k1moradi/swapz/actions/runs/38047254217): **PASS**
+- [Teardown safety 38047254245](https://github.com/k1moradi/swapz/actions/runs/38047254245): **PASS**
+- [NBD source safety 38047254206](https://github.com/k1moradi/swapz/actions/runs/38047254206): **PASS**
+
+Both suites compile selected real kernel C routines with userspace
+stand-ins, `-std=c11 -O2 -Wall -Wextra -Werror`, and do not call
+real dm-io, load kernel modules, create devices or issue privileged
+operations. These gates **do not** establish real kernel/data-device
+correctness, power-loss persistence, full LZ4 runtime, FUA/GC fault
+containment, physical-media safety, privileged teardown, or
+performance gains. Codex's independent native Linux compilation
+was reported at earlier `9a4e168` only; it must not be attributed
+to either new merge commit.
+
+V2.2 strategy and batch winner remain **UNDETERMINED**.
+
+See `docs/v22-published-mapping-read-bounds-audit.md` and
+`docs/v22-stream-submit-bounds-audit.md`.
