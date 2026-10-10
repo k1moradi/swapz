@@ -180,7 +180,10 @@ class ThreeCaseScreenTests(unittest.TestCase):
         self.save()
         raw = self.root / self.rows[1]["exact_read_latency"]["read_latency_sidecar"]
         raw.write_bytes(raw.read_bytes()[:-1] + b"!")
-        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+        # A one-bin histogram cannot be changed without altering its count or
+        # p99, so exact-distribution validation may catch tampering first.
+        with self.assertRaisesRegex(ValueError,
+                                    "exact count or nearest-rank p99 mismatch|SHA-256 mismatch"):
             mod.check_results(self.path)
 
     def test_symlink_missing_traversal_and_duplicate_sidecars_fail(self):
