@@ -1,0 +1,27 @@
+name: Rootless real fio CLAT compatibility
+
+on:
+  pull_request:
+    paths:
+      - 'tests/runtime/streaming-benchmark-read-latency.py'
+      - 'tests/runtime/streaming-benchmark-fio-cli-test.py'
+      - '.github/workflows/rootless-fio-clat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ordinary-file-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install userland fio on isolated hosted runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fio
+      - name: Real fio reader CLAT log and V3 conversion on ordinary file
+        run: |
+          # No root, /dev, null_blk, Device Mapper, NBD, loop, or swap.
+          timeout 45s python3 -B tests/runtime/streaming-benchmark-fio-cli-test.py -v
