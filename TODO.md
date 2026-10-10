@@ -1384,3 +1384,29 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       boundary completion races, never-completing lower requests,
       true LZ4 readback, and REQ_FUA/PREFLUSH durability under
       independently authorized disposable infrastructure.
+
+### 2026-10-10 — Source-qualified PREFLUSH and FUA batch ordering
+
+- [x] Audit production upper dispatch, compressed/raw stage, mixed
+      FUA/non-FUA flag aggregation, lower dm-io write flags,
+      flush barriers and async upper BIO completion. No confirmed
+      new correctness defect, so no speculative production change.
+- [x] Add `tests/runtime/swapz-flush-fua-contract-test.py`
+      compiling the real dispatch, flush and stage C functions.
+      9/9 tests cover 20 bounded C scenarios and six negative
+      source mutants, including preflush failure, FUA early-ack
+      exclusion and mixed-batch flag retention.
+- [x] Mandate the bounded gate in kernel-only, combined and
+      teardown CI and add a workflow-contract negative test
+      (now 23/23).
+      All exact executable SHA
+      `83d2e41d7d72e7dbedb3ad5860b0dc4359aac988`:
+      [kernel 38039036487](https://github.com/k1moradi/swapz/actions/runs/38039036487),
+      [combined 38039036567](https://github.com/k1moradi/swapz/actions/runs/38039036567),
+      [teardown 38039036488](https://github.com/k1moradi/swapz/actions/runs/38039036488),
+      [NBD 38039036489](https://github.com/k1moradi/swapz/actions/runs/38039036489);
+      PASS. Combined NBD stress 25/25.
+- [ ] Real kernel dm-io FUA/flush write-fault injection, media
+      persistence and independent device I/O quiescence remain
+      separately authorized work; rootless C flags are not
+      proof of physical durability.

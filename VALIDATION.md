@@ -3743,3 +3743,47 @@ kernel I/O quiescence or backing-release authorization. Never-
 completing callbacks remain a fail-closed teardown/liveness risk,
 not a license to free memory. No physical or privileged action
 was performed. V2.2 strategy/batch winner **UNDETERMINED**.
+
+## 2026-10-10 — Rootless exact-production-C FUA/PREFLUSH contract
+
+**Exact executable source commit:**
+`83d2e41d7d72e7dbedb3ad5860b0dc4359aac988`
+([commit](https://github.com/k1moradi/swapz/commit/83d2e41d7d72e7dbedb3ad5860b0dc4359aac988)).
+
+Reviewed `swapz_process_bio`, `swapz_process_flush`,
+`swapz_stage_write_block`, `swapz_submit_stream_buffer`,
+`swapz_finalize_stream_buffer`, `swapz_reap_inflight` and the
+serialized I/O worker. Found no source-confirmed new kernel
+durability defect. The production kernel file was left unchanged.
+
+New `tests/runtime/swapz-flush-fua-contract-test.py` compiles
+exact C flush/upper dispatch and physical-batch staging,
+with bounded synthetic lower/device/BIO dependencies. There are
+nine Python tests, including 20 executable C scenarios and six
+negative source mutation tests: preflush-before-current-write;
+zero-sector flush exclusion; batch and backing-flush errors;
+mixed FUA and plain compressed payloads; early completion only
+without FUA; raw/non-staged FUA; lower dm-io FUA flag propagation
+pinned to production source.
+
+**CI, one exact SHA:**
+- [Isolated kernel 38039036487](https://github.com/k1moradi/swapz/actions/runs/38039036487):
+  PASS, new 9/9 and prior 22/22 async, 21/21 generation,
+  15/15 GC compression, 17/17 GC source, 30/30 range.
+- [Combined 38039036567](https://github.com/k1moradi/swapz/actions/runs/38039036567):
+  PASS, new FUA gate plus 23/23 workflow-contract tests, NBD
+  stress 25/25.
+- [Teardown 38039036488](https://github.com/k1moradi/swapz/actions/runs/38039036488):
+  PASS with new gate and previous safety suites.
+- [Standalone NBD 38039036489](https://github.com/k1moradi/swapz/actions/runs/38039036489):
+  PASS.
+
+**Limitations:** This is extracted production C in a synthetic,
+rootless harness, not a live module or verified backing-media
+persistence. A staged non-FUA upper success is explicitly RAM-only
+until lower completion; lower FUA and preflush durability still
+requires authorized real-device fault injection. No real swap, DM,
+loop, NBD, module, pressure, physical-device manipulation,
+reboot or cleanup occurred. See
+`docs/v22-flush-fua-durability-audit.md`.
+Strategy/batch winner: **UNDETERMINED**.
