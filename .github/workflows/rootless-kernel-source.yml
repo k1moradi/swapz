@@ -1,0 +1,71 @@
+name: Rootless kernel source contracts
+
+on:
+  push:
+    paths:
+      - 'kernel/dm-swapz.c'
+      - 'tests/runtime/swapz-kernel-range-contract-test.py'
+      - 'tests/runtime/swapz-gc-source-contract-test.py'
+      - 'tests/runtime/swapz-gc-compressed-contract-test.py'
+      - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - '.github/workflows/rootless-kernel-source.yml'
+  pull_request:
+    paths:
+      - 'kernel/dm-swapz.c'
+      - 'tests/runtime/swapz-kernel-range-contract-test.py'
+      - 'tests/runtime/swapz-gc-source-contract-test.py'
+      - 'tests/runtime/swapz-gc-compressed-contract-test.py'
+      - 'tests/runtime/swapz-generation-gc-transaction-test.py'
+      - '.github/workflows/rootless-kernel-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pure-production-c:
+    name: kernel-rootless-c
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bind exact executable revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "KERNEL_SOURCE_TESTED_HEAD=$(git rev-parse HEAD)"
+
+      - name: Compile source-contract Python harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            tests/runtime/swapz-kernel-range-contract-test.py \
+            tests/runtime/swapz-gc-source-contract-test.py \
+            tests/runtime/swapz-gc-compressed-contract-test.py \
+            tests/runtime/swapz-generation-gc-transaction-test.py
+
+      - name: Execute exact production-C range guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-kernel-range-contract-test.py -v
+
+      - name: Execute GC source snapshot contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-gc-source-contract-test.py -v
+
+      - name: Execute GC compression scratch contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-gc-compressed-contract-test.py -v
+
+      - name: Execute foreground generation and nested GC transaction contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-generation-gc-transaction-test.py -v
