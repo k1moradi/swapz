@@ -1036,9 +1036,19 @@ raise SystemExit(outcome.exit_code)
                     worker_launcher=launcher,
                 )
                 self.broker.owner_create()
-                handles = tuple(
+                writer = self._request("service-0", "writer")["handle"]
+                # The rootless fixture starts real pinned dd workers. Wait
+                # until the retained regular-file descriptor contains the
+                # writer's complete deterministic payload before admitting
+                # readers; otherwise their reads can race partial writes.
+                writer_deadline = time.monotonic() + 2.0
+                while os.pread(mapper_fd, len(expected), 0) != expected:
+                    if process.poll() is not None or time.monotonic() >= writer_deadline:
+                        self.fail("pinned writer did not publish the full test payload")
+                    time.sleep(0.002)
+                handles = (writer,) + tuple(
                     self._request(f"service-{index}", role)["handle"]
-                    for index, role in enumerate(("writer", "a", "b", "a2", "b2"))
+                    for index, role in enumerate(("a", "b", "a2", "b2"), start=1)
                 )
                 self.assertTrue(self.broker.finalize())
                 self.assertTrue(client.cleanup_authorized)
