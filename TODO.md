@@ -1249,4 +1249,29 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Independently authenticate collector signing keys, device and
       kernel drain event provenance, and signed binary sidecar bundle
       origin before accepting any real benchmark nomination.
+### 2026-10-09 — Kernel logical-range preflight correction
+
+- [x] Correct the V2.2 discard partial-invalidation hazard: validate
+      the entire sector_t logical range before flushing the pack,
+      advancing a generation or invalidating any mapping. Reject
+      an out-of-range tail atomically at the source-policy level.
+- [x] Avoid narrowing high read/write sector_t page indexes to u32
+      before exact alignment and logical-page bounds validation.
+- [x] Compile and execute the two actual production C range guards
+      as short-lived rootless userspace code with 30 boundary,
+      mutation and source-order contract tests. Keep kernel module
+      and real block-device operations disabled.
+- [x] Run the mandatory guard on kernel/dm-swapz.c changes in both
+      rootless combined and teardown workflows, with negative
+      workflow trigger/execution checks (18 workflow-contract tests).
+      Exact executable commit:
+      `af2b394e90805a7f9647c68cc58659ee83f8ff95`.
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38028920840)
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38028920862).
+- [ ] Independently audit live-GC segment relocation against stale
+      generation publication and asynchronous write failures,
+      with reproducible rootless model/source contracts.
+- [ ] Separately review full kernel build, real DM discard/flush/FUA
+      behavior, GC concurrency, memory-reclaim safety and production
+      qualification only under separately authorized infrastructure.
 

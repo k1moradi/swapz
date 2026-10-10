@@ -57,3 +57,11 @@ mapping publication on asynchronous failures, and flush/FUA semantics.
 Production prerequisites remain independently trusted owner and collector,
 kernel quiescence evidence, and separately authorized disposable
 device tests. V2.2 strategy and batch winner remain UNDETERMINED.
+## Exact source-only CI qualification
+
+Implementation and test syntax correction were exercised together at
+`af2b394e90805a7f9647c68cc58659ee83f8ff95`:
+[combined run 38028920840](https://github.com/k1moradi/swapz/actions/runs/38028920840)
+and [teardown run 38028920862](https://github.com/k1moradi/swapz/actions/runs/38028920862).
+Both gates passed 30 compiled and structural kernel-range tests plus
+18 workflow-contract checks. These are not kernel-runtime tests.

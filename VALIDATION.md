@@ -3517,3 +3517,39 @@ privileged lifecycle owner, physical benchmark or cleanup authority.
 All production flags are false, and the V2.2 strategy/batch winner is
 **UNDETERMINED**. The later documentation-only commit must not be
 represented as having its own separately tested executable SHA.
+## 2026-10-09 — Kernel logical-range preflight and compiled C contract
+
+**Exact executable source:** `af2b394e90805a7f9647c68cc58659ee83f8ff95`
+([commit](https://github.com/k1moradi/swapz/commit/af2b394e90805a7f9647c68cc58659ee83f8ff95)).
+The main developer audited `kernel/dm-swapz.c` and corrected two
+failure modes: an out-of-range multi-page discard could invalidate
+earlier live pages before returning -ERANGE, and a sector_t-derived
+page index was narrowed to u32 before validation in read/write/discard.
+
+Two pure C helpers now check the full-width index and whole discard
+range *before* any staged-pack flush or logical-page mutation.
+The test `tests/runtime/swapz-kernel-range-contract-test.py`
+extracts and compiles **verbatim production helper bodies** into a
+temporary unprivileged userspace C library, verifying limits with
+ctypes. It also checks the source call order and key generation/GC/
+flush guards and demonstrates rejection by two intentional mutants.
+
+**Exact-revision GitHub Actions:**
+- [Rootless combined 38028920840](https://github.com/k1moradi/swapz/actions/runs/38028920840): PASS; 30/30 kernel-range tests, 18/18
+  workflow-contract tests and 25/25 NBD selftest stress repetitions.
+- [Rootless teardown 38028920862](https://github.com/k1moradi/swapz/actions/runs/38028920862): PASS; 30/30 compiled/source
+  guard tests and 18/18 workflow-contract tests.
+- The standalone NBD gate passed at the preceding executable commit
+  `53310d4defd04bcc2103d24f39c782727f2c99a3`
+  ([run 38028809970](https://github.com/k1moradi/swapz/actions/runs/38028809970)),
+  which has identical kernel source but predates a **test-only**
+  Python syntax correction. Do not claim all three workflows passed
+  the later exact SHA.
+
+**Trust and execution boundaries:** Source-only C guard arithmetic
+on a simulated 64-bit sector_t is not a whole-module build, real DM
+discard correctness test, validated GC concurrency, swap-in latency
+benchmark, authenticated kernel drain or backing-release permit.
+Both protected local state files remain untouched; no real DM, loop,
+NBD, swap, modules, block devices or destructive cleanup ran.
+The V2.2 strategy/batch winner remains **UNDETERMINED**.
