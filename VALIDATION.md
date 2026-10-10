@@ -4243,3 +4243,78 @@ privileged operations or physical fault workloads were performed.
 V2.2 strategy and batch-size winner remain **UNDETERMINED**.
 
 See `docs/v22-pending-pack-ownership-audit.md`.
+
+## October 10, 2026 — PR #13 generation scan pending-pack preflight
+
+After PR #12, the foreground write generation scanner remained a
+count-dependent read before PR #12's guarded compressed append/flush.
+`swapz_page_has_uncommitted_generation()` iterated `pending[]`
+under `pack_record_count` without its own bound check, and
+`swapz_commit_previous_generation()` could advance a replacement
+generation after a fault-injected zero/truncated count hid a prior
+accepted compressed BIO. An oversized count could read outside
+production's fixed 64 pending descriptors. No normal serialized-code
+trigger for these metadata inconsistencies has been demonstrated.
+
+[PR #13](https://github.com/k1moradi/swapz/pull/13) reuses the
+independent exact-identity checker `swapz_pack_bios_match()` at the
+very beginning of `swapz_commit_previous_generation()`, before
+any staged-reference shortcut or pending-record array scan.
+A mismatch sets the target failed and returns `-EUCLEAN` before
+new generation advancement or new upper-write storage. This
+introduces no memory allocation, on-disk change or new ownership
+metadata.
+
+The new
+`tests/runtime/swapz-generation-scan-pack-preflight-contract-test.py`
+compiles **verbatim** production C for the pending owner matcher,
+generation scanner, previous-generation commit and foreground write.
+**13/13** test methods PASS on the merge SHA, including deliberately
+old-code mutants:
+
+- a zeroed count hides an independently registered prior upper BIO
+  and erroneously lets the old code advance the generation;
+- count 65 reaches a matching previous-generation descriptor in a
+  deliberately extra-allocated in-bounds test canary at logical
+  slot 64. Production has only 64 descriptors; the test does not
+  perform real out-of-bounds or undefined memory access.
+
+The repaired code rejects both before advancing the generation,
+and also rejects truncated counts and wrong owner/record identities.
+Valid full 64-entry packs, GC-only NULL BIO records, staged references,
+unrelated-page records and generation wrap stay valid. The existing
+`swapz-generation-gc-transaction-test.py` source contract explicitly
+requires the new ordering while retaining nested GC transaction
+coverage (**22/22** methods PASS). New executable coverage is mandatory
+in kernel, combined and teardown rootless workflow gates.
+
+PR #13 merged at exact executable SHA
+[`9bb280588a2f0f4ffcc7764ab616ee873fed5352`](https://github.com/k1moradi/swapz/commit/9bb280588a2f0f4ffcc7764ab616ee873fed5352).
+All four exact PR-head rootless workflows passed:
+[kernel 38065446412](https://github.com/k1moradi/swapz/actions/runs/38065446412),
+[combined 38065446448](https://github.com/k1moradi/swapz/actions/runs/38065446448),
+[teardown 38065446416](https://github.com/k1moradi/swapz/actions/runs/38065446416)
+and [NBD 38065446429](https://github.com/k1moradi/swapz/actions/runs/38065446429).
+
+All four **post-merge** workflows passed on the same integration SHA:
+
+- [Kernel 38065599090](https://github.com/k1moradi/swapz/actions/runs/38065599090): **PASS**
+- [Combined 38065599097](https://github.com/k1moradi/swapz/actions/runs/38065599097): **PASS**
+- [Teardown 38065599100](https://github.com/k1moradi/swapz/actions/runs/38065599100): **PASS**
+- [NBD source 38065599105](https://github.com/k1moradi/swapz/actions/runs/38065599105): **PASS**
+
+These are **rootless source-contract qualifications only**. Codex's
+last supplied **132/132** method native Linux report and `W=1`
+module build qualified PR #9 source
+`8d86a96b22d5a8d2dc8d261251f20c3d94406dbe`.
+Codex was later assigned independent native PR #12 qualification,
+whose report was not yet supplied in this conversation turn.
+Neither report constitutes native Linux qualification of PR #13.
+No module was loaded or actual DM/swap/NBD/loop/physical device,
+privileged or destructive fault workload used. The bound checker
+adds at most a linear 64-record/owner preflight per foreground
+rewrite; performance has not been measured. The conservative
+indefinite teardown callback wait remains. V2.2 strategy/batch
+winner remains **UNDETERMINED**.
+
+See `docs/v22-generation-scan-pack-preflight-audit.md`.
