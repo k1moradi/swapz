@@ -218,7 +218,7 @@ static int run(int mode) {
             c.staged_refs[0].generation = prior;
             c.fail_batch = true;
             break;
-        case 6: case 7: case 9: case 10:
+        case 6: case 7: case 9:
             c.gc_trigger = true;
             break;
         default: break;
