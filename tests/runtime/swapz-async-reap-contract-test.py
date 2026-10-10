@@ -109,6 +109,8 @@ typedef uint8_t u8;
 #define SWAPZ_ASYNC_WATCHDOG_MS 30000U
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+#define SWAPZ_MAP_COMPRESSED 2U
+#define SWAPZ_MAX_COMPRESSED_BYTES 3568U
 #define SWAPZ_BUFFER_FREE 0U
 #define SWAPZ_BUFFER_FILL 1U
 #define SWAPZ_BUFFER_INFLIGHT 2U
@@ -163,7 +165,7 @@ struct swapz_context {
     struct swapz_stream_buffer stream_buffers[2];
     struct swapz_staged_ref staged_refs[2];
     u32 generations[2];
-    u32 logical_pages, max_batch_blocks;
+    u32 logical_pages, max_batch_blocks, physical_blocks;
     struct swapz_stats stats;
     int inflight_buffer_id, installed, resets, failed_events;
     bool failed, accepting_io;
@@ -195,7 +197,11 @@ static void swapz_complete_bio(struct bio *b, int err) {
 }
 static void swapz_install_mapping(struct swapz_context *c, u32 pg,
                                   u32 phys, u16 length, u8 idx, u8 flags) {
-    (void)pg; (void)phys; (void)length; (void)idx; (void)flags;
+    (void)pg; (void)length; (void)idx; (void)flags;
+    if (phys >= c->physical_blocks) {
+        swapz_set_failed(c,-EUCLEAN);
+        return;
+    }
     if (!c->failed) c->installed++;
 }
 static void swapz_reset_stream_buffer(struct swapz_context *c,
@@ -205,14 +211,17 @@ static void swapz_reset_stream_buffer(struct swapz_context *c,
 """
 SUFFIX = r"""
 static struct swapz_context c;
-static struct swapz_write_batch_block block;
+static struct swapz_write_batch_block blocks[2];
+#define block blocks[0]
 static struct bio b;
+static struct bio b2;
 static struct stub_queue q;
 static void setup(bool outstanding, bool early) {
     struct swapz_stream_buffer *stream;
     memset(&c,0,sizeof(c));
-    memset(&block,0,sizeof(block));
+    memset(blocks,0,sizeof(blocks));
     memset(&b,0,sizeof(b));
+    memset(&b2,0,sizeof(b2));
     memset(&q,0,sizeof(q));
     boundary_race=0;
     stream=&c.stream_buffers[0];
@@ -224,6 +233,7 @@ static void setup(bool outstanding, bool early) {
     stream->id=0;
     c.generations[0]=7;
     c.logical_pages=2;
+    c.physical_blocks=32;
     c.max_batch_blocks=1;
     c.inflight_buffer_id=0;
     c.accepting_io=true;
@@ -234,6 +244,7 @@ static void setup(bool outstanding, bool early) {
     block.records[0].generation=7;
     block.records[0].record_index=0;
     block.records[0].stored_length=4;
+    block.records[0].flags=SWAPZ_MAP_COMPRESSED;
     block.records[0].upper_completed=early;
     if (outstanding) block.records[0].bio=&b;
     c.staged_refs[0].valid=1;
@@ -326,12 +337,103 @@ static int scenario(int id) {
         if (swapz_reap_inflight(&c,true)!=-ETIMEDOUT ||
             c.stats.async_watchdog_timeouts || b.completes ||
             c.inflight_buffer_id!=0) return 18;
+    } else if (id>=16 && id<=23) {
+        /* Fault-inject in-memory metadata after the lower write was submitted.
+         * Finalization must fail before any success publication or unsafe index. */
+        setup(true,false);
+        if (id==16) s->block_count=2;
+        if (id==17) block.record_count=65;
+        if (id==18) block.records[0].logical_page=2;
+        if (id==19) block.records[0].record_index=1;
+        if (id==20) block.records[0].flags=4;
+        if (id==21) block.records[0].flags=0;
+        if (id==22 || id==23) {
+            c.max_batch_blocks=2;
+            s->block_count=2;
+            blocks[1].record_count=1;
+            blocks[1].records[0].logical_page=1;
+            blocks[1].records[0].generation=7;
+            blocks[1].records[0].record_index=1; /* Wrong descriptor slot. */
+            blocks[1].records[0].stored_length=4;
+            blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        }
+        if (id==23) {
+            b.completes=1; /* Upper BIO was already acknowledged. */
+            block.records[0].bio=NULL;
+            block.records[0].upper_completed=true;
+        }
+        swapz_stream_io_complete(id==23?1:0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed ||
+            c.installed || c.resets || s->state!=SWAPZ_BUFFER_INFLIGHT ||
+            c.inflight_buffer_id!=-1 || c.async_callbacks.value) return 30;
+        if (id==23) {
+            if (b.completes!=1 || !c.staged_refs[0].valid) return 31;
+        } else if (b.completes!=1 || b.error!=-EUCLEAN ||
+                   block.records[0].bio) return 32;
+    } else if (id==24) {
+        setup(true,false);
+        c.max_batch_blocks=2;
+        s->block_count=2;
+        blocks[1].record_count=1;
+        blocks[1].records[0].logical_page=1;
+        blocks[1].records[0].generation=7;
+        blocks[1].records[0].stored_length=4;
+        blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        blocks[1].records[0].bio=&b2;
+        c.generations[1]=7;
+        c.staged_refs[1]=(struct swapz_staged_ref){
+            .valid=1,.generation=7,.buffer_id=0,.block_index=1,.record_index=0};
+        swapz_stream_io_complete(0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result || c.failed || c.installed!=2 || c.resets!=1 ||
+            b.completes!=1 || b2.completes!=1 ||
+            c.staged_refs[0].valid || c.staged_refs[1].valid) return 33;
+    } else if (id==28 || id==29) {
+        /* Late-corrupted two-block extent: block 9 is valid, block 10
+         * crosses the usable physical boundary. Without a read-only
+         * preflight, block 9 is published before block 10 fails. */
+        setup(true,false);
+        c.max_batch_blocks=2;
+        c.physical_blocks=10;
+        s->start_block=9;
+        s->block_count=2;
+        c.generations[1]=7;
+        blocks[1].record_count=1;
+        blocks[1].records[0].logical_page=1;
+        blocks[1].records[0].generation=7;
+        blocks[1].records[0].record_index=0;
+        blocks[1].records[0].stored_length=4;
+        blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        swapz_stream_io_complete(0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (id==28) {
+            if (result!=-EUCLEAN || !c.failed || c.installed!=1 ||
+                c.resets || b.completes!=1 || b.error ||
+                block.records[0].bio)
+                return 40;
+            puts("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION");
+        } else {
+            if (result!=-EUCLEAN || !c.failed || c.installed ||
+                c.resets || b.completes!=1 || b.error!=-EUCLEAN ||
+                block.records[0].bio != NULL)
+                return 41;
+        }
+    } else if (id==25 || id==26 || id==27) {
+        setup(true,false);
+        if (id==25) s->start_block=c.physical_blocks;
+        if (id==26) s->block_count=0;
+        if (id==27) block.record_count=0;
+        swapz_stream_io_complete(1,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed || c.installed ||
+            c.resets || s->state!=SWAPZ_BUFFER_INFLIGHT) return 34;
     } else return 50;
     return 0;
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>15) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>29) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -350,14 +452,30 @@ class AsyncReapExactC(unittest.TestCase):
             raise AssertionError("required rootless userspace C compiler missing")
         cls.tmp=tempfile.TemporaryDirectory(prefix="swapz-async-exact-c-")
         cls.binary=Path(cls.tmp.name)/"async-exact-c"
-        program=Path(cls.tmp.name)/"async-exact-c.c"
-        program.write_text(PREFIX+"\n"+"\n".join(function(cls.source,f) for f in PURE)+
-                           "\n"+SUFFIX,encoding="utf-8")
-        cp=subprocess.run([cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
-                           "-o",str(cls.binary),str(program)],
-                          capture_output=True,text=True,timeout=15)
-        if cp.returncode:
-            raise AssertionError("production C compilation failed: "+cp.stderr)
+        cls.mutant_binary=Path(cls.tmp.name)/"missing-finalize-preflight"
+        compiled={name:function(cls.source,name) for name in PURE}
+        finalizer=compiled["swapz_finalize_stream_buffer"]
+        start=finalizer.index("\t/*\n\t * The callback only reports I/O completion")
+        end=finalizer.index("\n\tif (error) {",start)
+        corrupt=finalizer.rindex("\ncorrupt:\n")
+        if not start or corrupt<=end:
+            raise AssertionError("cannot identify full finalization preflight")
+        old_finalize=(finalizer[:start]+finalizer[end+1:corrupt]+
+                      "\n}")
+        for label,binary,body in (
+            ("async-exact-c",cls.binary,finalizer),
+            ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
+        ):
+            fragments=[body if name=="swapz_finalize_stream_buffer"
+                       else compiled[name] for name in PURE]
+            program=Path(cls.tmp.name)/(label+".c")
+            program.write_text(PREFIX+"\n"+"\n".join(fragments)+"\n"+SUFFIX,
+                               encoding="utf-8")
+            cp=subprocess.run([cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
+                               "-o",str(binary),str(program)],
+                              capture_output=True,text=True,timeout=15)
+            if cp.returncode:
+                raise AssertionError(label+" production C compilation failed: "+cp.stderr)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -368,6 +486,28 @@ class AsyncReapExactC(unittest.TestCase):
                           text=True,timeout=3)
         self.assertEqual(cp.returncode,0,f"case={i} {cp.stdout} {cp.stderr}")
         self.assertIn(f"ASYNC_REAP_{i}_OK",cp.stdout)
+
+    def test_malformed_late_completion_is_bounded_and_never_partially_publishes(self):
+        for i in range(16,24):
+            with self.subTest(case=i):
+                self.run_case(i)
+
+    def test_two_block_valid_finalize_still_publishes_and_completes(self):
+        self.run_case(24)
+
+    def test_bad_physical_extent_and_empty_counts_preserve_resident_buffer(self):
+        for i in (25,26,27):
+            with self.subTest(case=i):
+                self.run_case(i)
+
+    def test_late_two_block_extent_corruption_stops_all_publication(self):
+        self.run_case(29)
+
+    def test_removed_preflight_allows_partial_mapping_publication(self):
+        cp=subprocess.run([str(self.mutant_binary),"28"],capture_output=True,
+                          text=True,timeout=3)
+        self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
+        self.assertIn("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION",cp.stdout)
 
     def test_no_inflight(self): self.run_case(0)
     def test_incomplete_nonblocking_reap(self): self.run_case(1)
