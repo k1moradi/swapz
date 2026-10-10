@@ -329,7 +329,7 @@ static int run_case(unsigned int scenario, bool mutant)
     buffer.data = data;
     buffer.blocks = blocks;
     INIT_LIST_HEAD(&buffer.owned_bios);
-    buffer.block_count = scenario == 18 ? 3 : (scenario == 11 ? 2 : 1);
+    buffer.block_count = scenario == 18 ? 3 : ((scenario == 11 || scenario == 23) ? 2 : 1);
     prepare_block(&buffer, 0, 0);
     if (buffer.block_count >= 2)
         prepare_block(&buffer, 1, 1);
@@ -409,14 +409,17 @@ static int run_case(unsigned int scenario, bool mutant)
     case 20: break; /* 64 compressed extents overlap pairwise. */
     case 21: break; /* Adjacent payload ranges remain valid. */
     case 22: break; /* Reversed, non-overlapping extents are noncanonical. */
+    case 23: break; /* Production repack must move BIO owner to merged slot. */
     default: return 60;
     }
 
     /* Exercise failure fanout with one incomplete BIO on adversarial records. */
-    if (scenario == 7 || scenario == 10) {
+    if (scenario == 7 || scenario == 10 || scenario == 23) {
+        if (scenario == 23)
+            record = &blocks[1].records[0];
         record->bio = &pending_bio;
         pending_bio.entry.bio = &pending_bio;
-        pending_bio.entry.block_index = corrupt_block;
+        pending_bio.entry.block_index = scenario == 23 ? 1 : corrupt_block;
         pending_bio.entry.record_index = 0;
         INIT_LIST_HEAD(&pending_bio.entry.list);
         list_add_tail(&pending_bio.entry.list, &buffer.owned_bios);
@@ -451,7 +454,7 @@ static int run_case(unsigned int scenario, bool mutant)
         return 71;
     }
 
-    if (scenario == 0 || scenario == 13 || scenario == 21) {
+    if (scenario == 0 || scenario == 13 || scenario == 21 || scenario == 23) {
         if (context.failed || buffer.block_count != 1 ||
             context.staged_refs[0].valid != 1)
             return 71;
@@ -460,6 +463,13 @@ static int run_case(unsigned int scenario, bool mutant)
             return 72;
         if (scenario == 13 && data[0] != 'Q')
             return 73;
+        if (scenario == 23 &&
+            (blocks[0].record_count != 2 ||
+             blocks[0].records[1].bio != &pending_bio ||
+             pending_bio.entry.block_index != 0 ||
+             pending_bio.entry.record_index != 1 ||
+             !swapz_stream_bios_match(&context, &buffer)))
+            return 76;
         if (scenario == 21 &&
             (blocks[0].record_count != 2 ||
              data[SWAPZ_BLOCK_BYTES - 4] != 'A' ||
@@ -493,7 +503,7 @@ int main(int argc, char **argv)
     if (argc != 3)
         return 80;
     scenario = strtoul(argv[1], &end, 10);
-    if (!end || *end || scenario > 22)
+    if (!end || *end || scenario > 23)
         return 81;
     error = run_case((unsigned int)scenario, argv[2][0] == 'm');
     if (!error)
