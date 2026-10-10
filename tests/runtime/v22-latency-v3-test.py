@@ -171,6 +171,9 @@ class ExactV3SidecarTests(unittest.TestCase):
 
     def test_reject_zero_latency(self):
         self._set_records(self.row, [(0, 10000)])
+        # Keep the JSONL claim valid so the byte-level sidecar constraint
+        # is the one rejecting the fabricated zero latency.
+        self.row["read_p99_ns"] = 1
         self._reject("V3 latency unsorted")
 
     def test_reject_zero_count(self):
