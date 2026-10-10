@@ -4087,3 +4087,96 @@ No real DM, swap, loop/NBD, module loading, privileged or device/fault
 work was performed. V2.2 strategy/batch winner remains **UNDETERMINED**.
 
 See `docs/v22-independent-upper-bio-ownership-audit.md`.
+
+## October 10, 2026 — Native PR #8 closeout, exact BIO identity and checkpoint race
+
+### Native Linux baseline provided by Codex
+
+Codex independently validated `24e2794b173a405c9f9ccfe739c4f733ebc41508`
+on Ubuntu 26.04.1 LTS / x86_64, kernel `7.0.0-38-generic`,
+GCC 15.2.0-16ubuntu1, matching 7.0.0-38.38 headers.
+All seven requested rootless suites **PASS: 92/92 Python test
+methods** (upper ownership 7, async reaper 28, staged read 8,
+compaction 7, flush/FUA 9, stream submit 4, workflow contract 29).
+`make -C kernel KDIR=/lib/modules/$(uname -r)/build W=1`
+**PASS**, a nonempty x86-64 ELF `dm-swapz.ko` produced, no kernel
+C-source compilation warning or error, module not loaded.
+Compiler identity differs only between `gcc` and
+`x86_64-linux-gnu-gcc` names for GCC 15.2; missing pahole and
+`vmlinux` skipped optional BTF generation. The detached worktree
+remained clean; the shared checkout and protected untracked .state
+files were not touched.
+
+This is native evidence for PR #8 only. It **does not** establish
+native compilation of the later exact-identity repair.
+
+### PR #9 — Exact upper-BIO identity admission
+
+A controlled in-memory fault can duplicate or swap resident
+`record->bio` pointers while leaving PR #8's descriptor and owner
+counts equal. Without an exact identity check, erroneous upper BIO
+completion or mis-publication can result. PR #9 gives each existing
+per-BIO owner its current descriptor slot, updates that slot
+through production compaction, and compares the slot's actual BIO
+pointer against its independent owner before lower-write finalization
+or repacking. Two bounded O(N) passes, no new allocations.
+Exact-production-C tests demonstrate count-only acceptance of
+duplicates and show rejection of duplicate, swapped, cross-buffer
+and stale-slot mismatches without mapping publication.
+
+[PR #9](https://github.com/k1moradi/swapz/pull/9)
+merged as [`89c4aeedb7632913e91c8c530fb7af679b3b7a13`](https://github.com/k1moradi/swapz/commit/89c4aeedb7632913e91c8c530fb7af679b3b7a13).
+Exact **post-merge PASS**: [kernel 38060222060](https://github.com/k1moradi/swapz/actions/runs/38060222060),
+[combined 38060222088](https://github.com/k1moradi/swapz/actions/runs/38060222088),
+[teardown 38060222038](https://github.com/k1moradi/swapz/actions/runs/38060222038).
+Standalone NBD workflow was not triggered for this kernel-only diff.
+
+### PR #10 — Required real production repack execution
+
+Post-merge review discovered the real two-block compressed owner
+relocation C scenario had been **compiled but omitted** from the Python
+test selection. It was not previously executed and was not claimed
+as qualified. [PR #10](https://github.com/k1moradi/swapz/pull/10)
+added the explicit `test_real_repack_updates_pending_bio_owner_slot`
+method, without changing driver C.
+
+Exact PR-head
+`02eb175b56a1d47cc16184b94403a253eb2cc8a3`
+kernel [38060310127](https://github.com/k1moradi/swapz/actions/runs/38060310127),
+combined [38060310069](https://github.com/k1moradi/swapz/actions/runs/38060310069)
+and teardown [38060310111](https://github.com/k1moradi/swapz/actions/runs/38060310111)
+**PASS**. Post-merge
+`a49d9dcc2fb12ac6be0d8541778307b226aa3df9`
+[kernel 38060472581](https://github.com/k1moradi/swapz/actions/runs/38060472581)
+and [teardown 38060472580](https://github.com/k1moradi/swapz/actions/runs/38060472580)
+**PASS**, but [combined 38060472567](https://github.com/k1moradi/swapz/actions/runs/38060472567)
+**FAILED** on pressure token repeat 2/10. Retain this failure;
+it was not an exact-C swapz kernel regression.
+
+### PR #11 — Rootless checkpoint atomic publication race
+
+The pressure marker writer `os.link(temp, final)` then
+`temp.unlink()` exposes a transient two-linked inode, which the
+fail-closed reader previously rejected as unsafe if polled during
+the publication window. A bounded retry allows only an eventually
+single-linked regular marker to pass, preserving rejection of
+symlinks, permanent hardlinks and nonregular files. Deterministic
+source tests reproduce both the temporary two-link window and
+permanent hardlink denial, without real devices or privileges.
+
+[PR #11](https://github.com/k1moradi/swapz/pull/11) merged as
+[`4e68d9bcfd05ffec8f4785a073c3656735304320`](https://github.com/k1moradi/swapz/commit/4e68d9bcfd05ffec8f4785a073c3656735304320).
+Exact **post-merge PASS**: [combined 38060923597](https://github.com/k1moradi/swapz/actions/runs/38060923597)
+and [teardown 38060923539](https://github.com/k1moradi/swapz/actions/runs/38060923539),
+including the pressure-token repeat stage. Both PR-head
+source workflows also passed: combined 38060749912 and teardown
+38060749877.
+
+PR #10 and PR #11 changed only source-contract tests and rootless
+checkpoint utilities; the kernel driver executable code remains
+PR #9's `89c4aeed` version. No module was loaded or real
+DM, swap, NBD, loop, or physical-device stack exercised.
+Native build of PR #9 remains to be independently qualified.
+V2.2 performance/policy winner remains **UNDETERMINED**.
+
+See `docs/v22-exact-bio-identity-audit.md`.
