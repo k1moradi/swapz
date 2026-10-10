@@ -69,9 +69,11 @@ and empty count after simulated submission, along with valid
 two-block success and early-acknowledged staged readback retention.
 
 A separately compiled executable strips out the finalization
-preflight and reproduces publication of two mappings despite a
-mismatched descriptor index in a later block, proving the
-partial-publication risk of the prior implementation. Both the
+preflight and reproduces actual partial publication: after fault injection
+changes a two-block physical extent to cross the target's usable bound,
+the old finalizer commits block one before the mapping admission for
+block two detects the invalid physical block. The repaired finalizer
+rejects the complete batch first and publishes neither mapping. Both the
 production executable and deliberately broken variant are required
 by the existing mandatory kernel, combined, and teardown source
 workflow coverage.
