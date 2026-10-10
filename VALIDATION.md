@@ -3467,3 +3467,53 @@ production owner, actual backing deletion, live device, or physical
 experiment was established or authorized. V2.2 strategy/batch winner:
 **UNDETERMINED**. The later documentation-only commit must never
 be substituted for the exact executable SHA verified above.
+
+
+## 2026-10-09 — Source-only V3 sidecar-aware bundle integrity binding
+
+**Exact executable commit:**
+`98370f95e3cb6a1e708ecde242946c47c1b276e4`
+([commit](https://github.com/k1moradi/swapz/commit/98370f95e3cb6a1e708ecde242946c47c1b276e4)).
+
+The main developer independently implemented:
+- `tests/runtime/v22-evidence-bundle-v3.py`:
+  `swapz-v22-evidence-bundle-v2` with exact JSONL original-byte
+  digest, per-run LF-inclusive SHA-256, and per-run V3 sidecar original-byte
+  SHA-256, unique basename, validated size, exact read count and
+  integer nearest-rank p99.
+- Manifest assertions bind run/source revision, session, collector ID,
+  lower-device ID, backend/profile and evidence label. The two metadata
+  files and every sidecar must be read from the **same pinned directory**.
+  Sidecars reuse the V3 analyzer's fail-closed 512-MiB global budget and
+  10-million-sample per-run limits, with bounded streaming.
+- `tests/runtime/v22-evidence-bundle-v3-test.py`: **43**
+  synthetic rootless cases exercising positive full bundles, exact
+  10,000-distinct-value p99, forged sidecar bytes/hash/length, mismatched
+  run/session/collector/device assertions, duplicate sidecar or run
+  identities, input traversal, symlink/hardlink/FIFO, schema mismatch,
+  false p99/count, manifest tampering, and negative authorization.
+- `docs/v22-evidence-bundle-v3.md` includes the exact
+  schema and scope. Both joint workflows run the new 35-second bounded
+  gate, while static contract tests now number 16. The old JSONL-only
+  bundle verifier remains unchanged and denies V3 claims.
+
+**All three workflows passed the exact source revision:**
+- [combined run 38027940132](https://github.com/k1moradi/swapz/actions/runs/38027940132): PASS.
+- [teardown run 38027940134](https://github.com/k1moradi/swapz/actions/runs/38027940134): PASS.
+- [standalone NBD run 38027940133](https://github.com/k1moradi/swapz/actions/runs/38027940133): PASS.
+
+Both joint logs recorded **43/43 V3 bundle cases, 39/39 V3 exact-latency
+cases, 31/31 plateau cases, 22/22 legacy bundle policy cases,
+and 16/16 static workflow-contract cases**. The combined log recorded
+`COMBINED_TESTED_HEAD=98370f95e3cb6a1e708ecde242946c47c1b276e4`
+and 25/25 standalone-process NBD stress repetitions.
+
+**Limitations:** SHA-256 of user-supplied files protects only internal
+byte consistency; a malicious author can replace both artifact and
+digest. Manifest source, session, collector and device IDs are
+**claims**. This does NOT establish a trusted signing key, real
+kernel drain, swap-in sample source, production device identity,
+privileged lifecycle owner, physical benchmark or cleanup authority.
+All production flags are false, and the V2.2 strategy/batch winner is
+**UNDETERMINED**. The later documentation-only commit must not be
+represented as having its own separately tested executable SHA.

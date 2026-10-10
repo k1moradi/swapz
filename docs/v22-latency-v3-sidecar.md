@@ -50,15 +50,17 @@ never merge into the same plateau series.
 
 ## Legacy bundle manifest boundary
 
-The existing `swapz-v22-evidence-bundle-v1` verifier accepts a
-JSONL artifact plus a self-reported manifest only. It has no mechanism
-to read, bind, or verify binary sidecar bytes. It therefore **rejects
-all V3 rows**, including synthetic and self-reported physical rows,
-rather than claiming a hash-only JSONL manifest verifies them. A future
-independently reviewed bundle schema must bind each distinct V3
-sidecar's original bytes and collector/device/session identities before
-this restriction can be revisited. The V3 plateau parser's own
-sidecar digest is an *internal consistency* check only.
+The legacy `swapz-v22-evidence-bundle-v1` verifier accepts only the
+JSONL artifact and self-reported manifest. It **continues to reject
+all V3 rows** rather than falsely claiming their sidecars were read.
+
+A separate, independently tested `swapz-v22-evidence-bundle-v2`
+verifier now checks one pinned directory, each exact sidecar byte
+stream, the original-byte SHA-256 and size, run-bound JSONL digests
+and the claimed session, collector, device and backend/profile IDs.
+See [V3 bundle specification](v22-evidence-bundle-v3.md).
+All such identities remain caller-supplied; the bundle check does
+**not authenticate** their owner or grant production authority.
 
 ## Input trust and resource limits
 

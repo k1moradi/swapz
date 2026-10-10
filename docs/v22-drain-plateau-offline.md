@@ -50,8 +50,10 @@ sorted unsigned 64-bit network-order exact (latency_ns, count)
 pairs, total read_count, original bytes, exact p99, and retained
 descriptor identity without loading all sample values into memory.
 See [the V3 sidecar specification](v22-latency-v3-sidecar.md).
-The existing V1 measurement-bundle manifest rejects V3 until
-a sidecar-aware bundle contract is developed.
+The existing V1 measurement-bundle manifest continues to reject V3.
+A separate [V3-aware bundle verifier](v22-evidence-bundle-v3.md)
+now binds each sidecar's exact original bytes and length to a claimed
+run/session/device inventory, **without authenticating** the claimant.
 
 Use `swapz-drain-observation-v2` for the new internal-consistency
 check. It retains the v1 fields and adds **one strictly required**

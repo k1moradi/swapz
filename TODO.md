@@ -1217,11 +1217,36 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       `ea18d3b6d81a5d307a855ce45228d3aabb07915f`:
       [combined](https://github.com/k1moradi/swapz/actions/runs/38026623024)
       [teardown](https://github.com/k1moradi/swapz/actions/runs/38026623030).
-- [ ] Design a separate V3-aware measurement bundle schema that
-      cryptographically binds each sidecar to run/session/device
-      metadata. This is offline consistency only; independent
-      collector signatures and production trust remain prerequisites.
+- [x] Implement a separate V3-aware measurement bundle schema
+      `swapz-v22-evidence-bundle-v2` binding original sidecar bytes
+      and digest/length to each run's session, collector, source,
+      backend/profile, and claimed device identities. 43 adversarial
+      bundle tests and 16 workflow-contract tests passed on exact
+      `98370f95e3cb6a1e708ecde242946c47c1b276e4`:
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38027940132),
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38027940134).
+      This is offline hash consistency, not authenticated collector or
+      production trust. Legacy bundle v1 still rejects V3.
 - [ ] Independently audit kernel V2 staged-write generation
       invalidation and live GC relocation under concurrent I/O,
       without enabling production mapper/device operations.
+
+### 2026-10-09 — Independently implemented V3 bundle integrity binding
+
+- [x] Add `tests/runtime/v22-evidence-bundle-v3.py`,
+      exact v2 manifest schema, one pinned directory, bounded regular-file
+      checks, one-use sidecar filenames, strict run/source/session/collector/
+      backend/device assertions and original-byte SHA-256 binding.
+- [x] Add 43 rootless adversarial tests and mandatory 35-second
+      source-only test steps in both joint workflows. Enforce the gate
+      with a negative workflow-contract test (16 total).
+- [x] Exact executable SHA
+      `98370f95e3cb6a1e708ecde242946c47c1b276e4`,
+      all 3 workflows PASS:
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38027940132),
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38027940134),
+      [standalone NBD](https://github.com/k1moradi/swapz/actions/runs/38027940133).
+- [ ] Independently authenticate collector signing keys, device and
+      kernel drain event provenance, and signed binary sidecar bundle
+      origin before accepting any real benchmark nomination.
 
