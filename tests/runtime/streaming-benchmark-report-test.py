@@ -285,6 +285,23 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn('rate_iops=$READ_IOPS', self.script)
         self.assertIn('log_entries=32768', self.script)
 
+    def test_unrelated_fio_executable_rejected_before_fixture_allocation(self):
+        fake_fio = self.directory / "fio"
+        fake_fio.write_text("#!/bin/sh\\necho 'fio, version 1.9.2'\\n",
+                            encoding="utf-8")
+        fake_fio.chmod(0o755)
+        env = os.environ.copy()
+        env["PATH"] = str(self.directory) + os.pathsep + env["PATH"]
+        result = subprocess.run(["bash", str(BENCHMARK_PATH)], env=env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("not Flexible I/O Tester", result.stderr)
+        self.assertNotIn("root required", result.stderr)
+        source = self.script
+        gate = source.index("fio executable is not Flexible I/O Tester")
+        self.assertLess(gate, source.index("[[ $EUID -eq 0 ]]"))
+        self.assertLess(gate, source.index("TMP=$(mktemp"))
+
     def test_invalid_reader_iops_fails_before_privilege_or_device_checks(self):
         for invalid in ("0", "2001", "-1", "1.5", "nan", "1;true", "0001"):
             with self.subTest(value=invalid):
