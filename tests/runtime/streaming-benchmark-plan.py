@@ -59,7 +59,8 @@ def batch_list(raw: str, backend: str, bandwidth: int) -> tuple[int, ...]:
 
 
 def plan(*, backend: str, bandwidth: int, latency_ns: int,
-         strategies: str, batches: str, repeats: int) -> dict[str, object]:
+         strategies: str, batches: str, repeats: int,
+         runtime: int = 3, write_qd: int = 64, compress: int = 50) -> dict[str, object]:
     if backend not in ("null_blk", "nbd"):
         raise ValueError("backend must be null_blk or nbd")
     if not 0 <= bandwidth <= MAX_BANDWIDTH_MIB_S:
@@ -68,6 +69,12 @@ def plan(*, backend: str, bandwidth: int, latency_ns: int,
         raise ValueError("latency must be 0..10000000000 ns")
     if not 1 <= repeats <= 20:
         raise ValueError("repeats must be 1..20")
+    if not 1 <= runtime <= 3600:
+        raise ValueError("runtime must be 1..3600 seconds")
+    if not 1 <= write_qd <= 1024:
+        raise ValueError("writer QD must be 1..1024")
+    if not 0 <= compress <= 100:
+        raise ValueError("compressibility must be 0..100 percent")
     selected_policies = policy_list(strategies)
     selected_batches = batch_list(batches, backend, bandwidth)
     cases = [
@@ -95,6 +102,9 @@ def plan(*, backend: str, bandwidth: int, latency_ns: int,
         "backend": backend,
         "bandwidth_mib_s": bandwidth,
         "latency_ns": latency_ns,
+        "runtime_s": runtime,
+        "writer_qd": write_qd,
+        "compressibility_pct": compress,
         "null_blk_tick_budget_bytes":
             bandwidth * TICK_QUANTUM_BYTES if backend == "null_blk" and bandwidth else None,
         "strategies": list(selected_policies),
@@ -118,13 +128,18 @@ def main() -> int:
     parser.add_argument("--batches", default="auto",
                         help="auto or ordered space-separated KiB ceilings")
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--runtime", type=int, default=3)
+    parser.add_argument("--qd", type=int, default=64)
+    parser.add_argument("--compress", type=int, default=50)
     parser.add_argument("--emit-batches", action="store_true",
                         help="print admitted space-separated KiB sizes for existing Bash benchmark")
     args = parser.parse_args()
     try:
         result = plan(backend=args.backend, bandwidth=args.mbps,
                       latency_ns=args.latency_ns, strategies=args.strategies,
-                      batches=args.batches, repeats=args.repeats)
+                      batches=args.batches, repeats=args.repeats,
+                      runtime=args.runtime, write_qd=args.qd,
+                      compress=args.compress)
         if args.emit_batches:
             if args.backend != "null_blk":
                 raise ValueError("NBD execution remains disabled; cannot emit live NBD batches")
