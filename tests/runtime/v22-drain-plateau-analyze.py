@@ -294,7 +294,6 @@ def load_rows(path: Path) -> list[dict[str, object]]:
         text = _read_pinned_observation_text(path, directory_fd=dirfd)
         stream = io.StringIO(text)
         for number, line in enumerate(stream, start=1):
-        for number, line in enumerate(stream, start=1):
             if number > MAX_OBSERVATIONS:
                 raise ValueError("too many observations")
             if not line.strip():
