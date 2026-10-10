@@ -1612,3 +1612,17 @@ See `docs/v22-generation-scan-pack-preflight-audit.md`.
 - [ ] Design batch-ceiling changes without reallocating or freeing callback-owned buffers: preallocation limits, drain/quiesce barriers, failure rollback, and stable table/status semantics must be specified before implementation.
 - [ ] Require compiled rootless transition/failure tests, independent native Linux build, then **separately authorized** loaded-kernel/device qualification and performance measurements before enabling runtime governor-style changes by default.
 
+### 2026-10-10 — Rootless benchmark size admission and safe three-policy matrix (PR #14)
+
+- [x] Confirm prior default 20 MiB/s throttled `null_blk` matrix selected unserviceable 512 KiB and 1 MiB requests; its 50 Hz credit replenishment provides only `(1048576 // 50) * 20 = 419420` bytes (~409.6 KiB) per tick, and the earlier rejection occurred after fixture setup.
+- [x] Implement rootless `tests/runtime/streaming-benchmark-plan.py`: fail-closed batch/policy input and null_blk size budget, bounded runtime/queue depth/compressibility, no real module/device operations. Default 20 MiB/s plan includes one Immediate 4 KiB control and seven each Opportunistic/Staged 4–256 KiB cases; three **planned** repetitions are **45 proposed runs**, not benchmark evidence.
+- [x] Call planner from `streaming-benchmark.sh` **before** EUID/root checking, temporary allocations, configfs or module work; keep later size guard and NBD pidfd-lifecycle hard-disable. Explicit oversize 512/1024 KiB at 20 MiB/s is refused before resources exist; unthrottled `mbps=0` is not bandwidth evidence.
+- [x] Add **17/17** rootless planner tests for allowed matrix, malformed options, oversized-request refusal, correct 4 KiB Immediate baseline, NBD planning-only semantics and ordering before resources. Wire mandatory tests and executable-gate omission mutation into combined, teardown and standalone NBD source CI.
+- [x] Merge [PR #14](https://github.com/k1moradi/swapz/pull/14) at `b39aaa51b2426569badcbc60545854ae91c0a141`; exact **post-merge** combined (38070385763), teardown (38070385776), NBD source (38070385765) all **PASS**. No kernel executable changes.
+- [ ] Obtain Codex's independent PR #13 native `W=1` module and rootless suite result before requesting any authorized virtual benchmark; PR #12 native 151/151 does not qualify PR #13.
+- [ ] Before testing virtual `null_blk`, get explicit separate authorization and verify exact disposable backend, loaded module/source identity, holder/swap inventory, complete teardown and no residual test-owned state. First bounded comparison: Immediate 4 KiB; Opportunistic and Staged 4/8/16/32/64/128/256 KiB at 20 MiB/s.
+- [ ] Collect at least three **independent** matching runs per candidate with authenticated lower-write sector/IO deltas, complete drain/quiescence, exact concurrent read p99 and GC costs; existing single-run `streaming-benchmark-report.py` is non-qualifying. Use the existing strict V3 evidence/plateau tools, not a newly invented winner formula.
+- [ ] Keep NBD kernel execution **disabled** until independently reviewed pidfd-owned service lifecycle and separately authorized unused virtual /dev/nbdN smoke, request-size evidence, calibration and non-forced detach. Only then extend 20 MiB/s analysis to 512/1024 KiB.
+- [ ] Strategy, batch size and plateau winner **UNDETERMINED**; never treat rootless planner cases or unthrottled `null_blk` as a benchmark result.
+
+See `docs/benchmarks/v2.2-rootless-sweep-plan.md`.
