@@ -48,6 +48,13 @@ if a record count is zeroed, the block count is truncated or grows
 beyond allocated capacity, or compaction moved descriptors.
 Distinct stream buffers maintain distinct ownership lists.
 
+The finalizer also performs an O(records + owned BIOs), bounded
+read-only consistency check between non-null pending record pointers
+and the per-buffer independent owner list. It rejects mismatched
+counts before publishing any mapping: a lost `record->bio` pointer
+can no longer let an outstanding owner survive a successful-looking
+buffer reset. The fail-closed reaper then drains the registered owner.
+
 When the target has already failed, `swapz_read_staged()` allows
 staged readback only for records whose upper write was previously
 acknowledged (`upper_completed`). This prevents unacknowledged
@@ -87,10 +94,12 @@ early-acknowledged failed-target recovery.
 This is a defined *malformed-count recovery* guarantee, not a
 claim to reconstruct arbitrary damaged kernel memory. Corrupting the
 intrusive BIO ownership node itself, falsely changing the
-`record->bio` pointer on an otherwise valid finalization path,
+`record->bio` pointer into a *different but valid* owner,
 or corrupting per-BIO allocation metadata is not recovered merely
-by an independent list. The normal serializer is still responsible
-for keeping owner nodes and descriptor references consistent.
+by an independent list and an owner-count cross-check. The normal
+serializer remains responsible for maintaining exact descriptor-to-BIO
+identity. A missing pointer is now detected by the count check;
+arbitrary swapping or duplication of pointers is outside its proof.
 
 The test harness never attaches real DM/loop/NBD/swap storage,
 loads a kernel module, invokes privileged operations, or calls actual
