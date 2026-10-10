@@ -1302,3 +1302,31 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       lower-I/O timeouts, batch FUA/flush, physical source identity, and
       backing release only under separately authorized infrastructure.
 
+### 2026-10-10 — GC compressed output lifetime (second nested alias)
+
+- [x] Fix another nested GC/compaction scratch collision: GC formerly
+      passed `context->compressed_buffer` into `swapz_store_page`;
+      pack rollover or physical-block reservation could call
+      `swapz_compact_fill_buffer` before the compressed payload was
+      copied into `pack_buffer`. The compactor reused that same scratch.
+- [x] Add one preallocated 4-KiB `gc_compressed_buffer` with
+      constructor fail-closed check and common destructor unwind.
+      Preserve the already isolated `gc_source_buffer`, foreground
+      `write_compressed_buffer`, and existing compactor scratch.
+      No hot-path allocation, generation scheme, mapping layout, or
+      on-disk record format changed.
+- [x] Compile the verbatim production `swapz_add_compressed_record`
+      C function in an unprivileged harness, exercise actual staging
+      with first-pack and rollover scratch-overwrite injection,
+      intentional old-alias counterexamples, error paths,
+      and allocation/source-binding negative mutations.
+      **15/15 new GC compressed contract tests**, **17/17 GC source
+      tests**, **30/30 kernel range tests**, and **20/20 workflow
+      contract tests** passed on exact executable SHA
+      `f5379bc048b868be88210023229cdd133910c46c`:
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38033528668),
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38033528694),
+      [standalone NBD](https://github.com/k1moradi/swapz/actions/runs/38033528707).
+- [ ] Revisit nested foreground generation increment and GC relocation
+      under failpoints, generation wrap, failed or timed-out lower I/O,
+      flush/FUA and real kernel concurrency; no production claims yet.

@@ -3607,3 +3607,46 @@ measurement. Owner/collector authenticity and independent device
 drain remain separate blockers. V2.2 strategy and batch winner:
 **UNDETERMINED**. A subsequent documentation-only commit is not
 a substitute for the exact executable SHA above.
+
+## 2026-10-10 — GC compressed relocation buffer alias hardening
+
+**Exact tested executable revision:** `f5379bc048b868be88210023229cdd133910c46c`,
+[commit](https://github.com/k1moradi/swapz/commit/f5379bc048b868be88210023229cdd133910c46c).
+
+A source audit identified a second conditional GC payload alias:
+`swapz_clean_segment` used `context->compressed_buffer` for its
+newly compressed relocation payload. Before `swapz_add_compressed_record`
+copied that payload into the pack, it could reserve space or roll over an
+existing pack, invoking write-batch compaction that also used
+`context->compressed_buffer` as temporary record-copy scratch. The
+result was a possible corrupted relocation record. This is a
+source-level hazard, not measured live-device corruption.
+
+The main developer changed `kernel/dm-swapz.c` to allocate
+`gc_compressed_buffer` separately and use it only for GC compression.
+Constructor and common unwind require and release the new page.
+`tests/runtime/swapz-gc-compressed-contract-test.py` compiles the
+**actual production compressed-pack staging C function**, supplies
+rootless stand-ins for nested compaction, and compares protected
+payloads with intentionally aliased payloads on both first-pack and
+pack-rollover paths. The tests pin source/cleanup boundaries and verify
+intentional source mutants fail. The harness is not real LZ4/dm-io.
+
+**Same executable revision, three green GitHub Actions:**
+- [Combined run 38033528668](https://github.com/k1moradi/swapz/actions/runs/38033528668):
+  PASS, `COMBINED_TESTED_HEAD=f5379bc048b868be88210023229cdd133910c46c`,
+  15/15 new GC compressed C tests, 17/17 previous GC source C tests,
+  30/30 kernel range C tests, 20/20 workflow-contract tests,
+  broker 3/3 fresh-process repeats, and NBD stress 25/25.
+- [Teardown run 38033528694](https://github.com/k1moradi/swapz/actions/runs/38033528694):
+  PASS, same SHA, 15/15 + 17/17 + 30/30 + 20/20 respective suites.
+- [NBD source run 38033528707](https://github.com/k1moradi/swapz/actions/runs/38033528707):
+  PASS on the same SHA.
+
+**Safety boundary:** source-extracted C under mocked batch callbacks
+is not a complete kernel module build, real GC, concurrent swap
+traffic, physical-device audit, failure-injection test or production
+cleanup approval. No privileged kernel/module, live swap/DM/loop/NBD
+or destructive operations were performed. No Codex owner or broker
+files were changed. The V2.2 strategy/batch winner is
+**UNDETERMINED**.

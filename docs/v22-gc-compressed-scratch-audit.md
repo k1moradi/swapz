@@ -74,3 +74,16 @@ Next audit: generation advancement before nested GC under foreground
 allocation failure; stale generation wrap after 2^32 changes; FUA and
 failed lower write completion; actual kernel GC with partially live
 containers. V2.2 strategy and batch winner remain UNDETERMINED.
+
+## Exact source CI qualification
+
+Three workflows passed on the identical executable source
+`f5379bc048b868be88210023229cdd133910c46c`:
+[combined](https://github.com/k1moradi/swapz/actions/runs/38033528668),
+[teardown](https://github.com/k1moradi/swapz/actions/runs/38033528694),
+[standalone NBD](https://github.com/k1moradi/swapz/actions/runs/38033528707).
+Both joint workflows ran 15/15 new GC compressed C tests, 17/17 previous
+GC source tests, 30/30 kernel range C tests and 20/20 workflow-contract
+tests. Combined also passed 25/25 standalone-process NBD repetitions.
+None of these replace privileged, real-device or actual kernel GC
+qualification.
