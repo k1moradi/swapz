@@ -1078,6 +1078,51 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 	u32 block_index;
 	int error = buffer->io_error;
 
+	/*
+	 * The callback only reports I/O completion; it does not validate the
+	 * worker-owned batch metadata. Inspect the entire batch before completing
+	 * any upper BIO, clearing a staged reference, or publishing a mapping.
+	 * A late corrupt descriptor must not partially commit earlier records.
+	 */
+	if (unlikely(!buffer->block_count ||
+		     buffer->block_count > context->max_batch_blocks ||
+		     buffer->start_block >= context->physical_blocks ||
+		     buffer->block_count >
+			     context->physical_blocks - buffer->start_block))
+		goto corrupt;
+
+	for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+		const struct swapz_write_batch_block *block =
+			&buffer->blocks[block_index];
+		u32 record_index;
+
+		if (unlikely(!block->record_count ||
+			     block->record_count > SWAPZ_MAX_PACKED_RECORDS))
+			goto corrupt;
+
+		for (record_index = 0; record_index < block->record_count;
+		     ++record_index) {
+			const struct swapz_write_batch_record *record =
+				&block->records[record_index];
+
+			if (unlikely(record->logical_page >= context->logical_pages ||
+				     record->record_index != record_index ||
+				     (record->flags != 0 &&
+				      record->flags != SWAPZ_MAP_COMPRESSED)))
+				goto corrupt;
+
+			if (record->flags == 0) {
+				if (unlikely(block->record_count != 1 ||
+					     record->stored_length != SWAPZ_BLOCK_BYTES))
+					goto corrupt;
+			} else if (unlikely(!record->stored_length ||
+					    record->stored_length >
+						    SWAPZ_MAX_COMPRESSED_BYTES)) {
+				goto corrupt;
+			}
+		}
+	}
+
 	if (error) {
 		bool retain = false;
 
@@ -1177,6 +1222,17 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 
 	swapz_reset_stream_buffer(context, buffer, SWAPZ_BUFFER_FREE);
 	return 0;
+
+corrupt:
+	/*
+	 * Keep the buffer resident even when corruption prevents proving
+	 * whether an already-acknowledged staged record remains authoritative.
+	 * The reaper performs bounded failure completion for outstanding BIOs;
+	 * it must not recycle source pages that may be needed for swap-in.
+	 */
+	swapz_set_failed(context, -EUCLEAN);
+	buffer->state = SWAPZ_BUFFER_INFLIGHT;
+	return -EUCLEAN;
 }
 
 static int swapz_reap_inflight(struct swapz_context *context, bool wait)
