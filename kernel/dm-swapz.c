@@ -991,16 +991,27 @@ static void swapz_complete_buffer_bios(struct swapz_context *context,
 		struct swapz_write_batch_block *block = &buffer->blocks[block_index];
 		u32 record_index;
 
-		for (record_index = 0; record_index < block->record_count;
+		/*
+		 * A failed compactor may have rejected corrupt in-memory metadata.
+		 * Never re-trust its count or logical index while failing upper BIOs.
+		 */
+		if (unlikely(block->record_count > SWAPZ_MAX_PACKED_RECORDS))
+			swapz_set_failed(context, -EUCLEAN);
+		for (record_index = 0;
+		     record_index < min_t(u32, block->record_count,
+					  SWAPZ_MAX_PACKED_RECORDS);
 		     ++record_index) {
 			struct swapz_write_batch_record *record =
 				&block->records[record_index];
 
 			if (!record->bio)
 				continue;
-			swapz_clear_staged_ref(context, record->logical_page,
+			if (likely(record->logical_page < context->logical_pages))
+				swapz_clear_staged_ref(context, record->logical_page,
 					       record->generation, buffer->id,
 					       block_index, record->record_index);
+			else
+				swapz_set_failed(context, -EUCLEAN);
 			swapz_complete_bio(record->bio, error);
 			record->bio = NULL;
 		}
@@ -1973,7 +1984,9 @@ static int swapz_read_staged(struct swapz_context *context,
 	if (ref->block_index >= buffer->block_count)
 		return -EUCLEAN;
 	block = &buffer->blocks[ref->block_index];
-	if (ref->record_index >= block->record_count)
+	if (block->record_count > SWAPZ_MAX_PACKED_RECORDS ||
+	    ref->record_index >= block->record_count ||
+	    ref->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 		return -EUCLEAN;
 	record = &block->records[ref->record_index];
 	if (record->logical_page != logical_page ||
