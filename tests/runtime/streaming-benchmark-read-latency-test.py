@@ -122,6 +122,12 @@ class ExactReaderLatencyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "malformed or aggregated"):
             collector.collect(self.json, self.log, self.sidecar)
 
+    def test_excessive_fio_log_line_is_bounded(self):
+        self.log.write_text("9" * 1024 + "\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "line exceeds bounded length"):
+            collector.collect(self.json, self.log, self.sidecar)
+        self.assertFalse(self.sidecar.exists())
+
     def test_timestamp_reversal_rejected(self):
         self.log.write_text("1, 100, 0, 4096\n0, 200, 0, 4096\n",
                             encoding="utf-8")
