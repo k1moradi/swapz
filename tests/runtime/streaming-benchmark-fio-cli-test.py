@@ -73,8 +73,11 @@ class RealFioReaderLogIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="swapz-fio-paired-") as directory:
             root = Path(directory)
             data = root / "two-job-regular-file"
+            sentinel = b"SWAPZ_V22_PROBE_" * 256
             with data.open("wb") as stream:
                 stream.truncate(128 * 1024)
+                stream.seek(128 * 1024 - 4096)
+                stream.write(sentinel)
             prefix = root / "paired-reader"
             job = root / "paired.fio"
             output = root / "paired.json"
@@ -130,6 +133,11 @@ class RealFioReaderLogIntegration(unittest.TestCase):
             self.assertEqual(summary["read_count"],
                              jobs["reader"]["read"]["total_ios"])
             self.assertGreater(summary["read_p99_ns"], 0)
+            # Also verify that fio's actual offset/size semantics exclude the
+            # reserved final 4 KiB sentinel under the concurrent writer.
+            with data.open("rb") as stream:
+                stream.seek(128 * 1024 - 4096)
+                self.assertEqual(stream.read(4096), sentinel)
 
 
 if __name__ == "__main__":
