@@ -1567,3 +1567,17 @@ See `docs/v22-independent-upper-bio-ownership-audit.md`.
 - [ ] Independently qualify the newer PR #9 kernel source on native Linux at current main (W=1 module, exact-C ownership/async/compaction tests) after Codex's separate read-only GC/lifecycle assignment. Do not attribute PR #8's prior native report to it.
 - [ ] Investigate only demonstrated outstanding owner-list corruption, cross-buffer callback or GC edge cases; no arbitrary-corruption-recovery or real-device durability claims.
 - [ ] Measure actual per-BIO slot and O(records + owners) admission CPU/RAM costs before any policy/batch decision. V2.2 winner stays **UNDETERMINED**.
+
+### 2026-10-10 — Independent pending compressed-pack upper BIO ownership (PR #12)
+
+- [x] Review Codex's 94/94 rootless GC/range/mapping evidence at older `24e2794b`. Confirmed no demonstrated normal serialized ownership defect; isolated count-dependent pending-pack failure model.
+- [x] Compile an old-count cleanup mutant: accepted pending upper BIO with `pack_record_count=0` remains incomplete. Also test truncated count, oversized count, duplicate pointer, repeated cleanup, full 64-record pack, GC-only NULL upper owners and failed staging.
+- [x] Reuse each accepted BIO's existing per-BIO list node in `context->pending_bios`. Compare bounded pending slots against exact registered owners before append/flush; transfer node to stream ledger only when staging succeeds; drain the independent pack ledger on failure without reading malformed counts.
+- [x] Exercise real production `swapz_stage_write_block()` pending-to-stream list transfer in the FUA harness. New pending-pack exact-production-C suite: **11/11** methods. Existing staging/FUA suite: **9/9**. Wire all applicable mandatory rootless workflows and omission mutation.
+- [x] Merge [PR #12](https://github.com/k1moradi/swapz/pull/12) at `13451799dc44dd9126d59720568d8116acd9fb61`. Exact post-merge kernel (38063553855), combined (38063553874), teardown (38063553857), NBD (38063553854) **PASS**.
+- [ ] Independently build the newly changed module with native Linux `W=1` and rerun new rootless contracts on that exact SHA; older Codex `24e2794b` evidence must not be substituted.
+- [ ] Characterize O(pending pack size) preflight overhead per compressed append and evaluate real loaded-kernel performance before policy/batch selection.
+- [ ] Retain conservative indefinite async-callback teardown wait unless a documented lower-I/O cancellation / lifetime-revocation guarantee is established. Do not free callback-owned memory merely after a watchdog timeout.
+- [ ] Loaded module, actual DM/swap/loop/NBD/device, pressure and destructive fault qualification require separate explicit authorization. V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+See `docs/v22-pending-pack-ownership-audit.md`.
