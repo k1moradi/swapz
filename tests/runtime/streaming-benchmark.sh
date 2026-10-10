@@ -67,7 +67,7 @@ if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )
   exit 4
 fi
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in awk blockdev dmsetup fio modprobe python3; do
+for tool in awk blockdev cmp dd dmsetup fio modprobe python3; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 # Preserve a second fail-closed guard after setup as defense in depth.
@@ -76,6 +76,11 @@ NULLBLK_TICK_BYTES=$(( BANDWIDTH > 0 ? (1048576 / NULLBLK_TICKS_PER_SEC) * BANDW
 LOGICAL_MIB=32
 COLD_MIB=4
 WRITER_MIB=$((LOGICAL_MIB - COLD_MIB))
+# Reserve the final 4 KiB logical page as an independent compressed readback
+# sentinel. Fio's writer never overlaps it. This is a limited integrity probe,
+# NOT proof of the correctness of all random writes.
+SENTINEL_PAGE=$(( LOGICAL_MIB * 256 - 1 ))
+WRITER_BYTES=$(( WRITER_MIB * 1048576 - 4096 ))
 TMP=$(mktemp -d /dev/shm/swapz-v22-stream.XXXXXX)
 TAG="$$-$RANDOM"
 TARGET="swapz-v22-stream-$TAG"
@@ -255,6 +260,8 @@ run_case() {
   local fiofile="$TMP/${strategy}-${batch}.fio"
   local json="$TMP/${strategy}-${batch}.json"
   local before after status start_ns end_ns read_log_prefix latency_summary
+  local sentinel="$TMP/${strategy}-${batch}.sentinel"
+  local sentinel_read="$TMP/${strategy}-${batch}.sentinel.readback"
   read_log_prefix="$TMP/${strategy}-${batch}-reader"
 
   # Never reuse the target name if a prior case failed to remove it.
@@ -271,6 +278,16 @@ run_case() {
     return 1
   fi
   prefill_cold "$path"
+  # Write and persist a known compressible page before the timed workload.
+  # Its logical page is never targeted by the fio writer or reader.
+  python3 - "$sentinel" <<'PY'
+import sys
+with open(sys.argv[1], "xb") as out:
+    out.write(b"SWAPZ_V22_PROBE_" * 256)
+PY
+  dd if="$sentinel" of="$path" bs=4096 count=1 seek="$SENTINEL_PAGE" \
+      oflag=direct conv=notrunc status=none
+  flush_device "$path"
 
   cat >"$fiofile" <<EOF
 [global]
@@ -287,7 +304,7 @@ percentile_list=50:90:95:99:99.9
 filename=$path
 rw=randwrite
 offset=${COLD_MIB}M
-size=${WRITER_MIB}M
+size=$WRITER_BYTES
 iodepth=$WRITE_QD
 refill_buffers=1
 buffer_compress_percentage=$COMPRESS
@@ -324,6 +341,14 @@ EOF
   latency_summary=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-read-latency.py" \
       --fio-json "$json" --fio-clat-log "${read_log_prefix}_clat.log" \
       --sidecar "$TMP/${strategy}-${batch}.latbin") || return 1
+  # Verify post-drain data without including this read in lower-I/O counters.
+  # Any mismatch fails the entire case; never publish misleading good p99.
+  dd if="$path" of="$sentinel_read" bs=4096 count=1 skip="$SENTINEL_PAGE" \
+      iflag=direct status=none
+  if ! cmp -s "$sentinel" "$sentinel_read"; then
+    echo "ERROR: post-drain compressed sentinel readback differs; preserve fixture and diagnostics" >&2
+    return 1
+  fi
   status=$(dmsetup status "$TARGET")
   grep -q "failed=0" <<<"$status"
 
@@ -389,6 +414,9 @@ row = {
     "lower_read_ios": a[0]-b[0], "lower_read_sectors": a[1]-b[1],
     "lower_write_ios": lower_ios, "lower_write_sectors": lower_sectors,
     "status": s,
+    # One protected compressed page survived the fio workload and flush.
+    # This is NOT full random-writer data integrity attestation.
+    "isolated_sentinel_readback_ok": True,
     # Exact fio read samples are retained separately from the non-qualifying
     # summarized fio read_p99_ms and unverified lower-counter window.
     "exact_read_latency": exact_latency,
