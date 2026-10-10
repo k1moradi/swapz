@@ -76,6 +76,25 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn("upper=123.000MiB/s", text)
         self.assertIn("read_count=200", text)
 
+    def test_exact_reader_summary_is_checked_and_labeled_diagnostic(self):
+        item = row()
+        item["exact_read_latency"] = {"read_count": 200,
+                                      "read_p99_ns": 2500000}
+        text = reporter.report(self.read([item]))
+        self.assertIn("p99_src=fio_clat_exact", text)
+        self.assertIn("read_p99=2.500ms", text)
+        for bad in ({"read_count": 201, "read_p99_ns": 2500000},
+                    {"read_count": 200, "read_p99_ns": 2500001},
+                    {"read_count": True, "read_p99_ns": 2500000},
+                    {"read_count": 200, "read_p99_ns": 0},
+                    "untrusted"):
+            with self.subTest(bad=bad):
+                corrupt = row()
+                corrupt["exact_read_latency"] = bad
+                with self.assertRaisesRegex(ValueError, "exact reader summary"):
+                    self.read([corrupt])
+        self.assertIn("p99_src=legacy_unverified", reporter.report(self.read([row()])))
+
     def test_reporter_cannot_nominate_winner_even_with_three_strategies(self):
         observations = [row(strategy="immediate", batch=4),
                         row(strategy="staged", batch=128),
