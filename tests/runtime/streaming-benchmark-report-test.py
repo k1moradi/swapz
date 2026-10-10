@@ -112,7 +112,8 @@ class StreamingReportingTests(unittest.TestCase):
         item["isolated_sentinel_readback_ok"] = True
         report = reporter.report(self.read([item]))
         self.assertIn("sentinel=pass", report)
-        self.assertIn("NOT complete writer-range verification", report)
+        self.assertIn("integrity_sentinel = ONE protected 4 KiB", report)
+        self.assertIn("writer_crc32c=unverified", report)
         self.assertIn("sentinel=unverified", reporter.report(self.read([row()])))
         for bad in (False, 1, None, "true"):
             with self.subTest(bad=bad):
