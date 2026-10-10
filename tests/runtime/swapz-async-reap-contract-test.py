@@ -455,6 +455,39 @@ static int scenario(int id) {
                 block.records[0].bio != NULL)
                 return 41;
         }
+    } else if (id>=31 && id<=33) {
+        /* Same-count identity corruption must fail before publishing
+         * even one mapping, and complete only this buffer's owned BIOs. */
+        setup(true,false);
+        c.max_batch_blocks=2;
+        s->block_count=2;
+        blocks[1].record_count=1;
+        blocks[1].records[0].logical_page=1;
+        blocks[1].records[0].generation=7;
+        blocks[1].records[0].stored_length=4;
+        blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        blocks[1].records[0].bio=&b2;
+        b2.entry.block_index=1;
+        b2.entry.record_index=0;
+        list_add_tail(&b2.entry.list,&s->owned_bios);
+        if (id==31) {
+            /* Two descriptors both point at b; b2 remains owned. */
+            blocks[1].records[0].bio=&b;
+        } else if (id==32) {
+            /* Swapped pointers, unchanged outstanding owner count. */
+            block.records[0].bio=&b2;
+            blocks[1].records[0].bio=&b;
+        } else {
+            /* Index is valid but owner slot is stale after movement. */
+            b2.entry.block_index=0;
+        }
+        swapz_stream_io_complete(id==32?1:0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed || c.installed || c.resets ||
+            s->state!=SWAPZ_BUFFER_INFLIGHT ||
+            b.completes!=1 || b2.completes!=1 ||
+            b.error!=-EUCLEAN || b2.error!=-EUCLEAN ||
+            !list_empty(&s->owned_bios)) return 43;
     } else if (id==30) {
         /* Descriptor lost its BIO pointer, but independent ownership remains.
          * Reject the whole finalization before mapping publication or reset. */
@@ -481,7 +514,7 @@ static int scenario(int id) {
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>30) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>33) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -561,6 +594,11 @@ class AsyncReapExactC(unittest.TestCase):
                           text=True,timeout=3)
         self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
         self.assertIn("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION",cp.stdout)
+
+    def test_count_preserving_identity_corruption_fails_without_publication(self):
+        for case in (31,32,33):
+            with self.subTest(case=case):
+                self.run_case(case)
 
     def test_missing_record_bio_pointer_cannot_orphan_registered_owner(self):
         self.run_case(30)
