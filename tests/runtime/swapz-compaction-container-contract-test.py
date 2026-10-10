@@ -126,8 +126,8 @@ struct swapz_stream_buffer {
 };
 struct swapz_context {
     u32 logical_pages;
-    u32 generations[4];
-    struct swapz_staged_ref staged_refs[4];
+    u32 generations[SWAPZ_MAX_PACKED_RECORDS];
+    struct swapz_staged_ref staged_refs[SWAPZ_MAX_PACKED_RECORDS];
     u32 max_batch_blocks;
     u32 segment_write_block;
     bool failed;
@@ -207,29 +207,97 @@ static void prepare_block(struct swapz_stream_buffer *buffer,
     memcpy(block_data + SWAPZ_BLOCK_BYTES - 4, "ABCD", 4);
 }
 
+static void prepare_overlapping_block(struct swapz_stream_buffer *buffer,
+                                      bool partial)
+{
+    u8 *block_data = buffer->data;
+    struct swapz_container_disk *container = (void *)block_data;
+    unsigned int record_index;
+    unsigned int payload_start = SWAPZ_CONTAINER_BASE_BYTES +
+        SWAPZ_MAX_PACKED_RECORDS * sizeof(struct swapz_record_disk);
+    unsigned int length = SWAPZ_MAX_COMPRESSED_BYTES -
+        (partial ? SWAPZ_MAX_PACKED_RECORDS : 0);
+
+    memset(block_data, 0, SWAPZ_BLOCK_BYTES);
+    container->magic = SWAPZ_CONTAINER_MAGIC;
+    container->version = SWAPZ_CONTAINER_VERSION;
+    container->record_count = SWAPZ_MAX_PACKED_RECORDS;
+    memset(block_data + payload_start, 0xa5, SWAPZ_BLOCK_BYTES - payload_start);
+    for (record_index = 0; record_index < SWAPZ_MAX_PACKED_RECORDS;
+         ++record_index) {
+        struct swapz_record_disk *disk_record =
+            swapz_container_record(block_data, record_index);
+        struct swapz_write_batch_record *record =
+            &buffer->blocks[0].records[record_index];
+
+        record->logical_page = record_index;
+        record->generation = 1;
+        record->record_index = record_index;
+        record->stored_length = length;
+        record->flags = SWAPZ_MAP_COMPRESSED;
+        disk_record->logical_page = record_index;
+        disk_record->offset = payload_start + (partial ? record_index : 0);
+        disk_record->length = length;
+    }
+    buffer->blocks[0].record_count = SWAPZ_MAX_PACKED_RECORDS;
+}
+
+static void prepare_adjacent_block(struct swapz_stream_buffer *buffer)
+{
+    u8 *block_data = buffer->data;
+    struct swapz_container_disk *container = (void *)block_data;
+    unsigned int record_index;
+
+    memset(block_data, 0, SWAPZ_BLOCK_BYTES);
+    container->magic = SWAPZ_CONTAINER_MAGIC;
+    container->version = SWAPZ_CONTAINER_VERSION;
+    container->record_count = 2;
+    buffer->blocks[0].record_count = 2;
+    for (record_index = 0; record_index < 2; ++record_index) {
+        struct swapz_record_disk *disk_record =
+            swapz_container_record(block_data, record_index);
+        struct swapz_write_batch_record *record =
+            &buffer->blocks[0].records[record_index];
+        u16 offset = SWAPZ_BLOCK_BYTES - (record_index + 1) * 4;
+
+        record->logical_page = record_index;
+        record->generation = 1;
+        record->record_index = record_index;
+        record->stored_length = 4;
+        record->flags = SWAPZ_MAP_COMPRESSED;
+        disk_record->logical_page = record_index;
+        disk_record->offset = offset;
+        disk_record->length = 4;
+        memset(block_data + offset, 'A' + record_index, 4);
+    }
+}
+
 static int run_case(unsigned int scenario, bool mutant)
 {
     struct swapz_context context = {0};
     struct bio pending_bio = {0};
     struct swapz_stream_buffer buffer = {0};
-    struct swapz_write_batch_block blocks[2] = {0};
-    struct swapz_write_batch_block original_blocks[2];
-    u8 data[2 * SWAPZ_BLOCK_BYTES] = {0};
+    struct swapz_write_batch_block blocks[SWAPZ_MAX_PACKED_RECORDS] = {0};
+    struct swapz_write_batch_block original_blocks[SWAPZ_MAX_PACKED_RECORDS];
+    u8 data[SWAPZ_MAX_PACKED_RECORDS * SWAPZ_BLOCK_BYTES] = {0};
     u8 original_data[sizeof(data)];
-    struct swapz_staged_ref original_refs[4];
+    struct swapz_staged_ref original_refs[SWAPZ_MAX_PACKED_RECORDS];
     struct swapz_container_disk *container;
     struct swapz_record_disk *disk_record;
     struct swapz_write_batch_record *record;
     unsigned int corrupt_block = scenario == 11 ? 1 : 0;
+    unsigned int record_index;
 
     context.repack_buffer = context.repack_storage;
     context.io_buffer = context.io_storage;
     context.compressed_buffer = context.compressed_storage;
-    context.logical_pages = 4;
+    context.logical_pages = (scenario == 19 || scenario == 20) ?
+        SWAPZ_MAX_PACKED_RECORDS : 4;
     context.generations[0] = 1;
     context.generations[1] = 1;
-    context.max_batch_blocks = 2;
-    context.segment_write_block = 2;
+    context.max_batch_blocks = (scenario == 19 || scenario == 20) ?
+        SWAPZ_MAX_PACKED_RECORDS : 2;
+    context.segment_write_block = (scenario == 19 || scenario == 20) ? 1 : 2;
     buffer.data = data;
     buffer.blocks = blocks;
     buffer.block_count = scenario == 18 ? 3 : (scenario == 11 ? 2 : 1);
@@ -237,11 +305,33 @@ static int run_case(unsigned int scenario, bool mutant)
     if (buffer.block_count >= 2)
         prepare_block(&buffer, 1, 1);
 
-    context.staged_refs[0] = (struct swapz_staged_ref){
-        .generation=1, .buffer_id=0, .block_index=0, .record_index=0, .valid=1};
-    context.staged_refs[1] = (struct swapz_staged_ref){
-        .generation=1, .buffer_id=0, .block_index=1, .record_index=0,
-        .valid=buffer.block_count >= 2};
+    if (scenario == 19 || scenario == 20) {
+        prepare_overlapping_block(&buffer, scenario == 20);
+        for (record_index = 0; record_index < SWAPZ_MAX_PACKED_RECORDS;
+             ++record_index) {
+            context.generations[record_index] = 1;
+            context.staged_refs[record_index] = (struct swapz_staged_ref){
+                .generation=1, .buffer_id=0, .block_index=0,
+                .record_index=record_index, .valid=1};
+        }
+    } else if (scenario == 21) {
+        prepare_adjacent_block(&buffer);
+        context.staged_refs[0] = (struct swapz_staged_ref){
+            .generation=1, .buffer_id=0, .block_index=0,
+            .record_index=0, .valid=1};
+        context.staged_refs[1] = (struct swapz_staged_ref){
+            .generation=1, .buffer_id=0, .block_index=0,
+            .record_index=1, .valid=1};
+    }
+
+    if (scenario != 19 && scenario != 20 && scenario != 21) {
+        context.staged_refs[0] = (struct swapz_staged_ref){
+            .generation=1, .buffer_id=0, .block_index=0,
+            .record_index=0, .valid=1};
+        context.staged_refs[1] = (struct swapz_staged_ref){
+            .generation=1, .buffer_id=0, .block_index=1, .record_index=0,
+            .valid=buffer.block_count >= 2};
+    }
 
     container = (void *)(data + corrupt_block * SWAPZ_BLOCK_BYTES);
     disk_record = swapz_container_record(container, 0);
@@ -275,6 +365,9 @@ static int run_case(unsigned int scenario, bool mutant)
     case 16: container->record_count = 65; break;
     case 17: record->flags |= 4; break;
     case 18: break; /* Resident block count exceeds allocated capacity. */
+    case 19: break; /* 64 compressed records alias the same payload extent. */
+    case 20: break; /* 64 compressed extents overlap pairwise. */
+    case 21: break; /* Adjacent payload ranges remain valid. */
     default: return 60;
     }
 
@@ -288,15 +381,30 @@ static int run_case(unsigned int scenario, bool mutant)
     swapz_compact_fill_buffer(&context, &buffer);
 
     if (mutant) {
-        /* Demonstrate the removed preflight silently repacks bad version 2. */
-        if (scenario != 1 || context.failed ||
-            ((struct swapz_container_disk *)data)->version != 1)
-            return 70;
-        puts("OLD_VERSION_REPACKING_COUNTEREXAMPLE");
-        return 0;
+        if (scenario == 1) {
+            /* Demonstrate the removed preflight silently repacks bad version 2. */
+            if (context.failed ||
+                ((struct swapz_container_disk *)data)->version != 1)
+                return 70;
+            puts("OLD_VERSION_REPACKING_COUNTEREXAMPLE");
+            return 0;
+        }
+        if (scenario == 19 || scenario == 20) {
+            /* Overlap duplicates one payload into 64 unreserved output blocks. */
+            if (context.failed ||
+                buffer.block_count != SWAPZ_MAX_PACKED_RECORDS ||
+                context.segment_write_block != 1 ||
+                !memcmp(data, original_data, sizeof(data)) ||
+                context.staged_refs[63].block_index != 63 ||
+                context.staged_refs[63].record_index != 0)
+                return 70;
+            puts("OLD_OVERLAP_EXPANSION_COUNTEREXAMPLE");
+            return 0;
+        }
+        return 71;
     }
 
-    if (scenario == 0 || scenario == 13) {
+    if (scenario == 0 || scenario == 13 || scenario == 21) {
         if (context.failed || buffer.block_count != 1 ||
             context.staged_refs[0].valid != 1)
             return 71;
@@ -305,6 +413,12 @@ static int run_case(unsigned int scenario, bool mutant)
             return 72;
         if (scenario == 13 && data[0] != 'Q')
             return 73;
+        if (scenario == 21 &&
+            (blocks[0].record_count != 2 ||
+             data[SWAPZ_BLOCK_BYTES - 4] != 'A' ||
+             data[SWAPZ_BLOCK_BYTES - 8] != 'B' ||
+             context.staged_refs[1].record_index != 1))
+            return 74;
         return 0;
     }
 
@@ -332,7 +446,7 @@ int main(int argc, char **argv)
     if (argc != 3)
         return 80;
     scenario = strtoul(argv[1], &end, 10);
-    if (!end || *end || scenario > 18)
+    if (!end || *end || scenario > 21)
         return 81;
     error = run_case((unsigned int)scenario, argv[2][0] == 'm');
     if (!error)
@@ -394,7 +508,10 @@ class CompactionContainerContracts(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn(f"COMPACTION_CASE_{scenario}_OK", result.stdout)
         if mutant:
-            self.assertIn("OLD_VERSION_REPACKING_COUNTEREXAMPLE", result.stdout)
+            marker = ("OLD_OVERLAP_EXPANSION_COUNTEREXAMPLE"
+                      if scenario in (19, 20)
+                      else "OLD_VERSION_REPACKING_COUNTEREXAMPLE")
+            self.assertIn(marker, result.stdout)
 
     def test_valid_compressed_and_raw_records(self):
         for scenario in (0, 13):
@@ -402,12 +519,20 @@ class CompactionContainerContracts(unittest.TestCase):
                 self.run_contract(scenario)
 
     def test_corrupted_metadata_rejected_without_partial_repack(self):
-        for scenario in (*range(1, 13), 14, 15, 16, 17, 18):
+        for scenario in (*range(1, 13), 14, 15, 16, 17, 18, 19, 20):
             with self.subTest(scenario=scenario):
                 self.run_contract(scenario)
 
     def test_unchecked_production_compactor_accepts_corrupt_version(self):
         self.run_contract(1, mutant=True)
+
+    def test_unchecked_compactor_expands_overlapping_payloads(self):
+        for scenario in (19, 20):
+            with self.subTest(scenario=scenario):
+                self.run_contract(scenario, mutant=True)
+
+    def test_adjacent_nonoverlapping_payloads_remain_valid(self):
+        self.run_contract(21)
 
     def test_missing_preflight_call_is_rejected(self):
         compactor = exact_function(self.source, "swapz_compact_fill_buffer")

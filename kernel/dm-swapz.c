@@ -783,6 +783,7 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 			const struct swapz_write_batch_record *record =
 				&block->records[record_index];
 			const struct swapz_record_disk *disk_record;
+			unsigned int previous_index;
 			unsigned int offset;
 			unsigned int length;
 
@@ -797,11 +798,31 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 			length = le16_to_cpu(disk_record->length);
 			if (le32_to_cpu(disk_record->logical_page) != record->logical_page ||
 			    !length || length != record->stored_length ||
-			    length > SWAPZ_MAX_COMPRESSED_BYTES ||
-			    offset < descriptor_end ||
-			    offset > SWAPZ_BLOCK_BYTES ||
-			    length > SWAPZ_BLOCK_BYTES - offset)
+				length > SWAPZ_MAX_COMPRESSED_BYTES ||
+				offset < descriptor_end ||
+				offset > SWAPZ_BLOCK_BYTES ||
+				length > SWAPZ_BLOCK_BYTES - offset)
 				return -EUCLEAN;
+
+			/*
+			 * The packer stores each payload once. Overlapping extents could
+			 * make repacking expand one reserved source block into many output
+			 * blocks, overwriting staged input and physical reservations.
+			 */
+			for (previous_index = 0; previous_index < record_index;
+			     ++previous_index) {
+				const struct swapz_record_disk *previous_disk_record =
+					swapz_container_record_const(block_data,
+							     previous_index);
+				unsigned int previous_offset =
+					le16_to_cpu(previous_disk_record->offset);
+				unsigned int previous_length =
+					le16_to_cpu(previous_disk_record->length);
+
+				if (offset < previous_offset + previous_length &&
+				    previous_offset < offset + length)
+					return -EUCLEAN;
+			}
 		}
 	}
 
