@@ -26,7 +26,7 @@ LATENCY_RECORD = struct.Struct("!QQ")
 SIDECAR_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,120}\.latbin\Z")
 
 
-def _source_lines(path: Path, size_limit: int):
+def _source_lines(path: Path, size_limit: int, line_limit: int):
     """Read a bounded ordinary log using a pinned non-symlink descriptor."""
     flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
     descriptor = os.open(path, flags)
@@ -37,7 +37,17 @@ def _source_lines(path: Path, size_limit: int):
             raise ValueError("input must be a bounded singly-linked regular file")
         with os.fdopen(descriptor, "r", encoding="utf-8", newline="") as stream:
             descriptor = -1  # stream now owns the descriptor
-            yield from stream
+            bytes_read = 0
+            while True:
+                line = stream.readline(line_limit + 1)
+                if not line:
+                    break
+                if len(line) > line_limit:
+                    raise ValueError("input log line exceeds bounded length")
+                bytes_read += len(line.encode("utf-8"))
+                if bytes_read > size_limit:
+                    raise ValueError("input grew beyond bounded size")
+                yield line
             after = os.fstat(stream.fileno())
             signature = lambda state: (state.st_dev, state.st_ino, state.st_size,
                                        state.st_mtime_ns, state.st_ctime_ns,
@@ -50,7 +60,7 @@ def _source_lines(path: Path, size_limit: int):
 
 
 def _fio_read_count(path: Path) -> int:
-    raw = "".join(_source_lines(path, MAX_JSON_BYTES))
+    raw = "".join(_source_lines(path, MAX_JSON_BYTES, MAX_JSON_BYTES))
     def reject_duplicates(pairs):
         result = {}
         for key, value in pairs:
@@ -81,7 +91,7 @@ def collect(fio_json: Path, fio_clat_log: Path, sidecar: Path) -> dict[str, obje
     frequencies: Counter[int] = Counter()
     observed = 0
     last_timestamp = -1
-    for line in _source_lines(fio_clat_log, MAX_LOG_BYTES):
+    for line in _source_lines(fio_clat_log, MAX_LOG_BYTES, 256):
         fields = line.strip().split(",")
         if not 4 <= len(fields) <= 7 or any(
                 re.fullmatch(r"[0-9]+", field.strip()) is None for field in fields):
