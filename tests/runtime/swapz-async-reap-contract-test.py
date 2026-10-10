@@ -108,10 +108,14 @@ typedef uint16_t u16;
 typedef uint8_t u8;
 #define SWAPZ_ASYNC_WATCHDOG_MS 30000U
 #define SWAPZ_BLOCK_BYTES 4096U
+#define SWAPZ_MAX_PACKED_RECORDS 64U
 #define SWAPZ_BUFFER_FREE 0U
 #define SWAPZ_BUFFER_FILL 1U
 #define SWAPZ_BUFFER_INFLIGHT 2U
 #define unlikely(x) (x)
+#define likely(x) (x)
+#define min(a,b) ((a)<(b)?(a):(b))
+#define min_t(t,a,b) ((t)(a)<(t)(b)?(t)(a):(t)(b))
 #define READ_ONCE(x) (x)
 #define WRITE_ONCE(x,y) ((x)=(y))
 #define msecs_to_jiffies(x) (x)
@@ -134,7 +138,7 @@ struct swapz_write_batch_record {
 struct swapz_write_batch_block {
     u8 record_count;
     bool compaction;
-    struct swapz_write_batch_record records[2];
+    struct swapz_write_batch_record records[SWAPZ_MAX_PACKED_RECORDS];
 };
 struct swapz_stream_buffer {
     struct swapz_context *context;
@@ -159,6 +163,7 @@ struct swapz_context {
     struct swapz_stream_buffer stream_buffers[2];
     struct swapz_staged_ref staged_refs[2];
     u32 generations[2];
+    u32 logical_pages, max_batch_blocks;
     struct swapz_stats stats;
     int inflight_buffer_id, installed, resets, failed_events;
     bool failed, accepting_io;
@@ -218,6 +223,8 @@ static void setup(bool outstanding, bool early) {
     stream->state=SWAPZ_BUFFER_INFLIGHT;
     stream->id=0;
     c.generations[0]=7;
+    c.logical_pages=2;
+    c.max_batch_blocks=1;
     c.inflight_buffer_id=0;
     c.accepting_io=true;
     c.async_callbacks.value=1;

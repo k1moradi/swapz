@@ -11,6 +11,7 @@ on:
       - 'tests/runtime/swapz-async-reap-contract-test.py'
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
+      - 'tests/runtime/swapz-compaction-container-contract-test.py'
       - '.github/workflows/rootless-kernel-source.yml'
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - 'tests/runtime/swapz-async-reap-contract-test.py'
       - 'tests/runtime/swapz-flush-fua-contract-test.py'
       - 'tests/runtime/swapz-mapping-accounting-contract-test.py'
+      - 'tests/runtime/swapz-compaction-container-contract-test.py'
       - '.github/workflows/rootless-kernel-source.yml'
   workflow_dispatch:
 
@@ -53,7 +55,8 @@ jobs:
             tests/runtime/swapz-generation-gc-transaction-test.py \
             tests/runtime/swapz-async-reap-contract-test.py \
             tests/runtime/swapz-flush-fua-contract-test.py \
-            tests/runtime/swapz-mapping-accounting-contract-test.py
+            tests/runtime/swapz-mapping-accounting-contract-test.py \
+            tests/runtime/swapz-compaction-container-contract-test.py
 
       - name: Execute exact production-C range guards
         shell: bash
@@ -84,6 +87,12 @@ jobs:
         run: |
           set -euo pipefail
           timeout 25s python3 -B tests/runtime/swapz-mapping-accounting-contract-test.py -v
+      - name: Execute malformed compressed-container compaction contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 25s python3 -B tests/runtime/swapz-compaction-container-contract-test.py -v
+
       - name: Execute exact-C preflush and FUA flags contract
         shell: bash
         run: |

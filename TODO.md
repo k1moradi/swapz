@@ -1435,3 +1435,24 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       segment recycle on separately authorized disposable kernel
       infrastructure; rootless failure-state checks are not device
       corruption, device drain or physical persistence evidence.
+
+### 2026-10-10 — Compaction-container rootless audit candidate (PR #3)
+
+- [x] Audit `swapz_compact_fill_buffer()` against read/staged decoders on
+      source `1fd24f6ba8368a35153e7d2f1405ac633bac86c7`.
+- [x] Add read-only whole-batch preflight before in-place compressed repacking
+      and bound subsequent upper-BIO failure/staged-read indices.
+- [x] Compile exact production C with malformed versions, counts, offsets,
+      flags, lengths and late-block fault scenarios; execute an old-behavior
+      mutation demonstrating invalid version acceptance.
+- [x] Add mandatory isolated-kernel, combined and teardown rootless test gates.
+- [x] Obtain isolated kernel source and NBD source-safety PASS at candidate
+      executable `e3e45f5c8ab7e52e5db20375d12661b97088f0a2`.
+- [ ] Verify final combined/teardown conclusions on one exact final PR SHA,
+      reconcile any concurrent changes, then decide whether to merge PR #3.
+- [ ] Measure any impact of the extra bounded metadata scan before final
+      V2.2 performance-policy selection; no winner is established.
+- [ ] Reserve real kernel fault injection and physical backing release for a
+      separately authorized disposable fixture and independently trusted owner.
+
+See `docs/v22-compaction-container-validation-audit.md`.
