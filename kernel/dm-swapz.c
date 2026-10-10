@@ -987,7 +987,11 @@ static void swapz_complete_buffer_bios(struct swapz_context *context,
 {
 	u32 block_index;
 
-	for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+	if (unlikely(buffer->block_count > context->max_batch_blocks))
+		swapz_set_failed(context, -EUCLEAN);
+	for (block_index = 0;
+	     block_index < min(buffer->block_count, context->max_batch_blocks);
+	     ++block_index) {
 		struct swapz_write_batch_block *block = &buffer->blocks[block_index];
 		u32 record_index;
 
@@ -1981,7 +1985,8 @@ static int swapz_read_staged(struct swapz_context *context,
 		return -EUCLEAN;
 
 	buffer = &context->stream_buffers[ref->buffer_id];
-	if (ref->block_index >= buffer->block_count)
+	if (ref->block_index >= buffer->block_count ||
+	    ref->block_index >= context->max_batch_blocks)
 		return -EUCLEAN;
 	block = &buffer->blocks[ref->block_index];
 	if (block->record_count > SWAPZ_MAX_PACKED_RECORDS ||
