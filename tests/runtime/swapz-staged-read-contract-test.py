@@ -236,7 +236,11 @@ static int run_case(unsigned int scenario, bool old_flags_mutant)
         disk_record->offset = SWAPZ_BLOCK_BYTES - 4;
         disk_record->length = 4;
         break;
-    case 2: record->flags = 4; break; /* Unknown flag misclassified as raw. */
+    case 2:
+        /* A raw-shaped record with unknown flag bits used to read as raw. */
+        record->flags = 4;
+        record->stored_length = SWAPZ_BLOCK_BYTES;
+        break;
     case 3: container->record_count = 2; break; /* Disk/memory count mismatch. */
     case 4: /* Valid raw page. */
         record->flags = 0;
