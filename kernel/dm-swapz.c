@@ -281,6 +281,8 @@ struct swapz_context {
 
 	unsigned int pack_payload_start;
 	unsigned int pack_record_count;
+	/* Pending compressed writes own their per-BIO nodes until staging. */
+	struct list_head pending_bios;
 	struct swapz_pending_record pending[SWAPZ_MAX_PACKED_RECORDS];
 
 	struct swapz_stats stats;
@@ -538,6 +540,47 @@ static void swapz_register_owned_bio(struct swapz_stream_buffer *buffer,
 	list_add_tail(&entry->list, &buffer->owned_bios);
 }
 
+/*
+ * Pending-pack ownership cannot be inferred from pack_record_count alone:
+ * the count may hide an accepted BIO or exceed the allocated pending array.
+ * Check each independently owned node against its recorded slot without
+ * dereferencing an untrusted resident pointer. GC records have NULL BIOs.
+ */
+static bool swapz_pack_bios_match(struct swapz_context *context)
+{
+	struct swapz_per_bio *entry;
+	unsigned int record_bios = 0;
+	unsigned int owned_bios = 0;
+	unsigned int index;
+
+	if (context->pack_record_count > SWAPZ_MAX_PACKED_RECORDS)
+		return false;
+	for (index = 0; index < context->pack_record_count; ++index) {
+		if (context->pending[index].record_index != index)
+			return false;
+		if (context->pending[index].bio)
+			record_bios++;
+	}
+	list_for_each_entry(entry, &context->pending_bios, list) {
+		if (++owned_bios > SWAPZ_MAX_PACKED_RECORDS ||
+		    entry->record_index >= context->pack_record_count ||
+		    context->pending[entry->record_index].bio != entry->bio)
+			return false;
+	}
+	return record_bios == owned_bios;
+}
+
+static void swapz_register_pending_bio(struct swapz_context *context,
+				       struct bio *bio, u8 record_index)
+{
+	struct swapz_per_bio *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+	/* Worker-local queue ownership was released before compression. */
+	WARN_ON_ONCE(!list_empty(&entry->list));
+	entry->record_index = record_index;
+	list_add_tail(&entry->list, &context->pending_bios);
+}
+
 static void swapz_unaccount_mapping(struct swapz_context *context,
 				    const struct swapz_mapping *mapping)
 {
@@ -629,10 +672,26 @@ static bool swapz_current_segment_has_block(const struct swapz_context *context)
 
 static void swapz_reset_pack(struct swapz_context *context)
 {
+	/* Never erase accepted BIO descriptors while their owners still exist. */
+	WARN_ON_ONCE(!list_empty(&context->pending_bios));
 	memset(context->pack_buffer, 0, SWAPZ_BLOCK_BYTES);
 	memset(context->pending, 0, sizeof(context->pending));
 	context->pack_payload_start = SWAPZ_BLOCK_BYTES;
 	context->pack_record_count = 0;
+}
+
+static void swapz_fail_pending_pack_bios(struct swapz_context *context,
+					 int error)
+{
+	struct swapz_per_bio *entry;
+
+	/* Independent owners survive zeroed or truncated pack_record_count. */
+	while (!list_empty(&context->pending_bios)) {
+		entry = list_first_entry(&context->pending_bios,
+					 struct swapz_per_bio, list);
+		swapz_complete_bio(entry->bio, error);
+	}
+	swapz_reset_pack(context);
 }
 
 static void swapz_reset_stream_buffer(struct swapz_context *context,
@@ -1165,21 +1224,14 @@ static void swapz_complete_buffer_bios(struct swapz_context *context,
 static void swapz_fail_unsent_upper_bios(struct swapz_context *context, int error)
 {
 	struct swapz_stream_buffer *buffer = swapz_fill_buffer(context);
-	u32 record_index;
 
 	/*
-	 * pack_buffer records have not transferred into a stream buffer yet.
-	 * Complete those upper BIOs directly, then drop the pack.
+	 * The independent pending ledger, not a possibly malformed count,
+	 * owns every compressed upper BIO before stream-buffer staging.
 	 */
-	for (record_index = 0; record_index < context->pack_record_count;
-	     ++record_index) {
-		if (!context->pending[record_index].bio)
-			continue;
-		swapz_complete_bio(context->pending[record_index].bio, error);
-		context->pending[record_index].bio = NULL;
-	}
-	if (context->pack_record_count)
-		swapz_reset_pack(context);
+	if (unlikely(!swapz_pack_bios_match(context)))
+		swapz_set_failed(context, -EUCLEAN);
+	swapz_fail_pending_pack_bios(context, error);
 
 	/*
 	 * A failed target must not leave non-early-completed upper writes owned by
@@ -1622,9 +1674,19 @@ retry:
 			&batch_block->records[record_index];
 
 		target->bio = source->bio;
-		if (source->bio)
+		if (source->bio) {
+			/* An accepted compressed BIO leaves the pending ledger
+			 * before joining the stream buffer's owner list. Raw
+			 * BIOs arrive with an already-detached worker node. */
+			if (records == context->pending) {
+				struct swapz_per_bio *entry =
+					dm_per_bio_data(source->bio, sizeof(*entry));
+
+				list_del_init(&entry->list);
+			}
 			swapz_register_owned_bio(buffer, source->bio,
 						 block_index, record_index);
+		}
 		target->logical_page = source->logical_page;
 		target->generation = source->generation;
 		target->stored_length = source->stored_length;
@@ -1671,9 +1733,14 @@ static int swapz_flush_pack(struct swapz_context *context, bool compaction,
 			    bool allow_rotation)
 {
 	struct swapz_container_disk *container = context->pack_buffer;
-	unsigned int record_index;
 	int error;
 
+	/* Validate even an apparently empty pack: it may still own BIOs. */
+	if (unlikely(!swapz_pack_bios_match(context))) {
+		swapz_set_failed(context, -EUCLEAN);
+		error = -EUCLEAN;
+		goto fail_pending;
+	}
 	if (!context->pack_record_count)
 		return 0;
 
@@ -1698,11 +1765,7 @@ static int swapz_flush_pack(struct swapz_context *context, bool compaction,
 	return 0;
 
 fail_pending:
-	for (record_index = 0; record_index < context->pack_record_count; ++record_index) {
-		if (context->pending[record_index].bio)
-			swapz_complete_bio(context->pending[record_index].bio, error);
-	}
-	swapz_reset_pack(context);
+	swapz_fail_pending_pack_bios(context, error);
 	return error;
 }
 
@@ -1732,6 +1795,13 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 	struct swapz_record_disk *record;
 	struct swapz_pending_record *pending;
 	unsigned int record_index;
+
+	/* Do not overwrite a resident slot after a truncated count or follow
+	 * an oversized count through the pending-array write path. */
+	if (unlikely(!swapz_pack_bios_match(context))) {
+		swapz_set_failed(context, -EUCLEAN);
+		return -EUCLEAN;
+	}
 
 	/* Rotate before a new pack starts.  A non-empty pack must always have a
 	 * physical block reserved in the current segment, otherwise segment advance would
@@ -1769,6 +1839,8 @@ static int swapz_add_compressed_record(struct swapz_context *context,
 	pending->generation = generation;
 	pending->stored_length = compressed_length;
 	pending->record_index = record_index;
+	if (bio)
+		swapz_register_pending_bio(context, bio, record_index);
 	context->pack_record_count++;
 	context->stats.compressed_payload_bytes += compressed_length;
 	context->stats.compressed_pages++;
@@ -3159,6 +3231,7 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 			index ? SWAPZ_BUFFER_FREE : SWAPZ_BUFFER_FILL);
 	}
 	context->fill_buffer_id = 0;
+	INIT_LIST_HEAD(&context->pending_bios);
 	swapz_reset_pack(context);
 
 	context->io_client = dm_io_client_create();

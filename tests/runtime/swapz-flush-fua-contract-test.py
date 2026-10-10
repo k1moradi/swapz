@@ -152,6 +152,7 @@ STAGE_C = r"""
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 #include <errno.h>
 typedef uint32_t u32;
 typedef uint16_t u16;
@@ -168,12 +169,27 @@ typedef uint32_t blk_opf_t;
 #define SWAPZ_MAP_COMPRESSED 2U
 #define SWAPZ_STRATEGY_STAGED 2U
 #define WARN_ON_ONCE(x) (x)
-struct bio { u32 bi_opf; int completes,error; };
+struct list_head { struct list_head *next,*prev; };
+#define INIT_LIST_HEAD(n) do {(n)->next=(n);(n)->prev=(n);}while(0)
+#define list_empty(n) ((n)->next==(n))
+static void list_add_tail(struct list_head *n,struct list_head *h) {
+    n->next=h;n->prev=h->prev;h->prev->next=n;h->prev=n;
+}
+struct bio;
+struct swapz_per_bio { struct list_head list; struct bio *bio; u8 block_index,record_index; };
+struct bio { struct swapz_per_bio entry; u32 bi_opf; int completes,error; };
+static struct swapz_per_bio *dm_per_bio_data(struct bio *b, size_t size) {
+    (void)size;return &b->entry;
+}
+static void list_del_init(struct list_head *node) {
+    node->prev->next=node->next;node->next->prev=node->prev;
+    INIT_LIST_HEAD(node);
+}
 struct swapz_pending_record { struct bio *bio;u32 logical_page,generation;u16 stored_length;u8 record_index; };
 struct swapz_write_batch_record { struct bio *bio;u32 logical_page,generation;u16 stored_length;u8 record_index,flags;bool upper_completed; };
 struct swapz_write_batch_block { u8 record_count;bool compaction;struct swapz_write_batch_record records[64]; };
-struct swapz_stream_buffer { u8 data[8192];struct swapz_write_batch_block blocks[2];u32 start_block,block_count;blk_opf_t write_flags;u8 id,state; };
-struct swapz_context { struct swapz_stream_buffer stream;u32 max_batch_blocks,strategy,physical;int failed,ensure_error,staged;struct { u32 staged_early_completions; } stats; };
+ struct swapz_stream_buffer { struct list_head owned_bios;u8 data[8192];struct swapz_write_batch_block blocks[2];u32 start_block,block_count;blk_opf_t write_flags;u8 id,state; };
+ struct swapz_context { struct swapz_stream_buffer stream;struct list_head pending_bios;struct swapz_pending_record pending[64];u32 max_batch_blocks,strategy,physical;int failed,ensure_error,staged;struct { u32 staged_early_completions; } stats; };
 static struct swapz_stream_buffer *swapz_fill_buffer(struct swapz_context *c){return &c->stream;}
 static int swapz_submit_fill_buffer(struct swapz_context *c){(void)c;return -EIO;}
 static int swapz_reap_inflight(struct swapz_context *c,bool wait){(void)c;(void)wait;return -EIO;}
@@ -182,8 +198,11 @@ static u32 swapz_current_physical_block(struct swapz_context *c){return c->physi
 static int swapz_flush_write_batch(struct swapz_context *c){(void)c;return -EIO;}
 static void swapz_set_failed(struct swapz_context *c,int error){(void)error;c->failed=1;}
 static void swapz_set_staged_ref(struct swapz_context *c,u32 pg,u32 gen,u8 id,u32 bi,u8 ri){(void)pg;(void)gen;(void)id;(void)bi;(void)ri;c->staged++;}
-static void swapz_complete_bio(struct bio *b,int error){b->completes++;b->error=error;}
-static void swapz_register_owned_bio(struct swapz_stream_buffer *buffer,struct bio *bio,u8 block_index,u8 record_index){(void)buffer;(void)bio;(void)block_index;(void)record_index;}
+static void swapz_complete_bio(struct bio *b,int error){list_del_init(&b->entry.list);b->completes++;b->error=error;}
+static void swapz_register_owned_bio(struct swapz_stream_buffer *buffer,struct bio *bio,u8 block_index,u8 record_index) {
+    bio->entry.block_index=block_index;bio->entry.record_index=record_index;
+    list_add_tail(&bio->entry.list,&buffer->owned_bios);
+}
 static void swapz_note_block_written(struct swapz_context *c){c->physical++;}
 """
 STAGE_END = r"""
@@ -191,9 +210,14 @@ int main(int argc,char **argv) {
     struct swapz_context c={0};struct bio fua={0},plain={0};
     struct swapz_pending_record rec[1]={{0}};unsigned char data[4096]={42};
     struct swapz_write_batch_record *first,*next;int mode,rc;
-    if(argc!=2||sscanf(argv[1],"%d",&mode)!=1||mode<0||mode>6)return 60;
+    if(argc!=2||sscanf(argv[1],"%d",&mode)!=1||mode<0||mode>7)return 60;
     c.max_batch_blocks=2;c.physical=10;c.strategy=SWAPZ_STRATEGY_STAGED;
     c.stream.id=0;c.stream.state=SWAPZ_BUFFER_FILL;
+    INIT_LIST_HEAD(&c.stream.owned_bios);
+    INIT_LIST_HEAD(&c.pending_bios);
+    INIT_LIST_HEAD(&fua.entry.list);
+    INIT_LIST_HEAD(&plain.entry.list);
+    fua.entry.bio=&fua;plain.entry.bio=&plain;
     fua.bi_opf=REQ_FUA|REQ_SYNC;
     rec[0].bio=&fua;rec[0].logical_page=3;rec[0].generation=4;
     rec[0].stored_length=5;
@@ -202,11 +226,19 @@ int main(int argc,char **argv) {
     if(mode==4)c.ensure_error=-EIO;
     if(mode==5)c.stream.state=0;
     if(mode==6)fua.bi_opf=REQ_FUA|REQ_PRIO;
-    rc=swapz_stage_write_block(&c,data,rec,1,mode==2?0:SWAPZ_MAP_COMPRESSED,
+    if(mode==7) {
+        c.pending[0]=rec[0];
+        list_add_tail(&fua.entry.list,&c.pending_bios);
+    }
+    rc=swapz_stage_write_block(&c,data,mode==7?c.pending:rec,1,mode==2?0:SWAPZ_MAP_COMPRESSED,
                                 mode==3,false);
     if(mode==4)return rc==-EIO&&!c.stream.block_count&&!fua.completes?0:21;
     if(mode==5)return rc==-EUCLEAN&&c.failed&&!fua.completes?0:22;
     if(rc||c.stream.block_count!=1||c.staged!=1)return 23;
+    if(mode==7 && (!list_empty(&c.pending_bios) ||
+                   list_empty(&c.stream.owned_bios) ||
+                   fua.entry.block_index!=0 || fua.entry.record_index!=0))
+        return 29;
     first=&c.stream.blocks[0].records[0];
     if(mode==0){
         if(fua.completes!=1||first->bio||!first->upper_completed)return 24;
@@ -257,7 +289,7 @@ class FlushFUAContract(unittest.TestCase):
         for mode in range(13):
             with self.subTest(mode=mode): self.run_case("dispatch",mode)
     def test_stage_fua_mixed_record_and_early_completion_matrix(self):
-        for mode in range(7):
+        for mode in range(8):
             with self.subTest(mode=mode): self.run_case("stage",mode)
     def test_source_identity(self): guard(self.src)
     def mutation(self,name,needle,replacement,msg):
