@@ -85,6 +85,20 @@ def validate(row: object, line: int) -> dict[str, object]:
         raise ValueError(f"line {line}: workload did not record writes and reads")
     if row["read_p99_ms"] > row["read_max_ms"]:
         raise ValueError(f"line {line}: p99 exceeds measured maximum")
+    # New diagnostics carry an exact CLAT summary; validate its relationship
+    # to the displayed p99 without pretending that a JSONL row authenticates
+    # the sidecar, original fio job or backend. Older rows remain unqualified.
+    if "exact_read_latency" in row:
+        exact = row["exact_read_latency"]
+        if type(exact) is not dict:
+            raise ValueError(f"line {line}: malformed exact reader summary")
+        count = exact.get("read_count")
+        p99_ns = exact.get("read_p99_ns")
+        if (type(count) is not int or count != row["read_count"] or
+                type(p99_ns) is not int or p99_ns <= 0 or
+                not math.isclose(row["read_p99_ms"], p99_ns / 1e6,
+                                 rel_tol=1e-12, abs_tol=1e-12)):
+            raise ValueError(f"line {line}: mismatched exact reader summary")
     # Explicitly cross-check that the diagnostic lower counter rate came
     # from sectors, not fio's logical bytes or upper completion bandwidth.
     check_rates = (
@@ -144,6 +158,7 @@ def report(rows: list[dict[str, object]]) -> str:
                 f"lower_counter_window={row['lower_counter_window_mib_s']:.3f}MiB/s "
                 f"lower_wios={row['lower_write_ios']} "
                 f"read_p99={row['read_p99_ms']:.3f}ms "
+                f"p99_src={'fio_clat_exact' if 'exact_read_latency' in row else 'legacy_unverified'} "
                 f"read_count={row['read_count']}"
             )
     out.extend([
