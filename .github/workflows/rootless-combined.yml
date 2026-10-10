@@ -304,6 +304,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/recall-denial-telemetry.py tests/runtime/recall-denial-telemetry-test.py
           timeout 25s python3 -B tests/runtime/recall-denial-telemetry-test.py -v
+      - name: Compiled GC source snapshot and generation publication contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-gc-source-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-gc-source-contract-test.py -v
       - name: Compiled exact kernel range guards and GC order contract
         shell: bash
         run: |

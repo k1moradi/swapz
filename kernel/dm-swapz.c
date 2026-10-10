@@ -253,6 +253,8 @@ struct swapz_context {
 	/* Compaction/read scratch buffers. */
 	void *input_buffer;
 	void *io_buffer;
+	/* GC source must survive write-batch compaction using io_buffer. */
+	void *gc_source_buffer;
 	void *compressed_buffer;
 	void *pack_buffer;
 	void *repack_buffer;
@@ -1514,18 +1516,18 @@ static int swapz_store_page(struct swapz_context *context, struct bio *bio,
 				    page_data, compaction, allow_rotation);
 }
 
-static int swapz_decode_loaded_mapping(struct swapz_context *context,
-				       u32 logical_page,
+static int swapz_decode_loaded_mapping(u32 logical_page,
 				       const struct swapz_mapping *mapping,
+				       const void *source_block,
 				       void *destination)
 {
 	if (!(mapping->flags & SWAPZ_MAP_COMPRESSED)) {
-		memcpy(destination, context->io_buffer, SWAPZ_BLOCK_BYTES);
+		memcpy(destination, source_block, SWAPZ_BLOCK_BYTES);
 		return 0;
 	}
 
 	{
-		const struct swapz_container_disk *container = context->io_buffer;
+		const struct swapz_container_disk *container = source_block;
 		const struct swapz_record_disk *record;
 		u16 offset;
 		u16 length;
@@ -1537,7 +1539,7 @@ static int swapz_decode_loaded_mapping(struct swapz_context *context,
 		    mapping->record_index >= SWAPZ_MAX_PACKED_RECORDS)
 			return -EIO;
 
-		record = swapz_container_record_const(context->io_buffer,
+		record = swapz_container_record_const(source_block,
 						      mapping->record_index);
 		offset = le16_to_cpu(record->offset);
 		length = le16_to_cpu(record->length);
@@ -1549,7 +1551,7 @@ static int swapz_decode_loaded_mapping(struct swapz_context *context,
 		    offset + length > SWAPZ_BLOCK_BYTES)
 			return -EIO;
 
-		decompressed = LZ4_decompress_safe((const char *)context->io_buffer + offset,
+		decompressed = LZ4_decompress_safe((const char *)source_block + offset,
 						   destination, length,
 						   SWAPZ_BLOCK_BYTES);
 		if (decompressed != SWAPZ_BLOCK_BYTES)
@@ -1577,8 +1579,8 @@ static int swapz_read_mapping(struct swapz_context *context, u32 logical_page,
 	if (compaction)
 		context->stats.compaction_read_bytes += SWAPZ_BLOCK_BYTES;
 
-	return swapz_decode_loaded_mapping(context, logical_page, &mapping,
-					   destination);
+	return swapz_decode_loaded_mapping(logical_page, &mapping,
+					   context->io_buffer, destination);
 }
 
 static void swapz_try_discard_segment(struct swapz_context *context, u32 segment)
@@ -1721,7 +1723,14 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 			continue;
 
 		physical_block = victim * SWAPZ_SEGMENT_BLOCKS + block_offset;
-		error = swapz_read_block(context, physical_block, context->io_buffer);
+		/*
+		 * Preserve the complete source container through every relocation
+		 * from it.  swapz_store_page() may submit/compact a fill buffer,
+		 * and swapz_compact_fill_buffer() reuses io_buffer as scratch.
+		 * Compressed source blocks can hold several live records.
+		 */
+		error = swapz_read_block(context, physical_block,
+					 context->gc_source_buffer);
 		if (error)
 			goto fail;
 		context->stats.compaction_read_bytes += SWAPZ_BLOCK_BYTES;
@@ -1738,7 +1747,8 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 				goto fail;
 			}
 
-			error = swapz_decode_loaded_mapping(context, page, &mapping,
+			error = swapz_decode_loaded_mapping(page, &mapping,
+							 context->gc_source_buffer,
 							 context->input_buffer);
 			if (error)
 				goto fail;
@@ -2526,6 +2536,8 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->input_buffer);
 	if (context->io_buffer)
 		free_page((unsigned long)context->io_buffer);
+	if (context->gc_source_buffer)
+		free_page((unsigned long)context->gc_source_buffer);
 	if (context->compressed_buffer)
 		free_page((unsigned long)context->compressed_buffer);
 	if (context->pack_buffer)
@@ -2748,12 +2760,14 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	context->write_compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->input_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->gc_source_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->repack_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!context->write_buffer || !context->write_compressed_buffer ||
 	    !context->input_buffer || !context->io_buffer ||
+	    !context->gc_source_buffer ||
 	    !context->compressed_buffer || !context->pack_buffer ||
 	    !context->repack_buffer || !context->lz4_workmem) {
 		target->error = "Cannot allocate preallocated I/O buffers";
