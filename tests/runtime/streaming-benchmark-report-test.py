@@ -96,6 +96,39 @@ class StreamingReportingTests(unittest.TestCase):
                     self.read([corrupt])
         self.assertIn("p99_src=legacy_unverified", reporter.report(self.read([row()])))
 
+    def test_one_page_sentinel_is_not_full_integrity_attestation(self):
+        item = row()
+        item["isolated_sentinel_readback_ok"] = True
+        report = reporter.report(self.read([item]))
+        self.assertIn("sentinel=pass", report)
+        self.assertIn("NOT complete writer-range verification", report)
+        self.assertIn("sentinel=unverified", reporter.report(self.read([row()])))
+        for bad in (False, 1, None, "true"):
+            with self.subTest(bad=bad):
+                item["isolated_sentinel_readback_ok"] = bad
+                with self.assertRaisesRegex(ValueError, "sentinel readback"):
+                    self.read([item])
+
+    def test_compressed_sentinel_is_disjoint_from_writer_and_timed_window(self):
+        source = self.script
+        self.assertIn("SENTINEL_PAGE=$(( LOGICAL_MIB * 256 - 1 ))", source)
+        self.assertIn("WRITER_BYTES=$(( WRITER_MIB * 1048576 - 4096 ))", source)
+        self.assertIn("size=$WRITER_BYTES", source)
+        self.assertEqual(len(b"SWAPZ_V22_PROBE_" * 256), 4096)
+        cold = 4 * MIB
+        logical = 32 * MIB
+        writer_end = cold + (logical - cold - 4096)
+        self.assertEqual(writer_end, logical - 4096)
+        sentinel_write = source.index('dd if="$sentinel" of="$path"')
+        timed_before = source.index("before=$(read_stat)")
+        timed_after = source.index("after=$(read_stat)")
+        sentinel_read = source.index('dd if="$path" of="$sentinel_read"')
+        source_report = source.index('"isolated_sentinel_readback_ok": True')
+        self.assertLess(sentinel_write, timed_before)
+        self.assertLess(timed_after, sentinel_read)
+        self.assertLess(sentinel_read, source_report)
+        self.assertIn('if ! cmp -s "$sentinel" "$sentinel_read"; then', source)
+
     def test_reporter_cannot_nominate_winner_even_with_three_strategies(self):
         observations = [row(strategy="immediate", batch=4),
                         row(strategy="staged", batch=128),
@@ -223,6 +256,7 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertNotIn("drained_write_mib_s", parsed)
         self.assertEqual(parsed["lower_write_sectors"], 4096)
         self.assertEqual(parsed["read_count"], 200)
+        self.assertIs(parsed["isolated_sentinel_readback_ok"], True)
         # The diagnostic displayed p99 must come from the exact CLAT sidecar,
         # not fio's independently bucketed/rounded percentile summary.
         self.assertEqual(parsed["read_p99_ms"], 2.5)
