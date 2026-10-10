@@ -19,7 +19,7 @@ SOURCE = ROOT / "kernel" / "dm-swapz.c"
 
 def exact_function(source: str, name: str) -> str:
     match = list(re.finditer(
-        r"\bstatic\s+void\s+" + re.escape(name) + r"\s*\([^;{}]*\)\s*\{",
+        r"\bstatic\s+(?:void|bool)\s+" + re.escape(name) + r"\s*\([^;{}]*\)\s*\{",
         source, flags=re.DOTALL))
     if len(match) != 1:
         raise AssertionError("expected exactly one production function " + name)
@@ -50,6 +50,10 @@ typedef uint8_t u8;
 #define likely(x) (x)
 #define min(a,b) ((a)<(b)?(a):(b))
 #define min_t(t,a,b) ((t)(a)<(t)(b)?(t)(a):(t)(b))
+#define list_for_each_entry(entry,head,member) \
+    for (struct list_head *iter=(head)->next; \
+         iter!=(head) && ((entry)=container_of(iter,struct swapz_per_bio,member),1); \
+         iter=iter->next)
 
 struct list_head { struct list_head *next, *prev; };
 #define INIT_LIST_HEAD(node) do { (node)->next=(node); (node)->prev=(node); } while(0)
@@ -66,7 +70,7 @@ static void list_del_init(struct list_head *item) {
 }
 
 struct bio;
-struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct swapz_per_bio { struct list_head list; struct bio *bio; u8 block_index, record_index; };
 struct bio {
     struct swapz_per_bio entry;
     int completes, bi_status;
@@ -141,8 +145,50 @@ static void setup(void) {
     blocks[0][0].records[0].logical_page=0;
     blocks[0][1].records[0].bio=&bios[1];
     blocks[0][1].records[0].logical_page=1;
-    swapz_register_owned_bio(&buffers[0],&bios[0]);
-    swapz_register_owned_bio(&buffers[0],&bios[1]);
+    swapz_register_owned_bio(&buffers[0],&bios[0],0,0);
+    swapz_register_owned_bio(&buffers[0],&bios[1],1,0);
+}
+static int run_identity(int n, bool mutant) {
+    bool match;
+    setup();
+    switch(n) {
+    case 11: break; /* Correct independent mapping. */
+    case 12: blocks[0][1].records[0].bio=&bios[0]; break; /* Duplicated BIO. */
+    case 13: /* Swapped pointers with unchanged owner count. */
+        blocks[0][0].records[0].bio=&bios[1];
+        blocks[0][1].records[0].bio=&bios[0];
+        break;
+    case 14: /* Foreign buffer's owner pointer. */
+        blocks[1][0].records[0].bio=&bios[2];
+        swapz_register_owned_bio(&buffers[1],&bios[2],0,0);
+        blocks[0][1].records[0].bio=&bios[2];
+        break;
+    case 15: blocks[0][1].records[0].bio=NULL; break;
+    case 16: { /* Legal repack moves descriptors and owner slots together. */
+        struct swapz_write_batch_record tmp=blocks[0][0].records[0];
+        blocks[0][0].records[0]=blocks[0][1].records[0];
+        blocks[0][1].records[0]=tmp;
+        bios[0].entry.block_index=1;
+        bios[1].entry.block_index=0;
+        break;
+    }
+    case 17: bios[0].entry.block_index=1; break; /* Stale owner coordinate. */
+    case 18: /* Already completed staged write. */
+        swapz_complete_bio(&bios[0],0);
+        blocks[0][0].records[0].bio=NULL;
+        blocks[0][0].records[0].upper_completed=true;
+        break;
+    case 19: swapz_complete_bio(&bios[0],0); break; /* Stale completed pointer. */
+    default: return 80;
+    }
+    match=swapz_stream_bios_match(&c,&buffers[0]);
+    if (mutant) {
+        if (n!=12 || !match) return 81;
+        puts("OLD_COUNT_MATCH_ACCEPTS_DUPLICATE_BIO_POINTER");
+        return 0;
+    }
+    if (match != (n==11 || n==16 || n==18)) return 82;
+    return 0;
 }
 static int run_case(int n, bool mutant) {
     setup();
@@ -194,7 +240,7 @@ static int run_case(int n, bool mutant) {
     case 8:
         blocks[1][0].records[0].bio=&bios[2];
         blocks[1][0].records[0].logical_page=2;
-        swapz_register_owned_bio(&buffers[1],&bios[2]);
+        swapz_register_owned_bio(&buffers[1],&bios[2],0,0);
         swapz_complete_buffer_bios(&c,&buffers[0],-EIO);
         if (bios[2].completes || list_empty(&buffers[1].owned_bios))
             return 28;
@@ -238,8 +284,9 @@ int main(int argc,char **argv) {
     int result;
     if(argc!=3)return 80;
     n=strtol(argv[1],&end,10);
-    if(end==argv[1]||*end||n<0||n>10)return 81;
-    result=run_case((int)n,argv[2][0]=='m');
+    if(end==argv[1]||*end||n<0||n>19)return 81;
+    result=n>=11?run_identity((int)n,argv[2][0]=='m'):
+         run_case((int)n,argv[2][0]=='m');
     if(!result)printf("UPPER_BIO_OWNER_CASE_%ld_OK\n",n);
     return result;
 }
@@ -254,12 +301,13 @@ class UpperBioOwnershipExactC(unittest.TestCase):
         completion=exact_function(src,"swapz_complete_bio")
         register=exact_function(src,"swapz_register_owned_bio")
         drain=exact_function(src,"swapz_complete_buffer_bios")
+        identities=exact_function(src,"swapz_stream_bios_match")
         stage=src[src.index("static int swapz_stage_write_block("):
                   src.index("static int swapz_flush_pack(")]
         constructor=src[src.index("static int swapz_ctr("):]
         read=src[src.index("static int swapz_read_staged("):
                  src.index("static bool swapz_page_has_uncommitted_generation(")]
-        if "swapz_register_owned_bio(buffer, source->bio)" not in stage:
+        if "swapz_register_owned_bio(buffer, source->bio," not in stage:
             raise AssertionError("staging does not register independent ownership")
         if "INIT_LIST_HEAD(&buffer->owned_bios)" not in constructor:
             raise AssertionError("stream buffer ownership ledger not initialized")
@@ -271,11 +319,16 @@ class UpperBioOwnershipExactC(unittest.TestCase):
             raise AssertionError("completed BIO retains dangling ownership node")
         cls.tmp=tempfile.TemporaryDirectory(prefix="swapz-owned-bio-exact-c-")
         directory=Path(cls.tmp.name)
-        def compile_one(label: str, body: str):
+        validator_bad = identities.replace(
+            "block->records[entry->record_index].bio != entry->bio",
+            "false", 1)
+        if validator_bad == identities:
+            raise AssertionError("identity comparison mutation not applied")
+        def compile_one(label: str, body: str, checker: str = identities):
             path=directory/(label+".c")
             exe=directory/label
-            path.write_text(PREFIX+"\n"+completion+"\n"+register+"\n"+body+
-                            "\n"+SUFFIX,encoding="utf-8")
+            path.write_text(PREFIX+"\n"+completion+"\n"+register+"\n"+
+                            checker+"\n"+body+"\n"+SUFFIX,encoding="utf-8")
             result=subprocess.run(
                 [cc,"-std=c11","-O2","-Wall","-Wextra","-Werror",
                  "-o",str(exe),str(path)],
@@ -296,20 +349,36 @@ class UpperBioOwnershipExactC(unittest.TestCase):
             "\t\t\tswapz_complete_bio(record->bio, error);\n"
             "\t\t\trecord->bio = NULL;",1)
         cls.mutant=compile_one("count-dependent-mutant",old)
+        cls.identity_mutant=compile_one("identity-check-mutant",drain,
+                                        checker=validator_bad)
 
     @classmethod
     def tearDownClass(cls): cls.tmp.cleanup()
 
     def check(self,scenario,mutant=False):
         process=subprocess.run(
-            [str(self.mutant if mutant else self.production),str(scenario),
+            [str(self.identity_mutant if mutant and scenario>=11 else
+                 self.mutant if mutant else self.production),str(scenario),
              "mutant" if mutant else "production"],
             capture_output=True,text=True,timeout=3)
         self.assertEqual(process.returncode,0,process.stdout+process.stderr)
         self.assertIn(f"UPPER_BIO_OWNER_CASE_{scenario}_OK",process.stdout)
         if mutant:
-            self.assertIn("OLD_ZERO_COUNT_STRANDS_OWNED_UPPER_BIOS",
+            self.assertIn("OLD_COUNT_MATCH_ACCEPTS_DUPLICATE_BIO_POINTER"
+                          if scenario>=11 else
+                          "OLD_ZERO_COUNT_STRANDS_OWNED_UPPER_BIOS",
                           process.stdout)
+
+    def test_exact_ownership_rejects_duplicate_swap_and_cross_buffer(self):
+        for scenario in (12,13,14,15,17,19):
+            with self.subTest(case=scenario): self.check(scenario)
+
+    def test_valid_ownership_repack_and_early_ack(self):
+        for scenario in (11,16,18):
+            with self.subTest(case=scenario): self.check(scenario)
+
+    def test_count_only_mutant_accepts_duplicate_pointer(self):
+        self.check(12,mutant=True)
 
     def test_zero_and_oversized_block_counts_cannot_strand_bios(self):
         for i in (1,2,3,4):

@@ -111,6 +111,9 @@ static_assert(sizeof(struct swapz_mapping) == 8);
 struct swapz_per_bio {
 	struct list_head list;
 	struct bio *bio;
+	/* Current descriptor slot; repacking updates these two indices. */
+	u8 block_index;
+	u8 record_index;
 };
 
 struct swapz_pending_record {
@@ -523,12 +526,15 @@ static void swapz_complete_bio(struct bio *bio, int error)
 }
 
 static void swapz_register_owned_bio(struct swapz_stream_buffer *buffer,
-				     struct bio *bio)
+				     struct bio *bio, u8 block_index,
+				     u8 record_index)
 {
 	struct swapz_per_bio *entry = dm_per_bio_data(bio, sizeof(*entry));
 
 	/* The serialized worker detached this BIO from its local work list. */
 	WARN_ON_ONCE(!list_empty(&entry->list));
+	entry->block_index = block_index;
+	entry->record_index = record_index;
 	list_add_tail(&entry->list, &buffer->owned_bios);
 }
 
@@ -695,6 +701,62 @@ static bool swapz_stream_record_current(struct swapz_context *context,
 	return record->generation == context->generations[record->logical_page];
 }
 
+/*
+ * Prove a one-to-one mapping between pending descriptor BIO pointers and
+ * independently registered upper BIOs. Never dereference an untrusted
+ * record->bio to discover its owner; walk known list nodes and compare their
+ * remembered slot with the actual resident pointer. Both passes are bounded
+ * by allocated metadata, and repacking updates owner slot coordinates.
+ *
+ * A count-only check cannot detect swapped pointers or two records using
+ * the same BIO while another registered BIO is missing.
+ */
+static bool swapz_stream_bios_match(const struct swapz_context *context,
+				    const struct swapz_stream_buffer *buffer)
+{
+	struct swapz_per_bio *entry;
+	u32 record_bios = 0;
+	u32 owned_bios = 0;
+	u32 block_index;
+
+	if (buffer->block_count > context->max_batch_blocks)
+		return false;
+	for (block_index = 0; block_index < buffer->block_count; ++block_index) {
+		const struct swapz_write_batch_block *block =
+			&buffer->blocks[block_index];
+		u32 record_index;
+
+		if (block->record_count > SWAPZ_MAX_PACKED_RECORDS)
+			return false;
+		for (record_index = 0; record_index < block->record_count;
+		     ++record_index) {
+			const struct swapz_write_batch_record *record =
+				&block->records[record_index];
+
+			if (record->bio) {
+				if (record->upper_completed)
+					return false;
+				record_bios++;
+			}
+		}
+	}
+
+	list_for_each_entry(entry, &buffer->owned_bios, list) {
+		const struct swapz_write_batch_block *block;
+
+		if (++owned_bios > context->max_batch_blocks *
+				    SWAPZ_MAX_PACKED_RECORDS ||
+		    entry->block_index >= buffer->block_count)
+			return false;
+		block = &buffer->blocks[entry->block_index];
+		if (entry->record_index >= block->record_count ||
+		    block->records[entry->record_index].bio != entry->bio)
+			return false;
+	}
+
+	return record_bios == owned_bios;
+}
+
 static bool swapz_repack_can_fit(unsigned int record_count,
 				  unsigned int payload_start,
 				  unsigned int length)
@@ -715,6 +777,17 @@ static void swapz_update_repacked_ref(struct swapz_context *context,
 {
 	struct swapz_staged_ref *ref = &context->staged_refs[record->logical_page];
 
+	/*
+	 * The pre-compaction identity check made this descriptor's BIO safe
+	 * to look up. Keep its stable owner pointed at the relocated slot.
+	 */
+	if (record->bio) {
+		struct swapz_per_bio *entry =
+			dm_per_bio_data(record->bio, sizeof(*entry));
+
+		entry->block_index = block_index;
+		entry->record_index = record_index;
+	}
 	if (ref->valid && ref->generation == record->generation &&
 	    ref->buffer_id == buffer->id) {
 		ref->block_index = block_index;
@@ -871,6 +944,10 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 	error = swapz_validate_compact_fill_buffer(context, buffer);
 	if (error)
 		goto fail;
+	if (unlikely(!swapz_stream_bios_match(context, buffer))) {
+		error = -EUCLEAN;
+		goto fail;
+	}
 
 	memset(context->repack_buffer, 0, SWAPZ_BLOCK_BYTES);
 	memset(&context->repack_block, 0, sizeof(context->repack_block));
@@ -1116,9 +1193,6 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 					struct swapz_stream_buffer *buffer)
 {
 	u32 block_index;
-	u32 pending_record_bios = 0;
-	u32 pending_owned_bios = 0;
-	const struct list_head *node;
 	int error = buffer->io_error;
 
 	/*
@@ -1154,12 +1228,6 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 				      record->flags != SWAPZ_MAP_COMPRESSED)))
 				goto corrupt;
 
-			if (record->bio) {
-				if (unlikely(record->upper_completed))
-					goto corrupt;
-				pending_record_bios++;
-			}
-
 			if (record->flags == 0) {
 				if (unlikely(block->record_count != 1 ||
 					     record->stored_length != SWAPZ_BLOCK_BYTES))
@@ -1172,21 +1240,8 @@ static int swapz_finalize_stream_buffer(struct swapz_context *context,
 		}
 	}
 
-	/*
-	 * Counts and pointers in resident descriptors cannot be the only
-	 * evidence of who still owns an upper BIO. In particular, a valid
-	 * record_count with a lost record->bio must not silently reset a
-	 * buffer that still has registered outstanding owners. Bound the
-	 * independent list traversal to the allocated batch capacity.
-	 */
-	for (node = buffer->owned_bios.next;
-	     node != &buffer->owned_bios;
-	     node = node->next) {
-		if (unlikely(++pending_owned_bios >
-			     context->max_batch_blocks * SWAPZ_MAX_PACKED_RECORDS))
-			goto corrupt;
-	}
-	if (unlikely(pending_record_bios != pending_owned_bios))
+	/* Prove identities, not merely matching descriptor/owner counts. */
+	if (unlikely(!swapz_stream_bios_match(context, buffer)))
 		goto corrupt;
 
 	if (error) {
@@ -1568,7 +1623,8 @@ retry:
 
 		target->bio = source->bio;
 		if (source->bio)
-			swapz_register_owned_bio(buffer, source->bio);
+			swapz_register_owned_bio(buffer, source->bio,
+						 block_index, record_index);
 		target->logical_page = source->logical_page;
 		target->generation = source->generation;
 		target->stored_length = source->stored_length;

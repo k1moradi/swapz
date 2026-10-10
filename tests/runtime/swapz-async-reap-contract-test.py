@@ -22,6 +22,7 @@ PURE = (
     "swapz_clear_staged_ref",
     "swapz_stream_io_complete",
     "swapz_complete_buffer_bios",
+    "swapz_stream_bios_match",
     "swapz_finalize_stream_buffer",
     "swapz_reap_inflight",
 )
@@ -133,6 +134,10 @@ struct list_head { struct list_head *next, *prev; };
 #define list_empty(head) ((head)->next==(head))
 #define list_first_entry(head,type,member) \
     ((type *)((char *)(head)->next - offsetof(type,member)))
+#define list_for_each_entry(entry,head,member) \
+    for (struct list_head *iter=(head)->next; \
+         iter!=(head) && ((entry)=list_first_entry(iter->prev,struct swapz_per_bio,member),1); \
+         iter=iter->next)
 static void list_add_tail(struct list_head *node, struct list_head *head) {
     node->next=head;node->prev=head->prev;
     head->prev->next=node;head->prev=node;
@@ -142,7 +147,7 @@ static void list_del_init(struct list_head *node) {
     INIT_LIST_HEAD(node);
 }
 struct bio;
-struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct swapz_per_bio { struct list_head list; struct bio *bio; u8 block_index, record_index; };
 struct bio { struct swapz_per_bio entry; int completes, error; };
 struct swapz_context;
 struct swapz_write_batch_record {
@@ -247,6 +252,8 @@ static void setup(bool outstanding, bool early) {
     stream->context=&c;
     INIT_LIST_HEAD(&stream->owned_bios);
     b.entry.bio=&b;
+    b.entry.block_index=0;
+    b.entry.record_index=0;
     INIT_LIST_HEAD(&b.entry.list);
     stream->blocks=&block;
     stream->block_count=1;
@@ -407,6 +414,8 @@ static int scenario(int id) {
         blocks[1].records[0].stored_length=4;
         blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
         blocks[1].records[0].bio=&b2;
+        b2.entry.block_index=1;
+        b2.entry.record_index=0;
         list_add_tail(&b2.entry.list,&s->owned_bios);
         c.generations[1]=7;
         c.staged_refs[1]=(struct swapz_staged_ref){
@@ -446,6 +455,39 @@ static int scenario(int id) {
                 block.records[0].bio != NULL)
                 return 41;
         }
+    } else if (id>=31 && id<=33) {
+        /* Same-count identity corruption must fail before publishing
+         * even one mapping, and complete only this buffer's owned BIOs. */
+        setup(true,false);
+        c.max_batch_blocks=2;
+        s->block_count=2;
+        blocks[1].record_count=1;
+        blocks[1].records[0].logical_page=1;
+        blocks[1].records[0].generation=7;
+        blocks[1].records[0].stored_length=4;
+        blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
+        blocks[1].records[0].bio=&b2;
+        b2.entry.block_index=1;
+        b2.entry.record_index=0;
+        list_add_tail(&b2.entry.list,&s->owned_bios);
+        if (id==31) {
+            /* Two descriptors both point at b; b2 remains owned. */
+            blocks[1].records[0].bio=&b;
+        } else if (id==32) {
+            /* Swapped pointers, unchanged outstanding owner count. */
+            block.records[0].bio=&b2;
+            blocks[1].records[0].bio=&b;
+        } else {
+            /* Index is valid but owner slot is stale after movement. */
+            b2.entry.block_index=0;
+        }
+        swapz_stream_io_complete(id==32?1:0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed || c.installed || c.resets ||
+            s->state!=SWAPZ_BUFFER_INFLIGHT ||
+            b.completes!=1 || b2.completes!=1 ||
+            b.error!=-EUCLEAN || b2.error!=-EUCLEAN ||
+            !list_empty(&s->owned_bios)) return 43;
     } else if (id==30) {
         /* Descriptor lost its BIO pointer, but independent ownership remains.
          * Reject the whole finalization before mapping publication or reset. */
@@ -472,7 +514,7 @@ static int scenario(int id) {
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>30) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>33) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -501,20 +543,17 @@ class AsyncReapExactC(unittest.TestCase):
             raise AssertionError("cannot identify full finalization preflight")
         old_finalize=(finalizer[:start]+finalizer[end+1:corrupt]+
                       "\n}")
-        for declaration in (
-            "\tu32 pending_record_bios = 0;\n",
-            "\tu32 pending_owned_bios = 0;\n",
-            "\tconst struct list_head *node;\n",
-        ):
-            if old_finalize.count(declaration) != 1:
-                raise AssertionError("old finalizer mutant declaration changed")
-            old_finalize = old_finalize.replace(declaration, "", 1)
+        # The older executable variant strips the preflight but still
+        # includes the genuine separately compiled identity helper.
+        # No now-removed count-local declarations are necessary.
         for label,binary,body in (
             ("async-exact-c",cls.binary,finalizer),
             ("missing-finalize-preflight",cls.mutant_binary,old_finalize),
         ):
             fragments=[body if name=="swapz_finalize_stream_buffer"
-                       else compiled[name] for name in PURE]
+                       else compiled[name] for name in PURE
+                       if not (label=="missing-finalize-preflight" and
+                               name=="swapz_stream_bios_match")]
             program=Path(cls.tmp.name)/(label+".c")
             program.write_text(PREFIX+"\n"+"\n".join(fragments)+"\n"+SUFFIX,
                                encoding="utf-8")
@@ -555,6 +594,11 @@ class AsyncReapExactC(unittest.TestCase):
                           text=True,timeout=3)
         self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
         self.assertIn("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION",cp.stdout)
+
+    def test_count_preserving_identity_corruption_fails_without_publication(self):
+        for case in (31,32,33):
+            with self.subTest(case=case):
+                self.run_case(case)
 
     def test_missing_record_bio_pointer_cannot_orphan_registered_owner(self):
         self.run_case(30)
