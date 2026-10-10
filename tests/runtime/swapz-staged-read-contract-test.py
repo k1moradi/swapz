@@ -24,6 +24,11 @@ FLAG_GUARD = (
 COUNT_GUARD = (
     "\t\t    le16_to_cpu(container->record_count) > SWAPZ_MAX_PACKED_RECORDS ||\n"
 )
+MAPPING_FLAG_GUARD = (
+    "\tif (mapping->flags != SWAPZ_MAP_VALID &&\n"
+    "\t    mapping->flags != (SWAPZ_MAP_VALID | SWAPZ_MAP_COMPRESSED))\n"
+    "\t\treturn -EIO;\n"
+)
 
 
 def exact_function(source: str, name: str) -> str:
@@ -61,6 +66,7 @@ typedef uint64_t u64;
 #define SWAPZ_MAX_PACKED_RECORDS 64U
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U
 #define SWAPZ_CONTAINER_VERSION 1U
+#define SWAPZ_MAP_VALID 1U
 #define SWAPZ_MAP_COMPRESSED 2U
 #define SWAPZ_MAX_COMPRESSED_BYTES (SWAPZ_BLOCK_BYTES -     sizeof(struct swapz_container_disk) - sizeof(struct swapz_record_disk) - 512U)
 #define SWAPZ_CONTAINER_BASE_BYTES ((unsigned int)sizeof(struct swapz_container_disk))
@@ -152,7 +158,7 @@ static int run_mapping_case(unsigned int scenario, bool old_count_mutant)
 {
     struct swapz_mapping mapping = {
         .physical_block = 0, .stored_length = 4, .record_index = 0,
-        .flags = SWAPZ_MAP_COMPRESSED
+        .flags = SWAPZ_MAP_VALID | SWAPZ_MAP_COMPRESSED
     };
     u8 block_data[SWAPZ_BLOCK_BYTES] = {0};
     u8 destination[SWAPZ_BLOCK_BYTES];
@@ -161,6 +167,12 @@ static int run_mapping_case(unsigned int scenario, bool old_count_mutant)
         block_data + SWAPZ_CONTAINER_BASE_BYTES);
     int result;
 
+    if (scenario >= 13) {
+        mapping.flags = scenario == 13 ? SWAPZ_MAP_VALID | 4 :
+                        SWAPZ_MAP_VALID;
+        mapping.stored_length = scenario == 14 ? 4 : SWAPZ_BLOCK_BYTES;
+        mapping.record_index = scenario == 16 ? 1 : 0;
+    }
     container->magic = SWAPZ_CONTAINER_MAGIC;
     container->version = SWAPZ_CONTAINER_VERSION;
     container->record_count = scenario == 11 ? 65 : (scenario == 12 ? 0 : 1);
@@ -173,14 +185,30 @@ static int run_mapping_case(unsigned int scenario, bool old_count_mutant)
     result = swapz_decode_loaded_mapping(0, &mapping, block_data, destination);
 
     if (old_count_mutant) {
-        if (scenario != 11 || result || decode_calls != 1 ||
-            destination[0] != 'Z') return 70;
-        puts("OLD_OVERSIZED_DISK_RECORD_COUNT_ACCEPTED");
-        return 0;
+        if (scenario == 11) {
+            if (result || decode_calls != 1 || destination[0] != 'Z')
+                return 70;
+            puts("OLD_OVERSIZED_DISK_RECORD_COUNT_ACCEPTED");
+            return 0;
+        }
+        if (scenario == 13) {
+            if (result || decode_calls ||
+                memcmp(destination, block_data, SWAPZ_BLOCK_BYTES))
+                return 70;
+            puts("OLD_UNKNOWN_MAPPING_FLAGS_ACCEPTED_AS_RAW");
+            return 0;
+        }
+        return 75;
     }
     if (scenario == 10) {
         if (result || decode_calls != 1 || destination[0] != 'Z')
             return 71;
+        return 0;
+    }
+    if (scenario == 15) {
+        if (result || decode_calls ||
+            memcmp(destination, block_data, SWAPZ_BLOCK_BYTES))
+            return 73;
         return 0;
     }
     if (result != -EIO || decode_calls || destination[0] != 'X')
@@ -306,7 +334,7 @@ int main(int argc, char **argv)
 
     if (argc != 3) return 85;
     scenario = strtoul(argv[1], &end, 10);
-    if (end == argv[1] || *end || scenario > 12) return 86;
+    if (end == argv[1] || *end || scenario > 16) return 86;
     if (scenario >= 10)
         result = run_mapping_case((unsigned int)scenario, argv[2][0] == 'm');
     else
@@ -331,6 +359,8 @@ class StagedReadMetadataContracts(unittest.TestCase):
             raise AssertionError("production staged-read flag guard missing")
         if read_mapping.count(COUNT_GUARD) != 1:
             raise AssertionError("committed mapping count guard missing")
+        if read_mapping.count(MAPPING_FLAG_GUARD) != 1:
+            raise AssertionError("committed mapping flags guard missing")
         cls.temporary_directory = tempfile.TemporaryDirectory(
             prefix="swapz-staged-read-exact-c-")
         directory = Path(cls.temporary_directory.name)
@@ -353,7 +383,8 @@ class StagedReadMetadataContracts(unittest.TestCase):
         cls.production = compile_case("production-staged-read", read_staged,
                                       read_mapping)
         mutant_staged = read_staged.replace(FLAG_GUARD, "", 1)
-        mutant_mapping = read_mapping.replace(COUNT_GUARD, "", 1)
+        mutant_mapping = read_mapping.replace(COUNT_GUARD, "", 1).replace(
+            MAPPING_FLAG_GUARD, "", 1)
         cls.unknown_flags_mutant = compile_case(
             "unknown-flags-mutant", mutant_staged, mutant_mapping)
 
@@ -371,6 +402,8 @@ class StagedReadMetadataContracts(unittest.TestCase):
         if mutant:
             marker = ("OLD_OVERSIZED_DISK_RECORD_COUNT_ACCEPTED"
                       if scenario == 11 else
+                      "OLD_UNKNOWN_MAPPING_FLAGS_ACCEPTED_AS_RAW"
+                      if scenario == 13 else
                       "OLD_UNKNOWN_FLAGS_ACCEPTED_AS_RAW")
             self.assertIn(marker, process.stdout)
 
@@ -388,12 +421,15 @@ class StagedReadMetadataContracts(unittest.TestCase):
         self.execute(2, mutant=True)
 
     def test_loaded_mapping_record_count_is_bounded(self):
-        for scenario in (10, 11, 12):
+        for scenario in (10, 11, 12, 13, 14, 15, 16):
             with self.subTest(scenario=scenario):
                 self.execute(scenario)
 
     def test_old_mapping_decoder_accepted_oversized_count(self):
         self.execute(11, mutant=True)
+
+    def test_old_mapping_decoder_accepted_unknown_mapping_flags(self):
+        self.execute(13, mutant=True)
 
     def test_source_flags_guard_is_required(self):
         source = SOURCE.read_text(encoding="utf-8")
