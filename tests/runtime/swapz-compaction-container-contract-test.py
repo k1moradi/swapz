@@ -588,6 +588,11 @@ class CompactionContainerContracts(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 self.run_contract(scenario, mutant=True)
 
+    def test_real_repack_updates_pending_bio_owner_slot(self):
+        # This must execute the actual two-block compressed merge, not merely
+        # compile the scenario's C source or simulate owner movement.
+        self.run_contract(23)
+
     def test_adjacent_nonoverlapping_payloads_remain_valid(self):
         self.run_contract(21)
 
