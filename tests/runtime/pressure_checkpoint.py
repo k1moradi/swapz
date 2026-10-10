@@ -55,9 +55,20 @@ def _read_exact_checkpoint(path: Path, expected: bytes) -> None:
     Path.read_bytes() would accept a symlink to the expected token, read a
     huge file without a bound, or block on a FIFO with no writer.
     """
-    before = path.lstat()
-    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-        raise ValueError(f"unsafe pressure checkpoint file: {path}")
+    # _publish_new() atomically links its complete temporary file into the
+    # final name, then unlinks the temporary name. During that tiny window
+    # st_nlink is 2. Never accept two links, but allow a finite interval for
+    # the publisher to finish unlinking before classifying it as unsafe.
+    # A persistent hardlink (or any non-regular file) remains forbidden.
+    for attempt in range(51):
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink not in (1, 2):
+            raise ValueError(f"unsafe pressure checkpoint file: {path}")
+        if before.st_nlink == 1:
+            break
+        if attempt == 50:
+            raise ValueError(f"unsafe pressure checkpoint file: {path}")
+        time.sleep(0.001)
     # O_NONBLOCK also protects against a path being swapped to a FIFO
     # between lstat and open. O_NOFOLLOW rejects a replaced symlink.
     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC)
