@@ -36,6 +36,7 @@ MANDATORY_TESTS = (
     "v22-drain-plateau-analyze-test.py",
     "v22-latency-v3-test.py",
     "v22-evidence-bundle-check-test.py",
+    "v22-evidence-bundle-v3-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
@@ -219,6 +220,14 @@ class RootlessWorkflowContractTests(unittest.TestCase):
         self.assertIn(path, source)
         with self.assertRaisesRegex(WorkflowContractError, "standalone NBD workflow edits"):
             check_workflow(name, source.replace(path, "", 1))
+
+    def test_removed_v3_bundle_binding_execution_is_rejected(self):
+        for name, source in self.sources.items():
+            with self.subTest(workflow=name):
+                command = "timeout 35s python3 -B tests/runtime/v22-evidence-bundle-v3-test.py -v"
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(name, source.replace(command, "echo 'V3 bundle not executed'", 1))
 
     def test_removed_v3_latency_sidecar_execution_is_rejected(self):
         for name, source in self.sources.items():

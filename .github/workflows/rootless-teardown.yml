@@ -68,6 +68,8 @@ on:
       - 'tests/runtime/v22-latency-v3-test.py'
       - 'tests/runtime/v22-evidence-bundle-check.py'
       - 'tests/runtime/v22-evidence-bundle-check-test.py'
+      - 'tests/runtime/v22-evidence-bundle-v3.py'
+      - 'tests/runtime/v22-evidence-bundle-v3-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -344,6 +346,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/v22-drain-plateau-analyze.py tests/runtime/v22-latency-v3-test.py
           timeout 35s python3 -B tests/runtime/v22-latency-v3-test.py -v
+      - name: V3 sidecar-aware measurement bundle binding regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/v22-evidence-bundle-v3.py tests/runtime/v22-evidence-bundle-v3-test.py
+          timeout 35s python3 -B tests/runtime/v22-evidence-bundle-v3-test.py -v
       - name: Offline V2.2 evidence bundle identity and artifact integrity policy
         shell: bash
         run: |
