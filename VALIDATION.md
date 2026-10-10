@@ -4318,3 +4318,70 @@ indefinite teardown callback wait remains. V2.2 strategy/batch
 winner remains **UNDETERMINED**.
 
 See `docs/v22-generation-scan-pack-preflight-audit.md`.
+
+## October 10, 2026 — PR #14 rootless benchmark planner and pre-device safety gate
+
+The lead developer reviewed Codex's PR #12 native Linux report:
+`3a623c17ab19fd09ea34aae618e92bde0f375f35` tested on Ubuntu
+26.04.1 / Linux 7.0.0-38-generic, matching headers and GCC 15.2.
+Native module `W=1` compilation **PASS**, no kernel C-source warnings,
+769,200-byte nonempty `dm-swapz.ko`, nine rootless contract suites
+**151/151 methods PASS**. The report's unbounded generation-scan
+concern is already repaired by PR #13; its **newer executable SHA**
+was **not** qualified by Codex's earlier PR #12 build.
+
+To accelerate three-policy benchmarking without weakening safety,
+[PR #14](https://github.com/k1moradi/swapz/pull/14)
+implemented `streaming-benchmark-plan.py` and pre-device admission
+in `streaming-benchmark.sh`. The previously default 20 MiB/s
+`null_blk` fixture could not complete 512/1024 KiB requests because
+50 Hz byte-credit replenishment provides only 419,420 bytes/tick.
+The old benchmark checked this limit after allocating/configuring
+the test backend. It now chooses the largest supported feasible
+default (through 256 KiB) and refuses unserviceable explicit batches
+and malformed strategy/runtime/QD/compressibility values **before
+root checks or fixture setup**. A second size guard remains.
+
+The rootless planner enumerates Immediate 4 KiB, seven Opportunistic
+and seven Staged 4–256 KiB configurations at 20 MiB/s, with three
+requested independent repetitions yielding **45 planned cases, no
+actual measurements**. A planning-only NBD matrix does not authorize
+or activate NBD; the existing unsafe numeric-PID backend launch
+remains hard-disabled. `mbps=0` is an unthrottled overhead control,
+not evidence for a 20 MiB/s bandwidth plateau.
+
+**17/17** rootless planner methods PASS (null_blk tick budget,
+explicit 512/1024 rejection, default feasible set, malformed
+input, pre-allocation ordering, single Immediate control, NBD
+planning-only, and no-winner provenance). Source/CI negative tests
+reject removing the executable gate. The existing single-sweep
+diagnostic report remains non-qualifying; the strict V3 offline
+evidence/plateau checks continue to require independent run
+repetitions, trustworthy lower-sector counters, fully drained I/O,
+read p99 and other comparison data.
+
+PR #14 merged at executable source SHA
+[`b39aaa51b2426569badcbc60545854ae91c0a141`](https://github.com/k1moradi/swapz/commit/b39aaa51b2426569badcbc60545854ae91c0a141).
+All relevant PR-head workflows at
+`9a8456fbb713d0786075e01b6c5b04c0034f32d1` passed:
+[combined 38070225271](https://github.com/k1moradi/swapz/actions/runs/38070225271),
+[teardown 38070225348](https://github.com/k1moradi/swapz/actions/runs/38070225348),
+[NBD 38070225269](https://github.com/k1moradi/swapz/actions/runs/38070225269).
+
+All three exact **post-merge** rootless workflows on the executable
+merge SHA passed:
+
+- [Combined 38070385763](https://github.com/k1moradi/swapz/actions/runs/38070385763): **PASS**
+- [Teardown 38070385776](https://github.com/k1moradi/swapz/actions/runs/38070385776): **PASS**
+- [NBD source 38070385765](https://github.com/k1moradi/swapz/actions/runs/38070385765): **PASS**
+
+No kernel source, per-BIO ownership or data format changed in PR #14;
+therefore no new kernel-source-only workflow was triggered by this
+diff. No live module, DM/swap/null_blk/loop/NBD/physical device, root
+operations or loaded-kernel benchmark occurred. Independently
+qualified native PR #13, a separately **authorized disposable
+virtual runtime fixture**, safe teardown, and repeatable trusted
+drain/read-latency observation remain necessary. The V2.2 winner
+remains **UNDETERMINED**.
+
+See `docs/benchmarks/v2.2-rootless-sweep-plan.md`.
