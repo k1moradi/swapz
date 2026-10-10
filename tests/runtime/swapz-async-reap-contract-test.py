@@ -362,8 +362,7 @@ static int scenario(int id) {
         result=swapz_reap_inflight(&c,false);
         if (result!=-EUCLEAN || !c.failed ||
             c.installed || c.resets || s->state!=SWAPZ_BUFFER_INFLIGHT ||
-            c.inflight_buffer_id!=-1 || c.async_callbacks.value ||
-            !s->completion.reinits && false) return 30;
+            c.inflight_buffer_id!=-1 || c.async_callbacks.value) return 30;
         if (id==23) {
             if (b.completes!=1 || !c.staged_refs[0].valid) return 31;
         } else if (b.completes!=1 || b.error!=-EUCLEAN ||
