@@ -112,3 +112,24 @@ V2.2 strategy and batch winner remain **UNDETERMINED**.
 
 Pending final PR and merge commit identity, rootless workflow
 conclusions and their per-SHA evidence.
+
+## Exact integration evidence
+
+The reviewed owner-ledger change merged as
+[`80ea94452e0cdeeb9d83934dbc3e56009ac408b5`](https://github.com/k1moradi/swapz/commit/80ea94452e0cdeeb9d83934dbc3e56009ac408b5).
+
+Four **post-merge** rootless workflows completed successfully on this
+same executable SHA:
+
+- [Kernel source contracts](https://github.com/k1moradi/swapz/actions/runs/38056177917): **PASS** (owner 7/7, async 28/28, staged read 8/8)
+- [Combined source qualification](https://github.com/k1moradi/swapz/actions/runs/38056177901): **PASS**
+- [Teardown safety](https://github.com/k1moradi/swapz/actions/runs/38056177898): **PASS**
+- [NBD source safety](https://github.com/k1moradi/swapz/actions/runs/38056177903): **PASS**
+
+The exact PR head
+`aa4daa9e13786c8b171df54f1b380ec79659da85`
+also passed all four required rootless PR workflows. Later
+documentation-only changes on main do not alter executable
+qualification. Native Linux module compilation on this executable
+source has not yet been independently reported. No loaded kernel
+or real DM/loop/NBD/swap/device qualification was performed.
