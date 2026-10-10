@@ -170,7 +170,7 @@ class StreamingReportingTests(unittest.TestCase):
 
     def test_embedded_collector_produces_counters_not_logical_drain(self):
         source = self.script
-        marker = '"$start_ns" "$end_ns" "$BACKEND" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
         self.assertIn(marker, source)
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         self.assertIn('lower_counter_window_mib_s', embedded)
@@ -194,6 +194,9 @@ class StreamingReportingTests(unittest.TestCase):
             "failed=0 staged_hits=10", "staged", "128",
             "1000000000", "3000000000",
             "size-aware-nbd-20MiBps-500000ns-serialized",
+            json.dumps({"read_count": 200, "read_p99_ns": 2500000,
+                        "read_latency_sidecar": "reader.latbin",
+                        "read_latency_sha256": "0" * 64}),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=True)
         parsed = json.loads(result.stdout)
@@ -206,7 +209,7 @@ class StreamingReportingTests(unittest.TestCase):
 
     def test_embedded_collector_rejects_counter_regression(self):
         source = self.script
-        marker = '"$start_ns" "$end_ns" "$BACKEND" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio.json"
         fio.write_text(json.dumps({"jobs":[
@@ -216,7 +219,8 @@ class StreamingReportingTests(unittest.TestCase):
         ]}), encoding="utf-8")
         args=[sys.executable,"-c",embedded,str(fio),"10 1000 20 2000",
               "10 1000 19 1900","failed=0","staged","128",
-              "1000000000","3000000000","backend"]
+              "1000000000","3000000000","backend",
+              json.dumps({"read_count": 20, "read_p99_ns": 1000000})]
         result=subprocess.run(args,capture_output=True,text=True,timeout=5)
         self.assertNotEqual(result.returncode,0)
         self.assertIn("counters decreased",result.stderr)
