@@ -151,5 +151,69 @@ class RealFioReaderLogIntegration(unittest.TestCase):
             self.assertEqual(readback.read_bytes(), sentinel)
 
 
+    def test_full_writer_range_crc32c_after_time_based_random_overwrites(self):
+        """Real fio: preseed every 4K, random overwrite, sequential verify.
+
+        Exercise ordinary files only. Also corrupt one page and prove the
+        verification subprocess and JSON fail closed; never touch /dev.
+        """
+        fio = os.environ.get("SWAPZ_FIO_BIN", "/usr/bin/fio")
+        with tempfile.TemporaryDirectory(prefix="swapz-fio-full-verify-") as directory:
+            root = Path(directory)
+            data = root / "writer-data"
+            with data.open("wb") as stream:
+                stream.truncate(128 * 1024)
+            offset = 64 * 1024
+            size = 60 * 1024  # 15 pages, excludes final sentinel
+            def run(name, *args, expect_success=True):
+                output = root / f"{name}.json"
+                proc = subprocess.run(
+                    [fio, f"--name={name}", f"--filename={data}", "--bs=4k",
+                     "--ioengine=sync", "--direct=1",
+                     f"--offset={offset}", f"--size={size}",
+                     "--verify=crc32c", *args,
+                     "--output-format=json", f"--output={output}"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if expect_success:
+                    self.assertEqual(proc.returncode, 0,
+                                     proc.stdout + proc.stderr)
+                else:
+                    self.assertNotEqual(proc.returncode, 0,
+                                        "corrupted record accepted")
+                report = json.loads(output.read_text(encoding="utf-8"))
+                self.assertEqual(len(report["jobs"]), 1)
+                job = report["jobs"][0]
+                if expect_success:
+                    self.assertEqual(job["error"], 0, report)
+                else:
+                    self.assertNotEqual(job["error"], 0, report)
+                return job
+
+            prefill = run("prefill", "--rw=write", "--do_verify=0",
+                          "--refill_buffers=1",
+                          "--buffer_compress_percentage=50")
+            self.assertEqual(prefill["write"]["io_bytes"], size)
+            # An actual time_based random writer with checksummed payloads.
+            writer = run("timed", "--rw=randwrite", "--time_based=1",
+                         "--runtime=2", "--randseed=1517953062",
+                         "--do_verify=0", "--refill_buffers=1",
+                         "--buffer_compress_percentage=50")
+            self.assertGreater(writer["write"]["total_ios"], 15)
+
+            verify = run("verify", "--rw=read")
+            self.assertEqual(verify["read"]["io_bytes"], size)
+            self.assertEqual(verify["read"]["total_ios"], size // 4096)
+
+            # One changed payload byte anywhere in the writer extent must fail.
+            with data.open("r+b", buffering=0) as stream:
+                stream.seek(offset + 4096 + 256)
+                byte = stream.read(1)
+                self.assertEqual(len(byte), 1)
+                stream.seek(offset + 4096 + 256)
+                stream.write(bytes([byte[0] ^ 0x01]))
+            run("verify-bad", "--rw=read", expect_success=False)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
