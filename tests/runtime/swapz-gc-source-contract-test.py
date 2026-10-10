@@ -69,8 +69,8 @@ def gc_contract(source: str) -> None:
         raise AssertionError("GC must not reload or decode a source from compaction scratch")
     if "context->io_buffer" not in repacker:
         raise AssertionError("compactor's scratch aliasing assumption needs review")
-    if (re.search(r"context->gc_source_buffer\\s*=\\s*\\(void \\*\\)"
-                  r"__get_free_page\\(GFP_KERNEL\\)", ctor) is None
+    if (re.search(r"context->gc_source_buffer\s*=\s*\(void \*\)"
+                  r"__get_free_page\(GFP_KERNEL\)", ctor) is None
             or "!context->gc_source_buffer" not in ctor):
         raise AssertionError("GC snapshot lacks owned preallocation and fail-closed allocation")
     if "free_page((unsigned long)context->gc_source_buffer)" not in destructor:
