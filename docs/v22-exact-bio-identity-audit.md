@@ -109,4 +109,49 @@ remains **UNDETERMINED**.
 
 ## Revision-specific workflow evidence
 
-Pending final PR head, merge identity, and exact workflow conclusions.
+The executable identity fix merged in
+[PR #9](https://github.com/k1moradi/swapz/pull/9) as
+[`89c4aeedb7632913e91c8c530fb7af679b3b7a13`](https://github.com/k1moradi/swapz/commit/89c4aeedb7632913e91c8c530fb7af679b3b7a13).
+All three applicable **exact post-merge rootless workflows** passed:
+
+- [Kernel source 38060222060](https://github.com/k1moradi/swapz/actions/runs/38060222060): **PASS**
+- [Combined source 38060222088](https://github.com/k1moradi/swapz/actions/runs/38060222088): **PASS**
+- [Teardown safety 38060222038](https://github.com/k1moradi/swapz/actions/runs/38060222038): **PASS**
+
+The standalone NBD source workflow was not triggered by this
+kernel-only change; NBD rootless coverage is included in combined.
+
+A post-merge review caught a missing Python method for scenario 23:
+the new real two-block compressed repack was compiled but had not
+actually been executed by the PR #9 test selection. This was not
+counted as prior execution. [PR #10](https://github.com/k1moradi/swapz/pull/10),
+merged as `a49d9dcc2fb12ac6be0d8541778307b226aa3df9`, adds an
+explicit `test_real_repack_updates_pending_bio_owner_slot` method.
+Its exact head `02eb175b56a1d47cc16184b94403a253eb2cc8a3` passed
+[kernel 38060310127](https://github.com/k1moradi/swapz/actions/runs/38060310127),
+[combined 38060310069](https://github.com/k1moradi/swapz/actions/runs/38060310069),
+and [teardown 38060310111](https://github.com/k1moradi/swapz/actions/runs/38060310111).
+On the PR #10 merge SHA, [kernel 38060472581](https://github.com/k1moradi/swapz/actions/runs/38060472581)
+and [teardown 38060472580](https://github.com/k1moradi/swapz/actions/runs/38060472580)
+passed, while [combined 38060472567](https://github.com/k1moradi/swapz/actions/runs/38060472567)
+**FAILED** in an unrelated pressure-checkpoint publication race on
+repeat 2/10. This failed run remains in the qualification record.
+
+The pre-existing `pressure_checkpoint.py` publisher atomically links
+its complete temporary marker into its final filename, then unlinks the
+temporary name. A concurrent reader could reject the legitimate marker
+during its brief `st_nlink == 2` interval. [PR #11](https://github.com/k1moradi/swapz/pull/11)
+implements a bounded retry that **never accepts two links**, while a
+permanent hardlink or nonregular marker remains denied. Deterministic
+rootless tests cover both cases. PR #11 merged as
+[`4e68d9bcfd05ffec8f4785a073c3656735304320`](https://github.com/k1moradi/swapz/commit/4e68d9bcfd05ffec8f4785a073c3656735304320).
+Its exact post-merge [combined 38060923597](https://github.com/k1moradi/swapz/actions/runs/38060923597)
+and [teardown 38060923539](https://github.com/k1moradi/swapz/actions/runs/38060923539)
+workflows **PASS**, including the pressure-token repeat stage.
+
+Neither PR #10 nor PR #11 changed `kernel/dm-swapz.c`: the
+qualified executable kernel driver remains at PR #9's merge SHA.
+Codex's last native Linux report qualified the earlier PR #8
+executable revision `24e2794b`, not PR #9. New native Linux
+compilation and real loaded-kernel/device qualification remain
+outstanding; V2.2 winner is **UNDETERMINED**.
