@@ -85,6 +85,9 @@ def validate(row: object, line: int) -> dict[str, object]:
         raise ValueError(f"line {line}: workload did not record writes and reads")
     if row["read_p99_ms"] > row["read_max_ms"]:
         raise ValueError(f"line {line}: p99 exceeds measured maximum")
+    if ("isolated_sentinel_readback_ok" in row and
+            row["isolated_sentinel_readback_ok"] is not True):
+        raise ValueError(f"line {line}: compressed sentinel readback not proven")
     # New diagnostics carry an exact CLAT summary; validate its relationship
     # to the displayed p99 without pretending that a JSONL row authenticates
     # the sidecar, original fio job or backend. Older rows remain unqualified.
@@ -147,6 +150,8 @@ def report(rows: list[dict[str, object]]) -> str:
         "backend attribution and complete I/O drain NOT independently attested",
         "logical_flush_window_mib_s = fio logical bytes / flush-inclusive window; "
         "NOT lower-device drain bandwidth",
+        "integrity_sentinel = ONE protected 4 KiB compressed page only; "
+        "NOT complete writer-range verification",
     ]
     for strategy in sorted(groups):
         out.append(f"strategy={strategy} (unqualified; only one observation per batch)")
@@ -159,6 +164,7 @@ def report(rows: list[dict[str, object]]) -> str:
                 f"lower_wios={row['lower_write_ios']} "
                 f"read_p99={row['read_p99_ms']:.3f}ms "
                 f"p99_src={'fio_clat_exact' if 'exact_read_latency' in row else 'legacy_unverified'} "
+                f"sentinel={'pass' if row.get('isolated_sentinel_readback_ok') is True else 'unverified'} "
                 f"read_count={row['read_count']}"
             )
     out.extend([
