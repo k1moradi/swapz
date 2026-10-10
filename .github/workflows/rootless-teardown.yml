@@ -86,6 +86,8 @@ on:
       - 'tests/runtime/swapz-upper-bio-ownership-contract-test.py'
       - 'tests/runtime/swapz-pending-pack-ownership-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
+      - 'tests/runtime/streaming-benchmark-plan.py'
+      - 'tests/runtime/streaming-benchmark-plan-test.py'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
       - 'tests/runtime/streaming-benchmark-teardown.sh'
@@ -295,6 +297,12 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless V2.2 benchmark plan and pre-device admission contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-plan.py tests/runtime/streaming-benchmark-plan-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-plan-test.py -v
       - name: Rootless streaming single-sweep reporting safety regression
         shell: bash
         run: |
