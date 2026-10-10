@@ -96,3 +96,24 @@ No physical backing release, privileged teardown, real DM/NBD/swap,
 module loading, pressure workload, reboot, or destructive operation
 occurred during this task. V2.2 strategy and batch winner remain
 **UNDETERMINED**.
+
+## Post-merge evidence
+
+The candidate was merged as
+[`9ef86baa3c981efe28e0a64db8d9f203c11bdd10`](https://github.com/k1moradi/swapz/commit/9ef86baa3c981efe28e0a64db8d9f203c11bdd10).
+All four GitHub Actions runs on that **exact merge commit** passed:
+
+- [Kernel exact-C source contracts](https://github.com/k1moradi/swapz/actions/runs/38046079346)
+- [Combined source qualification](https://github.com/k1moradi/swapz/actions/runs/38046079305)
+- [Teardown safety](https://github.com/k1moradi/swapz/actions/runs/38046079319)
+- [NBD source safety](https://github.com/k1moradi/swapz/actions/runs/38046079218)
+
+The new exact-C staged decoder harness reports 7/7 passing Python
+test methods at the merged SHA, with executable old-acceptance
+counterexamples for unknown staged flags, unknown published mapping
+flags, and oversized compressed container counts.
+
+Documentation-only updates following the merge do **not** modify
+the qualified executable kernel or regression test source. The
+independent native kernel compilation reported by Codex was on
+the earlier `9a4e168` source, not this merge commit.
