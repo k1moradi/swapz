@@ -21,6 +21,9 @@ FLAG_GUARD = (
     "\tif (record->flags != 0 && record->flags != SWAPZ_MAP_COMPRESSED)\n"
     "\t\treturn -EUCLEAN;\n"
 )
+COUNT_GUARD = (
+    "\t\t    le16_to_cpu(container->record_count) > SWAPZ_MAX_PACKED_RECORDS ||\n"
+)
 
 
 def exact_function(source: str, name: str) -> str:
@@ -59,10 +62,18 @@ typedef uint64_t u64;
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_MAP_COMPRESSED 2U
+#define SWAPZ_MAX_COMPRESSED_BYTES (SWAPZ_BLOCK_BYTES -     sizeof(struct swapz_container_disk) - sizeof(struct swapz_record_disk) - 512U)
 #define SWAPZ_CONTAINER_BASE_BYTES ((unsigned int)sizeof(struct swapz_container_disk))
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define le32_to_cpu(value) (value)
 #define le16_to_cpu(value) (value)
+
+struct swapz_mapping {
+    u32 physical_block;
+    u16 stored_length;
+    u8 record_index;
+    u8 flags;
+};
 
 struct swapz_record_disk {
     u32 logical_page;
@@ -137,6 +148,46 @@ static int LZ4_decompress_safe(const char *input, char *destination,
 """
 
 SUFFIX = r"""
+static int run_mapping_case(unsigned int scenario, bool old_count_mutant)
+{
+    struct swapz_mapping mapping = {
+        .physical_block = 0, .stored_length = 4, .record_index = 0,
+        .flags = SWAPZ_MAP_COMPRESSED
+    };
+    u8 block_data[SWAPZ_BLOCK_BYTES] = {0};
+    u8 destination[SWAPZ_BLOCK_BYTES];
+    struct swapz_container_disk *container = (void *)block_data;
+    struct swapz_record_disk *disk_record = (void *)(
+        block_data + SWAPZ_CONTAINER_BASE_BYTES);
+    int result;
+
+    container->magic = SWAPZ_CONTAINER_MAGIC;
+    container->version = SWAPZ_CONTAINER_VERSION;
+    container->record_count = scenario == 11 ? 65 : (scenario == 12 ? 0 : 1);
+    disk_record->logical_page = 0;
+    disk_record->offset = SWAPZ_BLOCK_BYTES - 4;
+    disk_record->length = 4;
+    memcpy(block_data + SWAPZ_BLOCK_BYTES - 4, "QQQQ", 4);
+    memset(destination, 'X', sizeof(destination));
+    decode_calls = 0;
+    result = swapz_decode_loaded_mapping(0, &mapping, block_data, destination);
+
+    if (old_count_mutant) {
+        if (scenario != 11 || result || decode_calls != 1 ||
+            destination[0] != 'Z') return 70;
+        puts("OLD_OVERSIZED_DISK_RECORD_COUNT_ACCEPTED");
+        return 0;
+    }
+    if (scenario == 10) {
+        if (result || decode_calls != 1 || destination[0] != 'Z')
+            return 71;
+        return 0;
+    }
+    if (result != -EIO || decode_calls || destination[0] != 'X')
+        return 72;
+    return 0;
+}
+
 static int run_case(unsigned int scenario, bool old_flags_mutant)
 {
     struct swapz_context context = {0};
@@ -251,8 +302,11 @@ int main(int argc, char **argv)
 
     if (argc != 3) return 85;
     scenario = strtoul(argv[1], &end, 10);
-    if (end == argv[1] || *end || scenario > 9) return 86;
-    result = run_case((unsigned int)scenario, argv[2][0] == 'm');
+    if (end == argv[1] || *end || scenario > 12) return 86;
+    if (scenario >= 10)
+        result = run_mapping_case((unsigned int)scenario, argv[2][0] == 'm');
+    else
+        result = run_case((unsigned int)scenario, argv[2][0] == 'm');
     if (!result) printf("STAGED_READ_CASE_%lu_OK\n", scenario);
     return result;
 }
@@ -267,18 +321,23 @@ class StagedReadMetadataContracts(unittest.TestCase):
         if not compiler:
             raise AssertionError("mandatory C compiler unavailable")
         read_staged = exact_function(source, "swapz_read_staged")
+        read_mapping = exact_function(source, "swapz_decode_loaded_mapping")
         helper = exact_function(source, "swapz_stream_record_current")
         if read_staged.count(FLAG_GUARD) != 1:
             raise AssertionError("production staged-read flag guard missing")
+        if read_mapping.count(COUNT_GUARD) != 1:
+            raise AssertionError("committed mapping count guard missing")
         cls.temporary_directory = tempfile.TemporaryDirectory(
             prefix="swapz-staged-read-exact-c-")
         directory = Path(cls.temporary_directory.name)
 
-        def compile_case(filename: str, body: str) -> Path:
+        def compile_case(filename: str, staged_body: str,
+                         mapping_body: str) -> Path:
             path = directory / (filename + ".c")
             executable = directory / filename
-            path.write_text(PREFIX + "\n" + helper + "\n" + body +
-                            "\n" + SUFFIX, encoding="utf-8")
+            path.write_text(PREFIX + "\n" + helper + "\n" + staged_body +
+                            "\n" + mapping_body + "\n" + SUFFIX,
+                            encoding="utf-8")
             command = [compiler, "-std=c11", "-O2", "-Wall", "-Wextra",
                        "-Werror", "-o", str(executable), str(path)]
             result = subprocess.run(command, capture_output=True,
@@ -287,9 +346,12 @@ class StagedReadMetadataContracts(unittest.TestCase):
                 raise AssertionError("production C compilation failed: " + result.stderr)
             return executable
 
-        cls.production = compile_case("production-staged-read", read_staged)
-        mutant_body = read_staged.replace(FLAG_GUARD, "", 1)
-        cls.unknown_flags_mutant = compile_case("unknown-flags-mutant", mutant_body)
+        cls.production = compile_case("production-staged-read", read_staged,
+                                      read_mapping)
+        mutant_staged = read_staged.replace(FLAG_GUARD, "", 1)
+        mutant_mapping = read_mapping.replace(COUNT_GUARD, "", 1)
+        cls.unknown_flags_mutant = compile_case(
+            "unknown-flags-mutant", mutant_staged, mutant_mapping)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -303,7 +365,10 @@ class StagedReadMetadataContracts(unittest.TestCase):
         self.assertEqual(process.returncode, 0, process.stderr + process.stdout)
         self.assertIn(f"STAGED_READ_CASE_{scenario}_OK", process.stdout)
         if mutant:
-            self.assertIn("OLD_UNKNOWN_FLAGS_ACCEPTED_AS_RAW", process.stdout)
+            marker = ("OLD_OVERSIZED_DISK_RECORD_COUNT_ACCEPTED"
+                      if scenario == 11 else
+                      "OLD_UNKNOWN_FLAGS_ACCEPTED_AS_RAW")
+            self.assertIn(marker, process.stdout)
 
     def test_valid_compressed_and_raw_staged_reads(self):
         for scenario in (0, 4, 8):
@@ -317,6 +382,14 @@ class StagedReadMetadataContracts(unittest.TestCase):
 
     def test_unknown_flags_old_behavior_is_executable(self):
         self.execute(2, mutant=True)
+
+    def test_loaded_mapping_record_count_is_bounded(self):
+        for scenario in (10, 11, 12):
+            with self.subTest(scenario=scenario):
+                self.execute(scenario)
+
+    def test_old_mapping_decoder_accepted_oversized_count(self):
+        self.execute(11, mutant=True)
 
     def test_source_flags_guard_is_required(self):
         source = SOURCE.read_text(encoding="utf-8")
