@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import struct
 import tempfile
@@ -16,6 +17,13 @@ SPEC = importlib.util.spec_from_file_location("swapz_reader_clat", MODULE)
 assert SPEC is not None and SPEC.loader is not None
 collector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector)
+
+
+V3_SPEC = importlib.util.spec_from_file_location(
+    "swapz_plateau_v3_reader", HERE / "v22-drain-plateau-analyze.py")
+assert V3_SPEC is not None and V3_SPEC.loader is not None
+plateau = importlib.util.module_from_spec(V3_SPEC)
+V3_SPEC.loader.exec_module(plateau)
 
 
 class ExactReaderLatencyTests(unittest.TestCase):
@@ -51,6 +59,37 @@ class ExactReaderLatencyTests(unittest.TestCase):
                          b"".join(struct.pack("!QQ", *pair) for pair in (
                              (100, 99), (200, 1), (400, 1))))
         self.assertIn("NOT-independent-attestation", result["read_latency_source"])
+
+    def test_exact_sidecar_is_readable_by_existing_v3_verifier(self):
+        result = collector.collect(self.json, self.log, self.sidecar)
+        row = {
+            "read_latency_sidecar": result["read_latency_sidecar"],
+            "read_latency_sha256": result["read_latency_sha256"],
+            "read_count": result["read_count"],
+            "read_p99_ns": result["read_p99_ns"],
+        }
+        directory_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            used = plateau._verify_v3_sidecar(row, 1, directory_fd, 4096, set())
+        finally:
+            os.close(directory_fd)
+        self.assertEqual(used, result["read_latency_bytes"])
+
+    def test_v3_verifier_rejects_mutated_sidecar(self):
+        result = collector.collect(self.json, self.log, self.sidecar)
+        self.sidecar.write_bytes(self.sidecar.read_bytes() + b"corruption")
+        row = {
+            "read_latency_sidecar": result["read_latency_sidecar"],
+            "read_latency_sha256": result["read_latency_sha256"],
+            "read_count": result["read_count"],
+            "read_p99_ns": result["read_p99_ns"],
+        }
+        directory_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaisesRegex(ValueError, "length or byte budget"):
+                plateau._verify_v3_sidecar(row, 1, directory_fd, 4096, set())
+        finally:
+            os.close(directory_fd)
 
     def test_mismatched_counts_fail_without_sidecar(self):
         self.make_fio(6)
