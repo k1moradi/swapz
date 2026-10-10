@@ -26,6 +26,11 @@ assert spec and spec.loader
 reporter = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = reporter
 spec.loader.exec_module(reporter)
+VERIFY_PATH = HERE / "streaming-benchmark-writer-verify.py"
+verify_spec = importlib.util.spec_from_file_location("swapz_writer_verify_report_test", VERIFY_PATH)
+assert verify_spec and verify_spec.loader
+writer_verifier = importlib.util.module_from_spec(verify_spec)
+verify_spec.loader.exec_module(writer_verifier)
 
 MIB = 1024 * 1024
 FAKE_FULL_VERIFY = {
@@ -272,6 +277,58 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertAlmostEqual(parsed["logical_flush_window_mib_s"], 8)
         self.assertAlmostEqual(parsed["lower_counter_window_mib_s"], 1)
         self.assertIn("NO QUALIFIED WINNER", reporter.report(reporter.read_rows(self.write([parsed]))))
+
+    def test_writer_verifier_rejects_short_or_forged_fio_readback(self):
+        expected_bytes = 60 * 1024
+        baseline = {"jobs": [{"jobname": "writer-verify", "error": 0,
+                     "read": {"io_bytes": expected_bytes, "total_ios": 15},
+                     "write": {"io_bytes": 0}}]}
+        log = self.directory / "writer-verify.json"
+        log.write_text(json.dumps(baseline), encoding="utf-8")
+        accepted = writer_verifier.validate(log, expected_bytes)
+        self.assertIs(accepted["full_writer_readback_ok"], True)
+        self.assertEqual(accepted["writer_verified_pages"], 15)
+        for malformed in (
+            {"jobs": [{**baseline["jobs"][0], "error": 5}]},
+            {"jobs": [{**baseline["jobs"][0], "error": True}]},
+            {"jobs": [{**baseline["jobs"][0], "jobname": "wrong"}]},
+            {"jobs": [{**baseline["jobs"][0], "read":
+                      {"io_bytes": expected_bytes - 4096, "total_ios": 14}}]},
+            {"jobs": [{**baseline["jobs"][0], "read":
+                      {"io_bytes": expected_bytes, "total_ios": 14}}]},
+            {"jobs": [{**baseline["jobs"][0], "write": {"io_bytes": 4096}}]},
+            {"jobs": [baseline["jobs"][0], baseline["jobs"][0]]},
+        ):
+            with self.subTest(malformed=malformed):
+                log.write_text(json.dumps(malformed), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    writer_verifier.validate(log, expected_bytes)
+        log.write_text(json.dumps(baseline), encoding="utf-8")
+        for invalid_size in (0, 4097, -4096, True, 2**40):
+            with self.subTest(invalid_size=invalid_size):
+                with self.assertRaises(ValueError):
+                    writer_verifier.validate(log, invalid_size)
+        alias = self.directory / "writer-verify-alias.json"
+        alias.symlink_to(log)
+        with self.assertRaises(OSError):
+            writer_verifier.validate(alias, expected_bytes)
+
+    def test_writer_verifier_rejects_duplicate_fields_and_hardlinks(self):
+        expected_bytes = 60 * 1024
+        log = self.directory / "writer-verify.json"
+        log.write_text('{"jobs":[{"jobname":"writer-verify","error":0,'
+                       '"read":{"io_bytes":61440,"total_ios":15,"total_ios":15},'
+                       '"write":{"io_bytes":0}}]}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            writer_verifier.validate(log, expected_bytes)
+        log.write_text(json.dumps({"jobs":[{"jobname":"writer-verify",
+                      "error":0,"read":{"io_bytes":expected_bytes,
+                      "total_ios":15},"write":{"io_bytes":0}}]}),
+                      encoding="utf-8")
+        alias = self.directory / "hardlink"
+        alias.hardlink_to(log)
+        with self.assertRaisesRegex(ValueError, "bounded regular file"):
+            writer_verifier.validate(log, expected_bytes)
 
     def test_crc32c_verifier_is_outside_timed_window(self):
         source = self.script
