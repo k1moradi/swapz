@@ -222,6 +222,7 @@ static int run(int mode,bool mutant) {
         if(mode==2||mode==6||mode==12)c.pack_record_count=1;
         if(mode==3||mode==4||mode==15)c.pack_record_count=UINT32_MAX;
         if(mode==11)c.pending[1].bio=&bios[0];
+        if(mode==9)c.failed=true;
         if(mode==12||mode==13||mode==15) {
             rc=add(2,true);
             if(rc!=-EUCLEAN||bios[2].completes||members(&c.pending_bios)!=2)
