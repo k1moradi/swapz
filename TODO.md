@@ -1595,3 +1595,20 @@ See `docs/v22-pending-pack-ownership-audit.md`.
 - [ ] Retain safe async callback ownership wait on teardown absent proven dm-io cancellation; no blind freeing on timeouts or device operations without explicit authorization.
 
 See `docs/v22-generation-scan-pack-preflight-audit.md`.
+
+### 2026-10-10 — End-user strategy selection and governor-style policy
+
+**V2.2 deployment configuration (next small userspace/systemd improvement; retain fixed policy per target):**
+
+- [ ] Extend `/etc/swapz.conf` and `systemd/swapz.conf.example` with `SWAPZ_STRATEGY=opportunistic` and `SWAPZ_BATCH_KIB=256`; pass both values through `systemd/swapz.service` to the existing `swapzctl start --strategy ... --batch-kib ...` flags. Do not change the kernel target table ABI.
+- [ ] Validate configuration errors fail closed: permit only `immediate`, `opportunistic`, or `staged`; require batch sizes from 4 through 1024 KiB in 4 KiB increments. Document that immediate mode is always effectively 4 KiB, even when the requested ceiling is larger.
+- [ ] Add rootless config/service/CLI source-contract tests covering non-default strategy and batch propagation, invalid values, defaults, and status reporting. Verify that `swapzctl status` / `dmsetup status` expose the effective strategy and batch ceiling. Do not activate a real target in rootless CI.
+- [ ] Document policy selection at **target creation** and the safe operational lifecycle for changing configuration: do not modify an active swap mapping or restart a target until `swapoff`, draining, and teardown are explicitly authorized and validated. Keep V2.2's policy/batch winner **UNDETERMINED** pending measurements.
+
+**Governor-like live switching (deferred design milestone, not a V2.2 prerequisite):**
+
+- [ ] Specify an optional runtime interface (for example a dedicated Device Mapper message/control API, with sysfs exposure only if kernel conventions and lifecycle justify it). Do not advertise a writable `/sys/block/dm-*/swapz/strategy` path until implemented and reviewed.
+- [ ] Design safe `immediate` / `opportunistic` / `staged` transitions around pending compressed BIO ownership, early-acknowledged staged records, RAM readback, flush/FUA ordering, in-flight lower writes, watchdogs, callbacks, GC and teardown. Prove no lost/double BIO completion or generation publication before exposing live switching.
+- [ ] Design batch-ceiling changes without reallocating or freeing callback-owned buffers: preallocation limits, drain/quiesce barriers, failure rollback, and stable table/status semantics must be specified before implementation.
+- [ ] Require compiled rootless transition/failure tests, independent native Linux build, then **separately authorized** loaded-kernel/device qualification and performance measurements before enabling runtime governor-style changes by default.
+
