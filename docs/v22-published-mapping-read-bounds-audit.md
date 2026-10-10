@@ -76,3 +76,22 @@ post-merge kernel, combined, teardown, and NBD rootless workflow
 conclusions. Real-device/fault/teardown qualification still requires
 separate explicit authorization. No benchmark was run and the V2.2
 strategy/batch winner remains **UNDETERMINED**.
+
+## Exact merged-source evidence
+
+The reviewed change merged as
+[`03e6e6459fed5317918d1314f3ccf0bdab47564a`](https://github.com/k1moradi/swapz/commit/03e6e6459fed5317918d1314f3ccf0bdab47564a).
+
+All four **post-merge** rootless runs on this identical executable
+commit passed:
+
+- [Kernel source](https://github.com/k1moradi/swapz/actions/runs/38046890497)
+- [Combined source qualification](https://github.com/k1moradi/swapz/actions/runs/38046890454)
+- [Teardown safety](https://github.com/k1moradi/swapz/actions/runs/38046890382)
+- [NBD source safety](https://github.com/k1moradi/swapz/actions/runs/38046890405)
+
+The original PR head `617af668d022ad0c9fb89fd639ddca6f44c63ef4`
+also passed those four PR qualification workflows before merge.
+Later documentation-only commits on `main` do not modify the
+qualified executable source. Independent native kernel compilation
+has not yet been repeated on this revision.
