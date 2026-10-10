@@ -81,6 +81,7 @@ on:
       - 'tests/runtime/swapz-compaction-container-contract-test.py'
       - 'tests/runtime/swapz-staged-read-contract-test.py'
       - 'tests/runtime/swapz-published-read-bounds-contract-test.py'
+      - 'tests/runtime/swapz-stream-submit-bounds-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -370,6 +371,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/swapz-published-read-bounds-contract-test.py
           timeout 25s python3 -B tests/runtime/swapz-published-read-bounds-contract-test.py -v
+      - name: Compiled stream lower-write bounds and callback ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-stream-submit-bounds-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-stream-submit-bounds-contract-test.py -v
       - name: Compiled preflush and FUA ordering and batch-flag contract
         shell: bash
         run: |
