@@ -1581,3 +1581,17 @@ See `docs/v22-independent-upper-bio-ownership-audit.md`.
 - [ ] Loaded module, actual DM/swap/loop/NBD/device, pressure and destructive fault qualification require separate explicit authorization. V2.2 strategy/batch winner remains **UNDETERMINED**.
 
 See `docs/v22-pending-pack-ownership-audit.md`.
+
+### 2026-10-10 — Fail-closed prior-generation pending-pack scan (PR #13)
+
+- [x] Inspect `swapz_process_write()` → `swapz_commit_previous_generation()` → `swapz_page_has_uncommitted_generation()` ordering. Confirm malformed `pack_record_count` could be traversed before PR #12 append/flush validation; normal serialized code has no demonstrated corruption trigger.
+- [x] Add a narrowly scoped `swapz_pack_bios_match()` gate at entry to the prior-generation commit. Mismatch marks the target failed and returns `-EUCLEAN` before scanning pending records, incrementing the generation, copying a foreground BIO or staging a new record. No new ledger/allocation/disk-format change.
+- [x] Compile actual production-C owner validation, generation scan, previous-generation commit, and foreground write; test valid full64 pack, GC-only NULL owners, staged/current ref, unrelated page, generation wrap, malformed zero/truncated/oversized count and owner/pointer mismatches.
+- [x] Execute two deliberately unguarded mutants: zero count incorrectly advances past an accepted outstanding BIO; count 65 reads a deliberately oversized **safe** userspace canary at logical slot 64. No actual out-of-bounds access or undefined behavior.
+- [x] Require new exact-C test in kernel, combined and teardown gates and workflow omission mutation. Kernel CI: new generation-scan suite **13/13**, existing foreground generation/GC suite **22/22**.
+- [x] Merge [PR #13](https://github.com/k1moradi/swapz/pull/13) at `9bb280588a2f0f4ffcc7764ab616ee873fed5352`. Exact **post-merge** kernel (38065599090), combined (38065599097), teardown (38065599100) and NBD source (38065599105) **PASS**.
+- [ ] Obtain independent native Linux `W=1` module compilation and new suite execution on this exact executable revision; older Codex PR #9 evidence does not cover it.
+- [ ] Benchmark additional bounded pending-pack and generation-scan preflights under an authorized loaded module before selecting V2.2 policy/batch winner. Still **UNDETERMINED**.
+- [ ] Retain safe async callback ownership wait on teardown absent proven dm-io cancellation; no blind freeing on timeouts or device operations without explicit authorization.
+
+See `docs/v22-generation-scan-pack-preflight-audit.md`.
