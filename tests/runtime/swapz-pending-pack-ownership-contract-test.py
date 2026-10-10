@@ -102,7 +102,8 @@ struct swapz_stream_buffer {
     u32 staged_count;
 };
 struct swapz_context {
-    u8 pack_buffer[SWAPZ_BLOCK_BYTES];
+    u8 pack_data[SWAPZ_BLOCK_BYTES];
+    void *pack_buffer;
     unsigned int pack_payload_start,pack_record_count;
     struct list_head pending_bios;
     struct swapz_pending_record pending[SWAPZ_MAX_PACKED_RECORDS];
@@ -167,6 +168,7 @@ static unsigned int members(const struct list_head *h) {
 }
 static void setup(void) {
     memset(&c,0,sizeof(c));memset(bios,0,sizeof(bios));
+    c.pack_buffer=c.pack_data;
     INIT_LIST_HEAD(&c.pending_bios);
     INIT_LIST_HEAD(&c.stream.owned_bios);
     c.pack_payload_start=SWAPZ_BLOCK_BYTES;
