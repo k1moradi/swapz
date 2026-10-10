@@ -446,6 +446,18 @@ static int scenario(int id) {
                 block.records[0].bio != NULL)
                 return 41;
         }
+    } else if (id==30) {
+        /* Descriptor lost its BIO pointer, but independent ownership remains.
+         * Reject the whole finalization before mapping publication or reset. */
+        setup(true,false);
+        block.records[0].bio=NULL;
+        swapz_stream_io_complete(0,s);
+        result=swapz_reap_inflight(&c,false);
+        if (result!=-EUCLEAN || !c.failed || c.installed || c.resets ||
+            b.completes!=1 || b.error!=-EUCLEAN ||
+            !list_empty(&s->owned_bios) ||
+            s->state!=SWAPZ_BUFFER_INFLIGHT)
+            return 42;
     } else if (id==25 || id==26 || id==27) {
         setup(true,false);
         if (id==25) s->start_block=c.physical_blocks;
@@ -460,7 +472,7 @@ static int scenario(int id) {
 }
 int main(int argc, char **argv) {
     int i, rc;
-    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>29) return 60;
+    if (argc!=2 || sscanf(argv[1],"%d",&i)!=1 || i<0 || i>30) return 60;
     rc=scenario(i);
     if (rc) { fprintf(stderr,"scenario %d failed code %d\n",i,rc); return rc; }
     printf("ASYNC_REAP_%d_OK\n",i);
@@ -535,6 +547,9 @@ class AsyncReapExactC(unittest.TestCase):
                           text=True,timeout=3)
         self.assertEqual(cp.returncode,0,cp.stdout+cp.stderr)
         self.assertIn("OLD_FINALIZER_PARTIAL_MAPPING_PUBLICATION",cp.stdout)
+
+    def test_missing_record_bio_pointer_cannot_orphan_registered_owner(self):
+        self.run_case(30)
 
     def test_no_inflight(self): self.run_case(0)
     def test_incomplete_nonblocking_reap(self): self.run_case(1)
