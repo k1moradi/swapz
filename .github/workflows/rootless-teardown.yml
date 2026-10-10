@@ -83,6 +83,7 @@ on:
       - 'tests/runtime/swapz-published-read-bounds-contract-test.py'
       - 'tests/runtime/swapz-stream-submit-bounds-contract-test.py'
       - 'tests/runtime/swapz-upper-bio-ownership-contract-test.py'
+      - 'tests/runtime/swapz-pending-pack-ownership-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
@@ -378,6 +379,13 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/swapz-stream-submit-bounds-contract-test.py
           timeout 25s python3 -B tests/runtime/swapz-stream-submit-bounds-contract-test.py -v
+      - name: Compiled independent compressed pack BIO ownership and count bounds
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/swapz-pending-pack-ownership-contract-test.py
+          timeout 25s python3 -B tests/runtime/swapz-pending-pack-ownership-contract-test.py -v
+
       - name: Compiled independent upper BIO ownership and malformed counts
         shell: bash
         run: |
