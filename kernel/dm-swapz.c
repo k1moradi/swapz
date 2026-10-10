@@ -255,6 +255,8 @@ struct swapz_context {
 	void *io_buffer;
 	/* GC source must survive write-batch compaction using io_buffer. */
 	void *gc_source_buffer;
+	/* Keep GC's compressed output across nested batch compaction. */
+	void *gc_compressed_buffer;
 	void *compressed_buffer;
 	void *pack_buffer;
 	void *repack_buffer;
@@ -1756,7 +1758,7 @@ static int swapz_clean_segment(struct swapz_context *context, u32 victim)
 			error = swapz_store_page(context, NULL, page,
 						 context->generations[page],
 						 context->input_buffer,
-						 context->compressed_buffer, true, false);
+						 context->gc_compressed_buffer, true, false);
 			if (error)
 				goto fail;
 			context->stats.compaction_pages++;
@@ -2538,6 +2540,8 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->io_buffer);
 	if (context->gc_source_buffer)
 		free_page((unsigned long)context->gc_source_buffer);
+	if (context->gc_compressed_buffer)
+		free_page((unsigned long)context->gc_compressed_buffer);
 	if (context->compressed_buffer)
 		free_page((unsigned long)context->compressed_buffer);
 	if (context->pack_buffer)
@@ -2761,13 +2765,14 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	context->input_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->io_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->gc_source_buffer = (void *)__get_free_page(GFP_KERNEL);
+	context->gc_compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->compressed_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->pack_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->repack_buffer = (void *)__get_free_page(GFP_KERNEL);
 	context->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!context->write_buffer || !context->write_compressed_buffer ||
 	    !context->input_buffer || !context->io_buffer ||
-	    !context->gc_source_buffer ||
+	    !context->gc_source_buffer || !context->gc_compressed_buffer ||
 	    !context->compressed_buffer || !context->pack_buffer ||
 	    !context->repack_buffer || !context->lz4_workmem) {
 		target->error = "Cannot allocate preallocated I/O buffers";
