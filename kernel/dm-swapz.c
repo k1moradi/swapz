@@ -1642,7 +1642,15 @@ static int swapz_decode_loaded_mapping(u32 logical_page,
 				       const void *source_block,
 				       void *destination)
 {
+	/* A published mapping must be either a full raw page or compressed. */
+	if (mapping->flags != SWAPZ_MAP_VALID &&
+	    mapping->flags != (SWAPZ_MAP_VALID | SWAPZ_MAP_COMPRESSED))
+		return -EIO;
+
 	if (!(mapping->flags & SWAPZ_MAP_COMPRESSED)) {
+		if (mapping->record_index ||
+		    mapping->stored_length != SWAPZ_BLOCK_BYTES)
+			return -EIO;
 		memcpy(destination, source_block, SWAPZ_BLOCK_BYTES);
 		return 0;
 	}
