@@ -1527,3 +1527,16 @@ See `docs/v22-staged-read-metadata-audit.md`.
 
 See `docs/v22-published-mapping-read-bounds-audit.md` and
 `docs/v22-stream-submit-bounds-audit.md`.
+
+### 2026-10-10 — In-flight completed-batch metadata admission (PR #7)
+
+- [x] Audit `swapz_finalize_stream_buffer()` for post-submission malformed counts, logical-page indices and physical ranges before mapping or upper-BIO ownership mutation.
+- [x] Preflight complete resident metadata once in O(records), reject malformed batches without partial mapping publication and retain completed source buffer for potentially acknowledged staged reads.
+- [x] Extend the existing compiled exact-production-C asynchronous reaper suite with fault-injected late completion, valid two-block publication, staged retention, and an executable removed-preflight partial-publication counterexample (27/27 Python tests PASS).
+- [x] Merge [PR #7](https://github.com/k1moradi/swapz/pull/7) as `0f355b30b2ae5c61b31b75a460e3149600d31a1f`; exact post-merge kernel (38054166754), combined (38054166731), and teardown (38054166734) workflows **PASS**. Standalone NBD workflow not triggered by this kernel-only diff.
+- [ ] Independently recompile this newer kernel revision on Codex's native Linux host using its installed matching kernel headers and document full warnings. The previous Codex PASS was on older `9a4e168`, not this change.
+- [ ] Assess corrupted/lost resident record-count metadata that also destroys the discoverability of an outstanding upper BIO. The bounded failer cannot guarantee arbitrary-corruption recovery; design an independent ownership source before claiming that guarantee.
+- [ ] Preserve the separate explicit authorization requirement for real module/DM/swap/NBD/loop/device, privileged, pressure and backing-release tests.
+- [ ] Benchmark finalization scan overhead before any V2.2 batch or policy decision; winner remains **UNDETERMINED**.
+
+See `docs/v22-inflight-finalize-preflight-audit.md`.
