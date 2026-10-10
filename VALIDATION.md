@@ -4180,3 +4180,66 @@ Native build of PR #9 remains to be independently qualified.
 V2.2 performance/policy winner remains **UNDETERMINED**.
 
 See `docs/v22-exact-bio-identity-audit.md`.
+
+## October 10, 2026 — Pending-pack BIO ownership independence (PR #12)
+
+The lead developer reviewed Codex's previous native-host six-suite
+GC/range/transaction/mapping report at
+`24e2794b173a405c9f9ccfe739c4f733ebc41508`: **94/94 rootless
+test methods PASS**, with no changes to Codex's separate detached
+worktree, shared checkout or protected .state files. This read-only
+report identified a count-dependent pending compressed-pack ownership
+fault-injection gap, not a proven failure in normal serialized code.
+
+Before PR #12, fatal pack cleanup and rejected pack flush followed
+`pack_record_count` when finding accepted upper BIOs. Controlled
+zero/truncated metadata could hide outstanding BIOs; oversized counts
+could cause out-of-range pending-array walks. The new per-context
+`pending_bios` intrusive ledger reuses `dm_per_bio_data` list nodes
+and per-BIO slot coordinates, validates exact pending descriptor
+identity before compressed append/flush, explicitly transfers owners
+to the stream buffer ledger only after successful staging, and drains
+accepted pending BIOs independently on fatal paths. GC records with
+NULL upper BIO are not registered. No allocation or disk-format change.
+
+`tests/runtime/swapz-pending-pack-ownership-contract-test.py`
+compiles exact production pack and cleanup C with deterministic
+lower-staging mocks. **11/11** methods PASS: zero/truncated/oversized
+count, full64, failed staging, cleanup idempotence, GC NULL upper BIO,
+duplicate descriptor, append fail-closed, empty pack and an
+executable deliberately old count-dependent mutant demonstrating
+stranded upper BIOs. The existing
+`swapz-flush-fua-contract-test.py` now compiles and executes the real
+staging C pending-to-stream node transition (**9/9** methods PASS).
+The GC scratch fixture and mandatory kernel, combined, teardown and
+workflow contract gate were updated.
+
+[PR #12](https://github.com/k1moradi/swapz/pull/12) merged at exact
+executable SHA
+[`13451799dc44dd9126d59720568d8116acd9fb61`](https://github.com/k1moradi/swapz/commit/13451799dc44dd9126d59720568d8116acd9fb61).
+The exact PR head `ffe16e4cd76522a65decbbde3ded4054b1cd2688`
+also passed all four applicable rootless source workflows.
+The following **post-merge** runs all report **PASS** on the
+`13451799` executable SHA:
+
+- [Kernel source 38063553855](https://github.com/k1moradi/swapz/actions/runs/38063553855)
+- [Combined qualification 38063553874](https://github.com/k1moradi/swapz/actions/runs/38063553874)
+- [Teardown safety 38063553857](https://github.com/k1moradi/swapz/actions/runs/38063553857)
+- [NBD source safety 38063553854](https://github.com/k1moradi/swapz/actions/runs/38063553854)
+
+The new identity preflight is linear in current pack records and
+registered owners, bounded at 64 per append. No real performance
+measurements have been made. The fix does not recover arbitrary
+corruption of the owner list itself. A missing lower dm-io callback
+still prevents safe teardown because the callback retains an
+outstanding lifetime reference; no unsafe timeout-based context free
+was introduced.
+
+Codex's prior native `W=1` module build qualified older PR #8
+source `24e2794b`; the latest separate 94-test review was source
+contracts only. **Neither qualifies native compilation of this new
+PR #12 kernel source.** No loaded module, real DM/swap/loop/NBD/device,
+privileged operations or physical fault workloads were performed.
+V2.2 strategy and batch-size winner remain **UNDETERMINED**.
+
+See `docs/v22-pending-pack-ownership-audit.md`.
