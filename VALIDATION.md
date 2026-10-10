@@ -3553,3 +3553,57 @@ benchmark, authenticated kernel drain or backing-release permit.
 Both protected local state files remain untouched; no real DM, loop,
 NBD, swap, modules, block devices or destructive cleanup ran.
 The V2.2 strategy/batch winner remains **UNDETERMINED**.
+## 2026-10-09 — Independent source-level GC scratch alias fix
+
+**Exact qualified executable SHA:**
+`0d7e51a0273ec6124f7922567612cf0c2e00e05d`
+([commit](https://github.com/k1moradi/swapz/commit/0d7e51a0273ec6124f7922567612cf0c2e00e05d)).
+
+The main developer independently identified a nested GC/compaction alias:
+the old `swapz_clean_segment` read a compressed victim into the shared
+`io_buffer`, then decoded multiple live records. Relocating an earlier
+record could submit a full batch and invoke `swapz_compact_fill_buffer`,
+which overwrote `io_buffer` with an unrelated physical block before
+the next live victim record was read. This was a source-level
+data-integrity hazard, not an observed physical corruption event.
+
+**Patch:** `kernel/dm-swapz.c` adds one preallocated `gc_source_buffer`
+(4 KiB at the already-required PAGE_SIZE), changes the decoder to take an
+explicit source pointer, uses it for both raw/compressed GC decode,
+preserves the separate ordinary-read `io_buffer`, and frees the new
+page during context cleanup. The change does not edit Codex's
+supervisor, fixture owner, or containment files.
+
+**Test design:** `tests/runtime/swapz-gc-source-contract-test.py` extracts
+and executes the actual production C decoder and generation-current
+predicate using a small synthetic container and test-only LZ4 stub.
+It demonstrates that aliasing the source to overwritten scratch
+invalidates the second record, whereas the dedicated snapshot
+preserves its original bytes. The suite also checks synthetic
+raw/corrupt/foreign source behavior, stale generations across a u32
+wrap boundary, allocation/free contracts, GC source-call identity,
+late-write failure retention, and victim-reclaim ordering.
+This harness is *not* a full kernel LZ4 or GC pipeline test.
+
+**Exact-source actions:**
+- [Combined 38032711626](https://github.com/k1moradi/swapz/actions/runs/38032711626): PASS,
+  exact head verified in job logs, 17/17 GC tests,
+  30/30 kernel range tests, 19/19 workflow-contract tests,
+  25/25 NBD stress repetitions, broker fresh-process 3/3.
+- [Teardown 38032711514](https://github.com/k1moradi/swapz/actions/runs/38032711514): PASS,
+  same exact head, 17/17 GC tests, 30/30 kernel-range tests,
+  19/19 workflow-contract tests, broker fresh-process 3/3.
+- Standalone NBD had passed on the preceding source commit
+  `4c058c54f9ed93782c77a8d845c24cb115919556`
+  ([run 38032323683](https://github.com/k1moradi/swapz/actions/runs/38032323683)),
+  whose kernel source is identical but whose GC test had not yet
+  been qualified. Do not claim a common three-workflow green SHA.
+
+**Limitations:** The new suite runs extracted pure C and checks source
+call order on synthetic data; it does not prove correctness under
+real kernel dm-io, true LZ4, batch rollover, concurrent swap traffic,
+actual I/O faults, process crash, privileged cleanup, or physical
+measurement. Owner/collector authenticity and independent device
+drain remain separate blockers. V2.2 strategy and batch winner:
+**UNDETERMINED**. A subsequent documentation-only commit is not
+a substitute for the exact executable SHA above.

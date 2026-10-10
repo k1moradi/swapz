@@ -104,3 +104,14 @@ release authority from source-only CI.
 No real DM, loop, NBD, swap, module, pressure, physical device or
 destructive operation was exercised. Strategy/batch winner remains
 **UNDETERMINED**.
+## Exact-revision CI evidence
+
+The fully corrected executable was qualified at
+`0d7e51a0273ec6124f7922567612cf0c2e00e05d`:
+[combined rootless run 38032711626](https://github.com/k1moradi/swapz/actions/runs/38032711626)
+and [teardown run 38032711514](https://github.com/k1moradi/swapz/actions/runs/38032711514).
+Both passed 17 compiled/source GC tests and retained 30 kernel-range
+and 19 mandatory workflow-contract tests. Combined passed all 25
+standalone-process NBD stress repetitions. Earlier revisions failed
+only newly introduced test anchors/checks and must not be reported
+as passing. No live kernel or real device was exercised.

@@ -1274,4 +1274,31 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Separately review full kernel build, real DM discard/flush/FUA
       behavior, GC concurrency, memory-reclaim safety and production
       qualification only under separately authorized infrastructure.
+### 2026-10-09 — GC source-buffer alias corrected
+
+- [x] Audit staged-generation and live-GC relocation source path. A multi-live
+      compressed victim block formerly lived in `context->io_buffer`, while
+      nested submission/compaction could overwrite that buffer before later
+      records of the same source block were decoded.
+- [x] Add one preallocated 4 KiB `gc_source_buffer` for the entire victim
+      block's decode lifetime, pass explicit source bytes to the shared
+      decoder, preserve readback's existing io_buffer, and free the snapshot
+      on all context teardown/failed-construction paths. No allocations
+      were added to the GC hot path and no on-disk format was changed.
+- [x] Execute verbatim production decoder + generation predicate in a
+      rootless C harness with synthetic container records and a stub
+      decompressor, including the alias counterexample, no-alias
+      preservation, negative allocation/free and buffer-binding mutants,
+      stale-generation tests and source-level victim reclamation barriers.
+      New GC test suite 17/17; kernel-range suite 30/30; workflow contract
+      suite 19/19 in both mandatory workflows on exact executable SHA
+      `0d7e51a0273ec6124f7922567612cf0c2e00e05d`:
+      [combined](https://github.com/k1moradi/swapz/actions/runs/38032711626),
+      [teardown](https://github.com/k1moradi/swapz/actions/runs/38032711514).
+- [ ] Audit the generation increment before nested GC when foreground
+      allocation/relocation occurs, using source-anchored fault injection;
+      current evidence does not establish a second confirmed bug.
+- [ ] Qualify live kernel GC, LZ4 compression/decompression,
+      lower-I/O timeouts, batch FUA/flush, physical source identity, and
+      backing release only under separately authorized infrastructure.
 
