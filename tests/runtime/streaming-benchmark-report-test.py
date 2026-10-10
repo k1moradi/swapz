@@ -287,7 +287,7 @@ class StreamingReportingTests(unittest.TestCase):
 
     def test_unrelated_fio_executable_rejected_before_fixture_allocation(self):
         fake_fio = self.directory / "fio"
-        fake_fio.write_text("#!/bin/sh\\necho 'fio, version 1.9.2'\\n",
+        fake_fio.write_text("#!/bin/sh\necho 'fio, version 1.9.2'\n",
                             encoding="utf-8")
         fake_fio.chmod(0o755)
         env = os.environ.copy()
