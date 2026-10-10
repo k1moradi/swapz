@@ -159,6 +159,19 @@ missing inventory, direct-child-only scope, duplicate or unknown domain,
 reported descendant, stale session, or inspection error denies the session
 before swap inspection or mapper release begins.
 
+The service protocol keeps the five-field `worker` / `workers` result for the
+older rootless adapter and carries the broker input separately in the
+versioned `supervisor_lifecycle` object. The service builds that object from
+the exact retained `WorkerResult` record and its launch record; the
+`SupervisorControlClient` checks the direct-child projection against it,
+reconciles every lifecycle row with READY identity and the complete handle
+inventory, then exposes it through `containment_snapshot()`. Missing,
+contradictory, stale, duplicated, or foreign lifecycle rows deny the client
+before the broker can inspect swap state. The nested extension is a
+trusted-service assertion over a private socket, not a kernel-authenticated
+attestation. The compatibility result alone is not used by
+`FixtureOwnerBroker` as process-tree containment evidence.
+
 The broker's `serve_worker_connection()` accepts one bounded AF_UNIX stream.
 It reads PID, UID, and GID from kernel `SO_PEERCRED`, compares all three with
 the identity captured by trusted bootstrap, pins one connection for the

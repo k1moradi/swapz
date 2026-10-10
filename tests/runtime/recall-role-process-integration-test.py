@@ -109,7 +109,16 @@ class RootlessDirectProcessSession:
                 f"service_returncode={self.process.poll()!r}"
             ) from exc
         assert result["status"] == "ready"
-        return result["handle"]
+        handle = result["handle"]
+        if role in ("writer", "a", "b"):
+            self.client.call("release_group", handles=[handle])
+        elif role == "b2":
+            a2_handles = [known for known, name in self.adapter._role_by_handle.items()
+                          if name == "a2"]
+            if len(a2_handles) != 1:
+                self._refuse_synthetic_writer_readiness("a2 gate identity is ambiguous")
+            self.client.call("release_group", handles=[a2_handles[0], handle])
+        return handle
 
     def wait(self, handle: str) -> None:
         result = self.dispatch("WAIT", handle=handle, timeout_ms=5000)
@@ -498,6 +507,11 @@ class ActualServiceAndDirectDDTests(unittest.TestCase):
 
     def test_a2_wait_before_b2_admission_denied(self):
         self.session.launch("writer")
+        self.session.await_synthetic_writer_contents()
+        a = self.session.launch("a")
+        self.session.wait(a)
+        b = self.session.launch("b")
+        self.session.wait(b)
         a2 = self.session.launch("a2")
         with self.assertRaisesRegex(RoleError, "both concurrent"):
             self.session.wait(a2)

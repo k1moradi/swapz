@@ -394,7 +394,10 @@ from pathlib import Path
 child = os.fork()
 if child == 0:
     os.setsid()
-    Path({str(marker)!r}).write_text(f"{{os.getpid()}}:{{os.getpgrp()}}")
+    marker = Path({str(marker)!r})
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(f"{{os.getpid()}}:{{os.getpgrp()}}")
+    os.replace(temporary, marker)
     while True:
         time.sleep(1)
 os._exit(0)

@@ -784,7 +784,8 @@ class ActualServiceDrainOperations(FakeDrainOperations):
         session = self.owner.lease.session_id
         for handle in handles:
             response = self.launcher.wait(handle, 5.0)
-            row = response.get("worker")
+            lifecycle = response.get("supervisor_lifecycle")
+            row = lifecycle.get("worker") if isinstance(lifecycle, dict) else None
             if (response.get("status") != "reaped" or not isinstance(row, dict)
                     or row.get("handle") != handle or row.get("exit_code") != 0
                     or row.get("direct_child_reaped") is not True

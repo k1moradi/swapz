@@ -248,10 +248,34 @@ def worker_result(handle: str, *, reaped: bool = True, exit_code: int | None = 1
     }
 
 
+def direct_child_result(handle: str, *, reaped: bool = True, exit_code: int | None = 143,
+                        errors: list[str] | None = None) -> dict[str, Any]:
+    return {
+        "handle": handle, "reaped": reaped, "exit_code": exit_code,
+        "escalated": False, "errors": [] if errors is None else errors,
+    }
+
+
+def wait_result(request_id: int, handle: str, *, status: str = "reaped",
+                reaped: bool = True, exit_code: int | None = 0,
+                errors: list[str] | None = None) -> dict[str, Any]:
+    lifecycle_worker = worker_result(
+        handle, reaped=reaped, exit_code=exit_code, errors=errors,
+    )
+    return {
+        **response_base(request_id, status=status, ok=True, all_reaped=reaped),
+        "worker": direct_child_result(handle, reaped=reaped, exit_code=exit_code, errors=errors),
+        "supervisor_lifecycle": {"version": 1, "worker": lifecycle_worker},
+    }
+
+
 def stop_complete(request_id: int, handles: list[str]) -> dict[str, Any]:
     return {
         **response_base(request_id, status="complete", ok=True, all_reaped=True, cleanup_allowed=True),
-        "workers": [worker_result(handle) for handle in handles],
+        "workers": [direct_child_result(handle) for handle in handles],
+        "supervisor_lifecycle": {
+            "version": 1, "workers": [worker_result(handle) for handle in handles],
+        },
         "errors": [],
     }
 
@@ -332,16 +356,41 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             self.assertNotEqual(handles[0], handles[1])
             first_wait = session.client.call("wait", handle=handles[0], timeout_ms=1)
             self.assertEqual(first_wait["status"], "running")
+            self.assertEqual(set(first_wait["worker"]),
+                             {"handle", "reaped", "exit_code", "escalated", "errors"})
+            lifecycle_wait = first_wait["supervisor_lifecycle"]
+            self.assertEqual(lifecycle_wait["version"], 1)
+            self.assertEqual(lifecycle_wait["worker"]["handle"], handles[0])
+            self.assertEqual(lifecycle_wait["worker"]["session_id"], session.client.session_id)
+            self.assertTrue(lifecycle_wait["worker"]["pidfd_owned_at_launch"])
+            self.assertTrue(lifecycle_wait["worker"]["containment_installed"])
             stopped = session.client.call("stop_all", handles=handles)
             self.assertTrue(stopped["all_reaped"])
             self.assertTrue(stopped["cleanup_allowed"])
             self.assertEqual(len(stopped["workers"]), 3)
+            self.assertTrue(all(set(row) == {
+                "handle", "reaped", "exit_code", "escalated", "errors",
+            } for row in stopped["workers"]))
+            self.assertEqual(stopped["supervisor_lifecycle"]["version"], 1)
+            self.assertEqual(
+                {row["handle"] for row in stopped["supervisor_lifecycle"]["workers"]},
+                set(handles),
+            )
             self.assertTrue(all(worker["reaped"] for worker in stopped["workers"]))
             shutdown = session.client.call("shutdown")
             self.assertEqual(shutdown["status"], "shutdown")
             code, _, err = session.finish()
             self.assertEqual(code, 0, err)
             self.assertTrue(session.client.cleanup_authorized)
+            snapshot = session.client.containment_snapshot(
+                session.client.session_id, tuple(handles),
+            )
+            self.assertEqual(
+                {row["handle"] for row in snapshot["workers"]}, set(handles),
+            )
+            self.assertTrue(all(row["containment_installed"] is True
+                                and row["direct_child_reaped"] is True
+                                for row in snapshot["workers"]))
         finally:
             session.abort()
 
@@ -365,6 +414,24 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             self.assertTrue(session.client.cleanup_authorized)
         finally:
             session.abort()
+
+    def test_wait_requires_lifecycle_extension_bound_to_ready_identity(self) -> None:
+        process = completed_process(0)
+        valid = wait_result(2, "worker-A", status="reaped", exit_code=0)
+        valid["supervisor_lifecycle"]["worker"]["lifecycle_id"] = "f" * 32
+        client, peer, _ = queued_client(
+            [launch_ready(1, "worker-A"), valid], process=process,
+        )
+        try:
+            client.call("launch", command="sleep", duration_ms=10)
+            with self.assertRaises(ProtocolFailure):
+                client.call("wait", handle="worker-A", timeout_ms=10)
+            self.assertFalse(client.confirm_service_exit(process.returncode))
+            self.assertFalse(client.cleanup_authorized)
+        finally:
+            client.close()
+            peer.close()
+            process.wait(timeout=3.0)
 
     def test_nonzero_natural_exit_is_reported_and_denies_cleanup(self) -> None:
         session = ServiceProcess()
@@ -643,19 +710,21 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             response["workers"] = []
 
         def missing_worker(response: dict[str, Any]) -> None:
-            response["workers"] = [worker_result("worker-A")]
+            response["workers"] = [direct_child_result("worker-A")]
 
         def duplicate_handle(response: dict[str, Any]) -> None:
-            response["workers"] = [worker_result("worker-A"), worker_result("worker-A")]
+            response["workers"] = [direct_child_result("worker-A"), direct_child_result("worker-A")]
 
         def unknown_handle(response: dict[str, Any]) -> None:
-            response["workers"] = [worker_result("worker-A"), worker_result("worker-X")]
+            response["workers"] = [direct_child_result("worker-A"), direct_child_result("worker-X")]
 
         def unreaped_worker(response: dict[str, Any]) -> None:
-            response["workers"][1] = worker_result("worker-B", reaped=False, exit_code=None)
+            response["supervisor_lifecycle"]["workers"][1] = worker_result(
+                "worker-B", reaped=False, exit_code=None)
 
         def worker_error(response: dict[str, Any]) -> None:
-            response["workers"][0] = worker_result("worker-A", errors=["injected close error"])
+            response["supervisor_lifecycle"]["workers"][0] = worker_result(
+                "worker-A", errors=["injected close error"])
 
         def report_error(response: dict[str, Any]) -> None:
             response["errors"] = ["injected report error"]
@@ -665,6 +734,15 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
 
         def omitted_report_field(response: dict[str, Any]) -> None:
             del response["errors"]
+
+        def omitted_supervisor_lifecycle(response: dict[str, Any]) -> None:
+            del response["supervisor_lifecycle"]
+
+        def duplicate_lifecycle_handle(response: dict[str, Any]) -> None:
+            response["supervisor_lifecycle"]["workers"][1] = worker_result("worker-A")
+
+        def contradictory_direct_child_result(response: dict[str, Any]) -> None:
+            response["workers"][0]["exit_code"] = 99
 
         def contradictory_verdict(response: dict[str, Any]) -> None:
             response["ok"] = False
@@ -680,6 +758,9 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
             ("report error", report_error),
             ("malformed worker type", bad_worker_type),
             ("omitted report field", omitted_report_field),
+            ("omitted supervisor lifecycle extension", omitted_supervisor_lifecycle),
+            ("duplicate lifecycle handle", duplicate_lifecycle_handle),
+            ("contradictory direct-child result", contradictory_direct_child_result),
             ("contradictory top level", contradictory_verdict),
         ]
         for label, mutate in cases:
@@ -822,7 +903,8 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
         replay_client, replay_peer, _ = queued_client(
             [launch_ready(1, "worker-A"),
              {**response_base(1, status="running", ok=True, all_reaped=False),
-              "worker": worker_result("worker-A", reaped=False, exit_code=None)}],
+              **wait_result(1, "worker-A", status="running", reaped=False,
+                            exit_code=None)}],
             process=process,
         )
         try:
@@ -839,7 +921,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
         nonzero_client, nonzero_peer, _ = queued_client(
             [launch_ready(1, "worker-A"),
              {**response_base(2, status="reaped", ok=True, all_reaped=True),
-              "worker": worker_result("worker-A", exit_code=9)}],
+              **wait_result(2, "worker-A", exit_code=9)}],
             process=process2,
         )
         try:
@@ -1225,6 +1307,28 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         self.assertEqual(responses[2]["workers"][1]["errors"], ["injected later worker failure"])
         self.assertFalse(responses[3]["cleanup_allowed"])
         self.assertEqual(outcome.exit_code, 3)
+
+    def test_malformed_stop_worker_record_fails_closed_without_service_crash(self) -> None:
+        class MalformedStopReportSupervisor(FakeServiceSupervisor):
+            def cleanup_after_stop(self, handles, callback):
+                self.calls.append(tuple(handles))
+                for record in self.records.values():
+                    record.reaped = True
+                return StopReport((object(),), (), True), None
+
+        fake = MalformedStopReportSupervisor()
+        service = SupervisorControlService(supervisor=fake, io_timeout=0.5)
+        requests = [
+            {"id": 1, "op": "launch", "command": "sleep", "duration_ms": 10},
+            {"id": 2, "op": "stop_all", "handles": ["fake-handle-1"]},
+            {"id": 3, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(b"".join(raw_frame(item) for item in requests), service)
+        self.assertEqual(responses[0]["status"], "ready")
+        self.assertEqual(responses[1]["status"], "lifecycle_failure")
+        self.assertFalse(responses[1]["cleanup_allowed"])
+        self.assertTrue(responses[1]["preserve_backing"])
+        self.assertNotEqual(outcome.exit_code, 0)
 
     def test_duplicate_handle_after_role_admission_is_unconfirmed(self) -> None:
         class DuplicateHandleSupervisor(FakeServiceSupervisor):

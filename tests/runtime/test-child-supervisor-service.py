@@ -231,13 +231,40 @@ class _PosixRoleGateOps:
         os.close(fd)
 
 
-def _result_dict(result: WorkerResult, launch: dict[str, Any]) -> dict[str, Any]:
+def _result_dict(result: WorkerResult) -> dict[str, Any]:
+    """Compatibility result used by the older rootless recall adapter.
+
+    Process-containment details are carried separately in the explicitly
+    versioned ``supervisor_lifecycle`` extension.  Keeping these five fields
+    stable lets that adapter reject/consume its narrow direct-child result
+    without mistaking it for the broker's lifecycle-bound containment report.
+    """
     safe_handle = result.handle if _valid_opaque_handle(result.handle) else None
-    errors = [_bounded_text(item, 160) for item in result.errors[:4]]
+    raw_errors = result.errors
+    errors = ([_bounded_text(item, 160) for item in raw_errors[:4]]
+              if isinstance(raw_errors, (tuple, list))
+              and all(isinstance(item, str) for item in raw_errors[:4])
+              else ["invalid supervisor worker error inventory"])
     if safe_handle is None:
         errors.append("invalid supervisor handle withheld")
     return {
         "handle": safe_handle,
+        "reaped": result.reaped,
+        "exit_code": result.exit_code,
+        "escalated": result.escalated,
+        "errors": errors,
+    }
+
+
+def _lifecycle_dict(result: WorkerResult, launch: dict[str, Any]) -> dict[str, Any]:
+    """Versioned supervisor-owned lifecycle facts for broker reconciliation."""
+    raw_errors = result.errors
+    errors = ([_bounded_text(item, 160) for item in raw_errors[:4]]
+              if isinstance(raw_errors, (tuple, list))
+              and all(isinstance(item, str) for item in raw_errors[:4])
+              else ["invalid supervisor worker error inventory"])
+    return {
+        "handle": result.handle if _valid_opaque_handle(result.handle) else None,
         "protocol_version": SERVICE_PROTOCOL_VERSION,
         "session_id": launch["session_id"],
         "service_instance_id": launch["service_instance_id"],
@@ -387,7 +414,7 @@ class SupervisorControlService:
         launch = self._launch_records.get(handle)
         if launch is None or not self._same_lifecycle(result, launch):
             raise RuntimeError("worker result does not match its retained launch lifecycle")
-        return _result_dict(result, launch)
+        return _lifecycle_dict(result, launch)
 
     def _validate_common(self, request: object) -> tuple[int, str, dict[str, Any]]:
         if not isinstance(request, dict):
@@ -747,8 +774,12 @@ class SupervisorControlService:
         status = "reaped" if result.reaped and not result.errors else (
             "lifecycle_failure" if result.errors else "running"
         )
-        return self._response(request_id, status=status, ok=status != "lifecycle_failure",
-                              worker=row, all_reaped=self._all_reaped())
+        return self._response(
+            request_id, status=status, ok=status != "lifecycle_failure",
+            worker=_result_dict(result),
+            supervisor_lifecycle={"version": 1, "worker": row},
+            all_reaped=self._all_reaped(),
+        )
 
     def _stop_all(self, request_id: int, request: dict[str, Any]) -> dict[str, Any]:
         self._exact_keys(request, {"id", "op", "handles"})
@@ -786,26 +817,41 @@ class SupervisorControlService:
             self._last_stop_all_clean = False
             return self._response(request_id, status="lifecycle_failure",
                                   error=f"stop_all failed: {_bounded_text(exc)}")
+        if (type(report) is not StopReport or type(report.results) is not tuple
+                or type(report.errors) is not tuple
+                or any(type(result) is not WorkerResult for result in report.results)):
+            self._sticky_failure = True
+            self._last_stop_all_reaped = False
+            self._last_stop_all_clean = False
+            return self._response(
+                request_id, status="lifecycle_failure",
+                error="supervisor returned a malformed stop report",
+            )
         descriptor_errors = self._close_recall_dd_descriptors() if self._all_reaped() else []
         self._last_stop_all_reaped = bool(report.all_reaped) and self._all_reaped()
         self._last_stop_all_clean = (
             bool(report.cleanup_allowed) and self._last_stop_all_reaped
             and not repeated_stop and not descriptor_errors
         )
-        result_handles = [result.handle for result in report.results]
-        if (any(not _valid_opaque_handle(handle) for handle in result_handles)
+        valid_worker_rows = all(type(result) is WorkerResult for result in report.results)
+        result_handles = [result.handle if type(result) is WorkerResult else None
+                          for result in report.results]
+        if (not valid_worker_rows
+                or any(not _valid_opaque_handle(handle) for handle in result_handles)
                 or len(result_handles) != len(set(result_handles))
                 or set(result_handles) != set(self.handles)):
             self._sticky_failure = True
-        if report.errors or any(result.errors for result in report.results) or descriptor_errors:
+        if (report.errors or not valid_worker_rows
+                or any(result.errors for result in report.results if type(result) is WorkerResult)
+                or descriptor_errors):
             self._sticky_failure = True
         cleanup_allowed = self._last_stop_all_clean and not self._sticky_failure
         if not cleanup_allowed:
             self._sticky_failure = True
         try:
-            results = [self._worker_row(result, result.handle) for result in report.results]
+            lifecycle_results = [self._worker_row(result, result.handle) for result in report.results]
         except Exception as exc:
-            results = []
+            lifecycle_results = []
             self._sticky_failure = True
             self._last_stop_all_clean = False
             self._last_stop_all_reaped = False
@@ -813,13 +859,19 @@ class SupervisorControlService:
                                 tuple(report.errors) +
                                 (f"worker lifecycle identity mismatch: {_bounded_text(exc)}",),
                                 False)
+        legacy_results = [
+            _result_dict(result)
+            for result in report.results
+            if (type(result) is WorkerResult and result.handle in self._launch_records)
+        ]
         response = self._response(
             request_id,
             status="complete" if cleanup_allowed else "lifecycle_failure",
             ok=cleanup_allowed,
             cleanup_allowed=cleanup_allowed,
             all_reaped=self._last_stop_all_reaped,
-            workers=results,
+            workers=legacy_results,
+            supervisor_lifecycle={"version": 1, "workers": lifecycle_results},
             errors=[_bounded_text(item, 160)
                     for item in list(report.errors)[:max(0, 8 - len(descriptor_errors))]]
                     + descriptor_errors[:8],
@@ -1070,6 +1122,24 @@ class SupervisorControlClient:
         errors = row["errors"]
         return isinstance(errors, list) and all(isinstance(item, str) for item in errors)
 
+    @staticmethod
+    def _legacy_worker_shape(row: object) -> bool:
+        expected = {"handle", "reaped", "exit_code", "escalated", "errors"}
+        if not isinstance(row, dict) or set(row) != expected:
+            return False
+        if (not _valid_opaque_handle(row["handle"])
+                or not isinstance(row["reaped"], bool)
+                or not isinstance(row["escalated"], bool)):
+            return False
+        exit_code = row["exit_code"]
+        if exit_code is not None and (
+            isinstance(exit_code, bool) or not isinstance(exit_code, int)
+            or not 0 <= exit_code <= 255
+        ):
+            return False
+        errors = row["errors"]
+        return isinstance(errors, list) and all(isinstance(item, str) for item in errors)
+
     def _row_matches_launch(self, row: dict[str, Any]) -> bool:
         launch = self._launch_identities.get(row["handle"])
         return (launch is not None
@@ -1083,7 +1153,8 @@ class SupervisorControlClient:
     def _validate_stop_success(self, response: dict[str, Any]) -> bool:
         expected_keys = {
             "id", "protocol_version", "session_id", "service_instance_id", "supervisor_id",
-            "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "workers", "errors"
+            "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "workers",
+            "supervisor_lifecycle", "errors"
         }
         if set(response) != expected_keys:
             raise ProtocolError("successful stop_all response has missing or unexpected fields")
@@ -1094,28 +1165,46 @@ class SupervisorControlClient:
         ):
             raise ProtocolError("successful stop_all verdict fields contradict")
         workers = response["workers"]
+        lifecycle = response["supervisor_lifecycle"]
         errors = response["errors"]
         if not isinstance(workers, list) or len(workers) > MAX_WORKERS:
             raise ProtocolError("successful stop_all worker inventory is invalid")
+        if (not isinstance(lifecycle, dict) or set(lifecycle) != {"version", "workers"}
+                or type(lifecycle["version"]) is not int or lifecycle["version"] != 1
+                or not isinstance(lifecycle["workers"], list)
+                or len(lifecycle["workers"]) > MAX_WORKERS):
+            raise ProtocolError("successful stop_all supervisor lifecycle extension is invalid")
+        lifecycle_workers = lifecycle["workers"]
         if not isinstance(errors, list) or any(not isinstance(item, str) for item in errors):
             raise ProtocolError("successful stop_all error inventory is invalid")
-        if any(not self._worker_row_shape(row) for row in workers):
+        if any(not self._legacy_worker_shape(row) for row in workers):
+            raise ProtocolError("successful stop_all contains a malformed direct-child result")
+        if any(not self._worker_row_shape(row) for row in lifecycle_workers):
             raise ProtocolError("successful stop_all contains a malformed worker result")
-        if any(not self._row_matches_launch(row) for row in workers):
+        if any(not self._row_matches_launch(row) for row in lifecycle_workers):
             raise ProtocolError("successful stop_all contains a foreign or stale worker lifecycle")
-        handles = [row["handle"] for row in workers]
+        handles = [row["handle"] for row in lifecycle_workers]
         if len(handles) != len(set(handles)):
             raise ProtocolError("successful stop_all contains duplicate worker handles")
         if set(handles) != set(self._registered_handles) or len(handles) != len(self._registered_handles):
             raise ProtocolError("successful stop_all worker inventory does not match launch history")
+        legacy_by_handle = {row["handle"]: row for row in workers}
+        if len(legacy_by_handle) != len(workers) or set(legacy_by_handle) != set(handles):
+            raise ProtocolError("successful stop_all direct-child inventory does not match lifecycle inventory")
+        for row in lifecycle_workers:
+            legacy = legacy_by_handle[row["handle"]]
+            projected = {key: row[key] for key in
+                         ("handle", "reaped", "exit_code", "escalated", "errors")}
+            if legacy != projected:
+                raise ProtocolError("direct-child result contradicts supervisor lifecycle result")
         if any(row["reaped"] is not True or row["direct_child_reaped"] is not True
-               or row["exit_code"] is None for row in workers):
+               or row["exit_code"] is None for row in lifecycle_workers):
             raise ProtocolError("successful stop_all contains an unreaped worker")
-        direct_rows = [row for row in workers if row["role"] is not None]
+        direct_rows = [row for row in lifecycle_workers if row["role"] is not None]
         if direct_rows and ([row["role"] for row in direct_rows] != list(RECALL_ROLES)
                             or self._release_group_index != 4):
             raise ProtocolError("direct-dd cleanup lacks the complete released five-role inventory")
-        if errors or any(row["errors"] for row in workers):
+        if errors or any(row["errors"] for row in lifecycle_workers):
             return False
         return True
 
@@ -1171,21 +1260,30 @@ class SupervisorControlClient:
             return
         if set(response) != {
             "id", "protocol_version", "session_id", "service_instance_id", "supervisor_id",
-            "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "worker"
+            "ok", "status", "all_reaped", "cleanup_allowed", "preserve_backing", "worker",
+            "supervisor_lifecycle"
         }:
             raise ProtocolError("wait response has missing or unexpected fields")
         row = response["worker"]
-        if (not self._worker_row_shape(row) or row["handle"] != handle
-                or not self._row_matches_launch(row)):
+        lifecycle = response["supervisor_lifecycle"]
+        if (not self._legacy_worker_shape(row)
+                or not isinstance(lifecycle, dict) or set(lifecycle) != {"version", "worker"}
+                or type(lifecycle["version"]) is not int or lifecycle["version"] != 1
+                or not self._worker_row_shape(lifecycle["worker"])):
+            raise ProtocolError("wait response has malformed supervisor lifecycle result")
+        lifecycle_row = lifecycle["worker"]
+        if (row != {key: lifecycle_row[key] for key in
+                    ("handle", "reaped", "exit_code", "escalated", "errors")}
+                or lifecycle_row["handle"] != handle or not self._row_matches_launch(lifecycle_row)):
             raise ProtocolError("wait response worker does not match requested handle")
         if response["cleanup_allowed"] is not False or response["preserve_backing"] is not True:
             raise ProtocolError("wait response contains a cleanup verdict")
         if status == "running":
-            if (response["ok"] is not True or row["reaped"] is not False
-                    or row["exit_code"] is not None or row["errors"]):
+            if (response["ok"] is not True or lifecycle_row["reaped"] is not False
+                    or lifecycle_row["exit_code"] is not None or lifecycle_row["errors"]):
                 raise ProtocolError("running wait response has a contradictory worker result")
-        elif (response["ok"] is not True or row["reaped"] is not True
-              or row["exit_code"] != 0 or row["errors"]):
+        elif (response["ok"] is not True or lifecycle_row["reaped"] is not True
+              or lifecycle_row["exit_code"] != 0 or lifecycle_row["errors"]):
             raise ProtocolError("reaped wait response has a contradictory worker result")
 
     def _validate_shutdown_response(self, response: dict[str, Any]) -> bool:
@@ -1380,7 +1478,8 @@ class SupervisorControlClient:
             "stop_request_id": self._stop_request_id,
             "service_exit_status": 0,
             "expected_handles": tuple(handles),
-            "workers": tuple(dict(row) for row in self._stop_report["workers"]),
+            "workers": tuple(dict(row) for row in
+                             self._stop_report["supervisor_lifecycle"]["workers"]),
             "errors": tuple(self._stop_report["errors"]),
         }
 

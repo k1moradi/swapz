@@ -42,6 +42,24 @@ PAGES = {"a": 0, "b": 4, "a2": 0, "b2": 5}
 PAGE_SIZE = 4096
 
 
+class SyntheticRoleGateOps:
+    """Inert descriptor seam for the non-forking synthetic supervisor test."""
+
+    def __init__(self):
+        self.next_fd = 1000
+
+    def pipe(self):
+        pair = (self.next_fd, self.next_fd + 1)
+        self.next_fd += 2
+        return pair
+
+    def write(self, _fd, data):
+        return len(data)
+
+    def close(self, _fd):
+        return None
+
+
 class TrustedSyntheticGate:
     """Wrap the *real* role gate to snapshot readback FD identity before launch."""
 
@@ -75,19 +93,33 @@ class SyntheticDirectSupervisor:
         self.gate = gate
         self.reference = reference
         self.workers = {}
+        self.records = {}
         self.next_number = 0
         self.events = []
+        self.supervisor_id = "a" * 32
+
+    def _record(self, handle, *, reaped, exit_code):
+        lifecycle_id = f"{int(handle.rsplit('-', 1)[1]):032x}"
+        return service_module.WorkerResult(
+            handle, reaped, exit_code, False, (),
+            service_module.PROCESS_TREE_CONTAINMENT_PROFILE,
+            self.supervisor_id, lifecycle_id, True,
+            service_module.PROCESS_TREE_CONTAINMENT_PROFILE, True,
+        )
 
     def launch(self, argv, *, env, **options):
         role = self.gate.pending_role
         self.events.append(("launch", role))
         assert role in ("writer", *PAGES)
         assert options.get("strict_fds") is True
-        assert options.get("executable_fd") is not None
+        assert options.get("contain_process_tree") is True
+        assert isinstance(options.get("pass_fds"), tuple)
+        assert self.gate.gate._executable_fd in options["pass_fds"]
         assert "argv" not in options and "PATH" in env
         self.next_number += 1
         handle = f"trusted-role-{self.next_number}"
-        self.workers[handle] = False
+        self.workers[handle] = role
+        self.records[handle] = self._record(handle, reaped=False, exit_code=None)
         if role in PAGES:
             offset = PAGES[role] * PAGE_SIZE
             data = self.reference[offset:offset + PAGE_SIZE]
@@ -96,20 +128,25 @@ class SyntheticDirectSupervisor:
         return handle
 
     def worker_for_test(self, handle):
-        return type("WorkerView", (), {"reaped": self.workers[handle]})()
+        return type("WorkerView", (), {
+            "reaped": self.records[handle].reaped,
+        })()
+
+    def lifecycle_result(self, handle):
+        return self.records[handle]
 
     def wait(self, handle, timeout):
         self.events.append(("wait", handle))
-        self.workers[handle] = True
-        return service_module.WorkerResult(handle, True, 0, False, ())
+        self.records[handle] = self._record(handle, reaped=True, exit_code=0)
+        return self.records[handle]
 
     def cleanup_after_stop(self, handles, callback):
         self.events.append(("stop_all", ""))
         matches = set(handles) == set(self.workers) and len(handles) == len(self.workers)
         records = []
         for handle in self.workers:
-            self.workers[handle] = True
-            records.append(service_module.WorkerResult(handle, True, 0, False, ()))
+            self.records[handle] = self._record(handle, reaped=True, exit_code=0)
+            records.append(self.records[handle])
         return service_module.StopReport(tuple(records), (), matches), (
             callback() if matches else None
         )
@@ -166,7 +203,8 @@ class RoleServiceWireTests(unittest.TestCase):
         self.supervisor = SyntheticDirectSupervisor(self.gate, self.reference)
         self.service = service_module.SupervisorControlService(
             supervisor=self.supervisor, recall_dd_gate=self.gate,
-            enable_direct_dd=True, io_timeout=1.0
+            enable_direct_dd=True, io_timeout=1.0,
+            role_gate_ops=SyntheticRoleGateOps(),
         )
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         self.client = service_module.SupervisorControlClient(parent, timeout=3.0)
@@ -214,12 +252,16 @@ class RoleServiceWireTests(unittest.TestCase):
 
     def run_all(self):
         writer = self.send("LAUNCH_ROLE", role="writer")["handle"]
+        self.client.call("release_group", handles=[writer])
         a = self.send("LAUNCH_ROLE", role="a")["handle"]
+        self.client.call("release_group", handles=[a])
         self.send("WAIT", handle=a, timeout_ms=1500)
         b = self.send("LAUNCH_ROLE", role="b")["handle"]
+        self.client.call("release_group", handles=[b])
         self.send("WAIT", handle=b, timeout_ms=1500)
         a2 = self.send("LAUNCH_ROLE", role="a2")["handle"]
         b2 = self.send("LAUNCH_ROLE", role="b2")["handle"]
+        self.client.call("release_group", handles=[a2, b2])
         self.send("WAIT", handle=a2, timeout_ms=1500)
         self.send("WAIT", handle=b2, timeout_ms=1500)
         self.send("WAIT", handle=writer, timeout_ms=1500)
@@ -242,8 +284,10 @@ class RoleServiceWireTests(unittest.TestCase):
         self.assertEqual(self.gate.gate.close(), ())
 
     def test_swapped_readback_entry_denies_before_cleanup(self):
-        self.send("LAUNCH_ROLE", role="writer")
+        writer = self.send("LAUNCH_ROLE", role="writer")["handle"]
+        self.client.call("release_group", handles=[writer])
         reader = self.send("LAUNCH_ROLE", role="a")["handle"]
+        self.client.call("release_group", handles=[reader])
         entry = self.directory / "read-a"
         entry.rename(self.directory / "original-a")
         entry.write_bytes(self.reference[:PAGE_SIZE])
