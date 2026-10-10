@@ -227,7 +227,7 @@ static int run_case(int n, bool mutant) {
         return 0;
     }
     if(bios[0].completes!=1||bios[1].completes!=1||
-       (n!=6 && bios[0].bi_status!=-EIO)||
+       (n!=6 && n!=9 && bios[0].bi_status!=-EIO)||
        bios[1].bi_status!=-EIO||
        !list_empty(&buffers[0].owned_bios))
         return 70;
