@@ -239,6 +239,8 @@ static void setup(bool outstanding, bool early) {
     memset(blocks,0,sizeof(blocks));
     memset(&b,0,sizeof(b));
     memset(&b2,0,sizeof(b2));
+    b2.entry.bio=&b2;
+    INIT_LIST_HEAD(&b2.entry.list);
     memset(&q,0,sizeof(q));
     boundary_race=0;
     stream=&c.stream_buffers[0];
@@ -382,6 +384,7 @@ static int scenario(int id) {
         }
         if (id==23) {
             b.completes=1; /* Upper BIO was already acknowledged. */
+            list_del_init(&b.entry.list);
             block.records[0].bio=NULL;
             block.records[0].upper_completed=true;
         }
@@ -404,6 +407,7 @@ static int scenario(int id) {
         blocks[1].records[0].stored_length=4;
         blocks[1].records[0].flags=SWAPZ_MAP_COMPRESSED;
         blocks[1].records[0].bio=&b2;
+        list_add_tail(&b2.entry.list,&s->owned_bios);
         c.generations[1]=7;
         c.staged_refs[1]=(struct swapz_staged_ref){
             .valid=1,.generation=7,.buffer_id=0,.block_index=1,.record_index=0};
