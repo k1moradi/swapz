@@ -28,6 +28,12 @@ sys.modules[spec.name] = reporter
 spec.loader.exec_module(reporter)
 
 MIB = 1024 * 1024
+FAKE_FULL_VERIFY = {
+    "full_writer_readback_ok": True,
+    "writer_verified_bytes": 28 * MIB - 4096,
+    "writer_verified_pages": (28 * MIB - 4096) // 4096,
+    "writer_verify_method": "fio-crc32c-sequential-read-diagnostic",
+}
 
 
 def row(*, batch=128, strategy="staged", backend="size-aware-nbd-20MiBps-500000ns-serialized"):
@@ -223,7 +229,7 @@ class StreamingReportingTests(unittest.TestCase):
 
     def test_embedded_collector_produces_counters_not_logical_drain(self):
         source = self.script
-        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
         self.assertIn(marker, source)
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         self.assertIn('lower_counter_window_mib_s', embedded)
@@ -250,6 +256,7 @@ class StreamingReportingTests(unittest.TestCase):
             json.dumps({"read_count": 200, "read_p99_ns": 2500000,
                         "read_latency_sidecar": "reader.latbin",
                         "read_latency_sha256": "0" * 64}),
+            json.dumps(FAKE_FULL_VERIFY),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=True)
         parsed = json.loads(result.stdout)
@@ -257,6 +264,7 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertEqual(parsed["lower_write_sectors"], 4096)
         self.assertEqual(parsed["read_count"], 200)
         self.assertIs(parsed["isolated_sentinel_readback_ok"], True)
+        self.assertEqual(parsed["fio_full_writer_verification"], FAKE_FULL_VERIFY)
         # The diagnostic displayed p99 must come from the exact CLAT sidecar,
         # not fio's independently bucketed/rounded percentile summary.
         self.assertEqual(parsed["read_p99_ms"], 2.5)
@@ -264,6 +272,44 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertAlmostEqual(parsed["logical_flush_window_mib_s"], 8)
         self.assertAlmostEqual(parsed["lower_counter_window_mib_s"], 1)
         self.assertIn("NO QUALIFIED WINNER", reporter.report(reporter.read_rows(self.write([parsed]))))
+
+    def test_crc32c_verifier_is_outside_timed_window(self):
+        source = self.script
+        warm = source.index('prefill_writer_verified "$path"')
+        start = source.index('before=$(read_stat)')
+        fio_run = source.index('fio "$fiofile" --output-format=json --output="$json"')
+        end = source.index('after=$(read_stat)')
+        verify = source.index('fio --name=writer-verify')
+        post_verify = source.index('verify_summary=$(python3 -B')
+        readback = source.index('dd if="$path" of="$sentinel_read"')
+        self.assertLess(warm, start)
+        self.assertLess(start, fio_run)
+        self.assertLess(end, verify)
+        self.assertLess(verify, post_verify)
+        self.assertLess(post_verify, readback)
+        self.assertIn('verify=crc32c\ndo_verify=0', source)
+        self.assertIn('--rw=read', source)
+        self.assertIn('streaming-benchmark-writer-verify.py', source)
+
+    def test_full_writer_crc32c_summary_is_strict_but_diagnostic(self):
+        item = row()
+        item["fio_full_writer_verification"] = FAKE_FULL_VERIFY
+        text = reporter.report(self.read([item]))
+        self.assertIn("writer_crc32c=pass", text)
+        self.assertIn("NO QUALIFIED WINNER", text)
+        for invalid in (
+            {**FAKE_FULL_VERIFY, "full_writer_readback_ok": False},
+            {**FAKE_FULL_VERIFY, "writer_verified_pages": 2},
+            {**FAKE_FULL_VERIFY, "writer_verified_bytes": 4096},
+            {**FAKE_FULL_VERIFY, "writer_verify_method": "unverified"},
+            {**FAKE_FULL_VERIFY, "writer_verified_pages": True},
+            "forged",
+        ):
+            with self.subTest(invalid=invalid):
+                bad = row()
+                bad["fio_full_writer_verification"] = invalid
+                with self.assertRaisesRegex(ValueError, "full writer"):
+                    self.read([bad])
 
     def test_runner_stops_drain_clock_before_clat_parsing(self):
         fio_run = self.script.index('fio "$fiofile" --output-format=json --output="$json"')
@@ -314,7 +360,7 @@ class StreamingReportingTests(unittest.TestCase):
                 self.assertNotIn("root required", run.stderr)
 
     def test_embedded_collector_rejects_exact_latency_count_mismatch(self):
-        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
         embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio-mismatch.json"
         fio.write_text(json.dumps({"jobs":[
@@ -325,14 +371,15 @@ class StreamingReportingTests(unittest.TestCase):
         args = [sys.executable, "-c", embedded, str(fio),
                 "10 1000 20 2000", "12 1016 30 6096", "failed=0",
                 "staged", "128", "1000000000", "3000000000", "backend",
-                json.dumps({"read_count": 19, "read_p99_ns": 2000000})]
+                json.dumps({"read_count": 19, "read_p99_ns": 2000000}),
+                json.dumps(FAKE_FULL_VERIFY)]
         result = subprocess.run(args, capture_output=True, text=True, timeout=5)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("mismatched exact reader latency", result.stderr)
 
     def test_embedded_collector_rejects_counter_regression(self):
         source = self.script
-        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio.json"
         fio.write_text(json.dumps({"jobs":[
@@ -343,13 +390,14 @@ class StreamingReportingTests(unittest.TestCase):
         args=[sys.executable,"-c",embedded,str(fio),"10 1000 20 2000",
               "10 1000 19 1900","failed=0","staged","128",
               "1000000000","3000000000","backend",
-              json.dumps({"read_count": 20, "read_p99_ns": 1000000})]
+              json.dumps({"read_count": 20, "read_p99_ns": 1000000}),
+               json.dumps(FAKE_FULL_VERIFY)]
         result=subprocess.run(args,capture_output=True,text=True,timeout=5)
         self.assertNotEqual(result.returncode,0)
         self.assertIn("counters decreased",result.stderr)
 
     def test_embedded_collector_rejects_fio_job_errors_or_duplicate_jobs(self):
-        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
         embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio-error.json"
         writer = {"jobname": "writer", "error": 0,
@@ -360,7 +408,8 @@ class StreamingReportingTests(unittest.TestCase):
         args = [sys.executable, "-c", embedded, str(fio),
                 "10 1000 20 2000", "12 1016 30 6096", "failed=0",
                 "staged", "128", "1000000000", "3000000000", "backend",
-                json.dumps({"read_count": 20, "read_p99_ns": 1000000})]
+                json.dumps({"read_count": 20, "read_p99_ns": 1000000}),
+               json.dumps(FAKE_FULL_VERIFY)]
         for jobs, error in (
             ([writer, {**reader, "error": 5}], "fio job-level error"),
             ([{**writer, "error": True}, reader], "fio job-level error"),
