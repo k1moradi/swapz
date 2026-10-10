@@ -105,6 +105,12 @@ class RootlessBenchmarkPlanner(unittest.TestCase):
             ({"repeats": 0}, "repeats"),
             ({"repeats": 21}, "repeats"),
             ({"backend": "physical"}, "backend"),
+            ({"runtime": 0}, "runtime"),
+            ({"runtime": 3601}, "runtime"),
+            ({"write_qd": 0}, "writer QD"),
+            ({"write_qd": 1025}, "writer QD"),
+            ({"compress": -1}, "compressibility"),
+            ({"compress": 101}, "compressibility"),
         ):
             with self.subTest(options=kwargs):
                 self.reject(msg, **kwargs)
