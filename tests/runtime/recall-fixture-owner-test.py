@@ -42,6 +42,15 @@ owner_module = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = owner_module
 SPEC.loader.exec_module(owner_module)
 
+SUPERVISOR_SPEC = importlib.util.spec_from_file_location(
+    "recall_fixture_test_supervisor", HERE / "test-child-supervisor.py",
+)
+if SUPERVISOR_SPEC is None or SUPERVISOR_SPEC.loader is None:
+    raise RuntimeError("cannot load rootless pidfd supervisor")
+supervisor_module = importlib.util.module_from_spec(SUPERVISOR_SPEC)
+sys.modules[SUPERVISOR_SPEC.name] = supervisor_module
+SUPERVISOR_SPEC.loader.exec_module(supervisor_module)
+
 allow = owner_module._ALLOWLIST
 MapperIdentity = allow.MapperIdentity
 MapperInventory = allow.MapperInventory
@@ -62,6 +71,9 @@ LoopDetachObservation = owner_module.LoopDetachObservation
 LoopInventoryObservation = owner_module.LoopInventoryObservation
 WorkerLaunchReceipt = owner_module.WorkerLaunchReceipt
 WorkerStopReport = owner_module.WorkerStopReport
+WorkerContainmentResult = owner_module.WorkerContainmentResult
+WorkerContainmentObservation = owner_module.WorkerContainmentObservation
+_WORKER_CONTAINMENT_PROFILE = owner_module._WORKER_CONTAINMENT_PROFILE
 
 
 class FakeMapperFileOps(allow.RecallDDFileOps):
@@ -168,6 +180,7 @@ class FakeOwnedWorkerLauncher:
         self.pending: list[str] = []
         self.release_calls: list[tuple[str, ...]] = []
         self.unconfirmed_stop_calls = 0
+        self.containment_calls: list[tuple[str, tuple[str, ...]]] = []
         self.fail: set[str] = set()
 
     def launch(self, role, *, startup_timeout):
@@ -181,8 +194,14 @@ class FakeOwnedWorkerLauncher:
         if "duplicate_handle" in self.fail:
             handle = self.handles[0]
         if "missing_ready" in self.fail:
-            return WorkerLaunchReceipt(handle, role, False, True, True, True)
-        return WorkerLaunchReceipt(handle, role, True, True, True, True)
+            return WorkerLaunchReceipt(
+                handle, role, False, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+            )
+        containment = ("direct-child-only" if "uncontained_launch" in self.fail
+                       else _WORKER_CONTAINMENT_PROFILE)
+        return WorkerLaunchReceipt(
+            handle, role, True, True, True, True, containment,
+        )
 
     def release_group(self, handles):
         if "release" in self.fail:
@@ -215,15 +234,47 @@ class FakeOwnedWorkerLauncher:
                 self.pending.remove(handle)
         return WorkerStopReport(True, ())
 
+    def containment_observation(self, session_id, handles):
+        handles = tuple(handles)
+        self.containment_calls.append((session_id, handles))
+        if "containment_missing" in self.fail:
+            return None
+        results = [
+            WorkerContainmentResult(
+                handle, f"domain-{handle}", _WORKER_CONTAINMENT_PROFILE,
+                True, True, True, (), (),
+            )
+            for handle in handles
+        ]
+        if "containment_direct_only" in self.fail and results:
+            results[0] = dataclasses.replace(
+                results[0], scope="direct-child-only", process_creation_denied=False,
+            )
+        if "containment_live_descendant" in self.fail and results:
+            results[0] = dataclasses.replace(
+                results[0], live_descendant_handles=("orphan-test-child",),
+            )
+        if "containment_duplicate" in self.fail and len(results) > 1:
+            results[1] = dataclasses.replace(results[1], handle=results[0].handle)
+        if "containment_unknown" in self.fail and results:
+            results[-1] = dataclasses.replace(results[-1], handle="unknown-handle")
+        if "containment_incomplete" in self.fail and results:
+            results.pop()
+        return WorkerContainmentObservation(
+            "f" * 32 if "containment_stale" in self.fail else session_id,
+            handles, "containment_incomplete" not in self.fail,
+            tuple(results),
+            ("injected containment inspection failure",)
+            if "containment_error" in self.fail else (),
+        )
+
 
 class SyntheticPidfdWorkerLauncher:
     """Real, bounded test children; the only work is a regular-file marker."""
 
     CHILD_CODE = (
-        "import ctypes,os,signal,sys; gate=int(sys.argv[1]); out=int(sys.argv[2]); "
-        "role=sys.argv[3]; hold=sys.argv[4]=='1'; expected_parent=int(sys.argv[5]); "
-        "libc=ctypes.CDLL(None,use_errno=True); "
-        "(os._exit(90) if libc.prctl(1,signal.SIGTERM,0,0,0)!=0 or os.getppid()!=expected_parent else None); "
+        "import os,signal,sys; gate=int(sys.argv[1]); out=int(sys.argv[2]); "
+        "role=sys.argv[3]; hold=sys.argv[4]=='1'; "
         "first=os.read(gate,1); "
         "(os.write(1,b'R') if first==b'P' else os._exit(91)); "
         "second=os.read(gate,1); "
@@ -231,6 +282,21 @@ class SyntheticPidfdWorkerLauncher:
         "os.close(out); "
         "(signal.pause() if hold else None); os.close(gate); os._exit(0)"
     )
+
+    @staticmethod
+    def _install_containment_before_exec(expected_parent_pid, parent_pidfd,
+                                         diagnostic_fd=None):
+        try:
+            supervisor_module.LinuxPidfdOps().install_process_containment(
+                expected_parent_pid, parent_pidfd,
+            )
+        except BaseException as exc:
+            if diagnostic_fd is not None:
+                os.write(diagnostic_fd, f"{type(exc).__name__}:{exc}".encode())
+            raise
+        finally:
+            if diagnostic_fd is not None:
+                os.close(diagnostic_fd)
 
     def __init__(self, output_dir: Path, *, fail: str | None = None, hold_roles=()):
         self.output_dir = output_dir
@@ -264,19 +330,35 @@ class SyntheticPidfdWorkerLauncher:
             "pidfd": None, "gate_w": gate_w, "gate_open": True,
             "control_open": True,
             "proc": None, "reaped": False, "pidfd_closed": False,
+            "containment_installed": False,
         }
+        parent_pidfd = None
         try:
+            expected_parent_pid = os.getpid()
+            parent_pidfd = os.pidfd_open(expected_parent_pid, 0)
             proc = subprocess.Popen(
                 [sys.executable, "-c", self.CHILD_CODE, str(gate_r), str(output_fd), role,
-                 "1" if role in self.hold_roles else "0", str(os.getpid())],
-                close_fds=True, pass_fds=(gate_r, output_fd),
+                 "1" if role in self.hold_roles else "0"],
+                close_fds=True, pass_fds=(gate_r, output_fd, parent_pidfd),
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                preexec_fn=lambda: self._install_containment_before_exec(
+                    expected_parent_pid, parent_pidfd,
+                ),
             )
             record["proc"] = proc
-            # Retain ownership before any gate byte can let worker code run.
+            # Register the created child before any fallible parent-side close
+            # or pidfd acquisition. If READY is later lost, recovery still has
+            # the exact Popen child and its closed start gate.
             self.children[handle] = record
             self.handles.append(handle)
             self.pending.add(handle)
+            record["containment_installed"] = True
+            # Popen returns only after the pre-exec containment hook and exec
+            # succeed. The fixture gate stays shut until this parent owns the
+            # child pidfd below.
+            inherited_parent_pidfd = parent_pidfd
+            parent_pidfd = None
+            os.close(inherited_parent_pidfd)
             os.close(output_fd)
             output_fd = -1
             os.close(gate_r)
@@ -293,13 +375,18 @@ class SyntheticPidfdWorkerLauncher:
             ready, _, _ = select.select((ready_fd,), (), (), startup_timeout)
             if not ready or os.read(ready_fd, 1) != b"R":
                 raise TimeoutError("synthetic worker did not send READY before deadline")
-            return WorkerLaunchReceipt(handle, role, True, True, True, True)
+            record["containment_installed"] = True
+            return WorkerLaunchReceipt(
+                handle, role, True, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+            )
         except Exception:
             if proc is None:
                 os.close(gate_w)
                 record["gate_open"] = False
             raise
         finally:
+            if parent_pidfd is not None:
+                os.close(parent_pidfd)
             if output_fd >= 0:
                 os.close(output_fd)
             if gate_r >= 0:
@@ -417,6 +504,32 @@ class SyntheticPidfdWorkerLauncher:
             for handle in handles
         )
         return self.worker_results
+
+    def containment_observation(self, session_id, handles):
+        handles = tuple(handles)
+        workers = []
+        errors = []
+        for handle in handles:
+            record = self.children.get(handle)
+            if record is None:
+                errors.append(f"unknown test worker handle: {handle}")
+                continue
+            installed = record["containment_installed"] is True
+            reaped = record["reaped"] is True
+            workers.append(WorkerContainmentResult(
+                handle=handle,
+                domain_id=f"domain-{handle}",
+                scope=_WORKER_CONTAINMENT_PROFILE if installed else "direct-child-only",
+                filter_installed_before_exec=installed,
+                parent_death_bound=installed,
+                process_creation_denied=installed,
+                live_descendant_handles=(),
+                errors=() if reaped and installed else ("worker domain is not closed",),
+            ))
+        return WorkerContainmentObservation(
+            session_id, handles, len(workers) == len(handles) and not errors,
+            tuple(workers), tuple(errors),
+        )
 
     def close(self):
         pending = self.stop_unconfirmed()
@@ -633,6 +746,8 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
         self.assertFalse(self.broker.backing_must_be_preserved)
         self.assertEqual(self.owner.registered_worker_handles, handles)
         self.assertEqual(self.owner._worker_roles, ["writer", "a", "b", "a2", "b2"])
+        self.assertEqual(self.launcher.containment_calls,
+                         [(self.lease.session_id, handles)])
         self.assertEqual(self.launcher.release_calls[-1], (handles[3], handles[4]))
         self.assertEqual(self.launcher.release_calls[:3], [(handles[0],), (handles[1],), (handles[2],)])
         self.assertEqual(self.broker.evidence_events, (
@@ -712,7 +827,7 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
         self.assertFalse(case.broker.backing_release_authorized)
 
     def test_ready_and_pidfd_ownership_are_required_before_role_ack(self):
-        for failure in ("missing_ready", "launch_after_child", "release"):
+        for failure in ("missing_ready", "uncontained_launch", "launch_after_child", "release"):
             with self.subTest(failure=failure):
                 case = self._new_case()
                 case.broker.owner_create()
@@ -723,6 +838,46 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
                 self.assertEqual(case.launcher.pending, [])
                 self.assertGreater(case.launcher.unconfirmed_stop_calls, 0)
                 self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
+
+    def test_direct_child_completion_never_substitutes_for_tree_containment(self):
+        failures = (
+            "containment_missing", "containment_direct_only", "containment_live_descendant",
+            "containment_incomplete", "containment_duplicate", "containment_unknown",
+            "containment_stale", "containment_error",
+        )
+        for failure in failures:
+            with self.subTest(failure=failure):
+                case = self._new_case()
+                handles = case._start_workers()
+                case.launcher.fail.add(failure)
+                with self.assertRaises(FixtureOwnerDenied):
+                    case.broker.finalize()
+                self.assertEqual(case.owner.registered_worker_handles, handles)
+                self.assertIn("worker_attestation", case.mapper_ops.trace,
+                              "the direct-child report should be valid before the separate check")
+                self.assertEqual(case.launcher.containment_calls,
+                                 [(case.lease.session_id, handles)])
+                self.assertFalse(case.broker.backing_release_authorized)
+                self.assertTrue(case.broker.backing_must_be_preserved)
+                self.assertNotIn("swap_inventory", case.drain_ops.trace)
+                self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
+                self.assertNotIn("dm_suspend", case.mapper_ops.trace)
+                self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+
+    def test_containment_observation_must_cover_all_five_live_worker_domains(self):
+        case = self._new_case()
+        handles = case._start_workers()
+        observation = case.launcher.containment_observation(case.lease.session_id, handles)
+        self.assertEqual(observation.expected_handles, handles)
+        self.assertTrue(observation.inventory_complete)
+        self.assertEqual(tuple(item.handle for item in observation.workers), handles)
+        self.assertTrue(all(item.process_creation_denied and item.parent_death_bound
+                            and item.filter_installed_before_exec
+                            and item.live_descendant_handles == () and not item.errors
+                            for item in observation.workers))
+        self.assertTrue(case.broker.finalize())
+        self.assertTrue(case.broker.backing_release_authorized,
+                        "this is a rootless model result, not real backing release authority")
 
     def test_unconfirmed_stop_failure_does_not_skip_registered_stop_attempt(self):
         case = self._new_case()
@@ -752,7 +907,9 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
             handle = f"owned-{role}-slow"
             self.handles.append(handle)
             self.launcher.pending.append(handle)
-            return WorkerLaunchReceipt(handle, role, True, True, True, True)
+            return WorkerLaunchReceipt(
+                handle, role, True, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+            )
 
         self.launcher.launch = slow_launch
         result: list[object] = []
@@ -1157,12 +1314,18 @@ s.close()
                     marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
                     0o600,
                 )
+                expected_parent_pid = os.getpid()
+                parent_pidfd = os.pidfd_open(expected_parent_pid, 0)
                 proc = subprocess.Popen(
                     [sys.executable, "-c", SyntheticPidfdWorkerLauncher.CHILD_CODE,
-                     str(gate_r), str(output_fd), "writer", "1", str(os.getpid())],
-                    close_fds=True, pass_fds=(gate_r, output_fd),
+                     str(gate_r), str(output_fd), "writer", "1"],
+                    close_fds=True, pass_fds=(gate_r, output_fd, parent_pidfd, notify_w),
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    preexec_fn=lambda: SyntheticPidfdWorkerLauncher._install_containment_before_exec(
+                        expected_parent_pid, parent_pidfd, notify_w,
+                    ),
                 )
+                os.close(parent_pidfd)
                 os.close(gate_r)
                 os.close(output_fd)
                 worker_pidfd = os.pidfd_open(proc.pid, 0)
@@ -1175,7 +1338,11 @@ s.close()
                 os.read(crash_r, 1)
                 # Abruptly exit without stopping/reaping the active child.
                 os._exit(0)
-            except BaseException:
+            except BaseException as exc:
+                try:
+                    os.write(notify_w, b"ERR:" + repr(exc).encode("utf-8", "replace"))
+                except BaseException:
+                    pass
                 os._exit(97)
 
         os.close(notify_w)
@@ -1188,8 +1355,9 @@ s.close()
         try:
             ready, _, _ = select.select((notify_r,), (), (), 4.0)
             self.assertTrue(ready, "test supervisor did not report its owned child")
-            raw_pid = os.read(notify_r, 4)
-            self.assertEqual(len(raw_pid), 4)
+            raw_pid = os.read(notify_r, 4096)
+            self.assertFalse(raw_pid.startswith(b"ERR:"), raw_pid.decode("utf-8", "replace"))
+            self.assertEqual(len(raw_pid), 4, raw_pid.decode("utf-8", "replace"))
             worker_pid = struct.unpack("!i", raw_pid)[0]
             worker_pidfd = os.pidfd_open(worker_pid, 0)
             deadline = time.monotonic() + 2.0
@@ -1207,7 +1375,7 @@ s.close()
             waited_pid, worker_status = os.waitpid(worker_pid, 0)
             self.assertEqual(waited_pid, worker_pid)
             self.assertTrue(os.WIFSIGNALED(worker_status))
-            self.assertEqual(os.WTERMSIG(worker_status), signal.SIGTERM)
+            self.assertEqual(os.WTERMSIG(worker_status), signal.SIGKILL)
             worker_reaped = True
         finally:
             if crash_w >= 0:
@@ -1481,7 +1649,9 @@ s.close()
             handle = f"owned-{role}-thread"
             self.handles.append(handle)
             self.launcher.pending.append(handle)
-            return WorkerLaunchReceipt(handle, role, True, True, True, True)
+            return WorkerLaunchReceipt(
+                handle, role, True, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+            )
 
         self.launcher.launch = slow_launch
         def launch_one():

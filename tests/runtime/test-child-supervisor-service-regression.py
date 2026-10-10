@@ -123,7 +123,9 @@ class FakeServiceSupervisor:
 
     def wait(self, handle: str, timeout: float) -> WorkerResult:
         self.records[handle].reaped = True
-        return WorkerResult(handle, True, 0, False, ())
+        return WorkerResult(
+            handle, True, 0, False, (), supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE,
+        )
 
     def cleanup_after_stop(self, handles: list[str] | tuple[str, ...], callback: Any) -> tuple[StopReport, object | None]:
         self.calls.append(tuple(handles))
@@ -134,7 +136,11 @@ class FakeServiceSupervisor:
             if self.launch_failure_error and handle == "fake-handle-1":
                 injected = self.launch_failure_error
             errors = (injected,) if injected else ()
-            results.append(WorkerResult(handle, record.reaped, 0 if record.reaped else None, False, errors))
+            scope = (supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE
+                     if record.reaped else "direct-child-only")
+            results.append(WorkerResult(
+                handle, record.reaped, 0 if record.reaped else None, False, errors, scope,
+            ))
         clean = all(row.reaped and not row.errors for row in results) and set(handles) == set(self.records)
         result: object | None = None
         if clean:
@@ -440,7 +446,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
 
     def test_numeric_supervisor_token_is_never_exposed_or_authorized(self) -> None:
         class NumericHandleSupervisor(FakeServiceSupervisor):
-            def launch(self, argv: tuple[str, ...], *, env: dict[str, str]) -> str:
+            def launch(self, argv: tuple[str, ...], *, env: dict[str, str], **options: Any) -> str:
                 self.records["424242"] = SimpleNamespace(reaped=False)
                 raise SupervisorError("injected invalid token", preserve_required=True,
                                       handle="424242", child_reaped=False)
@@ -821,7 +827,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
         for number in (errno.ENOSYS, errno.EPERM):
             with self.subTest(errno=number):
                 class UnsupportedPidfdSupervisor(FakeServiceSupervisor):
-                    def launch(self, argv: tuple[str, ...], *, env: dict[str, str]) -> str:
+                    def launch(self, argv: tuple[str, ...], *, env: dict[str, str], **options: Any) -> str:
                         raise PidfdUnavailable(
                             f"injected pidfd failure {number}", preserve_required=False, child_reaped=True
                         )
@@ -1007,6 +1013,25 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         self.assertFalse(responses2[0]["cleanup_allowed"])
         self.assertFalse(outcome2.cleanup_allowed)
         self.assertEqual(configured.supervisor.launch_records, [])
+
+    def test_fixed_sleep_and_exit_workers_request_preexec_containment(self) -> None:
+        fake = FakeServiceSupervisor()
+        service = SupervisorControlService(supervisor=fake, io_timeout=0.5)
+        requests = [
+            {"id": 1, "op": "launch", "command": "sleep", "duration_ms": 1},
+            {"id": 2, "op": "launch", "command": "exit", "code": 0},
+            {"id": 3, "op": "stop_all", "handles": ["fake-handle-1", "fake-handle-2"]},
+            {"id": 4, "op": "shutdown"},
+        ]
+        outcome, responses = run_in_process(
+            b"".join(raw_frame(row) for row in requests), service,
+        )
+        self.assertEqual(outcome.exit_code, 0)
+        self.assertTrue(responses[2]["cleanup_allowed"])
+        self.assertEqual(len(fake.launch_records), 2)
+        for _argv, options in fake.launch_records:
+            self.assertIs(options["strict_fds"], True)
+            self.assertIs(options["contain_process_tree"], True)
 
     def test_explicit_role_mode_routes_all_five_exact_fd_commands_to_fake_supervisor(self) -> None:
         fake = FakeServiceSupervisor()

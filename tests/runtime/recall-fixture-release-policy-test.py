@@ -71,6 +71,17 @@ class FixtureBackingReleaseTests(unittest.TestCase):
                     "role": self.ROLE, "handle": self.HANDLE, "exit_status": 0,
                     "reaped": True, "descriptor_closed": True, "errors": [],
                 }],
+                "process_containment": {
+                    "session_id": session, "expected_handles": worker,
+                    "inventory_complete": True, "errors": [],
+                    "workers": [{
+                        "handle": self.HANDLE, "domain_id": "domain-1",
+                        "scope": "seccomp-no-fork-pdeathsig-v1",
+                        "filter_installed_before_exec": True,
+                        "parent_death_bound": True, "process_creation_denied": True,
+                        "live_descendant_handles": [], "errors": [],
+                    }],
+                },
             }),
             ("swap_quiescent", {
                 "session_id": session, "inventory_valid": True,
@@ -201,6 +212,17 @@ class FixtureBackingReleaseTests(unittest.TestCase):
             lambda p: p["role_results"][0].update(descriptor_closed=False),
             lambda p: p["role_results"][0].update(errors=["close failed"]),
             lambda p: p.update(inventory_complete=False),
+            lambda p: p.pop("process_containment"),
+            lambda p: p["process_containment"].update(inventory_complete=False),
+            lambda p: p["process_containment"]["workers"][0].update(scope="direct-child-only"),
+            lambda p: p["process_containment"]["workers"][0].update(
+                live_descendant_handles=["orphan-1"]
+            ),
+            lambda p: p["process_containment"]["workers"][0].update(
+                filter_installed_before_exec=False
+            ),
+            lambda p: p["process_containment"]["workers"][0].update(handle="unknown-worker"),
+            lambda p: p["process_containment"].update(session_id="f" * 32),
         )
         for index, mutate in enumerate(mutations):
             with self.subTest(index=index):

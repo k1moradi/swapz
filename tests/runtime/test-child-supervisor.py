@@ -27,6 +27,7 @@ _START = b"G"
 _ABORT = b"A"
 _ERROR_SIZE = struct.calcsize("!I")
 _POLL_EXIT = select.POLLIN | select.POLLHUP | select.POLLERR
+_PROCESS_TREE_CONTAINMENT_PROFILE = "seccomp-no-fork-pdeathsig-v1"
 
 
 class SupervisorError(RuntimeError):
@@ -75,6 +76,7 @@ class WorkerResult:
     exit_code: int | None
     escalated: bool
     errors: tuple[str, ...]
+    containment_scope: str = "direct-child-only"
 
     @property
     def worker_succeeded(self) -> bool:
@@ -94,6 +96,22 @@ class StopReport:
     @property
     def workers_succeeded(self) -> bool:
         return all(result.worker_succeeded for result in self.results)
+
+    @property
+    def process_tree_quiescent(self) -> bool:
+        """True only for reaped workers whose pre-exec no-fork domain was installed.
+
+        Direct-child reaping is deliberately insufficient. The scope describes
+        this supervisor's no-fork/PDEATHSIG contract; it is not a privileged
+        cgroup or a real-device I/O-drain attestation.
+        """
+        return (
+            self.all_reaped
+            and not self.errors
+            and all(not row.errors
+                    and row.containment_scope == _PROCESS_TREE_CONTAINMENT_PROFILE
+                    for row in self.results)
+        )
 
 
 class LinuxPidfdOps:
@@ -661,8 +679,8 @@ class GatedPidfdSupervisor:
             raise ValueError("contain_process_tree must be a boolean or None")
         if contain_process_tree is None:
             contain_process_tree = executable_fd is not None
-        if contain_process_tree and (executable_fd is None or not strict_fds):
-            raise ValueError("process containment requires a pinned executable and strict descriptors")
+        if contain_process_tree and not strict_fds:
+            raise ValueError("process containment requires strict descriptor isolation")
         if executable_fd is not None and not contain_process_tree:
             raise ValueError("pinned worker launches cannot disable process containment")
         if executable_fd is not None:
@@ -940,6 +958,11 @@ class GatedPidfdSupervisor:
             exit_code=worker.exit_code,
             escalated=worker.escalated,
             errors=tuple(worker.errors),
+            containment_scope=(
+                _PROCESS_TREE_CONTAINMENT_PROFILE
+                if worker.containment_required and worker.containment_installed
+                else "direct-child-only"
+            ),
         )
 
     def wait(self, handle: str, timeout: float) -> WorkerResult:
@@ -995,6 +1018,11 @@ class GatedPidfdSupervisor:
         # Never let an incomplete caller list leave a registered worker alive.
         workers = tuple(self._workers.values())
         results = tuple(self._stop_records(workers))
+        if any(result.containment_scope != _PROCESS_TREE_CONTAINMENT_PROFILE
+               for result in results):
+            report_errors.append(
+                "one or more workers are only directly supervised; process-tree containment is unverified"
+            )
         cleanup_allowed = (
             all(result.reaped for result in results)
             and not report_errors
@@ -1007,10 +1035,10 @@ class GatedPidfdSupervisor:
         worker_handles: Sequence[str],
         cleanup: Callable[[], object],
     ) -> tuple[StopReport, object | None]:
-        """Call cleanup only after every worker is reaped without lifecycle errors."""
+        """Call cleanup only after clean reaping and verified no-fork scope."""
         self._closing = True
         report = self.stop_all(worker_handles)
-        if not report.cleanup_allowed:
+        if not report.cleanup_allowed or not report.process_tree_quiescent:
             return report, None
         return report, cleanup()
 

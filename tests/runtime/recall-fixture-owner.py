@@ -67,6 +67,7 @@ _IPC_MAX_FRAME = 1024
 _IPC_TIMEOUT_SECONDS = 3.0
 _STARTUP_TIMEOUT_SECONDS = 3.0
 _MAX_DM_LAYERS = 8
+_WORKER_CONTAINMENT_PROFILE = "seccomp-no-fork-pdeathsig-v1"
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,7 @@ class PeerCredentials:
 
 @dataclass(frozen=True)
 class WorkerLaunchReceipt:
-    """Launcher attestation: a pidfd-owned worker is READY but still gated."""
+    """Launcher attestation for one pidfd-owned, still-gated worker."""
 
     handle: str
     role: str
@@ -123,6 +124,32 @@ class WorkerLaunchReceipt:
     pidfd_owned: bool
     startup_within_deadline: bool
     gate_held: bool
+    containment_profile: str
+
+
+@dataclass(frozen=True)
+class WorkerContainmentResult:
+    """Per-handle process-domain result, distinct from direct-child reaping."""
+
+    handle: str
+    domain_id: str
+    scope: str
+    filter_installed_before_exec: bool
+    parent_death_bound: bool
+    process_creation_denied: bool
+    live_descendant_handles: tuple[str, ...]
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkerContainmentObservation:
+    """Complete launcher inventory for the fixed worker process domains."""
+
+    session_id: str
+    expected_handles: tuple[str, ...]
+    inventory_complete: bool
+    workers: tuple[WorkerContainmentResult, ...]
+    errors: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -400,6 +427,7 @@ class FixtureDrainEvidenceProducer:
 
     def __init__(self, owner: MapperLifecycleOwner, operations: Any,
                  loop_device: str, *, admission_gate,
+                 worker_launcher,
                  nbd_release: NBDReleaseModel | None = None) -> None:
         if type(owner) is not MapperLifecycleOwner:
             raise FixtureOwnerDenied("producer requires the exact fixture mapper owner")
@@ -410,6 +438,8 @@ class FixtureDrainEvidenceProducer:
                        "inspect_lower_dependencies", "detach_loop", "inspect_loop"):
             if not callable(getattr(operations, method, None)):
                 raise FixtureOwnerDenied(f"trusted drain operation {method} is unavailable")
+        if not callable(getattr(worker_launcher, "containment_observation", None)):
+            raise FixtureOwnerDenied("worker launcher lacks a separate containment inventory")
         if not callable(getattr(admission_gate, "_admission_snapshot", None)):
             raise FixtureOwnerDenied("trusted broker admission gate is unavailable")
         profile = getattr(admission_gate, "session_profile", None)
@@ -421,6 +451,7 @@ class FixtureDrainEvidenceProducer:
             raise FixtureOwnerDenied("NBD server identity belongs to another session")
         self._owner = owner
         self._operations = operations
+        self._worker_launcher = worker_launcher
         self._loop_device = loop_device
         self._admission_gate = admission_gate
         self._profile = profile
@@ -519,6 +550,17 @@ class FixtureDrainEvidenceProducer:
             self._deny(f"worker completion authentication failed: {exc}")
         if verified is not True:
             self._deny("worker service did not authenticate the completion inventory")
+
+        # A direct-child wait or HMAC-authenticated worker report says nothing
+        # about descendants. Require a separate, session-bound process-domain
+        # observation before any swap or mapper release operation can start.
+        checkpoint("worker_containment_collection")
+        containment = self._worker_launcher.containment_observation(
+            self._session_id, handles,
+        )
+        self._validate_worker_containment(containment, handles)
+        checkpoint("worker_containment_verification")
+
         inventory_complete = worker.expected_handles == handles
         all_reaped = worker.reaped_handles == handles
         errors_empty = worker.errors == ()
@@ -539,6 +581,7 @@ class FixtureDrainEvidenceProducer:
                  "errors": list(result.errors)}
                 for result in worker.role_results
             ],
+            "process_containment": self._containment_payload(containment),
         })
 
         checkpoint("swap_inventory_before")
@@ -724,6 +767,62 @@ class FixtureDrainEvidenceProducer:
                     or type(result.errors) is not tuple or result.errors != ()):
                 self._deny("worker role result inventory is missing, reordered, or unsuccessful")
 
+    def _validate_worker_containment(self, observation: WorkerContainmentObservation,
+                                     handles: tuple[str, ...]) -> None:
+        if (type(observation) is not WorkerContainmentObservation
+                or type(observation.session_id) is not str
+                or observation.session_id != self._session_id
+                or type(observation.expected_handles) is not tuple
+                or observation.expected_handles != handles
+                or type(observation.inventory_complete) is not bool
+                or observation.inventory_complete is not True
+                or type(observation.workers) is not tuple
+                or len(observation.workers) != len(handles)
+                or type(observation.errors) is not tuple or observation.errors != ()):
+            self._deny("worker descendant/containment inventory is missing or ambiguous")
+        domains: set[str] = set()
+        for handle, result in zip(handles, observation.workers):
+            if (type(result) is not WorkerContainmentResult
+                    or type(result.handle) is not str or result.handle != handle
+                    or type(result.domain_id) is not str
+                    or _HANDLE.fullmatch(result.domain_id) is None
+                    or result.domain_id.isdecimal() or result.domain_id in domains
+                    or type(result.scope) is not str
+                    or result.scope != _WORKER_CONTAINMENT_PROFILE
+                    or type(result.filter_installed_before_exec) is not bool
+                    or result.filter_installed_before_exec is not True
+                    or type(result.parent_death_bound) is not bool
+                    or result.parent_death_bound is not True
+                    or type(result.process_creation_denied) is not bool
+                    or result.process_creation_denied is not True
+                    or type(result.live_descendant_handles) is not tuple
+                    or result.live_descendant_handles != ()
+                    or type(result.errors) is not tuple or result.errors != ()):
+                self._deny("worker process domain is direct-child-only, live, or unverified")
+            domains.add(result.domain_id)
+
+    @staticmethod
+    def _containment_payload(observation: WorkerContainmentObservation) -> dict[str, Any]:
+        return {
+            "session_id": observation.session_id,
+            "expected_handles": list(observation.expected_handles),
+            "inventory_complete": observation.inventory_complete,
+            "errors": list(observation.errors),
+            "workers": [
+                {
+                    "handle": result.handle,
+                    "domain_id": result.domain_id,
+                    "scope": result.scope,
+                    "filter_installed_before_exec": result.filter_installed_before_exec,
+                    "parent_death_bound": result.parent_death_bound,
+                    "process_creation_denied": result.process_creation_denied,
+                    "live_descendant_handles": list(result.live_descendant_handles),
+                    "errors": list(result.errors),
+                }
+                for result in observation.workers
+            ],
+        }
+
     def _validate_release_report(self, report: MapperReleaseReport,
                                  identity: MapperIdentity,
                                  worker: WorkerCompletionEvidence) -> None:
@@ -856,7 +955,8 @@ class FixtureOwnerBroker:
             raise FixtureOwnerDenied("broker requires the exact mapper lifecycle owner")
         if (not callable(peer_authenticator)
                 or any(not callable(getattr(worker_launcher, method, None))
-                       for method in ("launch", "release_group", "stop_unconfirmed", "stop_all"))):
+                       for method in ("launch", "release_group", "stop_unconfirmed", "stop_all",
+                                      "containment_observation"))):
             raise FixtureOwnerDenied("broker peer authentication and worker launcher are required")
         if (type(session_profile) is not SessionProfile
                 or session_profile not in (FIXED_RECALL_PROFILE, FIXED_RECALL_NBD_PROFILE)):
@@ -868,6 +968,7 @@ class FixtureOwnerBroker:
         self._request_inflight = 0
         self._producer = FixtureDrainEvidenceProducer(
             mapper_owner, drain_operations, loop_device, admission_gate=self,
+            worker_launcher=worker_launcher,
             nbd_release=nbd_release,
         )
         self._peer_authenticator = peer_authenticator
@@ -1061,8 +1162,10 @@ class FixtureOwnerBroker:
                     or type(receipt.pidfd_owned) is not bool or receipt.pidfd_owned is not True
                     or type(receipt.startup_within_deadline) is not bool
                     or receipt.startup_within_deadline is not True
-                    or type(receipt.gate_held) is not bool or receipt.gate_held is not True):
-                self._deny("launcher did not prove a unique pidfd-owned gated READY child")
+                    or type(receipt.gate_held) is not bool or receipt.gate_held is not True
+                    or type(receipt.containment_profile) is not str
+                    or receipt.containment_profile != _WORKER_CONTAINMENT_PROFILE):
+                self._deny("launcher did not prove a unique pidfd-owned, process-contained READY child")
             handle = receipt.handle
             # Retain the handle before owner registration or gate release. If
             # either operation fails, denial recovery still addresses it.
@@ -1380,7 +1483,8 @@ class FixtureOwnerBroker:
 
 __all__ = [
     "FixtureOwnerBroker", "FixtureOwnerDenied", "FixtureDrainEvidenceProducer",
-    "AdmissionGateObservation",
+    "AdmissionGateObservation", "WorkerContainmentResult", "WorkerContainmentObservation",
+    "WorkerLaunchReceipt", "WorkerStopReport",
     "SwapInventoryObservation", "SwapoffObservation", "LowerDependencyObservation",
     "LoopDetachObservation", "LoopInventoryObservation",
     "SessionProfile", "FIXED_RECALL_PROFILE", "FIXED_RECALL_NBD_PROFILE",

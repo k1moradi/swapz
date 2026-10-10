@@ -333,10 +333,12 @@ class SupervisorControlService:
                 request.get("duration_ms"), 0, MAX_SLEEP_MS, "duration_ms", request_id
             )
             argv = (sys.executable, "-c", _WORKER_CODE["sleep"], str(duration_ms))
+            launch_options = {"strict_fds": True, "contain_process_tree": True}
         elif command == "exit":
             self._exact_keys(request, {"id", "op", "command", "code"})
             code = self._bounded_integer(request.get("code"), 0, 125, "code", request_id)
             argv = (sys.executable, "-c", _WORKER_CODE["exit"], str(code))
+            launch_options = {"strict_fds": True, "contain_process_tree": True}
         elif command == "recall-dd":
             self._exact_keys(request, {"id", "op", "command", "role"})
             if not self.enable_direct_dd or self.recall_dd_gate is None:

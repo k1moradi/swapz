@@ -20,6 +20,7 @@ from typing import Any
 
 
 HERE = Path(__file__).resolve().parent
+_WORKER_CONTAINMENT_PROFILE = "seccomp-no-fork-pdeathsig-v1"
 _DRAIN_SPEC = importlib.util.spec_from_file_location(
     "swapz_fixture_release_drain_policy", HERE / "recall-io-drain-policy.py",
 )
@@ -216,6 +217,7 @@ class FixtureBackingReleasePolicy:
                 "session_id", "inventory_complete", "all_reaped", "errors_empty",
                 "worker_service_exit_status", "expected_handles", "reaped_handles",
                 "role_descriptors_closed", "worker_errors", "expected_roles", "role_results",
+                "process_containment",
             })
             expected = list(self.expected_worker_handles)
             expected_roles = list(self.expected_worker_roles)
@@ -249,6 +251,45 @@ class FixtureBackingReleasePolicy:
                         or result["descriptor_closed"] is not True
                         or type(result["errors"]) is not list or result["errors"] != []):
                     raise DrainEvidenceDenied("worker role result is missing, reordered, or unsuccessful")
+            containment = payload["process_containment"]
+            if (type(containment) is not dict
+                    or set(containment) != {
+                        "session_id", "expected_handles", "inventory_complete", "errors", "workers",
+                    }
+                    or containment["session_id"] != self.session_id
+                    or containment["expected_handles"] != expected
+                    or type(containment["inventory_complete"]) is not bool
+                    or containment["inventory_complete"] is not True
+                    or type(containment["errors"]) is not list or containment["errors"] != []
+                    or type(containment["workers"]) is not list
+                    or len(containment["workers"]) != len(expected)):
+                raise DrainEvidenceDenied("worker process-containment inventory is incomplete or foreign")
+            domain_ids: set[str] = set()
+            containment_keys = {
+                "handle", "domain_id", "scope", "filter_installed_before_exec",
+                "parent_death_bound", "process_creation_denied", "live_descendant_handles", "errors",
+            }
+            for index, result in enumerate(containment["workers"]):
+                if (type(result) is not dict or set(result) != containment_keys
+                        or result["handle"] != expected[index]
+                        or type(result["domain_id"]) is not str
+                        or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", result["domain_id"]) is None
+                        or result["domain_id"].isdecimal()
+                        or result["domain_id"] in domain_ids
+                        or result["scope"] != _WORKER_CONTAINMENT_PROFILE
+                        or type(result["filter_installed_before_exec"]) is not bool
+                        or result["filter_installed_before_exec"] is not True
+                        or type(result["parent_death_bound"]) is not bool
+                        or result["parent_death_bound"] is not True
+                        or type(result["process_creation_denied"]) is not bool
+                        or result["process_creation_denied"] is not True
+                        or type(result["live_descendant_handles"]) is not list
+                        or result["live_descendant_handles"] != []
+                        or type(result["errors"]) is not list or result["errors"] != []):
+                    raise DrainEvidenceDenied(
+                        "worker containment is direct-child-only, escaped, or ambiguous"
+                    )
+                domain_ids.add(result["domain_id"])
             return {key: payload[key] for key in (
                 "inventory_complete", "all_reaped", "errors_empty",
             )}

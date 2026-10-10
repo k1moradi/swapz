@@ -152,6 +152,12 @@ acknowledged. The injected launcher is a
 trusted component boundary: Python cannot safely preempt a malicious or
 permanently blocked in-process callback. A production launcher must enforce
 its own monotonic startup deadline and retain its private child inventory.
+Every READY receipt also names the required no-fork containment profile. After
+direct-child completion, the producer requires a separate complete
+session-bound launcher inventory for all five worker process domains. A
+missing inventory, direct-child-only scope, duplicate or unknown domain,
+reported descendant, stale session, or inspection error denies the session
+before swap inspection or mapper release begins.
 
 The broker's `serve_worker_connection()` accepts one bounded AF_UNIX stream.
 It reads PID, UID, and GID from kernel `SO_PEERCRED`, compares all three with
@@ -236,25 +242,75 @@ command, or prove actual kernel quiescence. `MapperLifecycleOwner.mapping_releas
 remains a separate mapper-only result. The broker requires both values plus a
 clean terminal state before exposing `backing_release_authorized`.
 
-The process tests start short-lived children that can write only a role marker
-to a private regular file. The child waits behind a pipe gate. Its parent
-opens and retains a pidfd before releasing the gate, waits for READY, registers
-the opaque handle, then issues GO. The test uses `Popen(close_fds=True,
-pass_fds=...)` to make inherited descriptors explicit. If pidfd acquisition
-or READY fails, the launcher aborts and reaps the still-gated child; an
-unregistered child is never treated as complete. These tests exercise real
-Linux child processes, but they do not run GNU `dd` or any device I/O.
+## Worker process-tree containment contract
 
-The synthetic worker sets `PR_SET_PDEATHSIG(SIGTERM)` and checks its expected
-parent PID after exec. A crash test exits its test supervisor while the direct
-child is active and confirms that the child exits and is reaped by a test
-subreaper. This does not contain grandchildren. Parent-death signals are not
-inherited as a process-tree guarantee, a released worker may fork, and a
-Python broker cannot retain descriptors after its own process dies. The
-current model does not prove that all descendants stop after production-owner
-crash. A real privileged owner needs a separately controlled crash-survival
-supervisor or cgroup policy, plus worker admission that forbids untracked
-descendants.
+A successful direct-child pidfd wait is never evidence that every process
+created by that worker has stopped. The required production contract is:
+
+1. The trusted launcher owns each worker from creation through confirmed
+   termination and separately identifies its containment domain.
+2. The domain covers descendants. Workers cannot fork, vfork, or create a new
+   process through clone/clone3 outside it.
+3. Process-group or session IDs are never used as domain identity. A group
+   change cannot detach the same thread group from its retained pidfd. The
+   profile denies credential and namespace transitions that could clear the
+   parent-death binding or change isolation. Executable identity and fixed
+   argv are validated separately; this process filter does not itself pin an
+   executable image or prohibit `execve`.
+4. The containment mechanism remains effective if the fixture owner or worker
+   supervisor exits. A direct-child pdeath signal alone is not a process-tree
+   guarantee.
+5. The owner receives a complete, session-bound inventory for every expected
+   handle/domain. Missing, ambiguous, stale, contradictory, or unauthenticated
+   inventory permanently denies release.
+6. Numeric PIDs, reused PIDs, process-group membership, HMACs, READY receipts,
+   and direct-child wait status do not count as independent tree-quiescence
+   evidence.
+7. Rootless mechanism tests, privileged containment authority, and kernel
+   I/O-drain behavior are separate qualification claims.
+
+The rootless `GatedPidfdSupervisor` profile sets `PR_SET_PDEATHSIG` and installs
+`no_new_privs` plus seccomp before exec and before releasing the worker gate.
+The filter rejects new process creation while permitting same-thread-group
+threads; a separate post-READY test confirms that a worker's fork attempt gets
+`EPERM`. The filter therefore prevents a worker descendant from being created
+after the trusted pre-exec setup. Its direct-child `StopReport` now exposes a
+separate `process_tree_quiescent` result and denies its cleanup callback when
+the worker was only directly supervised. The five-role broker independently
+requires the complete containment inventory; it does not infer that inventory
+from the worker-completion HMAC.
+
+The no-fork profile does not use process-group scans or accept a process-group
+change as evidence of containment. The fixed executable and argv policy must
+separately prevent an untrusted image from replacing the intended worker. The
+rootless five-role marker worker is a fixed Python test program; it is not
+evidence that GNU `dd` is trusted or that arbitrary executable changes are
+safe under the filter.
+
+The adversarial rootless process test creates an intentionally uncontained
+worker that forks a test-owned descendant and exits. It observes the direct
+worker reaped while the descendant remains alive, then verifies the cleanup
+callback is withheld. The test terminates only that descendant through a
+pidfd retained while it was known alive and reaps it as a test subreaper. A
+separate crash test kills the actual test supervisor and verifies its
+pre-exec-contained direct worker exits. Together these are counterexample and
+profile tests; they are not evidence about a privileged fixture or real device
+cleanup. The real five-role test runs bounded regular-file marker workers
+under the rootless no-fork profile and verifies a complete empty-descendant
+inventory. It does not run GNU `dd` or device I/O.
+
+`PR_SET_PDEATHSIG` applies to the immediate parent relationship and is not
+inherited by descendants. The seccomp filter closes worker-created process
+escape in the tested profile, but it does not establish a crash-survival chain
+when a separately deployed broker, supervisor service, or privileged owner
+dies. In production, either the trusted owner must directly supervise the
+workers with the same pre-exec no-fork boundary and parent-death binding, or a
+separately controlled crash-survival supervisor/cgroup manager must own and
+terminate the complete domain. A cgroup is useful only if its owner and
+failure policy survive the broker; merely placing workers in a cgroup is not
+automatic kill-on-owner-death. The current rootless tests do not prove such a
+production chain, cgroup authority, seccomp policy on every deployed kernel,
+or absence of privileged actors that can escape the domain.
 
 The AF_UNIX regression uses an actual listener and a separate rootless client
 process. Kernel `SO_PEERCRED` supplies the PID/UID/GID; the broker rejects

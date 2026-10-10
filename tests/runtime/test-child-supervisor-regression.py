@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import errno
+import ctypes
 import importlib.util
 import os
 import signal
@@ -197,7 +198,10 @@ def make_fake_supervisor(
     for token, pid, fd in rows:
         handle = f"opaque-{token}"
         ops.add(pid, fd, token)
-        supervisor._workers[handle] = Worker(handle=handle, pid=pid, pidfd=fd)
+        supervisor._workers[handle] = Worker(
+            handle=handle, pid=pid, pidfd=fd,
+            containment_required=True, containment_installed=True,
+        )
         handles.append(handle)
     return supervisor, handles
 
@@ -351,8 +355,97 @@ raise SystemExit(33)
                 self.assertEqual(marker.read_text(), str(errno.EPERM))
                 report = supervisor.stop_all([handle])
                 self.assertTrue(report.cleanup_allowed, report)
+                self.assertTrue(report.process_tree_quiescent, report)
             finally:
                 os.close(executable_fd)
+
+    def test_direct_child_exit_with_live_descendant_denies_cleanup_callback(self) -> None:
+        if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+            self.skipTest("pidfd APIs unavailable; exact descendant cleanup has no PID fallback")
+        libc = ctypes.CDLL(None, use_errno=True)
+        old_subreaper = ctypes.c_int(0)
+        self.assertEqual(libc.prctl(37, ctypes.byref(old_subreaper), 0, 0, 0), 0)
+        self.assertEqual(libc.prctl(36, 1, 0, 0, 0), 0)
+        descendant_pidfd = None
+        descendant_pid = None
+        descendant_reaped = False
+        supervisor = GatedPidfdSupervisor(term_grace=0.1, kill_grace=0.1)
+
+        def reap_owned_descendant(timeout: float) -> bool:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    got, _status = os.waitpid(descendant_pid, os.WNOHANG)
+                except ChildProcessError:
+                    return True
+                except InterruptedError:
+                    continue
+                if got == descendant_pid:
+                    return True
+                time.sleep(0.01)
+            return False
+
+        with tempfile.TemporaryDirectory(prefix="swapz-direct-only-tree-") as directory:
+            marker = Path(directory) / "descendant-pid"
+            code = f"""
+import os, time
+from pathlib import Path
+child = os.fork()
+if child == 0:
+    os.setsid()
+    Path({str(marker)!r}).write_text(f"{{os.getpid()}}:{{os.getpgrp()}}")
+    while True:
+        time.sleep(1)
+os._exit(0)
+"""
+            try:
+                handle = supervisor.launch(worker_command(code))
+                self.assertTrue(wait_for_file(marker), "test worker did not report its child")
+                descendant_pid_text, descendant_group_text = marker.read_text().split(":", 1)
+                descendant_pid = int(descendant_pid_text)
+                self.assertEqual(int(descendant_group_text), descendant_pid,
+                                 "test descendant should have detached into its own session")
+                descendant_pidfd = os.pidfd_open(descendant_pid, 0)
+                direct_result = supervisor.wait(handle, 2.0)
+                self.assertTrue(direct_result.reaped, direct_result.errors)
+                self.assertEqual(direct_result.exit_code, 0, direct_result.errors)
+                self.assertEqual(direct_result.containment_scope, "direct-child-only")
+                self.assertFalse(supervisor.ops.pidfd_exited(descendant_pidfd),
+                                 "test descendant should outlive the direct worker")
+
+                cleanup_calls: list[str] = []
+                report, cleanup_result = supervisor.cleanup_after_stop(
+                    [handle], lambda: cleanup_calls.append("unsafe cleanup"),
+                )
+                self.assertTrue(report.all_reaped, report)
+                self.assertFalse(report.cleanup_allowed, report)
+                self.assertFalse(report.process_tree_quiescent)
+                self.assertIsNone(cleanup_result)
+                self.assertEqual(cleanup_calls, [])
+                self.assertTrue(any("process-tree containment is unverified" in error
+                                    for error in report.errors))
+                signal.pidfd_send_signal(descendant_pidfd, signal.SIGTERM)
+                deadline = time.monotonic() + 2.0
+                while (not supervisor.ops.pidfd_exited(descendant_pidfd)
+                       and time.monotonic() < deadline):
+                    supervisor.ops.poll(descendant_pidfd, 20)
+                self.assertTrue(supervisor.ops.pidfd_exited(descendant_pidfd))
+                descendant_reaped = reap_owned_descendant(2.0)
+                self.assertTrue(descendant_reaped, "test-owned descendant did not reap promptly")
+            finally:
+                if descendant_pidfd is not None:
+                    if not supervisor.ops.pidfd_exited(descendant_pidfd):
+                        signal.pidfd_send_signal(descendant_pidfd, signal.SIGKILL)
+                        deadline = time.monotonic() + 2.0
+                        while (not supervisor.ops.pidfd_exited(descendant_pidfd)
+                       and time.monotonic() < deadline):
+                            supervisor.ops.poll(descendant_pidfd, 20)
+                    if descendant_pid is not None and not descendant_reaped:
+                        descendant_reaped = reap_owned_descendant(2.0)
+                    os.close(descendant_pidfd)
+                libc.prctl(36, old_subreaper.value, 0, 0, 0)
+                if descendant_pid is not None and not descendant_reaped:
+                    self.fail("test-owned descendant was not reaped after pidfd cleanup")
 
     def test_pinned_worker_cannot_clear_parent_death_binding(self) -> None:
         executable_fd = os.open(sys.executable, os.O_RDONLY | os.O_CLOEXEC)
@@ -618,7 +711,10 @@ raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
             self.assertTrue(result.reaped)
             self.assertEqual(result.exit_code, 0)
             report = supervisor.stop_all([handle])
-            self.assertTrue(report.cleanup_allowed)
+            self.assertTrue(report.all_reaped)
+            self.assertFalse(report.cleanup_allowed)
+            self.assertFalse(report.process_tree_quiescent)
+            self.assertEqual(report.results[0].containment_scope, "direct-child-only")
             self.assertFalse([event for event in ops.events if event[0] == "signal"])
             worker = supervisor.worker_for_test(handle)
             self.assertTrue(worker.close_attempted)
