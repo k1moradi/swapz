@@ -103,7 +103,7 @@ struct swapz_context {
     unsigned int fail_events,flush_pack,flush_batch,store_calls,copy_calls;
     unsigned int fail_flush,accepted_new,stored_generation;
 };
-static void swapz_set_failed(struct swapz_context *c,int err) {
+static void __attribute__((unused)) swapz_set_failed(struct swapz_context *c,int err) {
     (void)err;c->fail_events++;
 }
 static int swapz_checked_page_index(u32 pages,sector_t sector,u32 *page) {
