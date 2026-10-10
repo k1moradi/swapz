@@ -51,6 +51,7 @@ MANDATORY_TESTS = (
     "swapz-stream-submit-bounds-contract-test.py",
     "swapz-upper-bio-ownership-contract-test.py",
     "swapz-pending-pack-ownership-contract-test.py",
+    "streaming-benchmark-plan-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
@@ -255,6 +256,17 @@ class RootlessWorkflowContractTests(unittest.TestCase):
                         WorkflowContractError, "missing bounded executable safety gate"):
                     check_workflow(workflow, source.replace(
                         command, "echo 'generation scan gate skipped'", 1))
+
+    def test_removed_benchmark_predevice_planner_execution_is_rejected(self):
+        for workflow, source in self.sources.items():
+            with self.subTest(workflow=workflow):
+                command = ("timeout 25s python3 -B "
+                           "tests/runtime/streaming-benchmark-plan-test.py -v")
+                self.assertIn(command, source)
+                with self.assertRaisesRegex(
+                        WorkflowContractError, "missing bounded executable safety gate"):
+                    check_workflow(workflow, source.replace(
+                        command, "echo 'benchmark planner skipped'", 1))
 
     def test_removed_pending_pack_ownership_execution_is_rejected(self):
         for name, source in self.sources.items():
