@@ -74,3 +74,24 @@ Any real device, dm, swap, backing release, fault injection, pressure
 workload or privileged qualification remains blocked pending separate
 explicit approval. V2.2 strategy and batch winner remain
 **UNDETERMINED**.
+
+## Exact merged-source evidence
+
+The reviewed change merged as
+[`49b062a0180990a03b0b81fd40c1c3e41c2f620f`](https://github.com/k1moradi/swapz/commit/49b062a0180990a03b0b81fd40c1c3e41c2f620f).
+
+All four **post-merge** rootless runs on this identical executable
+commit passed:
+
+- [Kernel source](https://github.com/k1moradi/swapz/actions/runs/38047254236)
+- [Combined source qualification](https://github.com/k1moradi/swapz/actions/runs/38047254217)
+- [Teardown safety](https://github.com/k1moradi/swapz/actions/runs/38047254245)
+- [NBD source safety](https://github.com/k1moradi/swapz/actions/runs/38047254206)
+
+The original PR head `11f95c24e1e472451a6d5341698309b383de6973`
+also passed all four PR qualification workflows before merge.
+The exact-C stream submission suite reports 4/4 passing Python
+test methods with multiple valid/error scenarios and an executable
+unsafe-old-code mutant. Later documentation-only commits on
+`main` do not modify qualified executable code. No native loaded
+kernel/device qualification was performed for this new SHA.
