@@ -128,7 +128,22 @@ struct work_struct { int flag; };
 struct stub_queue { int queues; };
 struct stub_atomic { int value; };
 struct stub_wait { int wakes; };
-struct bio { int completes, error; };
+struct list_head { struct list_head *next, *prev; };
+#define INIT_LIST_HEAD(head) do { (head)->next=(head); (head)->prev=(head); } while(0)
+#define list_empty(head) ((head)->next==(head))
+#define list_first_entry(head,type,member) \
+    ((type *)((char *)(head)->next - offsetof(type,member)))
+static void list_add_tail(struct list_head *node, struct list_head *head) {
+    node->next=head;node->prev=head->prev;
+    head->prev->next=node;head->prev=node;
+}
+static void list_del_init(struct list_head *node) {
+    node->prev->next=node->next;node->next->prev=node->prev;
+    INIT_LIST_HEAD(node);
+}
+struct bio;
+struct swapz_per_bio { struct list_head list; struct bio *bio; };
+struct bio { struct swapz_per_bio entry; int completes, error; };
 struct swapz_context;
 struct swapz_write_batch_record {
     struct bio *bio;
@@ -143,6 +158,7 @@ struct swapz_write_batch_block {
     struct swapz_write_batch_record records[SWAPZ_MAX_PACKED_RECORDS];
 };
 struct swapz_stream_buffer {
+    struct list_head owned_bios;
     struct swapz_context *context;
     struct swapz_write_batch_block *blocks;
     u32 start_block, block_count;
@@ -193,6 +209,7 @@ static void swapz_set_failed(struct swapz_context *c, int err) {
     (void)err; c->failed=true; c->failed_events++;
 }
 static void swapz_complete_bio(struct bio *b, int err) {
+    list_del_init(&b->entry.list);
     b->completes++; b->error=err;
 }
 static void swapz_install_mapping(struct swapz_context *c, u32 pg,
@@ -226,6 +243,9 @@ static void setup(bool outstanding, bool early) {
     boundary_race=0;
     stream=&c.stream_buffers[0];
     stream->context=&c;
+    INIT_LIST_HEAD(&stream->owned_bios);
+    b.entry.bio=&b;
+    INIT_LIST_HEAD(&b.entry.list);
     stream->blocks=&block;
     stream->block_count=1;
     stream->start_block=9;
@@ -246,7 +266,10 @@ static void setup(bool outstanding, bool early) {
     block.records[0].stored_length=4;
     block.records[0].flags=SWAPZ_MAP_COMPRESSED;
     block.records[0].upper_completed=early;
-    if (outstanding) block.records[0].bio=&b;
+    if (outstanding) {
+        block.records[0].bio=&b;
+        list_add_tail(&b.entry.list,&stream->owned_bios);
+    }
     c.staged_refs[0].valid=1;
     c.staged_refs[0].generation=7;
 }
