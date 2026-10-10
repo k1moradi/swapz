@@ -11,6 +11,8 @@ on:
       - 'tests/runtime/size-aware-nbd-teardown-test.sh'
       - 'tests/runtime/streaming-teardown-regression.sh'
       - 'tests/runtime/streaming-benchmark.sh'
+      - 'tests/runtime/streaming-benchmark-plan.py'
+      - 'tests/runtime/streaming-benchmark-plan-test.py'
       - 'tests/runtime/streaming-benchmark-teardown.sh'
       - 'tests/runtime/nbd-pidfd-owned-session.py'
       - 'tests/runtime/nbd-pidfd-owned-mock-child.py'
@@ -27,6 +29,8 @@ on:
       - 'tests/runtime/size-aware-nbd-teardown-test.sh'
       - 'tests/runtime/streaming-teardown-regression.sh'
       - 'tests/runtime/streaming-benchmark.sh'
+      - 'tests/runtime/streaming-benchmark-plan.py'
+      - 'tests/runtime/streaming-benchmark-plan-test.py'
       - 'tests/runtime/streaming-benchmark-teardown.sh'
       - 'tests/runtime/nbd-pidfd-owned-session.py'
       - 'tests/runtime/nbd-pidfd-owned-mock-child.py'
@@ -99,6 +103,12 @@ jobs:
             fi
             echo "NBD rootless selftest repetition $i/25: PASS"
           done
+      - name: Rootless V2.2 benchmark plan and pre-device admission contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-plan.py tests/runtime/streaming-benchmark-plan-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-plan-test.py -v
       - name: Verify benchmark and NBD teardown Bash syntax
         run: |
           bash -n tests/runtime/streaming-benchmark.sh
