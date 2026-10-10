@@ -4,9 +4,11 @@
 
 This narrow audit began from remote `main` at
 `1fd24f6ba8368a35153e7d2f1405ac633bac86c7`.
-The candidate correction is reviewed as
-[PR #3](https://github.com/k1moradi/swapz/pull/3), not as a
-previously validated production release.
+The correction was integrated as
+[PR #3](https://github.com/k1moradi/swapz/pull/3), merged at
+[`57af151c4f47b24a3ad0533ea1377d289c13a2c1`](https://github.com/k1moradi/swapz/commit/57af151c4f47b24a3ad0533ea1377d289c13a2c1).
+This is still experimental source-level qualification, not a validated
+production release.
 
 The relevant production routines are `swapz_compact_fill_buffer`,
 `swapz_decode_loaded_mapping`, `swapz_read_staged`,
@@ -118,3 +120,18 @@ strategy/batch winner is **UNDETERMINED**.
 
 No real device, swap, NBD, DM, module, privileged cleanup, pressure,
 backing release or destructive operation was performed for this audit.
+
+### Post-merge CI, exact integration revision
+
+Merged SHA `57af151c4f47b24a3ad0533ea1377d289c13a2c1`
+passed rootless [kernel](https://github.com/k1moradi/swapz/actions/runs/38044908279),
+[combined](https://github.com/k1moradi/swapz/actions/runs/38044908328),
+[teardown](https://github.com/k1moradi/swapz/actions/runs/38044908268),
+and [NBD source-safety](https://github.com/k1moradi/swapz/actions/runs/38044908271)
+workflows, all at that same SHA. Final PR head
+`ffdd28aaabc5511aae294d676c0e57e1a6debf77`
+also passed each of these gates separately. These facts do not establish
+real kernel I/O or persistence behavior.
+
+Documentation-only commits written after the merge preserve the qualified
+executable source and must be distinguished from the exact tested SHA.
