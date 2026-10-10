@@ -183,6 +183,7 @@ static int swapz_flush_write_batch(struct swapz_context *c){(void)c;return -EIO;
 static void swapz_set_failed(struct swapz_context *c,int error){(void)error;c->failed=1;}
 static void swapz_set_staged_ref(struct swapz_context *c,u32 pg,u32 gen,u8 id,u32 bi,u8 ri){(void)pg;(void)gen;(void)id;(void)bi;(void)ri;c->staged++;}
 static void swapz_complete_bio(struct bio *b,int error){b->completes++;b->error=error;}
+static void swapz_register_owned_bio(struct swapz_stream_buffer *buffer,struct bio *bio){(void)buffer;(void)bio;}
 static void swapz_note_block_written(struct swapz_context *c){c->physical++;}
 """
 STAGE_END = r"""
