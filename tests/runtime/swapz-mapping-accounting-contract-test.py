@@ -51,6 +51,8 @@ def enforce_contract(src: str) -> None:
             install.find("segment >= context->segment_count") < 0 or
             install.find("SWAPZ_MAX_PACKED_RECORDS && !replacing_same_block") < 0):
         raise AssertionError("destination pre-validation incomplete")
+    if "mapping->physical_block = physical_block;" not in install:
+        raise AssertionError("mapping publication must follow validated live accounting")
     if not (install.index("physical_block >= context->physical_blocks") <
             install.index("swapz_unaccount_mapping(context, mapping)") <
             install.index("context->block_live_records[physical_block]++") <
@@ -280,7 +282,7 @@ class MappingAccountingContracts(unittest.TestCase):
         bad=original.replace("\tmapping->physical_block = physical_block;",
                              "\t/* removed mapping publication */",1)
         self.assertNotEqual(bad,original)
-        with self.assertRaisesRegex(AssertionError,"destination validation must precede"):
+        with self.assertRaisesRegex(AssertionError,"mapping publication must follow"):
             enforce_contract(self.src.replace(original,bad,1))
 
     def test_unaccount_underflow_guard_mutation_is_rejected(self):
