@@ -126,6 +126,7 @@ struct swapz_staged_ref {
 };
 
 struct swapz_context {
+    bool failed;
     struct swapz_staged_ref staged_refs[1];
     u32 generations[1];
     struct swapz_stream_buffer stream_buffers[2];
