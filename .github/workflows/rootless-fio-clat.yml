@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'tests/runtime/streaming-benchmark-read-latency.py'
+      - 'tests/runtime/streaming-benchmark-writer-verify.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-fio-cli-test.py'
       - '.github/workflows/rootless-fio-clat.yml'
