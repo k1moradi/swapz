@@ -76,8 +76,15 @@ class RealFioReaderLogIntegration(unittest.TestCase):
             sentinel = b"SWAPZ_V22_PROBE_" * 256
             with data.open("wb") as stream:
                 stream.truncate(128 * 1024)
-                stream.seek(128 * 1024 - 4096)
-                stream.write(sentinel)
+            reference = root / "sentinel-reference"
+            reference.write_bytes(sentinel)
+            # Exercise the live runner's exact direct-write command shape on
+            # an ORDINARY FILE only; no block devices or elevated privileges.
+            subprocess.run(
+                ["dd", f"if={reference}", f"of={data}", "bs=4096", "count=1",
+                 "seek=31", "oflag=direct", "conv=notrunc", "status=none"],
+                check=True, capture_output=True, text=True, timeout=10,
+            )
             prefix = root / "paired-reader"
             job = root / "paired.fio"
             output = root / "paired.json"
@@ -133,11 +140,15 @@ class RealFioReaderLogIntegration(unittest.TestCase):
             self.assertEqual(summary["read_count"],
                              jobs["reader"]["read"]["total_ios"])
             self.assertGreater(summary["read_p99_ns"], 0)
-            # Also verify that fio's actual offset/size semantics exclude the
-            # reserved final 4 KiB sentinel under the concurrent writer.
-            with data.open("rb") as stream:
-                stream.seek(128 * 1024 - 4096)
-                self.assertEqual(stream.read(4096), sentinel)
+            # Fio must not reach the last 4 KiB; exercise the same direct
+            # read and byte-for-byte comparison used by the live runner.
+            readback = root / "sentinel-readback"
+            subprocess.run(
+                ["dd", f"if={data}", f"of={readback}", "bs=4096", "count=1",
+                 "skip=31", "iflag=direct", "status=none"],
+                check=True, capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(readback.read_bytes(), sentinel)
 
 
 if __name__ == "__main__":
