@@ -56,6 +56,8 @@ class Worker:
     handle: str
     pid: int
     pidfd: int | None
+    lifecycle_id: str
+    pidfd_owned_at_launch: bool
     exec_error_fd: int | None = None
     gate_write_fd: int | None = None
     reaped: bool = False
@@ -77,6 +79,11 @@ class WorkerResult:
     escalated: bool
     errors: tuple[str, ...]
     containment_scope: str = "direct-child-only"
+    supervisor_id: str = ""
+    lifecycle_id: str = ""
+    containment_installed: bool = False
+    containment_profile: str | None = None
+    pidfd_owned_at_launch: bool = False
 
     @property
     def worker_succeeded(self) -> bool:
@@ -426,6 +433,9 @@ class GatedPidfdSupervisor:
         self.kill_grace = kill_grace
         self.escalate = escalate
         self.token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
+        # Stable only for this supervisor process. Worker lifecycle IDs below
+        # bind each result to one launch record, without exposing numeric PIDs.
+        self.supervisor_id = secrets.token_hex(16)
         self._workers: dict[str, Worker] = {}
         self._closing = False
         self._containment_failure_latched = False
@@ -708,6 +718,10 @@ class GatedPidfdSupervisor:
             raise ValueError("environment keys and values must be NUL-free strings")
         self._require_pidfd_support()
         handle = self._new_handle()
+        # Allocate the opaque lifecycle identity before fork.  There must be
+        # no fallible identity allocation after a child and pidfd exist but
+        # before the child has been entered in the supervisor's worker table.
+        lifecycle_id = self._new_lifecycle_id()
 
         expected_parent_pid = os.getpid()
         parent_pidfd: int | None = None
@@ -801,6 +815,8 @@ class GatedPidfdSupervisor:
             handle=handle,
             pid=pid,
             pidfd=pidfd,
+            lifecycle_id=lifecycle_id,
+            pidfd_owned_at_launch=True,
             exec_error_fd=error_read_fd,
             gate_write_fd=gate_write_fd,
             containment_required=contain_process_tree,
@@ -952,6 +968,9 @@ class GatedPidfdSupervisor:
         return results
 
     def _result(self, worker: Worker) -> WorkerResult:
+        containment_installed = bool(
+            worker.containment_required and worker.containment_installed
+        )
         return WorkerResult(
             handle=worker.handle,
             reaped=worker.reaped,
@@ -960,10 +979,34 @@ class GatedPidfdSupervisor:
             errors=tuple(worker.errors),
             containment_scope=(
                 _PROCESS_TREE_CONTAINMENT_PROFILE
-                if worker.containment_required and worker.containment_installed
+                if containment_installed
                 else "direct-child-only"
             ),
+            supervisor_id=self.supervisor_id,
+            lifecycle_id=worker.lifecycle_id,
+            containment_installed=containment_installed,
+            containment_profile=(
+                _PROCESS_TREE_CONTAINMENT_PROFILE if containment_installed else None
+            ),
+            pidfd_owned_at_launch=worker.pidfd_owned_at_launch,
         )
+
+    def _new_lifecycle_id(self) -> str:
+        for _ in range(16):
+            value = secrets.token_hex(16)
+            if all(worker.lifecycle_id != value for worker in self._workers.values()):
+                return value
+        raise SupervisorError(
+            "worker lifecycle identity allocation failed",
+            preserve_required=True,
+        )
+
+    def lifecycle_result(self, handle: str) -> WorkerResult:
+        """Return an immutable view of the supervisor's own launch record."""
+        worker = self._workers.get(handle)
+        if worker is None:
+            raise KeyError("unknown worker handle")
+        return self._result(worker)
 
     def wait(self, handle: str, timeout: float) -> WorkerResult:
         """Wait for natural worker completion and reap it, without signaling."""

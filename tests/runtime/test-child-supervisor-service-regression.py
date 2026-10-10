@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import errno
+import hashlib
 import os
 import socket
 import stat
@@ -41,8 +42,8 @@ service_module = load_module("service_test_module", SERVICE_PATH)
 
 SupervisorError = service_module.SupervisorError
 PidfdUnavailable = service_module.PidfdUnavailable
-StopReport = supervisor_module.StopReport
-WorkerResult = supervisor_module.WorkerResult
+StopReport = service_module.StopReport
+WorkerResult = service_module.WorkerResult
 ChannelFailure = service_module.ChannelFailure
 ProtocolFailure = service_module.ProtocolFailure
 SupervisorControlClient = service_module.SupervisorControlClient
@@ -96,6 +97,7 @@ class FakeServiceSupervisor:
     """Service API fake; it creates no process and invokes no OS signal."""
 
     def __init__(self, *, stop_error: str | None = None, launch_error: bool = False) -> None:
+        self.supervisor_id = "a" * 32
         self.records: dict[str, SimpleNamespace] = {}
         self.calls: list[tuple[str, ...]] = []
         self.callback_count = 0
@@ -109,7 +111,7 @@ class FakeServiceSupervisor:
         self.next += 1
         handle = f"fake-handle-{self.next}"
         self.launch_records.append((tuple(argv), {**options, "env": dict(env)}))
-        self.records[handle] = SimpleNamespace(reaped=False)
+        self.records[handle] = SimpleNamespace(reaped=False, lifecycle_id=f"{self.next:032x}")
         if self.launch_error:
             self.launch_failure_error = "injected post-pidfd startup failure"
             raise SupervisorError("injected post-pidfd startup failure", preserve_required=True,
@@ -121,10 +123,23 @@ class FakeServiceSupervisor:
             raise KeyError(handle)
         return self.records[handle]
 
+    def lifecycle_result(self, handle: str) -> WorkerResult:
+        record = self.worker_for_test(handle)
+        return WorkerResult(
+            handle, record.reaped, 0 if record.reaped else None, False, (),
+            supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE,
+            self.supervisor_id, record.lifecycle_id, True,
+            supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE,
+            True,
+        )
+
     def wait(self, handle: str, timeout: float) -> WorkerResult:
         self.records[handle].reaped = True
         return WorkerResult(
             handle, True, 0, False, (), supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE,
+            self.supervisor_id, self.records[handle].lifecycle_id, True,
+            supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE,
+            True,
         )
 
     def cleanup_after_stop(self, handles: list[str] | tuple[str, ...], callback: Any) -> tuple[StopReport, object | None]:
@@ -140,6 +155,9 @@ class FakeServiceSupervisor:
                      if record.reaped else "direct-child-only")
             results.append(WorkerResult(
                 handle, record.reaped, 0 if record.reaped else None, False, errors, scope,
+                self.supervisor_id, record.lifecycle_id, True,
+                supervisor_module._PROCESS_TREE_CONTAINMENT_PROFILE,
+                True,
             ))
         clean = all(row.reaped and not row.errors for row in results) and set(handles) == set(self.records)
         result: object | None = None
@@ -147,6 +165,32 @@ class FakeServiceSupervisor:
             self.callback_count += 1
             result = callback()
         return StopReport(tuple(results), (), clean), result
+
+
+class FakeRoleGateOps:
+    """In-memory role gates; never writes through a real descriptor."""
+
+    def __init__(self) -> None:
+        self.next_fd = 100_000
+        self.open: set[int] = set()
+        self.released: list[int] = []
+
+    def pipe(self) -> tuple[int, int]:
+        read_fd, write_fd = self.next_fd, self.next_fd + 1
+        self.next_fd += 2
+        self.open.update((read_fd, write_fd))
+        return read_fd, write_fd
+
+    def write(self, fd: int, data: bytes) -> int:
+        if fd not in self.open or data != b"G":
+            raise OSError("invalid synthetic role gate write")
+        self.released.append(fd)
+        return len(data)
+
+    def close(self, fd: int) -> None:
+        if fd not in self.open:
+            raise OSError("synthetic role gate already closed")
+        self.open.remove(fd)
 
 
 def raw_frame(value: dict[str, Any]) -> bytes:
@@ -158,6 +202,10 @@ def response_base(request_id: int, *, status: str, ok: bool, all_reaped: bool,
                   cleanup_allowed: bool = False) -> dict[str, Any]:
     return {
         "id": request_id,
+        "protocol_version": service_module.SERVICE_PROTOCOL_VERSION,
+        "session_id": "1" * 32,
+        "service_instance_id": "2" * 32,
+        "supervisor_id": "3" * 32,
         "ok": ok,
         "status": status,
         "all_reaped": all_reaped,
@@ -167,17 +215,36 @@ def response_base(request_id: int, *, status: str, ok: bool, all_reaped: bool,
 
 
 def launch_ready(request_id: int, handle: str) -> dict[str, Any]:
-    return {**response_base(request_id, status="ready", ok=True, all_reaped=False), "handle": handle}
+    return {
+        **response_base(request_id, status="ready", ok=True, all_reaped=False),
+        "handle": handle, "lifecycle_id": hashlib.sha256(handle.encode()).hexdigest()[:32],
+        "role": None, "containment_scope": service_module.PROCESS_TREE_CONTAINMENT_PROFILE,
+        "containment_installed": True,
+        "containment_profile": service_module.PROCESS_TREE_CONTAINMENT_PROFILE,
+        "pidfd_owned_at_launch": True,
+        "gate_held": False,
+    }
 
 
 def worker_result(handle: str, *, reaped: bool = True, exit_code: int | None = 143,
                   errors: list[str] | None = None) -> dict[str, Any]:
     return {
         "handle": handle,
+        "protocol_version": service_module.SERVICE_PROTOCOL_VERSION,
+        "session_id": "1" * 32,
+        "service_instance_id": "2" * 32,
+        "supervisor_id": "3" * 32,
+        "lifecycle_id": hashlib.sha256(handle.encode()).hexdigest()[:32],
+        "role": None,
         "reaped": reaped,
+        "direct_child_reaped": reaped,
         "exit_code": exit_code,
         "escalated": False,
         "errors": [] if errors is None else errors,
+        "containment_scope": service_module.PROCESS_TREE_CONTAINMENT_PROFILE,
+        "containment_installed": True,
+        "containment_profile": service_module.PROCESS_TREE_CONTAINMENT_PROFILE,
+        "pidfd_owned_at_launch": True,
     }
 
 
@@ -447,7 +514,7 @@ class SupervisorServiceProtocolTests(unittest.TestCase):
     def test_numeric_supervisor_token_is_never_exposed_or_authorized(self) -> None:
         class NumericHandleSupervisor(FakeServiceSupervisor):
             def launch(self, argv: tuple[str, ...], *, env: dict[str, str], **options: Any) -> str:
-                self.records["424242"] = SimpleNamespace(reaped=False)
+                self.records["424242"] = SimpleNamespace(reaped=False, lifecycle_id="4" * 32)
                 raise SupervisorError("injected invalid token", preserve_required=True,
                                       handle="424242", child_reaped=False)
 
@@ -1004,7 +1071,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         configured_gate = self.make_gate()
         configured = SupervisorControlService(
             supervisor=FakeServiceSupervisor(), recall_dd_gate=configured_gate,
-            enable_direct_dd=True, io_timeout=0.5,
+            enable_direct_dd=True, io_timeout=0.5, role_gate_ops=FakeRoleGateOps(),
         )
         malformed = {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer",
                      "argv": ["dd", "of=/dev/sda"], "pid": 123, "mapper": "/dev/sda"}
@@ -1038,6 +1105,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         gate = self.make_gate()
         service = SupervisorControlService(
             supervisor=fake, recall_dd_gate=gate, enable_direct_dd=True, io_timeout=1.0,
+            role_gate_ops=FakeRoleGateOps(),
         )
         client, thread, outcomes = self.start_service_thread(service)
         roles = ("writer", "a", "b", "a2", "b2")
@@ -1046,27 +1114,37 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
             response = client.call("launch", command="recall-dd", role=role)
             self.assertEqual(response["status"], "ready")
             handles.append(response["handle"])
+            if role in {"writer", "a", "b"}:
+                client.call("release_group", handles=[response["handle"]])
+            elif role == "b2":
+                client.call("release_group", handles=handles[-2:])
         self.assertEqual(gate.roles_issued, roles)
         self.assertEqual(len(fake.launch_records), 5)
         writer_argv, writer_options = fake.launch_records[0]
-        source_fd, mapper_fd = writer_options["pass_fds"]
-        exec_fd = int(writer_options["executable"].rsplit("/", 1)[1])
-        self.assertEqual(writer_argv, (
+        role_gate_fd, exec_fd, source_fd, mapper_fd = writer_options["pass_fds"]
+        self.assertEqual(writer_argv[:5], (
+            sys.executable, "-c", service_module._GATED_EXEC_CODE,
+            str(role_gate_fd), str(exec_fd),
+        ))
+        self.assertEqual(writer_argv[5:], (
             "dd", f"if=/proc/self/fd/{source_fd}", f"of=/proc/self/fd/{mapper_fd}",
             "bs=4096", "count=9", "oflag=direct", "conv=notrunc", "status=none",
         ))
-        self.assertEqual(writer_options["executable_fd"], exec_fd)
         self.assertTrue(writer_options["strict_fds"])
         self.assertTrue(writer_options["contain_process_tree"])
-        self.assertNotIn(exec_fd, writer_options["pass_fds"])
+        self.assertIn(exec_fd, writer_options["pass_fds"])
         for role, (argv, options), page in zip(roles[1:], fake.launch_records[1:], (0, 4, 0, 5)):
-            output_fd = int(argv[2].rsplit("/", 1)[1])
-            self.assertEqual(argv, (
+            gate_fd, role_exec_fd, role_source_fd, role_mapper_fd, output_fd = options["pass_fds"]
+            self.assertEqual(argv[:5], (
+                sys.executable, "-c", service_module._GATED_EXEC_CODE,
+                str(gate_fd), str(role_exec_fd),
+            ))
+            self.assertEqual(argv[5:], (
                 "dd", f"if=/proc/self/fd/{mapper_fd}", f"of=/proc/self/fd/{output_fd}",
                 "bs=4096", f"skip={page}", "count=1", "iflag=direct", "status=none",
             ))
-            self.assertEqual(options["pass_fds"], (source_fd, mapper_fd, output_fd))
-            self.assertEqual(options["executable_fd"], exec_fd)
+            self.assertEqual((role_source_fd, role_mapper_fd), (source_fd, mapper_fd))
+            self.assertEqual(role_exec_fd, exec_fd)
             self.assertTrue(options["strict_fds"])
             self.assertTrue(options["contain_process_tree"])
             self.assertEqual(Path(gate._directory_path / ("read-" + role)).name, "read-" + role)
@@ -1086,7 +1164,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
                 fake = FakeServiceSupervisor()
                 service = SupervisorControlService(
                     supervisor=fake, recall_dd_gate=self.make_gate(),
-                    enable_direct_dd=True, io_timeout=1.0,
+                    enable_direct_dd=True, io_timeout=1.0, role_gate_ops=FakeRoleGateOps(),
                 )
                 client, thread, outcomes = self.start_service_thread(service)
                 for role in roles:
@@ -1114,7 +1192,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         fake = FakeServiceSupervisor(launch_error=True)
         service = SupervisorControlService(
             supervisor=fake, recall_dd_gate=self.make_gate(),
-            enable_direct_dd=True, io_timeout=0.5,
+            enable_direct_dd=True, io_timeout=0.5, role_gate_ops=FakeRoleGateOps(),
         )
         requests = [
             {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
@@ -1133,7 +1211,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         fake = FakeServiceSupervisor(stop_error="injected later worker failure")
         service = SupervisorControlService(
             supervisor=fake, recall_dd_gate=self.make_gate(),
-            enable_direct_dd=True, io_timeout=0.5,
+            enable_direct_dd=True, io_timeout=0.5, role_gate_ops=FakeRoleGateOps(),
         )
         requests = [
             {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
@@ -1157,7 +1235,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         fake = DuplicateHandleSupervisor()
         service = SupervisorControlService(
             supervisor=fake, recall_dd_gate=self.make_gate(),
-            enable_direct_dd=True, io_timeout=0.5,
+            enable_direct_dd=True, io_timeout=0.5, role_gate_ops=FakeRoleGateOps(),
         )
         requests = [
             {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},
@@ -1181,7 +1259,7 @@ class RecallDDServiceAdmissionTests(unittest.TestCase):
         fake = UnsupportedPidfdSupervisor()
         service = SupervisorControlService(
             supervisor=fake, recall_dd_gate=self.make_gate(),
-            enable_direct_dd=True, io_timeout=0.5,
+            enable_direct_dd=True, io_timeout=0.5, role_gate_ops=FakeRoleGateOps(),
         )
         requests = [
             {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"},

@@ -57,12 +57,20 @@ class FixtureBackingReleaseTests(unittest.TestCase):
         ident = self._base_identity(identity)
         worker = [self.HANDLE]
         session = self.SESSION
+        service_instance = "3" * 32
+        supervisor_id = "4" * 32
+        # Include a non-decimal hex character: lifecycle IDs are opaque tokens,
+        # and the policy deliberately rejects numeric-looking domain IDs.
+        lifecycle_id = "5a" * 16
         payloads = [
             ("admission_closed", {
                 "session_id": session, "closed": True, "no_more_roles": True,
             }),
             ("workers_reaped", {
-                "session_id": session, "inventory_complete": True, "all_reaped": True,
+                "session_id": session, "protocol_version": 2,
+                "service_instance_id": service_instance, "supervisor_id": supervisor_id,
+                "stop_request_id": 7,
+                "inventory_complete": True, "all_reaped": True,
                 "errors_empty": True, "worker_service_exit_status": 0,
                 "expected_handles": worker, "reaped_handles": worker,
                 "role_descriptors_closed": worker, "worker_errors": [],
@@ -70,12 +78,26 @@ class FixtureBackingReleaseTests(unittest.TestCase):
                 "role_results": [{
                     "role": self.ROLE, "handle": self.HANDLE, "exit_status": 0,
                     "reaped": True, "descriptor_closed": True, "errors": [],
+                    "service_instance_id": service_instance,
+                    "supervisor_id": supervisor_id, "lifecycle_id": lifecycle_id,
+                    "pidfd_owned_at_launch": True,
+                    "containment_scope": "seccomp-no-fork-pdeathsig-v1",
+                    "containment_installed": True,
                 }],
                 "process_containment": {
-                    "session_id": session, "expected_handles": worker,
+                    "session_id": session, "protocol_version": 2,
+                    "service_instance_id": service_instance,
+                    "supervisor_id": supervisor_id, "stop_request_id": 7,
+                    "service_exit_status": 0, "expected_handles": worker,
                     "inventory_complete": True, "errors": [],
                     "workers": [{
-                        "handle": self.HANDLE, "domain_id": "domain-1",
+                        "handle": self.HANDLE, "protocol_version": 2,
+                        "session_id": session, "service_instance_id": service_instance,
+                        "supervisor_id": supervisor_id, "lifecycle_id": lifecycle_id,
+                        "role": self.ROLE, "direct_child_reaped": True, "exit_code": 0,
+                        "containment_installed": True,
+                        "containment_profile": "seccomp-no-fork-pdeathsig-v1",
+                        "domain_id": lifecycle_id,
                         "scope": "seccomp-no-fork-pdeathsig-v1",
                         "filter_installed_before_exec": True,
                         "parent_death_bound": True, "process_creation_denied": True,
@@ -241,6 +263,24 @@ class FixtureBackingReleaseTests(unittest.TestCase):
             incomplete.submit(self._envelope(sequence, event, payload))
         self.assertFalse(incomplete.backing_release_authorized)
         self.assertTrue(incomplete.backing_must_be_preserved)
+
+    def test_boolean_values_cannot_masquerade_as_integer_worker_status(self):
+        mutations = (
+            lambda p: p["process_containment"].update(service_exit_status=False),
+            lambda p: p["process_containment"]["workers"][0].update(exit_code=False),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                policy = self._new_policy()
+                event, payload = self.payloads[0]
+                policy.submit(self._envelope(0, event, payload))
+                event, payload = self.payloads[1]
+                changed = copy.deepcopy(payload)
+                mutate(changed)
+                with self.assertRaises(policy_module.DrainEvidenceDenied):
+                    policy.submit(self._envelope(1, event, changed))
+                self.assertTrue(policy.backing_must_be_preserved)
+                self.assertFalse(policy.backing_release_authorized)
 
     def test_adversarial_worker_swap_suspend_open_count_remove_and_owner_receipts(self):
         cases = (

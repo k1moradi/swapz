@@ -214,7 +214,8 @@ class FixtureBackingReleasePolicy:
             return {"closed": True}
         if event == "workers_reaped":
             self._exact_context(payload, {
-                "session_id", "inventory_complete", "all_reaped", "errors_empty",
+                "session_id", "protocol_version", "service_instance_id", "supervisor_id",
+                "stop_request_id", "inventory_complete", "all_reaped", "errors_empty",
                 "worker_service_exit_status", "expected_handles", "reaped_handles",
                 "role_descriptors_closed", "worker_errors", "expected_roles", "role_results",
                 "process_containment",
@@ -224,6 +225,8 @@ class FixtureBackingReleasePolicy:
             role_results = payload["role_results"]
             role_result_keys = {
                 "role", "handle", "exit_status", "reaped", "descriptor_closed", "errors",
+                "service_instance_id", "supervisor_id", "lifecycle_id",
+                "pidfd_owned_at_launch", "containment_scope", "containment_installed",
             }
             if (payload["worker_service_exit_status"] != 0
                     or type(payload["worker_service_exit_status"]) is not int
@@ -232,6 +235,14 @@ class FixtureBackingReleasePolicy:
                     or payload["role_descriptors_closed"] != expected
                     or payload["worker_errors"] != []
                     or payload["expected_roles"] != expected_roles
+                    or type(payload["protocol_version"]) is not int
+                    or payload["protocol_version"] != 2
+                    or type(payload["service_instance_id"]) is not str
+                    or re.fullmatch(r"[0-9a-f]{32}", payload["service_instance_id"]) is None
+                    or type(payload["supervisor_id"]) is not str
+                    or re.fullmatch(r"[0-9a-f]{32}", payload["supervisor_id"]) is None
+                    or type(payload["stop_request_id"]) is not int
+                    or payload["stop_request_id"] <= 0
                     or type(role_results) is not list
                     or len(role_results) != len(expected_roles)
                     or type(payload["inventory_complete"]) is not bool
@@ -249,14 +260,31 @@ class FixtureBackingReleasePolicy:
                         or type(result["reaped"]) is not bool or result["reaped"] is not True
                         or type(result["descriptor_closed"]) is not bool
                         or result["descriptor_closed"] is not True
-                        or type(result["errors"]) is not list or result["errors"] != []):
+                        or type(result["errors"]) is not list or result["errors"] != []
+                        or result["service_instance_id"] != payload["service_instance_id"]
+                        or result["supervisor_id"] != payload["supervisor_id"]
+                        or type(result["lifecycle_id"]) is not str
+                        or re.fullmatch(r"[0-9a-f]{32}", result["lifecycle_id"]) is None
+                        or type(result["pidfd_owned_at_launch"]) is not bool
+                        or result["pidfd_owned_at_launch"] is not True
+                        or result["containment_scope"] != "seccomp-no-fork-pdeathsig-v1"
+                        or result["containment_installed"] is not True):
                     raise DrainEvidenceDenied("worker role result is missing, reordered, or unsuccessful")
             containment = payload["process_containment"]
             if (type(containment) is not dict
                     or set(containment) != {
-                        "session_id", "expected_handles", "inventory_complete", "errors", "workers",
+                        "session_id", "protocol_version", "service_instance_id", "supervisor_id",
+                        "stop_request_id", "service_exit_status", "expected_handles",
+                        "inventory_complete", "errors", "workers",
                     }
                     or containment["session_id"] != self.session_id
+                    or type(containment["protocol_version"]) is not int
+                    or containment["protocol_version"] != payload["protocol_version"]
+                    or containment["service_instance_id"] != payload["service_instance_id"]
+                    or containment["supervisor_id"] != payload["supervisor_id"]
+                    or containment["stop_request_id"] != payload["stop_request_id"]
+                    or type(containment["service_exit_status"]) is not int
+                    or containment["service_exit_status"] != 0
                     or containment["expected_handles"] != expected
                     or type(containment["inventory_complete"]) is not bool
                     or containment["inventory_complete"] is not True
@@ -266,12 +294,27 @@ class FixtureBackingReleasePolicy:
                 raise DrainEvidenceDenied("worker process-containment inventory is incomplete or foreign")
             domain_ids: set[str] = set()
             containment_keys = {
-                "handle", "domain_id", "scope", "filter_installed_before_exec",
+                "handle", "protocol_version", "session_id", "service_instance_id",
+                "supervisor_id", "lifecycle_id", "role", "direct_child_reaped", "exit_code",
+                "containment_installed", "containment_profile", "domain_id", "scope",
+                "filter_installed_before_exec",
                 "parent_death_bound", "process_creation_denied", "live_descendant_handles", "errors",
             }
             for index, result in enumerate(containment["workers"]):
                 if (type(result) is not dict or set(result) != containment_keys
                         or result["handle"] != expected[index]
+                        or type(result["protocol_version"]) is not int
+                        or result["protocol_version"] != 2
+                        or result["session_id"] != self.session_id
+                        or result["service_instance_id"] != payload["service_instance_id"]
+                        or result["supervisor_id"] != payload["supervisor_id"]
+                        or result["role"] != expected_roles[index]
+                        or type(result["direct_child_reaped"]) is not bool
+                        or result["direct_child_reaped"] is not True
+                        or type(result["exit_code"]) is not int or result["exit_code"] != 0
+                        or result["containment_installed"] is not True
+                        or result["containment_profile"] != "seccomp-no-fork-pdeathsig-v1"
+                        or result["lifecycle_id"] != role_results[index]["lifecycle_id"]
                         or type(result["domain_id"]) is not str
                         or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", result["domain_id"]) is None
                         or result["domain_id"].isdecimal()

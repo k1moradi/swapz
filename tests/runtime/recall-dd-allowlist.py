@@ -725,6 +725,12 @@ class WorkerRoleResult:
     reaped: bool
     descriptor_closed: bool
     errors: tuple[str, ...]
+    service_instance_id: str = ""
+    supervisor_id: str = ""
+    lifecycle_id: str = ""
+    pidfd_owned_at_launch: bool = False
+    containment_scope: str = "direct-child-only"
+    containment_installed: bool = False
 
 
 @dataclass(frozen=True)
@@ -744,6 +750,10 @@ class WorkerCompletionEvidence:
     errors: tuple[str, ...]
     authenticator: bytes
     role_results: tuple[WorkerRoleResult, ...]
+    protocol_version: int = 1
+    service_instance_id: str = ""
+    supervisor_id: str = ""
+    stop_request_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -808,8 +818,12 @@ def worker_completion_payload(evidence: WorkerCompletionEvidence) -> bytes:
     if type(evidence) is not WorkerCompletionEvidence:
         raise MapperOwnerDenied("worker completion evidence has the wrong type")
     value = {
-        "schema": "swapz.fixture-worker-completion.v1",
+        "schema": "swapz.fixture-worker-completion.v2",
         "session_id": evidence.session_id,
+        "protocol_version": evidence.protocol_version,
+        "service_instance_id": evidence.service_instance_id,
+        "supervisor_id": evidence.supervisor_id,
+        "stop_request_id": evidence.stop_request_id,
         "expected_handles": list(evidence.expected_handles),
         "reaped_handles": list(evidence.reaped_handles),
         "role_descriptors_closed": list(evidence.role_descriptors_closed),
@@ -823,6 +837,12 @@ def worker_completion_payload(evidence: WorkerCompletionEvidence) -> bytes:
                 "reaped": result.reaped,
                 "descriptor_closed": result.descriptor_closed,
                 "errors": list(result.errors),
+                "service_instance_id": result.service_instance_id,
+                "supervisor_id": result.supervisor_id,
+                "lifecycle_id": result.lifecycle_id,
+                "pidfd_owned_at_launch": result.pidfd_owned_at_launch,
+                "containment_scope": result.containment_scope,
+                "containment_installed": result.containment_installed,
             }
             for result in evidence.role_results
         ],

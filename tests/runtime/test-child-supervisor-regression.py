@@ -200,6 +200,7 @@ def make_fake_supervisor(
         ops.add(pid, fd, token)
         supervisor._workers[handle] = Worker(
             handle=handle, pid=pid, pidfd=fd,
+            lifecycle_id=f"{pid:032x}", pidfd_owned_at_launch=True,
             containment_required=True, containment_installed=True,
         )
         handles.append(handle)
@@ -808,7 +809,10 @@ raise SystemExit(0 if setuid_denied and pdeath_denied and async_denied else 41)
         self.assertEqual(ops.events, [])
 
         duplicate = GatedPidfdSupervisor(ops=ops, token_factory=lambda: "opaque")
-        duplicate._workers["opaque"] = Worker(handle="opaque", pid=1, pidfd=None)
+        duplicate._workers["opaque"] = Worker(
+            handle="opaque", pid=1, pidfd=None,
+            lifecycle_id="a" * 32, pidfd_owned_at_launch=False,
+        )
         with self.assertRaises(SupervisorError):
             duplicate.launch(worker_command("pass"))
         self.assertEqual(ops.pipe_count, 0)

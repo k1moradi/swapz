@@ -55,6 +55,13 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 supervisor_module = module._SUPERVISOR_MODULE
 
+if stage == "before-ack":
+    module._WORKER_CODE["sleep"] = (
+        "from pathlib import Path; import sys,time; "
+        f"Path({str(root / 'worker-started')!r}).write_text('started'); "
+        "time.sleep(int(sys.argv[1])/1000)"
+    )
+
 def mark(name, value="ready"):
     (root / name).write_text(str(value))
 
@@ -209,8 +216,16 @@ class CrashContainmentTests(unittest.TestCase):
             process, client_sock = self.start_service(directory, stage)
             worker_pidfd = None
             try:
+                if stage == "before-ack":
+                    launch_request = {
+                        "id": 1, "op": "launch", "command": "sleep", "duration_ms": 5000,
+                    }
+                else:
+                    launch_request = {
+                        "id": 1, "op": "launch", "command": "recall-dd", "role": "writer",
+                    }
                 client_sock.sendall(service.encode_frame(
-                    {"id": 1, "op": "launch", "command": "recall-dd", "role": "writer"}
+                    launch_request
                 ))
                 marker_name = "failure-point"
                 if stage == "after-pidfd":
@@ -324,8 +339,10 @@ class CrashContainmentTests(unittest.TestCase):
             client = SupervisorControlClient(client_sock, service_process=process, timeout=6.0)
             worker_pidfds: list[int] = []
             try:
-                first = client.call("launch", command="recall-dd", role="writer")
-                second = client.call("launch", command="recall-dd", role="a")
+                # This test measures service inventory/reaping for two workers;
+                # the fixed direct-dd protocol separately requires all five roles.
+                first = client.call("launch", command="sleep", duration_ms=5000)
+                second = client.call("launch", command="sleep", duration_ms=5000)
                 self.assertEqual(first["status"], "ready")
                 self.assertEqual(second["status"], "ready")
                 worker_pidfds = self.open_worker_pidfds(directory, 2)

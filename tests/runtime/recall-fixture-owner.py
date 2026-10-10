@@ -125,6 +125,12 @@ class WorkerLaunchReceipt:
     startup_within_deadline: bool
     gate_held: bool
     containment_profile: str
+    protocol_version: int = 1
+    session_id: str = ""
+    service_instance_id: str = ""
+    supervisor_id: str = ""
+    lifecycle_id: str = ""
+    containment_scope: str = "direct-child-only"
 
 
 @dataclass(frozen=True)
@@ -139,6 +145,16 @@ class WorkerContainmentResult:
     process_creation_denied: bool
     live_descendant_handles: tuple[str, ...]
     errors: tuple[str, ...]
+    protocol_version: int = 1
+    session_id: str = ""
+    service_instance_id: str = ""
+    supervisor_id: str = ""
+    lifecycle_id: str = ""
+    role: str = ""
+    direct_child_reaped: bool = False
+    exit_code: int | None = None
+    containment_installed: bool = False
+    containment_profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -150,12 +166,164 @@ class WorkerContainmentObservation:
     inventory_complete: bool
     workers: tuple[WorkerContainmentResult, ...]
     errors: tuple[str, ...]
+    protocol_version: int = 1
+    service_instance_id: str = ""
+    supervisor_id: str = ""
+    stop_request_id: int = 0
+    service_exit_status: int = -1
 
 
 @dataclass(frozen=True)
 class WorkerStopReport:
     all_reaped: bool
     errors: tuple[str, ...]
+
+
+class SupervisorServiceWorkerLauncher:
+    """Broker adapter for protocol-v2 results from one pidfd supervisor service.
+
+    The service's private Unix socket and bound process are trusted-process
+    assertions. This adapter joins its launch and stop rows by session,
+    service, supervisor, opaque handle, role, and lifecycle ID; it does not
+    turn the result into a kernel-authenticated attestation.
+    """
+
+    def __init__(self, client: Any, session_id: str, *, service_exit_waiter=None) -> None:
+        registered_handles = getattr(client, "registered_handles", None)
+        if (not callable(getattr(client, "call", None))
+                or not callable(getattr(client, "containment_snapshot", None))
+                or type(registered_handles) is not tuple):
+            raise FixtureOwnerDenied("protocol-v2 supervisor client is incomplete")
+        if type(session_id) is not str or re.fullmatch(r"[0-9a-f]{32}", session_id) is None:
+            raise FixtureOwnerDenied("supervisor service requires one exact session identity")
+        if service_exit_waiter is not None and not callable(service_exit_waiter):
+            raise FixtureOwnerDenied("service exit waiter is invalid")
+        self.client = client
+        self.session_id = session_id
+        self._service_exit_waiter = service_exit_waiter
+        self._receipts: dict[str, WorkerLaunchReceipt] = {}
+        self._stopped = False
+        self._stop_report: dict[str, Any] | None = None
+
+    def launch(self, role: str, *, session_id: str, startup_timeout: float) -> WorkerLaunchReceipt:
+        if self._stopped or session_id != self.session_id:
+            raise FixtureOwnerDenied("supervisor service launch session is closed or foreign")
+        if role not in _ROLES or not 0 < startup_timeout <= _STARTUP_TIMEOUT_SECONDS:
+            raise FixtureOwnerDenied("supervisor service role or startup deadline is invalid")
+        started = time.monotonic()
+        response = self.client.call("launch", command="recall-dd", role=role)
+        startup_within_deadline = time.monotonic() - started <= startup_timeout
+        if response.get("status") != "ready":
+            raise FixtureOwnerDenied(
+                "supervisor service did not return a READY role receipt: "
+                f"status={response.get('status')!r}, error={response.get('error')!r}"
+            )
+        receipt = WorkerLaunchReceipt(
+            response["handle"], role, response["status"] == "ready",
+            response["pidfd_owned_at_launch"], startup_within_deadline,
+            response["gate_held"],
+            response["containment_profile"], response["protocol_version"],
+            response["session_id"], response["service_instance_id"],
+            response["supervisor_id"], response["lifecycle_id"],
+            response["containment_scope"],
+        )
+        if (receipt.session_id != self.session_id or receipt.protocol_version != 2
+                or receipt.ready is not True or receipt.pidfd_owned is not True
+                or receipt.startup_within_deadline is not True
+                or receipt.gate_held is not True
+                or receipt.containment_profile != _WORKER_CONTAINMENT_PROFILE
+                or receipt.containment_scope != _WORKER_CONTAINMENT_PROFILE
+                or receipt.handle in self._receipts):
+            raise FixtureOwnerDenied("supervisor service READY identity is contradictory")
+        self._receipts[receipt.handle] = receipt
+        return receipt
+
+    def release_group(self, handles: tuple[str, ...]) -> None:
+        if self._stopped:
+            raise FixtureOwnerDenied("supervisor role gate release after stop")
+        self.client.call("release_group", handles=list(handles))
+
+    def wait(self, handle: str, timeout: float) -> dict[str, Any]:
+        if self._stopped or handle not in self._receipts or not 0 <= timeout <= 60:
+            raise FixtureOwnerDenied("supervisor wait references a closed or unknown worker")
+        return self.client.call("wait", handle=handle, timeout_ms=int(timeout * 1000))
+
+    def registered_launch_receipts(
+        self, handles: tuple[str, ...],
+    ) -> tuple[WorkerLaunchReceipt, ...]:
+        handles = tuple(handles)
+        if (handles != tuple(self._receipts)
+                or handles != tuple(self.client.registered_handles)):
+            raise FixtureOwnerDenied("requested launch receipt inventory is foreign or incomplete")
+        return tuple(self._receipts[handle] for handle in handles)
+
+    def stop_unconfirmed(self) -> WorkerStopReport:
+        return self.stop_all(tuple(self.client.registered_handles))
+
+    def stop_all(self, handles: tuple[str, ...]) -> WorkerStopReport:
+        if self._stopped:
+            return WorkerStopReport(False, ("supervisor service stop was already attempted",))
+        self._stopped = True
+        try:
+            if tuple(handles) != tuple(self.client.registered_handles):
+                raise FixtureOwnerDenied("stop inventory differs from supervisor launch history")
+            response = self.client.call("stop_all", handles=list(handles))
+            if response.get("status") != "complete" or response.get("cleanup_allowed") is not True:
+                return WorkerStopReport(False, ("supervisor service denied stop completion",))
+            self._stop_report = response
+            self.client.call("shutdown")
+            if self._service_exit_waiter is not None:
+                exit_status = self._service_exit_waiter()
+            else:
+                process = getattr(self.client, "service_process", None)
+                if process is None:
+                    raise FixtureOwnerDenied("bound supervisor service exit is unavailable")
+                exit_status = process.wait(timeout=self.client.timeout)
+            if self.client.confirm_service_exit(exit_status) is not True:
+                raise FixtureOwnerDenied("supervisor service exit was not confirmed cleanly")
+            return WorkerStopReport(True, ())
+        except Exception as exc:
+            return WorkerStopReport(False, (f"supervisor service stop or exit failed: {exc}",))
+
+    def containment_observation(self, session_id: str,
+                                handles: tuple[str, ...]) -> WorkerContainmentObservation:
+        if self._stop_report is None:
+            raise FixtureOwnerDenied("supervisor stop report is unavailable")
+        snapshot = self.client.containment_snapshot(session_id, tuple(handles))
+        workers = []
+        for row in snapshot["workers"]:
+            receipt = self._receipts.get(row["handle"])
+            if receipt is None:
+                raise FixtureOwnerDenied("stop report contains an unregistered lifecycle")
+            workers.append(WorkerContainmentResult(
+                handle=row["handle"],
+                domain_id=row["lifecycle_id"],
+                scope=row["containment_scope"],
+                filter_installed_before_exec=row["containment_installed"],
+                parent_death_bound=row["containment_profile"] == _WORKER_CONTAINMENT_PROFILE,
+                process_creation_denied=row["containment_profile"] == _WORKER_CONTAINMENT_PROFILE,
+                live_descendant_handles=(), errors=tuple(row["errors"]),
+                protocol_version=row["protocol_version"],
+                session_id=row["session_id"],
+                service_instance_id=row["service_instance_id"],
+                supervisor_id=row["supervisor_id"],
+                lifecycle_id=row["lifecycle_id"], role=row["role"],
+                direct_child_reaped=row["direct_child_reaped"],
+                exit_code=row["exit_code"],
+                containment_installed=row["containment_installed"],
+                containment_profile=row["containment_profile"],
+            ))
+        return WorkerContainmentObservation(
+            session_id=snapshot["session_id"],
+            expected_handles=tuple(snapshot["expected_handles"]),
+            inventory_complete=len(workers) == len(handles),
+            workers=tuple(workers), errors=tuple(snapshot["errors"]),
+            protocol_version=snapshot["protocol_version"],
+            service_instance_id=snapshot["service_instance_id"],
+            supervisor_id=snapshot["supervisor_id"],
+            stop_request_id=snapshot["stop_request_id"],
+            service_exit_status=snapshot["service_exit_status"],
+        )
 
 
 @dataclass(frozen=True)
@@ -440,6 +608,8 @@ class FixtureDrainEvidenceProducer:
                 raise FixtureOwnerDenied(f"trusted drain operation {method} is unavailable")
         if not callable(getattr(worker_launcher, "containment_observation", None)):
             raise FixtureOwnerDenied("worker launcher lacks a separate containment inventory")
+        if not callable(getattr(worker_launcher, "registered_launch_receipts", None)):
+            raise FixtureOwnerDenied("worker launcher lacks its retained launch inventory")
         if not callable(getattr(admission_gate, "_admission_snapshot", None)):
             raise FixtureOwnerDenied("trusted broker admission gate is unavailable")
         profile = getattr(admission_gate, "session_profile", None)
@@ -558,7 +728,7 @@ class FixtureDrainEvidenceProducer:
         containment = self._worker_launcher.containment_observation(
             self._session_id, handles,
         )
-        self._validate_worker_containment(containment, handles)
+        self._validate_worker_containment(containment, handles, worker)
         checkpoint("worker_containment_verification")
 
         inventory_complete = worker.expected_handles == handles
@@ -566,6 +736,10 @@ class FixtureDrainEvidenceProducer:
         errors_empty = worker.errors == ()
         self._emit("workers_reaped", {
             "session_id": self._session_id,
+            "protocol_version": worker.protocol_version,
+            "service_instance_id": worker.service_instance_id,
+            "supervisor_id": worker.supervisor_id,
+            "stop_request_id": worker.stop_request_id,
             "inventory_complete": inventory_complete,
             "all_reaped": all_reaped,
             "errors_empty": errors_empty,
@@ -578,7 +752,13 @@ class FixtureDrainEvidenceProducer:
                 {"role": result.role, "handle": result.handle,
                  "exit_status": result.exit_status, "reaped": result.reaped,
                  "descriptor_closed": result.descriptor_closed,
-                 "errors": list(result.errors)}
+                 "errors": list(result.errors),
+                 "service_instance_id": result.service_instance_id,
+                 "supervisor_id": result.supervisor_id,
+                 "lifecycle_id": result.lifecycle_id,
+                 "pidfd_owned_at_launch": result.pidfd_owned_at_launch,
+                 "containment_scope": result.containment_scope,
+                 "containment_installed": result.containment_installed}
                 for result in worker.role_results
             ],
             "process_containment": self._containment_payload(containment),
@@ -742,6 +922,9 @@ class FixtureDrainEvidenceProducer:
 
     def _validate_worker(self, worker: WorkerCompletionEvidence,
                          handles: tuple[str, ...], roles: tuple[str, ...]) -> None:
+        receipts = self._launch_receipts(handles, roles)
+        service_instance_id = receipts[0].service_instance_id
+        supervisor_id = receipts[0].supervisor_id
         role_results = getattr(worker, "role_results", None)
         if (type(worker) is not WorkerCompletionEvidence
                 or type(worker.session_id) is not str
@@ -757,7 +940,12 @@ class FixtureDrainEvidenceProducer:
                 or type(worker.service_exit_status) is not int or worker.service_exit_status != 0
                 or type(worker.authenticator) is not bytes or len(worker.authenticator) != 32):
             self._deny("worker service returned an incomplete or contradictory inventory")
-        for role, handle, result in zip(roles, handles, role_results):
+        if (type(worker.protocol_version) is not int or worker.protocol_version != 2
+                or worker.service_instance_id != service_instance_id
+                or worker.supervisor_id != supervisor_id
+                or type(worker.stop_request_id) is not int or worker.stop_request_id <= 0):
+            self._deny("worker completion belongs to an unbound service or supervisor session")
+        for role, handle, result, receipt in zip(roles, handles, role_results, receipts):
             if (type(result) is not WorkerRoleResult
                     or result.role != role or result.handle != handle
                     or type(result.exit_status) is not int or result.exit_status != 0
@@ -766,9 +954,21 @@ class FixtureDrainEvidenceProducer:
                     or result.descriptor_closed is not True
                     or type(result.errors) is not tuple or result.errors != ()):
                 self._deny("worker role result inventory is missing, reordered, or unsuccessful")
+            if (receipt is None
+                    or result.service_instance_id != receipt.service_instance_id
+                    or result.supervisor_id != receipt.supervisor_id
+                    or result.lifecycle_id != receipt.lifecycle_id
+                    or result.pidfd_owned_at_launch is not True
+                    or result.containment_scope != _WORKER_CONTAINMENT_PROFILE
+                    or result.containment_installed is not True):
+                self._deny("worker completion result is not bound to its supervisor launch record")
 
     def _validate_worker_containment(self, observation: WorkerContainmentObservation,
-                                     handles: tuple[str, ...]) -> None:
+                                     handles: tuple[str, ...],
+                                     worker: WorkerCompletionEvidence) -> None:
+        receipts = self._launch_receipts(handles, self._profile.expected_roles)
+        service_instance_id = receipts[0].service_instance_id
+        supervisor_id = receipts[0].supervisor_id
         if (type(observation) is not WorkerContainmentObservation
                 or type(observation.session_id) is not str
                 or observation.session_id != self._session_id
@@ -780,8 +980,21 @@ class FixtureDrainEvidenceProducer:
                 or len(observation.workers) != len(handles)
                 or type(observation.errors) is not tuple or observation.errors != ()):
             self._deny("worker descendant/containment inventory is missing or ambiguous")
+        if (type(observation.protocol_version) is not int or observation.protocol_version != 2
+                or observation.service_instance_id != service_instance_id
+                or observation.supervisor_id != supervisor_id
+                or type(observation.stop_request_id) is not int or observation.stop_request_id <= 0
+                or type(observation.service_exit_status) is not int
+                or observation.service_exit_status != 0
+                or observation.service_instance_id != worker.service_instance_id
+                or observation.supervisor_id != worker.supervisor_id
+                or observation.stop_request_id != worker.stop_request_id):
+            self._deny("containment report is not bound to the completed supervisor service session")
         domains: set[str] = set()
-        for handle, result in zip(handles, observation.workers):
+        for index, (handle, result, receipt) in enumerate(
+            zip(handles, observation.workers, receipts)
+        ):
+            completion = worker.role_results[index]
             if (type(result) is not WorkerContainmentResult
                     or type(result.handle) is not str or result.handle != handle
                     or type(result.domain_id) is not str
@@ -799,20 +1012,98 @@ class FixtureDrainEvidenceProducer:
                     or result.live_descendant_handles != ()
                     or type(result.errors) is not tuple or result.errors != ()):
                 self._deny("worker process domain is direct-child-only, live, or unverified")
+            if (receipt is None
+                    or type(result.protocol_version) is not int
+                    or result.protocol_version != 2
+                    or result.session_id != self._session_id
+                    or result.service_instance_id != receipt.service_instance_id
+                    or result.supervisor_id != receipt.supervisor_id
+                    or result.lifecycle_id != receipt.lifecycle_id
+                    or result.role != receipt.role
+                    or type(result.direct_child_reaped) is not bool
+                    or result.direct_child_reaped is not True
+                    or type(result.exit_code) is not int or result.exit_code != 0
+                    or type(result.containment_installed) is not bool
+                    or result.containment_installed is not True
+                    or type(result.containment_profile) is not str
+                    or result.containment_profile != receipt.containment_profile
+                    or result.scope != receipt.containment_scope
+                    or completion.handle != result.handle
+                    or completion.role != result.role
+                    or completion.lifecycle_id != result.lifecycle_id
+                    or completion.supervisor_id != result.supervisor_id
+                    or completion.service_instance_id != result.service_instance_id
+                    or completion.exit_status != result.exit_code
+                    or completion.reaped is not result.direct_child_reaped):
+                self._deny("containment row does not match the same pidfd-owned worker lifecycle")
             domains.add(result.domain_id)
+
+    def _launch_receipts(self, handles: tuple[str, ...],
+                         roles: tuple[str, ...]) -> tuple[WorkerLaunchReceipt, ...]:
+        """Read the launcher's immutable per-handle identities for reconciliation.
+
+        This is a trusted-launcher API, not worker IPC. The producer requires
+        the exact role/handle/session inventory before accepting a stop report.
+        """
+        try:
+            receipts = self._worker_launcher.registered_launch_receipts(handles)
+        except Exception as exc:
+            self._deny(f"supervisor launch inventory is unavailable: {exc}")
+        if (type(receipts) is not tuple or len(receipts) != len(handles)
+                or len(receipts) != len(roles)):
+            self._deny("supervisor launch receipt inventory is incomplete")
+        service_ids: set[str] = set()
+        supervisor_ids: set[str] = set()
+        lifecycle_ids: set[str] = set()
+        for role, handle, receipt in zip(roles, handles, receipts):
+            if (type(receipt) is not WorkerLaunchReceipt
+                    or receipt.protocol_version != 2
+                    or receipt.session_id != self._session_id
+                    or receipt.handle != handle or receipt.role != role
+                    or receipt.ready is not True or receipt.pidfd_owned is not True
+                    or receipt.startup_within_deadline is not True
+                    or receipt.gate_held is not True
+                    or receipt.containment_profile != _WORKER_CONTAINMENT_PROFILE
+                    or receipt.containment_scope != _WORKER_CONTAINMENT_PROFILE
+                    or re.fullmatch(r"[0-9a-f]{32}", receipt.service_instance_id) is None
+                    or re.fullmatch(r"[0-9a-f]{32}", receipt.supervisor_id) is None
+                    or re.fullmatch(r"[0-9a-f]{32}", receipt.lifecycle_id) is None):
+                self._deny("supervisor launch receipt is stale, foreign, or incomplete")
+            service_ids.add(receipt.service_instance_id)
+            supervisor_ids.add(receipt.supervisor_id)
+            lifecycle_ids.add(receipt.lifecycle_id)
+        if (len(service_ids) != 1 or len(supervisor_ids) != 1
+                or len(lifecycle_ids) != len(handles)):
+            self._deny("supervisor launch identities are mixed or duplicated")
+        return receipts
 
     @staticmethod
     def _containment_payload(observation: WorkerContainmentObservation) -> dict[str, Any]:
         return {
             "session_id": observation.session_id,
+            "protocol_version": observation.protocol_version,
+            "service_instance_id": observation.service_instance_id,
+            "supervisor_id": observation.supervisor_id,
+            "stop_request_id": observation.stop_request_id,
+            "service_exit_status": observation.service_exit_status,
             "expected_handles": list(observation.expected_handles),
             "inventory_complete": observation.inventory_complete,
             "errors": list(observation.errors),
             "workers": [
                 {
                     "handle": result.handle,
+                    "protocol_version": result.protocol_version,
+                    "session_id": result.session_id,
+                    "service_instance_id": result.service_instance_id,
+                    "supervisor_id": result.supervisor_id,
+                    "lifecycle_id": result.lifecycle_id,
+                    "role": result.role,
+                    "direct_child_reaped": result.direct_child_reaped,
+                    "exit_code": result.exit_code,
                     "domain_id": result.domain_id,
                     "scope": result.scope,
+                    "containment_installed": result.containment_installed,
+                    "containment_profile": result.containment_profile,
                     "filter_installed_before_exec": result.filter_installed_before_exec,
                     "parent_death_bound": result.parent_death_bound,
                     "process_creation_denied": result.process_creation_denied,
@@ -988,6 +1279,10 @@ class FixtureOwnerBroker:
         self._issued_handles: list[str] = []
         self._issued_roles: list[str] = []
         self._role_handles: dict[str, str] = {}
+        self._launch_receipts: dict[str, WorkerLaunchReceipt] = {}
+        self._service_instance_id: str | None = None
+        self._supervisor_id: str | None = None
+        self._lifecycle_ids: set[str] = set()
         self._gated_roles: set[str] = set()
         self._stop_attempted = False
         self._launch_ambiguous = False
@@ -1149,7 +1444,8 @@ class FixtureOwnerBroker:
             self._begin_operation("worker_launch")
             launch_started = time.monotonic()
             receipt = self._worker_launcher.launch(
-                role, startup_timeout=_STARTUP_TIMEOUT_SECONDS,
+                role, session_id=self.mapper_owner.lease.session_id,
+                startup_timeout=_STARTUP_TIMEOUT_SECONDS,
             )
             if time.monotonic() - launch_started > _STARTUP_TIMEOUT_SECONDS:
                 self._deny("pidfd-owned READY handshake exceeded its fixed deadline")
@@ -1164,7 +1460,21 @@ class FixtureOwnerBroker:
                     or receipt.startup_within_deadline is not True
                     or type(receipt.gate_held) is not bool or receipt.gate_held is not True
                     or type(receipt.containment_profile) is not str
-                    or receipt.containment_profile != _WORKER_CONTAINMENT_PROFILE):
+                    or receipt.containment_profile != _WORKER_CONTAINMENT_PROFILE
+                    or type(receipt.protocol_version) is not int or receipt.protocol_version != 2
+                    or receipt.session_id != self.mapper_owner.lease.session_id
+                    or type(receipt.service_instance_id) is not str
+                    or re.fullmatch(r"[0-9a-f]{32}", receipt.service_instance_id) is None
+                    or type(receipt.supervisor_id) is not str
+                    or re.fullmatch(r"[0-9a-f]{32}", receipt.supervisor_id) is None
+                    or type(receipt.lifecycle_id) is not str
+                    or re.fullmatch(r"[0-9a-f]{32}", receipt.lifecycle_id) is None
+                    or receipt.lifecycle_id in self._lifecycle_ids
+                    or receipt.containment_scope != _WORKER_CONTAINMENT_PROFILE
+                    or (self._service_instance_id is not None
+                        and receipt.service_instance_id != self._service_instance_id)
+                    or (self._supervisor_id is not None
+                        and receipt.supervisor_id != self._supervisor_id)):
                 self._deny("launcher did not prove a unique pidfd-owned, process-contained READY child")
             handle = receipt.handle
             # Retain the handle before owner registration or gate release. If
@@ -1172,6 +1482,10 @@ class FixtureOwnerBroker:
             self._issued_handles.append(handle)
             self._issued_roles.append(role)
             self._role_handles[role] = handle
+            self._launch_receipts[handle] = receipt
+            self._service_instance_id = receipt.service_instance_id
+            self._supervisor_id = receipt.supervisor_id
+            self._lifecycle_ids.add(receipt.lifecycle_id)
             self._begin_operation("worker_registration")
             self.mapper_owner.register_worker(handle, role)
             self._launch_ambiguous = False

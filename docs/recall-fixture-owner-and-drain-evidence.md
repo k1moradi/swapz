@@ -280,6 +280,38 @@ the worker was only directly supervised. The five-role broker independently
 requires the complete containment inventory; it does not infer that inventory
 from the worker-completion HMAC.
 
+The protocol-v2 broker path also has a rootless end-to-end test that executes
+the fixed five regular-file `dd` roles through an actual supervisor service
+process and its `SupervisorControlClient` adapter. The supervisor's private
+`Worker` record supplies the supervisor ID, opaque handle, lifecycle ID,
+`pidfd_owned_at_launch`, and containment profile recorded only after the
+pre-exec setup and exec handshake succeeded. The service cross-checks launch,
+wait, and stop results against that same retained record, then exports the
+session, service instance, supervisor, handle, role, lifecycle, direct-child
+reaped status, exit result, and containment fields. The client requires every
+stop row to match its READY receipt and complete launch history.
+`SupervisorServiceWorkerLauncher` exposes the receipt set and finalized stop
+snapshot; the evidence producer reconciles both against the fixed five roles
+before it emits its session HMAC or starts any modeled swap/DM/lower-device
+operation. Swap, mapper, lower-device, and loop operations remain fakes; the
+test uses ordinary temporary files. Its `/usr/bin/dd` is pinned by the test
+gate but is not checked against the GNU qualification manifest, so this
+broker-chain test does not itself establish GNU provenance or GNU-specific
+worker compatibility. That requires the separate authenticated GNU worker
+qualification and its independently retained build inputs.
+
+That chain is a trusted-process assertion, not a cryptographic or
+kernel-authenticated attestation. The inherited private Unix socket and bound
+service process identify which local service the client is talking to; they
+do not protect against a compromised service, a process that obtains the
+socket descriptor, or host root. The rootless `domain_id` is the supervisor's
+opaque lifecycle ID, not a kernel cgroup ID. The service derives
+`parent_death_bound` and `process_creation_denied` from the exact versioned
+containment profile after its supervisor record reports successful pre-exec
+setup; it does not independently inspect seccomp state from the kernel.
+Direct-child reap remains a separate field. Neither that reap nor this
+protocol proves that submitted block I/O has drained.
+
 The no-fork profile does not use process-group scans or accept a process-group
 change as evidence of containment. The fixed executable and argv policy must
 separately prevent an untrusted image from replacing the intended worker. The

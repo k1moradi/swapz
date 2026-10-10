@@ -51,6 +51,15 @@ supervisor_module = importlib.util.module_from_spec(SUPERVISOR_SPEC)
 sys.modules[SUPERVISOR_SPEC.name] = supervisor_module
 SUPERVISOR_SPEC.loader.exec_module(supervisor_module)
 
+SERVICE_SPEC = importlib.util.spec_from_file_location(
+    "recall_fixture_test_service", HERE / "test-child-supervisor-service.py",
+)
+if SERVICE_SPEC is None or SERVICE_SPEC.loader is None:
+    raise RuntimeError("cannot load rootless pidfd supervisor service")
+service_module = importlib.util.module_from_spec(SERVICE_SPEC)
+sys.modules[SERVICE_SPEC.name] = service_module
+SERVICE_SPEC.loader.exec_module(service_module)
+
 allow = owner_module._ALLOWLIST
 MapperIdentity = allow.MapperIdentity
 MapperInventory = allow.MapperInventory
@@ -181,9 +190,16 @@ class FakeOwnedWorkerLauncher:
         self.release_calls: list[tuple[str, ...]] = []
         self.unconfirmed_stop_calls = 0
         self.containment_calls: list[tuple[str, tuple[str, ...]]] = []
+        self.service_instance_id = "c" * 32
+        self.supervisor_id = "d" * 32
+        self.stop_request_id = 100
+        self.receipts: dict[str, WorkerLaunchReceipt] = {}
+        self.reaped: set[str] = set()
         self.fail: set[str] = set()
+        self._stop_attempted = False
+        self._stop_report: WorkerStopReport | None = None
 
-    def launch(self, role, *, startup_timeout):
+    def launch(self, role, *, session_id, startup_timeout):
         if startup_timeout <= 0:
             raise AssertionError("startup handshake must be bounded")
         handle = f"owned-{role}-{len(self.handles) + 1}"
@@ -194,14 +210,23 @@ class FakeOwnedWorkerLauncher:
         if "duplicate_handle" in self.fail:
             handle = self.handles[0]
         if "missing_ready" in self.fail:
-            return WorkerLaunchReceipt(
-                handle, role, False, True, True, True, _WORKER_CONTAINMENT_PROFILE,
-            )
+            return WorkerLaunchReceipt(handle, role, False, True, True, True,
+                                       _WORKER_CONTAINMENT_PROFILE)
         containment = ("direct-child-only" if "uncontained_launch" in self.fail
                        else _WORKER_CONTAINMENT_PROFILE)
-        return WorkerLaunchReceipt(
+        receipt = WorkerLaunchReceipt(
             handle, role, True, True, True, True, containment,
+            2, session_id, self.service_instance_id, self.supervisor_id,
+            f"{len(self.handles):032x}", containment,
         )
+        self.receipts[handle] = receipt
+        return receipt
+
+    def registered_launch_receipts(self, handles):
+        handles = tuple(handles)
+        if handles != tuple(self.receipts):
+            raise FixtureOwnerDenied("fake launcher receipt inventory mismatch")
+        return tuple(self.receipts[handle] for handle in handles)
 
     def release_group(self, handles):
         if "release" in self.fail:
@@ -221,31 +246,43 @@ class FakeOwnedWorkerLauncher:
         self.unconfirmed_stop_calls += 1
         if "stop_unconfirmed" in self.fail:
             return WorkerStopReport(False, ("unconfirmed child remains",))
+        self.reaped.update(self.pending)
         self.pending.clear()
         return WorkerStopReport(True, ())
 
     def stop_all(self, handles):
         handles = tuple(handles)
+        if self._stop_attempted:
+            return self._stop_report or WorkerStopReport(
+                False, ("worker stop report is unavailable after an earlier attempt",),
+            )
+        self._stop_attempted = True
         self.stop_calls.append(handles)
         if "stop_all" in self.fail:
-            return WorkerStopReport(False, ("worker remains",))
+            self._stop_report = WorkerStopReport(False, ("worker remains",))
+            return self._stop_report
         for handle in handles:
             if handle in self.pending:
                 self.pending.remove(handle)
-        return WorkerStopReport(True, ())
+            self.reaped.add(handle)
+        self._stop_report = WorkerStopReport(True, ())
+        return self._stop_report
 
     def containment_observation(self, session_id, handles):
         handles = tuple(handles)
         self.containment_calls.append((session_id, handles))
         if "containment_missing" in self.fail:
             return None
-        results = [
-            WorkerContainmentResult(
-                handle, f"domain-{handle}", _WORKER_CONTAINMENT_PROFILE,
-                True, True, True, (), (),
-            )
-            for handle in handles
-        ]
+        results = []
+        for handle in handles:
+            receipt = self.receipts[handle]
+            results.append(WorkerContainmentResult(
+                handle, f"domain-{handle}", receipt.containment_scope,
+                True, True, True, (), (), 2, session_id,
+                receipt.service_instance_id, receipt.supervisor_id,
+                receipt.lifecycle_id, receipt.role, handle in self.reaped, 0,
+                True, receipt.containment_profile,
+            ))
         if "containment_direct_only" in self.fail and results:
             results[0] = dataclasses.replace(
                 results[0], scope="direct-child-only", process_creation_denied=False,
@@ -256,6 +293,16 @@ class FakeOwnedWorkerLauncher:
             )
         if "containment_duplicate" in self.fail and len(results) > 1:
             results[1] = dataclasses.replace(results[1], handle=results[0].handle)
+        if "containment_duplicate_domain" in self.fail and len(results) > 1:
+            results[1] = dataclasses.replace(results[1], domain_id=results[0].domain_id)
+        if "containment_wrong_role" in self.fail and results:
+            results[0] = dataclasses.replace(results[0], role="b")
+        if "containment_stale_lifecycle" in self.fail and results:
+            results[0] = dataclasses.replace(results[0], lifecycle_id="9" * 32)
+        if "containment_foreign_service" in self.fail and results:
+            results[0] = dataclasses.replace(results[0], service_instance_id="9" * 32)
+        if "containment_boolean_exit_code" in self.fail and results:
+            results[0] = dataclasses.replace(results[0], exit_code=False)
         if "containment_unknown" in self.fail and results:
             results[-1] = dataclasses.replace(results[-1], handle="unknown-handle")
         if "containment_incomplete" in self.fail and results:
@@ -266,6 +313,8 @@ class FakeOwnedWorkerLauncher:
             tuple(results),
             ("injected containment inspection failure",)
             if "containment_error" in self.fail else (),
+            2, self.service_instance_id, self.supervisor_id, self.stop_request_id,
+            False if "containment_boolean_service_exit" in self.fail else 0,
         )
 
 
@@ -310,14 +359,23 @@ class SyntheticPidfdWorkerLauncher:
         self.signal_calls: list[tuple[str, int, int]] = []
         self._counter = 0
         self.worker_results: tuple[WorkerRoleResult, ...] = ()
+        self.session_id: str | None = None
+        self.service_instance_id = "e" * 32
+        self.supervisor_id = "f" * 32
+        self.stop_request_id = 200
+        self.receipts: dict[str, WorkerLaunchReceipt] = {}
 
-    def launch(self, role, *, startup_timeout):
+    def launch(self, role, *, session_id, startup_timeout):
         if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
             raise OSError("pidfd APIs unavailable; refusing numeric-PID fallback")
         if not 0 < startup_timeout <= 10:
             raise AssertionError("startup handshake timeout must be bounded")
+        if self.session_id is not None and self.session_id != session_id:
+            raise FixtureOwnerDenied("synthetic supervisor session changed")
+        self.session_id = session_id
         self._counter += 1
         handle = f"pidfd-owned-{role}-{self._counter}"
+        lifecycle_id = f"{self._counter:032x}"
         output = self.output_dir / f"worker-{self._counter}.out"
         gate_r, gate_w = os.pipe2(os.O_CLOEXEC)
         output_fd = os.open(
@@ -327,6 +385,7 @@ class SyntheticPidfdWorkerLauncher:
         proc = None
         record = {
             "role": role, "handle": handle, "output": output,
+            "lifecycle_id": lifecycle_id,
             "pidfd": None, "gate_w": gate_w, "gate_open": True,
             "control_open": True,
             "proc": None, "reaped": False, "pidfd_closed": False,
@@ -376,9 +435,13 @@ class SyntheticPidfdWorkerLauncher:
             if not ready or os.read(ready_fd, 1) != b"R":
                 raise TimeoutError("synthetic worker did not send READY before deadline")
             record["containment_installed"] = True
-            return WorkerLaunchReceipt(
+            receipt = WorkerLaunchReceipt(
                 handle, role, True, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+                2, session_id, self.service_instance_id, self.supervisor_id,
+                lifecycle_id, _WORKER_CONTAINMENT_PROFILE,
             )
+            self.receipts[handle] = receipt
+            return receipt
         except Exception:
             if proc is None:
                 os.close(gate_w)
@@ -417,6 +480,12 @@ class SyntheticPidfdWorkerLauncher:
             # Partial release is ambiguous; owner denial and preservation are
             # mandatory. The launcher still retains every child pidfd.
             raise
+
+    def registered_launch_receipts(self, handles):
+        handles = tuple(handles)
+        if handles != tuple(self.handles) or any(handle not in self.receipts for handle in handles):
+            raise FixtureOwnerDenied("synthetic pidfd launch receipt inventory mismatch")
+        return tuple(self.receipts[handle] for handle in handles)
 
     def stop_unconfirmed(self):
         errors = []
@@ -500,6 +569,9 @@ class SyntheticPidfdWorkerLauncher:
                 self.children[handle]["role"], handle,
                 self.children[handle]["proc"].returncode,
                 self.children[handle]["reaped"], self.children[handle]["pidfd_closed"], (),
+                self.service_instance_id, self.supervisor_id,
+                self.children[handle]["lifecycle_id"], True,
+                _WORKER_CONTAINMENT_PROFILE, True,
             )
             for handle in handles
         )
@@ -525,10 +597,19 @@ class SyntheticPidfdWorkerLauncher:
                 process_creation_denied=installed,
                 live_descendant_handles=(),
                 errors=() if reaped and installed else ("worker domain is not closed",),
+                protocol_version=2, session_id=session_id,
+                service_instance_id=self.service_instance_id,
+                supervisor_id=self.supervisor_id,
+                lifecycle_id=record["lifecycle_id"], role=record["role"],
+                direct_child_reaped=reaped,
+                exit_code=record["proc"].returncode,
+                containment_installed=installed,
+                containment_profile=_WORKER_CONTAINMENT_PROFILE if installed else "",
             ))
         return WorkerContainmentObservation(
             session_id, handles, len(workers) == len(handles) and not errors,
-            tuple(workers), tuple(errors),
+            tuple(workers), tuple(errors), 2, self.service_instance_id,
+            self.supervisor_id, self.stop_request_id, 0,
         )
 
     def close(self):
@@ -548,6 +629,7 @@ class FakeDrainOperations:
         self.worker_key = worker_key
         self.loop = loop
         self.owner = None
+        self.launcher = None
         self.swap_active = True
         self.loop_present = True
         self.nbd_present = True
@@ -558,21 +640,59 @@ class FakeDrainOperations:
     def bind_owner(self, owner):
         self.owner = owner
 
+    def bind_launcher(self, launcher):
+        self.launcher = launcher
+
     def collect_worker_completion(self, handles):
         self.trace.append("worker_report")
         if "worker_report" in self.fail:
             return object()
         session = self.owner.lease.session_id
-        reaped = handles[:-1] if "worker_incomplete" in self.fail else handles
+        stop = self.launcher.stop_all(handles)
+        if type(stop) is not WorkerStopReport:
+            return object()
+        reaped = (handles if stop.all_reaped else handles[:-1])
+        if "worker_incomplete" in self.fail:
+            reaped = handles[:-1]
         roles = tuple(self.owner._worker_roles)
         role_results = (self.worker_results if self.worker_results is not None else tuple(
-            WorkerRoleResult(role, handle, 0, True, True, ())
+            WorkerRoleResult(
+                role, handle, 0, handle in reaped, True,
+                () if stop.all_reaped else ("worker stop failed",),
+                self.launcher.service_instance_id, self.launcher.supervisor_id,
+                self.launcher.receipts[handle].lifecycle_id, True,
+                _WORKER_CONTAINMENT_PROFILE, True,
+            )
             for role, handle in zip(roles, handles)
         ))
         if "role_result_failure" in self.fail and role_results:
             role_results = (WorkerRoleResult(roles[0], handles[0], 1, True, True, ("failed",)),) + role_results[1:]
+        if "completion_wrong_service" in self.fail and role_results:
+            role_results = (dataclasses.replace(
+                role_results[0], service_instance_id="9" * 32,
+            ),) + role_results[1:]
+        if "completion_wrong_role" in self.fail and role_results:
+            role_results = (dataclasses.replace(role_results[0], role="a"),) + role_results[1:]
+        if "completion_stale_lifecycle" in self.fail and role_results:
+            role_results = (dataclasses.replace(
+                role_results[0], lifecycle_id="9" * 32,
+            ),) + role_results[1:]
+        if "completion_direct_only" in self.fail and role_results:
+            role_results = (dataclasses.replace(
+                role_results[0], containment_scope="direct-child-only",
+                containment_installed=False,
+            ),) + role_results[1:]
+        evidence_session = "f" * 32 if "completion_stale_session" in self.fail else session
+        evidence_service = (
+            "9" * 32 if "completion_foreign_service" in self.fail
+            else self.launcher.service_instance_id
+        )
+        evidence_protocol = 1 if "completion_old_protocol" in self.fail else 2
         provisional = WorkerCompletionEvidence(
-            session, handles, reaped, handles, 0, (), bytes(32), role_results,
+            evidence_session, handles, reaped, handles, 0 if stop.all_reaped else 1,
+            tuple(stop.errors), bytes(32), role_results, evidence_protocol,
+            evidence_service, self.launcher.supervisor_id,
+            self.launcher.stop_request_id,
         )
         authenticator = hmac.new(
             self.worker_key, worker_completion_payload(provisional), hashlib.sha256,
@@ -580,7 +700,10 @@ class FakeDrainOperations:
         if "worker_bad_mac" in self.fail:
             authenticator = b"x" * 32
         return WorkerCompletionEvidence(
-            session, handles, reaped, handles, 0, (), authenticator, role_results,
+            evidence_session, handles, reaped, handles, 0 if stop.all_reaped else 1,
+            tuple(stop.errors), authenticator, role_results, evidence_protocol,
+            evidence_service, self.launcher.supervisor_id,
+            self.launcher.stop_request_id,
         )
 
     def inspect_swap(self, identity):
@@ -652,6 +775,58 @@ class FakeDrainOperations:
         )
 
 
+class ActualServiceDrainOperations(FakeDrainOperations):
+    """Use the real service/client rows; only mapper and drain ops are faked."""
+
+    def collect_worker_completion(self, handles):
+        handles = tuple(handles)
+        self.trace.append("worker_report")
+        session = self.owner.lease.session_id
+        for handle in handles:
+            response = self.launcher.wait(handle, 5.0)
+            row = response.get("worker")
+            if (response.get("status") != "reaped" or not isinstance(row, dict)
+                    or row.get("handle") != handle or row.get("exit_code") != 0
+                    or row.get("direct_child_reaped") is not True
+                    or row.get("errors") != []):
+                raise AssertionError(
+                    f"actual service worker {handle} did not finish cleanly: "
+                    f"status={response.get('status')!r}, row={row!r}"
+                )
+        stopped = self.launcher.stop_all(handles)
+        if type(stopped) is not WorkerStopReport or stopped.all_reaped is not True or stopped.errors:
+            return object()
+        observation = self.launcher.containment_observation(session, handles)
+        receipts = self.launcher.registered_launch_receipts(handles)
+        roles = tuple(self.owner._worker_roles)
+        role_results = tuple(
+            WorkerRoleResult(
+                row.role, row.handle, row.exit_code, row.direct_child_reaped,
+                row.direct_child_reaped, tuple(row.errors),
+                row.service_instance_id, row.supervisor_id, row.lifecycle_id,
+                receipt.pidfd_owned, row.scope, row.containment_installed,
+            )
+            for row, receipt in zip(observation.workers, receipts)
+        )
+        if tuple(row.role for row in role_results) != roles:
+            return object()
+        provisional = WorkerCompletionEvidence(
+            session, handles, handles, handles, observation.service_exit_status,
+            tuple(observation.errors), bytes(32), role_results, 2,
+            observation.service_instance_id, observation.supervisor_id,
+            observation.stop_request_id,
+        )
+        authenticator = hmac.new(
+            self.worker_key, worker_completion_payload(provisional), hashlib.sha256,
+        ).digest()
+        return WorkerCompletionEvidence(
+            session, handles, handles, handles, observation.service_exit_status,
+            tuple(observation.errors), authenticator, role_results, 2,
+            observation.service_instance_id, observation.supervisor_id,
+            observation.stop_request_id,
+        )
+
+
 class FixtureOwnerBrokerTests(unittest.TestCase):
     IDENTITY = MapperIdentity("swapz-v22-recall-owner-test", "SWAPZ-OWNER-TEST", 253, 91, "a" * 64)
     LOOP = "/dev/loop91"
@@ -694,6 +869,7 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
             return "worker" if peer is self.worker_peer else None
 
         self.launcher = FakeOwnedWorkerLauncher(self.handles, self.stop_calls)
+        self.drain_ops.bind_launcher(self.launcher)
 
         self.broker = FixtureOwnerBroker(
             self.owner, self.drain_ops, self.LOOP,
@@ -773,6 +949,137 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
         self.assertTrue(self.owner.backing_must_be_preserved,
                         "mapper-only owner must not itself authorize backing release")
 
+    def test_actual_supervisor_service_containment_is_bound_to_broker_roles(self):
+        """Exercise a real service, actual pidfds and pinned dd on regular files.
+
+        Mapper, swap and drain operations remain synthetic. This verifies the
+        evidence path from retained supervisor records through the v2 adapter
+        into broker validation; it is not kernel DM or I/O-drain qualification.
+        """
+        dd_path = Path("/usr/bin/dd")
+        if not dd_path.is_file():
+            self.skipTest("fixed /usr/bin/dd test executable is unavailable")
+        with tempfile.TemporaryDirectory(prefix="swapz-service-broker-") as temporary:
+            base = Path(temporary)
+            fixture = base / "fixture"
+            fixture.mkdir(mode=0o700)
+            fixture.chmod(0o700)
+            expected = bytes(range(256)) * (9 * 4096 // 256)
+            (fixture / "pages.bin").write_bytes(expected)
+            (fixture / "pages.bin").chmod(0o600)
+            mapper_path = base / "synthetic-mapper.bin"
+            mapper_path.write_bytes(bytes(len(expected)))
+            mapper_path.chmod(0o600)
+            mapper_fd = os.open(mapper_path, os.O_RDWR | os.O_CLOEXEC)
+            parent_sock, child_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            session_id = self.lease.session_id
+            bootstrap = r'''
+import importlib.util, os, socket, stat, sys
+from pathlib import Path
+runtime, fixture, mapper_name, mapper_fd_text, socket_fd_text, session = sys.argv[1:]
+sys.path.insert(0, runtime)
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, Path(runtime) / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+service_module = load("integrated_service", "test-child-supervisor-service.py")
+policy = service_module._ALLOWLIST_MODULE
+expected_name = mapper_name
+mapper_fd = int(mapper_fd_text)
+os.set_inheritable(mapper_fd, False)
+def verify_mapper(fd, name, ops):
+    info = ops.fstat(fd)
+    return (name == expected_name and stat.S_ISREG(info.st_mode)
+            and info.st_size == 9 * 4096)
+gate = policy.RecallDDLaunchGate(
+    Path(fixture), mapper_name, mapper_fd=mapper_fd,
+    executable_path=Path("/usr/bin/dd"), mapper_verifier=verify_mapper,
+)
+control = socket.socket(fileno=int(socket_fd_text))
+outcome = service_module.SupervisorControlService(
+    io_timeout=8.0, recall_dd_gate=gate, enable_direct_dd=True,
+    session_id=session,
+).serve(control)
+control.close()
+raise SystemExit(outcome.exit_code)
+'''
+            process = None
+            client = None
+            try:
+                process = subprocess.Popen(
+                    [sys.executable, "-c", bootstrap, str(HERE), str(fixture),
+                     "swapz-v22-recall-integration", str(mapper_fd),
+                     str(child_sock.fileno()), session_id],
+                    pass_fds=(mapper_fd, child_sock.fileno()), close_fds=True,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=None,
+                )
+                child_sock.close()
+                client = service_module.SupervisorControlClient(
+                    parent_sock, service_process=process, timeout=20.0,
+                )
+                launcher = owner_module.SupervisorServiceWorkerLauncher(client, session_id)
+                drain = ActualServiceDrainOperations(
+                    self.IDENTITY, self.WORKER_KEY, self.LOOP,
+                )
+                drain.bind_owner(self.owner)
+                drain.bind_launcher(launcher)
+                self.drain_ops = drain
+                self.launcher = launcher
+                self.handles = []
+                self.broker = FixtureOwnerBroker(
+                    self.owner, drain, self.LOOP,
+                    peer_authenticator=lambda peer: "worker" if peer is self.worker_peer else None,
+                    worker_launcher=launcher,
+                )
+                self.broker.owner_create()
+                handles = tuple(
+                    self._request(f"service-{index}", role)["handle"]
+                    for index, role in enumerate(("writer", "a", "b", "a2", "b2"))
+                )
+                self.assertTrue(self.broker.finalize())
+                self.assertTrue(client.cleanup_authorized)
+                self.assertEqual(mapper_path.read_bytes(), expected)
+                for role, page in (("a", 0), ("b", 4), ("a2", 0), ("b2", 5)):
+                    self.assertEqual(
+                        (fixture / f"read-{role}").read_bytes(),
+                        expected[page * 4096:(page + 1) * 4096],
+                    )
+                self.assertEqual(len(launcher.registered_launch_receipts(handles)), 5)
+                snapshot = launcher.containment_observation(session_id, handles)
+                self.assertEqual(tuple(row.handle for row in snapshot.workers), handles)
+                self.assertTrue(all(row.direct_child_reaped and row.containment_installed
+                                    and row.scope == _WORKER_CONTAINMENT_PROFILE
+                                    for row in snapshot.workers))
+                self.assertEqual(tuple(row.role for row in snapshot.workers),
+                                 ("writer", "a", "b", "a2", "b2"))
+                self.assertEqual(process.wait(timeout=1.0), 0)
+            finally:
+                if process is not None and process.poll() is None:
+                    try:
+                        parent_sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    try:
+                        process.wait(timeout=8.0)
+                    except subprocess.TimeoutExpired:
+                        # This is the exact service process created above; its
+                        # own parent-death binding terminates any live worker.
+                        process.kill()
+                        process.wait(timeout=2.0)
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                else:
+                    parent_sock.close()
+                if child_sock.fileno() >= 0:
+                    child_sock.close()
+                os.close(mapper_fd)
+
     def test_incomplete_role_inventories_never_reach_worker_or_drain_evidence(self):
         cases = ((), ("writer",), ("writer", "a", "b"),
                  ("writer", "a", "b", "a2"))
@@ -843,6 +1150,9 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
         failures = (
             "containment_missing", "containment_direct_only", "containment_live_descendant",
             "containment_incomplete", "containment_duplicate", "containment_unknown",
+            "containment_duplicate_domain", "containment_wrong_role",
+            "containment_stale_lifecycle", "containment_foreign_service",
+            "containment_boolean_exit_code", "containment_boolean_service_exit",
             "containment_stale", "containment_error",
         )
         for failure in failures:
@@ -863,6 +1173,68 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
                 self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
                 self.assertNotIn("dm_suspend", case.mapper_ops.trace)
                 self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+
+    def test_completion_rows_must_match_the_same_supervisor_launch_receipts(self):
+        failures = (
+            "completion_wrong_service", "completion_wrong_role",
+            "completion_stale_lifecycle", "completion_direct_only",
+            "completion_stale_session", "completion_old_protocol",
+        )
+        for failure in failures:
+            with self.subTest(failure=failure):
+                case = self._new_case()
+                case._start_workers()
+                case.drain_ops.fail.add(failure)
+                with self.assertRaises(FixtureOwnerDenied):
+                    case.broker.finalize()
+                self.assertEqual(case.broker.state, case.broker.DENIED)
+                self.assertFalse(case.broker.backing_release_authorized)
+                self.assertTrue(case.broker.backing_must_be_preserved)
+                self.assertNotIn("swap_inventory", case.drain_ops.trace)
+                self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
+                self.assertNotIn("dm_suspend", case.mapper_ops.trace)
+                self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+
+    def test_concurrent_denial_during_containment_collection_prevents_swapoff(self):
+        case = self._new_case()
+        case._start_workers()
+        collecting = threading.Event()
+        resume = threading.Event()
+        original = case.launcher.containment_observation
+
+        def blocked_containment(session_id, handles):
+            collecting.set()
+            if not resume.wait(timeout=3.0):
+                raise TimeoutError("containment evidence barrier was not released")
+            return original(session_id, handles)
+
+        case.launcher.containment_observation = blocked_containment
+        outcomes: list[object] = []
+
+        def finalize():
+            try:
+                outcomes.append(case.broker.finalize())
+            except Exception as exc:
+                outcomes.append(exc)
+
+        thread = threading.Thread(target=finalize, daemon=True)
+        thread.start()
+        self.assertTrue(collecting.wait(timeout=2.0))
+        with self.assertRaises(FixtureOwnerDenied):
+            case.broker.producer_died()
+        self.assertFalse(case.broker.backing_release_authorized)
+        resume.set()
+        thread.join(timeout=4.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsInstance(outcomes[0], FixtureOwnerDenied)
+        self.assertEqual(case.broker.state, case.broker.DENIED)
+        self.assertFalse(case.broker.backing_release_authorized)
+        self.assertNotIn("swap_inventory", case.drain_ops.trace)
+        self.assertNotIn("swapoff_exact_mapper", case.drain_ops.trace)
+        self.assertNotIn("dm_suspend", case.mapper_ops.trace)
+        self.assertNotIn("dm_remove_normal", case.mapper_ops.trace)
+        self.assertEqual(case.stop_calls, [tuple(case.handles)])
 
     def test_containment_observation_must_cover_all_five_live_worker_domains(self):
         case = self._new_case()
@@ -899,7 +1271,7 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
         entered = threading.Event()
         release = threading.Event()
 
-        def slow_launch(role, *, startup_timeout):
+        def slow_launch(role, *, session_id, startup_timeout):
             self.assertGreater(startup_timeout, 0)
             self.assertEqual(self.broker.request_inflight, 1)
             entered.set()
@@ -907,9 +1279,13 @@ class FixtureOwnerBrokerTests(unittest.TestCase):
             handle = f"owned-{role}-slow"
             self.handles.append(handle)
             self.launcher.pending.append(handle)
-            return WorkerLaunchReceipt(
+            receipt = WorkerLaunchReceipt(
                 handle, role, True, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+                2, session_id, self.launcher.service_instance_id,
+                self.launcher.supervisor_id, "1" * 32, _WORKER_CONTAINMENT_PROFILE,
             )
+            self.launcher.receipts[handle] = receipt
+            return receipt
 
         self.launcher.launch = slow_launch
         result: list[object] = []
@@ -1234,6 +1610,7 @@ s.close()
         case = self._new_case()
         launcher = SyntheticPidfdWorkerLauncher(case.root)
         case.launcher = launcher
+        case.drain_ops.bind_launcher(launcher)
         case.handles = launcher.handles
         case.broker = FixtureOwnerBroker(
             case.owner, case.drain_ops, case.LOOP,
@@ -1275,6 +1652,7 @@ s.close()
                 case = self._new_case()
                 launcher = SyntheticPidfdWorkerLauncher(case.root, fail=failure)
                 case.launcher = launcher
+                case.drain_ops.bind_launcher(launcher)
                 case.handles = launcher.handles
                 case.broker = FixtureOwnerBroker(
                     case.owner, case.drain_ops, case.LOOP,
@@ -1427,6 +1805,7 @@ s.close()
         case = self._new_case()
         launcher = SyntheticPidfdWorkerLauncher(case.root, hold_roles=("b2",))
         case.launcher = launcher
+        case.drain_ops.bind_launcher(launcher)
         case.handles = launcher.handles
         case.broker = FixtureOwnerBroker(
             case.owner, case.drain_ops, case.LOOP,
@@ -1642,16 +2021,20 @@ s.close()
         release = threading.Event()
         launched: list[object] = []
 
-        def slow_launch(role, *, startup_timeout):
+        def slow_launch(role, *, session_id, startup_timeout):
             self.assertGreater(startup_timeout, 0)
             entered.set()
             release.wait(timeout=1.0)
             handle = f"owned-{role}-thread"
             self.handles.append(handle)
             self.launcher.pending.append(handle)
-            return WorkerLaunchReceipt(
+            receipt = WorkerLaunchReceipt(
                 handle, role, True, True, True, True, _WORKER_CONTAINMENT_PROFILE,
+                2, session_id, self.launcher.service_instance_id,
+                self.launcher.supervisor_id, "2" * 32, _WORKER_CONTAINMENT_PROFILE,
             )
+            self.launcher.receipts[handle] = receipt
+            return receipt
 
         self.launcher.launch = slow_launch
         def launch_one():
