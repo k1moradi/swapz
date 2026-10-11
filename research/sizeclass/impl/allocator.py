@@ -48,6 +48,9 @@ class ExtentAllocator:
     def __init__(self, block_count=1, packing='sequential', *,
                  max_staged_records=16, flush_deadline_ticks=10,
                  max_in_flight_extents=64, max_physical_bytes=1024 * 1024):
+        if any(type(value) is not int for value in (block_count, max_staged_records,
+                flush_deadline_ticks, max_in_flight_extents, max_physical_bytes)):
+            raise ValueError('geometry and bounds must be integers')
         if block_count not in SUPPORTED_BLOCK_COUNTS or packing not in ('sequential', 'best_fit'):
             raise ValueError('invalid extent geometry or packing policy')
         if (min(max_staged_records, flush_deadline_ticks, max_in_flight_extents, max_physical_bytes) <= 0
