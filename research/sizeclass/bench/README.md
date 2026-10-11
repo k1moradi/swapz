@@ -43,6 +43,12 @@ Local tests: **23 passed**, Python compilation passed; actual Git blobs for the 
 
 The 50%-like adaptive ratio rises to **1.600×** at W32 in this model. The partial-flush penalty makes 64 KiB underperform substantially at W16. The hot/cold case exercises GC and reports **actual modeled** relocation write bytes, without fixed WAF multipliers. These numbers are **neither loaded-kernel nor flash-wear measurements**; do not compare 2.667× rootless directly with the independently reported **2.922× PR #31 actual null_blk** result, because flush/overwrite/arrival behavior differs.
 
+## Read-amplification and GC regression evidence
+
+A default policy minimizes completed physical write bytes; **this is not a proof of acceptable cold-read p99**. In the 1536-operation W16 synthetic 2072-byte run, 256 identical sampled logical reads touched **256** 4 KiB blocks in ordered4 but **404** in adaptive. The additional blocks include uncached metadata and spanning payload reads. The explicit `--read-penalty-bytes` control permits research on read/write tradeoffs, not claims about actual service time.
+
+At 3072 operations, W16, 256 working slots, four 1 MiB segments, seed 12345, the skewed synthetic hot/cold trace exercised relocation: ordered4 had **479,232 modeled GC write bytes** and 1.563359× net reduction, while adaptive had **286,720 modeled GC write bytes** and 1.930861× net reduction. This is a reproducible simulator result, not a measurement of kernel GC, NAND wear, or a matched-load latency outcome. Before choosing a kernel format, independently verify the policy at low-latency read targets.
+
 ## Gate for downstream work
 
 Independent Codex rootless validation is described in [CODEX_TASK.md](CODEX_TASK.md). Rootless success alone is **not** authorization for a live run. Before benchmarking a loaded kernel, implement and review a separate experimental kernel PR proving actual multi-block read/write alignment, on-disk version compatibility, mapping/BIO authority, bounded progress, CRC32C integrity, GC reserve/reclaim, timeout/error and torn-write semantics. Only then independently build and run the already-guarded disposable null_blk benchmark, with exact-source/module/host ownership preflights and safe ordinary teardown. Never bypass production swap or resource safeguards.
