@@ -396,7 +396,7 @@ class StreamingReportingTests(unittest.TestCase):
         fake_fio.chmod(0o755)
         env = os.environ.copy()
         env["PATH"] = str(self.directory) + os.pathsep + env["PATH"]
-        result = subprocess.run(["bash", str(BENCHMARK_PATH)], env=env,
+        result = subprocess.run(["bash", str(BENCHMARK_PATH), "--run-live"], env=env,
                                 capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 4)
         self.assertIn("not Flexible I/O Tester", result.stderr)
@@ -411,7 +411,7 @@ class StreamingReportingTests(unittest.TestCase):
             with self.subTest(value=invalid):
                 env = os.environ.copy()
                 env["SWAPZ_BENCH_READ_IOPS"] = invalid
-                run = subprocess.run(["bash", str(BENCHMARK_PATH)], env=env,
+                run = subprocess.run(["bash", str(BENCHMARK_PATH), "--run-live"], env=env,
                                      capture_output=True, text=True, timeout=5)
                 self.assertEqual(run.returncode, 4)
                 self.assertIn("SWAPZ_BENCH_READ_IOPS must be", run.stderr)
