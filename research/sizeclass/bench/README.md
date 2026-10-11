@@ -34,7 +34,7 @@ TSV columns are exactly `page_index`, `payload_bytes`, `kind`. The runner hashes
 
 ## Executed local rootless observations
 
-Local tests: **22 passed**, Python compilation passed; actual Git blobs for the three Python files match the locally executed source exactly. Synthetic 1536 writes, W16, 384 slots, six 1 MiB segments, one reserve, seed 12345:
+Local tests: **23 passed**, Python compilation passed; actual Git blobs for the three Python files match the locally executed source exactly. Synthetic 1536 writes, W16, 384 slots, six 1 MiB segments, one reserve, seed 12345:
 
 | Input | ordered4 | bestfit4 | fixed8 | fixed16 | fixed64 | adaptive |
 |---|---:|---:|---:|---:|---:|---:|
