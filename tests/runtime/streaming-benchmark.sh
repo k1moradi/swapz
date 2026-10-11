@@ -163,12 +163,12 @@ cleanup() {
   if (( BENCH_QUARANTINE || (rc != 0 && (TARGET_ACTIVE || TARGET_CANDIDATE || IO_STARTED)) )); then
     local reason="$BENCH_QUARANTINE_REASON"
     [[ -n "$reason" ]] || reason="interrupted/failed with active or candidate target (rc=$rc)"
-    swapz_benchmark_record_quarantine "$reason" "$rc" || true
+    swapz_benchmark_record_quarantine "$reason" "$(( rc == 0 ? 1 : rc ))" || true
     echo "BENCHMARK_QUARANTINED: no automatic DM/null_blk/configfs cleanup; preserve $TMP and inspect ownership." >&2
     exit 1
   fi
   if ! swapz_benchmark_cleanup_resources; then
-    swapz_benchmark_record_quarantine "ordinary owned-resource teardown failed; ownership uncertain" "$rc" || true
+    swapz_benchmark_record_quarantine "ordinary owned-resource teardown failed; ownership uncertain" "$(( rc == 0 ? 1 : rc ))" || true
     echo "ERROR: benchmark cleanup incomplete; preserving the test DM target, backing device, and $TMP for diagnosis." >&2
     if (( rc == 0 )); then
       rc=1
