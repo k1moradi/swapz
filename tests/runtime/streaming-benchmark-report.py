@@ -155,6 +155,16 @@ def read_rows(path: Path) -> list[dict[str, object]]:
     return rows
 
 
+def _cumulative_counter(status: dict[str, object], key: str) -> int | None:
+    """A missing legacy source-reported counter is unknown, never zero."""
+    value = status.get(key)
+    if value is None:
+        return None
+    if type(value) is not str or re.fullmatch(r"[0-9]+", value) is None:
+        raise ValueError(f"invalid cumulative kernel status counter: {key}")
+    return int(value)
+
+
 def report(rows: list[dict[str, object]]) -> str:
     groups: dict[str, list[dict[str, object]]] = defaultdict(list)
     for row in rows:
@@ -165,6 +175,14 @@ def report(rows: list[dict[str, object]]) -> str:
         "backend attribution and complete I/O drain NOT independently attested",
         "logical_flush_window_mib_s = fio logical bytes / flush-inclusive window; "
         "NOT lower-device drain bandwidth",
+        "lower_bytes_per_logical_byte = lower sector delta / timed fio logical "
+        "writer bytes; includes possible GC or foreign backend I/O",
+        "effective_io_reduction_x = timed fio logical writer bytes / timed "
+        "lower-device sector bytes, NOT independent compression attribution",
+        "lz4_payload_ratio_x = 4096 times cumulative compressed pages / "
+        "cumulative compressed payload bytes; EXCLUDES metadata/raw pages",
+        "compressed/raw pages and mean compressed payload are CUMULATIVE "
+        "kernel counters including prefill and GC, not a timed-window ratio",
         "integrity_sentinel = ONE protected 4 KiB compressed page outside writer extent",
         "writer_crc32c = fio CRC32C read of every configured writer page AFTER timing; "
         "NOT independent device provenance or a qualified winner",
@@ -172,12 +190,38 @@ def report(rows: list[dict[str, object]]) -> str:
     for strategy in sorted(groups):
         out.append(f"strategy={strategy} (unqualified; only one observation per batch)")
         for row in sorted(groups[strategy], key=lambda value: value["batch_kib"]):
+            lower_bytes = row["lower_write_sectors"] * SECTOR_SIZE
+            lower_per_logical = lower_bytes / row["logical_write_bytes"]
+            effective_ratio = (f"{row['logical_write_bytes'] / lower_bytes:.3f}"
+                               if lower_bytes else "unavailable")
+            mean_request = (f"{lower_bytes / row['lower_write_ios'] / 1024:.2f}"
+                            if row["lower_write_ios"] else "unavailable")
+            status = row["status"]
+            compressed = _cumulative_counter(status, "compressed_pages")
+            raw = _cumulative_counter(status, "raw_pages")
+            payload = _cumulative_counter(status, "compressed_payload")
+            if ((compressed == 0 and payload not in (None, 0)) or
+                    (compressed is not None and compressed > 0 and payload == 0)):
+                raise ValueError("inconsistent cumulative compressed payload counters")
+            lz4_ratio = (f"{compressed * 4096 / payload:.3f}"
+                         if compressed and payload else "unavailable")
+            mean_payload = (f"{payload / compressed:.0f}"
+                            if compressed and payload is not None else "unavailable")
+            compressed_text = str(compressed) if compressed is not None else "unavailable"
+            raw_text = str(raw) if raw is not None else "unavailable"
             out.append(
                 f"  {row['batch_kib']:4d}KiB "
                 f"upper={row['upper_write_mib_s']:.3f}MiB/s "
                 f"logical_flush_window={row['logical_flush_window_mib_s']:.3f}MiB/s "
                 f"lower_counter_window={row['lower_counter_window_mib_s']:.3f}MiB/s "
                 f"lower_wios={row['lower_write_ios']} "
+                f"lower_bytes_per_logical_byte={lower_per_logical:.3f} "
+                f"effective_io_reduction_x={effective_ratio} "
+                f"lz4_payload_ratio_x_cumulative={lz4_ratio} "
+                f"mean_lower_request_kib={mean_request} "
+                f"compressed_pages_cumulative={compressed_text} "
+                f"raw_pages_cumulative={raw_text} "
+                f"mean_compressed_payload_bytes_cumulative={mean_payload} "
                 f"read_p99={row['read_p99_ms']:.3f}ms "
                 f"p99_src={'fio_clat_exact' if 'exact_read_latency' in row else 'legacy_unverified'} "
                 f"sentinel={'pass' if row.get('isolated_sentinel_readback_ok') is True else 'unverified'} "
