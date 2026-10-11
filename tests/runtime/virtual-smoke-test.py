@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import ast
 import hashlib
+import json
 from pathlib import Path
 import re
 import sys
@@ -375,6 +376,87 @@ class VirtualSmokeContracts(unittest.TestCase):
                     SMOKE.SystemOperations().make_run_dir(run_id)
             self.assertTrue(preexisting.is_dir())
             self.assertEqual(list(preexisting.iterdir()), [])
+
+    def test_loop_json_reports_backing_attachment_not_device_node(self):
+        operations = SMOKE.SystemOperations()
+        loop = "/dev/loop9"
+        query = ["losetup", "--json", "--output", "NAME,BACK-FILE", loop]
+        observations = (
+            ([], False),
+            ([{"name": loop, "back-file": None}], False),
+            ([{"name": loop, "back-file": ""}], False),
+            ([{"name": loop, "back-file": "/dev/shm/owned.img"}], True),
+        )
+        for records, attached in observations:
+            with self.subTest(records=records):
+                result = SMOKE.CommandResult(tuple(query), 0,
+                                             json.dumps({"loopdevices": records}), "")
+                with mock.patch.object(operations, "run", return_value=result) as run:
+                    self.assertIs(operations.loop_exists(loop), attached)
+                    run.assert_called_once_with(query, 2000)
+
+    def test_loop_json_invalid_or_wrong_device_fails_closed(self):
+        operations = SMOKE.SystemOperations()
+        loop = "/dev/loop9"
+        query = ["losetup", "--json", "--output", "NAME,BACK-FILE", loop]
+        malformed = (
+            {},
+            {"loopdevices": None},
+            {"loopdevices": "not-a-list"},
+            {"loopdevices": [{"name": "/dev/loop8", "back-file": None}]},
+            {"loopdevices": [{"name": loop}]},
+            {"loopdevices": [{"name": loop, "back-file": 0}]},
+            {"loopdevices": [{"name": loop, "back-file": None},
+                             {"name": loop, "back-file": "/dev/shm/other"}]},
+        )
+        for document in malformed:
+            with self.subTest(document=document):
+                result = SMOKE.CommandResult(tuple(query), 0, json.dumps(document), "")
+                with mock.patch.object(operations, "run", return_value=result):
+                    with self.assertRaises(SMOKE.QuarantineRequired):
+                        operations.loop_exists(loop)
+        for stdout in ("", "{malformed"):
+            with self.subTest(stdout=stdout):
+                result = SMOKE.CommandResult(tuple(query), 0, stdout, "")
+                with mock.patch.object(operations, "run", return_value=result):
+                    with self.assertRaises(SMOKE.QuarantineRequired):
+                        operations.loop_exists(loop)
+
+    def test_detach_accepts_unbound_losetup_json_row(self):
+        operations = SMOKE.SystemOperations()
+        loop = "/dev/loop9"
+        detach = ["losetup", "--detach", loop]
+        query = ["losetup", "--json", "--output", "NAME,BACK-FILE", loop]
+        outcomes = [
+            SMOKE.CommandResult(tuple(detach), 0, "", ""),
+            SMOKE.CommandResult(tuple(query), 0,
+                                json.dumps({"loopdevices": [
+                                    {"name": loop, "back-file": None}]}), ""),
+        ]
+        with mock.patch.object(operations, "run", side_effect=outcomes) as run:
+            operations.detach_loop(loop)
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(run.call_args_list, [
+                mock.call(detach, 5000), mock.call(query, 2000)])
+
+    def test_full_cleanup_accepts_unbound_loop_device_node(self):
+        # The runner checks the loop state again after detach_loop returns.
+        class DetachedLoopOps(FakeOps):
+            def loop_exists(self, loop):
+                self.actions.append(("loop-exists", loop))
+                real_operations = SMOKE.SystemOperations()
+                query = ["losetup", "--json", "--output", "NAME,BACK-FILE", loop]
+                result = SMOKE.CommandResult(
+                    tuple(query), 0,
+                    json.dumps({"loopdevices": [{"name": loop, "back-file": None}]}), "")
+                with mock.patch.object(real_operations, "run", return_value=result):
+                    return real_operations.loop_exists(loop)
+
+        operations = DetachedLoopOps()
+        SMOKE.SmokeRunner(good_config(), operations).run()
+        self.assertIn(("loop-exists", "/dev/loop-test"), operations.actions)
+        self.assertNotIn("quarantine", [action[0] for action in operations.actions])
+        self.assertFalse(operations.loaded)
 
     def test_success_proves_staged_hit_then_drains_and_cleans_owned_stack(self):
         ops = FakeOps()
