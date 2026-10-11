@@ -57,7 +57,6 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
             scope)
         self.assertIn("runtime=10s/case", scope)
         self.assertIn("reader_iops_target=300", scope)
-        self.assertIn("no swap", "no swap") if False else None
         self.assertIn("not authorized are physical storage", scope)
         self.assertIn("loading/unloading dm_swapz", scope)
         self.assertNotIn("--run-live", scope)
