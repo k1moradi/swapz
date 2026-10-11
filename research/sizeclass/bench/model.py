@@ -244,10 +244,12 @@ class Replay:
                       partial_blocks: int = 0) -> Extent | None:
         if not 0 <= partial_blocks < blocks or (not fail and partial_blocks):
             raise ValueError('partial block completion requires failed entire extent')
+        # Validate the immutable serialized image before reserving any physical
+        # blocks. Invalid caller input must not silently leak device capacity.
+        image, offsets = serialize(records, blocks)
         position = self._allocate(blocks, gc=gc, excluded_segment=excluded_segment)
         if position is None:
             return None
-        image, offsets = serialize(records, blocks)
         identifier = self.next_extent_id
         self.next_extent_id += 1
         segment_id, start = position
@@ -387,6 +389,7 @@ class Replay:
             self.gc_victims += 1
             return True
         copied = []
+        relocation_extents = 0
         for index in range(0, len(survivors), self.window):
             subset = survivors[index:index + self.window]
             records = []
@@ -396,7 +399,7 @@ class Replay:
                 records.append(Record(mapping.slot, mapping.generation, payload, mapping.raw))
             for extent_blocks, group in choose_pack(records, self.policy,
                                                     read_penalty_bytes=self.read_penalty_bytes):
-                if fail_after_extents is not None and len(copied) >= fail_after_extents:
+                if fail_after_extents is not None and relocation_extents >= fail_after_extents:
                     self.failed_gc_runs += 1
                     return False
                 new_extent = self._write_extent(group, extent_blocks, gc=True,
@@ -405,6 +408,7 @@ class Replay:
                     self.failed_gc_runs += 1
                     return False
                 copied.extend(self._mapping_pairs(new_extent))
+                relocation_extents += 1
         # The actual write requests have succeeded; only now can mappings move.
         for record, new_mapping in copied:
             old = self.mappings.get(record.slot)
