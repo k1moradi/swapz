@@ -125,6 +125,27 @@ class QuarantineRegression(unittest.TestCase):
         self.assertFalse(trace.exists())
         self.assertIn("refusing to remove", result.stderr)
 
+    def test_verified_target_removed_by_uuid_not_reusable_name(self):
+        trace = self.directory / "verified-remove"
+        script = (self.prefix +
+            f"source '{TEARDOWN}'\n"
+            "TARGET_UUID='SWAPZ-V22-our-case'\n"
+            'timeout() {\n'
+            '  case "$*" in\n'
+            '    *"-o uuid "* ) printf "%s\\n" "$TARGET_UUID" ;;\n'
+            '    *" remove --retry SWAPZ-V22-our-case"* )\n'
+            '      printf "%s\\n" "REMOVE_UUID" > "$TMP/verified-remove" ;;\n'
+            '    *"-o name"* ) : ;;\n'
+            '    * ) return 99 ;;\n'
+            '  esac\n'
+            '}\n'
+            'swapz_benchmark_remove_target\n'
+            'printf "RC:%s:ACTIVE:%s\\n" "$?" "$TARGET_ACTIVE"\n')
+        r = bash(script)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("RC:0:ACTIVE:0", r.stdout)
+        self.assertEqual(trace.read_text(), "REMOVE_UUID\n")
+
     def test_foreign_nullblk_config_is_never_powered_off(self):
         config = self.directory / "foreign-nullblk"
         config.mkdir()
