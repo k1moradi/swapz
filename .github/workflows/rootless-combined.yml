@@ -34,6 +34,13 @@ jobs:
           python3 -m py_compile tests/runtime/rootless-workflow-contract-test.py
           timeout 20s python3 -B tests/runtime/rootless-workflow-contract-test.py -v
           echo "ROOTLESS_WORKFLOW_CONTRACT: PASS (mandatory tests and source trigger coverage)"
+      - name: Rootless loaded-kernel smoke lifecycle mocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/virtual-smoke.sh
+          python3 -m py_compile tests/runtime/virtual-smoke.py tests/runtime/virtual-smoke-test.py
+          timeout 25s python3 -B tests/runtime/virtual-smoke-test.py -v
       - name: Record exact joint source identity
         shell: bash
         run: |
@@ -243,6 +250,12 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless exact fio read-latency sidecar conversion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-read-latency.py tests/runtime/streaming-benchmark-read-latency-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-read-latency-test.py -v
       - name: Rootless V2.2 benchmark plan and pre-device admission contracts
         shell: bash
         run: |

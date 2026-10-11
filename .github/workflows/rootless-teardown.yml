@@ -8,6 +8,9 @@ on:
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
       - 'kernel/dm-swapz.c'
+      - 'tests/runtime/virtual-smoke.py'
+      - 'tests/runtime/virtual-smoke.sh'
+      - 'tests/runtime/virtual-smoke-test.py'
       - 'tests/runtime/test-stack-teardown.sh'
       - 'tests/runtime/test-stack-teardown-regression.sh'
       - 'tests/runtime/pressure-teardown.sh'
@@ -88,6 +91,8 @@ on:
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-plan.py'
       - 'tests/runtime/streaming-benchmark-plan-test.py'
+      - 'tests/runtime/streaming-benchmark-read-latency.py'
+      - 'tests/runtime/streaming-benchmark-read-latency-test.py'
       - 'tests/runtime/streaming-benchmark-report.py'
       - 'tests/runtime/streaming-benchmark-report-test.py'
       - 'tests/runtime/streaming-benchmark-teardown.sh'
@@ -104,6 +109,9 @@ on:
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
       - 'kernel/dm-swapz.c'
+      - 'tests/runtime/virtual-smoke.py'
+      - 'tests/runtime/virtual-smoke.sh'
+      - 'tests/runtime/virtual-smoke-test.py'
       - 'tests/runtime/**'
   workflow_dispatch:
 
@@ -123,6 +131,13 @@ jobs:
           python3 -m py_compile tests/runtime/rootless-workflow-contract-test.py
           timeout 20s python3 -B tests/runtime/rootless-workflow-contract-test.py -v
           echo "ROOTLESS_WORKFLOW_CONTRACT: PASS (mandatory tests and source trigger coverage)"
+      - name: Rootless loaded-kernel smoke lifecycle mocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/virtual-smoke.sh
+          python3 -m py_compile tests/runtime/virtual-smoke.py tests/runtime/virtual-smoke-test.py
+          timeout 25s python3 -B tests/runtime/virtual-smoke-test.py -v
       - name: Verify Bash syntax
         run: |
           set -euo pipefail
@@ -297,6 +312,12 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless exact fio read-latency sidecar conversion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-read-latency.py tests/runtime/streaming-benchmark-read-latency-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-read-latency-test.py -v
       - name: Rootless V2.2 benchmark plan and pre-device admission contracts
         shell: bash
         run: |
