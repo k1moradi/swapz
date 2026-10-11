@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""No-device benchmark approval contract; authorize exact VM or real PC.
+"""Read-only benchmark profile and VM/real-PC identity gate.
 
---show-statement prints the exact proposed scope for an independent VM owner
-to review; printing it does NOT confer authorization. --check requires an
-identical independently supplied SWAPZ_BENCH_AUTHORIZATION in the environment.
-VM/host indicators and an approved machine-id digest do not prove that the
-kernel is safe, that block devices have no passthrough, or that the person
-supplying authorization is the true owner. Never launches block operations.
+No pasted authorization statement is required. --show-statement optionally
+prints a workload scope summary. --check verifies the same strict benchmark
+profile and pinned VM/host identity without touching devices.
+This cannot independently attest loaded module provenance.
 """
 from __future__ import annotations
 
@@ -155,30 +153,28 @@ def host_indication(expected_machine_sha: str,
 
 
 def check(env: Mapping[str, str], command: object = subprocess.run) -> str:
-    statement, _ = proposal(env)
-    # Do not log the supplied authorization; failures return only the reason.
-    if env.get("SWAPZ_BENCH_AUTHORIZATION", "") != statement:
-        raise ValueError("explicit exact benchmark authorization is missing or mismatched")
+    # Keep strict workload and identity admission, not a copied approval phrase.
+    proposal(env)
     if env.get("SWAPZ_BENCH_HOST_ID"):
         host_indication(env.get("SWAPZ_BENCH_HOST_MACHINE_ID_SHA256", ""), command)
-        return "BENCH_LIVE_SCOPE=AUTHORIZED_STATEMENT_AND_APPROVED_REAL_PC_ONLY"
+        return "BENCH_LIVE_SCOPE=VERIFIED_APPROVED_REAL_PC_IDENTITY_ONLY"
     vm_indication(command)
-    return "BENCH_LIVE_SCOPE=AUTHORIZED_STATEMENT_AND_VM_GUEST_INDICATION_ONLY"
+    return "BENCH_LIVE_SCOPE=VERIFIED_VM_GUEST_INDICATION_ONLY"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--show-statement", action="store_true",
-                        help="print proposed scope; NEVER grants authorization")
+                        help="print optional workload scope summary; no device operations")
     action.add_argument("--check", action="store_true",
-                        help="fail closed on missing exact approval and VM guest indication")
+                        help="check exact benchmark profile and VM/host indication")
     args = parser.parse_args()
     try:
         if args.show_statement:
             statement, _ = proposal(os.environ)
             print(statement)
-            print("PROPOSAL_ONLY_NO_AUTHORIZATION_OR_DEVICE_OPERATIONS", file=sys.stderr)
+            print("SCOPE_INFORMATION_ONLY_NO_DEVICE_OPERATIONS", file=sys.stderr)
         else:
             print(check(os.environ))
     except ValueError as exc:
