@@ -104,6 +104,8 @@ BACKEND=""
 CONFIGFS_MOUNTED_BY_US=0
 RESULTS="$TMP/results.jsonl"
 TARGET_ACTIVE=0
+CASES_COMPLETED=0
+REPORT_COMPLETE=0
 NBD_PID=""
 NBD_READY="$TMP/nbd.ready"
 NBD_STATS="$TMP/nbd.stats.json"
@@ -123,6 +125,19 @@ cleanup() {
       rc=1
     fi
     exit "$rc"
+  fi
+  if (( rc == 0 )) && [[ "$KEEP_ARTIFACTS" == 1 ]]; then
+    # This branch runs only AFTER swapz_benchmark_cleanup_resources confirmed
+    # ordinary removal of the owned DM target, null_blk config and mount.
+    # The marker binds exact result bytes/case count to a successful reported
+    # sweep. It remains self-reported evidence, NOT device attestation.
+    if (( REPORT_COMPLETE != 1 || CASES_COMPLETED < 1 )); then
+      echo "ERROR: benchmark reporting did not finish; no finalization marker." >&2
+      rc=1
+    elif ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-finalize.py"         --write --results "$RESULTS" --expected-cases "$CASES_COMPLETED"         --backend "$BACKEND" >/dev/null; then
+      echo "ERROR: could not pin completed sweep to teardown; preserving $TMP" >&2
+      rc=1
+    fi
   fi
   if (( rc == 0 )); then
     # NBD server stats are emitted only after its graceful shutdown. Keep
@@ -486,6 +501,7 @@ PY
   # do not allow an open-count/udev race to abort the sweep and trigger unsafe
   # backing removal in the EXIT trap.
   swapz_benchmark_remove_target || return 1
+  (( CASES_COMPLETED += 1 ))
   echo "RESULT strategy=$strategy batch_kib=$batch $(tail -n1 "$RESULTS")"
 }
 
@@ -514,3 +530,4 @@ done
 python3 "$ROOT/tests/runtime/streaming-benchmark-report.py" --results "$RESULTS"
 
 echo "V2.2 streaming single-sweep diagnostics: PASS (NO QUALIFIED WINNER)"
+REPORT_COMPLETE=1
