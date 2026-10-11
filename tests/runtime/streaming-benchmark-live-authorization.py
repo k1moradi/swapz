@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""No-device benchmark approval contract; refuse unsanctioned live VM work.
+"""No-device benchmark approval contract; authorize exact VM or real PC.
 
 --show-statement prints the exact proposed scope for an independent VM owner
 to review; printing it does NOT confer authorization. --check requires an
 identical independently supplied SWAPZ_BENCH_AUTHORIZATION in the environment.
-VM detection only establishes a guest indication; it does not authenticate a
-VM label, passthrough devices or isolation. Never launches block operations.
+VM/host indicators and an approved machine-id digest do not prove that the
+kernel is safe, that block devices have no passthrough, or that the person
+supplying authorization is the true owner. Never launches block operations.
 """
 from __future__ import annotations
 
+import hashlib
 import argparse
 import importlib.util
 import os
@@ -29,6 +31,7 @@ SPEC.loader.exec_module(planner)
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 VM = re.compile(r"disposable-[A-Za-z0-9._-]{1,60}\Z")
+HOST = re.compile(r"devpc-[A-Za-z0-9._-]{1,60}\Z")
 
 
 def _number(env: Mapping[str, str], name: str, default: int) -> int:
@@ -40,11 +43,21 @@ def _number(env: Mapping[str, str], name: str, default: int) -> int:
 
 def proposal(env: Mapping[str, str]) -> tuple[str, dict[str, object]]:
     vm = env.get("SWAPZ_BENCH_VM_ID", "")
+    host = env.get("SWAPZ_BENCH_HOST_ID", "")
+    host_machine_sha = env.get("SWAPZ_BENCH_HOST_MACHINE_ID_SHA256", "")
+    if host:
+        if vm or HOST.fullmatch(host) is None:
+            raise ValueError("choose exactly one approved devpc-<label> host or disposable VM")
+        if DIGEST.fullmatch(host_machine_sha) is None:
+            raise ValueError("bare-metal host requires approved machine-id SHA-256")
+        identity = f"bare-metal development PC {host} with machine-id SHA-256 {host_machine_sha}"
+    else:
+        if VM.fullmatch(vm) is None or host_machine_sha:
+            raise ValueError("SWAPZ_BENCH_VM_ID must identify a disposable-<label> VM")
+        identity = f"disposable VM {vm}"
     source = env.get("SWAPZ_BENCH_SOURCE_SHA", "")
     module = env.get("SWAPZ_BENCH_MODULE_SHA256", "")
     path = env.get("SWAPZ_BENCH_MODULE_PATH", "")
-    if VM.fullmatch(vm) is None:
-        raise ValueError("SWAPZ_BENCH_VM_ID must be a disposable-<label> VM")
     if SHA.fullmatch(source) is None or DIGEST.fullmatch(module) is None:
         raise ValueError("source SHA and selected module SHA-256 must be full lowercase digests")
     if not path.startswith("/") or "\n" in path or "\r" in path:
@@ -81,8 +94,8 @@ def proposal(env: Mapping[str, str]) -> tuple[str, dict[str, object]]:
     # Exact cases, not merely a broad batch-size ceiling: changing the
     # strategy subset, order or size changes the required approval statement.
     statement = (
-        "I AUTHORIZE swapz V2.2 diagnostic benchmark only on disposable VM "
-        f"{vm} with source {source}, selected module SHA-256 {module} " 
+        "I AUTHORIZE swapz V2.2 diagnostic benchmark only on "
+        f"{identity} with source {source}, selected module SHA-256 {module} " 
         f"at protected module path {path}; "
         f"cases in order [{cases}]; backend=null_blk "
         f"bandwidth={bandwidth}MiB/s latency={latency}ns "
@@ -96,7 +109,8 @@ def proposal(env: Mapping[str, str]) -> tuple[str, dict[str, object]]:
         "fio and dd direct 4KiB read/write/verification I/O only within "
         "each owned 32MiB logical target, explicit fsync, DM status "
         "queries, and owned temporary artifact creation/removal; "
-        "not authorized are physical storage, NBD, swap activation, "
+        "not authorized are physical storage, SD-card swap partition I/O, "
+        "swapoff or swapon, NBD, swap activation, "
         "loading/unloading dm_swapz, forced removal, host reboot, "
         "or destructive external cleanup."
     )
@@ -118,11 +132,36 @@ def vm_indication(command: object = subprocess.run) -> str:
     return kind
 
 
+def host_indication(expected_machine_sha: str,
+                    command: object = subprocess.run,
+                    machine_id_path: Path = Path("/etc/machine-id")) -> str:
+    """Require the approved real PC, no VM or container indication."""
+    try:
+        machine = machine_id_path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"cannot read approved host machine identity: {exc}") from exc
+    if (re.fullmatch(r"[0-9a-f]{32}", machine) is None or
+            hashlib.sha256(machine.encode("ascii")).hexdigest() != expected_machine_sha):
+        raise ValueError("host machine-id does not match separate authorization")
+    for flag in ("--vm", "--container"):
+        try:
+            result = command(["systemd-detect-virt", flag],
+                             capture_output=True, text=True, timeout=3, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValueError(f"cannot confirm real-host isolation state: {exc}") from exc
+        if result.returncode != 1 or result.stdout.strip() not in ("", "none"):
+            raise ValueError("real development PC requested but virtualization/container state differs")
+    return "bare-metal-host"
+
+
 def check(env: Mapping[str, str], command: object = subprocess.run) -> str:
     statement, _ = proposal(env)
     # Do not log the supplied authorization; failures return only the reason.
     if env.get("SWAPZ_BENCH_AUTHORIZATION", "") != statement:
         raise ValueError("explicit exact benchmark authorization is missing or mismatched")
+    if env.get("SWAPZ_BENCH_HOST_ID"):
+        host_indication(env.get("SWAPZ_BENCH_HOST_MACHINE_ID_SHA256", ""), command)
+        return "BENCH_LIVE_SCOPE=AUTHORIZED_STATEMENT_AND_APPROVED_REAL_PC_ONLY"
     vm_indication(command)
     return "BENCH_LIVE_SCOPE=AUTHORIZED_STATEMENT_AND_VM_GUEST_INDICATION_ONLY"
 
