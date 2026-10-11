@@ -54,6 +54,7 @@ MANDATORY_TESTS = (
     "virtual-smoke-test.py",
     "streaming-benchmark-live-authorization-test.py",
     "v22-fast-compare-test.py",
+    "streaming-benchmark-source-preflight-test.py",
     "streaming-benchmark-quarantine-test.py",
     "streaming-benchmark-plan-test.py",
     "streaming-benchmark-read-latency-test.py",

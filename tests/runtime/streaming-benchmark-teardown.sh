@@ -10,6 +10,20 @@ swapz_benchmark_remove_target() {
     return 0
   fi
 
+  # For the production runner, explicitly validate the unique DM UUID
+  # before EVER removing a target by its generated name. No path from a
+  # partial create may remove a foreign mapping with a colliding name.
+  local removal_identity="$TARGET"
+  if declare -F swapz_benchmark_verify_owned_target >/dev/null; then
+    swapz_benchmark_verify_owned_target || {
+      echo "ERROR: target UUID not verified; refusing to remove any DM mapping." >&2
+      return 1
+    }
+    # Resolve by UUID as well as validating it: if a name is replaced in
+    # the narrow interval after our check, never remove the replacement.
+    removal_identity="$TARGET_UUID"
+  fi
+
   # --retry handles transient opens from udev or consumers just exiting.
   # Never use --force or --deferred: the backing must not be powered off
   # until the DM target is actually gone.
@@ -18,11 +32,11 @@ swapz_benchmark_remove_target() {
   # dmsetup when sourced independently. Never force/defer removal.
   if declare -F swapz_benchmark_bounded >/dev/null; then
     if ! swapz_benchmark_bounded "owned DM normal removal" 20s \
-        dmsetup remove --retry "$TARGET"; then
+        dmsetup remove --retry "$removal_identity"; then
       echo "ERROR: DM target removal uncertain; leave backing powered." >&2
       return 1
     fi
-  elif ! dmsetup remove --retry "$TARGET"; then
+  elif ! dmsetup remove --retry "$removal_identity"; then
     echo "ERROR: normal DM removal failed for test target $TARGET; leaving backing powered." >&2
     dmsetup info "$TARGET" >&2 || true
     dmsetup status "$TARGET" >&2 || true
@@ -81,6 +95,10 @@ swapz_benchmark_cleanup_resources() {
 
   # Strict dependency ordering: never power off null_blk before removing DM.
   if [[ -d "$NULL_CFG" ]]; then
+    if [[ "${NULL_CFG_OWNED:-0}" != 1 ]]; then
+      echo "ERROR: null_blk config is not positively owned by this run; refusing to power off." >&2
+      return 1
+    fi
     if declare -F swapz_benchmark_bounded >/dev/null; then
       swapz_benchmark_bounded "test-owned null_blk powerdown" 12s \
           bash -c 'printf "0\n" > "$1"' _ "$NULL_CFG/power" || return 1
@@ -94,6 +112,7 @@ swapz_benchmark_cleanup_resources() {
       echo "ERROR: could not remove test null_blk config $NULL_CFG" >&2
       return 1
     fi
+    NULL_CFG_OWNED=0
   fi
 
   if (( CONFIGFS_MOUNTED_BY_US )); then

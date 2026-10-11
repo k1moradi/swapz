@@ -99,6 +99,15 @@ if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-live-authorization.py" 
   echo "ERROR: benchmark scope/VM authorization refused; no fixture allocated." >&2
   exit 4
 fi
+# Strictly refuse a writable/unreviewed checkout before any fixture setup.
+# The source SHA binds the exact privilege-bearing runner plus helpers, not
+# merely kernel/dm-swapz.c. The PC operator must prepare a protected full
+# checkout before invoking this as root.
+if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-source-preflight.py" \
+    --source-sha "$SWAPZ_BENCH_SOURCE_SHA"; then
+  echo "ERROR: benchmark source executable/dependency ownership refused; no fixture allocated." >&2
+  exit 4
+fi
 # Codex's successful smoke unloads its *owned* module. A separately authorized
 # operator must register the exact VM-built dm_swapz before this benchmark;
 # never insmod/modprobe it implicitly. Verify the selected .ko SHA, exact
@@ -126,6 +135,7 @@ WRITER_BYTES=$(( WRITER_MIB * 1048576 - 4096 ))
 TMP=$(mktemp -d /dev/shm/swapz-v22-stream.XXXXXX)
 TAG="$$-$RANDOM"
 TARGET="swapz-v22-stream-$TAG"
+TARGET_UUID="SWAPZ-V22-$TAG"
 NULL_NAME="swapzv22$TAG"
 NULL_CFG="/sys/kernel/config/nullb/$NULL_NAME"
 BACKING=""
@@ -138,6 +148,8 @@ RESULTS="$TMP/results.jsonl"
 BENCH_QUARANTINE=0
 BENCH_QUARANTINE_REASON=""
 TARGET_CANDIDATE=0
+NULL_CFG_CANDIDATE=0
+NULL_CFG_OWNED=0
 IO_STARTED=0
 TARGET_ACTIVE=0
 CASES_COMPLETED=0
@@ -160,7 +172,7 @@ cleanup() {
   # uncertain preserves *everything*, even if ordinary removal might work.
   # This avoids destroying forensic evidence or powering down a backing
   # with an unresolved in-flight kernel request.
-  if (( BENCH_QUARANTINE || (rc != 0 && (TARGET_ACTIVE || TARGET_CANDIDATE || IO_STARTED)) )); then
+  if (( BENCH_QUARANTINE || NULL_CFG_CANDIDATE || (rc != 0 && (TARGET_ACTIVE || TARGET_CANDIDATE || IO_STARTED)) )); then
     local reason="$BENCH_QUARANTINE_REASON"
     [[ -n "$reason" ]] || reason="interrupted/failed with active or candidate target (rc=$rc)"
     swapz_benchmark_record_quarantine "$reason" "$(( rc == 0 ? 1 : rc ))" || true
@@ -222,35 +234,43 @@ setup_nullblk() {
     CONFIGFS_MOUNTED_BY_US=1
   fi
   [[ -d /sys/kernel/config/nullb ]] || return 1
+  NULL_CFG_CANDIDATE=1
   swapz_benchmark_bounded "null_blk config allocation" 12s mkdir "$NULL_CFG" || return 1
+  NULL_CFG_OWNED=1
+  NULL_CFG_CANDIDATE=0
   for attr in size memory_backed irqmode completion_nsec hw_queue_depth max_sectors mbps power; do
     [[ -e "$NULL_CFG/$attr" ]] || return 1
   done
     swapz_benchmark_bounded "null_blk config size" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 256 "$NULL_CFG/size"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 256 "$NULL_CFG/size" || return 1
     swapz_benchmark_bounded "null_blk config memory_backed" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/memory_backed"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/memory_backed" || return 1
     swapz_benchmark_bounded "null_blk config irqmode" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 2 "$NULL_CFG/irqmode"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2 "$NULL_CFG/irqmode" || return 1
     swapz_benchmark_bounded "null_blk config completion_nsec" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ "$LATENCY_NS" "$NULL_CFG/completion_nsec"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$LATENCY_NS" "$NULL_CFG/completion_nsec" || return 1
     swapz_benchmark_bounded "null_blk config hw_queue_depth" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/hw_queue_depth"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/hw_queue_depth" || return 1
     swapz_benchmark_bounded "null_blk config max_sectors" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 2048 "$NULL_CFG/max_sectors"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2048 "$NULL_CFG/max_sectors" || return 1
     swapz_benchmark_bounded "null_blk config mbps" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BANDWIDTH" "$NULL_CFG/mbps"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BANDWIDTH" "$NULL_CFG/mbps" || return 1
   if [[ -e "$NULL_CFG/discard" ]]; then
       swapz_benchmark_bounded "null_blk config discard" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BENCH_DISCARD" "$NULL_CFG/discard"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BENCH_DISCARD" "$NULL_CFG/discard" || return 1
   elif (( BENCH_DISCARD )); then
     echo "ERROR: null_blk discard requested but configfs has no discard control" >&2
     return 1
   fi
     swapz_benchmark_bounded "null_blk config power" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power" || return 1
   local index candidate
-  index=$(cat "$NULL_CFG/index")
+  index=$(swapz_benchmark_bounded "owned null_blk index" 5s cat "$NULL_CFG/index") || return 1
+  if [[ ! "$index" =~ ^[0-9]+$ ]]; then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="invalid null_blk index; cannot identify owned backing"
+    return 1
+  fi
   BACKING=""
   # Configfs null_blk naming differs across kernel versions. Newer kernels may
   # expose /dev/<configfs-name>; older ones commonly expose /dev/nullb<index>.
@@ -384,7 +404,8 @@ run_case() {
     return 1
   fi
   TARGET_CANDIDATE=1
-  swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch"
+  swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch" --uuid "$TARGET_UUID"
+  swapz_benchmark_verify_owned_target || return 1
   TARGET_ACTIVE=1
   TARGET_CANDIDATE=0
   # Prove the throttled fixture cannot issue a full-segment lower DISCARD

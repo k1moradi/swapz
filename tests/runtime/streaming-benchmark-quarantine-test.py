@@ -33,7 +33,7 @@ class QuarantineRegression(unittest.TestCase):
             "TARGET='swapz-owned-test'\n"
             "BACKING='/dev/test-owned-nullb'\n"
             "NULL_CFG='/sys/kernel/config/nullb/owned-test'\n"
-            "TARGET_ACTIVE=1\nTARGET_CANDIDATE=0\nIO_STARTED=1\n"
+            "TARGET_ACTIVE=1\nTARGET_CANDIDATE=0\nNULL_CFG_CANDIDATE=0\nIO_STARTED=1\n"
             "BENCH_QUARANTINE=0\nBENCH_QUARANTINE_REASON=''\n"
         )
 
@@ -88,6 +88,98 @@ class QuarantineRegression(unittest.TestCase):
                 r = bash(code)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertIn(f"{expected}:{quarantined}", r.stdout)
+
+    def test_only_correct_uuid_allows_target_removal(self):
+        for observed, rc, expected in (
+            ("SWAPZ-V22-our-case", 0, 0),
+            ("SWAPZ-V22-foreign-case", 0, 1),
+            ("", 0, 1),
+            ("SWAPZ-V22-our-case", 124, 1),
+        ):
+            with self.subTest(observed=observed, rc=rc):
+                trace = self.directory / "dm-remove-attempt"
+                trace.unlink(missing_ok=True)
+                script = (self.prefix +
+                    f"TARGET_UUID='SWAPZ-V22-our-case'\n"
+                    f"timeout() {{ printf '%s\\n' {observed!r}; return {rc}; }}\n"
+                    "swapz_benchmark_verify_owned_target\n"
+                    "code=$?\n"
+                    "printf '%s:%s\\n' \"$code\" \"$BENCH_QUARANTINE\"\n")
+                result = bash(script)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"{expected}:{expected}", result.stdout)
+
+    def test_mismatched_uuid_never_calls_dm_remove(self):
+        trace = self.directory / "dm-removed"
+        script = (self.prefix +
+            f"source '{TEARDOWN}'\n"
+            "TARGET_UUID='SWAPZ-V22-our-case'\n"
+            "timeout() { printf 'SWAPZ-V22-foreign-case\\n'; return 0; }\n"
+            "dmsetup() { printf 'UNSAFE' > \"$TMP/dm-removed\"; return 0; }\n"
+            "swapz_benchmark_remove_target\n"
+            "rc=$?\n"
+            'printf "%s:%s\\n" "$rc" "$BENCH_QUARANTINE"\n')
+        result = bash(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1:1", result.stdout)
+        self.assertFalse(trace.exists())
+        self.assertIn("refusing to remove", result.stderr)
+
+    def test_verified_target_removed_by_uuid_not_reusable_name(self):
+        trace = self.directory / "verified-remove"
+        script = (self.prefix +
+            f"source '{TEARDOWN}'\n"
+            "TARGET_UUID='SWAPZ-V22-our-case'\n"
+            'timeout() {\n'
+            '  case "$*" in\n'
+            '    *"-o uuid "* ) printf "%s\\n" "$TARGET_UUID" ;;\n'
+            '    *" remove --retry SWAPZ-V22-our-case"* )\n'
+            '      printf "%s\\n" "REMOVE_UUID" > "$TMP/verified-remove" ;;\n'
+            '    *"-o name"* ) : ;;\n'
+            '    * ) return 99 ;;\n'
+            '  esac\n'
+            '}\n'
+            'swapz_benchmark_remove_target\n'
+            'printf "RC:%s:ACTIVE:%s\\n" "$?" "$TARGET_ACTIVE"\n')
+        r = bash(script)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("RC:0:ACTIVE:0", r.stdout)
+        self.assertEqual(trace.read_text(), "REMOVE_UUID\n")
+
+    def test_foreign_nullblk_config_is_never_powered_off(self):
+        config = self.directory / "foreign-nullblk"
+        config.mkdir()
+        (config / "power").write_text("1\n")
+        script = (
+            "set -u\n"
+            f"source '{TEARDOWN}'\n"
+            f"NULL_CFG='{config}'\n"
+            "NULL_CFG_OWNED=0\n"
+            "TARGET='swapz-owned-test'\n"
+            "TARGET_ACTIVE=0\nCONFIGFS_MOUNTED_BY_US=0\n"
+            "BACKEND_KIND=null_blk\n"
+            "dmsetup() { return 1; }\n"
+            "swapz_benchmark_cleanup_resources\n"
+            "printf 'RC:%s\\n' \"$?\"\n")
+        result = bash(script)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("RC:1", result.stdout)
+        self.assertEqual((config / "power").read_text(), "1\n")
+        self.assertIn("not positively owned", result.stderr)
+
+    def test_conditional_setup_cannot_ignore_config_attribute_failure(self):
+        import re
+        source = self.script
+        calls = re.findall(
+            r'swapz_benchmark_bounded "null_blk config [^"]+" 12s \\\n'
+            r'[^\n]+', source)
+        self.assertEqual(len(calls), 9)
+        self.assertTrue(all(c.endswith("|| return 1") for c in calls),
+                        "conditional ! setup_nullblk disables Bash errexit")
+        self.assertIn("NULL_CFG_CANDIDATE=1", source)
+        self.assertIn("NULL_CFG_OWNED=1", source)
+        self.assertIn('swapz_benchmark_verify_owned_target || return 1', source)
+        self.assertIn('--uuid "$TARGET_UUID"', source)
 
     def _cleanup_function(self) -> str:
         return "cleanup() {" + self.script.split("cleanup() {", 1)[1].split(

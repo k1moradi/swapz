@@ -300,6 +300,7 @@ class ThreeCaseScreenTests(unittest.TestCase):
                 'RESULTS="$TMP/results.jsonl"\n'
                 "TARGET_ACTIVE=0\n"
                 "TARGET_CANDIDATE=0\n"
+                "NULL_CFG_CANDIDATE=0\n"
                 "IO_STARTED=0\n"
                 "BENCH_QUARANTINE=0\n"
                 "BENCH_QUARANTINE_REASON=''\n"

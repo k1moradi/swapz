@@ -17,6 +17,26 @@ swapz_benchmark_bounded() {
   fi
 }
 
+swapz_benchmark_verify_owned_target() {
+  # A name match is NOT sufficient authority to remove a DM mapping.
+  # The UUID assigned at creation must still be attached to this exact name.
+  # An error, empty value or mismatch is always uncertain: preserve backing.
+  local observed rc=0
+  observed=$(timeout --signal=TERM --kill-after=2s 8s dmsetup info \
+      --columns --noheadings -o uuid "$TARGET") || rc=$?
+  if (( rc != 0 )); then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="cannot verify benchmark target UUID (rc=$rc)"
+    return 1
+  fi
+  observed=$(printf '%s' "$observed" | tr -d '[:space:]')
+  if [[ -z "${TARGET_UUID:-}" || "$observed" != "$TARGET_UUID" ]]; then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="owned DM UUID mismatch; target name cannot authorize removal"
+    return 1
+  fi
+  return 0
+}
 swapz_benchmark_target_exists() {
   # 0=positively present, 1=positively absent, 2=uncertain/error.
   # Only a successful COMPLETE inventory can establish absence, unlike
