@@ -272,8 +272,8 @@ performs `swapoff`, `swapon`, mounts, forced removal or reboot.
 The 32 MiB image is 65,536 sectors (32 complete 1 MiB segments), with
 enough reserve for the production constructor. The loop-backed
 `dm-delay` covers all 65,536 sectors. Only the swapz logical table is one page (`0 8` sectors). The constructor reserve requires at least
-three segments plus the larger of 25% of the one-page logical size or two
-segments of reserve.
+three segments plus the larger of 25% of the one-page logical size or two segments
+of reserve.
 
 Example VM command; for the real PC use the host form above:
 
