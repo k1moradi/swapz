@@ -233,30 +233,35 @@ setup_nullblk() {
     [[ -e "$NULL_CFG/$attr" ]] || return 1
   done
     swapz_benchmark_bounded "null_blk config size" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 256 "$NULL_CFG/size"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 256 "$NULL_CFG/size" || return 1
     swapz_benchmark_bounded "null_blk config memory_backed" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/memory_backed"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/memory_backed" || return 1
     swapz_benchmark_bounded "null_blk config irqmode" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 2 "$NULL_CFG/irqmode"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2 "$NULL_CFG/irqmode" || return 1
     swapz_benchmark_bounded "null_blk config completion_nsec" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ "$LATENCY_NS" "$NULL_CFG/completion_nsec"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$LATENCY_NS" "$NULL_CFG/completion_nsec" || return 1
     swapz_benchmark_bounded "null_blk config hw_queue_depth" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/hw_queue_depth"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/hw_queue_depth" || return 1
     swapz_benchmark_bounded "null_blk config max_sectors" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 2048 "$NULL_CFG/max_sectors"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2048 "$NULL_CFG/max_sectors" || return 1
     swapz_benchmark_bounded "null_blk config mbps" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BANDWIDTH" "$NULL_CFG/mbps"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BANDWIDTH" "$NULL_CFG/mbps" || return 1
   if [[ -e "$NULL_CFG/discard" ]]; then
       swapz_benchmark_bounded "null_blk config discard" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BENCH_DISCARD" "$NULL_CFG/discard"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BENCH_DISCARD" "$NULL_CFG/discard" || return 1
   elif (( BENCH_DISCARD )); then
     echo "ERROR: null_blk discard requested but configfs has no discard control" >&2
     return 1
   fi
     swapz_benchmark_bounded "null_blk config power" 12s \
-      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power"
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power" || return 1
   local index candidate
-  index=$(cat "$NULL_CFG/index")
+  index=$(swapz_benchmark_bounded "owned null_blk index" 5s cat "$NULL_CFG/index") || return 1
+  if [[ ! "$index" =~ ^[0-9]+$ ]]; then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="invalid null_blk index; cannot identify owned backing"
+    return 1
+  fi
   BACKING=""
   # Configfs null_blk naming differs across kernel versions. Newer kernels may
   # expose /dev/<configfs-name>; older ones commonly expose /dev/nullb<index>.
