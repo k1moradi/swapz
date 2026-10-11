@@ -89,6 +89,67 @@ class QuarantineRegression(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr)
                 self.assertIn(f"{expected}:{quarantined}", r.stdout)
 
+    def test_nullblk_index_read_keeps_parent_quarantine_on_subshell_timeout(self):
+        # This exact failure used to be lost by:
+        # index=$(swapz_benchmark_bounded ... ) || return 1
+        # because Bash resets variables set inside command substitutions.
+        for output, status, wanted_index, quarantined in (
+            ("7", 0, "7", 0),
+            ("", 124, "", 1),
+            ("7", 5, "", 1),
+            ("unknown", 0, "", 1),
+            ("7 8", 0, "", 1),
+        ):
+            with self.subTest(output=output, status=status):
+                script = self.prefix + (
+                    f"timeout() {{ printf '%s\\n' {output!r}; return {status}; }}\n"
+                    "swapz_benchmark_read_owned_nullblk_index /tmp/mock-nullb-index\n"
+                    "code=$?\n"
+                    'printf "INDEX:%s:RC:%s:QUARANTINE:%s\\n" '
+                    '"$NULLBLK_INDEX" "$code" "$BENCH_QUARANTINE"\n'
+                )
+                result = bash(script)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(
+                    f"INDEX:{wanted_index}:RC:{quarantined}:QUARANTINE:{quarantined}",
+                    result.stdout)
+
+    def test_index_timeout_before_dm_create_does_not_poweroff_backing(self):
+        marker = self.directory / "QUARANTINED.json"
+        cleanup_trace = self.directory / "attempted-cleanup-after-index-timeout"
+        code = (self.prefix +
+            "TARGET_ACTIVE=0\nTARGET_CANDIDATE=0\nIO_STARTED=0\n"
+            "NULL_CFG_CANDIDATE=0\nNULL_CFG_OWNED=1\n"
+            "KEEP_ARTIFACTS=1\nREPORT_COMPLETE=0\nCASES_COMPLETED=0\n"
+            "RESULTS=\"$TMP/results.jsonl\"\nBACKEND_KIND=null_blk\n"
+            "BACKEND='null_blk-20MiBps-500000ns-QD1'\n"
+            "NBD_STATS=''\n"
+            "timeout() { return 124; }\n"
+            "swapz_benchmark_read_owned_nullblk_index /tmp/mock-nullb-index || :\n"
+            "swapz_benchmark_cleanup_resources() {\n"
+            '  printf "UNSAFE" > "$TMP/attempted-cleanup-after-index-timeout"\n'
+            "  return 0\n"
+            "}\n"
+            + self._cleanup_function() + "\n" +
+            "false\ncleanup\n")
+        result = bash(code)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(cleanup_trace.exists(), "uncertain backing was powered off")
+        self.assertTrue(marker.is_file())
+        record = json.loads(marker.read_text())
+        self.assertEqual(record["state"], "QUARANTINED_NO_AUTOMATIC_CLEANUP")
+        self.assertFalse(record["target_active_source_reported"])
+        self.assertFalse(record["live_io_started_source_reported"])
+        self.assertIn("index read failed", record["reason"])
+
+    def test_runner_calls_index_helper_directly_in_parent_shell(self):
+        import re
+        self.assertRegex(
+            self.script,
+            r'swapz_benchmark_read_owned_nullblk_index "\$NULL_CFG/index" \|\| return 1')
+        self.assertIn('index="$NULLBLK_INDEX"', self.script)
+        self.assertNotRegex(self.script, r'index=\$\(swapz_benchmark_bounded')
+
     def test_only_correct_uuid_allows_target_removal(self):
         for observed, rc, expected in (
             ("SWAPZ-V22-our-case", 0, 0),
