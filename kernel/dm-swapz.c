@@ -46,6 +46,12 @@
 #define SWAPZ_BLOCK_BYTES PAGE_SIZE
 #define SWAPZ_BLOCK_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+/*
+ * Opt-in bounded lookahead uses at most 16 source blocks and 128 surviving
+ * records.  Any larger or less favorable batch takes the V2.2 ordered path.
+ */
+#define SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS 16U
+#define SWAPZ_BESTFIT4_MAX_RECORDS 128U
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U /* 'SPWZ' little-endian on disk */
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_EMPTY_BLOCK U32_MAX
@@ -153,6 +159,15 @@ enum swapz_stream_buffer_state {
 };
 
 struct swapz_context;
+
+/* Worker-owned coordinates into the original, immutable batch snapshot. */
+struct swapz_bestfit4_record {
+	u16 source_block;
+	u16 length;
+	u8 source_record;
+	bool raw;
+	bool claimed;
+};
 
 struct swapz_stream_buffer {
 	struct swapz_context *context;
@@ -269,6 +284,15 @@ struct swapz_context {
 	void *compressed_buffer;
 	void *pack_buffer;
 	void *repack_buffer;
+	/*
+	 * Optional 4 KiB best-fit research mode.  Preallocated once at ctr, only
+	 * the ordered worker accesses these snapshots.  Callbacks cannot touch
+	 * either the scratch buffers or mutable descriptor metadata.
+	 */
+	void *bestfit4_source_data;
+	struct swapz_write_batch_block *bestfit4_source_blocks;
+	struct swapz_bestfit4_record *bestfit4_records;
+	bool bestfit4_enabled;
 	struct swapz_write_batch_block repack_block;
 	struct swapz_write_batch_block compact_source_block;
 	void *lz4_workmem;
@@ -2938,6 +2962,9 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       swapz_strategy_name(context->strategy),
 		       (unsigned int)(context->max_batch_blocks *
 			      (SWAPZ_BLOCK_BYTES / 1024)));
+		/* Keep the validated default table output byte-for-byte unchanged. */
+		if (context->bestfit4_enabled)
+			DMEMIT(" bestfit4");
 		break;
 	case STATUSTYPE_IMA:
 		break;
@@ -2990,6 +3017,9 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->pack_buffer);
 	if (context->repack_buffer)
 		free_page((unsigned long)context->repack_buffer);
+	vfree(context->bestfit4_source_data);
+	kvfree(context->bestfit4_source_blocks);
+	kvfree(context->bestfit4_records);
 	vfree(context->stream_buffers[0].data);
 	vfree(context->stream_buffers[1].data);
 	kvfree(context->stream_buffers[0].blocks);
@@ -3048,8 +3078,8 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	u32 index;
 	int error;
 
-	if (argc < 1 || argc > 3) {
-		target->error = "Usage: <backing> [immediate|opportunistic|staged] [batch_kib]";
+	if (argc < 1 || argc > 4) {
+		target->error = "Usage: <backing> [immediate|opportunistic|staged] [batch_kib] [ordered4|bestfit4]";
 		return -EINVAL;
 	}
 	if (target->len % SWAPZ_BLOCK_SECTORS) {
@@ -3100,6 +3130,22 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 
 	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
 		context->max_batch_blocks = 1;
+
+	if (argc >= 4) {
+		if (!strcmp(argv[3], "bestfit4"))
+			context->bestfit4_enabled = true;
+		else if (strcmp(argv[3], "ordered4")) {
+			target->error = "Unknown swapz 4 KiB packing policy";
+			error = -EINVAL;
+			goto fail;
+		}
+	}
+	if (context->bestfit4_enabled &&
+	    context->max_batch_blocks > SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS) {
+		target->error = "bestfit4 requires a batch of at most 64 KiB";
+		error = -EINVAL;
+		goto fail;
+	}
 
 	error = dm_get_device(target, argv[0], dm_table_get_mode(target->table),
 			      &context->backing);
@@ -3220,6 +3266,25 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		target->error = "Cannot allocate preallocated I/O buffers";
 		error = -ENOMEM;
 		goto fail;
+	}
+
+	if (context->bestfit4_enabled) {
+		/* Bounded, preallocated worker scratch; no allocations on swap I/O. */
+		context->bestfit4_source_data = vzalloc(
+			(size_t)context->max_batch_blocks * SWAPZ_BLOCK_BYTES);
+		context->bestfit4_source_blocks = kvcalloc(
+			context->max_batch_blocks,
+			sizeof(*context->bestfit4_source_blocks), GFP_KERNEL);
+		context->bestfit4_records = kvcalloc(
+			SWAPZ_BESTFIT4_MAX_RECORDS,
+			sizeof(*context->bestfit4_records), GFP_KERNEL);
+		if (!context->bestfit4_source_data ||
+		    !context->bestfit4_source_blocks ||
+		    !context->bestfit4_records) {
+			target->error = "Cannot allocate bounded bestfit4 scratch";
+			error = -ENOMEM;
+			goto fail;
+		}
 	}
 
 	for (index = 0; index < ARRAY_SIZE(context->stream_buffers); ++index) {
