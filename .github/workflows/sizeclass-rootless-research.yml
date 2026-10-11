@@ -1,0 +1,72 @@
+name: Sizeclass rootless research
+
+on:
+  push:
+    branches:
+      - research/sizeclass-adaptive-extent-benchmark
+  pull_request:
+    paths:
+      - research/sizeclass/bench/**
+      - .github/workflows/sizeclass-rootless-research.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact workflow commit
+        uses: actions/checkout@v4
+
+      - name: Test syntax and adversarial rootless cases
+        run: |
+          python3 -m compileall -q research/sizeclass/bench
+          python3 -B research/sizeclass/bench/test_model.py -v
+
+      - name: Run equal-trace and GC-aware benchmark matrix
+        run: |
+          python3 -B research/sizeclass/bench/run.py --trace fio50 --operations 1536 --window 16 --working-set 384 --segments 6 --seed 12345 > fio50-w16.json
+          python3 -B research/sizeclass/bench/run.py --trace fio75 --operations 1536 --window 16 --working-set 384 --segments 6 --seed 12345 > fio75-w16.json
+          python3 -B research/sizeclass/bench/run.py --trace hotcold --operations 3072 --window 16 --working-set 256 --segments 4 --seed 12345 > hotcold-w16.json
+          python3 -B research/sizeclass/bench/run.py --trace fio50 --operations 1536 --window 32 --working-set 384 --segments 8 --seed 12345 > fio50-w32.json
+
+      - name: Validate deterministic results without implying kernel speedup
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          for filename in (
+              'fio50-w16.json',
+              'fio75-w16.json',
+              'hotcold-w16.json',
+              'fio50-w32.json',
+          ):
+              output = json.loads(Path(filename).read_text(encoding='utf-8'))
+              assert output['comparison_valid'], filename
+              assert all(row['failed_logical_writes'] == 0 and
+                         row['failed_gc_runs'] == 0 for row in output['results']), filename
+              assert len({row['completed_logical_bytes'] for row in output['results']}) == 1, filename
+              print(filename, [(row['policy'], row['net_reduction'])
+                               for row in output['results']])
+
+          fio50 = json.loads(Path('fio50-w16.json').read_text(encoding='utf-8'))
+          baseline, adaptive = fio50['results'][0], fio50['results'][-1]
+          assert baseline['net_reduction'] == 1.0
+          assert adaptive['net_reduction'] > baseline['net_reduction']
+          assert adaptive['upper_read_4k_blocks'] >= baseline['upper_read_4k_blocks']
+          PY
+
+      - name: Retain rootless JSON evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sizeclass-rootless-model
+          path: |
+            fio50-w16.json
+            fio75-w16.json
+            hotcold-w16.json
+            fio50-w32.json
+          if-no-files-found: error
+          retention-days: 14
