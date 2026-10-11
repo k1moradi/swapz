@@ -11,9 +11,9 @@ reported exact UUID/table/backing verification, zero pending counters,
 ordinary target and loop removal, and ordinary module unload, **without a
 reboot**. The original quarantine record remains forensic evidence, not a
 smoke PASS. **Before the next run**, recheck the absence of those old
-resources and resolve the independently observed machine-ID digest
-discrepancy; keep the exact source/host/module preflight checks.
-This source-only patch does not inspect or mutate the host.
+resources; the previously reported machine-ID digest discrepancy was
+resolved by hashing the trimmed machine-ID value. Keep exact source/host/module
+preflight checks. This source-only fix does not inspect or mutate the host.
 
 The corrected parser accepts the kernel's actual `STATUSTYPE_INFO` layout:
 `strategy=staged`, `batch_kib=64`, signed `inflight_id=-1/0/1`,
@@ -83,10 +83,10 @@ critical host activity.
 
 ### Bare-metal read-only preparation
 
-The development PC previously reported kernel `7.0.0-38-generic`; the
-source-tested host module digest from that specific build was
-`03e2437bb819d1b655720e3c9053a66d95cffa6d837cf87ea777a2dd03babc1c`.
-Re-verify both values **locally**; never infer a newly built module digest.
+The development PC previously reported kernel `7.0.0-38-generic`.
+Re-verify the running kernel and the actual selected `.ko` **locally**.
+Historical module digests are not reusable without exact file/provenance
+verification, even when the kernel source blob is unchanged.
 
 Read-only host identity for operator verification:
 
@@ -126,12 +126,16 @@ test-owned RAM-backed loop/DM resources.
 Example for an already verified development PC:
 
 ```bash
-sudo bash /root/swapz-smoke/smoke-pr22-source/tests/runtime/virtual-smoke.sh \
+SOURCE_ROOT='/root/swapz-smoke/<protected-current-smoke-checkout>'
+SOURCE_SHA='<exact-current-smoke-commit>'
+MODULE_PATH="$SOURCE_ROOT/kernel/dm-swapz.ko"
+MODULE_SHA256='<sha256sum-of-verified-selected-module>'
+sudo bash "$SOURCE_ROOT/tests/runtime/virtual-smoke.sh" \
   --run-live --host-id devpc-inspiron1564linux \
-  --host-machine-id-sha256 <trimmed-machine-id-sha256> \
-  --source-sha <exact-checked-out-commit> \
-  --module /root/swapz-smoke/smoke-pr22-source/kernel/dm-swapz.ko \
-  --module-sha256 <verified-selected-module-sha256>
+  --host-machine-id-sha256 21e84737f676800d84b35bea7ea4095c247a1d4c4823648da87e013355b3b557 \
+  --source-sha "$SOURCE_SHA" \
+  --module "$MODULE_PATH" \
+  --module-sha256 "$MODULE_SHA256"
 ```
 
 No reboot, forced removal or physical-device storage access is performed
@@ -153,8 +157,8 @@ host smoke deliberately cannot reach `/dev/sdb1`.
 
 
 `tests/runtime/virtual-smoke.sh` is a narrowly scoped loaded-kernel check for
-a **specified disposable Linux VM**. It is not a benchmark and its
-rootless mocks do not qualify a loaded kernel. No live invocation was made as
+a **specified disposable Linux VM or verified development PC**. It is not a
+benchmark and its rootless mocks do not qualify a loaded kernel. No live invocation was made as
 part of this change.
 
 ## What the live smoke does
