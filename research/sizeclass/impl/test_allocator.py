@@ -1,5 +1,6 @@
 """Deterministic, rootless Issue #33 allocator tests (no lower I/O)."""
 import dataclasses
+import random
 import unittest
 
 from allocator import BLOCK_BYTES, CorruptExtentError, ExtentAllocator
@@ -215,6 +216,42 @@ class AllocatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             allocator.write(0, b'a' * 4097)
 
+
+    def test_seeded_mixed_overwrites_and_out_of_order_failures(self):
+        # Every assertion uses modeled completed lower I/O, not future writes.
+        for block_count in (1, 2, 4, 16):
+            for packing in ('sequential', 'best_fit'):
+                with self.subTest(block_count=block_count, packing=packing):
+                    generator = random.Random(0x5A17)
+                    allocator = ExtentAllocator(block_count=block_count, packing=packing,
+                                                max_staged_records=8)
+                    for _ in range(50):
+                        slot = generator.randrange(10)
+                        length = generator.choice((200, 1048, 1600, 2072, 2200, 3500))
+                        allocator.write(slot, generator.randbytes(length))
+                    allocator.flush()
+                    extents = list(allocator.in_flight.values())
+                    generator.shuffle(extents)
+                    winners = {}
+                    successful_tickets = 0
+                    for index, extent in enumerate(extents):
+                        success = index % 5 != 0
+                        partial = (4096 if extent.physical_bytes >= 8192 else 0)
+                        allocator.complete(extent.identifier, success=success,
+                                           completed_bytes=extent.physical_bytes if success else partial)
+                        for ticket, _ in extent.records:
+                            self.assertEqual(ticket.upper_completed, success)
+                            if success:
+                                successful_tickets += 1
+                                previous = winners.get(ticket.logical_page)
+                                if previous is None or ticket.generation > previous.generation:
+                                    winners[ticket.logical_page] = ticket
+                    self.assertEqual(allocator.completed_logical_bytes, successful_tickets * 4096)
+                    self.assertEqual(set(allocator.mapping_table), set(winners))
+                    for slot, ticket in winners.items():
+                        payload, read_blocks = allocator.read(slot)
+                        self.assertEqual(payload, ticket.payload)
+                        self.assertIn(read_blocks, (1, 2))
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
