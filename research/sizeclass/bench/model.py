@@ -343,3 +343,108 @@ class Replay:
         if not self.staged:
             return True
         self.forced_flushes += 1
+        pending = list(self.staged)
+        packed = choose_pack(pending, self.policy, read_penalty_bytes=self.read_penalty_bytes)
+        success = True
+        for blocks, group in packed:
+            extent = self._write_extent(group, blocks, gc=False)
+            if extent is None:
+                # Bounded synchronous cleaner: once only, with no recursive GC.
+                if self.collect_one():
+                    extent = self._write_extent(group, blocks, gc=False)
+            if extent is None:
+                self.failed_logical_writes += len(group)
+                success = False
+                continue
+            for record, mapping in self._mapping_pairs(extent):
+                old = self.mappings.get(record.slot)
+                if old is None or old.generation < record.generation:
+                    self.mappings[record.slot] = mapping
+                self.completed_logical_bytes += BLOCK_BYTES
+        self.staged.clear()
+        return success
+
+    def collect_one(self, *, fail_after_extents: int | None = None) -> bool:
+        """Relocate a closed victim and publish atomically at the simulation level.
+
+        On failure, original mappings remain authoritative and the victim remains
+        allocated; successfully copied scratch extents are orphaned and charged.
+        """
+        candidates = [segment for segment in self.segments if segment.state == 'closed']
+        if not candidates:
+            return False
+        active = [mapping for mapping in self.mappings.values()]
+        live_by_segment: dict[int, list[Mapping]] = defaultdict(list)
+        for mapping in active:
+            extent = self.media[mapping.extent_id]
+            live_by_segment[extent.segment_id].append(mapping)
+        victim = min(candidates, key=lambda segment:
+                     (sum(mapping.length for mapping in live_by_segment[segment.identifier]),
+                      segment.identifier))
+        survivors = live_by_segment[victim.identifier]
+        if not survivors:
+            self._reclaim_segment(victim)
+            self.gc_victims += 1
+            return True
+        copied = []
+        for index in range(0, len(survivors), self.window):
+            subset = survivors[index:index + self.window]
+            records = []
+            for mapping in subset:
+                payload, blocks = self._read_mapping(mapping)
+                self.gc_read_blocks += blocks
+                records.append(Record(mapping.slot, mapping.generation, payload, mapping.raw))
+            for extent_blocks, group in choose_pack(records, self.policy,
+                                                    read_penalty_bytes=self.read_penalty_bytes):
+                if fail_after_extents is not None and len(copied) >= fail_after_extents:
+                    self.failed_gc_runs += 1
+                    return False
+                new_extent = self._write_extent(group, extent_blocks, gc=True,
+                                                excluded_segment=victim.identifier)
+                if new_extent is None:
+                    self.failed_gc_runs += 1
+                    return False
+                copied.extend(self._mapping_pairs(new_extent))
+        # The actual write requests have succeeded; only now can mappings move.
+        for record, new_mapping in copied:
+            old = self.mappings.get(record.slot)
+            if old is None or old.generation != record.generation or self.media[old.extent_id].segment_id != victim.identifier:
+                self.failed_gc_runs += 1
+                return False  # Changes in this single-worker model are unexpected.
+        for record, new_mapping in copied:
+            self.mappings[record.slot] = new_mapping
+        self._reclaim_segment(victim)
+        self.gc_victims += 1
+        return True
+
+    def _reclaim_segment(self, segment: Segment) -> None:
+        if self.current_segment == segment.identifier:
+            raise MediaError('cannot reclaim open segment')
+        if any(mapping.extent_id in segment.extent_ids for mapping in self.mappings.values()):
+            raise MediaError('victim still contains live records')
+        for identifier in segment.extent_ids:
+            self.media.pop(identifier, None)
+        segment.extent_ids.clear()
+        segment.used_blocks = 0
+        segment.state = 'free'
+
+    def report(self) -> dict:
+        physical = self.foreground_write_bytes + self.gc_write_bytes
+        return {
+            'policy': self.policy,
+            'completed_logical_bytes': self.completed_logical_bytes,
+            'foreground_physical_bytes': self.foreground_write_bytes,
+            'foreground_submitted_bytes': self.foreground_submitted_bytes,
+            'gc_physical_bytes': self.gc_write_bytes,
+            'gc_submitted_bytes': self.gc_submitted_bytes,
+            'net_physical_bytes': physical,
+            'net_reduction': round(self.completed_logical_bytes / physical, 6) if physical else None,
+            'gc_read_4k_blocks': self.gc_read_blocks,
+            'upper_read_4k_blocks': self.upper_read_blocks,
+            'upper_read_operations': self.upper_reads,
+            'failed_logical_writes': self.failed_logical_writes,
+            'failed_gc_runs': self.failed_gc_runs,
+            'gc_victims': self.gc_victims,
+            'free_segments': self._free_segments(),
+            'allocated_blocks': sum(segment.used_blocks for segment in self.segments),
+        }
