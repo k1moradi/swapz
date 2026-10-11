@@ -112,6 +112,9 @@ def compare(path: Path) -> dict[str, object]:
     control = cases[0]
     for case in cases:
         case["relative_to_immediate"] = {
+            # Both tails use the same Immediate baseline and exact CLAT samples.
+            "exact_read_p95_ratio": case["exact_read_p95_ms"] /
+                                    control["exact_read_p95_ms"],
             "exact_read_p99_ratio": case["exact_read_p99_ms"] /
                                     control["exact_read_p99_ms"],
             "upper_write_mib_s_ratio": case["upper_write_mib_s"] /
@@ -148,9 +151,9 @@ def markdown(report: dict[str, object]) -> str:
         "Source-reported completed sweep; NO QUALIFIED WINNER.",
         "",
         "| Policy (batch) | Completed reads | Exact p95 (ms) | Exact p99 (ms) | "
-        "p99 ratio | Upper write (MiB/s) | Upper ratio | Lower write I/Os | "
+        "p95 ratio | p99 ratio | Upper write (MiB/s) | Upper ratio | Lower write I/Os | "
         "Lower sectors | I/O ratio vs Immediate | Sector ratio vs Immediate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for c in report["cases"]:
         ratios = c["relative_to_immediate"]
@@ -158,6 +161,7 @@ def markdown(report: dict[str, object]) -> str:
             f"| {c['strategy'].title()} ({c['batch_kib']} KiB) | "
             f"{c['observed_reads']} | {c['exact_read_p95_ms']:.3f} | "
             f"{c['exact_read_p99_ms']:.3f} | "
+            f"{ratios['exact_read_p95_ratio']:.3f}x | "
             f"{ratios['exact_read_p99_ratio']:.3f}x | "
             f"{c['upper_write_mib_s']:.2f} | "
             f"{ratios['upper_write_mib_s_ratio']:.3f}x | "
