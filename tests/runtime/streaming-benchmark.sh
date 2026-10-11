@@ -218,28 +218,37 @@ setup_nullblk() {
   swapz_benchmark_bounded "null_blk module provisioning" 15s modprobe null_blk nr_devices=0 >/dev/null 2>&1 || return 1
   [[ -d /sys/kernel/config ]] || return 1
   if ! mountpoint -q /sys/kernel/config; then
-    mount -t configfs none /sys/kernel/config || return 1
+    swapz_benchmark_bounded "configfs mount" 12s mount -t configfs none /sys/kernel/config || return 1
     CONFIGFS_MOUNTED_BY_US=1
   fi
   [[ -d /sys/kernel/config/nullb ]] || return 1
-  mkdir "$NULL_CFG" || return 1
+  swapz_benchmark_bounded "null_blk config allocation" 12s mkdir "$NULL_CFG" || return 1
   for attr in size memory_backed irqmode completion_nsec hw_queue_depth max_sectors mbps power; do
     [[ -e "$NULL_CFG/$attr" ]] || return 1
   done
-  echo 256 >"$NULL_CFG/size"
-  echo 1 >"$NULL_CFG/memory_backed"
-  echo 2 >"$NULL_CFG/irqmode"
-  echo "$LATENCY_NS" >"$NULL_CFG/completion_nsec"
-  echo 1 >"$NULL_CFG/hw_queue_depth"
-  echo 2048 >"$NULL_CFG/max_sectors"
-  echo "$BANDWIDTH" >"$NULL_CFG/mbps"
+    swapz_benchmark_bounded "null_blk config size" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 256 "$NULL_CFG/size"
+    swapz_benchmark_bounded "null_blk config memory_backed" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/memory_backed"
+    swapz_benchmark_bounded "null_blk config irqmode" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2 "$NULL_CFG/irqmode"
+    swapz_benchmark_bounded "null_blk config completion_nsec" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$LATENCY_NS" "$NULL_CFG/completion_nsec"
+    swapz_benchmark_bounded "null_blk config hw_queue_depth" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/hw_queue_depth"
+    swapz_benchmark_bounded "null_blk config max_sectors" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2048 "$NULL_CFG/max_sectors"
+    swapz_benchmark_bounded "null_blk config mbps" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BANDWIDTH" "$NULL_CFG/mbps"
   if [[ -e "$NULL_CFG/discard" ]]; then
-    echo "$BENCH_DISCARD" >"$NULL_CFG/discard"
+      swapz_benchmark_bounded "null_blk config discard" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BENCH_DISCARD" "$NULL_CFG/discard"
   elif (( BENCH_DISCARD )); then
     echo "ERROR: null_blk discard requested but configfs has no discard control" >&2
     return 1
   fi
-  echo 1 >"$NULL_CFG/power"
+    swapz_benchmark_bounded "null_blk config power" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power"
   local index candidate
   index=$(cat "$NULL_CFG/index")
   BACKING=""
@@ -380,9 +389,13 @@ run_case() {
   TARGET_CANDIDATE=0
   # Prove the throttled fixture cannot issue a full-segment lower DISCARD
   # before any write/GC can reach it.
-  if (( ! BENCH_DISCARD )) && ! dmsetup status "$TARGET" | grep -q 'lower_discard=off'; then
-    echo "ERROR: benchmark backend unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
-    return 1
+  if (( ! BENCH_DISCARD )); then
+    local early_status
+    early_status=$(swapz_benchmark_bounded "owned DM discard status" 5s dmsetup status "$TARGET") || return 1
+    if ! grep -q 'lower_discard=off' <<<"$early_status"; then
+      echo "ERROR: benchmark backend unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
+      return 1
+    fi
   fi
   IO_STARTED=1
   prefill_cold "$path"
