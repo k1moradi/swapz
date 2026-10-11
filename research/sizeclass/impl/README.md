@@ -11,7 +11,7 @@ python3 -B research/sizeclass/impl/test_allocator.py -v
 python3 -m compileall -q research/sizeclass/impl
 ```
 
-Tested source files: `allocator.py`, `wire.py`, `test_allocator.py` at Git blob SHAs `a3dc109be24a85769548b02473c76fa8583f3537`, `30ea5010600b8d76ef6ac1f9952329ee8cee498c`, `f0b73994204267296772d9d73e7a6d33a62b319d`. Local rootless run: **19 tests passed**, seed `0x5A17` for mixed-overwrite replay. No CI run or independent external-host reproduction is claimed for this branch. The historical `legacy/` scripts were not modified; their five original defect tests remain deliberately red.
+Tested source files: `allocator.py`, `wire.py`, `test_allocator.py` at Git blob SHAs `30cd5f008c5fd6e9f12e9980cdb2ac0e4c4c4c77`, `30ea5010600b8d76ef6ac1f9952329ee8cee498c`, `9b111eda1af160d83dcb45591fb6b31767ef5457`. Local rootless run: **19 tests passed**, seed `0x5A17` for mixed-overwrite replay. No CI run or independent external-host reproduction is claimed for this branch. The historical `legacy/` scripts were not modified; their five original defect tests remain deliberately red.
 
 ## Modeled extent format
 
