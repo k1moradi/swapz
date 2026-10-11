@@ -76,6 +76,25 @@ class AllocatorTests(unittest.TestCase):
         self.assertEqual(allocator.read(2).payload, b'C' * 1000)
         self.assertEqual(allocator.completed_logical_bytes, 2 * BLOCK_BYTES)
 
+    def test_replacing_staged_raw_page_releases_extent_window(self):
+        allocator = SizeClassAllocator(2, max_staged_extents=1)
+        allocator.stage(3, 1, b'R' * BLOCK_BYTES)
+        allocator.stage(3, 2, b'S' * BLOCK_BYTES)
+        self.assertEqual(len(allocator.staged), 1)
+        self.assertEqual(len(allocator.staged[0].records), 1)
+        commit_all(allocator)
+        self.assertEqual(allocator.read(3).payload, b'S' * BLOCK_BYTES)
+
+    def test_corrupted_raw_mapping_fails_closed(self):
+        allocator = SizeClassAllocator(1)
+        allocator.stage(1, 1, b'R' * BLOCK_BYTES)
+        commit_all(allocator)
+        original = allocator.committed[1]
+        allocator.committed[1] = Mapping(original.extent_id, original.generation,
+                                         1, BLOCK_BYTES - 1, original.checksum, True)
+        with self.assertRaises(CorruptExtent):
+            allocator.read(1)
+
     def test_raw_fallback_never_pads_compressed_data(self):
         allocator = SizeClassAllocator(2)
         with self.assertRaises(AllocatorError):
