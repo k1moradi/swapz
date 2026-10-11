@@ -54,6 +54,7 @@ class ThreeCaseScreenTests(unittest.TestCase):
         (self.root / sidecar).write_bytes(content)
         return {
             "backend": mod.BACKEND, "strategy": strategy, "batch_kib": batch,
+            "write_qd": 64,
             "logical_write_bytes": 16 * MIB, "upper_write_mib_s": 123.0,
             "logical_flush_window_mib_s": 8.0,
             "lower_counter_window_mib_s": 1.0,
@@ -152,6 +153,22 @@ class ThreeCaseScreenTests(unittest.TestCase):
         self.save()
         with self.assertRaisesRegex(ValueError, "fewer than 1000"):
             mod.check_results(self.path)
+
+    def test_wrong_or_missing_writer_queue_depth_rejected(self):
+        # The runner emits writer iodepth from fio's actual job options.
+        # A mistuned QD1 run must not qualify as the QD64 fast screen.
+        original = self.rows[1]["write_qd"]
+        for unexpected in (1, 0, 65, "64", True, None):
+            with self.subTest(observed_qd=unexpected):
+                self.rows[1]["write_qd"] = unexpected
+                self.save()
+                with self.assertRaisesRegex(ValueError, "expected writer QD64"):
+                    mod.check_results(self.path)
+        self.rows[1].pop("write_qd")
+        self.save()
+        with self.assertRaisesRegex(ValueError, "expected writer QD64"):
+            mod.check_results(self.path)
+        self.rows[1]["write_qd"] = original
 
     def test_wrong_backend_or_kernel_status_fails(self):
         for key, value in (
