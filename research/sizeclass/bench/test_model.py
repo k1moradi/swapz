@@ -181,6 +181,17 @@ class OwnershipAndGCTests(unittest.TestCase):
         self.assertGreater(replay.gc_write_bytes, 0)
         self.assertEqual(replay.failed_gc_runs, 1)
 
+    def test_gc_failure_injection_counts_extents_not_records(self):
+        replay = Replay('fixed8', segment_count=5, reserve_segments=1, window=16)
+        for slot in range(387):
+            replay.stage(slot, b'A' * 2072)
+        replay.flush()
+        self.assertEqual(replay.segments[0].state, 'closed')
+        originals = dict(replay.mappings)
+        self.assertFalse(replay.collect_one(fail_after_extents=2))
+        self.assertEqual(replay.mappings, originals)
+        self.assertEqual(replay.gc_write_bytes, 2 * 8192)
+
     def test_failed_extent_preserves_committed_mapping(self):
         replay = Replay('fixed8', window=1)
         replay.stage(1, b'A' * 2072)
