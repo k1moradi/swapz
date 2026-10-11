@@ -134,7 +134,9 @@ cleanup() {
     if (( REPORT_COMPLETE != 1 || CASES_COMPLETED < 1 )); then
       echo "ERROR: benchmark reporting did not finish; no finalization marker." >&2
       rc=1
-    elif ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-finalize.py"         --write --results "$RESULTS" --expected-cases "$CASES_COMPLETED"         --backend "$BACKEND" >/dev/null; then
+    elif ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-finalize.py" \
+        --write --results "$RESULTS" --expected-cases "$CASES_COMPLETED" \
+        --backend "$BACKEND" >/dev/null; then
       echo "ERROR: could not pin completed sweep to teardown; preserving $TMP" >&2
       rc=1
     fi
@@ -147,11 +149,15 @@ cleanup() {
     fi
     if [[ "$KEEP_ARTIFACTS" == 1 ]]; then
       echo "DIAGNOSTIC_ARTIFACTS=$TMP (UNQUALIFIED; no independent drain/quiescence attestation)"
-    else
-      rm -rf "$TMP"
+    elif ! rm -rf "$TMP"; then
+      echo "ERROR: test artifact cleanup failed; run cannot claim success." >&2
+      rc=1
     fi
+  fi
+  if (( rc == 0 )); then
+    echo "V2.2 streaming single-sweep diagnostics: PASS (OWNED RESOURCES REMOVED; NO QUALIFIED WINNER)"
   else
-    echo "Benchmark exited with status $rc; diagnostic artifacts preserved at $TMP" >&2
+    echo "Benchmark exited with status $rc; no finalized successful sweep claimed; inspect $TMP if retained." >&2
   fi
   exit "$rc"
 }
@@ -529,5 +535,5 @@ done
 # independent I/O-drain and p99 sample/repetition evidence explicitly.
 python3 "$ROOT/tests/runtime/streaming-benchmark-report.py" --results "$RESULTS"
 
-echo "V2.2 streaming single-sweep diagnostics: PASS (NO QUALIFIED WINNER)"
+echo "V2.2 streaming diagnostics: reporter complete; resource teardown still pending"
 REPORT_COMPLETE=1
