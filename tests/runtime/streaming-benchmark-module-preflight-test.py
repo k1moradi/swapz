@@ -128,7 +128,7 @@ class ReadOnlyModuleAdmissionTests(unittest.TestCase):
 
     def test_benchmark_shell_places_gate_before_fixture_allocation(self):
         source = BENCH.read_text(encoding="utf-8")
-        gate = source.index('"streaming-benchmark-module-preflight.py"')
+        gate = source.index('tests/runtime/streaming-benchmark-module-preflight.py"')
         first_tmp = source.index("TMP=$(mktemp")
         setup = source.index("setup_nullblk()")
         self.assertLess(gate, first_tmp)
