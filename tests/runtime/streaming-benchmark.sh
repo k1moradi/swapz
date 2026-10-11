@@ -86,7 +86,7 @@ if ! FIO_VERSION=$(fio --version 2>/dev/null) ||
   exit 4
 fi
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in awk blockdev cmp dd dmsetup fio modinfo modprobe python3 git systemd-detect-virt; do
+for tool in awk blockdev cmp dd dmsetup fio modinfo modprobe python3 git systemd-detect-virt timeout; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 # Refuse a missing/unapproved VM scope BEFORE module inspection, tmpfs image,
@@ -133,6 +133,12 @@ BACKING_KNAME=""
 BACKEND=""
 CONFIGFS_MOUNTED_BY_US=0
 RESULTS="$TMP/results.jsonl"
+# Once a mutating command has uncertain completion, do NOT attempt automatic
+# teardown. A real PC can hang even after a userspace timeout is reported.
+BENCH_QUARANTINE=0
+BENCH_QUARANTINE_REASON=""
+TARGET_CANDIDATE=0
+IO_STARTED=0
 TARGET_ACTIVE=0
 CASES_COMPLETED=0
 REPORT_COMPLETE=0
@@ -141,15 +147,28 @@ NBD_READY="$TMP/nbd.ready"
 NBD_STATS="$TMP/nbd.stats.json"
 NBD_LOG="$TMP/nbd-server.log"
 
-# Teardown is deliberately a separate, mock-testable helper. A failed normal
-# dmsetup removal must NEVER power off the backing null_blk device.
+# Both helpers are independently rootless-testable. A failed or timed-out
+# DM removal must NEVER power off the backing null_blk device.
+source "$ROOT/tests/runtime/streaming-benchmark-quarantine.sh"
 source "$ROOT/tests/runtime/streaming-benchmark-teardown.sh"
 
 cleanup() {
   local rc=$?
   trap - EXIT
   set +e
+  # An unexpected exit after DM target creation or while its creation is
+  # uncertain preserves *everything*, even if ordinary removal might work.
+  # This avoids destroying forensic evidence or powering down a backing
+  # with an unresolved in-flight kernel request.
+  if (( BENCH_QUARANTINE || (rc != 0 && (TARGET_ACTIVE || TARGET_CANDIDATE || IO_STARTED)) )); then
+    local reason="$BENCH_QUARANTINE_REASON"
+    [[ -n "$reason" ]] || reason="interrupted/failed with active or candidate target (rc=$rc)"
+    swapz_benchmark_record_quarantine "$reason" "$(( rc == 0 ? 1 : rc ))" || true
+    echo "BENCHMARK_QUARANTINED: no automatic DM/null_blk/configfs cleanup; preserve $TMP and inspect ownership." >&2
+    exit 1
+  fi
   if ! swapz_benchmark_cleanup_resources; then
+    swapz_benchmark_record_quarantine "ordinary owned-resource teardown failed; ownership uncertain" "$(( rc == 0 ? 1 : rc ))" || true
     echo "ERROR: benchmark cleanup incomplete; preserving the test DM target, backing device, and $TMP for diagnosis." >&2
     if (( rc == 0 )); then
       rc=1
@@ -192,33 +211,44 @@ cleanup() {
   exit "$rc"
 }
 trap cleanup EXIT
+trap 'BENCH_QUARANTINE=1; BENCH_QUARANTINE_REASON="operator SIGINT during benchmark"; exit 130' INT
+trap 'BENCH_QUARANTINE=1; BENCH_QUARANTINE_REASON="operator SIGTERM during benchmark"; exit 143' TERM
 
 setup_nullblk() {
-  modprobe null_blk nr_devices=0 >/dev/null 2>&1 || return 1
+  swapz_benchmark_bounded "null_blk module provisioning" 15s modprobe null_blk nr_devices=0 >/dev/null 2>&1 || return 1
   [[ -d /sys/kernel/config ]] || return 1
   if ! mountpoint -q /sys/kernel/config; then
-    mount -t configfs none /sys/kernel/config || return 1
+    swapz_benchmark_bounded "configfs mount" 12s mount -t configfs none /sys/kernel/config || return 1
     CONFIGFS_MOUNTED_BY_US=1
   fi
   [[ -d /sys/kernel/config/nullb ]] || return 1
-  mkdir "$NULL_CFG" || return 1
+  swapz_benchmark_bounded "null_blk config allocation" 12s mkdir "$NULL_CFG" || return 1
   for attr in size memory_backed irqmode completion_nsec hw_queue_depth max_sectors mbps power; do
     [[ -e "$NULL_CFG/$attr" ]] || return 1
   done
-  echo 256 >"$NULL_CFG/size"
-  echo 1 >"$NULL_CFG/memory_backed"
-  echo 2 >"$NULL_CFG/irqmode"
-  echo "$LATENCY_NS" >"$NULL_CFG/completion_nsec"
-  echo 1 >"$NULL_CFG/hw_queue_depth"
-  echo 2048 >"$NULL_CFG/max_sectors"
-  echo "$BANDWIDTH" >"$NULL_CFG/mbps"
+    swapz_benchmark_bounded "null_blk config size" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 256 "$NULL_CFG/size"
+    swapz_benchmark_bounded "null_blk config memory_backed" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/memory_backed"
+    swapz_benchmark_bounded "null_blk config irqmode" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2 "$NULL_CFG/irqmode"
+    swapz_benchmark_bounded "null_blk config completion_nsec" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$LATENCY_NS" "$NULL_CFG/completion_nsec"
+    swapz_benchmark_bounded "null_blk config hw_queue_depth" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/hw_queue_depth"
+    swapz_benchmark_bounded "null_blk config max_sectors" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 2048 "$NULL_CFG/max_sectors"
+    swapz_benchmark_bounded "null_blk config mbps" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BANDWIDTH" "$NULL_CFG/mbps"
   if [[ -e "$NULL_CFG/discard" ]]; then
-    echo "$BENCH_DISCARD" >"$NULL_CFG/discard"
+      swapz_benchmark_bounded "null_blk config discard" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ "$BENCH_DISCARD" "$NULL_CFG/discard"
   elif (( BENCH_DISCARD )); then
     echo "ERROR: null_blk discard requested but configfs has no discard control" >&2
     return 1
   fi
-  echo 1 >"$NULL_CFG/power"
+    swapz_benchmark_bounded "null_blk config power" 12s \
+      bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power"
   local index candidate
   index=$(cat "$NULL_CFG/index")
   BACKING=""
@@ -288,10 +318,10 @@ if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 )); then
 fi
 
 STAT="/sys/class/block/$BACKING_KNAME/stat"
-read_stat() { awk '{print $1, $3, $5, $7}' "$STAT"; }
+read_stat() { swapz_benchmark_bounded "lower-device counter snapshot" 5s awk '{print $1, $3, $5, $7}' "$STAT"; }
 
 flush_device() {
-  python3 - "$1" <<'PY'
+  swapz_benchmark_bounded "direct-device fsync drain" 45s python3 - "$1" <<'PY'
 import os, sys
 fd = os.open(sys.argv[1], os.O_RDWR)
 try:
@@ -308,7 +338,7 @@ status_value() {
 
 prefill_cold() {
   local path=$1
-  fio --name=prefill --filename="$path" --offset=0 --size="${COLD_MIB}M" \
+  swapz_benchmark_bounded "cold prefill fio" 120s fio --name=prefill --filename="$path" --offset=0 --size="${COLD_MIB}M" \
       --io_size="${COLD_MIB}M" --rw=write --bs=4k --ioengine=libaio \
       --iodepth=16 --direct=1 --numjobs=1 --refill_buffers=1 \
       --buffer_compress_percentage=0 --randseed=1517953062 \
@@ -320,7 +350,7 @@ prefill_writer_verified() {
   local path=$1 case_id=$2
   # Seed every 4 KiB page with an fio CRC32C header before random overwrites.
   # This setup happens before timed lower-device snapshots and is not measured.
-  fio --name=writer-prefill --filename="$path" \
+  swapz_benchmark_bounded "CRC32C writer prefill fio" 120s fio --name=writer-prefill --filename="$path" \
       --offset="${COLD_MIB}M" --size="$WRITER_BYTES" --rw=write \
       --bs=4k --ioengine=libaio --iodepth=16 --direct=1 \
       --verify=crc32c --do_verify=0 --refill_buffers=1 \
@@ -341,18 +371,33 @@ run_case() {
   read_log_prefix="$TMP/${strategy}-${batch}-reader"
 
   # Never reuse the target name if a prior case failed to remove it.
-  if (( TARGET_ACTIVE )) || dmsetup info "$TARGET" >/dev/null 2>&1; then
-    echo "ERROR: previous benchmark DM target still exists; refusing to start another case." >&2
+  local occupied=0
+  swapz_benchmark_target_exists || occupied=$?
+  if (( occupied == 2 )); then
+    echo "ERROR: previous target ownership could not be verified; stopping safely." >&2
     return 1
   fi
-  dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch"
+  if (( TARGET_ACTIVE || occupied == 0 )); then
+    echo "ERROR: previous benchmark DM target still exists; refusing to start another case." >&2
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="unexpected DM target name collision or earlier target still active"
+    return 1
+  fi
+  TARGET_CANDIDATE=1
+  swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch"
   TARGET_ACTIVE=1
+  TARGET_CANDIDATE=0
   # Prove the throttled fixture cannot issue a full-segment lower DISCARD
   # before any write/GC can reach it.
-  if (( ! BENCH_DISCARD )) && ! dmsetup status "$TARGET" | grep -q 'lower_discard=off'; then
-    echo "ERROR: benchmark backend unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
-    return 1
+  if (( ! BENCH_DISCARD )); then
+    local early_status
+    early_status=$(swapz_benchmark_bounded "owned DM discard status" 5s dmsetup status "$TARGET") || return 1
+    if ! grep -q 'lower_discard=off' <<<"$early_status"; then
+      echo "ERROR: benchmark backend unexpectedly advertises lower DISCARD; refusing unsafe workload." >&2
+      return 1
+    fi
   fi
+  IO_STARTED=1
   prefill_cold "$path"
   prefill_writer_verified "$path" "${strategy}-${batch}"
   # Write and persist a known compressible page before the timed workload.
@@ -362,7 +407,7 @@ import sys
 with open(sys.argv[1], "xb") as out:
     out.write(b"SWAPZ_V22_PROBE_" * 256)
 PY
-  dd if="$sentinel" of="$path" bs=4096 count=1 seek="$SENTINEL_PAGE" \
+  swapz_benchmark_bounded "sentinel direct write" 30s dd if="$sentinel" of="$path" bs=4096 count=1 seek="$SENTINEL_PAGE" \
       oflag=direct conv=notrunc status=none
   flush_device "$path"
 
@@ -410,7 +455,7 @@ EOF
   before=$(read_stat)
   # An elapsed interval cannot use wall-clock time (date can jump).
   start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
-  fio "$fiofile" --output-format=json --output="$json"
+  swapz_benchmark_bounded "timed reader/writer fio" "$(( RUNTIME + 90 ))s" fio "$fiofile" --output-format=json --output="$json"
   # Stop the flush-inclusive physical-counter window immediately after the
   # drain; parsing large CLAT logs beforehand would bias its duration and
   # let background writes progress outside the intended measurement phase.
@@ -426,7 +471,7 @@ EOF
   # every writer page using fio's embedded CRC32C headers. The verification
   # workload is 4 KiB READ ONLY, and cannot alter timed throughput or p99.
   local writer_verify_json="$TMP/${strategy}-${batch}.writer-verify.json"
-  fio --name=writer-verify --filename="$path" --rw=read \
+  swapz_benchmark_bounded "full writer CRC32C readback" 120s fio --name=writer-verify --filename="$path" --rw=read \
       --offset="${COLD_MIB}M" --size="$WRITER_BYTES" --bs=4k \
       --ioengine=libaio --iodepth=1 --direct=1 --verify=crc32c \
       --output-format=json --output="$writer_verify_json"
@@ -434,13 +479,13 @@ EOF
       --fio-json "$writer_verify_json" --expected-bytes "$WRITER_BYTES") || return 1
   # Separately verify a protected page that the timed writer never addresses.
   # Any mismatch fails the entire case; never publish misleading good p99.
-  dd if="$path" of="$sentinel_read" bs=4096 count=1 skip="$SENTINEL_PAGE" \
+  swapz_benchmark_bounded "sentinel direct read" 30s dd if="$path" of="$sentinel_read" bs=4096 count=1 skip="$SENTINEL_PAGE" \
       iflag=direct status=none
   if ! cmp -s "$sentinel" "$sentinel_read"; then
     echo "ERROR: post-drain compressed sentinel readback differs; preserve fixture and diagnostics" >&2
     return 1
   fi
-  status=$(dmsetup status "$TARGET")
+  status=$(swapz_benchmark_bounded "owned DM target status" 5s dmsetup status "$TARGET")
   grep -q "failed=0" <<<"$status"
 
   python3 - "$json" "$before" "$after" "$status" "$strategy" "$batch" \
@@ -537,6 +582,7 @@ PY
   # do not allow an open-count/udev race to abort the sweep and trigger unsafe
   # backing removal in the EXIT trap.
   swapz_benchmark_remove_target || return 1
+  IO_STARTED=0
   (( CASES_COMPLETED += 1 ))
   echo "RESULT strategy=$strategy batch_kib=$batch $(tail -n1 "$RESULTS")"
 }

@@ -299,12 +299,17 @@ class ThreeCaseScreenTests(unittest.TestCase):
                 f"TMP={str(fixture)!r}\n"
                 'RESULTS="$TMP/results.jsonl"\n'
                 "TARGET_ACTIVE=0\n"
+                "TARGET_CANDIDATE=0\n"
+                "IO_STARTED=0\n"
+                "BENCH_QUARANTINE=0\n"
+                "BENCH_QUARANTINE_REASON=''\n"
                 f"KEEP_ARTIFACTS={kept!r}\n"
                 f"REPORT_COMPLETE={int(report_ok)}\n"
                 "CASES_COMPLETED=3\n"
                 f"BACKEND={mod.BACKEND!r}\n"
                 'BACKEND_KIND=null_blk\n'
                 'NBD_STATS=""\n'
+                "swapz_benchmark_record_quarantine() { return 0; }\n"
                 "swapz_benchmark_cleanup_resources() { "
                 f"return {0 if teardown_ok else 1}; }}\n"
                 + function + "\n" +
