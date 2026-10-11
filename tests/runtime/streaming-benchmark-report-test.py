@@ -88,6 +88,47 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn("upper=123.000MiB/s", text)
         self.assertIn("read_count=200", text)
 
+    def test_bandwidth_reduction_and_packing_counters_are_labeled(self):
+        item = row()
+        # 2 MiB lower write for 16 MiB logical writer I/O: 0.125x.
+        item["status"].update({
+            "compressed_pages": "400",
+            "raw_pages": "100",
+            "compressed_payload": "760000",
+        })
+        result = reporter.report(self.read([item]))
+        self.assertIn("lower_bytes_per_logical_byte=0.125", result)
+        self.assertIn("mean_lower_request_kib=204.80", result)
+        self.assertIn("compressed_pages_cumulative=400", result)
+        self.assertIn("raw_pages_cumulative=100", result)
+        self.assertIn("mean_compressed_payload_bytes_cumulative=1900", result)
+        self.assertIn("CUMULATIVE", result)
+        self.assertIn("possible GC or foreign backend I/O", result)
+        self.assertIn("NO QUALIFIED WINNER", result)
+
+    def test_missing_or_corrupt_cumulative_counters_are_not_fabricated(self):
+        clean = reporter.report(self.read([row()]))
+        self.assertIn("compressed_pages_cumulative=unavailable", clean)
+        self.assertIn("mean_compressed_payload_bytes_cumulative=unavailable", clean)
+        for corrupt in (
+            {"compressed_pages": "-1"},
+            {"raw_pages": "NaN"},
+            {"compressed_payload": "1.2"},
+            {"compressed_pages": 1},
+            {"compressed_pages": "0", "compressed_payload": "100"},
+        ):
+            with self.subTest(corrupt=corrupt):
+                item = row()
+                item["status"].update(corrupt)
+                with self.assertRaises(ValueError):
+                    reporter.report(self.read([item]))
+
+    def test_missing_lower_requests_never_divide_by_zero(self):
+        item = row()
+        item["lower_write_ios"] = 0
+        report = reporter.report(self.read([item]))
+        self.assertIn("mean_lower_request_kib=unavailable", report)
+
     def test_exact_reader_summary_is_checked_and_labeled_diagnostic(self):
         item = row()
         item["exact_read_latency"] = {"read_count": 200,
