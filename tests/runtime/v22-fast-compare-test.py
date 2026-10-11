@@ -54,8 +54,10 @@ class ThreeCaseComparison(unittest.TestCase):
     def test_relative_lower_requests_and_sectors_are_not_confused(self):
         self.fixture.rows[1]["lower_write_ios"] = 5
         self.fixture.rows[1]["lower_write_sectors"] = 2048
+        self.fixture.rows[1]["lower_counter_window_mib_s"] = 0.5
         self.fixture.rows[2]["lower_write_ios"] = 20
         self.fixture.rows[2]["lower_write_sectors"] = 8192
+        self.fixture.rows[2]["lower_counter_window_mib_s"] = 2.0
         self.fixture.save()
         self.fixture.seal()
         result = compare.compare(self.results)
