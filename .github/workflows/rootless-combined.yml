@@ -34,6 +34,13 @@ jobs:
           python3 -m py_compile tests/runtime/rootless-workflow-contract-test.py
           timeout 20s python3 -B tests/runtime/rootless-workflow-contract-test.py -v
           echo "ROOTLESS_WORKFLOW_CONTRACT: PASS (mandatory tests and source trigger coverage)"
+      - name: Rootless loaded-kernel smoke lifecycle mocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/virtual-smoke.sh
+          python3 -m py_compile tests/runtime/virtual-smoke.py tests/runtime/virtual-smoke-test.py
+          timeout 25s python3 -B tests/runtime/virtual-smoke-test.py -v
       - name: Record exact joint source identity
         shell: bash
         run: |
