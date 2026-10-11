@@ -43,6 +43,12 @@ class ThreeCaseComparison(unittest.TestCase):
                          ["immediate", "opportunistic", "staged"])
         self.assertEqual([c["exact_read_p95_ms"] for c in result["cases"]],
                          [1.0, 1.1, 1.2])
+        self.assertEqual(
+            [c["relative_to_immediate"]["exact_read_p95_ratio"]
+             for c in result["cases"]], [1.0, 1.1, 1.2])
+        self.assertEqual(
+            [c["relative_to_immediate"]["exact_read_p99_ratio"]
+             for c in result["cases"]], [1.0, 1.1, 1.2])
         self.assertEqual(result["cases"][0]["relative_to_immediate"][
             "lower_write_ios_ratio"], 1.0)
         self.assertIsNone(result["qualified_winner"])
@@ -50,6 +56,7 @@ class ThreeCaseComparison(unittest.TestCase):
         formatted = compare.markdown(result)
         self.assertIn("NO QUALIFIED WINNER", formatted)
         self.assertIn("Exact p95", formatted)
+        self.assertIn("p95 ratio", formatted)
         self.assertIn("Staged (64 KiB)", formatted)
         self.assertIn("source-reported teardown-marker", formatted)
 
@@ -66,9 +73,17 @@ class ThreeCaseComparison(unittest.TestCase):
         row["read_p99_ms"] = 3.0
         self.fixture.save()
         self.fixture.seal()
-        c = compare.compare(self.results)["cases"][0]
-        self.assertEqual(c["exact_read_p95_ms"], 1.0)
-        self.assertEqual(c["exact_read_p99_ms"], 3.0)
+        cases = compare.compare(self.results)["cases"]
+        self.assertEqual(cases[0]["exact_read_p95_ms"], 1.0)
+        self.assertEqual(cases[0]["exact_read_p99_ms"], 3.0)
+        self.assertEqual(cases[0]["relative_to_immediate"]["exact_read_p95_ratio"], 1.0)
+        self.assertEqual(cases[0]["relative_to_immediate"]["exact_read_p99_ratio"], 1.0)
+        # Second case retains a single 1.1 ms bucket. Verify that p99
+        # uses its own 3 ms Immediate baseline rather than the p95 baseline.
+        self.assertAlmostEqual(
+            cases[1]["relative_to_immediate"]["exact_read_p95_ratio"], 1.1)
+        self.assertAlmostEqual(
+            cases[1]["relative_to_immediate"]["exact_read_p99_ratio"], 1.1 / 3.0)
 
     def test_relative_lower_requests_and_sectors_are_not_confused(self):
         self.fixture.rows[1]["lower_write_ios"] = 5
