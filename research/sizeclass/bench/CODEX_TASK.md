@@ -1,0 +1,15 @@
+# Codex independent rootless validation — swapz size-class benchmark
+
+Start autonomously from the draft benchmark PR's **exact head commit**. No confirmation is needed for ordinary rootless tests or narrow build/test fixes. Preserve all host, device, module and source identity checks. This task **does not waive privileged safety authorizations** and authorizes no live kernel test.
+
+1. Verify git origin, branch, exact HEAD SHA, clean checkout, and tested file SHA-256. Do not merge, force-push or touch kernel/, tests/runtime/, or PR #31.
+2. Run `python3 -B research/sizeclass/bench/test_model.py -v`; then run all four deterministic CLI examples in `research/sizeclass/bench/README.md`. Keep complete stdout, stderr, status codes and JSON files.
+3. Independently audit byte-accurate 8+8 experimental serialization and readback, generation mapping authority, CRC32 (not CRC32C), torn-write completed-vs-submitted bytes, 1 MiB segments, finite reserve, nonrecursive GC, liveness selection, rollback/quarantine after relocation failure, sibling preservation, 4 KiB read blocks and bounded flush windows.
+4. Run seeded edge and stress cases: uniform 2072 bytes and 1048 bytes, clustered 8×2200 + 8×1600, mixed, skewed hot/cold overwrites, W8/W16/W32, 4/8/16/64 KiB, raw fallback, 64-record descriptor cap, generation rollover, repeated in-flight logical slots, partial writes, corrupted metadata and checksum, reserve exhaustion. Distinguish unsupported scenarios from passing ones; do not weaken tests.
+5. Compare the exact same operations, flush points, physical capacity, reserve and read-sample seeds across policies. Require matching completed logical bytes, zero unacknowledged success and exact foreground+GC totals. The CLI exits 2 on noncomparable cases: investigate rather than declaring a winner.
+6. May repair **minor research Python compile warnings, test harness defects, and narrow correctness bugs**. Do so in an isolated validation branch with tests and reviewable commits/draft PR; no API renames, kernel changes, altered baselines, misleading benchmark data or silent success claims.
+7. Report exact source HEAD, file hashes, environment, commands, exit codes, per-case JSON, limitations, and a verdict on whether a *separately reviewed kernel prototype* is justified. Distinguish geometry, rootless simulation and real loaded-kernel results.
+
+For **future live testing only**, require a separately reviewed kernel implementation PR and explicit authorization of its exact source, module, host and independently owned disposable RAM-backed null_blk fixture. Mandatory source/module/host preflights and ordinary owned-device teardown must remain enabled. Never operate on /dev/sdb1, /swapfile or production swap; never force/defer DM remove, reboot, or unload uncertain modules. Quarantine ambiguous resources.
+
+Posting this task to GitHub does not itself launch Codex. The agent must be started through its own user-facing task/agent interface.
