@@ -35,6 +35,40 @@ GOOD_STATUS = {
     "buf1_blocks": 0,
 }
 
+# The actual STATUSTYPE_INFO DMEMIT layout in kernel/dm-swapz.c: this is
+# intentionally NOT a fabricated dictionary of already-parsed counters.
+REAL_KERNEL_STATUS = (
+    "0 8 swapz strategy=staged batch_kib=64 fill_id=1 inflight_id=0 "
+    "inflight_blocks=1 fill_blocks=0 pack_records=0 async_cb=1 "
+    "buf0_state=2 buf0_blocks=1 buf1_state=0 buf1_blocks=0 "
+    "segment=0/32 head_blocks=4 free_segments=30 live_blocks=1 "
+    "logical_write=4096 physical_write=0 physical_write_reqs=1 "
+    "multi_write_reqs=0 max_write_batch=1 stream_submit=4096 "
+    "async_timeouts=0 staged_hits=0 staged_early=1 staged_cancel=0 "
+    "staged_cancel_blocks=0 logical_read=0 physical_read=0 "
+    "compressed_payload=128 compressed_pages=1 raw_pages=0 "
+    "upper_discards=0 rotations=0 segment_cycle_min=0 segment_cycle_max=0 "
+    "gc_victims=0 gc_scanned=0 gc_pages=0 gc_read=0 gc_write=0 "
+    "lower_discard=on discard_bytes=0 discard_failures=0 failed=0"
+)
+
+
+def production_status(**overrides):
+    """Keep every real-kernel mixed-type field while adjusting mock counters."""
+    parts = REAL_KERNEL_STATUS.split()
+    changes = {name: str(value) for name, value in overrides.items()}
+    observed = set()
+    for index, token in enumerate(parts):
+        if "=" not in token:
+            continue
+        key, _ = token.split("=", 1)
+        if key in changes:
+            parts[index] = key + "=" + changes[key]
+            observed.add(key)
+    if set(changes) != observed:
+        raise AssertionError(f"unknown production status overrides: {set(changes) - observed}")
+    return " ".join(parts)
+
 
 class FakeOps:
     def __init__(self, fail_at: str | None = None, timeout_at: str | None = None,
@@ -487,21 +521,122 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertNotIn("losetup-detach", events)
         self.assertNotIn("rmmod", events)
 
-    def test_status_parser_requires_actual_numeric_status_fields(self):
-        row = " ".join(f"{key}={value}" for key, value in {
-            "staged_hits": 3, "staged_early": 1, "inflight_blocks": 0,
-            "async_cb": 0, "failed": 0, "pack_records": 0,
-            "fill_blocks": 0, "buf0_blocks": 0, "buf1_blocks": 0,
-        }.items())
-        self.assertEqual(SMOKE.parse_status(row)["staged_hits"], 3)
-        with self.assertRaisesRegex(SMOKE.QuarantineRequired, "lacks required fields"):
-            SMOKE.parse_status("staged_hits=3 failed=0")
-        with self.assertRaisesRegex(SMOKE.QuarantineRequired, "non-numeric"):
-            SMOKE.parse_status(row.replace("async_cb=0", "async_cb=unknown"))
+    def test_status_parser_accepts_real_mixed_type_kernel_dm_status(self):
+        inflight = SMOKE.parse_status(REAL_KERNEL_STATUS)
+        self.assertEqual(inflight["inflight_id"], 0)
+        self.assertEqual(inflight["inflight_blocks"], 1)
+        self.assertEqual(inflight["async_cb"], 1)
+        self.assertEqual(inflight["batch_kib"], 64)
+        self.assertNotIn("strategy", inflight)
+        self.assertNotIn("lower_discard", inflight)
 
-        # Exercise the actual host command method while mocking only its
-        # subprocess boundary; assert both the supported field and strict
-        # parsing of the documented L/I/s/r/w attribute layout.
+        drained_text = production_status(
+            inflight_id=-1, inflight_blocks=0, async_cb=0,
+            buf0_blocks=0, staged_hits=1, physical_write=4096)
+        drained = SMOKE.parse_status(drained_text)
+        self.assertEqual(drained["inflight_id"], -1)
+        self.assertEqual(drained["inflight_blocks"], 0)
+        self.assertEqual(drained["staged_hits"], 1)
+
+        # Exercise actual host command parsing, mocking only subprocess.
+        operations = SMOKE.SystemOperations()
+        cmd = ["dmsetup", "status", "owned-target"]
+        with mock.patch.object(operations, "_checked", return_value=drained_text) as checked:
+            self.assertEqual(operations.dm_status("owned-target")["inflight_id"], -1)
+            checked.assert_called_once_with(cmd, SMOKE.STATUS_TIMEOUT_MS)
+
+    def test_status_parser_rejects_bad_real_kernel_fields(self):
+        failures = (
+            ("strategy=staged", "strategy=opportunistic", "wrong smoke strategy"),
+            ("batch_kib=64", "batch_kib=4", "wrong smoke batch"),
+            ("lower_discard=on", "lower_discard=unknown", "lower_discard"),
+            ("inflight_id=0", "inflight_id=-2", "inflight_id"),
+            ("inflight_id=0", "inflight_id=unknown", "inflight_id"),
+            ("segment=0/32", "segment=1/1", "segment index"),
+            ("segment=0/32", "segment=1/0", "segment index"),
+            ("segment=0/32", "segment=-1/32", "segment index"),
+            ("segment=0/32", "segment=garbage", "segment index"),
+            ("async_cb=1", "async_cb=bogus", "non-numeric"),
+            ("failed=0", "failed=2", "invalid failed"),
+            ("staged_hits=0", "staged_hits=-1", "non-numeric"),
+            ("staged_hits=0", "staged_hits=0 staged_hits=0", "duplicate"),
+        )
+        for original, altered, error in failures:
+            with self.subTest(replacement=altered):
+                with self.assertRaisesRegex(SMOKE.QuarantineRequired, error):
+                    SMOKE.parse_status(REAL_KERNEL_STATUS.replace(original, altered, 1))
+        with self.assertRaisesRegex(SMOKE.QuarantineRequired, "lacks required"):
+            SMOKE.parse_status(REAL_KERNEL_STATUS.replace("async_cb=1", ""))
+        with self.assertRaisesRegex(SMOKE.QuarantineRequired, "malformed"):
+            SMOKE.parse_status(REAL_KERNEL_STATUS + " =bad")
+
+    def test_full_lifecycle_parses_production_status_via_system_operations(self):
+        class ProductionTextOps(FakeOps):
+            def __init__(self):
+                super().__init__()
+                self.raw_operations = SMOKE.SystemOperations()
+                self.taint_delivered = False
+
+            def new_kernel_messages(self):
+                if self.loaded and not self.taint_delivered:
+                    self.taint_delivered = True
+                    return [SMOKE.EXPECTED_MODULE_LOAD_TAINT]
+                return []
+
+            def dm_status(self, name):
+                current = super().dm_status(name)
+                raw = production_status(
+                    inflight_id=(0 if current["inflight_blocks"] else -1),
+                    **current)
+                with mock.patch.object(
+                        self.raw_operations, "_checked", return_value=raw):
+                    return self.raw_operations.dm_status(name)
+
+        ops = ProductionTextOps()
+        SMOKE.SmokeRunner(good_config(), ops).run()
+        events = [x[0] for x in ops.actions]
+        self.assertEqual(events.count("read-4k"), 2)
+        self.assertLess(events.index("suspend"), events.index("resume"))
+        self.assertNotIn("quarantine", events)
+        self.assertFalse(ops.loaded)
+
+    def test_expected_taint_only_allowed_immediately_after_owned_module_load(self):
+        taint = SMOKE.EXPECTED_MODULE_LOAD_TAINT
+
+        class TaintOps(FakeOps):
+            def __init__(self, messages):
+                super().__init__()
+                self.messages = messages
+                self.delivered = False
+
+            def new_kernel_messages(self):
+                if not self.delivered and self.loaded:
+                    self.delivered = True
+                    return list(self.messages)
+                return []
+
+        good = TaintOps([taint])
+        SMOKE.SmokeRunner(good_config(), good).run()
+        self.assertFalse(good.loaded)
+
+        warning = "dm-swapz: WARNING: lower I/O callback ownership invalid"
+        mixed = TaintOps([taint, warning])
+        with self.assertRaisesRegex(SMOKE.QuarantineRequired, "unexpected kernel warning"):
+            SMOKE.SmokeRunner(good_config(), mixed).run()
+        self.assertIn(warning, mixed.quarantine["messages"])
+        self.assertNotIn("dm-remove", [event[0] for event in mixed.actions])
+
+        near_match = TaintOps([taint + " unexpected"])
+        with self.assertRaisesRegex(SMOKE.QuarantineRequired, "unexpected kernel warning"):
+            SMOKE.SmokeRunner(good_config(), near_match).run()
+        # Delayed same text is not ignored after the privileged load phase.
+        later = SMOKE.SmokeRunner(good_config(), TaintOps([]))
+        later.owned.module_owned = True
+        with mock.patch.object(later.ops, "new_kernel_messages", return_value=[taint]):
+            with self.assertRaisesRegex(SMOKE.QuarantineRequired, "unexpected kernel warning"):
+                later._check_messages("pre-drain staged read")
+
+    def test_dm_attr_parser_accepts_only_documented_layout(self):
         operations = SMOKE.SystemOperations()
         command = ["dmsetup", "info", "--columns", "--noheadings", "-o",
                    "attr", "owned-target"]
