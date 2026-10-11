@@ -228,3 +228,118 @@ class Replay:
         assert block_count in EXTENT_CLASSES
         if self.current_segment is not None:
             current = self.segments[self.current_segment]
+            if (current.state == 'open' and current.identifier != excluded_segment and
+                    current.used_blocks + block_count <= SEGMENT_BLOCKS):
+                start = current.used_blocks
+                current.used_blocks += block_count
+                return current.identifier, start
+        if not self._open_new_segment(gc=gc, excluded_segment=excluded_segment):
+            return None
+        current = self.segments[self.current_segment]
+        current.used_blocks = block_count
+        return current.identifier, 0
+
+    def _write_extent(self, records: list[Record], blocks: int, *, gc: bool,
+                      excluded_segment: int | None = None, fail: bool = False,
+                      partial_blocks: int = 0) -> Extent | None:
+        if not 0 <= partial_blocks < blocks or (not fail and partial_blocks):
+            raise ValueError('partial block completion requires failed entire extent')
+        position = self._allocate(blocks, gc=gc, excluded_segment=excluded_segment)
+        if position is None:
+            return None
+        image, offsets = serialize(records, blocks)
+        identifier = self.next_extent_id
+        self.next_extent_id += 1
+        segment_id, start = position
+        # Reserve/submit the full extent, but charge only physically completed
+        # blocks on an explicitly torn lower write. Retain consumed addresses.
+        completed_bytes = partial_blocks * BLOCK_BYTES if fail else len(image)
+        if gc:
+            self.gc_submitted_bytes += len(image)
+            self.gc_write_bytes += completed_bytes
+        else:
+            self.foreground_submitted_bytes += len(image)
+            self.foreground_write_bytes += completed_bytes
+        if fail:
+            return None
+        extent = Extent(identifier, segment_id, start, image, tuple(records), offsets)
+        self.media[identifier] = extent
+        self.segments[segment_id].extent_ids.append(identifier)
+        return extent
+
+    @staticmethod
+    def _mapping_pairs(extent: Extent) -> list[tuple[Record, Mapping]]:
+        return [(record, Mapping(extent.identifier, record.slot, record.generation,
+                                 offset, len(record.payload), zlib.crc32(record.payload), record.raw))
+                for record, offset in zip(extent.records, extent.offsets)]
+
+    def _read_mapping(self, mapping: Mapping) -> tuple[bytes, int]:
+        extent = self.media.get(mapping.extent_id)
+        if extent is None:
+            raise MediaError('mapped extent missing')
+        if mapping.raw:
+            if (extent.blocks != 1 or len(extent.records) != 1 or
+                    not extent.records[0].raw or mapping.offset or mapping.length != BLOCK_BYTES):
+                raise MediaError('raw extent mismatch')
+            payload = extent.image
+            blocks = 1
+        else:
+            image = extent.image
+            if len(image) < HEADER.size:
+                raise MediaError('truncated header')
+            magic, version, count = HEADER.unpack_from(image)
+            if (magic, version, count) != (MAGIC, VERSION, len(extent.records)) or count > MAX_RECORDS:
+                raise MediaError('invalid header')
+            payload_start = HEADER.size + count * DESCRIPTOR.size
+            if payload_start > len(image):
+                raise MediaError('descriptor overflow')
+            found = False
+            intervals = []
+            for index in range(count):
+                slot, offset, length = DESCRIPTOR.unpack_from(image, HEADER.size + index * DESCRIPTOR.size)
+                if not payload_start <= offset or not 0 < length <= MAX_COMPRESSED_BYTES or offset + length > len(image):
+                    raise MediaError('out-of-bounds descriptor')
+                intervals.append((offset, offset + length))
+                found |= (slot, offset, length) == (mapping.slot, mapping.offset, mapping.length)
+            intervals.sort()
+            if any(end > next_start for (_, end), (next_start, _) in zip(intervals, intervals[1:])):
+                raise MediaError('overlapping descriptors')
+            if not found:
+                raise MediaError('stale record descriptor')
+            payload = image[mapping.offset:mapping.offset + mapping.length]
+            payload_first = mapping.offset // BLOCK_BYTES
+            payload_last = (mapping.offset + mapping.length - 1) // BLOCK_BYTES
+            # Count blocks touched by metadata plus the requested payload (no cache assumption).
+            blocks = len(set(range((payload_start + BLOCK_BYTES - 1) // BLOCK_BYTES)) |
+                         set(range(payload_first, payload_last + 1)))
+        if zlib.crc32(payload) != mapping.crc32:
+            raise MediaError('payload checksum mismatch')
+        return payload, blocks
+
+    def read(self, slot: int) -> bytes | None:
+        mapping = self.mappings.get(slot)
+        if mapping is None:
+            return None
+        payload, blocks = self._read_mapping(mapping)
+        self.upper_reads += 1
+        self.upper_read_blocks += blocks
+        return payload
+
+    def stage(self, slot: int, payload: bytes, *, raw: bool = False) -> None:
+        if len(self.staged) >= self.window:
+            self.flush()
+        generation = self.latest_generation.get(slot, 0) + 1
+        # All in-window generations must be independently acknowledged; fail closed
+        # instead of silently completing an overwritten pending BIO.
+        if any(item.slot == slot for item in self.staged):
+            raise ValueError('repeated slot within pending window requires BIO ownership model')
+        record = Record(slot, generation, payload, raw)
+        self.staged.append(record)
+        self.latest_generation[slot] = generation
+        if len(self.staged) == self.window:
+            self.flush()
+
+    def flush(self) -> bool:
+        if not self.staged:
+            return True
+        self.forced_flushes += 1
