@@ -6,6 +6,8 @@ on:
       - 'tests/runtime/streaming-benchmark-read-latency.py'
       - 'tests/runtime/streaming-benchmark-writer-verify.py'
       - 'tests/runtime/streaming-benchmark-finalize.py'
+      - 'tests/runtime/streaming-benchmark-module-preflight.py'
+      - 'tests/runtime/streaming-benchmark-module-preflight-test.py'
       - 'tests/runtime/v22-fast-screen.py'
       - 'tests/runtime/v22-fast-screen-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
@@ -26,6 +28,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fio
+      - name: Read-only selected-module provenance gate regression
+        run: |
+          timeout 20s python3 -B tests/runtime/streaming-benchmark-module-preflight-test.py -v
       - name: Rootless fast three-policy benchmark plan and artifact gate
         run: |
           timeout 20s python3 -B tests/runtime/v22-fast-screen-test.py -v
