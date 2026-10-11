@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -25,8 +26,19 @@ assert spec and spec.loader
 reporter = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = reporter
 spec.loader.exec_module(reporter)
+VERIFY_PATH = HERE / "streaming-benchmark-writer-verify.py"
+verify_spec = importlib.util.spec_from_file_location("swapz_writer_verify_report_test", VERIFY_PATH)
+assert verify_spec and verify_spec.loader
+writer_verifier = importlib.util.module_from_spec(verify_spec)
+verify_spec.loader.exec_module(writer_verifier)
 
 MIB = 1024 * 1024
+FAKE_FULL_VERIFY = {
+    "full_writer_readback_ok": True,
+    "writer_verified_bytes": 28 * MIB - 4096,
+    "writer_verified_pages": (28 * MIB - 4096) // 4096,
+    "writer_verify_method": "fio-crc32c-sequential-read-diagnostic",
+}
 
 
 def row(*, batch=128, strategy="staged", backend="size-aware-nbd-20MiBps-500000ns-serialized"):
@@ -75,6 +87,59 @@ class StreamingReportingTests(unittest.TestCase):
         self.assertIn("logical_flush_window=8.000MiB/s", text)
         self.assertIn("upper=123.000MiB/s", text)
         self.assertIn("read_count=200", text)
+
+    def test_exact_reader_summary_is_checked_and_labeled_diagnostic(self):
+        item = row()
+        item["exact_read_latency"] = {"read_count": 200,
+                                      "read_p99_ns": 2500000}
+        text = reporter.report(self.read([item]))
+        self.assertIn("p99_src=fio_clat_exact", text)
+        self.assertIn("read_p99=2.500ms", text)
+        for bad in ({"read_count": 201, "read_p99_ns": 2500000},
+                    {"read_count": 200, "read_p99_ns": 2500001},
+                    {"read_count": True, "read_p99_ns": 2500000},
+                    {"read_count": 200, "read_p99_ns": 0},
+                    "untrusted"):
+            with self.subTest(bad=bad):
+                corrupt = row()
+                corrupt["exact_read_latency"] = bad
+                with self.assertRaisesRegex(ValueError, "exact reader summary"):
+                    self.read([corrupt])
+        self.assertIn("p99_src=legacy_unverified", reporter.report(self.read([row()])))
+
+    def test_one_page_sentinel_is_not_full_integrity_attestation(self):
+        item = row()
+        item["isolated_sentinel_readback_ok"] = True
+        report = reporter.report(self.read([item]))
+        self.assertIn("sentinel=pass", report)
+        self.assertIn("integrity_sentinel = ONE protected 4 KiB", report)
+        self.assertIn("writer_crc32c=unverified", report)
+        self.assertIn("sentinel=unverified", reporter.report(self.read([row()])))
+        for bad in (False, 1, None, "true"):
+            with self.subTest(bad=bad):
+                item["isolated_sentinel_readback_ok"] = bad
+                with self.assertRaisesRegex(ValueError, "sentinel readback"):
+                    self.read([item])
+
+    def test_compressed_sentinel_is_disjoint_from_writer_and_timed_window(self):
+        source = self.script
+        self.assertIn("SENTINEL_PAGE=$(( LOGICAL_MIB * 256 - 1 ))", source)
+        self.assertIn("WRITER_BYTES=$(( WRITER_MIB * 1048576 - 4096 ))", source)
+        self.assertIn("size=$WRITER_BYTES", source)
+        self.assertEqual(len(b"SWAPZ_V22_PROBE_" * 256), 4096)
+        cold = 4 * MIB
+        logical = 32 * MIB
+        writer_end = cold + (logical - cold - 4096)
+        self.assertEqual(writer_end, logical - 4096)
+        sentinel_write = source.index('dd if="$sentinel" of="$path"')
+        timed_before = source.index("before=$(read_stat)")
+        timed_after = source.index("after=$(read_stat)")
+        sentinel_read = source.index('dd if="$path" of="$sentinel_read"')
+        source_report = source.index('"isolated_sentinel_readback_ok": True')
+        self.assertLess(sentinel_write, timed_before)
+        self.assertLess(timed_after, sentinel_read)
+        self.assertLess(sentinel_read, source_report)
+        self.assertIn('if ! cmp -s "$sentinel" "$sentinel_read"; then', source)
 
     def test_reporter_cannot_nominate_winner_even_with_three_strategies(self):
         observations = [row(strategy="immediate", batch=4),
@@ -170,22 +235,22 @@ class StreamingReportingTests(unittest.TestCase):
 
     def test_embedded_collector_produces_counters_not_logical_drain(self):
         source = self.script
-        marker = '"$start_ns" "$end_ns" "$BACKEND" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
         self.assertIn(marker, source)
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         self.assertIn('lower_counter_window_mib_s', embedded)
         fio = self.directory / "fabricated-fio.json"
         fio.write_text(json.dumps({"jobs": [
-            {"jobname": "writer", "job options": {"iodepth": "64"},
+            {"jobname":"writer", "error": 0, "job options": {"iodepth": "64"},
              "write": {"io_bytes": 16 * MIB, "bw_bytes": 123 * MIB,
                        "clat_ns": {"mean": 1_000_000, "max": 3_000_000,
                                    "percentile": {"99.000000": 2_000_000}}},
              "usr_cpu": 3, "sys_cpu": 5},
-            {"jobname": "reader",
+            {"jobname":"reader", "error": 0,
              "read": {"total_ios": 200,
                       "clat_ns": {"mean": 1_000_000, "max": 3_000_000,
                                   "percentile": {"95.000000": 2_000_000,
-                                                 "99.000000": 2_500_000}}},
+                                                 "99.000000": 2_900_000}}},
              "usr_cpu": 1, "sys_cpu": 2},
         ]}), encoding="utf-8")
         cmd = [
@@ -194,32 +259,229 @@ class StreamingReportingTests(unittest.TestCase):
             "failed=0 staged_hits=10", "staged", "128",
             "1000000000", "3000000000",
             "size-aware-nbd-20MiBps-500000ns-serialized",
+            json.dumps({"read_count": 200, "read_p99_ns": 2500000,
+                        "read_latency_sidecar": "reader.latbin",
+                        "read_latency_sha256": "0" * 64}),
+            json.dumps(FAKE_FULL_VERIFY),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, check=True)
         parsed = json.loads(result.stdout)
         self.assertNotIn("drained_write_mib_s", parsed)
         self.assertEqual(parsed["lower_write_sectors"], 4096)
         self.assertEqual(parsed["read_count"], 200)
+        self.assertIs(parsed["isolated_sentinel_readback_ok"], True)
+        self.assertEqual(parsed["fio_full_writer_verification"], FAKE_FULL_VERIFY)
+        # The diagnostic displayed p99 must come from the exact CLAT sidecar,
+        # not fio's independently bucketed/rounded percentile summary.
+        self.assertEqual(parsed["read_p99_ms"], 2.5)
+        self.assertEqual(parsed["fio_summary_read_p99_ms"], 2.9)
         self.assertAlmostEqual(parsed["logical_flush_window_mib_s"], 8)
         self.assertAlmostEqual(parsed["lower_counter_window_mib_s"], 1)
         self.assertIn("NO QUALIFIED WINNER", reporter.report(reporter.read_rows(self.write([parsed]))))
 
+    def test_writer_verifier_rejects_short_or_forged_fio_readback(self):
+        expected_bytes = 60 * 1024
+        baseline = {"jobs": [{"jobname": "writer-verify", "error": 0,
+                     "read": {"io_bytes": expected_bytes, "total_ios": 15},
+                     "write": {"io_bytes": 0}}]}
+        log = self.directory / "writer-verify.json"
+        log.write_text(json.dumps(baseline), encoding="utf-8")
+        accepted = writer_verifier.validate(log, expected_bytes)
+        self.assertIs(accepted["full_writer_readback_ok"], True)
+        self.assertEqual(accepted["writer_verified_pages"], 15)
+        for malformed in (
+            {"jobs": [{**baseline["jobs"][0], "error": 5}]},
+            {"jobs": [{**baseline["jobs"][0], "error": True}]},
+            {"jobs": [{**baseline["jobs"][0], "jobname": "wrong"}]},
+            {"jobs": [{**baseline["jobs"][0], "read":
+                      {"io_bytes": expected_bytes - 4096, "total_ios": 14}}]},
+            {"jobs": [{**baseline["jobs"][0], "read":
+                      {"io_bytes": expected_bytes, "total_ios": 14}}]},
+            {"jobs": [{**baseline["jobs"][0], "write": {"io_bytes": 4096}}]},
+            {"jobs": [baseline["jobs"][0], baseline["jobs"][0]]},
+        ):
+            with self.subTest(malformed=malformed):
+                log.write_text(json.dumps(malformed), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    writer_verifier.validate(log, expected_bytes)
+        log.write_text(json.dumps(baseline), encoding="utf-8")
+        for invalid_size in (0, 4097, -4096, True, 2**40):
+            with self.subTest(invalid_size=invalid_size):
+                with self.assertRaises(ValueError):
+                    writer_verifier.validate(log, invalid_size)
+        alias = self.directory / "writer-verify-alias.json"
+        alias.symlink_to(log)
+        with self.assertRaises(OSError):
+            writer_verifier.validate(alias, expected_bytes)
+
+    def test_writer_verifier_rejects_duplicate_fields_and_hardlinks(self):
+        expected_bytes = 60 * 1024
+        log = self.directory / "writer-verify.json"
+        log.write_text('{"jobs":[{"jobname":"writer-verify","error":0,'
+                       '"read":{"io_bytes":61440,"total_ios":15,"total_ios":15},'
+                       '"write":{"io_bytes":0}}]}', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            writer_verifier.validate(log, expected_bytes)
+        log.write_text(json.dumps({"jobs":[{"jobname":"writer-verify",
+                      "error":0,"read":{"io_bytes":expected_bytes,
+                      "total_ios":15},"write":{"io_bytes":0}}]}),
+                      encoding="utf-8")
+        alias = self.directory / "hardlink"
+        alias.hardlink_to(log)
+        with self.assertRaisesRegex(ValueError, "bounded regular file"):
+            writer_verifier.validate(log, expected_bytes)
+
+    def test_crc32c_verifier_is_outside_timed_window(self):
+        source = self.script
+        warm = source.index('prefill_writer_verified "$path"')
+        start = source.index('before=$(read_stat)')
+        fio_run = source.index('fio "$fiofile" --output-format=json --output="$json"')
+        end = source.index('after=$(read_stat)')
+        verify = source.index('fio --name=writer-verify')
+        post_verify = source.index('verify_summary=$(python3 -B')
+        readback = source.index('dd if="$path" of="$sentinel_read"')
+        self.assertLess(warm, start)
+        self.assertLess(start, fio_run)
+        self.assertLess(end, verify)
+        self.assertLess(verify, post_verify)
+        self.assertLess(post_verify, readback)
+        self.assertIn('verify=crc32c\ndo_verify=0', source)
+        self.assertIn('--rw=read', source)
+        self.assertIn('streaming-benchmark-writer-verify.py', source)
+
+    def test_full_writer_crc32c_summary_is_strict_but_diagnostic(self):
+        item = row()
+        item["fio_full_writer_verification"] = FAKE_FULL_VERIFY
+        text = reporter.report(self.read([item]))
+        self.assertIn("writer_crc32c=pass", text)
+        self.assertIn("NO QUALIFIED WINNER", text)
+        for invalid in (
+            {**FAKE_FULL_VERIFY, "full_writer_readback_ok": False},
+            {**FAKE_FULL_VERIFY, "writer_verified_pages": 2},
+            {**FAKE_FULL_VERIFY, "writer_verified_bytes": 4096},
+            {**FAKE_FULL_VERIFY, "writer_verify_method": "unverified"},
+            {**FAKE_FULL_VERIFY, "writer_verified_pages": True},
+            "forged",
+        ):
+            with self.subTest(invalid=invalid):
+                bad = row()
+                bad["fio_full_writer_verification"] = invalid
+                with self.assertRaisesRegex(ValueError, "full writer"):
+                    self.read([bad])
+
+    def test_runner_stops_drain_clock_before_clat_parsing(self):
+        fio_run = self.script.index('fio "$fiofile" --output-format=json --output="$json"')
+        drain = self.script.index('flush_device "$path"', fio_run)
+        stop_clock = self.script.index('end_ns=$(python3 -c', drain)
+        after_counters = self.script.index('after=$(read_stat)', stop_clock)
+        convert = self.script.index('latency_summary=$(python3 -B', fio_run)
+        self.assertLess(fio_run, drain)
+        self.assertLess(drain, stop_clock)
+        self.assertLess(stop_clock, after_counters)
+        self.assertLess(after_counters, convert)
+
+    def test_reader_iops_target_validated_before_device_setup(self):
+        validation = self.script.index('SWAPZ_BENCH_READ_IOPS must be an integer')
+        planner = self.script.index('BATCHES=$(python3 -B')
+        allocation = self.script.index('TMP=$(mktemp')
+        self.assertLess(validation, planner)
+        self.assertLess(planner, allocation)
+        self.assertIn('rate_iops=$READ_IOPS', self.script)
+        self.assertIn('log_entries=32768', self.script)
+
+    def test_unrelated_fio_executable_rejected_before_fixture_allocation(self):
+        fake_fio = self.directory / "fio"
+        fake_fio.write_text("#!/bin/sh\necho 'fio, version 1.9.2'\n",
+                            encoding="utf-8")
+        fake_fio.chmod(0o755)
+        env = os.environ.copy()
+        env["PATH"] = str(self.directory) + os.pathsep + env["PATH"]
+        result = subprocess.run(["bash", str(BENCHMARK_PATH)], env=env,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("not Flexible I/O Tester", result.stderr)
+        self.assertNotIn("root required", result.stderr)
+        source = self.script
+        gate = source.index("fio executable is not Flexible I/O Tester")
+        self.assertLess(gate, source.index("[[ $EUID -eq 0 ]]"))
+        self.assertLess(gate, source.index("TMP=$(mktemp"))
+
+    def test_invalid_reader_iops_fails_before_privilege_or_device_checks(self):
+        for invalid in ("0", "2001", "-1", "1.5", "nan", "1;true", "0001"):
+            with self.subTest(value=invalid):
+                env = os.environ.copy()
+                env["SWAPZ_BENCH_READ_IOPS"] = invalid
+                run = subprocess.run(["bash", str(BENCHMARK_PATH)], env=env,
+                                     capture_output=True, text=True, timeout=5)
+                self.assertEqual(run.returncode, 4)
+                self.assertIn("SWAPZ_BENCH_READ_IOPS must be", run.stderr)
+                self.assertNotIn("root required", run.stderr)
+
+    def test_embedded_collector_rejects_exact_latency_count_mismatch(self):
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
+        embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        fio = self.directory / "fio-mismatch.json"
+        fio.write_text(json.dumps({"jobs":[
+            {"jobname":"writer", "error": 0,"job options":{"iodepth":"1"},
+             "write":{"io_bytes":MIB,"bw_bytes":MIB}},
+            {"jobname":"reader", "error": 0,"read":{"total_ios":20}}
+        ]}), encoding="utf-8")
+        args = [sys.executable, "-c", embedded, str(fio),
+                "10 1000 20 2000", "12 1016 30 6096", "failed=0",
+                "staged", "128", "1000000000", "3000000000", "backend",
+                json.dumps({"read_count": 19, "read_p99_ns": 2000000}),
+                json.dumps(FAKE_FULL_VERIFY)]
+        result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mismatched exact reader latency", result.stderr)
+
     def test_embedded_collector_rejects_counter_regression(self):
         source = self.script
-        marker = '"$start_ns" "$end_ns" "$BACKEND" >>"$RESULTS" <<\'PY\'\n'
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
         embedded = source.split(marker, 1)[1].split("\nPY\n", 1)[0]
         fio = self.directory / "fio.json"
         fio.write_text(json.dumps({"jobs":[
-            {"jobname":"writer","job options":{"iodepth":"1"},
+            {"jobname":"writer", "error": 0,"job options":{"iodepth":"1"},
              "write":{"io_bytes":MIB,"bw_bytes":MIB}},
-            {"jobname":"reader","read":{"total_ios":20}}
+            {"jobname":"reader", "error": 0,"read":{"total_ios":20}}
         ]}), encoding="utf-8")
         args=[sys.executable,"-c",embedded,str(fio),"10 1000 20 2000",
               "10 1000 19 1900","failed=0","staged","128",
-              "1000000000","3000000000","backend"]
+              "1000000000","3000000000","backend",
+              json.dumps({"read_count": 20, "read_p99_ns": 1000000}),
+               json.dumps(FAKE_FULL_VERIFY)]
         result=subprocess.run(args,capture_output=True,text=True,timeout=5)
         self.assertNotEqual(result.returncode,0)
         self.assertIn("counters decreased",result.stderr)
+
+    def test_embedded_collector_rejects_fio_job_errors_or_duplicate_jobs(self):
+        marker = '"$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<\'PY\'\n'
+        embedded = self.script.split(marker, 1)[1].split("\nPY\n", 1)[0]
+        fio = self.directory / "fio-error.json"
+        writer = {"jobname": "writer", "error": 0,
+                  "job options": {"iodepth": "1"},
+                  "write": {"io_bytes": MIB, "bw_bytes": MIB}}
+        reader = {"jobname": "reader", "error": 0,
+                  "read": {"total_ios": 20}}
+        args = [sys.executable, "-c", embedded, str(fio),
+                "10 1000 20 2000", "12 1016 30 6096", "failed=0",
+                "staged", "128", "1000000000", "3000000000", "backend",
+                json.dumps({"read_count": 20, "read_p99_ns": 1000000}),
+               json.dumps(FAKE_FULL_VERIFY)]
+        for jobs, error in (
+            ([writer, {**reader, "error": 5}], "fio job-level error"),
+            ([{**writer, "error": True}, reader], "fio job-level error"),
+            ([writer, {k: v for k, v in reader.items() if k != "error"}],
+             "fio job-level error"),
+            ([writer, writer], "fio JSON missing/duplicate"),
+            ([reader], "exactly two named jobs"),
+        ):
+            with self.subTest(jobs=jobs):
+                fio.write_text(json.dumps({"jobs": jobs}), encoding="utf-8")
+                result = subprocess.run(args, capture_output=True, text=True,
+                                        timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
 
     def test_benchmark_shell_only_reports_and_does_not_nominate_from_single_run(self):
         self.assertNotIn('"drained_write_mib_s"', self.script)

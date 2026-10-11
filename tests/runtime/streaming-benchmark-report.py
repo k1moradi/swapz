@@ -21,6 +21,9 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_ROWS = 128
 MIB = 1024 * 1024
 SECTOR_SIZE = 512
+# Current single-sweep fixture: 32 MiB logical, 4 MiB cold reads, one
+# reserved sentinel page. Older standalone observations remain unqualified.
+EXPECTED_WRITER_BYTES = (32 - 4) * MIB - 4096
 BATCHES = {4, 8, 16, 32, 64, 128, 256, 512, 1024}
 STRATEGIES = {"immediate", "opportunistic", "staged"}
 REQUIRED = {
@@ -85,6 +88,35 @@ def validate(row: object, line: int) -> dict[str, object]:
         raise ValueError(f"line {line}: workload did not record writes and reads")
     if row["read_p99_ms"] > row["read_max_ms"]:
         raise ValueError(f"line {line}: p99 exceeds measured maximum")
+    if ("isolated_sentinel_readback_ok" in row and
+            row["isolated_sentinel_readback_ok"] is not True):
+        raise ValueError(f"line {line}: compressed sentinel readback not proven")
+    if "fio_full_writer_verification" in row:
+        verification = row["fio_full_writer_verification"]
+        if type(verification) is not dict:
+            raise ValueError(f"line {line}: malformed full writer verification")
+        if (verification.get("full_writer_readback_ok") is not True or
+                type(verification.get("writer_verified_bytes")) is not int or
+                verification["writer_verified_bytes"] != EXPECTED_WRITER_BYTES or
+                type(verification.get("writer_verified_pages")) is not int or
+                verification["writer_verified_pages"] != EXPECTED_WRITER_BYTES // 4096 or
+                verification.get("writer_verify_method") !=
+                "fio-crc32c-sequential-read-diagnostic"):
+            raise ValueError(f"line {line}: invalid full writer CRC32C verification")
+    # New diagnostics carry an exact CLAT summary; validate its relationship
+    # to the displayed p99 without pretending that a JSONL row authenticates
+    # the sidecar, original fio job or backend. Older rows remain unqualified.
+    if "exact_read_latency" in row:
+        exact = row["exact_read_latency"]
+        if type(exact) is not dict:
+            raise ValueError(f"line {line}: malformed exact reader summary")
+        count = exact.get("read_count")
+        p99_ns = exact.get("read_p99_ns")
+        if (type(count) is not int or count != row["read_count"] or
+                type(p99_ns) is not int or p99_ns <= 0 or
+                not math.isclose(row["read_p99_ms"], p99_ns / 1e6,
+                                 rel_tol=1e-12, abs_tol=1e-12)):
+            raise ValueError(f"line {line}: mismatched exact reader summary")
     # Explicitly cross-check that the diagnostic lower counter rate came
     # from sectors, not fio's logical bytes or upper completion bandwidth.
     check_rates = (
@@ -133,6 +165,9 @@ def report(rows: list[dict[str, object]]) -> str:
         "backend attribution and complete I/O drain NOT independently attested",
         "logical_flush_window_mib_s = fio logical bytes / flush-inclusive window; "
         "NOT lower-device drain bandwidth",
+        "integrity_sentinel = ONE protected 4 KiB compressed page outside writer extent",
+        "writer_crc32c = fio CRC32C read of every configured writer page AFTER timing; "
+        "NOT independent device provenance or a qualified winner",
     ]
     for strategy in sorted(groups):
         out.append(f"strategy={strategy} (unqualified; only one observation per batch)")
@@ -144,6 +179,9 @@ def report(rows: list[dict[str, object]]) -> str:
                 f"lower_counter_window={row['lower_counter_window_mib_s']:.3f}MiB/s "
                 f"lower_wios={row['lower_write_ios']} "
                 f"read_p99={row['read_p99_ms']:.3f}ms "
+                f"p99_src={'fio_clat_exact' if 'exact_read_latency' in row else 'legacy_unverified'} "
+                f"sentinel={'pass' if row.get('isolated_sentinel_readback_ok') is True else 'unverified'} "
+                f"writer_crc32c={'pass' if 'fio_full_writer_verification' in row else 'unverified'} "
                 f"read_count={row['read_count']}"
             )
     out.extend([

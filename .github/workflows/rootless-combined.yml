@@ -243,6 +243,12 @@ jobs:
             fi
             echo "PRESSURE_TOKEN_REPEAT $attempt/10: PASS"
           done
+      - name: Rootless exact fio read-latency sidecar conversion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-read-latency.py tests/runtime/streaming-benchmark-read-latency-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-read-latency-test.py -v
       - name: Rootless V2.2 benchmark plan and pre-device admission contracts
         shell: bash
         run: |

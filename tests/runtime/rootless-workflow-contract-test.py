@@ -52,6 +52,7 @@ MANDATORY_TESTS = (
     "swapz-upper-bio-ownership-contract-test.py",
     "swapz-pending-pack-ownership-contract-test.py",
     "streaming-benchmark-plan-test.py",
+    "streaming-benchmark-read-latency-test.py",
 )
 RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
