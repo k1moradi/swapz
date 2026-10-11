@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 
@@ -78,6 +79,22 @@ def exact_p95_from_pinned_sidecar(dirfd: int, name: str, digest: str,
         os.close(fd)
 
 
+def cumulative_lz4_payload_ratio(status: dict[str, object]) -> float | None:
+    """Kernel's cumulative compressed-page payload ratio, NOT physical savings."""
+    pair = (status.get("compressed_pages"), status.get("compressed_payload"))
+    if pair == (None, None):
+        return None
+    if any(type(value) is not str or re.fullmatch(r"[0-9]{1,20}", value) is None
+           for value in pair):
+        raise ValueError("malformed cumulative LZ4 payload counters")
+    pages, payload_bytes = map(int, pair)
+    if pages == 0 and payload_bytes == 0:
+        return None
+    if pages <= 0 or payload_bytes <= 0:
+        raise ValueError("inconsistent cumulative LZ4 payload counters")
+    return (pages * 4096) / payload_bytes
+
+
 def compare(path: Path) -> dict[str, object]:
     validated = screen.check_results(path)
     raw = plateau._read_pinned_observation_text(path)
@@ -105,6 +122,15 @@ def compare(path: Path) -> dict[str, object]:
                 "staged_early_source_reported": r.get("staged_early"),
                 "staged_hits_source_reported": r.get("staged_hits"),
                 "physical_write_reqs_source_reported": r.get("physical_write_reqs"),
+                # Timed fio logical bytes versus sysfs lower sectors.
+                # This can include GC/foreign backend I/O and is NOT an
+                # independent device-attributed compression measurement.
+                "effective_io_reduction_ratio":
+                    r["logical_write_bytes"] / (r["lower_write_sectors"] * 512),
+                # Cumulative kernel LZ4 payload-only ratio; raw pages and
+                # container/record overhead are excluded.
+                "lz4_payload_ratio_cumulative":
+                    cumulative_lz4_payload_ratio(r["status"]),
             })
     finally:
         os.close(dirfd)
@@ -139,7 +165,10 @@ def compare(path: Path) -> dict[str, object]:
             "One sweep without randomization/repetition; lower-device sectors and "
             "requests are source-reported, not exclusively attributed. Reader "
             "p95/p99 are nearest-rank exact fio CLAT sidecar samples, not "
-            "independent timing instrumentation. No qualified winner."
+            "independent timing instrumentation. The effective lower-byte "
+            "ratio includes possible GC/unrelated I/O, while the cumulative "
+            "LZ4 payload ratio excludes raw pages and container overhead. "
+            "No qualified winner."
         ),
     }
 
@@ -151,12 +180,16 @@ def markdown(report: dict[str, object]) -> str:
         "Source-reported completed sweep; NO QUALIFIED WINNER.",
         "",
         "| Policy (batch) | Completed reads | Exact p95 (ms) | Exact p99 (ms) | "
-        "p95 ratio | p99 ratio | Upper write (MiB/s) | Upper ratio | Lower write I/Os | "
-        "Lower sectors | I/O ratio vs Immediate | Sector ratio vs Immediate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "p95 ratio | p99 ratio | Upper write (MiB/s) | Upper ratio | "
+        "LZ4 payload ratio (cumulative) | Effective I/O reduction | "
+        "Lower write I/Os | Lower sectors | I/O ratio vs Immediate | "
+        "Sector ratio vs Immediate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for c in report["cases"]:
         ratios = c["relative_to_immediate"]
+        lz4 = c["lz4_payload_ratio_cumulative"]
+        lz4_label = f"{lz4:.3f}x" if lz4 is not None else "n/a"
         output.append(
             f"| {c['strategy'].title()} ({c['batch_kib']} KiB) | "
             f"{c['observed_reads']} | {c['exact_read_p95_ms']:.3f} | "
@@ -165,6 +198,7 @@ def markdown(report: dict[str, object]) -> str:
             f"{ratios['exact_read_p99_ratio']:.3f}x | "
             f"{c['upper_write_mib_s']:.2f} | "
             f"{ratios['upper_write_mib_s_ratio']:.3f}x | "
+            f"{lz4_label} | {c['effective_io_reduction_ratio']:.3f}x | "
             f"{c['lower_write_ios']} | {c['lower_write_sectors']} | "
             f"{ratios['lower_write_ios_ratio']:.3f}x | "
             f"{ratios['lower_write_sectors_ratio']:.3f}x |"
@@ -175,7 +209,10 @@ def markdown(report: dict[str, object]) -> str:
         "and source-reported teardown-marker gates.",
         "",
         "**Not qualified:** kernel quiescence, exclusive physical write attribution, "
-        "or a strategy winner. No separate benchmark execution was performed.",
+        "or a strategy winner. LZ4 payload ratio is kernel-cumulative and "
+        "excludes metadata/raw pages. Effective I/O reduction is based on "
+        "fio logical bytes and shared lower sysfs sector deltas, including "
+        "potential GC/foreign I/O. No separate benchmark execution was performed.",
     ])
     return "\n".join(output) + "\n"
 
