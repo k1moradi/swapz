@@ -521,19 +521,11 @@ EOF
   status=$(swapz_benchmark_bounded "owned DM target status" 5s dmsetup status "$TARGET")
   grep -q "failed=0" <<<"$status"
 
+  SWAPZ_SOURCE_ROOT="$ROOT" SWAPZ_COUNTER_PREFIX="$counter_prefix" \
   python3 - "$json" "$before" "$after" "$status" "$strategy" "$batch" \
-      "$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" \
-      "$ROOT" "$counter_prefix" >>"$RESULTS" <<'PY'
-import importlib.util
-import json, sys
-from pathlib import Path
-(path, before, after, status, strategy, batch, start_ns, end_ns, backend,
- latency_summary, verify_summary, root_dir, counter_prefix) = sys.argv[1:]
-spec = importlib.util.spec_from_file_location(
-    "swapz_benchmark_counters",
-    str(Path(root_dir) / "tests/runtime/streaming-benchmark-counters.py"))
-counters = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(counters)
+      "$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<'PY'
+import json, os, sys
+path, before, after, status, strategy, batch, start_ns, end_ns, backend, latency_summary, verify_summary = sys.argv[1:]
 with open(path, encoding="utf-8") as f:
     root = json.load(f)
 source_jobs = root.get("jobs") if isinstance(root, dict) else None
@@ -562,14 +554,6 @@ b = [int(x) for x in before.split()]
 a = [int(x) for x in after.split()]
 s = status_map(status)
 logical = int(w.get("io_bytes", 0))
-cp = Path(counter_prefix)
-counter_metrics = counters.compute(
-    cp.with_suffix(".counters.status-before").read_text(),
-    cp.with_suffix(".counters.status-after").read_text(),
-    cp.with_suffix(".counters.lower-before").read_text(),
-    cp.with_suffix(".counters.lower-after").read_text(),
-    int(end_ns) - int(start_ns),
-    expected_logical=logical)
 elapsed_s = (int(end_ns) - int(start_ns)) / 1e9
 if elapsed_s <= 0:
     raise SystemExit("nonpositive monotonic benchmark interval; preserve artifacts")
@@ -610,9 +594,6 @@ row = {
     "lower_read_ios": a[0]-b[0], "lower_read_sectors": a[1]-b[1],
     "lower_write_ios": lower_ios, "lower_write_sectors": lower_sectors,
     "status": s,
-    # Byte-accurate kernel delta over the SAME flush-inclusive owned lower
-    # counter window; not proof of quiescence or real flash endurance.
-    "drain_aligned_counters": counter_metrics,
     # One protected compressed page survived the fio workload and flush.
     # This is NOT full random-writer data integrity attestation.
     "isolated_sentinel_readback_ok": True,
@@ -623,6 +604,27 @@ row = {
     # summarized fio read_p99_ms and unverified lower-counter window.
     "exact_read_latency": exact_latency,
 }
+# The privileged runner supplies these paths. Legacy rootless embedded
+# reporting tests intentionally run this collector without any live target
+# or counter snapshots, and retain their original 11-argument contract.
+counter_prefix = os.environ.get("SWAPZ_COUNTER_PREFIX")
+if counter_prefix:
+    import importlib.util
+    from pathlib import Path
+    source_root = os.environ["SWAPZ_SOURCE_ROOT"]
+    spec = importlib.util.spec_from_file_location(
+        "swapz_benchmark_counters",
+        str(Path(source_root) / "tests/runtime/streaming-benchmark-counters.py"))
+    counters = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(counters)
+    cp = Path(counter_prefix)
+    row["drain_aligned_counters"] = counters.compute(
+        Path(str(cp) + ".status-before").read_text(),
+        Path(str(cp) + ".status-after").read_text(),
+        Path(str(cp) + ".lower-before").read_text(),
+        Path(str(cp) + ".lower-after").read_text(),
+        int(end_ns) - int(start_ns),
+        expected_logical=logical)
 row["staged_hits"] = int(s.get("staged_hits", 0))
 row["staged_early"] = int(s.get("staged_early", 0))
 row["staged_cancel"] = int(s.get("staged_cancel", 0))
