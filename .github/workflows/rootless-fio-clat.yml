@@ -6,6 +6,9 @@ on:
       - 'tests/runtime/streaming-benchmark-read-latency.py'
       - 'tests/runtime/streaming-benchmark-writer-verify.py'
       - 'tests/runtime/streaming-benchmark-finalize.py'
+      - 'tests/runtime/streaming-benchmark-quarantine.sh'
+      - 'tests/runtime/streaming-benchmark-quarantine-test.py'
+      - 'tests/runtime/streaming-benchmark-teardown.sh'
       - 'tests/runtime/streaming-benchmark-module-preflight.py'
       - 'tests/runtime/streaming-benchmark-module-preflight-test.py'
       - 'tests/runtime/streaming-benchmark-live-authorization.py'
@@ -33,6 +36,13 @@ jobs:
       - name: Rootless exact benchmark VM authorization safety
         run: |
           timeout 20s python3 -B tests/runtime/streaming-benchmark-live-authorization-test.py -v
+      - name: Rootless bounded benchmark quarantine contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n tests/runtime/streaming-benchmark-quarantine.sh tests/runtime/streaming-benchmark-teardown.sh tests/runtime/streaming-benchmark.sh
+          python3 -m py_compile tests/runtime/streaming-benchmark-quarantine-test.py
+          timeout 20s python3 -B tests/runtime/streaming-benchmark-quarantine-test.py -v
       - name: Read-only selected-module provenance gate regression
         run: |
           timeout 20s python3 -B tests/runtime/streaming-benchmark-module-preflight-test.py -v
