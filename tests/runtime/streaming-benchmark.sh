@@ -385,7 +385,8 @@ run_case() {
   local path="/dev/mapper/$TARGET"
   local fiofile="$TMP/${strategy}-${batch}.fio"
   local json="$TMP/${strategy}-${batch}.json"
-  local before after status start_ns end_ns read_log_prefix latency_summary verify_summary
+  local before after status status_before status_after start_ns end_ns read_log_prefix latency_summary verify_summary
+  local counter_prefix="$TMP/${strategy}-${batch}.counters"
   local sentinel="$TMP/${strategy}-${batch}.sentinel"
   local sentinel_read="$TMP/${strategy}-${batch}.sentinel.readback"
   read_log_prefix="$TMP/${strategy}-${batch}-reader"
@@ -473,7 +474,13 @@ per_job_logs=0
 log_entries=32768
 EOF
 
+  # Record swapz's cumulative byte and compression counters before fio. This
+  # follows the already-drained prefill and protected sentinel, and precedes
+  # the existing lower-device timing window; do not move either flush.
+  status_before=$(swapz_benchmark_bounded "owned DM pre-fio status" 5s dmsetup status "$TARGET") || return 1
+  printf '%s\n' "$status_before" > "$counter_prefix.status-before"
   before=$(read_stat)
+  printf '%s\n' "$before" > "$counter_prefix.lower-before"
   # An elapsed interval cannot use wall-clock time (date can jump).
   start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   swapz_benchmark_bounded "timed reader/writer fio" "$(( RUNTIME + 90 ))s" fio "$fiofile" --output-format=json --output="$json"
@@ -483,6 +490,11 @@ EOF
   flush_device "$path"
   end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   after=$(read_stat)
+  printf '%s\n' "$after" > "$counter_prefix.lower-after"
+  # The original fsync already completed; capture final physical-byte and GC
+  # counters BEFORE CRC32C readback. Failed or missing status aborts the case.
+  status_after=$(swapz_benchmark_bounded "owned DM post-drain status" 5s dmsetup status "$TARGET") || return 1
+  printf '%s\n' "$status_after" > "$counter_prefix.status-after"
   # Require one exact latency for every completed reader I/O; a missing,
   # aggregated, or inconsistent fio log fails the case before publication.
   latency_summary=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-read-latency.py" \
@@ -510,9 +522,18 @@ EOF
   grep -q "failed=0" <<<"$status"
 
   python3 - "$json" "$before" "$after" "$status" "$strategy" "$batch" \
-      "$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<'PY'
+      "$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" \
+      "$ROOT" "$counter_prefix" >>"$RESULTS" <<'PY'
+import importlib.util
 import json, sys
-path, before, after, status, strategy, batch, start_ns, end_ns, backend, latency_summary, verify_summary = sys.argv[1:]
+from pathlib import Path
+(path, before, after, status, strategy, batch, start_ns, end_ns, backend,
+ latency_summary, verify_summary, root_dir, counter_prefix) = sys.argv[1:]
+spec = importlib.util.spec_from_file_location(
+    "swapz_benchmark_counters",
+    str(Path(root_dir) / "tests/runtime/streaming-benchmark-counters.py"))
+counters = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(counters)
 with open(path, encoding="utf-8") as f:
     root = json.load(f)
 source_jobs = root.get("jobs") if isinstance(root, dict) else None
@@ -541,6 +562,14 @@ b = [int(x) for x in before.split()]
 a = [int(x) for x in after.split()]
 s = status_map(status)
 logical = int(w.get("io_bytes", 0))
+cp = Path(counter_prefix)
+counter_metrics = counters.compute(
+    cp.with_suffix(".counters.status-before").read_text(),
+    cp.with_suffix(".counters.status-after").read_text(),
+    cp.with_suffix(".counters.lower-before").read_text(),
+    cp.with_suffix(".counters.lower-after").read_text(),
+    int(end_ns) - int(start_ns),
+    expected_logical=logical)
 elapsed_s = (int(end_ns) - int(start_ns)) / 1e9
 if elapsed_s <= 0:
     raise SystemExit("nonpositive monotonic benchmark interval; preserve artifacts")
@@ -581,6 +610,9 @@ row = {
     "lower_read_ios": a[0]-b[0], "lower_read_sectors": a[1]-b[1],
     "lower_write_ios": lower_ios, "lower_write_sectors": lower_sectors,
     "status": s,
+    # Byte-accurate kernel delta over the SAME flush-inclusive owned lower
+    # counter window; not proof of quiescence or real flash endurance.
+    "drain_aligned_counters": counter_metrics,
     # One protected compressed page survived the fio workload and flush.
     # This is NOT full random-writer data integrity attestation.
     "isolated_sentinel_readback_ok": True,
