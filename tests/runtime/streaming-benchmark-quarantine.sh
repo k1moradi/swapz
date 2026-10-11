@@ -17,6 +17,27 @@ swapz_benchmark_bounded() {
   fi
 }
 
+swapz_benchmark_target_exists() {
+  # 0=positively present, 1=positively absent, 2=uncertain/error.
+  # Only a successful COMPLETE inventory can establish absence, unlike
+  # a single-device dmsetup info request with ambiguous nonzero statuses.
+  local names rc=0 name
+  names=$(timeout --signal=TERM --kill-after=2s 8s dmsetup info \
+      --columns --noheadings -o name) || rc=$?
+  if (( rc != 0 )); then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="cannot conclusively enumerate Device Mapper targets (rc=$rc)"
+    return 2
+  fi
+  while IFS= read -r name; do
+    name=$(printf '%s' "$name" | tr -d '[:space:]')
+    if [[ "$name" == "$TARGET" ]]; then
+      return 0
+    fi
+  done <<<"$names"
+  return 1
+}
+
 swapz_benchmark_record_quarantine() {
   # Evidence is written exclusively to the runner's generated directory.
   # This is a runner statement, not independent device attestation.
