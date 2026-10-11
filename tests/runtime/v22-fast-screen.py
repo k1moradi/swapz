@@ -29,6 +29,7 @@ def _load(name: str, filename: str):
 planner = _load("swapz_fast_screen_planner", "streaming-benchmark-plan.py")
 reporter = _load("swapz_fast_screen_reporter", "streaming-benchmark-report.py")
 plateau = _load("swapz_fast_screen_exact_sidecars", "v22-drain-plateau-analyze.py")
+finalizer = _load("swapz_fast_screen_finalization", "streaming-benchmark-finalize.py")
 
 FAST_CASES = (
     ("immediate", 4),
@@ -171,10 +172,19 @@ def check_results(path: Path) -> dict[str, object]:
                 "full_writer_crc32c": True,
                 "sentinel_readback": True,
             })
+        # Check the last artifact only after validating every individual case.
+        # This exact digest is emitted by the runner *only after* completing
+        # reporter output and its owned DM/null_blk/configfs cleanup. The
+        # finalizer and sample rows are source-reported, not independent VM
+        # provenance, and may be forged by anyone who can edit the directory.
+        finalized = finalizer.check_marker(
+            raw.encode("utf-8"), dirfd, len(FAST_CASES), BACKEND)
     finally:
         os.close(dirfd)
     return {
         "schema": "swapz-v22-rootless-fast-screen-check-v1",
+        "source_reported_teardown": finalized["state"],
+        "completed_results_sha256": finalized["results_sha256"],
         "diagnostic_gate": "PASS_SOURCE_REPORTED_ONLY",
         "case_count": len(cases),
         "cases": cases,
@@ -182,7 +192,8 @@ def check_results(path: Path) -> dict[str, object]:
         "evidence": "UNQUALIFIED_EXPLORATORY_DIAGNOSTICS",
         "execution_authorized": False,
         "limitations": (
-            "NO QUALIFIED WINNER: exact fio CLAT and source-reported CRC checked; "
+            "NO QUALIFIED WINNER: exact fio CLAT, source-reported CRC and " 
+            "runner-reported final teardown checked; "
             "kernel/module identity, backend attribution, complete drain and "
             "quiescence remain independently unverified"
         ),
