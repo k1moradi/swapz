@@ -14,6 +14,8 @@ on:
       - 'tests/runtime/streaming-benchmark-live-authorization.py'
       - 'tests/runtime/streaming-benchmark-live-authorization-test.py'
       - 'tests/runtime/v22-fast-screen.py'
+      - 'tests/runtime/v22-fast-compare.py'
+      - 'tests/runtime/v22-fast-compare-test.py'
       - 'tests/runtime/v22-fast-screen-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-fio-cli-test.py'
@@ -36,6 +38,11 @@ jobs:
       - name: Rootless exact benchmark VM authorization safety
         run: |
           timeout 20s python3 -B tests/runtime/streaming-benchmark-live-authorization-test.py -v
+      - name: Read-only finalized three-policy performance comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 20s python3 -B tests/runtime/v22-fast-compare-test.py -v
       - name: Rootless bounded benchmark quarantine contracts
         shell: bash
         run: |
