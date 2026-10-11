@@ -5,12 +5,15 @@
 The first real-PC loaded-kernel attempt reached the Staged write but failed
 because the old parser rejected the kernel's valid `strategy=staged` text.
 The source of that failure was the smoke harness, **not proven scheduler
-correctness or a scheduler failure**. The test PC still had a source-reported
-quarantined loop, `dm-delay`, `swapz` mapping and loaded module. **Do not
-launch another smoke or benchmark until Codex independently verifies that
-this original quarantined stack is safely recovered or the user performs
-an independently approved reboot and preflight.** This source-only patch
-does not inspect, detach or clean up those existing live resources.
+correctness or a scheduler failure**. The test PC initially retained a
+quarantined loop, `dm-delay`, `swapz` mapping and loaded module. Codex later
+reported exact UUID/table/backing verification, zero pending counters,
+ordinary target and loop removal, and ordinary module unload, **without a
+reboot**. The original quarantine record remains forensic evidence, not a
+smoke PASS. **Before the next run**, recheck the absence of those old
+resources and resolve the independently observed machine-ID digest
+discrepancy; require a newly approved exact source/host/module statement.
+This source-only patch does not inspect or mutate the host.
 
 The corrected parser accepts the kernel's actual `STATUSTYPE_INFO` layout:
 `strategy=staged`, `batch_kib=64`, signed `inflight_id=-1/0/1`,
