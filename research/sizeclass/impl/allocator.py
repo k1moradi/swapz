@@ -265,14 +265,19 @@ class SizeClassAllocator:
                 if extent.block_count == self.block_count and extent.can_fit(len(record_payload), replacing=replaced):
                     target = extent
                     break
-        if target is None and len(self.staged) >= self.max_staged_extents:
+        replaced_extent = next((extent for extent in self.staged
+                                if replaced is not None and replaced.state == 'STAGED'
+                                and any(record is replaced for record in extent.records)), None)
+        empty_after_replacement = (replaced_extent is not None and replaced_extent is not target
+                                   and len(replaced_extent.records) == 1)
+        staged_count_after_replacement = len(self.staged) - int(empty_after_replacement)
+        if target is None and staged_count_after_replacement >= self.max_staged_extents:
             raise Backpressure('bounded staged extent window exhausted: flush and complete')
         if replaced is not None:
-            if replaced.state == 'STAGED':
-                for staged_extent in self.staged:
-                    if any(existing is replaced for existing in staged_extent.records):
-                        staged_extent.records.remove(replaced)
-                        break
+            if replaced_extent is not None:
+                replaced_extent.records.remove(replaced)
+                if not replaced_extent.records and replaced_extent is not target:
+                    self.staged.remove(replaced_extent)
             replaced.state = 'SUPERSEDED'
         if target is None:
             target = self._new_extent(1 if raw else self.block_count)
@@ -387,7 +392,8 @@ class SizeClassAllocator:
         if image is None:
             raise CorruptExtent('committed extent missing')
         if mapping.raw:
-            if len(image) != BLOCK_BYTES or zlib.crc32(image) != mapping.checksum:
+            if (mapping.offset != 0 or mapping.length != BLOCK_BYTES
+                    or len(image) != BLOCK_BYTES or zlib.crc32(image) != mapping.checksum):
                 raise CorruptExtent('corrupt raw mapping')
         else:
             descriptor = parse_extent(image, mapping.extent_id,
