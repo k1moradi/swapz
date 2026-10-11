@@ -164,7 +164,9 @@ def authorization_statement(vm_id: str, source_sha: str,
         f"I AUTHORIZE swapz V2.2 smoke only on disposable VM {vm_id} with "
         f"source {source_sha} and module SHA-256 {module_sha256}; permitted "
         "operations are one /dev/shm-backed loop device, one dm-delay target, "
-        "one swapz target, one aligned 4 KiB write/read, ordinary suspend and "
+        "one swapz target, one aligned 4 KiB write, two separate aligned "
+        "4 KiB reads (one while the lower write is outstanding and one after "
+        "ordinary suspend/resume drain), ordinary suspend and "
         "resume, ordinary removal of resources positively created by this run, "
         "and insmod/rmmod of only the selected dm-swapz module; no swap "
         "activation, mount, physical storage, forced removal, or host reboot."
@@ -206,6 +208,17 @@ def parse_info_value(text: str) -> str:
     if len(fields) != 1:
         raise QuarantineRequired(f"expected one dmsetup info value, got {text!r}")
     return fields[0]
+
+
+def parse_dm_attr(text: str) -> bool:
+    """Return suspended state for the exact writable, live-table attr forms."""
+    attr = parse_info_value(text)
+    if attr == "L--w":
+        return False
+    if attr == "L-sw":
+        return True
+    raise QuarantineRequired(
+        f"unexpected or ambiguous dmsetup attr value: {attr!r}")
 
 
 class SystemOperations:
@@ -428,21 +441,14 @@ class SystemOperations:
         if watchdog_match is None:
             raise SmokeFailure("cannot identify the production async watchdog value")
         watchdog_ms = int(watchdog_match.group(1))
-        if WRITE_DELAY_MS >= watchdog_ms:
+        # SWAPZ_ASYNC_WATCHDOG_MS applies to an individual in-flight lower
+        # request.  It is not a wall-clock budget for all userspace polling,
+        # readback, diagnostics, and suspend commands combined.
+        if watchdog_ms <= WRITE_DELAY_MS + 1000:
             raise SmokeFailure(
-                f"controlled write delay {WRITE_DELAY_MS} ms must stay below "
-                f"async watchdog {watchdog_ms} ms")
-        bounded_window = max(
-            WRITE_DELAY_MS,
-            WRITE_TIMEOUT_MS + STAGED_WAIT_MS + READ_TIMEOUT_MS
-            + 2 * STATUS_TIMEOUT_MS + SUSPEND_TIMEOUT_MS
-            + 4 * LOG_READ_TIMEOUT_MS + 2 * COMMAND_GRACE_MS
-            + STATUS_TIMEOUT_MS,
-        )
-        if watchdog_ms <= 0 or bounded_window + 1000 >= watchdog_ms:
-            raise SmokeFailure(
-                f"smoke wait budget {bounded_window} ms is too close to or exceeds "
-                f"async watchdog {watchdog_ms} ms")
+                f"controlled lower-write delay {WRITE_DELAY_MS} ms must be at "
+                f"least 1000 ms below the per-request async watchdog "
+                f"{watchdog_ms} ms")
 
         try:
             self._kmsg_fd = os.open("/dev/kmsg", os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
@@ -614,10 +620,16 @@ class SystemOperations:
         return parse_status(self._checked(["dmsetup", "status", name], STATUS_TIMEOUT_MS))
 
     def dm_is_suspended(self, name: str) -> bool:
-        value = parse_info_value(self._checked([
-            "dmsetup", "info", "--columns", "--noheadings", "-o", "suspended", name,
-        ], 2000))
-        return value.lower() in {"suspended", "yes", "1"}
+        try:
+            attr = self._checked([
+                "dmsetup", "info", "--columns", "--noheadings", "-o", "attr", name,
+            ], 2000)
+        except QuarantineRequired:
+            raise
+        except SmokeFailure as exc:
+            raise QuarantineRequired(
+                f"cannot establish Device Mapper suspended state for {name}: {exc}") from exc
+        return parse_dm_attr(attr)
 
     def dm_suspend(self, name: str) -> None:
         self._checked(["dmsetup", "suspend", name], SUSPEND_TIMEOUT_MS)
@@ -864,8 +876,10 @@ class SmokeRunner:
         self.delay_devno = self.ops.device_number(  # type: ignore[attr-defined]
             f"/dev/mapper/{self.delay_name}")
 
-        # Required production syntax: one 4 KiB logical page, staged strategy,
-        # and a 64 KiB batch ceiling.
+        # Keep the creation table's operator-supplied path.  Device Mapper
+        # resolves it to a dev_t, and dm_dev.name (used by swapz's table status)
+        # is emitted as canonical major:minor, so verification substitutes
+        # only the devno obtained from this verified owned target.
         target_table = (
             f"0 {TARGET_SECTORS} swapz /dev/mapper/{self.delay_name} staged 64")
         expected_target = target_table.split()

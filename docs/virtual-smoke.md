@@ -36,7 +36,7 @@ it goes idle; the check therefore waits for status to show all of
 `staged_early>0`, `inflight_blocks>0`, and `async_cb>0`. It then reads the same
 logical page before that lower write finishes, compares all 4096 bytes, and
 requires the actual `staged_hits=` counter to increase while the lower write
-is still in flight.
+is still in flight. This is the first of two distinct 4 KiB reads.
 
 Next, ordinary `dmsetup suspend` invokes swapz's presuspend drain, and ordinary
 `dmsetup resume` reopens the target. The harness requires zero in-flight
@@ -45,15 +45,29 @@ and compares the page again. This checks a drained read path; it does not claim
 power-loss durability.
 
 The production watchdog is read from `kernel/dm-swapz.c` at preflight and is
-currently 30 seconds. The controlled write delay is 5 seconds. The combined
-write, poll, read, status, suspend, and bounded diagnostic command budget is
-checked to remain below the watchdog with at least a one-second margin. Any
-command timeout, status uncertainty, data mismatch, warning, unexpected DM
-identity, or outstanding callback marks the VM **QUARANTINED**. The harness
-records a `QUARANTINED.json` marker under the run directory where possible and
-does not attempt teardown after such a failure. Do not reboot or force-remove
-anything to clear quarantine; preserve the VM for the authorized operator to
-inspect.
+The current value is 30 seconds. The watchdog bounds an individual asynchronous
+lower request; it is not a wall-clock budget for the whole userspace smoke. The
+controlled lower-write delay is 5 seconds, with a one-second preflight margin
+below that per-request watchdog. Individual commands and polls retain their
+own deadlines; the ordinary suspend command has a 12-second bound for the
+expected delayed write to drain. A timeout at any stage is ambiguous and
+quarantines the VM. Any status uncertainty, data mismatch, warning, unexpected
+DM identity, or outstanding callback also marks the VM **QUARANTINED**. The
+harness records a `QUARANTINED.json` marker under the run directory where
+possible and does not attempt teardown after such a failure. Do not reboot or
+force-remove anything to clear quarantine; preserve the VM for the authorized
+operator to inspect.
+
+Suspended state is queried with the documented `dmsetup info -o attr` field.
+The parser accepts only `L--w` (live, writable, active) and `L-sw` (live,
+writable, suspended). A missing table, an unexpected inactive table,
+read-only state, malformed value, extra output, or failed query is ambiguous
+and quarantines the VM. The target table is created with the owned delay path
+`/dev/mapper/<name>`, as required by Device Mapper. Verification compares the
+reported swapz backing token to the exact major:minor number obtained from that
+verified delay target. This matches the target status implementation, which
+emits `context->backing->name`, and Device Mapper stores that name from the
+resolved device number. No alternate device path or alias is accepted.
 
 The `/dev/kmsg` reader drains records already buffered when it is opened and
 reports any pre-existing warning/error records as baseline. It then checks new
@@ -82,8 +96,10 @@ future invocation, the user or designated VM owner must explicitly authorize:
 - the exact source commit and `dm-swapz.ko` SHA-256;
 - creation of one tmpfs-backed loop, one `dm-delay` target and one `swapz`
   target;
-- one 4 KiB write/read, ordinary suspend/resume, and ordinary cleanup of only
-  those positively owned resources;
+- one aligned 4 KiB write and two separate aligned 4 KiB reads: the first while
+  the lower write is outstanding, followed by ordinary suspend/resume drain
+  and the second read; ordinary cleanup of only those positively owned
+  resources;
 - loading and unloading only the selected `dm-swapz` module; and
 - the fail-closed quarantine policy, including preserving the VM on any
   timeout, warning, failed status, or ambiguous ownership.
@@ -124,9 +140,11 @@ runner's ownership and requiring their own explicit approval:
 The harness itself runs as root and performs only the separately approved
 operations listed in its authorization string: create one `/dev/shm`-backed
 loop device, `insmod` the selected `dm-swapz.ko`, create the UUID-tagged
-`dm-delay` and one-page `swapz` targets, perform one aligned 4 KiB write/read,
-query status, ordinarily suspend/resume, then ordinarily remove those exact
-owned targets, detach the owned loop, and `rmmod dm_swapz`. It never owns or
+`dm-delay` and one-page `swapz` targets, perform one aligned 4 KiB write and
+two separate aligned 4 KiB reads (one while the lower write is outstanding and
+one after suspend/resume drain), query status, ordinarily suspend/resume, then
+ordinarily remove those exact owned targets, detach the owned loop, and
+`rmmod dm_swapz`. It never owns or
 unloads the provisioned `dm-delay` module. If the harness times out, sees a
 warning, finds ambiguous ownership, or cannot prove a drained state, it leaves
 the remaining resources in place and marks the VM quarantined. Any later
@@ -151,7 +169,7 @@ VM_ID=disposable-swapz-v22-20261010
 SOURCE_SHA='<approved exact commit SHA in SOURCE_ROOT>'
 MODULE=/root/swapz-smoke/dm-swapz.ko
 MODULE_SHA256='<approved recorded SHA-256>'
-AUTH="I AUTHORIZE swapz V2.2 smoke only on disposable VM $VM_ID with source $SOURCE_SHA and module SHA-256 $MODULE_SHA256; permitted operations are one /dev/shm-backed loop device, one dm-delay target, one swapz target, one aligned 4 KiB write/read, ordinary suspend and resume, ordinary removal of resources positively created by this run, and insmod/rmmod of only the selected dm-swapz module; no swap activation, mount, physical storage, forced removal, or host reboot."
+AUTH="I AUTHORIZE swapz V2.2 smoke only on disposable VM $VM_ID with source $SOURCE_SHA and module SHA-256 $MODULE_SHA256; permitted operations are one /dev/shm-backed loop device, one dm-delay target, one swapz target, one aligned 4 KiB write, two separate aligned 4 KiB reads (one while the lower write is outstanding and one after ordinary suspend/resume drain), ordinary suspend and resume, ordinary removal of resources positively created by this run, and insmod/rmmod of only the selected dm-swapz module; no swap activation, mount, physical storage, forced removal, or host reboot."
 sudo "$SOURCE_ROOT/tests/runtime/virtual-smoke.sh" \
   --run-live \
   --vm-id "$VM_ID" \

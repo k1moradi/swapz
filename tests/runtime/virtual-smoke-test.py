@@ -135,6 +135,7 @@ class FakeOps:
         table = self.created[name][1].split()
         if table[2] == "swapz":
             table[3] = "253:0"
+        self.actions.append(("dm-table", name, tuple(table)))
         return table
 
     def dm_status(self, name):
@@ -158,6 +159,9 @@ class FakeOps:
         return status
 
     def dm_is_suspended(self, name):
+        self.actions.append(("suspended-query", name))
+        if self.suspended and self.uncertainty_at == "suspended-query":
+            raise SMOKE.QuarantineRequired("injected suspended-state query uncertainty")
         return self.suspended
 
     def dm_suspend(self, name):
@@ -251,6 +255,15 @@ class VirtualSmokeContracts(unittest.TestCase):
             SMOKE.validate_cli_config(SMOKE.Config(
                 config.vm_id, config.source_sha, config.module_path,
                 config.module_sha256, "I authorize it", True))
+        old_statement = config.authorization.replace(
+            "one aligned 4 KiB write, two separate aligned 4 KiB reads "
+            "(one while the lower write is outstanding and one after "
+            "ordinary suspend/resume drain)",
+            "one aligned 4 KiB write/read")
+        with self.assertRaisesRegex(SMOKE.SmokeFailure, "does not exactly bind"):
+            SMOKE.validate_cli_config(SMOKE.Config(
+                config.vm_id, config.source_sha, config.module_path,
+                config.module_sha256, old_statement, True))
 
     def test_user_owned_checkout_is_refused_for_privileged_live_execution(self):
         # CI/worktree paths are intentionally not trusted as root execution
@@ -279,10 +292,17 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertEqual(target_table.split()[1:3], ["8", "swapz"])
         self.assertEqual(target_table.split()[-2:], ["staged", "64"])
         self.assertIn("/dev/mapper/swapz-smoke-delay-", target_table)
+        verified_target_table = next(
+            a[2] for a in ops.actions
+            if a[0] == "dm-table" and "-target-" in a[1])
+        self.assertEqual(verified_target_table[3], "253:0")
         events = [a[0] for a in ops.actions]
         self.assertLess(events.index("write-4k"), events.index("read-4k"))
+        self.assertEqual(events.count("read-4k"), 2)
         self.assertLess(events.index("read-4k"), events.index("suspend"))
         self.assertLess(events.index("suspend"), events.index("resume"))
+        read_indices = [index for index, event in enumerate(events) if event == "read-4k"]
+        self.assertLess(events.index("resume"), read_indices[1])
         self.assertLess(events.index("dm-remove"), events.index("losetup-detach"))
         self.assertLess(events.index("losetup-detach"), events.index("rmmod"))
         self.assertNotIn("quarantine", events)
@@ -367,6 +387,17 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertNotIn("losetup-detach", events)
         self.assertNotIn("rmmod", events)
 
+        ops = FakeOps(uncertainty_at="suspended-query")
+        with self.assertRaisesRegex(
+                SMOKE.QuarantineRequired, "suspended-state query uncertainty"):
+            SMOKE.SmokeRunner(good_config(), ops).run()
+        events = [a[0] for a in ops.actions]
+        self.assertLess(events.index("suspend"), events.index("suspended-query"))
+        self.assertIn("quarantine", events)
+        self.assertNotIn("dm-remove", events)
+        self.assertNotIn("losetup-detach", events)
+        self.assertNotIn("rmmod", events)
+
     def test_unexpected_target_open_reference_prevents_teardown(self):
         ops = FakeOps()
         ops.open_target = True
@@ -389,6 +420,26 @@ class VirtualSmokeContracts(unittest.TestCase):
             SMOKE.parse_status("staged_hits=3 failed=0")
         with self.assertRaisesRegex(SMOKE.QuarantineRequired, "non-numeric"):
             SMOKE.parse_status(row.replace("async_cb=0", "async_cb=unknown"))
+
+        # Exercise the actual host command method while mocking only its
+        # subprocess boundary; assert both the supported field and strict
+        # parsing of the documented L/I/s/r/w attribute layout.
+        operations = SMOKE.SystemOperations()
+        command = ["dmsetup", "info", "--columns", "--noheadings", "-o",
+                   "attr", "owned-target"]
+        for attr, suspended in (("L--w", False), ("L-sw", True)):
+            with mock.patch.object(operations, "_checked", return_value=attr) as checked:
+                self.assertIs(operations.dm_is_suspended("owned-target"), suspended)
+                checked.assert_called_once_with(command, 2000)
+        for malformed in ("", "L--", "L--w extra", "L-Iw", "L-sr", "----"):
+            with mock.patch.object(operations, "_checked", return_value=malformed):
+                with self.subTest(attr=malformed), self.assertRaises(
+                        SMOKE.QuarantineRequired):
+                    operations.dm_is_suspended("owned-target")
+        with mock.patch.object(
+                operations, "_checked", side_effect=SMOKE.SmokeFailure("query failed")):
+            with self.assertRaisesRegex(SMOKE.QuarantineRequired, "cannot establish"):
+                operations.dm_is_suspended("owned-target")
 
     def test_kernel_log_gate_uses_printk_priority_for_device_mapper_errors(self):
         warning, message = SMOKE.SystemOperations._kernel_record_is_warning(
@@ -431,19 +482,15 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertTrue(command_names.isdisjoint({"swapon", "swapoff", "mount", "reboot", "sysrq"}))
         self.assertIn("exec python3 -B", wrapper)
         kernel_source = (ROOT / "kernel/dm-swapz.c").read_text(encoding="utf-8")
+        self.assertIn('DMEMIT("%s %s %u", context->backing->name', kernel_source)
+        self.assertIn("expected_target[3] = self.delay_devno", source)
         match = re.search(r"^#define\s+SWAPZ_ASYNC_WATCHDOG_MS\s+(\d+)U\s*$",
                           kernel_source, re.MULTILINE)
         self.assertIsNotNone(match)
         watchdog = int(match.group(1))
-        window = max(
-            SMOKE.WRITE_DELAY_MS,
-            SMOKE.WRITE_TIMEOUT_MS + SMOKE.STAGED_WAIT_MS + SMOKE.READ_TIMEOUT_MS
-            + 2 * SMOKE.STATUS_TIMEOUT_MS + SMOKE.SUSPEND_TIMEOUT_MS
-            + 4 * SMOKE.LOG_READ_TIMEOUT_MS + 2 * SMOKE.COMMAND_GRACE_MS
-            + SMOKE.STATUS_TIMEOUT_MS,
-        )
-        self.assertLess(window + 1000, watchdog)
-        self.assertLess(SMOKE.WRITE_DELAY_MS, watchdog)
+        self.assertLess(SMOKE.WRITE_DELAY_MS + 1000, watchdog)
+        self.assertGreater(SMOKE.SUSPEND_TIMEOUT_MS, SMOKE.WRITE_DELAY_MS)
+        self.assertNotIn("bounded_window", source)
 
     def test_operator_handoff_names_privileged_prerequisites_and_capacity(self):
         handoff = (ROOT / "docs/virtual-smoke.md").read_text(encoding="utf-8")
@@ -458,6 +505,12 @@ class VirtualSmokeContracts(unittest.TestCase):
         )
         self.assertRegex(handoff, r"cannot\s+authenticate the operator-supplied VM label")
         self.assertIn("forensic cleanup or VM reset needs a new", handoff)
+        self.assertIn("two separate aligned 4 KiB reads", handoff)
+        self.assertIn("while the lower write is outstanding", handoff)
+        self.assertIn("after ordinary suspend/resume drain", handoff)
+        expected_auth_line = 'AUTH="' + SMOKE.authorization_statement(
+            "$VM_ID", "$SOURCE_SHA", "$MODULE_SHA256") + '"'
+        self.assertIn(expected_auth_line, handoff)
 
 
 if __name__ == "__main__":
