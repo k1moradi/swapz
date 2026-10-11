@@ -126,6 +126,7 @@ WRITER_BYTES=$(( WRITER_MIB * 1048576 - 4096 ))
 TMP=$(mktemp -d /dev/shm/swapz-v22-stream.XXXXXX)
 TAG="$$-$RANDOM"
 TARGET="swapz-v22-stream-$TAG"
+TARGET_UUID="SWAPZ-V22-$TAG"
 NULL_NAME="swapzv22$TAG"
 NULL_CFG="/sys/kernel/config/nullb/$NULL_NAME"
 BACKING=""
@@ -138,6 +139,8 @@ RESULTS="$TMP/results.jsonl"
 BENCH_QUARANTINE=0
 BENCH_QUARANTINE_REASON=""
 TARGET_CANDIDATE=0
+NULL_CFG_CANDIDATE=0
+NULL_CFG_OWNED=0
 IO_STARTED=0
 TARGET_ACTIVE=0
 CASES_COMPLETED=0
@@ -160,7 +163,7 @@ cleanup() {
   # uncertain preserves *everything*, even if ordinary removal might work.
   # This avoids destroying forensic evidence or powering down a backing
   # with an unresolved in-flight kernel request.
-  if (( BENCH_QUARANTINE || (rc != 0 && (TARGET_ACTIVE || TARGET_CANDIDATE || IO_STARTED)) )); then
+  if (( BENCH_QUARANTINE || NULL_CFG_CANDIDATE || (rc != 0 && (TARGET_ACTIVE || TARGET_CANDIDATE || IO_STARTED)) )); then
     local reason="$BENCH_QUARANTINE_REASON"
     [[ -n "$reason" ]] || reason="interrupted/failed with active or candidate target (rc=$rc)"
     swapz_benchmark_record_quarantine "$reason" "$(( rc == 0 ? 1 : rc ))" || true
@@ -222,7 +225,10 @@ setup_nullblk() {
     CONFIGFS_MOUNTED_BY_US=1
   fi
   [[ -d /sys/kernel/config/nullb ]] || return 1
+  NULL_CFG_CANDIDATE=1
   swapz_benchmark_bounded "null_blk config allocation" 12s mkdir "$NULL_CFG" || return 1
+  NULL_CFG_OWNED=1
+  NULL_CFG_CANDIDATE=0
   for attr in size memory_backed irqmode completion_nsec hw_queue_depth max_sectors mbps power; do
     [[ -e "$NULL_CFG/$attr" ]] || return 1
   done
@@ -384,7 +390,8 @@ run_case() {
     return 1
   fi
   TARGET_CANDIDATE=1
-  swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch"
+  swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch" --uuid "$TARGET_UUID"
+  swapz_benchmark_verify_owned_target || return 1
   TARGET_ACTIVE=1
   TARGET_CANDIDATE=0
   # Prove the throttled fixture cannot issue a full-segment lower DISCARD
