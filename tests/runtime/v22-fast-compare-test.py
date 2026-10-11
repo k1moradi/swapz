@@ -85,6 +85,45 @@ class ThreeCaseComparison(unittest.TestCase):
         self.assertAlmostEqual(
             cases[1]["relative_to_immediate"]["exact_read_p99_ratio"], 1.1 / 3.0)
 
+    def test_compression_ratios_are_distinct_and_labeled(self):
+        row = self.fixture.rows[0]
+        row["status"].update({
+            "compressed_pages": "500",
+            "compressed_payload": "1000000",
+        })
+        self.fixture.save()
+        self.fixture.seal()
+        result = compare.compare(self.results)
+        control = result["cases"][0]
+        # Historical fixture: 16 MiB of fio writes, 2 MiB of lower sectors.
+        self.assertEqual(control["effective_io_reduction_ratio"], 8.0)
+        # Cumulative LZ4: 500 compressed 4KiB pages / 1,000,000 payload B.
+        self.assertAlmostEqual(control["lz4_payload_ratio_cumulative"], 2.048)
+        self.assertIsNone(result["cases"][1]["lz4_payload_ratio_cumulative"])
+        displayed = compare.markdown(result)
+        self.assertIn("LZ4 payload ratio (cumulative)", displayed)
+        self.assertIn("Effective I/O reduction", displayed)
+        self.assertIn("2.048x | 8.000x", displayed)
+        self.assertIn("n/a | 8.000x", displayed)
+        self.assertIn("No qualified winner.", result["limitations"])
+
+    def test_malformed_or_partial_lz4_counters_fail_closed(self):
+        for counters in (
+            {"compressed_pages": "4"},
+            {"compressed_pages": "0", "compressed_payload": "1"},
+            {"compressed_pages": "1", "compressed_payload": "0"},
+            {"compressed_pages": "bad", "compressed_payload": "100"},
+            {"compressed_pages": 1, "compressed_payload": "100"},
+        ):
+            with self.subTest(counters=counters):
+                self.fixture.rows[0]["status"] = {
+                    "failed": "0", "strategy": "immediate",
+                    "batch_kib": "4", "lower_discard": "off", **counters}
+                self.fixture.save()
+                self.fixture.seal()
+                with self.assertRaises(ValueError):
+                    compare.compare(self.results)
+
     def test_relative_lower_requests_and_sectors_are_not_confused(self):
         self.fixture.rows[1]["lower_write_ios"] = 5
         self.fixture.rows[1]["lower_write_sectors"] = 2048
