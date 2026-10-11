@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fail-closed loaded-kernel smoke for an authorized VM or real development PC.
+"""Fail-closed loaded-kernel smoke for a specified VM or real development PC.
 
-Every live operation requires an exact authorization statement bound to the
-environment, source revision and selected module digest. Rootless coverage
-uses injected mock operations; this is a correctness smoke, not a benchmark.
+A deliberate --run-live flag and verified host/source/module identities are
+required. No copied authorization phrase is required. Rootless coverage uses
+injected mock operations; this is a correctness smoke, not a benchmark.
 """
 
 from __future__ import annotations
@@ -96,7 +96,6 @@ class Config:
     source_sha: str
     module_path: Path
     module_sha256: str
-    authorization: str
     live: bool
     host_id: str | None = None
     host_machine_id_sha256: str | None = None
@@ -164,40 +163,6 @@ class Operations(Protocol):
                           messages: list[str]) -> None: ...
 
 
-def authorization_statement(vm_id: str, source_sha: str,
-                            module_sha256: str, *,
-                            host_id: str | None = None,
-                            host_machine_id_sha256: str | None = None) -> str:
-    if host_id is not None:
-        machine = host_machine_id_sha256 or ""
-        return (
-            "I AUTHORIZE swapz V2.2 smoke only on bare-metal development PC "
-            f"{host_id} with machine-id SHA-256 {machine}, source {source_sha} "
-            f"and module SHA-256 {module_sha256}; permitted operations are "
-            "one 32 MiB /dev/shm-backed file attached to one owned loop device, "
-            "one dm-delay target, one one-page swapz target, one aligned 4 KiB "
-            "write and two aligned 4 KiB reads (first while lower I/O is "
-            "outstanding, second after ordinary suspend/resume drain), "
-            "read-only status and kernel-log checks, ordinary suspend/resume, "
-            "ordinary cleanup of positively owned test resources, and "
-            "insmod/rmmod of only the selected dm-swapz module; "
-            "the developer accepts risk of kernel hang or crash on this PC; "
-            "NOT authorized are swapoff or swapon, SD-card or other raw "
-            "physical-partition reads/writes, mounts, swap activation, "
-            "forced removal, unrelated-device cleanup or host reboot."
-        )
-    return (
-        f"I AUTHORIZE swapz V2.2 smoke only on disposable VM {vm_id} with "
-        f"source {source_sha} and module SHA-256 {module_sha256}; permitted "
-        "operations are one /dev/shm-backed loop device, one dm-delay target, "
-        "one swapz target, one aligned 4 KiB write, two separate aligned "
-        "4 KiB reads (one while the lower write is outstanding and one after "
-        "ordinary suspend/resume drain), ordinary suspend and "
-        "resume, ordinary removal of resources positively created by this run, "
-        "and insmod/rmmod of only the selected dm-swapz module; no swap "
-        "activation, mount, physical storage, forced removal, or host reboot."
-    )
-
 
 def validate_cli_config(config: Config) -> None:
     if not config.live:
@@ -218,13 +183,6 @@ def validate_cli_config(config: Config) -> None:
         raise SmokeFailure("--source-sha must be a full lowercase Git SHA")
     if not re.fullmatch(r"[0-9a-f]{64}", config.module_sha256):
         raise SmokeFailure("--module-sha256 must be a full lowercase SHA-256")
-    if config.authorization != authorization_statement(
-            config.vm_id, config.source_sha, config.module_sha256,
-            host_id=config.host_id,
-            host_machine_id_sha256=config.host_machine_id_sha256):
-        raise SmokeFailure(
-            "authorization text does not exactly bind the VM, source, module, "
-            "and permitted operation list")
 
 
 def parse_status(text: str) -> dict[str, int]:
@@ -390,7 +348,7 @@ class SystemOperations:
 
     def _require_root(self) -> None:
         if os.geteuid() != 0:
-            raise SmokeFailure("live smoke requires root after explicit authorization")
+            raise SmokeFailure("live smoke requires root")
 
     @staticmethod
     def _secure_module_path(path: Path) -> Path:
@@ -470,7 +428,7 @@ class SystemOperations:
                     f"rc={result.returncode} output={result.stdout.strip()!r}")
 
     def preflight(self, config: Config, names: tuple[str, str]) -> int:
-        """Complete all read-only authorization and identity checks first."""
+        """Complete all read-only host/source/module identity checks first."""
         validate_cli_config(config)
         self._require_root()
         self._require_protected_source_tree()
@@ -513,7 +471,7 @@ class SystemOperations:
             ], 2000)
             if blob != worktree_blob:
                 raise SmokeFailure(
-                    f"{source_path} differs from the authorized source SHA")
+                    f"{source_path} differs from the pinned source SHA")
 
         module = self._secure_module_path(config.module_path)
         digest = hashlib.sha256(module.read_bytes()).hexdigest()
@@ -1205,7 +1163,7 @@ class SmokeRunner:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run narrowly scoped loaded-kernel smoke on a separately authorized VM or real development PC.")
+        description="Run narrowly scoped loaded-kernel smoke with pinned VM/PC, source and module identity; no approval phrase.")
     parser.add_argument("--run-live", action="store_true",
                         help="required explicit switch; never set by rootless tests")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -1219,8 +1177,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="root-owned, non-writable selected dm-swapz.ko")
     parser.add_argument("--module-sha256", required=True,
                         help="independently recorded SHA-256 of selected module")
-    parser.add_argument("--authorization", required=True,
-                        help="exact authorization_statement() for this VM, source, module and operation scope")
     return parser
 
 
@@ -1231,7 +1187,6 @@ def main(argv: list[str] | None = None) -> int:
         source_sha=args.source_sha,
         module_path=args.module,
         module_sha256=args.module_sha256,
-        authorization=args.authorization,
         live=args.run_live,
         host_id=args.host_id,
         host_machine_id_sha256=args.host_machine_id_sha256,
@@ -1245,7 +1200,7 @@ def main(argv: list[str] | None = None) -> int:
         print("VIRTUAL_SMOKE: INTERRUPTED; preserve PC/VM state and remaining resources; no forced cleanup",
               file=sys.stderr)
         return 1
-    print("VIRTUAL_SMOKE: PASS (authorized host/VM, tmpfs-loop only; not benchmark evidence)")
+    print("VIRTUAL_SMOKE: PASS (verified host/VM, tmpfs-loop only; not benchmark evidence)")
     return 0
 
 
