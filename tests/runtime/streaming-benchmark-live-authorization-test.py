@@ -161,8 +161,10 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
             return vm_result("", 1)
         with mock.patch.object(auth.Path, "read_text", return_value=machine):
             self.assertIn("APPROVED_REAL_PC", auth.check(env, runner))
+            changed = {**env, "SWAPZ_BENCH_HOST_MACHINE_ID_SHA256": "f"*64}
+            changed["SWAPZ_BENCH_AUTHORIZATION"] = auth.proposal(changed)[0]
             with self.assertRaisesRegex(ValueError, "host machine-id"):
-                auth.check({**env, "SWAPZ_BENCH_HOST_MACHINE_ID_SHA256": "f"*64}, runner)
+                auth.check(changed, runner)
 
     def test_baremetal_scope_requires_exact_machine_and_rejects_guest(self):
         machine = "0123456789abcdef0123456789abcdef"
