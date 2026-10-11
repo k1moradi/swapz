@@ -5,6 +5,7 @@ on:
     paths:
       - 'tests/runtime/streaming-benchmark-read-latency.py'
       - 'tests/runtime/streaming-benchmark-writer-verify.py'
+      - 'tests/runtime/streaming-benchmark-finalize.py'
       - 'tests/runtime/v22-fast-screen.py'
       - 'tests/runtime/v22-fast-screen-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
