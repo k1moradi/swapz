@@ -317,6 +317,7 @@ class ThreeCaseScreenTests(unittest.TestCase):
         successful, marker = call(teardown_ok=True, report_ok=True, initial_ok=True)
         self.assertEqual(successful.returncode, 0, successful.stderr)
         self.assertTrue(marker.is_file())
+        self.assertIn("PASS (OWNED RESOURCES REMOVED", successful.stdout)
         for kwargs in (
             {"teardown_ok": False, "report_ok": True, "initial_ok": True},
             {"teardown_ok": True, "report_ok": False, "initial_ok": True},
@@ -326,6 +327,7 @@ class ThreeCaseScreenTests(unittest.TestCase):
                 failed, marker = call(**kwargs)
                 self.assertNotEqual(failed.returncode, 0)
                 self.assertFalse(marker.exists())
+                self.assertNotIn("PASS (OWNED RESOURCES REMOVED", failed.stdout)
 
     def test_mock_runner_profile_is_only_environment_not_executed(self):
         script = SCRIPT.read_text(encoding="utf-8")
