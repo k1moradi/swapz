@@ -89,6 +89,8 @@ on:
       - 'tests/runtime/swapz-upper-bio-ownership-contract-test.py'
       - 'tests/runtime/swapz-pending-pack-ownership-contract-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
+      - 'tests/runtime/streaming-benchmark-live-authorization.py'
+      - 'tests/runtime/streaming-benchmark-live-authorization-test.py'
       - 'tests/runtime/streaming-benchmark-plan.py'
       - 'tests/runtime/streaming-benchmark-plan-test.py'
       - 'tests/runtime/streaming-benchmark-read-latency.py'
@@ -138,6 +140,12 @@ jobs:
           bash -n tests/runtime/virtual-smoke.sh
           python3 -m py_compile tests/runtime/virtual-smoke.py tests/runtime/virtual-smoke-test.py
           timeout 25s python3 -B tests/runtime/virtual-smoke-test.py -v
+      - name: Rootless exact benchmark VM authorization contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tests/runtime/streaming-benchmark-live-authorization.py tests/runtime/streaming-benchmark-live-authorization-test.py
+          timeout 25s python3 -B tests/runtime/streaming-benchmark-live-authorization-test.py -v
       - name: Verify Bash syntax
         run: |
           set -euo pipefail
