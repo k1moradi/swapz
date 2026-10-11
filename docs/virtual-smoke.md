@@ -1,5 +1,95 @@
 # V2.2 loaded-kernel smoke harness
 
+## Alternative: the real development PC (no VM)
+
+The V2.2 smoke may now run on an **explicitly authorized bare-metal
+development PC**. A VM is NOT required for this path. The first loaded-kernel
+test still writes **only** to a newly created 32 MiB file on verified tmpfs
+`/dev/shm`, attached through an owned loop device; it does not access the
+host's SD-card swap partition. It exercises the running real Linux kernel,
+the actual `dm_swapz` module, `dm-delay` and Device Mapper.
+
+**Important host risk:** unlike a disposable VM, the host can become
+unresponsive or panic when testing an experimental kernel module. A
+quarantine result means **stop and preserve remaining devices**, not
+automatically reboot or force removal. Host recovery and forensic cleanup
+are separately approved operations. Make sure work is saved, a local
+operator can recover the host, and the 32 MiB tmpfs fixture plus module
+operations are acceptable before proceeding. Never run the smoke during
+critical host activity.
+
+### Bare-metal read-only preparation
+
+The development PC previously reported kernel `7.0.0-38-generic`; the
+source-tested host module digest from that specific build was
+`03e2437bb819d1b655720e3c9053a66d95cffa6d837cf87ea777a2dd03babc1c`.
+Re-verify both values **locally**; never infer a newly built module digest.
+
+Read-only host identity for operator verification:
+
+```bash
+uname -r
+python3 - <<'PY'
+import hashlib
+from pathlib import Path
+value = Path('/etc/machine-id').read_text(encoding='ascii').strip()
+print(hashlib.sha256(value.encode('ascii')).hexdigest())
+PY
+systemd-detect-virt --vm || true
+systemd-detect-virt --container || true
+swapon --show
+```
+
+The host branch's new `--host-id devpc-<label>` mode requires a
+64-hex SHA-256 of that machine-id. It rejects detected VM/container states,
+and requires the normal root-owned full source checkout, module hash,
+registered `dm-delay`, tmpfs, root authorization and kernel-log safeguards.
+The operator must verify the host name/identity independently; neither
+the label nor the hash alone establishes host ownership.
+
+Provisioning `dm-delay`, moving a pinned checkout and module to a
+root-owned non-writable location, and any `insmod/rmmod` still require
+**separately approved operations**; the harness does not provision them.
+
+### Exact bare-metal smoke approval
+
+The existing VM authorization text is **not interchangeable** with the
+new bare-metal approval. The new statement binds an approved
+`devpc-<label>`, host machine-id SHA-256, source commit and selected
+module SHA-256, and expressly limits all writes to the 32 MiB tmpfs
+loop-backed test fixture. It authorizes exactly one 4 KiB write and two
+4 KiB reads; it also acknowledges possible kernel hang/crash risk.
+
+The owner must explicitly approve the complete
+`authorization_statement('', source_sha, module_sha256,
+host_id=..., host_machine_id_sha256=...)` return value, then supply it
+unchanged. The host form is:
+
+```text
+I AUTHORIZE swapz V2.2 smoke only on bare-metal development PC <devpc-label> with machine-id SHA-256 <MACHINE_DIGEST>, source <SOURCE_SHA> and module SHA-256 <MODULE_DIGEST>; permitted operations are one 32 MiB /dev/shm-backed file attached to one owned loop device, one dm-delay target, one one-page swapz target, one aligned 4 KiB write and two aligned 4 KiB reads (first while lower I/O is outstanding, second after ordinary suspend/resume drain), read-only status and kernel-log checks, ordinary suspend/resume, ordinary cleanup of positively owned test resources, and insmod/rmmod of only the selected dm-swapz module; the developer accepts risk of kernel hang or crash on this PC; NOT authorized are swapoff or swapon, SD-card or other raw physical-partition reads/writes, mounts, swap activation, forced removal, unrelated-device cleanup or host reboot.
+```
+
+For a **separately authorized** host and protected checkout/module, the
+runner CLI uses `--run-live --host-id devpc-<label>
+--host-machine-id-sha256 <MACHINE_DIGEST> --source-sha <SOURCE_SHA>
+--module /root/<approved-path>/dm-swapz.ko
+--module-sha256 <MODULE_DIGEST> --authorization <EXACT_APPROVED_STRING>`.
+This paragraph is a command reference, **not permission to execute it**.
+
+### The SD swap partition is not the smoke fixture
+
+The development PC's `/dev/sdb1` was previously verified as an active
+116.2 GiB swap partition. It was temporarily swapped off and then
+successfully re-enabled **without any test write**. Leave it active for
+this first smoke, and keep the separate `/swapfile` unchanged.
+
+A future **separate** SD-card performance test would require a
+purpose-built, reviewed physical-device ownership design, checked data
+and swap-signature preservation/restoration, recovery planning, and
+explicit destructive-device authorization. This safe RAM-backed
+host smoke deliberately cannot reach `/dev/sdb1`.
+
+
 `tests/runtime/virtual-smoke.sh` is a narrowly scoped loaded-kernel check for
 an **explicitly authorized disposable Linux VM**. It is not a benchmark and its
 rootless mocks do not qualify a loaded kernel. No live invocation was made as

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -139,6 +140,53 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
         self.assertEqual(p["total_planned_runs"], 15)
         self.assertIn("staged:256KiB", full)
         self.assertNotIn("staged:512KiB", full)
+
+    def test_baremetal_scope_includes_exact_host_and_excludes_sd_swap(self):
+        machine = "0123456789abcdef0123456789abcdef"
+        digest = hashlib.sha256(machine.encode("ascii")).hexdigest()
+        env = baseline(
+            SWAPZ_BENCH_VM_ID="",
+            SWAPZ_BENCH_HOST_ID="devpc-Inspiron1564Linux",
+            SWAPZ_BENCH_HOST_MACHINE_ID_SHA256=digest)
+        scope, p = auth.proposal(env)
+        self.assertEqual(p["total_planned_runs"], 3)
+        self.assertIn("bare-metal development PC devpc-Inspiron1564Linux", scope)
+        self.assertIn(digest, scope)
+        self.assertIn("SD-card swap partition I/O", scope)
+        self.assertIn("swapoff or swapon", scope)
+        self.assertNotIn("disposable VM", scope)
+        self.assertRaises(ValueError, auth.check, env, mock.Mock())
+        env["SWAPZ_BENCH_AUTHORIZATION"] = scope
+        def runner(args, **kwargs):
+            return vm_result("", 1)
+        with mock.patch.object(auth.Path, "read_text", return_value=machine):
+            self.assertIn("APPROVED_REAL_PC", auth.check(env, runner))
+            changed = {**env, "SWAPZ_BENCH_HOST_MACHINE_ID_SHA256": "f"*64}
+            changed["SWAPZ_BENCH_AUTHORIZATION"] = auth.proposal(changed)[0]
+            with self.assertRaisesRegex(ValueError, "host machine-id"):
+                auth.check(changed, runner)
+
+    def test_baremetal_scope_requires_exact_machine_and_rejects_guest(self):
+        machine = "0123456789abcdef0123456789abcdef"
+        digest = hashlib.sha256(machine.encode("ascii")).hexdigest()
+        with mock.patch.object(auth.Path, "read_text", return_value=machine):
+            for answers in (
+                [vm_result("kvm", 0)],
+                [vm_result("", 1), vm_result("docker", 0)],
+                [vm_result("", 0)],
+            ):
+                with self.subTest(answers=answers):
+                    fake = mock.Mock(side_effect=answers)
+                    with self.assertRaisesRegex(ValueError, "virtualization/container"):
+                        auth.host_indication(digest, fake)
+        for options in (
+            {"SWAPZ_BENCH_HOST_ID": "devpc-approved"},
+            {"SWAPZ_BENCH_HOST_ID": "devpc-approved",
+             "SWAPZ_BENCH_VM_ID": ""},
+            {"SWAPZ_BENCH_HOST_ID": "host"},
+        ):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                auth.proposal(baseline(**options))
 
     def test_non_guest_results_and_errors_fail_closed(self):
         for result in (

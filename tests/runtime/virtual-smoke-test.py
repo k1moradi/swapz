@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import ast
+import hashlib
 from pathlib import Path
 import re
 import sys
@@ -264,6 +265,83 @@ class VirtualSmokeContracts(unittest.TestCase):
             SMOKE.validate_cli_config(SMOKE.Config(
                 config.vm_id, config.source_sha, config.module_path,
                 config.module_sha256, old_statement, True))
+
+    def test_baremetal_scope_is_separate_and_pins_exact_host_identity(self):
+        mid_sha = hashlib.sha256(b"0123456789abcdef0123456789abcdef").hexdigest()
+        host = SMOKE.Config(
+            vm_id="", host_id="devpc-Inspiron1564Linux",
+            host_machine_id_sha256=mid_sha,
+            source_sha="a"*40, module_path=Path("/root/dm-swapz.ko"),
+            module_sha256="b"*64, live=True,
+            authorization=SMOKE.authorization_statement(
+                "", "a"*40, "b"*64,
+                host_id="devpc-Inspiron1564Linux",
+                host_machine_id_sha256=mid_sha))
+        SMOKE.validate_cli_config(host)
+        self.assertIn("bare-metal development PC", host.authorization)
+        self.assertIn("NOT authorized are swapoff or swapon", host.authorization)
+        self.assertIn("SD-card or other raw", host.authorization)
+        self.assertNotIn("disposable VM", host.authorization)
+        with self.assertRaisesRegex(SMOKE.SmokeFailure, "does not exactly bind"):
+            SMOKE.validate_cli_config(SMOKE.Config(
+                **{**vars(host), "authorization":
+                   SMOKE.authorization_statement(
+                       "disposable-test-vm", host.source_sha, host.module_sha256)}))
+        with self.assertRaisesRegex(SMOKE.SmokeFailure, "machine-id SHA-256"):
+            SMOKE.validate_cli_config(SMOKE.Config(
+                **{**vars(host), "host_machine_id_sha256": "bad"}))
+        with self.assertRaisesRegex(SMOKE.SmokeFailure, "devpc-"):
+            SMOKE.validate_cli_config(SMOKE.Config(
+                **{**vars(host), "host_id": "production"}))
+        with self.assertRaisesRegex(SMOKE.SmokeFailure, "no VM ID"):
+            SMOKE.validate_cli_config(SMOKE.Config(
+                **{**vars(host), "vm_id": "disposable-any"}))
+
+    def test_baremetal_detection_rejects_virtualized_or_container_host(self):
+        machine = "0123456789abcdef0123456789abcdef"
+        digest = hashlib.sha256(machine.encode("ascii")).hexdigest()
+        op = SMOKE.SystemOperations()
+        def result(argv, rc=1, output=""):
+            return SMOKE.CommandResult(tuple(argv), rc, output, "")
+        with mock.patch.object(SMOKE.Path, "read_text", return_value=machine):
+            with mock.patch.object(op, "run", side_effect=[
+                    result(["systemd-detect-virt", "--vm"]),
+                    result(["systemd-detect-virt", "--container"])]):
+                op._verify_baremetal_identity(digest)
+            with self.assertRaisesRegex(SMOKE.SmokeFailure, "machine identity"):
+                op._verify_baremetal_identity("e"*64)
+            for flag, observations in (
+                ("--vm", [result(["systemd-detect-virt", "--vm"], 0, "kvm")]),
+                ("--container", [result(["systemd-detect-virt", "--vm"]),
+                                  result(["systemd-detect-virt", "--container"], 0, "docker")]),
+            ):
+                with self.subTest(flag=flag), mock.patch.object(
+                        op, "run", side_effect=observations):
+                    with self.assertRaisesRegex(SMOKE.SmokeFailure,
+                                                "virtualization indicator"):
+                        op._verify_baremetal_identity(digest)
+
+    def test_real_host_smoke_uses_same_tmpfs_loop_and_two_reads(self):
+        digest = hashlib.sha256(b"0123456789abcdef0123456789abcdef").hexdigest()
+        config = SMOKE.Config(
+            vm_id="", host_id="devpc-test", host_machine_id_sha256=digest,
+            source_sha="a"*40, module_path=Path("/root/dm-swapz.ko"),
+            module_sha256="b"*64, live=True,
+            authorization=SMOKE.authorization_statement(
+                "", "a"*40, "b"*64, host_id="devpc-test",
+                host_machine_id_sha256=digest))
+        ops = FakeOps()
+        SMOKE.SmokeRunner(config, ops).run()
+        self.assertEqual(sum(x[0] == "write-4k" for x in ops.actions), 1)
+        self.assertEqual(sum(x[0] == "read-4k" for x in ops.actions), 2)
+        self.assertEqual(sum(x[0] == "losetup-create" for x in ops.actions), 1)
+        self.assertEqual(sum(x[0] == "rmmod" for x in ops.actions), 1)
+        unsafe = FakeOps(timeout_at="write")
+        with self.assertRaises(SMOKE.QuarantineRequired):
+            SMOKE.SmokeRunner(config, unsafe).run()
+        self.assertTrue(unsafe.quarantine["owned"]["host_mode"])
+        self.assertNotIn("rmmod", [x[0] for x in unsafe.actions])
+        self.assertNotIn("losetup-detach", [x[0] for x in unsafe.actions])
 
     def test_user_owned_checkout_is_refused_for_privileged_live_execution(self):
         # CI/worktree paths are intentionally not trusted as root execution

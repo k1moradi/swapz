@@ -95,6 +95,8 @@ class Config:
     module_sha256: str
     authorization: str
     live: bool
+    host_id: str | None = None
+    host_machine_id_sha256: str | None = None
 
 
 @dataclass
@@ -119,6 +121,7 @@ class Owned:
     target_owned: bool = False
     io_started: bool = False
     quarantined: bool = False
+    host_mode: bool = False
 
 
 class Operations(Protocol):
@@ -159,7 +162,27 @@ class Operations(Protocol):
 
 
 def authorization_statement(vm_id: str, source_sha: str,
-                            module_sha256: str) -> str:
+                            module_sha256: str, *,
+                            host_id: str | None = None,
+                            host_machine_id_sha256: str | None = None) -> str:
+    if host_id is not None:
+        machine = host_machine_id_sha256 or ""
+        return (
+            "I AUTHORIZE swapz V2.2 smoke only on bare-metal development PC "
+            f"{host_id} with machine-id SHA-256 {machine}, source {source_sha} "
+            f"and module SHA-256 {module_sha256}; permitted operations are "
+            "one 32 MiB /dev/shm-backed file attached to one owned loop device, "
+            "one dm-delay target, one one-page swapz target, one aligned 4 KiB "
+            "write and two aligned 4 KiB reads (first while lower I/O is "
+            "outstanding, second after ordinary suspend/resume drain), "
+            "read-only status and kernel-log checks, ordinary suspend/resume, "
+            "ordinary cleanup of positively owned test resources, and "
+            "insmod/rmmod of only the selected dm-swapz module; "
+            "the developer accepts risk of kernel hang or crash on this PC; "
+            "NOT authorized are swapoff or swapon, SD-card or other raw "
+            "physical-partition reads/writes, mounts, swap activation, "
+            "forced removal, unrelated-device cleanup or host reboot."
+        )
     return (
         f"I AUTHORIZE swapz V2.2 smoke only on disposable VM {vm_id} with "
         f"source {source_sha} and module SHA-256 {module_sha256}; permitted "
@@ -176,14 +199,26 @@ def authorization_statement(vm_id: str, source_sha: str,
 def validate_cli_config(config: Config) -> None:
     if not config.live:
         raise SmokeFailure("missing --run-live; no operation was attempted")
-    if not re.fullmatch(r"disposable-[A-Za-z0-9._-]{1,60}", config.vm_id):
-        raise SmokeFailure("--vm-id must use the disposable-<label> form")
+    if config.host_id is None:
+        if not re.fullmatch(r"disposable-[A-Za-z0-9._-]{1,60}", config.vm_id):
+            raise SmokeFailure("--vm-id must use the disposable-<label> form")
+        if config.host_machine_id_sha256 is not None:
+            raise SmokeFailure("bare-metal machine digest cannot be used with VM mode")
+    else:
+        if (config.vm_id or
+                not re.fullmatch(r"devpc-[A-Za-z0-9._-]{1,60}", config.host_id)):
+            raise SmokeFailure("host mode requires --host-id devpc-<label> and no VM ID")
+        if not config.host_machine_id_sha256 or not re.fullmatch(
+                r"[0-9a-f]{64}", config.host_machine_id_sha256):
+            raise SmokeFailure("host mode requires exact machine-id SHA-256")
     if not re.fullmatch(r"[0-9a-f]{40}", config.source_sha):
         raise SmokeFailure("--source-sha must be a full lowercase Git SHA")
     if not re.fullmatch(r"[0-9a-f]{64}", config.module_sha256):
         raise SmokeFailure("--module-sha256 must be a full lowercase SHA-256")
     if config.authorization != authorization_statement(
-            config.vm_id, config.source_sha, config.module_sha256):
+            config.vm_id, config.source_sha, config.module_sha256,
+            host_id=config.host_id,
+            host_machine_id_sha256=config.host_machine_id_sha256):
         raise SmokeFailure(
             "authorization text does not exactly bind the VM, source, module, "
             "and permitted operation list")
@@ -364,6 +399,26 @@ class SystemOperations:
                         "live source path components must be root-owned and "
                         f"non-writable: {component}")
 
+    def _verify_baremetal_identity(self, expected_machine_sha: str) -> None:
+        """Fail before mutation if the specifically approved real PC changed."""
+        try:
+            machine_id = Path("/etc/machine-id").read_text(encoding="ascii").strip()
+        except (OSError, UnicodeError) as exc:
+            raise SmokeFailure(f"cannot read host identity: {exc}") from exc
+        if not re.fullmatch(r"[0-9a-f]{32}", machine_id):
+            raise SmokeFailure("host machine-id format invalid")
+        actual = hashlib.sha256(machine_id.encode("ascii")).hexdigest()
+        if actual != expected_machine_sha:
+            raise SmokeFailure("approved bare-metal machine identity differs")
+        for kind in ("--vm", "--container"):
+            result = self.run(["systemd-detect-virt", kind], 2000)
+            # On a real host, systemd-detect-virt returns rc=1 and usually
+            # no output. Any guest/container indication or ambiguity refuses.
+            if result.returncode != 1 or result.stdout.strip() not in ("", "none"):
+                raise SmokeFailure(
+                    f"bare-metal preflight refused virtualization indicator {kind}: "
+                    f"rc={result.returncode} output={result.stdout.strip()!r}")
+
     def preflight(self, config: Config, names: tuple[str, str]) -> int:
         """Complete all read-only authorization and identity checks first."""
         validate_cli_config(config)
@@ -378,9 +433,16 @@ class SystemOperations:
             raise SmokeFailure(f"missing required tools: {missing}")
         if os.sysconf("SC_PAGE_SIZE") != PAGE_BYTES:
             raise SmokeFailure("the loaded-kernel smoke requires 4096-byte pages")
-        virt = self._checked(["systemd-detect-virt", "--vm"], 2000)
-        if not virt or virt.lower() == "none":
-            raise SmokeFailure("systemd-detect-virt did not confirm a virtual machine")
+        if config.host_id is not None:
+            # Bare-metal is a separately approved mode, not a general escape
+            # hatch for an unexpected VM/container response. Two read-only
+            # systemd checks exclude known virtual machines and containers.
+            self._verify_baremetal_identity(config.host_machine_id_sha256 or "")
+            virt = "bare-metal"
+        else:
+            virt = self._checked(["systemd-detect-virt", "--vm"], 2000)
+            if not virt or virt.lower() == "none":
+                raise SmokeFailure("systemd-detect-virt did not confirm a virtual machine")
         fs_type = self._checked(["stat", "-f", "-c", "%T", "/dev/shm"], 2000)
         if fs_type != "tmpfs":
             raise SmokeFailure("/dev/shm is not tmpfs; refusing to create a backing file")
@@ -424,8 +486,8 @@ class SystemOperations:
         available_targets = {line.split()[0] for line in target_lines if line.split()}
         if "delay" not in available_targets:
             raise SmokeFailure(
-                "dm-delay is not already registered; provision it separately under "
-                "the VM's authorization before invoking this harness")
+                "dm-delay is not registered; it requires separate host/VM provisioning "
+                "approval and must be available before invoking this harness")
         names_output = self._checked([
             "dmsetup", "info", "--columns", "--noheadings", "-o", "name",
         ], 2000)
@@ -462,7 +524,7 @@ class SystemOperations:
             for message in initial_warnings:
                 print(f"KERNEL_LOG_BASELINE: {message}")
         self._watchdog_ms = watchdog_ms
-        print(f"PREFLIGHT: PASS vm_type={virt} vm_id={config.vm_id} "
+        print(f"PREFLIGHT: PASS environment={virt} identity={config.host_id or config.vm_id} "
               f"source={head} module_sha256={digest} watchdog_ms={watchdog_ms}")
         return watchdog_ms
 
@@ -754,7 +816,8 @@ class SystemOperations:
                           latest_status: dict[str, int] | None,
                           messages: list[str]) -> None:
         body = {
-            "status": "QUARANTINED_DO_NOT_REUSE_VM",
+            "status": ("QUARANTINED_HOST_DO_NOT_FORCE_CLEANUP"
+                       if owned.host_mode else "QUARANTINED_DO_NOT_REUSE_VM"),
             "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "reason": reason,
             "owned_or_candidate_resources": {
@@ -773,7 +836,9 @@ class SystemOperations:
                 os.chmod(marker, 0o600)
             except OSError as exc:
                 print(f"QUARANTINE_RECORD_WRITE_FAILED: {exc}", file=sys.stderr)
-        print("VM QUARANTINED: preserve all remaining resources and do not reuse this VM",
+        print(("DEVELOPMENT PC QUARANTINED: stop tests and preserve resources; "
+               "do not force cleanup or reboot" if owned.host_mode else
+               "VM QUARANTINED: preserve all remaining resources and do not reuse this VM"),
               file=sys.stderr)
         print(json.dumps(body, sort_keys=True), file=sys.stderr)
 
@@ -782,7 +847,7 @@ class SmokeRunner:
     def __init__(self, config: Config, ops: Operations):
         self.config = config
         self.ops = ops
-        self.owned = Owned()
+        self.owned = Owned(host_mode=config.host_id is not None)
         self.run_id = os.urandom(6).hex()
         self.delay_name = f"swapz-smoke-delay-{self.run_id}"
         self.target_name = f"swapz-smoke-target-{self.run_id}"
@@ -1062,11 +1127,14 @@ class SmokeRunner:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the narrowly scoped loaded-kernel swapz smoke in an authorized disposable VM.")
+        description="Run narrowly scoped loaded-kernel smoke on a separately authorized VM or real development PC.")
     parser.add_argument("--run-live", action="store_true",
                         help="required explicit switch; never set by rootless tests")
-    parser.add_argument("--vm-id", required=True,
-                        help="operator-assigned disposable-<label> VM identity")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--vm-id", help="approved disposable-<label> VM identity")
+    mode.add_argument("--host-id", help="approved devpc-<label> real development PC")
+    parser.add_argument("--host-machine-id-sha256",
+                        help="bare-metal only: SHA-256 of stripped /etc/machine-id")
     parser.add_argument("--source-sha", required=True,
                         help="exact checked-out Git commit whose kernel source built the module")
     parser.add_argument("--module", required=True, type=Path,
@@ -1081,12 +1149,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = Config(
-        vm_id=args.vm_id,
+        vm_id=args.vm_id or "",
         source_sha=args.source_sha,
         module_path=args.module,
         module_sha256=args.module_sha256,
         authorization=args.authorization,
         live=args.run_live,
+        host_id=args.host_id,
+        host_machine_id_sha256=args.host_machine_id_sha256,
     )
     try:
         SmokeRunner(config, SystemOperations()).run()
@@ -1094,10 +1164,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"VIRTUAL_SMOKE: FAIL: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("VIRTUAL_SMOKE: INTERRUPTED; quarantine the disposable VM and preserve resources",
+        print("VIRTUAL_SMOKE: INTERRUPTED; preserve PC/VM state and remaining resources; no forced cleanup",
               file=sys.stderr)
         return 1
-    print("VIRTUAL_SMOKE: PASS (authorized disposable VM only; not benchmark evidence)")
+    print("VIRTUAL_SMOKE: PASS (authorized host/VM, tmpfs-loop only; not benchmark evidence)")
     return 0
 
 
