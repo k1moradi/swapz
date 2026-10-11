@@ -98,6 +98,8 @@ class StreamingReportingTests(unittest.TestCase):
         })
         result = reporter.report(self.read([item]))
         self.assertIn("lower_bytes_per_logical_byte=0.125", result)
+        self.assertIn("effective_io_reduction_x=8.000", result)
+        self.assertIn("lz4_payload_ratio_x_cumulative=2.156", result)
         self.assertIn("mean_lower_request_kib=204.80", result)
         self.assertIn("compressed_pages_cumulative=400", result)
         self.assertIn("raw_pages_cumulative=100", result)
@@ -109,6 +111,7 @@ class StreamingReportingTests(unittest.TestCase):
     def test_missing_or_corrupt_cumulative_counters_are_not_fabricated(self):
         clean = reporter.report(self.read([row()]))
         self.assertIn("compressed_pages_cumulative=unavailable", clean)
+        self.assertIn("lz4_payload_ratio_x_cumulative=unavailable", clean)
         self.assertIn("mean_compressed_payload_bytes_cumulative=unavailable", clean)
         for corrupt in (
             {"compressed_pages": "-1"},
@@ -116,6 +119,7 @@ class StreamingReportingTests(unittest.TestCase):
             {"compressed_payload": "1.2"},
             {"compressed_pages": 1},
             {"compressed_pages": "0", "compressed_payload": "100"},
+            {"compressed_pages": "10", "compressed_payload": "0"},
         ):
             with self.subTest(corrupt=corrupt):
                 item = row()
@@ -128,6 +132,15 @@ class StreamingReportingTests(unittest.TestCase):
         item["lower_write_ios"] = 0
         report = reporter.report(self.read([item]))
         self.assertIn("mean_lower_request_kib=unavailable", report)
+        self.assertIn("effective_io_reduction_x=8.000", report)
+
+    def test_zero_lower_sectors_does_not_claim_infinite_reduction(self):
+        item = row()
+        item["lower_write_sectors"] = 0
+        item["lower_counter_window_mib_s"] = 0.0
+        report = reporter.report(self.read([item]))
+        self.assertIn("effective_io_reduction_x=unavailable", report)
+        self.assertIn("lower_bytes_per_logical_byte=0.000", report)
 
     def test_exact_reader_summary_is_checked_and_labeled_diagnostic(self):
         item = row()
