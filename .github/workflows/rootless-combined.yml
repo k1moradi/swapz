@@ -41,6 +41,11 @@ jobs:
           bash -n tests/runtime/virtual-smoke.sh
           python3 -m py_compile tests/runtime/virtual-smoke.py tests/runtime/virtual-smoke-test.py
           timeout 25s python3 -B tests/runtime/virtual-smoke-test.py -v
+      - name: Read-only finalized three-policy performance comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 20s python3 -B tests/runtime/v22-fast-compare-test.py -v
       - name: Rootless bounded benchmark quarantine contracts
         shell: bash
         run: |
