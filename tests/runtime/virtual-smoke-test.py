@@ -769,10 +769,10 @@ class VirtualSmokeContracts(unittest.TestCase):
             handoff,
             r"Only the swapz\s+logical table is one page \(`0 8` sectors\)\.",
         )
-        self.assertRegex(handoff, r"cannot\s+authenticate the operator-supplied VM label")
+        self.assertIn("A disposable VM must be isolated from valuable disks", handoff)
         self.assertIn("Forensic cleanup requires operator verification", handoff)
         self.assertIn("two separate aligned 4 KiB reads", handoff)
-        self.assertIn("while the lower write is outstanding", handoff)
+        self.assertRegex(handoff, r"while the lower\s+write is outstanding")
         self.assertIn("after ordinary suspend/resume drain", handoff)
         self.assertNotIn('--authorization "$AUTH"', handoff)
         self.assertNotIn('AUTH="I AUTHORIZE', handoff)
