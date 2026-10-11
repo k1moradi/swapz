@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import hashlib
+import struct
 from pathlib import Path
 import subprocess
 import sys
@@ -50,6 +52,23 @@ class ThreeCaseComparison(unittest.TestCase):
         self.assertIn("Exact p95", formatted)
         self.assertIn("Staged (64 KiB)", formatted)
         self.assertIn("source-reported teardown-marker", formatted)
+
+    def test_exact_p95_differs_from_exact_p99_for_two_bucket_sidecar(self):
+        row = self.fixture.rows[0]
+        name = row["exact_read_latency"]["read_latency_sidecar"]
+        # For 1200 completed 4 KiB reads, nearest rank 95%=1140 and
+        # rank 99%=1188; the two percentiles must differ.
+        content = struct.pack("!QQ", 1_000_000, 1140) + struct.pack("!QQ", 3_000_000, 60)
+        (self.root / name).write_bytes(content)
+        row["exact_read_latency"]["read_latency_sha256"] = hashlib.sha256(content).hexdigest()
+        row["exact_read_latency"]["read_latency_bytes"] = len(content)
+        row["exact_read_latency"]["read_p99_ns"] = 3_000_000
+        row["read_p99_ms"] = 3.0
+        self.fixture.save()
+        self.fixture.seal()
+        c = compare.compare(self.results)["cases"][0]
+        self.assertEqual(c["exact_read_p95_ms"], 1.0)
+        self.assertEqual(c["exact_read_p99_ms"], 3.0)
 
     def test_relative_lower_requests_and_sectors_are_not_confused(self):
         self.fixture.rows[1]["lower_write_ios"] = 5
