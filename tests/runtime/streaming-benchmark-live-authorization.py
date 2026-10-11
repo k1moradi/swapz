@@ -82,7 +82,8 @@ def proposal(env: Mapping[str, str]) -> tuple[str, dict[str, object]]:
     # strategy subset, order or size changes the required approval statement.
     statement = (
         "I AUTHORIZE swapz V2.2 diagnostic benchmark only on disposable VM "
-        f"{vm} with source {source} and selected module SHA-256 {module}; "
+        f"{vm} with source {source}, selected module SHA-256 {module} " 
+        f"at protected module path {path}; "
         f"cases in order [{cases}]; backend=null_blk "
         f"bandwidth={bandwidth}MiB/s latency={latency}ns "
         f"runtime={runtime}s/case writer_qd={qd} "
