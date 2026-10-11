@@ -69,6 +69,9 @@ typedef uint64_t u64;
 
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+#define SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS 16U
+#define SWAPZ_BESTFIT4_MAX_RECORDS 128U
+#define array_size(count, size) ((size_t)(count) * (size_t)(size))
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_MAP_COMPRESSED 2U
@@ -139,6 +142,13 @@ struct swapz_staged_ref {
     u8 buffer_id;
     u8 valid;
 };
+struct swapz_bestfit4_record {
+    u16 source_block;
+    u16 length;
+    u8 source_record;
+    bool raw;
+    bool claimed;
+};
 struct swapz_stream_buffer {
     struct list_head owned_bios;
     void *data;
@@ -155,6 +165,11 @@ struct swapz_context {
     bool failed;
     /* Production scratch fields are void pointers, not byte arrays. */
     void *repack_buffer;
+    /* The new production helper is extracted and compiled without kernels. */
+    bool bestfit4_enabled;
+    void *bestfit4_source_data;
+    struct swapz_write_batch_block *bestfit4_source_blocks;
+    struct swapz_bestfit4_record *bestfit4_records;
     u8 repack_storage[SWAPZ_BLOCK_BYTES];
     struct swapz_write_batch_block repack_block;
     struct swapz_write_batch_block compact_source_block;
@@ -529,6 +544,11 @@ class CompactionContainerContracts(unittest.TestCase):
             raise AssertionError("compactor must call complete preflight exactly once")
         functions = [exact_function(cls.source, name) for name in FUNCTIONS]
         functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer"), preflight)
+        # The opt-in helper is real production C; include it without weakening
+        # any existing ordered-compactor mutation or identity preflights.
+        bestfit_helper = exact_function(cls.source, "swapz_compact_fill_buffer_bestfit4")
+        functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer") + 1,
+                         bestfit_helper)
 
         def compile_contract(name: str, bodies: list[str]) -> Path:
             path = directory / (name + ".c")
@@ -550,6 +570,9 @@ class CompactionContainerContracts(unittest.TestCase):
             if name != "swapz_compact_fill_buffer" else broken
             for name in FUNCTIONS
         ]
+        mutant_functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer"), preflight)
+        mutant_functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer") + 1,
+                                bestfit_helper)
         cls.mutant_binary = compile_contract("no-preflight-mutant", mutant_functions)
 
     @classmethod
