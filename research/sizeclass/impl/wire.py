@@ -16,7 +16,8 @@ class CorruptExtentError(ValueError):
 def serialize(records, block_count):
     """Return immutable extent bytes and exact payload offsets for the records."""
     if len(records) == 1 and records[0].raw:
-        assert len(records[0].payload) == BLOCK_BYTES
+        if len(records[0].payload) != BLOCK_BYTES:
+            raise ValueError('raw extent must contain exactly one whole page')
         return records[0].payload, (0,)
     if not 0 < len(records) <= MAX_PACKED_RECORDS or any(record.raw for record in records):
         raise ValueError('invalid compressed record group')
