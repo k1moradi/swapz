@@ -385,7 +385,8 @@ run_case() {
   local path="/dev/mapper/$TARGET"
   local fiofile="$TMP/${strategy}-${batch}.fio"
   local json="$TMP/${strategy}-${batch}.json"
-  local before after status start_ns end_ns read_log_prefix latency_summary verify_summary
+  local before after status status_before status_after start_ns end_ns read_log_prefix latency_summary verify_summary
+  local counter_prefix="$TMP/${strategy}-${batch}.counters"
   local sentinel="$TMP/${strategy}-${batch}.sentinel"
   local sentinel_read="$TMP/${strategy}-${batch}.sentinel.readback"
   read_log_prefix="$TMP/${strategy}-${batch}-reader"
@@ -473,7 +474,13 @@ per_job_logs=0
 log_entries=32768
 EOF
 
+  # Record swapz's cumulative byte and compression counters before fio. This
+  # follows the already-drained prefill and protected sentinel, and precedes
+  # the existing lower-device timing window; do not move either flush.
+  status_before=$(swapz_benchmark_bounded "owned DM pre-fio status" 5s dmsetup status "$TARGET") || return 1
+  printf '%s\n' "$status_before" > "$counter_prefix.status-before"
   before=$(read_stat)
+  printf '%s\n' "$before" > "$counter_prefix.lower-before"
   # An elapsed interval cannot use wall-clock time (date can jump).
   start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   swapz_benchmark_bounded "timed reader/writer fio" "$(( RUNTIME + 90 ))s" fio "$fiofile" --output-format=json --output="$json"
@@ -483,6 +490,11 @@ EOF
   flush_device "$path"
   end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
   after=$(read_stat)
+  printf '%s\n' "$after" > "$counter_prefix.lower-after"
+  # The original fsync already completed; capture final physical-byte and GC
+  # counters BEFORE CRC32C readback. Failed or missing status aborts the case.
+  status_after=$(swapz_benchmark_bounded "owned DM post-drain status" 5s dmsetup status "$TARGET") || return 1
+  printf '%s\n' "$status_after" > "$counter_prefix.status-after"
   # Require one exact latency for every completed reader I/O; a missing,
   # aggregated, or inconsistent fio log fails the case before publication.
   latency_summary=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-read-latency.py" \
@@ -509,9 +521,10 @@ EOF
   status=$(swapz_benchmark_bounded "owned DM target status" 5s dmsetup status "$TARGET")
   grep -q "failed=0" <<<"$status"
 
+  SWAPZ_SOURCE_ROOT="$ROOT" SWAPZ_COUNTER_PREFIX="$counter_prefix" \
   python3 - "$json" "$before" "$after" "$status" "$strategy" "$batch" \
       "$start_ns" "$end_ns" "$BACKEND" "$latency_summary" "$verify_summary" >>"$RESULTS" <<'PY'
-import json, sys
+import json, os, sys
 path, before, after, status, strategy, batch, start_ns, end_ns, backend, latency_summary, verify_summary = sys.argv[1:]
 with open(path, encoding="utf-8") as f:
     root = json.load(f)
@@ -591,6 +604,27 @@ row = {
     # summarized fio read_p99_ms and unverified lower-counter window.
     "exact_read_latency": exact_latency,
 }
+# The privileged runner supplies these paths. Legacy rootless embedded
+# reporting tests intentionally run this collector without any live target
+# or counter snapshots, and retain their original 11-argument contract.
+counter_prefix = os.environ.get("SWAPZ_COUNTER_PREFIX")
+if counter_prefix:
+    import importlib.util
+    from pathlib import Path
+    source_root = os.environ["SWAPZ_SOURCE_ROOT"]
+    spec = importlib.util.spec_from_file_location(
+        "swapz_benchmark_counters",
+        str(Path(source_root) / "tests/runtime/streaming-benchmark-counters.py"))
+    counters = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(counters)
+    cp = Path(counter_prefix)
+    row["drain_aligned_counters"] = counters.compute(
+        Path(str(cp) + ".status-before").read_text(),
+        Path(str(cp) + ".status-after").read_text(),
+        Path(str(cp) + ".lower-before").read_text(),
+        Path(str(cp) + ".lower-after").read_text(),
+        int(end_ns) - int(start_ns),
+        expected_logical=logical)
 row["staged_hits"] = int(s.get("staged_hits", 0))
 row["staged_early"] = int(s.get("staged_early", 0))
 row["staged_cancel"] = int(s.get("staged_cancel", 0))
