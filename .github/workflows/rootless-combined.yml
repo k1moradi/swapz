@@ -279,6 +279,11 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/streaming-benchmark-read-latency.py tests/runtime/streaming-benchmark-read-latency-test.py
           timeout 25s python3 -B tests/runtime/streaming-benchmark-read-latency-test.py -v
+      - name: Rootless V2.2 drain-aligned compression accounting
+        run: |
+          python3 -m py_compile tests/runtime/streaming-benchmark-counters.py tests/runtime/streaming-benchmark-counters-test.py
+          timeout 20s python3 -B tests/runtime/streaming-benchmark-counters-test.py -v
+          bash -n tests/runtime/streaming-benchmark.sh
       - name: Rootless V2.2 benchmark plan and pre-device admission contracts
         shell: bash
         run: |
