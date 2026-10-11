@@ -58,39 +58,41 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
             scope)
         self.assertIn("runtime=10s/case", scope)
         self.assertIn("reader_iops_target=300", scope)
-        self.assertIn("not authorized are physical storage", scope)
+        self.assertIn("excluded operations are physical storage", scope)
         self.assertIn("loading/unloading dm_swapz", scope)
         self.assertNotIn("--run-live", scope)
 
-    def test_explicit_exact_authorization_and_vm_guest_indication(self):
+    def test_live_check_needs_no_approval_phrase_but_verifies_vm_guest(self):
         env = baseline()
-        scope, _ = auth.proposal(env)
-        env["SWAPZ_BENCH_AUTHORIZATION"] = scope
         fake = mock.Mock(return_value=vm_result())
-        self.assertIn("AUTHORIZED_STATEMENT", auth.check(env, fake))
+        self.assertIn("VERIFIED_VM_GUEST", auth.check(env, fake))
         fake.assert_called_once_with(
             ["systemd-detect-virt", "--vm"], capture_output=True, text=True,
             timeout=3, check=False)
 
-    def test_no_authorization_or_old_scope_short_circuits_vm_query(self):
+    def test_old_string_is_ignored_not_an_authorization_gate(self):
         env = baseline()
-        never = mock.Mock(side_effect=AssertionError("VM query must not run"))
-        with self.assertRaisesRegex(ValueError, "missing or mismatched"):
-            auth.check(env, never)
-        env["SWAPZ_BENCH_AUTHORIZATION"] = "old-smoke-authorization"
-        with self.assertRaisesRegex(ValueError, "missing or mismatched"):
-            auth.check(env, never)
-        never.assert_not_called()
+        for extra in ("", "arbitrary-old-smoke-string"):
+            with self.subTest(value=extra):
+                other = {**env, "SWAPZ_BENCH_AUTHORIZATION": extra}
+                fake = mock.Mock(return_value=vm_result())
+                self.assertIn("VERIFIED_VM_GUEST", auth.check(other, fake))
+                fake.assert_called_once()
+        # Invalid host/VM configuration is still refused *before* any
+        # systemd-detect-virt calls.
+        fake = mock.Mock(side_effect=AssertionError("must not check host"))
+        with self.assertRaises(ValueError):
+            auth.check({**env, "SWAPZ_BENCH_BATCHES": "512"}, fake)
+        fake.assert_not_called()
 
-    def test_each_changed_run_dimension_requires_separate_exact_scope(self):
+    def test_changed_run_dimensions_still_checked_by_planner(self):
         env = baseline()
         original, _ = auth.proposal(env)
-        env["SWAPZ_BENCH_AUTHORIZATION"] = original
         changes = {
             "SWAPZ_BENCH_VM_ID": "disposable-another",
             "SWAPZ_BENCH_SOURCE_SHA": "c"*40,
             "SWAPZ_BENCH_MODULE_SHA256": "a"*64,
-            "SWAPZ_BENCH_MODULE_PATH": "/root/another-approved.ko",
+            "SWAPZ_BENCH_MODULE_PATH": "/root/another-module.ko",
             "SWAPZ_BENCH_MBPS": "21",
             "SWAPZ_BENCH_LATENCY_NS": "1000000",
             "SWAPZ_BENCH_RUNTIME": "11",
@@ -99,16 +101,23 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
             "SWAPZ_BENCH_READ_IOPS": "500",
             "SWAPZ_BENCH_BATCHES": "32",
             "SWAPZ_BENCH_STRATEGIES": "immediate staged",
-            "SWAPZ_BENCH_DISCARD": "1",
             "SWAPZ_BENCH_KEEP_ARTIFACTS": "0",
         }
         for key, value in changes.items():
             with self.subTest(dimension=key):
                 other = {**env, key: value}
-                fake = mock.Mock()
+                changed, _ = auth.proposal(other)
+                self.assertNotEqual(changed, original)
+                fake = mock.Mock(return_value=vm_result())
+                self.assertIn("VERIFIED_VM_GUEST", auth.check(other, fake))
+        for key, value in (
+            ("SWAPZ_BENCH_DISCARD", "1"),
+            ("SWAPZ_BENCH_BACKEND", "nbd"),
+            ("SWAPZ_BENCH_RUNTIME", "0"),
+        ):
+            with self.subTest(rejected=key):
                 with self.assertRaises(ValueError):
-                    auth.check(other, fake)
-                fake.assert_not_called()
+                    auth.proposal({**env, key: value})
 
     def test_scope_rejects_host_identity_and_unsafe_numeric_inputs(self):
         bad = [
@@ -156,13 +165,11 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
         self.assertIn("swapoff or swapon", scope)
         self.assertNotIn("disposable VM", scope)
         self.assertRaises(ValueError, auth.check, env, mock.Mock())
-        env["SWAPZ_BENCH_AUTHORIZATION"] = scope
         def runner(args, **kwargs):
             return vm_result("", 1)
         with mock.patch.object(auth.Path, "read_text", return_value=machine):
             self.assertIn("APPROVED_REAL_PC", auth.check(env, runner))
             changed = {**env, "SWAPZ_BENCH_HOST_MACHINE_ID_SHA256": "f"*64}
-            changed["SWAPZ_BENCH_AUTHORIZATION"] = auth.proposal(changed)[0]
             with self.assertRaisesRegex(ValueError, "host machine-id"):
                 auth.check(changed, runner)
 
@@ -232,8 +239,8 @@ class BenchmarkLiveScopeTest(unittest.TestCase):
         )
         self.assertEqual(cmd.returncode, 0, cmd.stderr)
         self.assertIn("cases in order [immediate:4KiB", cmd.stdout)
-        self.assertIn("PROPOSAL_ONLY_NO_AUTHORIZATION", cmd.stderr)
-        self.assertNotIn("AUTHORIZED_STATEMENT", cmd.stdout)
+        self.assertIn("SCOPE_INFORMATION_ONLY_NO_DEVICE_OPERATIONS", cmd.stderr)
+        self.assertNotIn("VERIFIED_VM_GUEST", cmd.stdout)
 
 
 if __name__ == "__main__":
