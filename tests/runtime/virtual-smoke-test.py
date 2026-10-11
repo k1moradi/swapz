@@ -654,6 +654,78 @@ class VirtualSmokeContracts(unittest.TestCase):
             with self.assertRaisesRegex(SMOKE.QuarantineRequired, "cannot establish"):
                 operations.dm_is_suspended("owned-target")
 
+    def test_raw_rejected_dm_status_preserved_in_quarantine_forensics(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        import io
+        import json
+        op = SMOKE.SystemOperations()
+        malformed = REAL_KERNEL_STATUS.replace(
+            "strategy=staged", "strategy=broken", 1)
+        valid = production_status(inflight_id=-1, inflight_blocks=0,
+                                  async_cb=0, buf0_blocks=0)
+        with mock.patch.object(op, "_checked", side_effect=[malformed, valid]):
+            with self.assertRaisesRegex(SMOKE.QuarantineRequired, "wrong smoke strategy"):
+                op.dm_status("swapz-owned-test")
+            self.assertEqual(op.dm_status("swapz-owned-test")["inflight_id"], -1)
+        with tempfile.TemporaryDirectory(prefix="swapz-status-raw-rootless-") as tmp:
+            owned = SMOKE.Owned(
+                host_mode=True, run_dir=Path(tmp), target_name="swapz-owned-test",
+                quarantined=True)
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                op.quarantine_record(owned, "status parser failure", None, [])
+            body = json.loads((Path(tmp) / "QUARANTINED.json").read_text())
+            self.assertEqual(body["first_rejected_dm_status_raw"], malformed)
+            self.assertEqual(body["last_raw_dm_status"], valid)
+            self.assertIsNone(body["last_status"])
+            self.assertFalse(body["raw_dm_status_truncated"])
+            self.assertEqual(body["status"], "QUARANTINED_HOST_DO_NOT_FORCE_CLEANUP")
+
+    def test_raw_status_capture_is_bounded_even_with_untrusted_long_text(self):
+        op = SMOKE.SystemOperations()
+        broken = REAL_KERNEL_STATUS + (" unexpected=1" * 10000)
+        with mock.patch.object(op, "_checked", return_value=broken):
+            with self.assertRaises(SMOKE.QuarantineRequired):
+                op.dm_status("swapz-owned-test")
+        self.assertEqual(len(op._first_rejected_dm_status_raw),
+                         SMOKE.MAX_RAW_STATUS_CHARS)
+        self.assertTrue(op._raw_status_truncated)
+
+    def test_unsigned_module_notice_is_not_kernel_warning_at_notice_priority(self):
+        unsigned = ("dm_swapz: module verification failed: signature "
+                    "and/or required key missing - tainting kernel")
+        # Upstream prints via pr_notice_once (severity 5). Preserve the
+        # record's priority classification instead of globally exempting
+        # module-signature text from true kernel warning severity 0..4.
+        for priority, expected in ((5, False), (4, True), (3, True)):
+            with self.subTest(priority=priority):
+                flag, text = SMOKE.SystemOperations._kernel_record_is_warning(
+                    f"{priority},31,1000,-;" + unsigned)
+                self.assertEqual(flag, expected)
+                self.assertEqual(text, unsigned)
+        # A true DM error must still fail even when adjacent to a notice.
+        err, _ = SMOKE.SystemOperations._kernel_record_is_warning(
+            "3,32,1001,-;device-mapper: swapz: backing I/O failed (-5)")
+        self.assertTrue(err)
+
+    def test_staged_hit_and_logical_read_are_kernel_completions_not_byte_proof(self):
+        # A resumed/recovered mapping may have been probed by udev or other
+        # readers, so cumulative counters must not be equated with the two
+        # controlled payload readback files. Prove the staged hit must
+        # INCREASE after the test's own byte-equal first read.
+        class AlreadyReadOps(FakeOps):
+            def dm_status(self, name):
+                current = super().dm_status(name)
+                # Simulates a pre-existing staged hit from a reader that
+                # raced target creation; no controlled-read increment.
+                current["staged_hits"] = 1
+                return current
+        ops = AlreadyReadOps()
+        with self.assertRaisesRegex(
+                SMOKE.QuarantineRequired, "staged_hits= did not increase"):
+            SMOKE.SmokeRunner(good_config(), ops).run()
+        self.assertTrue(ops.quarantine["owned"]["quarantined"])
+        self.assertNotIn("dm-remove", [event[0] for event in ops.actions])
+
     def test_kernel_log_gate_uses_printk_priority_for_device_mapper_errors(self):
         warning, message = SMOKE.SystemOperations._kernel_record_is_warning(
             "4,101,2000,-;device-mapper: swapz: ownership warning")
