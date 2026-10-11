@@ -148,16 +148,19 @@ def markdown(report: dict[str, object]) -> str:
         "Source-reported completed sweep; NO QUALIFIED WINNER.",
         "",
         "| Policy (batch) | Completed reads | Exact p95 (ms) | Exact p99 (ms) | "
-        "Upper write (MiB/s) | Lower write I/Os | Lower sectors | "
-        "I/O ratio vs Immediate | Sector ratio vs Immediate |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "p99 ratio | Upper write (MiB/s) | Upper ratio | Lower write I/Os | "
+        "Lower sectors | I/O ratio vs Immediate | Sector ratio vs Immediate |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for c in report["cases"]:
         ratios = c["relative_to_immediate"]
         output.append(
             f"| {c['strategy'].title()} ({c['batch_kib']} KiB) | "
             f"{c['observed_reads']} | {c['exact_read_p95_ms']:.3f} | "
-            f"{c['exact_read_p99_ms']:.3f} | {c['upper_write_mib_s']:.2f} | "
+            f"{c['exact_read_p99_ms']:.3f} | "
+            f"{ratios['exact_read_p99_ratio']:.3f}x | "
+            f"{c['upper_write_mib_s']:.2f} | "
+            f"{ratios['upper_write_mib_s_ratio']:.3f}x | "
             f"{c['lower_write_ios']} | {c['lower_write_sectors']} | "
             f"{ratios['lower_write_ios_ratio']:.3f}x | "
             f"{ratios['lower_write_sectors_ratio']:.3f}x |"
