@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Fail-closed loaded-kernel smoke for an explicitly authorized disposable VM.
+"""Fail-closed loaded-kernel smoke for an authorized VM or real development PC.
 
-The default invocation is intentionally inert: every live operation requires
-an exact authorization statement bound to the VM label, source revision, and
-selected module digest.  Rootless coverage lives in virtual-smoke-test.py and
-uses an injected fake operations object; this file is not a benchmark.
+Every live operation requires an exact authorization statement bound to the
+environment, source revision and selected module digest. Rootless coverage
+uses injected mock operations; this is a correctness smoke, not a benchmark.
 """
 
 from __future__ import annotations
@@ -55,6 +54,9 @@ REQUIRED_STATUS = (
     "buf0_blocks",
     "buf1_blocks",
 )
+# The kernel may emit this one expected taint notice on successful insmod.
+# Only accept it in the immediate after-our-own-module-load log check.
+EXPECTED_MODULE_LOAD_TAINT = "dm_swapz: loading out-of-tree module taints kernel."
 KERNEL_WARNING = re.compile(
     r"(?:\bWARNING:\s|\bBUG:\s|\bOops:\s|\bCall Trace:\s|"
     r"dm-swapz.*(?:\bWARN\b|\bERROR\b|ownership.{0,32}(?:fail|bad)|"
@@ -225,16 +227,57 @@ def validate_cli_config(config: Config) -> None:
 
 
 def parse_status(text: str) -> dict[str, int]:
+    """Parse the real kernel STATUSTYPE_INFO schema, not fabricated integers.
+
+    The kernel has two categorical fields, one structured segment index and
+    one signed buffer ID. All remaining key/value fields are unsigned counters.
+    Preserve the numeric-only result used by SmokeRunner after validating the
+    complete status, including exact staged/64 configuration.
+    """
     values: dict[str, int] = {}
-    for key, value in re.findall(r"([A-Za-z][A-Za-z0-9_]*)=([^\s]+)", text):
-        if key in values:
+    seen: set[str] = set()
+    special = {"strategy", "lower_discard", "segment"}
+    for token in text.split():
+        # dmsetup may prefix target start/length and target name.
+        if "=" not in token:
+            continue
+        match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_]*)=([^\s=]+)", token)
+        if match is None:
+            raise QuarantineRequired(f"malformed status token: {token!r}")
+        key, value = match.groups()
+        if key in seen:
             raise QuarantineRequired(f"duplicate status field: {key}")
-        if not value.isdecimal():
-            raise QuarantineRequired(f"non-numeric status field: {key}={value}")
-        values[key] = int(value, 10)
-    missing = sorted(set(REQUIRED_STATUS) - values.keys())
+        seen.add(key)
+        if key == "strategy":
+            if value != "staged":
+                raise QuarantineRequired(f"wrong smoke strategy: {value}")
+        elif key == "batch_kib":
+            if value != "64":
+                raise QuarantineRequired(f"wrong smoke batch_kib: {value}")
+            values[key] = 64
+        elif key == "lower_discard":
+            # Loop-backed lower devices may or may not advertise DISCARD;
+            # the smoke does not set a discard policy. Both statuses are
+            # legitimate, but noncanonical values are never silently ignored.
+            if value not in ("on", "off"):
+                raise QuarantineRequired(f"invalid lower_discard: {value}")
+        elif key == "segment":
+            segment = re.fullmatch(r"(0|[1-9][0-9]*)/([1-9][0-9]*)", value)
+            if segment is None or int(segment[1]) >= int(segment[2]):
+                raise QuarantineRequired(f"invalid segment index/total: {value}")
+        elif key == "inflight_id":
+            if re.fullmatch(r"-1|0|1", value) is None:
+                raise QuarantineRequired(f"invalid inflight_id: {value}")
+            values[key] = int(value, 10)
+        else:
+            if re.fullmatch(r"0|[1-9][0-9]*", value) is None:
+                raise QuarantineRequired(f"non-numeric status field: {key}={value}")
+            values[key] = int(value, 10)
+    missing = sorted((set(REQUIRED_STATUS) | special | {"batch_kib", "inflight_id"}) - seen)
     if missing:
         raise QuarantineRequired(f"dmsetup status lacks required fields: {missing}")
+    if values["failed"] not in (0, 1):
+        raise QuarantineRequired("invalid failed status indicator")
     return values
 
 
@@ -867,10 +910,19 @@ class SmokeRunner:
 
     def _check_messages(self, point: str) -> None:
         messages = self.ops.new_kernel_messages()
-        if messages:
-            self.last_messages.extend(messages)
+        unexpected = []
+        for message in messages:
+            if (point == "after owned module load" and self.owned.module_owned
+                    and message == EXPECTED_MODULE_LOAD_TAINT):
+                # Keep the raw notice in durable stdout diagnostics, not in
+                # the unexpected-warning list. No global severity filtering.
+                print(f"EXPECTED_OWNED_MODULE_TAINT: {message}")
+            else:
+                unexpected.append(message)
+        if unexpected:
+            self.last_messages.extend(unexpected)
             raise QuarantineRequired(
-                f"unexpected kernel warning at {point}: {messages!r}")
+                f"unexpected kernel warning at {point}: {unexpected!r}")
 
     def _status(self) -> dict[str, int]:
         if self.owned.target_name is None:
@@ -924,6 +976,10 @@ class SmokeRunner:
         self.owned.module_owned = True
         if not self.ops.module_loaded() or "swapz" not in self.ops.targets():
             raise QuarantineRequired("selected dm-swapz module did not register its target")
+        # The expected first-load out-of-tree taint notice is not a scheduler
+        # warning; examine it immediately after our owned insmod. A genuine
+        # second warning in this same batch still quarantines the fixture.
+        self._check_messages("after owned module load")
 
         delay_table = self._create_delay_table()
         self.owned.delay_name = self.delay_name
