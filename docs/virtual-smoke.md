@@ -12,7 +12,7 @@ ordinary target and loop removal, and ordinary module unload, **without a
 reboot**. The original quarantine record remains forensic evidence, not a
 smoke PASS. **Before the next run**, recheck the absence of those old
 resources and resolve the independently observed machine-ID digest
-discrepancy; require a newly approved exact source/host/module statement.
+discrepancy; keep the exact source/host/module preflight checks.
 This source-only patch does not inspect or mutate the host.
 
 The corrected parser accepts the kernel's actual `STATUSTYPE_INFO` layout:
@@ -262,15 +262,16 @@ Host preparation steps:
    vermagic and source provenance before invoking the runner.
 
 The runner checks all pinned identities, creates one RAM-backed loop, one
-`dm-delay` target and one one-page `swapz` target, runs one aligned 4 KiB
-write and two byte-verified reads around suspend/resume drain, and
-ordinarily removes only positively owned test resources. It never
+`dm-delay` target and one one-page `swapz` target. It runs one aligned
+4 KiB write and two separate aligned 4 KiB reads (first while the lower
+write is outstanding, second after ordinary suspend/resume drain) with
+byte-for-byte payload checks, then ordinarily removes only positively
+owned test resources. It never
 performs `swapoff`, `swapon`, mounts, forced removal or reboot.
 
 The 32 MiB image is 65,536 sectors (32 complete 1 MiB segments), with
 enough reserve for the production constructor. The loop-backed
-`dm-delay` covers all 65,536 sectors. Only the swapz logical table
-is one page (`0 8` sectors). The constructor reserve requires at least
+`dm-delay` covers all 65,536 sectors. Only the swapz logical table is one page (`0 8` sectors). The constructor reserve requires at least
 three segments plus the larger of 25% of the one-page logical size or two
 segments of reserve.
 
@@ -289,9 +290,9 @@ sudo bash "$SOURCE_ROOT/tests/runtime/virtual-smoke.sh" \
 ```
 
 A failed status, unknown ownership, warning or timed-out kernel operation
-requires quarantine without forced or unverified cleanup. Forensic cleanup
-requires operator verification of exact ownership and quiescence; no
-automatic host reboot is permitted.
+requires quarantine without forced or unverified cleanup.
+Forensic cleanup requires operator verification of exact ownership and
+quiescence; no automatic host reboot is permitted.
 
 ## Rootless validation scope
 
