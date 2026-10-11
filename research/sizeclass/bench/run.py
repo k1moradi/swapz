@@ -78,3 +78,69 @@ def run_trace(trace: list[tuple[int, bytes]], *, policy: str,
               read_penalty_bytes: int, read_seed: int, reads: int = 256) -> dict:
     replay = Replay(policy, segment_count=segments, reserve_segments=reserve_segments,
                     window=window, read_penalty_bytes=read_penalty_bytes)
+    # Raw 4096-byte audit pages remain intact; compressed payloads are stored
+    # exactly as sampled/generated, without re-compressing arbitrary synthetic data.
+    for slot, payload in trace:
+        replay.stage(slot, payload, raw=len(payload) == BLOCK_BYTES)
+    replay.flush()
+    generator = random.Random(read_seed)
+    slots = sorted(replay.mappings)
+    for _ in range(reads):
+        if slots:
+            slot = slots[generator.randrange(len(slots))]
+            replay.read(slot)
+    return replay.report()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--trace', choices=('fio50', 'fio75', 'clustered', 'mixed', 'hotcold'),
+                        default='fio50')
+    parser.add_argument('--audit-lengths', type=Path)
+    parser.add_argument('--operations', type=int, default=1536)
+    parser.add_argument('--window', type=int, default=16)
+    parser.add_argument('--working-set', type=int, default=384)
+    parser.add_argument('--segments', type=int, default=6)
+    parser.add_argument('--reserve-segments', type=int, default=1)
+    parser.add_argument('--read-penalty-bytes', type=int, default=0)
+    parser.add_argument('--reads', type=int, default=256)
+    parser.add_argument('--seed', type=int, default=12345)
+    arguments = parser.parse_args()
+    if arguments.window < 1 or arguments.working_set < arguments.window or arguments.reads < 0:
+        parser.error('window/working-set/reads violate bounds')
+    if arguments.audit_lengths:
+        trace = audit_lengths_trace(arguments.audit_lengths, seed=arguments.seed,
+                                    window=arguments.window, working_set=arguments.working_set)
+        origin = {'type': 'external-audit-lengths-only',
+                  'path': str(arguments.audit_lengths),
+                  'sha256': hashlib.sha256(arguments.audit_lengths.read_bytes()).hexdigest()}
+    else:
+        trace = synthetic_trace(arguments.trace, operations=arguments.operations,
+                                window=arguments.window, working_set=arguments.working_set,
+                                seed=arguments.seed)
+        origin = {'type': 'synthetic-lengths-and-payloads', 'name': arguments.trace}
+    results = [run_trace(trace, policy=policy, window=arguments.window,
+                         segments=arguments.segments,
+                         reserve_segments=arguments.reserve_segments,
+                         read_penalty_bytes=arguments.read_penalty_bytes,
+                         read_seed=arguments.seed ^ 0x5A17,
+                         reads=arguments.reads) for policy in POLICIES]
+    comparable = len({result['completed_logical_bytes'] for result in results}) == 1 and all(
+        not result['failed_logical_writes'] and not result['failed_gc_runs'] for result in results)
+    output = {'origin': origin, 'seed': arguments.seed, 'operations': len(trace),
+              'window': arguments.window, 'working_set': arguments.working_set,
+              'segments': arguments.segments,
+              'reserve_segments': arguments.reserve_segments,
+              'read_penalty_bytes': arguments.read_penalty_bytes,
+              'comparison_valid': comparable,
+              'results': results,
+              'limitations': ['rootless simulator, not kernel measurement',
+                              'CRC32 checksum (not CRC32C) validates synthetic bytes',
+                              'no I/O concurrency, queueing, or real read p99',
+                              'payload-length audit does not contain actual memory bytes']}
+    print(json.dumps(output, sort_keys=True, indent=2))
+    return 0 if comparable else 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
