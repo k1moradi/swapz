@@ -51,6 +51,7 @@ MANDATORY_TESTS = (
     "swapz-stream-submit-bounds-contract-test.py",
     "swapz-upper-bio-ownership-contract-test.py",
     "swapz-pending-pack-ownership-contract-test.py",
+    "virtual-smoke-test.py",
     "streaming-benchmark-plan-test.py",
     "streaming-benchmark-read-latency-test.py",
 )
