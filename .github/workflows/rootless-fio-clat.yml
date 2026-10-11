@@ -8,6 +8,8 @@ on:
       - 'tests/runtime/streaming-benchmark-finalize.py'
       - 'tests/runtime/streaming-benchmark-module-preflight.py'
       - 'tests/runtime/streaming-benchmark-module-preflight-test.py'
+      - 'tests/runtime/streaming-benchmark-live-authorization.py'
+      - 'tests/runtime/streaming-benchmark-live-authorization-test.py'
       - 'tests/runtime/v22-fast-screen.py'
       - 'tests/runtime/v22-fast-screen-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
@@ -28,6 +30,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fio
+      - name: Rootless exact benchmark VM authorization safety
+        run: |
+          timeout 20s python3 -B tests/runtime/streaming-benchmark-live-authorization-test.py -v
       - name: Read-only selected-module provenance gate regression
         run: |
           timeout 20s python3 -B tests/runtime/streaming-benchmark-module-preflight-test.py -v
