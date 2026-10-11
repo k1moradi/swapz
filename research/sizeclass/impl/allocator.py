@@ -60,6 +60,7 @@ class ExtentAllocator:
         self.max_staged_records, self.flush_deadline_ticks = max_staged_records, flush_deadline_ticks
         self.max_in_flight_extents, self.max_physical_bytes = max_in_flight_extents, max_physical_bytes
         self.staged, self.in_flight, self.committed_extents = [], {}, {}
+        self.committed_extent_kinds = {}
         self.mapping_table, self.latest_generation = {}, {}
         self._ticket_identifier = self._extent_identifier = self._current_tick = 0
         self._oldest_staged_tick = None
@@ -185,6 +186,7 @@ class ExtentAllocator:
             return
         self.successful_physical_bytes += extent.physical_bytes
         self.committed_extents[extent.identifier] = extent.content
+        self.committed_extent_kinds[extent.identifier] = extent.raw
         for ticket, offset in extent.records:
             previous = self.mapping_table.get(ticket.logical_page)
             if previous is None or previous.generation < ticket.generation:
@@ -199,6 +201,9 @@ class ExtentAllocator:
 
     def read(self, logical_page):
         mapping = self.mapping_table[logical_page]
+        if (mapping.logical_page != logical_page or
+                self.committed_extent_kinds.get(mapping.extent_identifier) is not mapping.raw):
+            raise CorruptExtentError('mapping logical identity or raw kind mismatch')
         content = self.committed_extents.get(mapping.extent_identifier)
         if content is None:
             raise CorruptExtentError('committed extent missing')
