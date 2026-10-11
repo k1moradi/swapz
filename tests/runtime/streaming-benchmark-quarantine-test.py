@@ -134,6 +134,7 @@ class QuarantineRegression(unittest.TestCase):
             f"source '{TEARDOWN}'\n"
             f"NULL_CFG='{config}'\n"
             "NULL_CFG_OWNED=0\n"
+            "TARGET='swapz-owned-test'\n"
             "TARGET_ACTIVE=0\nCONFIGFS_MOUNTED_BY_US=0\n"
             "BACKEND_KIND=null_blk\n"
             "dmsetup() { return 1; }\n"
