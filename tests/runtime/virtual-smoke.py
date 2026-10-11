@@ -121,6 +121,7 @@ class Owned:
     target_owned: bool = False
     io_started: bool = False
     quarantined: bool = False
+    host_mode: bool = False
 
 
 class Operations(Protocol):
@@ -815,7 +816,8 @@ class SystemOperations:
                           latest_status: dict[str, int] | None,
                           messages: list[str]) -> None:
         body = {
-            "status": "QUARANTINED_DO_NOT_REUSE_VM",
+            "status": ("QUARANTINED_HOST_DO_NOT_FORCE_CLEANUP"
+                       if owned.host_mode else "QUARANTINED_DO_NOT_REUSE_VM"),
             "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "reason": reason,
             "owned_or_candidate_resources": {
@@ -834,7 +836,9 @@ class SystemOperations:
                 os.chmod(marker, 0o600)
             except OSError as exc:
                 print(f"QUARANTINE_RECORD_WRITE_FAILED: {exc}", file=sys.stderr)
-        print("VM QUARANTINED: preserve all remaining resources and do not reuse this VM",
+        print(("DEVELOPMENT PC QUARANTINED: stop tests and preserve resources; "
+               "do not force cleanup or reboot" if owned.host_mode else
+               "VM QUARANTINED: preserve all remaining resources and do not reuse this VM"),
               file=sys.stderr)
         print(json.dumps(body, sort_keys=True), file=sys.stderr)
 
@@ -843,7 +847,7 @@ class SmokeRunner:
     def __init__(self, config: Config, ops: Operations):
         self.config = config
         self.ops = ops
-        self.owned = Owned()
+        self.owned = Owned(host_mode=config.host_id is not None)
         self.run_id = os.urandom(6).hex()
         self.delay_name = f"swapz-smoke-delay-{self.run_id}"
         self.target_name = f"swapz-smoke-target-{self.run_id}"
