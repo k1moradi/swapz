@@ -231,6 +231,10 @@ On a successful run only, teardown verifies the saved DM UUIDs and exact
 tables, zero pending status, no unexpected holders, zero DM open references,
 and the loop's unchanged backing-file identity. It uses ordinary `dmsetup remove`, ordinary loop detach,
 and ordinary `rmmod` only for resources that this run positively created.
+After detach, `losetup --json --output NAME,BACK-FILE /dev/loopN` may still list
+the unbound loop node with `"back-file": null`. This is not an attachment:
+teardown checks for a nonempty backing path and rejects malformed, mismatched
+or ambiguous JSON rather than treating any device row as an attached image.
 It never invokes `swapon`, `swapoff`, mount, physical-device access,
 `dmsetup remove -f`, `rmmod -f`, reboot, or SysRq.
 
