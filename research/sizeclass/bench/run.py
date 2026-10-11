@@ -80,9 +80,18 @@ def run_trace(trace: list[tuple[int, bytes]], *, policy: str,
                     window=window, read_penalty_bytes=read_penalty_bytes)
     # Raw 4096-byte audit pages remain intact; compressed payloads are stored
     # exactly as sampled/generated, without re-compressing arbitrary synthetic data.
+    expected_by_slot = {}
     for slot, payload in trace:
         replay.stage(slot, payload, raw=len(payload) == BLOCK_BYTES)
+        expected_by_slot[slot] = payload
     replay.flush()
+    # A completed, no-error replay must return the *exact* final payload for
+    # every slot, not merely a self-consistent CRC of the wrong generation.
+    if not replay.failed_logical_writes and not replay.failed_gc_runs:
+        for slot, expected in expected_by_slot.items():
+            mapping = replay.mappings.get(slot)
+            if mapping is None or replay._read_mapping(mapping)[0] != expected:
+                raise AssertionError('incorrect final payload or generation mapping')
     generator = random.Random(read_seed)
     slots = sorted(replay.mappings)
     for _ in range(reads):
