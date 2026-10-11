@@ -99,6 +99,15 @@ if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-live-authorization.py" 
   echo "ERROR: benchmark scope/VM authorization refused; no fixture allocated." >&2
   exit 4
 fi
+# Strictly refuse a writable/unreviewed checkout before any fixture setup.
+# The source SHA binds the exact privilege-bearing runner plus helpers, not
+# merely kernel/dm-swapz.c. The PC operator must prepare a protected full
+# checkout before invoking this as root.
+if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-source-preflight.py" \
+    --source-sha "$SWAPZ_BENCH_SOURCE_SHA"; then
+  echo "ERROR: benchmark source executable/dependency ownership refused; no fixture allocated." >&2
+  exit 4
+fi
 # Codex's successful smoke unloads its *owned* module. A separately authorized
 # operator must register the exact VM-built dm_swapz before this benchmark;
 # never insmod/modprobe it implicitly. Verify the selected .ko SHA, exact
