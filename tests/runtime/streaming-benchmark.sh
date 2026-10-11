@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This executable is privileged: never infer authorization from root alone.
-# A separate exact disposable-VM authorization is required before resources.
+# This executable is privileged. Require deliberate --run-live, pinned host,
+# protected source and selected module identities before allocating resources.
+# No repeated approval phrase is required.
 if (( $# != 1 )) || [[ "$1" != "--run-live" ]]; then
-  echo "ERROR: explicitly pass --run-live after independent VM and operation approval; no device setup." >&2
+  echo "ERROR: explicitly pass --run-live to start this diagnostic test; no device setup." >&2
   exit 4
 fi
 
@@ -89,14 +90,14 @@ fi
 for tool in awk blockdev cmp dd dmsetup fio modinfo modprobe python3 git systemd-detect-virt timeout; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
-# Refuse a missing/unapproved VM scope BEFORE module inspection, tmpfs image,
-# null_blk, DM or any mutating kernel operation. This is an independent
-# benchmark authorization, NOT inherited from Codex's one-page smoke.
+# Enforce the exact VM/host identity and validated benchmark plan BEFORE
+# module inspection, tmpfs, null_blk, DM or any mutating kernel operation.
+# No copied approval phrase is required. Do not inherit smoke parameters.
 : "${SWAPZ_BENCH_SOURCE_SHA:?must explicitly pin approved source commit}"
 : "${SWAPZ_BENCH_MODULE_SHA256:?must explicitly pin selected VM-built module SHA-256}"
 : "${SWAPZ_BENCH_MODULE_PATH:?must explicitly name protected selected .ko}"
 if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-live-authorization.py" --check; then
-  echo "ERROR: benchmark scope/VM authorization refused; no fixture allocated." >&2
+  echo "ERROR: benchmark profile/VM-host identity preflight refused; no fixture allocated." >&2
   exit 4
 fi
 # Strictly refuse a writable/unreviewed checkout before any fixture setup.
@@ -108,10 +109,10 @@ if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-source-preflight.py" \
   echo "ERROR: benchmark source executable/dependency ownership refused; no fixture allocated." >&2
   exit 4
 fi
-# Codex's successful smoke unloads its *owned* module. A separately authorized
-# operator must register the exact VM-built dm_swapz before this benchmark;
+# A successful smoke unloads its owned module. Register the selected
+# exactly identified dm_swapz before benchmark invocation;
 # never insmod/modprobe it implicitly. Verify the selected .ko SHA, exact
-# approved source checkout, vermagic, loaded module and DM target *before*
+# pinned source checkout, vermagic, loaded module and DM target *before*
 # allocating tmpfs/null_blk/DM resources. Loaded-to-selected-byte identity
 # is necessarily operator-attested; this is not independent kernel provenance.
 if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-module-preflight.py" \
