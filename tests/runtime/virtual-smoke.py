@@ -756,10 +756,27 @@ class SystemOperations:
                 return False
             raise QuarantineRequired(f"cannot verify loop state for {loop}: {result.stderr[-500:]}")
         try:
-            records = json.loads(result.stdout).get("loopdevices", [])
+            document = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise QuarantineRequired(f"invalid losetup JSON for {loop}: {exc}") from exc
-        return bool(records)
+        if not isinstance(document, dict) or not isinstance(document.get("loopdevices"), list):
+            raise QuarantineRequired(f"invalid losetup device list for {loop}")
+        records = document["loopdevices"]
+        if not records:
+            return False
+        if len(records) != 1 or not isinstance(records[0], dict):
+            raise QuarantineRequired(f"ambiguous losetup device list for {loop}")
+        record = records[0]
+        if record.get("name") != loop or "back-file" not in record:
+            raise QuarantineRequired(f"unexpected losetup backing identity for {loop}")
+        backing_file = record["back-file"]
+        # An unbound /dev/loopN can persist and still appear in losetup JSON.
+        # Only a nonempty backing path proves an attachment remains.
+        if backing_file is None or backing_file == "":
+            return False
+        if not isinstance(backing_file, str):
+            raise QuarantineRequired(f"invalid losetup backing path for {loop}")
+        return True
 
     def write_page(self, target: str, payload: Path) -> None:
         self._checked([
