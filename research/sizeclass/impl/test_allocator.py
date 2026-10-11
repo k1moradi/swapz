@@ -196,6 +196,12 @@ class AllocatorTests(unittest.TestCase):
         allocator.mapping_table[1] = dataclasses.replace(location, offset=1)
         with self.assertRaises(CorruptExtentError):
             allocator.read(1)
+        allocator.mapping_table[1] = dataclasses.replace(location, logical_page=2)
+        with self.assertRaises(CorruptExtentError):
+            allocator.read(1)
+        allocator.mapping_table[1] = dataclasses.replace(location, raw=True, offset=0, length=4096)
+        with self.assertRaises(CorruptExtentError):
+            allocator.read(1)
         allocator.mapping_table[1] = location
         allocator.committed_extents[location.extent_identifier] = b'X' * 8192
         with self.assertRaises(CorruptExtentError):
