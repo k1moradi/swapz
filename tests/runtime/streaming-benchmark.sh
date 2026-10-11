@@ -79,9 +79,25 @@ if ! FIO_VERSION=$(fio --version 2>/dev/null) ||
   exit 4
 fi
 [[ $EUID -eq 0 ]] || { echo "root required" >&2; exit 1; }
-for tool in awk blockdev cmp dd dmsetup fio modprobe python3; do
+for tool in awk blockdev cmp dd dmsetup fio modinfo modprobe python3 git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
+# Codex's successful smoke unloads its *owned* module. A separately authorized
+# operator must register the exact VM-built dm_swapz before this benchmark;
+# never insmod/modprobe it implicitly. Verify the selected .ko SHA, exact
+# approved source checkout, vermagic, loaded module and DM target *before*
+# allocating tmpfs/null_blk/DM resources. Loaded-to-selected-byte identity
+# is necessarily operator-attested; this is not independent kernel provenance.
+: "${SWAPZ_BENCH_SOURCE_SHA:?must explicitly pin approved source commit}"
+: "${SWAPZ_BENCH_MODULE_SHA256:?must explicitly pin selected VM-built module SHA-256}"
+: "${SWAPZ_BENCH_MODULE_PATH:?must explicitly name protected selected .ko}"
+if ! python3 -B "$ROOT/tests/runtime/streaming-benchmark-module-preflight.py" \
+    --source-sha "$SWAPZ_BENCH_SOURCE_SHA" \
+    --module-sha256 "$SWAPZ_BENCH_MODULE_SHA256" \
+    --module "$SWAPZ_BENCH_MODULE_PATH"; then
+  echo "ERROR: selected module/provenance admission failed; no fixture allocated." >&2
+  exit 4
+fi
 # Preserve a second fail-closed guard after setup as defense in depth.
 NULLBLK_TICKS_PER_SEC=50
 NULLBLK_TICK_BYTES=$(( BANDWIDTH > 0 ? (1048576 / NULLBLK_TICKS_PER_SEC) * BANDWIDTH : 0 ))
