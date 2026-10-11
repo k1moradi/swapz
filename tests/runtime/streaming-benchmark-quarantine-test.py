@@ -186,7 +186,7 @@ class QuarantineRegression(unittest.TestCase):
         self.assertFalse(trace.exists())
         self.assertIn("refusing to remove", result.stderr)
 
-    def test_verified_target_removed_by_uuid_not_reusable_name(self):
+    def test_verified_target_removed_by_explicit_uuid_not_reusable_name(self):
         trace = self.directory / "verified-remove"
         script = (self.prefix +
             f"source '{TEARDOWN}'\n"
@@ -194,7 +194,7 @@ class QuarantineRegression(unittest.TestCase):
             'timeout() {\n'
             '  case "$*" in\n'
             '    *"-o uuid "* ) printf "%s\\n" "$TARGET_UUID" ;;\n'
-            '    *" remove --retry SWAPZ-V22-our-case"* )\n'
+            '    *" remove --retry --uuid SWAPZ-V22-our-case"* )\n'
             '      printf "%s\\n" "REMOVE_UUID" > "$TMP/verified-remove" ;;\n'
             '    *"-o name"* ) : ;;\n'
             '    * ) return 99 ;;\n'
@@ -206,6 +206,11 @@ class QuarantineRegression(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("RC:0:ACTIVE:0", r.stdout)
         self.assertEqual(trace.read_text(), "REMOVE_UUID\n")
+        self.assertIn('dmsetup remove --retry --uuid "$removal_identity"',
+                      TEARDOWN.read_text(encoding="utf-8"))
+        self.assertNotIn('dmsetup remove --retry "$removal_identity"; then',
+                         TEARDOWN.read_text(encoding="utf-8").split(
+                             'elif ! dmsetup remove --retry', 1)[0])
 
     def test_foreign_nullblk_config_is_never_powered_off(self):
         config = self.directory / "foreign-nullblk"
