@@ -265,20 +265,11 @@ setup_nullblk() {
     swapz_benchmark_bounded "null_blk config power" 12s \
       bash -c 'printf "%s\n" "$1" > "$2"' _ 1 "$NULL_CFG/power" || return 1
   local index candidate
-  # $(...) runs in a subshell. If a bounded sysfs read times out,
-  # BENCH_QUARANTINE set inside swapz_benchmark_bounded is lost unless the
-  # parent explicitly records uncertainty. This is *before* TARGET_ACTIVE or
-  # IO_STARTED and after the configfs device may already be powered on.
-  if ! index=$(swapz_benchmark_bounded "owned null_blk index" 5s cat "$NULL_CFG/index"); then
-    BENCH_QUARANTINE=1
-    BENCH_QUARANTINE_REASON="owned null_blk index read failed or timed out; configfs device state uncertain"
-    return 1
-  fi
-  if [[ ! "$index" =~ ^[0-9]+$ ]]; then
-    BENCH_QUARANTINE=1
-    BENCH_QUARANTINE_REASON="invalid null_blk index; cannot identify owned backing"
-    return 1
-  fi
+  # This read occurs after powering on the configfs device but before
+  # any DM target/I/O. The helper sets quarantine in the PARENT shell if
+  # the bounded index read fails, even though its capture uses $(...).
+  swapz_benchmark_read_owned_nullblk_index "$NULL_CFG/index" || return 1
+  index="$NULLBLK_INDEX"
   BACKING=""
   # Configfs null_blk naming differs across kernel versions. Newer kernels may
   # expose /dev/<configfs-name>; older ones commonly expose /dev/nullb<index>.
