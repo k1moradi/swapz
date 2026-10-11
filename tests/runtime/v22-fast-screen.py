@@ -125,6 +125,10 @@ def check_results(path: Path) -> dict[str, object]:
                 raise ValueError(f"line {line_no}: expected case {FAST_CASES[line_no-1]}")
             if row["backend"] != BACKEND:
                 raise ValueError(f"line {line_no}: unexpected benchmark backend")
+            # The live runner records fio's writer iodepth from job options.
+            # Reject a different workload instead of comparing unlike QDs.
+            if type(row.get("write_qd")) is not int or row["write_qd"] != 64:
+                raise ValueError(f"line {line_no}: expected writer QD64")
             status = row["status"]
             if (status.get("strategy") != key[0] or
                     status.get("batch_kib") != str(key[1]) or
