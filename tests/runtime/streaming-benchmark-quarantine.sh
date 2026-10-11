@@ -17,6 +17,27 @@ swapz_benchmark_bounded() {
   fi
 }
 
+swapz_benchmark_read_owned_nullblk_index() {
+  # Never return a configfs index through $(...), because the caller's
+  # BENCH_QUARANTINE state would then be trapped in a subshell. The bounded
+  # read itself still uses a subshell, so explicitly mark uncertainty in
+  # this parent-shell function after ANY failure or timeout.
+  local observed
+  NULLBLK_INDEX=""
+  if ! observed=$(swapz_benchmark_bounded "owned null_blk index" 5s cat "$1"); then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="owned null_blk index read failed or timed out; configfs device state uncertain"
+    return 1
+  fi
+  if [[ ! "$observed" =~ ^[0-9]+$ ]]; then
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="invalid owned null_blk index; cannot identify its backing device"
+    return 1
+  fi
+  NULLBLK_INDEX=$observed
+  return 0
+}
+
 swapz_benchmark_verify_owned_target() {
   # A name match is NOT sufficient authority to remove a DM mapping.
   # The UUID assigned at creation must still be attached to this exact name.
