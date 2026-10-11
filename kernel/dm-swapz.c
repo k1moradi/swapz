@@ -46,6 +46,12 @@
 #define SWAPZ_BLOCK_BYTES PAGE_SIZE
 #define SWAPZ_BLOCK_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+/*
+ * Opt-in bounded lookahead uses at most 16 source blocks and 128 surviving
+ * records.  Any larger or less favorable batch takes the V2.2 ordered path.
+ */
+#define SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS 16U
+#define SWAPZ_BESTFIT4_MAX_RECORDS 128U
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U /* 'SPWZ' little-endian on disk */
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_EMPTY_BLOCK U32_MAX
@@ -153,6 +159,15 @@ enum swapz_stream_buffer_state {
 };
 
 struct swapz_context;
+
+/* Worker-owned coordinates into the original, immutable batch snapshot. */
+struct swapz_bestfit4_record {
+	u16 source_block;
+	u16 length;
+	u8 source_record;
+	bool raw;
+	bool claimed;
+};
 
 struct swapz_stream_buffer {
 	struct swapz_context *context;
@@ -269,6 +284,15 @@ struct swapz_context {
 	void *compressed_buffer;
 	void *pack_buffer;
 	void *repack_buffer;
+	/*
+	 * Optional 4 KiB best-fit research mode.  Preallocated once at ctr, only
+	 * the ordered worker accesses these snapshots.  Callbacks cannot touch
+	 * either the scratch buffers or mutable descriptor metadata.
+	 */
+	void *bestfit4_source_data;
+	struct swapz_write_batch_block *bestfit4_source_blocks;
+	struct swapz_bestfit4_record *bestfit4_records;
+	bool bestfit4_enabled;
 	struct swapz_write_batch_block repack_block;
 	struct swapz_write_batch_block compact_source_block;
 	void *lz4_workmem;
@@ -987,6 +1011,271 @@ static int swapz_validate_compact_fill_buffer(const struct swapz_context *contex
 	return 0;
 }
 
+/*
+ * Experimental bounded size-aware repack for mixed compressed sizes.
+ *
+ * The existing V2.2 on-disk container and all upper BIO ownership/mapping
+ * publication rules stay unchanged.  The ordered worker exclusively owns the
+ * scratch snapshot; async completions only signal buffer completion.
+ *
+ * First plan an entire <=64 KiB source batch without changing authoritative
+ * references.  If its best-fit plan is not strictly smaller (or exceeds 128
+ * survivors), use the original source-ordered compactor untouched.  The
+ * read-only snapshot avoids overwriting unconsumed source bytes/metadata.
+ */
+static bool swapz_compact_fill_buffer_bestfit4(struct swapz_context *context,
+					      struct swapz_stream_buffer *buffer)
+{
+	struct swapz_bestfit4_record *entries = context->bestfit4_records;
+	u16 plan[SWAPZ_BESTFIT4_MAX_RECORDS];
+	u32 old_count = buffer->block_count;
+	u32 entry_count = 0;
+	u32 plan_count = 0;
+	u32 planned_blocks = 0;
+	unsigned int planned_payload_start = SWAPZ_BLOCK_BYTES;
+	unsigned int planned_record_count = 0;
+	unsigned int repack_payload_start = SWAPZ_BLOCK_BYTES;
+	u32 write_index = 0;
+	u32 read_index;
+	u32 index;
+	int error;
+
+	if (!context->bestfit4_enabled || !old_count ||
+	    old_count > SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS)
+		return false;
+
+	error = swapz_validate_compact_fill_buffer(context, buffer);
+	if (error)
+		goto fail;
+	if (unlikely(!swapz_stream_bios_match(context, buffer))) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+
+	memcpy(context->bestfit4_source_data, buffer->data,
+	       (size_t)old_count * SWAPZ_BLOCK_BYTES);
+	memcpy(context->bestfit4_source_blocks, buffer->blocks,
+	       array_size(old_count, sizeof(*buffer->blocks)));
+
+	for (read_index = 0; read_index < old_count; ++read_index) {
+		const struct swapz_write_batch_block *source =
+			&context->bestfit4_source_blocks[read_index];
+		u32 record_index;
+
+		for (record_index = 0; record_index < source->record_count;
+		     ++record_index) {
+			const struct swapz_write_batch_record *record =
+				&source->records[record_index];
+			struct swapz_bestfit4_record *entry;
+			bool keep = record->bio ||
+				swapz_stream_record_current(context, record);
+
+			if (!keep)
+				continue;
+			/* A large tiny-record batch remains on the original path. */
+			if (entry_count == SWAPZ_BESTFIT4_MAX_RECORDS)
+				return false;
+			entry = &entries[entry_count++];
+			entry->source_block = read_index;
+			entry->source_record = record_index;
+			entry->length = record->stored_length;
+			entry->raw = !(record->flags & SWAPZ_MAP_COMPRESSED);
+			entry->claimed = false;
+		}
+	}
+
+	/*
+	 * Start with the earliest surviving record, then choose the largest
+	 * available compressed payload that fits the current container.  This
+	 * bounded best-fit search is at most 128*128 comparisons per batch.
+	 */
+	while (plan_count < entry_count) {
+		u32 selected = entry_count;
+
+		if (!planned_record_count) {
+			for (index = 0; index < entry_count; ++index) {
+				if (!entries[index].claimed) {
+					selected = index;
+					break;
+				}
+			}
+			planned_payload_start = SWAPZ_BLOCK_BYTES;
+			planned_blocks++;
+		} else {
+			for (index = 0; index < entry_count; ++index) {
+				const struct swapz_bestfit4_record *candidate =
+					&entries[index];
+
+				if (candidate->claimed || candidate->raw ||
+				    !swapz_repack_can_fit(planned_record_count,
+							  planned_payload_start,
+							  candidate->length))
+					continue;
+				if (selected == entry_count ||
+				    candidate->length > entries[selected].length)
+					selected = index;
+			}
+			if (selected == entry_count) {
+				planned_record_count = 0;
+				continue;
+			}
+		}
+
+		if (unlikely(selected == entry_count)) {
+			error = -EUCLEAN;
+			goto fail;
+		}
+		entries[selected].claimed = true;
+		plan[plan_count++] = selected;
+		if (entries[selected].raw) {
+			planned_record_count = 0;
+		} else {
+			if (unlikely(!swapz_repack_can_fit(planned_record_count,
+						    planned_payload_start,
+						    entries[selected].length))) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			planned_payload_start -= entries[selected].length;
+			planned_record_count++;
+		}
+	}
+
+	/*
+	 * Never enlarge the lower-device stream or alter unchanged batches.
+	 * Falling back also avoids paying the scratch-copy/write cost for the
+	 * all-2072B synthetic case where no two records can fit in one 4K block.
+	 */
+	if (planned_blocks >= old_count)
+		return false;
+
+	/* From here onward only one worker may update staged/BIO coordinates. */
+	for (read_index = 0; read_index < old_count; ++read_index) {
+		const struct swapz_write_batch_block *source =
+			&context->bestfit4_source_blocks[read_index];
+		u32 record_index;
+
+		for (record_index = 0; record_index < source->record_count;
+		     ++record_index) {
+			const struct swapz_write_batch_record *record =
+				&source->records[record_index];
+
+			if (record->bio ||
+			    swapz_stream_record_current(context, record))
+				continue;
+			swapz_clear_staged_ref(context, record->logical_page,
+					       record->generation, buffer->id,
+					       read_index, record->record_index);
+			context->stats.staged_cancellations++;
+		}
+	}
+
+	memset(context->repack_buffer, 0, SWAPZ_BLOCK_BYTES);
+	memset(&context->repack_block, 0, sizeof(context->repack_block));
+
+	for (index = 0; index < plan_count; ++index) {
+		const struct swapz_bestfit4_record *entry = &entries[plan[index]];
+		const struct swapz_write_batch_block *source =
+			&context->bestfit4_source_blocks[entry->source_block];
+		struct swapz_write_batch_record record =
+			source->records[entry->source_record];
+		const u8 *source_data =
+			(const u8 *)context->bestfit4_source_data +
+			entry->source_block * SWAPZ_BLOCK_BYTES;
+
+		if (entry->raw) {
+			error = swapz_emit_repack_container(context, buffer,
+						    &write_index,
+						    &repack_payload_start);
+			if (error)
+				goto fail;
+			if (unlikely(write_index >= context->max_batch_blocks)) {
+				error = -ENOSPC;
+				goto fail;
+			}
+			memcpy((u8 *)buffer->data + write_index * SWAPZ_BLOCK_BYTES,
+			       source_data, SWAPZ_BLOCK_BYTES);
+			memcpy(&buffer->blocks[write_index], source, sizeof(*source));
+			swapz_update_repacked_ref(context, buffer,
+						 &buffer->blocks[write_index].records[0],
+						 write_index, 0);
+			write_index++;
+			continue;
+		}
+
+		{
+			const struct swapz_record_disk *source_record =
+				swapz_container_record_const(source_data,
+							      entry->source_record);
+			struct swapz_record_disk *dest_record;
+			u16 offset = le16_to_cpu(source_record->offset);
+			u16 length = le16_to_cpu(source_record->length);
+			u8 destination_record;
+
+			if (unlikely(length != entry->length ||
+				     le32_to_cpu(source_record->logical_page) !=
+				     record.logical_page ||
+				     offset + length > SWAPZ_BLOCK_BYTES)) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			if (!swapz_repack_can_fit(context->repack_block.record_count,
+						   repack_payload_start, length)) {
+				error = swapz_emit_repack_container(context, buffer,
+							    &write_index,
+							    &repack_payload_start);
+				if (error)
+					goto fail;
+			}
+			if (unlikely(!swapz_repack_can_fit(
+				    context->repack_block.record_count,
+				    repack_payload_start, length))) {
+				error = -E2BIG;
+				goto fail;
+			}
+
+			repack_payload_start -= length;
+			destination_record = context->repack_block.record_count;
+			dest_record = swapz_container_record(context->repack_buffer,
+							     destination_record);
+			dest_record->logical_page = cpu_to_le32(record.logical_page);
+			dest_record->offset = cpu_to_le16(repack_payload_start);
+			dest_record->length = cpu_to_le16(length);
+			memcpy((u8 *)context->repack_buffer + repack_payload_start,
+			       source_data + offset, length);
+			record.record_index = destination_record;
+			context->repack_block.records[destination_record] = record;
+			context->repack_block.record_count++;
+			context->repack_block.compaction |= source->compaction;
+		}
+	}
+
+	error = swapz_emit_repack_container(context, buffer, &write_index,
+					    &repack_payload_start);
+	if (error)
+		goto fail;
+	if (unlikely(write_index != planned_blocks || write_index > old_count)) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+	if (write_index < old_count) {
+		u32 reclaimed = old_count - write_index;
+
+		if (WARN_ON_ONCE(context->segment_write_block < reclaimed)) {
+			swapz_set_failed(context, -EUCLEAN);
+			return true;
+		}
+		context->segment_write_block -= reclaimed;
+		context->stats.staged_cancelled_blocks += reclaimed;
+	}
+	buffer->block_count = write_index;
+	return true;
+
+fail:
+	swapz_set_failed(context, error);
+	return true;
+}
+
 static void swapz_compact_fill_buffer(struct swapz_context *context,
 				      struct swapz_stream_buffer *buffer)
 {
@@ -997,6 +1286,10 @@ static void swapz_compact_fill_buffer(struct swapz_context *context,
 	int error = 0;
 
 	if (!old_count)
+		return;
+
+	/* Experimental lookahead is opt-in and preserves the default path. */
+	if (swapz_compact_fill_buffer_bestfit4(context, buffer))
 		return;
 
 	/* Preflight every record: a late corruption error must not partially repack. */
@@ -2938,6 +3231,9 @@ static void swapz_status(struct dm_target *target, status_type_t type,
 		       swapz_strategy_name(context->strategy),
 		       (unsigned int)(context->max_batch_blocks *
 			      (SWAPZ_BLOCK_BYTES / 1024)));
+		/* Keep the validated default table output byte-for-byte unchanged. */
+		if (context->bestfit4_enabled)
+			DMEMIT(" bestfit4");
 		break;
 	case STATUSTYPE_IMA:
 		break;
@@ -2990,6 +3286,9 @@ static void swapz_free_context(struct swapz_context *context)
 		free_page((unsigned long)context->pack_buffer);
 	if (context->repack_buffer)
 		free_page((unsigned long)context->repack_buffer);
+	vfree(context->bestfit4_source_data);
+	kvfree(context->bestfit4_source_blocks);
+	kvfree(context->bestfit4_records);
 	vfree(context->stream_buffers[0].data);
 	vfree(context->stream_buffers[1].data);
 	kvfree(context->stream_buffers[0].blocks);
@@ -3048,8 +3347,8 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 	u32 index;
 	int error;
 
-	if (argc < 1 || argc > 3) {
-		target->error = "Usage: <backing> [immediate|opportunistic|staged] [batch_kib]";
+	if (argc < 1 || argc > 4) {
+		target->error = "Usage: <backing> [immediate|opportunistic|staged] [batch_kib] [ordered4|bestfit4]";
 		return -EINVAL;
 	}
 	if (target->len % SWAPZ_BLOCK_SECTORS) {
@@ -3100,6 +3399,22 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 
 	if (context->strategy == SWAPZ_STRATEGY_IMMEDIATE)
 		context->max_batch_blocks = 1;
+
+	if (argc >= 4) {
+		if (!strcmp(argv[3], "bestfit4"))
+			context->bestfit4_enabled = true;
+		else if (strcmp(argv[3], "ordered4")) {
+			target->error = "Unknown swapz 4 KiB packing policy";
+			error = -EINVAL;
+			goto fail;
+		}
+	}
+	if (context->bestfit4_enabled &&
+	    context->max_batch_blocks > SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS) {
+		target->error = "bestfit4 requires a batch of at most 64 KiB";
+		error = -EINVAL;
+		goto fail;
+	}
 
 	error = dm_get_device(target, argv[0], dm_table_get_mode(target->table),
 			      &context->backing);
@@ -3220,6 +3535,25 @@ static int swapz_ctr(struct dm_target *target, unsigned int argc, char **argv)
 		target->error = "Cannot allocate preallocated I/O buffers";
 		error = -ENOMEM;
 		goto fail;
+	}
+
+	if (context->bestfit4_enabled) {
+		/* Bounded, preallocated worker scratch; no allocations on swap I/O. */
+		context->bestfit4_source_data = vzalloc(
+			(size_t)context->max_batch_blocks * SWAPZ_BLOCK_BYTES);
+		context->bestfit4_source_blocks = kvcalloc(
+			context->max_batch_blocks,
+			sizeof(*context->bestfit4_source_blocks), GFP_KERNEL);
+		context->bestfit4_records = kvcalloc(
+			SWAPZ_BESTFIT4_MAX_RECORDS,
+			sizeof(*context->bestfit4_records), GFP_KERNEL);
+		if (!context->bestfit4_source_data ||
+		    !context->bestfit4_source_blocks ||
+		    !context->bestfit4_records) {
+			target->error = "Cannot allocate bounded bestfit4 scratch";
+			error = -ENOMEM;
+			goto fail;
+		}
 	}
 
 	for (index = 0; index < ARRAY_SIZE(context->stream_buffers); ++index) {

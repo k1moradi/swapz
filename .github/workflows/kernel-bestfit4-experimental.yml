@@ -1,0 +1,54 @@
+name: Experimental kernel bestfit4 qualification
+
+on:
+  push:
+    branches:
+      - feat/kernel-bounded-bestfit4-optin
+  pull_request:
+    paths:
+      - kernel/dm-swapz.c
+      - tests/runtime/kernel-bestfit4-geometry-test.py
+      - .github/workflows/kernel-bestfit4-experimental.yml
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-geometry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rootless geometry, boundedness, and opt-in contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B tests/runtime/kernel-bestfit4-geometry-test.py -v
+          git diff --check
+
+  compile-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install distribution kernel headers (no module loading)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential linux-headers-generic-hwe-24.04
+      - name: Build out-of-tree kernel module with W=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
+          test -n "$KDIR"
+          echo "SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "KERNEL_BLOB=$(git rev-parse HEAD:kernel/dm-swapz.c)"
+          echo "KDIR=$KDIR"
+          make -C kernel KDIR="$KDIR" W=1 -j2 all
+          test -s kernel/dm-swapz.ko
+          sha256sum kernel/dm-swapz.ko
+          git diff --check
+          echo "COMPILE_ONLY: successful; no module inserted"

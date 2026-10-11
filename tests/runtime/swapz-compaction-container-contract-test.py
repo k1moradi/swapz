@@ -69,6 +69,9 @@ typedef uint64_t u64;
 
 #define SWAPZ_BLOCK_BYTES 4096U
 #define SWAPZ_MAX_PACKED_RECORDS 64U
+#define SWAPZ_BESTFIT4_MAX_BATCH_BLOCKS 16U
+#define SWAPZ_BESTFIT4_MAX_RECORDS 128U
+#define array_size(count, size) ((size_t)(count) * (size_t)(size))
 #define SWAPZ_CONTAINER_MAGIC 0x5a575053U
 #define SWAPZ_CONTAINER_VERSION 1U
 #define SWAPZ_MAP_COMPRESSED 2U
@@ -139,6 +142,13 @@ struct swapz_staged_ref {
     u8 buffer_id;
     u8 valid;
 };
+struct swapz_bestfit4_record {
+    u16 source_block;
+    u16 length;
+    u8 source_record;
+    bool raw;
+    bool claimed;
+};
 struct swapz_stream_buffer {
     struct list_head owned_bios;
     void *data;
@@ -155,6 +165,11 @@ struct swapz_context {
     bool failed;
     /* Production scratch fields are void pointers, not byte arrays. */
     void *repack_buffer;
+    /* The new production helper is extracted and compiled without kernels. */
+    bool bestfit4_enabled;
+    void *bestfit4_source_data;
+    struct swapz_write_batch_block *bestfit4_source_blocks;
+    struct swapz_bestfit4_record *bestfit4_records;
     u8 repack_storage[SWAPZ_BLOCK_BYTES];
     struct swapz_write_batch_block repack_block;
     struct swapz_write_batch_block compact_source_block;
@@ -300,6 +315,156 @@ static void prepare_adjacent_block(struct swapz_stream_buffer *buffer)
     }
 }
 
+/*
+ * Execute the exact production-C optional compactor on full realistic batches,
+ * not a Python approximation or a mocked planner.  Verify every payload, BIO
+ * owner coordinate, generation-staged ref, and reclaimed physical block.
+ */
+static int run_bestfit_case(unsigned int scenario)
+{
+    struct swapz_context context = {0};
+    struct swapz_stream_buffer buffer = {0};
+    struct bio pending_bio = {0};
+    u8 *data = calloc(16, SWAPZ_BLOCK_BYTES);
+    struct swapz_write_batch_block *blocks =
+        calloc(16, sizeof(*blocks));
+    bool seen[16] = {0};
+    unsigned int source_count = scenario == 24 ? 12 : 16;
+    unsigned int expected_count = scenario == 24 ? 8 : 16;
+    unsigned int block_index;
+    unsigned int slot = 0;
+    int result = 0;
+
+    context.repack_buffer = context.repack_storage;
+    context.io_buffer = context.io_storage;
+    context.compressed_buffer = context.compressed_storage;
+    context.logical_pages = 16;
+    context.max_batch_blocks = 16;
+    context.segment_write_block = source_count;
+    context.bestfit4_enabled = true;
+    context.bestfit4_source_data = calloc(16, SWAPZ_BLOCK_BYTES);
+    context.bestfit4_source_blocks = calloc(16, sizeof(*blocks));
+    context.bestfit4_records = calloc(SWAPZ_BESTFIT4_MAX_RECORDS,
+                                       sizeof(*context.bestfit4_records));
+    if (!data || !blocks || !context.bestfit4_source_data ||
+        !context.bestfit4_source_blocks || !context.bestfit4_records) {
+        result = 83;
+        goto out;
+    }
+    buffer.data = data;
+    buffer.blocks = blocks;
+    buffer.block_count = source_count;
+    INIT_LIST_HEAD(&buffer.owned_bios);
+    for (block_index = 0; block_index < source_count; ++block_index) {
+        unsigned int count = scenario == 24 && block_index >= 8 ? 2 : 1;
+        unsigned int current_offset = SWAPZ_BLOCK_BYTES;
+        struct swapz_container_disk *container =
+            (void *)(data + block_index * SWAPZ_BLOCK_BYTES);
+        unsigned int record_index;
+
+        container->magic = SWAPZ_CONTAINER_MAGIC;
+        container->version = SWAPZ_CONTAINER_VERSION;
+        container->record_count = count;
+        blocks[block_index].record_count = count;
+        for (record_index = 0; record_index < count; ++record_index) {
+            unsigned int length = scenario == 25 ? 2072 :
+                                  (block_index < 8 ? 2200 : 1600);
+            struct swapz_record_disk *disk_record =
+                swapz_container_record(container, record_index);
+            struct swapz_write_batch_record *record =
+                &blocks[block_index].records[record_index];
+
+            current_offset -= length;
+            disk_record->logical_page = slot;
+            disk_record->offset = current_offset;
+            disk_record->length = length;
+            record->logical_page = slot;
+            record->generation = 1;
+            record->record_index = record_index;
+            record->stored_length = length;
+            record->flags = SWAPZ_MAP_COMPRESSED;
+            memset((u8 *)container + current_offset, slot + 1, length);
+            context.generations[slot] = 1;
+            context.staged_refs[slot] = (struct swapz_staged_ref){
+                .generation=1, .buffer_id=0, .block_index=block_index,
+                .record_index=record_index, .valid=1};
+            if (slot == 10) {
+                record->bio = &pending_bio;
+                pending_bio.entry.bio = &pending_bio;
+                pending_bio.entry.block_index = block_index;
+                pending_bio.entry.record_index = record_index;
+                INIT_LIST_HEAD(&pending_bio.entry.list);
+                list_add_tail(&pending_bio.entry.list, &buffer.owned_bios);
+            }
+            slot++;
+        }
+    }
+    if (slot != 16 || !swapz_stream_bios_match(&context, &buffer)) {
+        result = 84;
+        goto out;
+    }
+    swapz_compact_fill_buffer(&context, &buffer);
+    if (context.failed || buffer.block_count != expected_count ||
+        context.segment_write_block != expected_count ||
+        context.stats.staged_cancelled_blocks != source_count - expected_count ||
+        !swapz_stream_bios_match(&context, &buffer)) {
+        result = 85;
+        goto out;
+    }
+
+    for (block_index = 0; block_index < buffer.block_count; ++block_index) {
+        const u8 *block_data = data + block_index * SWAPZ_BLOCK_BYTES;
+        const struct swapz_container_disk *container = (const void *)block_data;
+        unsigned int record_index;
+
+        if (container->magic != SWAPZ_CONTAINER_MAGIC ||
+            container->record_count !=
+                (scenario == 24 ? 2U : 1U)) {
+            result = 86;
+            goto out;
+        }
+        for (record_index = 0; record_index < container->record_count;
+             ++record_index) {
+            const struct swapz_record_disk *disk_record =
+                swapz_container_record_const(block_data, record_index);
+            const unsigned int logical_slot = disk_record->logical_page;
+            const unsigned int expected_length = scenario == 25 ? 2072 :
+                                                 (logical_slot < 8 ? 2200 : 1600);
+            unsigned int byte_index;
+
+            if (logical_slot >= 16 || seen[logical_slot] ||
+                disk_record->length != expected_length ||
+                disk_record->offset + expected_length > SWAPZ_BLOCK_BYTES ||
+                context.staged_refs[logical_slot].block_index != block_index ||
+                context.staged_refs[logical_slot].record_index != record_index ||
+                !context.staged_refs[logical_slot].valid) {
+                result = 87;
+                goto out;
+            }
+            seen[logical_slot] = true;
+            for (byte_index = 0; byte_index < expected_length; ++byte_index) {
+                if (block_data[disk_record->offset + byte_index] != logical_slot + 1) {
+                    result = 88;
+                    goto out;
+                }
+            }
+        }
+    }
+    for (slot = 0; slot < 16; ++slot) {
+        if (!seen[slot]) {
+            result = 89;
+            goto out;
+        }
+    }
+out:
+    free(context.bestfit4_source_data);
+    free(context.bestfit4_source_blocks);
+    free(context.bestfit4_records);
+    free(blocks);
+    free(data);
+    return result;
+}
+
 static int run_case(unsigned int scenario, bool mutant)
 {
     struct swapz_context context = {0};
@@ -315,6 +480,9 @@ static int run_case(unsigned int scenario, bool mutant)
     struct swapz_write_batch_record *record;
     unsigned int corrupt_block = scenario == 11 ? 1 : 0;
     unsigned int record_index;
+
+    if (scenario == 24 || scenario == 25)
+        return run_bestfit_case(scenario);
 
     context.repack_buffer = context.repack_storage;
     context.io_buffer = context.io_storage;
@@ -503,7 +671,7 @@ int main(int argc, char **argv)
     if (argc != 3)
         return 80;
     scenario = strtoul(argv[1], &end, 10);
-    if (!end || *end || scenario > 23)
+    if (!end || *end || scenario > 25)
         return 81;
     error = run_case((unsigned int)scenario, argv[2][0] == 'm');
     if (!error)
@@ -529,6 +697,11 @@ class CompactionContainerContracts(unittest.TestCase):
             raise AssertionError("compactor must call complete preflight exactly once")
         functions = [exact_function(cls.source, name) for name in FUNCTIONS]
         functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer"), preflight)
+        # The opt-in helper is real production C; include it without weakening
+        # any existing ordered-compactor mutation or identity preflights.
+        bestfit_helper = exact_function(cls.source, "swapz_compact_fill_buffer_bestfit4")
+        functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer") + 1,
+                         bestfit_helper)
 
         def compile_contract(name: str, bodies: list[str]) -> Path:
             path = directory / (name + ".c")
@@ -550,6 +723,9 @@ class CompactionContainerContracts(unittest.TestCase):
             if name != "swapz_compact_fill_buffer" else broken
             for name in FUNCTIONS
         ]
+        mutant_functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer"), preflight)
+        mutant_functions.insert(FUNCTIONS.index("swapz_compact_fill_buffer") + 1,
+                                bestfit_helper)
         cls.mutant_binary = compile_contract("no-preflight-mutant", mutant_functions)
 
     @classmethod
@@ -595,6 +771,15 @@ class CompactionContainerContracts(unittest.TestCase):
 
     def test_adjacent_nonoverlapping_payloads_remain_valid(self):
         self.run_contract(21)
+
+    def test_actual_bounded_bestfit4_reduces_mixed_payloads(self):
+        # Exact production C: clustered 8 large + 8 small, plus a real
+        # independent upper BIO owner moved by the out-of-place repacker.
+        self.run_contract(24)
+
+    def test_actual_bestfit4_uniform_2072_falls_back_without_churn(self):
+        # Geometry guarantees no 4K-only reduction at 50% fio payload sizes.
+        self.run_contract(25)
 
     def test_missing_preflight_call_is_rejected(self):
         compactor = exact_function(self.source, "swapz_compact_fill_buffer")

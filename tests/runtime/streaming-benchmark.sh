@@ -58,6 +58,13 @@ case "$BENCH_DISCARD" in
   *) echo "ERROR: SWAPZ_BENCH_DISCARD must be 0 or 1" >&2; exit 4 ;;
 esac
 STRATEGIES=${SWAPZ_BENCH_STRATEGIES:-"immediate opportunistic staged"}
+# Experimental kernel packing comparison is opt-in. The default table and
+# authority checks remain identical to the qualified V2.2 baseline.
+PACKING=${SWAPZ_BENCH_PACKING:-ordered4}
+case "$PACKING" in
+  ordered4|bestfit4) ;;
+  *) echo "ERROR: SWAPZ_BENCH_PACKING must be ordered4 or bestfit4" >&2; exit 4 ;;
+esac
 REQUESTED_BATCHES=${SWAPZ_BENCH_BATCHES:-auto}
 # The rootless planner admits only serviceable null_blk requests; an explicit
 # 512/1024 KiB batch under a 20 MiB/s throttle is rejected before even
@@ -69,6 +76,14 @@ if ! BATCHES=$(python3 -B "$ROOT/tests/runtime/streaming-benchmark-plan.py" \
     --batches "$REQUESTED_BATCHES" --repeats 1 --emit-batches); then
   echo "ERROR: benchmark pre-device plan rejected configuration; no fixture allocated." >&2
   exit 4
+fi
+if [[ "$PACKING" == bestfit4 ]]; then
+  for planned_batch in $BATCHES; do
+    if (( planned_batch > 64 )); then
+      echo "ERROR: bestfit4 only permits <=64 KiB batches; choose SWAPZ_BENCH_BATCHES=64 or lower" >&2
+      exit 4
+    fi
+  done
 fi
 if [[ "$BACKEND_KIND" == null_blk ]] && (( BANDWIDTH > 0 && BENCH_DISCARD == 1 )); then
   echo "ERROR: null_blk mbps may requeue a 1 MiB GC DISCARD forever; use SWAPZ_BENCH_DISCARD=0 with bandwidth throttling." >&2
@@ -405,7 +420,12 @@ run_case() {
     return 1
   fi
   TARGET_CANDIDATE=1
-  swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch" --uuid "$TARGET_UUID"
+  if [[ "$PACKING" == ordered4 ]]; then
+    swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch" --uuid "$TARGET_UUID"
+  else
+    # Never opt in to bestfit4 unless it was explicitly selected before preflights.
+    swapz_benchmark_bounded "owned DM target creation" 20s dmsetup create "$TARGET" --table "0 $table_sectors swapz $BACKING $strategy $batch bestfit4" --uuid "$TARGET_UUID"
+  fi
   swapz_benchmark_verify_owned_target || return 1
   TARGET_ACTIVE=1
   TARGET_CANDIDATE=0
@@ -647,6 +667,7 @@ echo "LOWER_DISCARD=$BENCH_DISCARD"
 echo "NBD_DEVICE=${NBD_DEVICE:-not-used}"
 echo "BATCHES=$BATCHES"
 echo "STRATEGIES=$STRATEGIES"
+echo "PACKING=$PACKING"
 echo "READ_IOPS_TARGET=$READ_IOPS (actual completions validated per case)"
 echo "KEEP_ARTIFACTS=$KEEP_ARTIFACTS"
 
