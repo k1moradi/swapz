@@ -81,7 +81,10 @@ swapz_benchmark_cleanup_resources() {
 
   # Strict dependency ordering: never power off null_blk before removing DM.
   if [[ -d "$NULL_CFG" ]]; then
-    if ! echo 0 >"$NULL_CFG/power"; then
+    if declare -F swapz_benchmark_bounded >/dev/null; then
+      swapz_benchmark_bounded "test-owned null_blk powerdown" 12s \
+          bash -c 'printf "0\n" > "$1"' _ "$NULL_CFG/power" || return 1
+    elif ! echo 0 >"$NULL_CFG/power"; then
       echo "ERROR: could not power off test null_blk $NULL_CFG" >&2
       return 1
     fi
