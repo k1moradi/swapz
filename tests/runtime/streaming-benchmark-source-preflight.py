@@ -27,7 +27,7 @@ PATHS = (
     "tests/runtime/streaming-benchmark-module-preflight.py",
     "tests/runtime/streaming-benchmark-plan.py",
     "tests/runtime/streaming-benchmark-read-latency.py",
-    "tests/runtime/streaming-benchmark-fio-verify.py",
+    "tests/runtime/streaming-benchmark-writer-verify.py",
     "tests/runtime/streaming-benchmark-report.py",
     "tests/runtime/streaming-benchmark-finalize.py",
     "tests/runtime/v22-drain-plateau-analyze.py",
