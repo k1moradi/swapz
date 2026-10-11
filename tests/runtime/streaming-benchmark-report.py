@@ -177,6 +177,10 @@ def report(rows: list[dict[str, object]]) -> str:
         "NOT lower-device drain bandwidth",
         "lower_bytes_per_logical_byte = lower sector delta / timed fio logical "
         "writer bytes; includes possible GC or foreign backend I/O",
+        "effective_io_reduction_x = timed fio logical writer bytes / timed "
+        "lower-device sector bytes, NOT independent compression attribution",
+        "lz4_payload_ratio_x = 4096 times cumulative compressed pages / "
+        "cumulative compressed payload bytes; EXCLUDES metadata/raw pages",
         "compressed/raw pages and mean compressed payload are CUMULATIVE "
         "kernel counters including prefill and GC, not a timed-window ratio",
         "integrity_sentinel = ONE protected 4 KiB compressed page outside writer extent",
@@ -188,14 +192,19 @@ def report(rows: list[dict[str, object]]) -> str:
         for row in sorted(groups[strategy], key=lambda value: value["batch_kib"]):
             lower_bytes = row["lower_write_sectors"] * SECTOR_SIZE
             lower_per_logical = lower_bytes / row["logical_write_bytes"]
+            effective_ratio = (f"{row['logical_write_bytes'] / lower_bytes:.3f}"
+                               if lower_bytes else "unavailable")
             mean_request = (f"{lower_bytes / row['lower_write_ios'] / 1024:.2f}"
                             if row["lower_write_ios"] else "unavailable")
             status = row["status"]
             compressed = _cumulative_counter(status, "compressed_pages")
             raw = _cumulative_counter(status, "raw_pages")
             payload = _cumulative_counter(status, "compressed_payload")
-            if compressed == 0 and payload not in (None, 0):
+            if ((compressed == 0 and payload not in (None, 0)) or
+                    (compressed is not None and compressed > 0 and payload == 0)):
                 raise ValueError("inconsistent cumulative compressed payload counters")
+            lz4_ratio = (f"{compressed * 4096 / payload:.3f}"
+                         if compressed and payload else "unavailable")
             mean_payload = (f"{payload / compressed:.0f}"
                             if compressed and payload is not None else "unavailable")
             compressed_text = str(compressed) if compressed is not None else "unavailable"
@@ -207,6 +216,8 @@ def report(rows: list[dict[str, object]]) -> str:
                 f"lower_counter_window={row['lower_counter_window_mib_s']:.3f}MiB/s "
                 f"lower_wios={row['lower_write_ios']} "
                 f"lower_bytes_per_logical_byte={lower_per_logical:.3f} "
+                f"effective_io_reduction_x={effective_ratio} "
+                f"lz4_payload_ratio_x_cumulative={lz4_ratio} "
                 f"mean_lower_request_kib={mean_request} "
                 f"compressed_pages_cumulative={compressed_text} "
                 f"raw_pages_cumulative={raw_text} "
