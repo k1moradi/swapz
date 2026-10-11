@@ -6,9 +6,8 @@ from allocator import BLOCK_BYTES, CorruptExtentError, ExtentAllocator
 
 
 def finished(allocator):
-    extents = allocator.flush()
-    extents = list(allocator.in_flight.values()) if not extents else extents
-    for extent in extents:
+    allocator.flush()
+    for extent in list(allocator.in_flight.values()):
         allocator.complete(extent.identifier)
 
 
@@ -206,6 +205,8 @@ class AllocatorTests(unittest.TestCase):
             ExtentAllocator(block_count=3)
         with self.assertRaises(ValueError):
             ExtentAllocator(max_physical_bytes=4097)
+        with self.assertRaises(ValueError):
+            ExtentAllocator(max_staged_records=1.5)
         allocator = ExtentAllocator()
         with self.assertRaises(ValueError):
             allocator.write(-1, b'a')
