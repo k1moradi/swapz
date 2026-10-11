@@ -92,7 +92,7 @@ def proposal(env: Mapping[str, str]) -> tuple[str, dict[str, object]]:
     # Exact cases, not merely a broad batch-size ceiling: changing the
     # strategy subset, order or size changes the required approval statement.
     statement = (
-        "I AUTHORIZE swapz V2.2 diagnostic benchmark only on "
+        "swapz V2.2 diagnostic benchmark scope on "
         f"{identity} with source {source}, selected module SHA-256 {module} " 
         f"at protected module path {path}; "
         f"cases in order [{cases}]; backend=null_blk "
@@ -107,7 +107,7 @@ def proposal(env: Mapping[str, str]) -> tuple[str, dict[str, object]]:
         "fio and dd direct 4KiB read/write/verification I/O only within "
         "each owned 32MiB logical target, explicit fsync, DM status "
         "queries, and owned temporary artifact creation/removal; "
-        "not authorized are physical storage, SD-card swap partition I/O, "
+        "excluded operations are physical storage, SD-card swap partition I/O, "
         "swapoff or swapon, NBD, swap activation, "
         "loading/unloading dm_swapz, forced removal, host reboot, "
         "or destructive external cleanup."
