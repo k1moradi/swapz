@@ -336,6 +336,12 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertEqual(sum(x[0] == "read-4k" for x in ops.actions), 2)
         self.assertEqual(sum(x[0] == "losetup-create" for x in ops.actions), 1)
         self.assertEqual(sum(x[0] == "rmmod" for x in ops.actions), 1)
+        unsafe = FakeOps(timeout_at="write")
+        with self.assertRaises(SMOKE.QuarantineRequired):
+            SMOKE.SmokeRunner(config, unsafe).run()
+        self.assertTrue(unsafe.quarantine["owned"]["host_mode"])
+        self.assertNotIn("rmmod", [x[0] for x in unsafe.actions])
+        self.assertNotIn("losetup-detach", [x[0] for x in unsafe.actions])
 
     def test_user_owned_checkout_is_refused_for_privileged_live_execution(self):
         # CI/worktree paths are intentionally not trusted as root execution
