@@ -33,7 +33,7 @@ class QuarantineRegression(unittest.TestCase):
             "TARGET='swapz-owned-test'\n"
             "BACKING='/dev/test-owned-nullb'\n"
             "NULL_CFG='/sys/kernel/config/nullb/owned-test'\n"
-            "TARGET_ACTIVE=1\nTARGET_CANDIDATE=0\nIO_STARTED=1\n"
+            "TARGET_ACTIVE=1\nTARGET_CANDIDATE=0\nNULL_CFG_CANDIDATE=0\nIO_STARTED=1\n"
             "BENCH_QUARANTINE=0\nBENCH_QUARANTINE_REASON=''\n"
         )
 
