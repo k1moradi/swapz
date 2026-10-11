@@ -1,5 +1,39 @@
 # V2.2 loaded-kernel smoke harness
 
+## Live smoke status parser fix and existing host quarantine
+
+The first real-PC loaded-kernel attempt reached the Staged write but failed
+because the old parser rejected the kernel's valid `strategy=staged` text.
+The source of that failure was the smoke harness, **not proven scheduler
+correctness or a scheduler failure**. The test PC still had a source-reported
+quarantined loop, `dm-delay`, `swapz` mapping and loaded module. **Do not
+launch another smoke or benchmark until Codex independently verifies that
+this original quarantined stack is safely recovered or the user performs
+an independently approved reboot and preflight.** This source-only patch
+does not inspect, detach or clean up those existing live resources.
+
+The corrected parser accepts the kernel's actual `STATUSTYPE_INFO` layout:
+`strategy=staged`, `batch_kib=64`, signed `inflight_id=-1/0/1`,
+`segment=current/total`, `lower_discard=on/off`, and unsigned counters.
+The loop backing determines whether lower DISCARD is advertised; this
+one-page RAM-backed correctness smoke does not configure that policy.
+Unknown malformed or duplicate fields, wrong Staged/batch configuration,
+failed target status, or missing required counters still quarantine.
+
+The kernel can emit the exact informational warning
+`dm_swapz: loading out-of-tree module taints kernel.` while loading the
+harness-owned module. Only this exact message at the immediate owned-load
+check is classified as an expected taint and printed as
+`EXPECTED_OWNED_MODULE_TAINT`; every other warning, even in the same
+batch, fails closed. No global warning-severity suppression is used.
+
+**Important:** the checked-in wrapper is mode `0644`, so invoke it as
+`sudo bash /root/<protected-checkout>/tests/runtime/virtual-smoke.sh ...`
+with a newly authorized **exact** source SHA. Do not assume the older PR
+#19 authorization text applies after the source revision changes. If the
+kernel C blob is unchanged and the selected module's provenance is verified,
+the module bytes may not require a rebuild; recheck the actual hash and
+vermagic before proposing the new authorization.
 ## Alternative: the real development PC (no VM)
 
 The V2.2 smoke may now run on an **explicitly authorized bare-metal
@@ -260,7 +294,7 @@ SOURCE_SHA='<approved exact commit SHA in SOURCE_ROOT>'
 MODULE=/root/swapz-smoke/dm-swapz.ko
 MODULE_SHA256='<approved recorded SHA-256>'
 AUTH="I AUTHORIZE swapz V2.2 smoke only on disposable VM $VM_ID with source $SOURCE_SHA and module SHA-256 $MODULE_SHA256; permitted operations are one /dev/shm-backed loop device, one dm-delay target, one swapz target, one aligned 4 KiB write, two separate aligned 4 KiB reads (one while the lower write is outstanding and one after ordinary suspend/resume drain), ordinary suspend and resume, ordinary removal of resources positively created by this run, and insmod/rmmod of only the selected dm-swapz module; no swap activation, mount, physical storage, forced removal, or host reboot."
-sudo "$SOURCE_ROOT/tests/runtime/virtual-smoke.sh" \
+sudo bash "$SOURCE_ROOT/tests/runtime/virtual-smoke.sh" \
   --run-live \
   --vm-id "$VM_ID" \
   --source-sha "$SOURCE_SHA" \
