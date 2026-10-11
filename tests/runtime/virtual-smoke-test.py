@@ -263,12 +263,9 @@ def good_config(**overrides):
         source_sha="a" * 40,
         module_path=Path("/root/dm-swapz.ko"),
         module_sha256="b" * 64,
-        authorization="",
         live=True,
     )
     values.update(overrides)
-    values["authorization"] = SMOKE.authorization_statement(
-        values["vm_id"], values["source_sha"], values["module_sha256"])
     return SMOKE.Config(**values)
 
 
@@ -281,24 +278,24 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertEqual(ops.preflight_calls, 0)
         self.assertEqual(ops.actions, [])
 
-    def test_authorization_is_bound_to_disposable_vm_source_and_module(self):
+    def test_approval_phrase_not_needed_but_vm_and_module_identity_required(self):
         config = good_config(vm_id="workstation")
         with self.assertRaisesRegex(SMOKE.SmokeFailure, "disposable-"):
             SMOKE.validate_cli_config(config)
         config = good_config()
-        with self.assertRaisesRegex(SMOKE.SmokeFailure, "does not exactly bind"):
+        SMOKE.validate_cli_config(config)
+        self.assertFalse(hasattr(config, "authorization"))
+        for value, error in (("invalid", "--source-sha"),
+                             ("a" * 39, "--source-sha")):
+            with self.subTest(source=value):
+                with self.assertRaisesRegex(SMOKE.SmokeFailure, error):
+                    SMOKE.validate_cli_config(SMOKE.Config(
+                        **{**vars(config), "source_sha": value}))
+        with self.assertRaisesRegex(SMOKE.SmokeFailure, "--module-sha256"):
             SMOKE.validate_cli_config(SMOKE.Config(
-                config.vm_id, config.source_sha, config.module_path,
-                config.module_sha256, "I authorize it", True))
-        old_statement = config.authorization.replace(
-            "one aligned 4 KiB write, two separate aligned 4 KiB reads "
-            "(one while the lower write is outstanding and one after "
-            "ordinary suspend/resume drain)",
-            "one aligned 4 KiB write/read")
-        with self.assertRaisesRegex(SMOKE.SmokeFailure, "does not exactly bind"):
-            SMOKE.validate_cli_config(SMOKE.Config(
-                config.vm_id, config.source_sha, config.module_path,
-                config.module_sha256, old_statement, True))
+                **{**vars(config), "module_sha256": "bad"}))
+        # Legacy pasted phrases no longer have a CLI entry point.
+        self.assertNotIn("--authorization", SMOKE.build_parser().format_help())
 
     def test_baremetal_scope_is_separate_and_pins_exact_host_identity(self):
         mid_sha = hashlib.sha256(b"0123456789abcdef0123456789abcdef").hexdigest()
@@ -306,21 +303,8 @@ class VirtualSmokeContracts(unittest.TestCase):
             vm_id="", host_id="devpc-Inspiron1564Linux",
             host_machine_id_sha256=mid_sha,
             source_sha="a"*40, module_path=Path("/root/dm-swapz.ko"),
-            module_sha256="b"*64, live=True,
-            authorization=SMOKE.authorization_statement(
-                "", "a"*40, "b"*64,
-                host_id="devpc-Inspiron1564Linux",
-                host_machine_id_sha256=mid_sha))
+            module_sha256="b"*64, live=True)
         SMOKE.validate_cli_config(host)
-        self.assertIn("bare-metal development PC", host.authorization)
-        self.assertIn("NOT authorized are swapoff or swapon", host.authorization)
-        self.assertIn("SD-card or other raw", host.authorization)
-        self.assertNotIn("disposable VM", host.authorization)
-        with self.assertRaisesRegex(SMOKE.SmokeFailure, "does not exactly bind"):
-            SMOKE.validate_cli_config(SMOKE.Config(
-                **{**vars(host), "authorization":
-                   SMOKE.authorization_statement(
-                       "disposable-test-vm", host.source_sha, host.module_sha256)}))
         with self.assertRaisesRegex(SMOKE.SmokeFailure, "machine-id SHA-256"):
             SMOKE.validate_cli_config(SMOKE.Config(
                 **{**vars(host), "host_machine_id_sha256": "bad"}))
@@ -360,10 +344,7 @@ class VirtualSmokeContracts(unittest.TestCase):
         config = SMOKE.Config(
             vm_id="", host_id="devpc-test", host_machine_id_sha256=digest,
             source_sha="a"*40, module_path=Path("/root/dm-swapz.ko"),
-            module_sha256="b"*64, live=True,
-            authorization=SMOKE.authorization_statement(
-                "", "a"*40, "b"*64, host_id="devpc-test",
-                host_machine_id_sha256=digest))
+            module_sha256="b"*64, live=True)
         ops = FakeOps()
         SMOKE.SmokeRunner(config, ops).run()
         self.assertEqual(sum(x[0] == "write-4k" for x in ops.actions), 1)
@@ -780,7 +761,7 @@ class VirtualSmokeContracts(unittest.TestCase):
     def test_operator_handoff_names_privileged_prerequisites_and_capacity(self):
         handoff = (ROOT / "docs/virtual-smoke.md").read_text(encoding="utf-8")
         self.assertIn("modprobe dm-delay", handoff)
-        self.assertIn("separate authorized operation", handoff)
+        self.assertIn("No approval phrase", handoff)
         self.assertIn("65,536 sectors", handoff)
         self.assertIn("32 complete 1 MiB segments", handoff)
         self.assertIn("the larger of 25% of the one-page logical size or two segments", handoff)
@@ -793,9 +774,8 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertIn("two separate aligned 4 KiB reads", handoff)
         self.assertIn("while the lower write is outstanding", handoff)
         self.assertIn("after ordinary suspend/resume drain", handoff)
-        expected_auth_line = 'AUTH="' + SMOKE.authorization_statement(
-            "$VM_ID", "$SOURCE_SHA", "$MODULE_SHA256") + '"'
-        self.assertIn(expected_auth_line, handoff)
+        self.assertNotIn('--authorization "$AUTH"', handoff)
+        self.assertNotIn('AUTH="I AUTHORIZE', handoff)
 
 
 if __name__ == "__main__":
