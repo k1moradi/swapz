@@ -113,3 +113,118 @@ def _can_fit(records: list[Record], record: Record, blocks: int) -> bool:
 
 
 def _pack_fixed(records: list[Record], blocks: int, *, best_fit: bool) -> list[tuple[int, list[Record]]]:
+    """Reorder only already-present records, never future window arrivals."""
+    packed: list[tuple[int, list[Record]]] = []
+    groups: list[list[Record]] = []
+    ordered = sorted(records, key=lambda item: (-len(item.payload), item.slot)) if best_fit else records
+    for record in ordered:
+        if record.raw:
+            packed.append((1, [record]))
+            continue
+        if best_fit:
+            fits = [group for group in groups if _can_fit(group, record, blocks)]
+            if fits:
+                selected = max(fits, key=lambda group: sum(len(item.payload) for item in group)
+                               + DESCRIPTOR.size * len(group))
+                selected.append(record)
+                continue
+            groups.append([record])
+        else:
+            if not groups or not _can_fit(groups[-1], record, blocks):
+                groups.append([record])
+            else:
+                groups[-1].append(record)
+    packed.extend((blocks, group) for group in groups)
+    return packed
+
+
+def choose_pack(records: list[Record], policy: str, *, read_penalty_bytes: int = 0):
+    """Select an extent class at the same bounded flush point for all policies.
+
+    Adaptive minimizes full physical write bytes; ties prefer less spanning,
+    then fewer 4K blocks. Read penalty is explicitly tunable rather than
+    assuming a measured latency multiplier.
+    """
+    if policy not in POLICIES or read_penalty_bytes < 0:
+        raise ValueError('unknown packing policy or negative read penalty')
+    if not records:
+        return []
+    if policy == 'ordered4':
+        return _pack_fixed(records, 1, best_fit=False)
+    if policy == 'bestfit4':
+        return _pack_fixed(records, 1, best_fit=True)
+    fixed = {'fixed8': 2, 'fixed16': 4, 'fixed64': 16}
+    candidates = (fixed[policy],) if policy in fixed else (1, 2, 4)
+    scored = []
+    for blocks in candidates:
+        packed = _pack_fixed(records, blocks, best_fit=True)
+        physical_bytes = sum(extent_blocks * BLOCK_BYTES for extent_blocks, _ in packed)
+        extra_reads = 0
+        for extent_blocks, group in packed:
+            if group[0].raw:
+                continue
+            offset = HEADER.size + len(group) * DESCRIPTOR.size
+            for item in group:
+                extra_reads += (offset + len(item.payload) - 1) // BLOCK_BYTES - offset // BLOCK_BYTES
+                offset += len(item.payload)
+        scored.append((physical_bytes + extra_reads * read_penalty_bytes,
+                       physical_bytes, extra_reads, blocks, packed))
+    return min(scored, key=lambda value: value[:4])[-1]
+
+
+class Replay:
+    """A finite 1 MiB-segment media model with in-place overwrite *prohibited*.
+
+    This is a single-threaded, committed-mapping simulator, not an asynchronous
+    BIO or durable failure-recovery implementation. GC never recursively calls GC.
+    """
+    def __init__(self, policy: str, *, segment_count: int = 8, reserve_segments: int = 1,
+                 window: int = 16, read_penalty_bytes: int = 0):
+        if policy not in POLICIES or segment_count < 3 or not 0 < reserve_segments < segment_count - 1:
+            raise ValueError('invalid policy or physical reserve')
+        if not 0 < window <= 256 or read_penalty_bytes < 0:
+            raise ValueError('invalid bounded window')
+        self.policy, self.window, self.read_penalty_bytes = policy, window, read_penalty_bytes
+        self.segments = [Segment(index) for index in range(segment_count)]
+        self.reserve_segments = reserve_segments
+        self.current_segment: int | None = None
+        self.media: dict[int, Extent] = {}
+        self.mappings: dict[int, Mapping] = {}
+        self.latest_generation: dict[int, int] = {}
+        self.staged: list[Record] = []
+        self.next_extent_id = 1
+        self.foreground_write_bytes = 0
+        self.gc_write_bytes = 0
+        self.foreground_submitted_bytes = 0
+        self.gc_submitted_bytes = 0
+        self.gc_read_blocks = 0
+        self.completed_logical_bytes = 0
+        self.failed_logical_writes = 0
+        self.failed_gc_runs = 0
+        self.gc_victims = 0
+        self.upper_read_blocks = 0
+        self.upper_reads = 0
+        self.forced_flushes = 0
+
+    def _free_segments(self) -> int:
+        return sum(segment.state == 'free' for segment in self.segments)
+
+    def _open_new_segment(self, *, gc: bool, excluded_segment: int | None = None) -> bool:
+        free = next((segment for segment in self.segments
+                     if segment.state == 'free' and segment.identifier != excluded_segment), None)
+        if free is None or (not gc and self._free_segments() <= self.reserve_segments):
+            return False
+        if self.current_segment is not None:
+            current = self.segments[self.current_segment]
+            if current.state == 'open':
+                current.state = 'closed'
+        free.state = 'open'
+        free.used_blocks = 0
+        self.current_segment = free.identifier
+        return True
+
+    def _allocate(self, block_count: int, *, gc: bool = False,
+                  excluded_segment: int | None = None) -> tuple[int, int] | None:
+        assert block_count in EXTENT_CLASSES
+        if self.current_segment is not None:
+            current = self.segments[self.current_segment]
