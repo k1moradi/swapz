@@ -46,6 +46,11 @@ jobs:
         run: |
           set -euo pipefail
           timeout 20s python3 -B tests/runtime/v22-fast-compare-test.py -v
+      - name: Protected benchmark source and exact owned DM identity regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 20s python3 -B tests/runtime/streaming-benchmark-source-preflight-test.py -v
       - name: Rootless bounded benchmark quarantine contracts
         shell: bash
         run: |
