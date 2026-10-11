@@ -19,8 +19,9 @@ swapz_benchmark_remove_target() {
       echo "ERROR: target UUID not verified; refusing to remove any DM mapping." >&2
       return 1
     }
-    # Resolve by UUID as well as validating it: if a name is replaced in
-    # the narrow interval after our check, never remove the replacement.
+    # Explicitly select the UUID namespace, not a positional device name:
+    # dmsetup may interpret a bare UUID operand as a name. Never fall back
+    # to TARGET if identity resolution fails after the ownership check.
     removal_identity="$TARGET_UUID"
   fi
 
@@ -32,7 +33,7 @@ swapz_benchmark_remove_target() {
   # dmsetup when sourced independently. Never force/defer removal.
   if declare -F swapz_benchmark_bounded >/dev/null; then
     if ! swapz_benchmark_bounded "owned DM normal removal" 20s \
-        dmsetup remove --retry "$removal_identity"; then
+        dmsetup remove --retry --uuid "$removal_identity"; then
       echo "ERROR: DM target removal uncertain; leave backing powered." >&2
       return 1
     fi
