@@ -41,6 +41,7 @@ STATUS_TIMEOUT_MS = 1000
 SUSPEND_TIMEOUT_MS = 12000
 COMMAND_GRACE_MS = 500
 LOG_READ_TIMEOUT_MS = 250
+MAX_RAW_STATUS_CHARS = 16384
 POLL_INTERVAL_S = 0.025
 RUN_DIR_ROOT = Path("/dev/shm")
 REQUIRED_STATUS = (
@@ -306,6 +307,12 @@ class SystemOperations:
         self._kmsg_fd: int | None = None
         self._watchdog_ms: int | None = None
         self._validated_module: Path | None = None
+        # Last successful dmsetup command output, plus the *first* rejected
+        # status. A subsequent quarantine retry must not overwrite the raw
+        # record responsible for the original parser failure.
+        self._last_raw_dm_status: str | None = None
+        self._first_rejected_dm_status_raw: str | None = None
+        self._raw_status_truncated = False
 
     @staticmethod
     def _decode(file_obj: Any) -> str:
@@ -722,7 +729,16 @@ class SystemOperations:
         return rows[0]
 
     def dm_status(self, name: str) -> dict[str, int]:
-        return parse_status(self._checked(["dmsetup", "status", name], STATUS_TIMEOUT_MS))
+        raw = self._checked(["dmsetup", "status", name], STATUS_TIMEOUT_MS)
+        limited = raw[:MAX_RAW_STATUS_CHARS]
+        self._last_raw_dm_status = limited
+        self._raw_status_truncated |= len(raw) > MAX_RAW_STATUS_CHARS
+        try:
+            return parse_status(raw)
+        except QuarantineRequired:
+            if self._first_rejected_dm_status_raw is None:
+                self._first_rejected_dm_status_raw = limited
+            raise
 
     def dm_is_suspended(self, name: str) -> bool:
         try:
@@ -868,6 +884,12 @@ class SystemOperations:
                 for key, value in vars(owned).items()
             },
             "last_status": latest_status,
+            # Source-reported diagnostic only. This preserves the original
+            # offending kernel text even if the later quarantine status
+            # retry fails again (or parses a different result).
+            "first_rejected_dm_status_raw": self._first_rejected_dm_status_raw,
+            "last_raw_dm_status": self._last_raw_dm_status,
+            "raw_dm_status_truncated": self._raw_status_truncated,
             "new_kernel_warning_messages": messages,
             "instruction": "Preserve current kernel/device/module state; do not force-remove or reboot.",
         }
