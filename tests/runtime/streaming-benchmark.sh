@@ -362,8 +362,16 @@ run_case() {
   read_log_prefix="$TMP/${strategy}-${batch}-reader"
 
   # Never reuse the target name if a prior case failed to remove it.
-  if (( TARGET_ACTIVE )) || dmsetup info "$TARGET" >/dev/null 2>&1; then
+  local occupied=0
+  swapz_benchmark_target_exists || occupied=$?
+  if (( occupied == 2 )); then
+    echo "ERROR: previous target ownership could not be verified; stopping safely." >&2
+    return 1
+  fi
+  if (( TARGET_ACTIVE || occupied == 0 )); then
     echo "ERROR: previous benchmark DM target still exists; refusing to start another case." >&2
+    BENCH_QUARANTINE=1
+    BENCH_QUARANTINE_REASON="unexpected DM target name collision or earlier target still active"
     return 1
   fi
   TARGET_CANDIDATE=1
