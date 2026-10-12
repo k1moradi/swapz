@@ -2,23 +2,28 @@
 
 ## Mission and decisive success test
 
-> **The ultimate success criterion is fewer ACTUAL lower-device 4 KiB-equivalent
-> I/O transfers on the SD card, SSD or HDD under a verified workload — not a
-> larger modeled compression ratio, a better synthetic packing density, or
-> more green CI checks.**
+> **The ultimate success criterion is lower measured host-visible storage
+> I/O cost — READ and WRITE BYTES plus REQUEST COUNTS separately, including
+> GC — under an identical verified workload on the actual SD card, SSD or
+> HDD, while keeping correctness, CPU and swap-in latency acceptable.
+> The existing 4KiB layout is an implementation choice, NOT a universal
+> device physical-sector or operation size.**
 
-Read the complete normative [swapz vision and evidence standard](VISION.md).
-This governs feature priority, comparative benchmarks, PR review and V3
-release decisions.
+Read the normative [VISION.md](VISION.md), device-size/sector/partition/
+swap-file distinctions in [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and the
+measured algorithm-vs-implementation diagnosis in
+[PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Together they govern
+feature priority, design, performance evidence and release decisions.
 
 - **Correctness first:** full 4 KiB logical data readback, safe upper/lower
   completion and flush ordering, mapping generations, GC, reserve ownership
   and teardown are mandatory prerequisites, not performance indicators.
-- **Primary physical evidence:** report independently measured lower-device
-  **write and read sector deltas**, converted to aligned 4 KiB-equivalent
-  units, PLUS **read and write request counts**, with **GC traffic included**.
-  One 16 KiB lower command consumes four 4 KiB-equivalent transfer units
-  although it is one command; never conflate the two measures.
+- **Primary lower-I/O evidence:** report owned-device read and write
+  **bytes** (Linux `stat` **512-byte** sector counts multiplied by 512)
+  and independent read/write **request counts**, including GC, flushes
+  and error attempts. Optional 4KiB-equivalent units are normalization
+  only. One 16KiB command transfers 16KiB (four normalized units)
+  in ONE request, not four physical operations.
 - **Observable performance:** compare achieved useful swap-in/out IOPS,
   cold-read p95/p99, worker stalls, CPU and RAM costs under matched actual
   workloads. Extra read blocks, GC rewrites or latency may erase write savings.
@@ -32,17 +37,22 @@ release decisions.
   matched workloads, and swap-in latency/CPU/GC do not regress
   unacceptably. Preserve V2.2 as control and publish counterexamples.
 
-**Measurement caveat:** 4 KiB is swapz's aligned host-level accounting unit;
-it is not a promise about internal flash NAND program/erase granularity,
-every HDD's physical sector size, or actual flash endurance.
+**Measurement caveat:** V3's aligned 4KiB lower *allocation* unit and
+supported 4KiB `PAGE_SIZE` are not universal physical-sector sizes.
+512n/512e/4Kn, physical alignment, reported minimum/optimal transfer
+sizes, filesystem cluster sizes and device-internal programming can differ.
+Profile and qualify per device class; do not infer NAND endurance from
+host-visible sectors.
 
 ## Product direction
 
-**Minimize completed lower 4 KiB block writes and reads on slow SD/eMMC,
-SATA SSD, HDD and USB storage while preserving byte-exact swap semantics.**
-The physical unit for accounting is always 4 KiB; a single kernel BIO may
-cover multiple adjacent physical 4 KiB blocks, and actual device transfer /
-read-amplification is measured rather than assumed.
+**Minimize actually observed lower-device read/write cost on slow
+SD/eMMC, SATA SSD, HDD and USB storage while preserving byte-exact
+swap semantics.** V3.0-alpha currently allocates aligned 4KiB lower
+*format units* and submits contiguous 4/8/16KiB extents. Measure
+host-visible **BYTES and REQUEST COUNTS** separately; normalize to
+4KiB-equivalent bytes for comparison but never label that normalization
+the number of physical operations or internal disk sectors.
 
 V3 is inspired by zsmalloc's **object-size classification and compaction**,
 not by copying its in-memory page allocator. It is a volatile Device Mapper
@@ -53,7 +63,9 @@ The necessary pipeline is:
 1. Compress 4 KiB logical pages immediately.
 2. Reorder **only already accepted, safe-to-reorder, different-slot** records
    inside a bounded 64-record window to pair complementary sizes.
-3. Prefer tightly packed **physical 4 KiB blocks** when records fit.
+3. Prefer tightly packed **aligned 4KiB V3 container units** when
+   records fit; do NOT presume this is optimal for every 512n, 512e,
+   4Kn or larger-preferred-I/O lower device.
 4. Use versioned, aligned **8 or 16 KiB extents** for cases such as
    2,072-byte LZ4 objects where two cannot fit inside a single 4 KiB block.
    Physical blocks can contain parts of different compressed records.
@@ -68,11 +80,24 @@ The necessary pipeline is:
    and byte-exact reads, and account lower **completed bytes and requests**.
 9. Benchmark meaningful workloads on verified disposable devices: uniform
    2,072B, 1,048B, clustered 2,200/1,600B, alternating, mixed and hot/cold;
-   report lower writes+reads+GC, achieved IOPS, CPU, drain and p95/p99.
+   report **read/write bytes+requests** and GC separately, device sector
+   geometry, actual achieved IOPS, CPU, drain and p95/p99.
+10. Diagnose and improve **actual write-window occupancy** (including the
+    observed singleton-window/low-queue-depth bottleneck). Evaluate
+    bounded, safe size-class staging across producer turns and concurrent
+    lower-I/O overlap before adding complexity to the bin-packing sorter.
+    Keep all mapping-generation and flush/FUA/discard barriers explicit.
+11. Compare full GC cost by **live bytes and relocation read/write cost**,
+    not only live record counts; qualify steady-state hot/cold workloads.
+    Do not infer SSD/SD wear reduction from host sectors alone.
 
 The optimization is a **write/read/CPU/GC Pareto frontier**, not compression
-ratio or physical writes alone. A device whose minimum read is one physical
-4 KiB block is never claimed to perform a sub-4KiB read.
+ratio or write bytes alone. A 512n drive can address 512-byte sectors,
+512e may incur hidden 4KiB RMW penalties, and 4Kn normally requires
+4KiB-aligned I/O. Device-reported preferred I/O size and real latency
+are measurements, not substitutes for actual completed lower requests.
+The current V3 codec reads aligned 4KiB units even where the device
+could potentially address smaller sectors.
 
 ## Version decision
 
@@ -139,8 +164,8 @@ source, `.ko`, active mapper and lower-device identity are reconciled.
 
 V3 becomes a user-facing release only when it handles real compressed and
 raw swap pages with long-lived GC, passes exact readback under real device
-fault/pressure conditions and **materially improves the independently
-reconciled lower 4 KiB-equivalent read/write I/O frontier including GC** under
-matched achieved load and flush/drain rules, without unacceptable swap-in
-p99, CPU or memory regressions. The detailed go/no-go and inconclusive
+fault/pressure conditions and **materially improves measured lower-device
+read/write bytes AND request-count/latency tradeoffs including GC**, under
+matched achieved load, sector geometry and flush/drain rules, without
+unacceptable swap-in p99, CPU or memory regressions. The detailed go/no-go and inconclusive
 criteria are mandatory in [VISION.md](VISION.md).
