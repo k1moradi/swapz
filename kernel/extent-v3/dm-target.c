@@ -31,7 +31,8 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.1"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.2"
+#define SV3_WORK_QUANTUM_BIOS 64U
 
 struct sv3_bio_ref {
 	struct list_head list;
@@ -1127,7 +1128,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 	(void)flags;
 	switch (type) {
 	case STATUSTYPE_INFO:
-		DMEMIT("version=%s mode=alpha-no-gc logical_write=%llu logical_read=%llu "
+		DMEMIT("version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu discarded=%llu "
@@ -1186,5 +1187,5 @@ module_init(sv3_dm_init);
 module_exit(sv3_dm_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("swapz main developer");
-MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; GC disabled");
+MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC");
 MODULE_ALIAS("dm-swapz3");
