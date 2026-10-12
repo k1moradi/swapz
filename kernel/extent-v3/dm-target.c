@@ -20,6 +20,7 @@
 #include <linux/lz4.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/sched.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 #include <linux/spinlock.h>
@@ -102,6 +103,14 @@ struct sv3_dm {
 	u64 physical_write_reqs;
 	u64 physical_read_bytes;
 	u64 physical_read_reqs;
+	/* Submitted I/O, including failed/torn lower requests. These counters
+	 * are NOT completed or proven-media bytes; never mix the two. */
+	u64 lower_write_submitted_bytes;
+	u64 lower_write_submitted_reqs;
+	u64 lower_read_submitted_bytes;
+	u64 lower_read_submitted_reqs;
+	u64 worker_requeues;
+	u64 one_page_windows;
 	u64 compressed_pages;
 	u64 raw_pages;
 	u64 discard_pages;
@@ -157,6 +166,15 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	region.bdev = ctx->backing->bdev;
 	region.sector = (sector_t)block * SV3_SECTORS;
 	region.count = (sector_t)blocks * SV3_SECTORS;
+	if (op == REQ_OP_READ) {
+		ctx->lower_read_submitted_bytes +=
+			(u64)blocks * SV3_BLOCK_BYTES;
+		ctx->lower_read_submitted_reqs++;
+	} else {
+		ctx->lower_write_submitted_bytes +=
+			(u64)blocks * SV3_BLOCK_BYTES;
+		ctx->lower_write_submitted_reqs++;
+	}
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
 	if (error || bitmap)
 		return error ? error : -EIO;
@@ -564,6 +582,8 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		}
 	}
 	ctx->windows++;
+	if (count == 1)
+		ctx->one_page_windows++;
 	ctx->batch_count = 0;
 	if (error || committed != count) {
 		sv3_fail(ctx, error ? error : -EIO);
@@ -854,8 +874,10 @@ static void sv3_worker(struct work_struct *work)
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
-		if (!list_empty(&ctx->incoming))
+		if (!list_empty(&ctx->incoming)) {
+			ctx->worker_requeues++;
 			queue_work(ctx->workqueue, &ctx->worker);
+		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
 }
@@ -1149,7 +1171,11 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
-		       "dead_segment_reuses=%u write_verify_blocks=%u failed=%u error=%d",
+		       "dead_segment_reuses=%u write_verify_blocks=%u "
+		       "write_submitted=%llu write_submitted_reqs=%llu "
+		       "read_submitted=%llu read_submitted_reqs=%llu "
+		       "worker_requeues=%llu one_page_windows=%llu "
+		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
@@ -1161,6 +1187,11 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
+		       ctx->lower_write_submitted_bytes,
+		       ctx->lower_write_submitted_reqs,
+		       ctx->lower_read_submitted_bytes,
+		       ctx->lower_read_submitted_reqs,
+		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
