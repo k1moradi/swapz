@@ -83,10 +83,21 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->gc_allocation = 0", gc)
 
     def test_map_and_teardown_are_owned(self):
-        self.assertIn("dm_per_bio_data(", body("sv3_map"))
+        admitted = body("sv3_map")
+        drained = body("sv3_drain")
+        self.assertIn("dm_per_bio_data(", admitted)
         self.assertIn("WQ_MEM_RECLAIM", body("sv3_ctr"))
-        self.assertIn("flush_workqueue(ctx->workqueue)", body("sv3_drain"))
+        self.assertIn("flush_workqueue(ctx->workqueue)", drained)
         self.assertIn("destroy_workqueue(ctx->workqueue)", body("sv3_free"))
+        self.assertLess(admitted.index("spin_lock_irqsave(&ctx->queue_lock"),
+                        admitted.index("if (!ctx->accepting)"))
+        self.assertLess(admitted.index("if (!ctx->accepting)"),
+                        admitted.index("list_add_tail(&entry->list"))
+        self.assertLess(admitted.index("queue_work(ctx->workqueue"),
+                        admitted.index("spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\treturn DM_MAPIO_SUBMITTED"))
+        self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
+                        drained.index("flush_workqueue(ctx->workqueue)"))
+        self.assertIn("spin_lock_irqsave(&ctx->queue_lock", drained)
 
 
 if __name__ == "__main__":
