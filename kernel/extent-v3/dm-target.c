@@ -466,6 +466,8 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	 * there. Restore the foreground cursor after the victim is drained.
 	 */
 	a->gc_allocation = 1;
+	a->gc_forbidden_open = old_open;
+	a->gc_forbidden_victim = victim;
 	a->open_segment = ~(sv3_u32)0;
 	a->next_segment_probe =
 		(ctx->physical_blocks - a->reserve_blocks) /
@@ -546,6 +548,8 @@ out:
 	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
 	ctx->gc_count = 0;
 	a->gc_allocation = 0;
+	a->gc_forbidden_open = ~(sv3_u32)0;
+	a->gc_forbidden_victim = ~(sv3_u32)0;
 	a->next_block = old_next;
 	a->open_segment = old_open;
 	a->next_segment_probe = error ? old_probe : victim;
