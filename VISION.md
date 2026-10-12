@@ -51,15 +51,17 @@ of LZ4-compressed objects, adapted to block storage:
    ordering barriers.
 3. Fit complementary sizes into as few aligned 4 KiB backing blocks as
    possible. If two payloads are 2,200 B and 1,600 B, a V3 two-record
-   header+descriptor overhead of 48 B yields **3,848 B**: one 4 KiB block
+   header+descriptor overhead of 48 B yields **3,848 B**: one aligned 4 KiB V3 container unit
    rather than two. The extra space is useful only when it changes lower
    transfer size/count, not merely an in-memory packing statistic.
 4. Where 4 KiB containers cannot pack efficiently, permit aligned 8/16 KiB
-   physical extents with individually addressable compressed objects.
-   For example, two 2,072 B objects plus the older 24 B 4 KiB container
-   overhead require **4,168 B** and therefore cannot share a 4 KiB block
-   regardless of reorder policy. A 16 KiB extent can pack seven such objects
-   across four 4 KiB backing blocks, rather than seven standalone blocks.
+   V3 extents with individually addressable compressed objects.
+   For example, two 2,072B objects with V3's 16B header and two 16B
+   descriptors require **4,192B**, so they cannot share a 4KiB V3 unit
+   regardless of reorder policy. A 16KiB V3 extent can pack seven such
+   objects into four aligned 4KiB allocation units instead of seven.
+   The older V2.x 24B header/descriptor model was also over-full at
+   4,168B; these figures refer to *format layout*, not device sectors.
 5. During overwrites and discards, treat stale records as reclaimable but
    relocate **only still-live objects**. Repack survivors by size and recycle
    victims only after completed lower I/O, generation-authoritative mapping
@@ -71,10 +73,12 @@ changed.** We may store the same exact LZ4 bytes more densely; that is
 
 ## 3. A write win can be a read loss
 
-Packing multiple objects into one 4 KiB block often helps both capacity
-and I/O. But an object crossing a physical 4 KiB boundary can make a
-**single swap-in** require extra lower reads: a metadata block, and one or
-two payload blocks. Cache hits may change actual transfer counts.
+Packing multiple objects into one aligned V3 4KiB unit can help both
+capacity and I/O. But an object crossing that *V3 container* boundary can
+make a **single swap-in** require extra 4KiB reads through the current
+driver: a metadata unit and one or two payload units. This is NOT the
+backing disk's physical sector size; cache and request scheduling may
+change actual observed transfers.
 
 Thus **“minimize writes at any cost” is not the vision**. The real objective
 is a device- and workload-specific frontier between:
