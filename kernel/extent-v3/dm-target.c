@@ -510,6 +510,11 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		if (!count || !ctx->segment_roles[segment] ||
 		    segment == ctx->authority.open_segment)
 			continue;
+		/* Reject a provably non-reclaimable full victim BEFORE paying
+		 * for up to 1MiB of GC reads/writes. Such an eviction could
+		 * only fill its sole reserve destination and return ENOSPC. */
+		if (!sv3_gc_has_possible_headroom(ctx->gc_scores[segment]))
+			continue;
 		switch (ctx->gc_cost_policy) {
 		case 0:
 			score = count;
