@@ -49,6 +49,28 @@ read, blocks duplicates from being staged together, caps each invocation
 to 64 upper BIOs, and completes only after real lower I/O. Suspends
 accelerate any timer and drain all accepted work.
 
+## Required drain-race review after main-developer correction
+
+The initial alpha.3 code compiled and passed rootless checks but used
+`flush_delayed_work()` and `flush_workqueue()` for suspension while
+the finite-window worker could **requeue itself**. Upstream workqueue
+semantics do not justify treating a single delayed-work flush as a
+complete flush of all later chained instances. The follow-up source
+now closes BIO admission under `queue_lock`, forces the pending timer
+to run, and calls `drain_workqueue()` after the delayed flush.
+When admission is closed, the worker drains all earlier accepted BIOs
+in the same invocation with periodic scheduler yields, instead of
+requeuing an unbounded chain of 64-BIO work items.
+
+**Independent host qualification is mandatory.** Run at least 1,024
+accepted mixed compressed/raw writes (more than 16 worker quanta)
+while concurrently suspending/resuming the owned test DM target.
+Verify every upper BIO completes exactly once, byte-exact readback,
+no delayed callback after teardown, and no `workqueue` / lockdep /
+hung-task warning. Repeat with `coalesce_ms=0,1,2,4`, FUA barriers,
+a pending timer at suspend, and lower I/O faults. Any hang or callback
+ownership uncertainty is a STOP condition; do not force teardown.
+
 ## Functional and concurrency safety before benchmarking
 
 - Byte-exact independently verified compressed/raw roundtrips (including
