@@ -100,15 +100,42 @@ The project remains **draft V3.0.0-alpha.2**, not a production release.
 No SD/HDD/SSD tests or unattended `swapon` should occur before a
 separately reviewed release-gate commit removes the null_blk-only guard.
 
+## Device geometry is not always 4KiB
+
+The current V3 codec allocates aligned 4KiB units and accepts only
+`PAGE_SIZE=4096`; this **does not** mean all actual backing drives
+have 4KiB physical sectors or read/write in 4KiB operations. Before
+any future SD/SSD/HDD admission, record both backing
+`queue/logical_block_size` and `queue/physical_block_size`, along
+with `minimum_io_size`, `optimal_io_size`, partition alignment,
+FUA/cache/discard behavior and device limits. A 512n/512e drive can
+address 512B units; 4Kn generally requires 4KiB alignment; a large
+filesystem allocation cluster is NOT the physical sector size.
+
+The `/sys/block/<device>/stat` sector fields are **always 512-byte
+accounting sectors**: `read_bytes = Δread_sectors * 512`,
+`write_bytes = Δwrite_sectors * 512`, and **4KiB equivalents**
+`= Δsectors / 8`. A 16KiB single lower request equals four *byte
+equivalents* but is NOT four physical I/O operations. Read and write
+request counts must be recorded separately. Host counters do not prove
+flash NAND program/erase counts or physical SD endurance.
+
+See [DEVICE_GEOMETRY.md](../../DEVICE_GEOMETRY.md) and
+[PERFORMANCE_DIAGNOSIS.md](../../PERFORMANCE_DIAGNOSIS.md).
+The current `null_blk`-only target admission remains mandatory.
+
 ## Mandatory physical-I/O success metrics
 
 The benchmark's goal is specified by [the project vision](../../VISION.md):
 **fewer REAL lower-device 4 KiB-equivalent read/write transfers under a
 verified workload**, not a better synthetic compression ratio.
 
-- For *each* V2.2/V3 matched run, record lower sectors and completed lower
-  read/write requests **separately**; report equivalent 4 KiB units as
-  bytes/4096. A 16 KiB request is **four transfer units**, one request.
+- For *each* V2.2/V3 matched run, record lower **512-byte Linux
+  stat-sector deltas**, lower read/write **bytes** and independent request
+  counts **separately**. Report equivalent 4KiB byte units as
+  stat sectors/8, clearly labeled normalization (NOT four separate
+  physical operations). A 16KiB request can be one request, 32
+  stat sectors, four normalized 4KiB units.
 - Include all GC relocation writes **and reads**, foreground I/O, and lower
   cache-flush/discard activity as distinct dimensions. Do not omit the
   IO needed to free a packed segment.

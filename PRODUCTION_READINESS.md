@@ -1,9 +1,14 @@
 # swapz V3 — production readiness ledger
 
 **Status: NOT READY — V3.0.0-alpha.2.** This is an evidence gate, not a
-marketing release label. See [VISION.md](VISION.md): primary success means
-verified **real lower-device** 4 KiB-equivalent read and write savings,
-including every GC read/rewrite and request, with acceptable swap-in p99.
+marketing release label. See [VISION.md](VISION.md),
+[DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
+[PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
+means verified, workload-matched reductions in **host-visible lower
+read/write BYTES and REQUEST COUNTS**, accounting for all GC and
+flush operations and the device's actual logical/physical sector and
+preferred I/O sizes, with acceptable swap-in p99 and CPU. 4KiB
+equivalents are a normalization, not physical operation counts.
 Correctness tests are mandatory but do not establish this outcome.
 
 ## What is already supported by evidence
@@ -20,7 +25,11 @@ Its **limitations** are material: the kernel emitted 19 workqueue CPU-hog
 diagnostics under concurrency; explicit loaded `REQ_FUA` was not observed;
 64-page *ordered4* control was geometry, not a loaded V2.2 comparison;
 and GC churn wrote 1.040x compressed and 1.143x raw logical bytes, both
-**write amplification**, not steady-state savings. The study did not
+**write amplification relative to completed logical bytes**, not
+steady-state savings nor proof of a V2.2 regression. The other 64-page
+loaded test demonstrated real packing, but its ordered4 control was
+only a geometry model; size-class opportunity was limited by
+singleton write windows during churn. The study did not
 measure production p99 on SD/SSD/HDD.
 
 ## Main-developer alpha.2 changes after the host run
@@ -61,6 +70,29 @@ measure production p99 on SD/SSD/HDD.
 **All host alpha.1 module hashes and performance results are HISTORICAL.**
 They do not validate the renamed/rebuilt alpha.2 `dm-swapz.ko`.
 
+## Failure classification — do not confuse readiness and algorithm proof
+
+- **Demonstrated algorithmic benefit:** loaded V3 combined 64 logical
+  pages into 31 normalized 4KiB lower units in 24 requests; the
+  41-unit ordered4 comparison was **modeled**, not loaded V2.2.
+- **Architectural performance weakness:** bounded greedy pairing
+  cannot combine records absent from the same submitted worker
+  window. Single-record windows during churn sharply reduce the
+  gain. Improve and measure staging opportunity and GC live-*byte*
+  cost, not only the sorting function.
+- **Real implementation bugs:** the alpha.1 workqueue CPU-hog report,
+  missing forbidden-GC-segment enforcement, and earlier status/raw
+  integrity defects. Alpha.2 fixes are not yet independently
+  qualified on the loaded physical host.
+- **Missing evidence:** loaded V2.2 apples-to-apples measurements,
+  loaded alpha.2 FUA and hostile GC, repeated concurrency with no
+  kernel scheduling warnings, and a safe **physical-media**
+  benchmark. This is an **unproven release benefit**, not a
+  demonstrated failure of zsmalloc-style size classes.
+
+See [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md) for
+sourced numbers and the concrete engineering response.
+
 ## Required production exit gates (hard)
 
 - [ ] **G1, loaded alpha.2 correctness.** Independent static review followed
@@ -86,21 +118,32 @@ They do not validate the renamed/rebuilt alpha.2 `dm-swapz.ko`.
       exhaustion and failed relocation. Never reuse partly live segments.
       Under faults, no upper success for unpublished data; preserve old
       mapping data and leave teardown ownership safe.
-- [ ] **G5, measured V2.2 control.** Same actual LZ4 page bytes,
-      compressed-size histogram, arrivals, read/write mix and achieved
-      load on independently owned equal `null_blk` configuration, with
-      **mutually exclusive builds** of V2.2 and V3 `dm-swapz.ko`. Report
-      independently measured lower read/write sectors and requests,
-      including GC. Do not use ordered4 modeled geometry as control.
+- [ ] **G5, measured V2.2 control and online packing opportunity.** Same
+      actual LZ4 page bytes, compressed-size histogram, arrivals,
+      read/write mix and achieved load on independently owned equal
+      `null_blk` configuration, with **mutually exclusive builds** of
+      V2.2 and V3 `dm-swapz.ko`. Record write-window occupancy,
+      singleton-window fraction, 4/8/16KiB allocations, empty bytes
+      and GC relocation bytes; compare options for bounded cross-worker
+      size-bin staging under the same flush/FUA and upper BIO ownership.
+      Report lower read/write **512-byte stat sectors** and request
+      counts, including GC; a 4KiB equivalent is stat sectors / 8,
+      **NOT** the number of physical I/O commands. Do not use ordered4
+      modeled geometry as an observed control.
 - [ ] **G6, authorized physical-media qualification.** After G1–G5
       pass and a separate review removes the current **null_blk-only**
       constructor guard, test only a clearly isolated, verified target
       SD/SSD/HDD backing. For the user-authorized `/dev/sdb1`, recheck
       active swap, mounts, holders, available memory and consent scope.
       **Do not touch any active swap** or force a cleanup. **NEVER REBOOT.**
-      Compare physical medium host sectors, requests, CPU, p99 and GC,
-      and device health/telemetry where available. Do not infer NAND
-      endurance from host sectors alone.
+      Before loading, profile backing logical and physical sectors
+      (`512n/512e/4Kn` where applicable), alignment, minimum/optimal
+      I/O, partition start and cache/flush behavior; never presume
+      4096-byte units are the device's native sectors. Compare device
+      **read/write bytes and requests** (plus GC), CPU, p99 and
+      device health/telemetry where available. Use 512-byte sysfs-stat
+      sectors in conversion, irrespective of 4Kn. Do not infer NAND
+      program operations or endurance from host sector totals alone.
 - [ ] **G7, packaging/deployment/recovery.** Independent DKMS packaging
       for the retained `dm-swapz.ko` module name, explicit incompatible
       volatile V3 format, system integration, bounded reclaim pressure,
