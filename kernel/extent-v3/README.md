@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.3 production Device Mapper target (release-hardening branch)
+# Current development: V3.0.0-alpha.4 production Device Mapper target (release-hardening branch)
 
 The active `dm-swapz.ko` (target name `swapz3`) is built from
 `kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and
