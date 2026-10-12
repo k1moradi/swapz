@@ -14,7 +14,7 @@ format, PR #31 metrics, and PR #38 default code are untouched.
    Payloads may cross physical 4 KiB blocks.
 2. **Finite capacity and failure authority:** single ordered-worker authority
    using caller-preallocated mapping/refcount/class arrays. Physically append
-   extents on segment-aligned offsets, maintain 25%+two-segment GC reserve,
+   extents on segment-aligned offsets, maintain a GC reserve of at least 25% of logical blocks and at least two 1MiB segments,
    stage generations, and publish only once **every lower block completes**,
    metadata passes and **every sibling payload CRC** passes. Failures/quarantines
    never change previous authoritative mappings. A failed write burns its
@@ -68,12 +68,14 @@ byte-exact payload checks, generation wrap, stale reads, failed last sibling,
 partial lower write, GC-reserve exhaustion, post-failure quarantine, failed
 second extent, unacknowledged-prefix handling and targeted read-block counts.
 
-**16 × 2072-byte compressed records**: `ordered4` geometry consumes
+**16 synthetic 2072-byte opaque record bodies (compressed-length geometry only)**: `ordered4` geometry consumes
 16 × 4 KiB = **65,536 physical bytes**. The rootless V3 engine's
 finite-window dynamic program consumes **ten** 4 KiB blocks, **40,960 bytes**,
 or **1.600× logical/physical reduction**, by choosing 8/16 KiB extents
 according to the completion/read-cost objective. This is a deterministic
-in-memory C model with a fault-injected lower callback, **not** loaded-kernel
+in-memory C model with a fault-injected lower callback. The synthetic record
+bodies are not necessarily valid LZ4 frames; actual LZ4 compression and
+decompression still need integration. This is **not** loaded-kernel
 latency, NAND program bytes, real LZ4 compression overhead or swap performance.
 
 CI also W=1-compiles the independent codec/authority/engine kernel module
