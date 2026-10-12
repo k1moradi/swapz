@@ -303,7 +303,9 @@ static int test_gc_cannot_spill_into_second_reserve(void)
 		CHECK(write_raw(page) == 0);
 	CHECK(a.next_block == 768 && a.open_segment == 2);
 	CHECK(sv3_stage(&a, &page, 1, 1, &tx) == -ENOSPC);
-	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	/* A full destination now fails on lack of foreground capacity,
+	 * before the remaining-source-mappings validation. Both reject. */
+	CHECK(sv3_gc_commit_rotation(&a, 0) == -ENOSPC);
 	CHECK(roles[0] == 1 && roles[1] == 1);
 	CHECK(roles[2] == 0 && roles[3] == 0);
 	CHECK(maps[0].valid && maps[0].start_block == 255);
