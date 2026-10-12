@@ -848,9 +848,17 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 	INIT_LIST_HEAD(&entry->list);
 	entry->bio = bio;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
+	/*
+	 * Admission and shutdown share queue_lock: presuspend cannot finish
+	 * draining while a previously admitted BIO is added after the drain.
+	 */
+	if (!ctx->accepting) {
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		return DM_MAPIO_KILL;
+	}
 	list_add_tail(&entry->list, &ctx->incoming);
-	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	queue_work(ctx->workqueue, &ctx->worker);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return DM_MAPIO_SUBMITTED;
 }
 
@@ -858,9 +866,13 @@ static void sv3_drain(struct dm_target *ti)
 {
 	struct sv3_dm *ctx = ti->private;
 
+	unsigned long flags;
+
+	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	flush_workqueue(ctx->workqueue);
-	/* Any last batch is drained in the worker, before the flush. */
+	/* Every admitted BIO had already been queued under the same lock. */
 	if (!ctx->failed) {
 		int error = blkdev_issue_flush(ctx->backing->bdev);
 
@@ -872,9 +884,12 @@ static void sv3_drain(struct dm_target *ti)
 static void sv3_resume(struct dm_target *ti)
 {
 	struct sv3_dm *ctx = ti->private;
+	unsigned long flags;
 
+	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!ctx->failed)
 		WRITE_ONCE(ctx->accepting, true);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 }
 
 static void sv3_free(struct sv3_dm *ctx)
