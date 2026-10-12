@@ -1,6 +1,6 @@
 # Current development: V3.0.0-alpha.2 production Device Mapper target (release-hardening branch)
 
-The active `dm-swapz3.ko` (target name `swapz3`) is built from
+The active `dm-swapz.ko` (target name `swapz3`) is built from
 `kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and
 packing engine. It now includes **experimental low-live 1MiB segment
 relocation**, using compressed-object size regrouping and raw 4KiB fallback.
@@ -11,7 +11,7 @@ physical extents are protected by whole-range discard preflight and
 one-lock BIO admission/drain.
 
 **Safety gate:** This is not yet a qualified system swap target. Current CI
-is exact-C source/mocked lower I/O and a **compile-only** `dm-swapz3.ko`
+is exact-C source/mocked lower I/O and a **compile-only** `dm-swapz.ko`
 build. No loaded V3 kernel swap, actual null_blk GC churn, SD-card write, fio
 p99 or long-lived fault injection has been independently verified. Do not
 run it on `/dev/sdb1`, the system swap or an unrelated device until the
