@@ -57,7 +57,7 @@ The seven existing exact-C suites also passed with GCC `-O0`, GCC `-O2`, and Cla
 Native module builds passed with exit code 0 for `make -C kernel/extent-v3 KDIR=/lib/modules/$(uname -r)/build W=1 -j2 all`, the same command at `W=2`, and a final `W=1` rebuild. There were no kernel C-source warnings. `modinfo` and SHA-256 were taken from the final `dm-swapz3.ko`. Environment diagnostics were:
 
 - Compiler executable name differs from the kernel build name (`gcc` versus `x86_64-linux-gnu-gcc`), while both are GCC 15.2.0 from the same Ubuntu package version.
-- Kernel headers recorded pahole 131, while the host's available pahole version was 0.
+- Kernel headers recorded pahole 131, while Kbuild detected local pahole version 0 (unavailable).
 - BTF generation was skipped because the matching `vmlinux` was unavailable.
 
 ## Live functional and packing results
