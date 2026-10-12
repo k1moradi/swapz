@@ -179,10 +179,10 @@ static int test_failed_gc_write_preserves_live_mapping(void)
 
 	CHECK(setup() == 0);
 	CHECK(write_one(0) == 0);
-	previous = maps[0].start_block;
 	/* Move foreground OPEN away from victim0 first. */
 	for (unsigned int i = 1; i < 256; ++i)
 		CHECK(write_one(0) == 0);
+	previous = maps[0].start_block;
 	CHECK(write_one(1) == 0);
 	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
 	p = (struct sv3_compressed_page) {
@@ -190,7 +190,7 @@ static int test_failed_gc_write_preserves_live_mapping(void)
 	};
 	fail_write = 1;
 	CHECK(sv3_engine_write_window(&e, &p, 1, &completed) == -EIO);
-	CHECK(completed == 0 && maps[0].start_block != previous);
+	CHECK(completed == 0 && maps[0].start_block == previous);
 	CHECK(maps[0].valid && verify_page(0) == 0);
 	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
 	CHECK(roles[0] == 1 && roles[2] == 0);
