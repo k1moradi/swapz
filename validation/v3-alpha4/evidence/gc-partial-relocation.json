@@ -1,0 +1,23 @@
+{
+  "result": "PASS_FAIL_CLOSED_PARTIAL_RELOCATION",
+  "trigger_error": "EIO",
+  "gc_victims": 0,
+  "role_rotations": 0,
+  "successful_raw_records_moved": 1,
+  "gc_pages": 1,
+  "gc_read_bytes": 8192,
+  "gc_write_bytes": 4096,
+  "selected_live_records": 2,
+  "selected_live_cost_bytes": 8192,
+  "logical_bytes_acked_for_failed_trigger": 0,
+  "reserve_blocks": 512,
+  "physical_checks": {
+    "source_page512_block254_matches_expected": true,
+    "first_relocated_copy_block7680_matches_page512": true,
+    "second_source_page513_block255_matches_expected": true,
+    "failed_destination_block7681_unchanged": true,
+    "failed_trigger_page0_not_present_at_destination": true
+  },
+  "target_removal": "ordinary exact UUID, passed",
+  "limitation": "Target failed closed after the injected destination error; no logical read through the failed target was attempted."
+}

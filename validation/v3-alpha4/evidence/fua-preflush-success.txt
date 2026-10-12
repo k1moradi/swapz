@@ -1,0 +1,32 @@
+2026-10-12T12:45:03,034589-07:00 SV3BIO submit_pair label=compressed-fua normal_page=201 normal_opf=0x800001 fua_page=202 fua_opf=0x820001 fua_bit=1
+2026-10-12T12:45:03,034795-07:00 SV3BIO completion label=fua-write status=0 opf=0x820001 sector=1616
+2026-10-12T12:45:03,045572-07:00 SV3BIO pair_done label=compressed-fua first_error=0 second_error=0 exactly_once=1
+2026-10-12T12:45:03,045679-07:00 SV3BIO submit_pair label=raw-fua normal_page=203 normal_opf=0x800001 fua_page=204 fua_opf=0x820001 fua_bit=1
+2026-10-12T12:45:03,045813-07:00 SV3BIO completion label=fua-write status=0 opf=0x820001 sector=1632
+2026-10-12T12:45:03,056584-07:00 SV3BIO pair_done label=raw-fua first_error=0 second_error=0 exactly_once=1
+2026-10-12T12:45:03,056634-07:00 SV3BIO submit_preflush normal_opf=0x800001 zero_bio_opf=0x840001 sectors=0 preflush_bit=1
+2026-10-12T12:45:03,056720-07:00 SV3BIO completion label=preflush-preceding-write status=0 opf=0x800001 sector=1640
+2026-10-12T12:45:03,056774-07:00 SV3BIO completion label=preflush-zero-write status=0 opf=0x840001 sector=0
+2026-10-12T12:45:03,067582-07:00 SV3BIO pair_done label=preflush-order first_error=0 second_error=0 exactly_once=1
+2026-10-12T12:45:03,067598-07:00 SV3BIO probe_end result=0
+
+lower block issue/complete flush evidence (filtered):
+     kworker/2:2-427397 [002] ..... 205018.250913: block_rq_issue:       251,0 WS 4096 () 80 + 8 0x2,0,4 [kworker/2:2]
+     kworker/2:2-427397 [002] ..... 205018.250929: block_rq_complete:    251,0 WS () 80 + 8 0x2,0,4 [0]
+     kworker/2:2-427397 [002] ..... 205018.250945: block_rq_issue:       251,0 WS 4096 () 88 + 8 0x2,0,4 [kworker/2:2]
+     kworker/2:2-427397 [002] ..... 205018.250949: block_rq_complete:    251,0 WS () 88 + 8 0x2,0,4 [0]
+    kworker/2:1H-331   [002] ..... 205018.250979: block_rq_issue:       251,0 FF 0 () 0 + 0 0x0,0,0 [kworker/2:1H]
+    kworker/2:1H-331   [002] ..... 205018.250981: block_rq_complete:    251,0 FF () 18446744073709551615 + 0 0x0,0,0 [0]
+    kworker/2:1H-331   [002] d..1. 205018.250983: block_rq_complete:    251,0 WS () 0 + 0 0x2,0,4 [0]
+     kworker/2:2-427397 [002] ..... 205018.261953: block_rq_issue:       251,0 WS 4096 () 96 + 8 0x2,0,4 [kworker/2:2]
+     kworker/2:2-427397 [002] ..... 205018.261960: block_rq_complete:    251,0 WS () 96 + 8 0x2,0,4 [0]
+     kworker/2:2-427397 [002] .L... 205018.261992: block_rq_issue:       251,0 WS 4096 () 104 + 8 0x2,0,4 [kworker/2:2]
+     kworker/2:2-427397 [002] .L... 205018.261995: block_rq_complete:    251,0 WS () 104 + 8 0x2,0,4 [0]
+    kworker/2:1H-331   [002] ..... 205018.262014: block_rq_issue:       251,0 FF 0 () 0 + 0 0x0,0,0 [kworker/2:1H]
+    kworker/2:1H-331   [002] ..... 205018.262016: block_rq_complete:    251,0 FF () 18446744073709551615 + 0 0x0,0,0 [0]
+    kworker/2:1H-331   [002] d..1. 205018.262017: block_rq_complete:    251,0 WS () 0 + 0 0x2,0,4 [0]
+     kworker/2:2-427397 [002] ..... 205018.272923: block_rq_issue:       251,0 WS 4096 () 112 + 8 0x2,0,4 [kworker/2:2]
+     kworker/2:2-427397 [002] ..... 205018.272929: block_rq_complete:    251,0 WS () 112 + 8 0x2,0,4 [0]
+    kworker/2:1H-331   [002] ..... 205018.272972: block_rq_issue:       251,0 FF 0 () 0 + 0 0x0,0,0 [kworker/2:1H]
+    kworker/2:1H-331   [002] ..... 205018.272974: block_rq_complete:    251,0 FF () 18446744073709551615 + 0 0x0,0,0 [0]
+    kworker/2:1H-331   [002] d..1. 205018.272975: block_rq_complete:    251,0 WS () 0 + 0 0x2,0,4 [0]

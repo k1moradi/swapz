@@ -1,0 +1,82 @@
+
+=== clang O0 codec ===
+SV3_EXACT_PRODUCTION_C_TESTS_PASS=8
+
+=== clang O0 authority ===
+SV3_EXACT_AUTHORITY_TESTS_PASS=10
+
+=== clang O0 tx-snapshot ===
+SV3_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=4
+
+=== clang O0 write-verify ===
+SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7
+
+=== clang O0 dead-segment ===
+SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=4
+
+=== clang O0 raw-discard ===
+SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=7
+
+=== clang O0 engine ===
+SV3_EXACT_ENGINE_TESTS_PASS=9
+
+=== clang O0 randomized-engine ===
+RANDOM_ENGINE_PASS cap=0 windows=100 generated_records=3242 writes=790 blocks=1541 reads=5984 next_block=1794
+RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953
+RANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950
+RANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776
+RANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass
+
+=== clang O0 gc-forbidden ===
+SV3_GC_FORBIDDEN_SEGMENT_TESTS_PASS=3
+
+=== clang O0 gc-cost ===
+SV3_GC_COST_TESTS_PASS=3
+
+=== clang O0 gc-rotation ===
+SV3_ROTATING_GC_TESTS_PASS=6
+
+=== clang O0 gc-engine-rotation ===
+SV3_GC_ENGINE_ROTATION_TESTS_PASS=2
+
+=== clang O2 codec ===
+SV3_EXACT_PRODUCTION_C_TESTS_PASS=8
+
+=== clang O2 authority ===
+SV3_EXACT_AUTHORITY_TESTS_PASS=10
+
+=== clang O2 tx-snapshot ===
+SV3_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=4
+
+=== clang O2 write-verify ===
+SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7
+
+=== clang O2 dead-segment ===
+SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=4
+
+=== clang O2 raw-discard ===
+SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=7
+
+=== clang O2 engine ===
+SV3_EXACT_ENGINE_TESTS_PASS=9
+
+=== clang O2 randomized-engine ===
+RANDOM_ENGINE_PASS cap=0 windows=100 generated_records=3242 writes=790 blocks=1541 reads=5984 next_block=1794
+RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953
+RANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950
+RANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776
+RANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass
+
+=== clang O2 gc-forbidden ===
+SV3_GC_FORBIDDEN_SEGMENT_TESTS_PASS=3
+
+=== clang O2 gc-cost ===
+SV3_GC_COST_TESTS_PASS=3
+
+=== clang O2 gc-rotation ===
+SV3_ROTATING_GC_TESTS_PASS=6
+
+=== clang O2 gc-engine-rotation ===
+SV3_GC_ENGINE_ROTATION_TESTS_PASS=2
+
+CLANG_O0_O2_EXACT_C_MATRIX: PASS

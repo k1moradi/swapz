@@ -1,0 +1,35 @@
+cleanup_start=2026-10-12T13:48:02-07:00
+
+-- preflight --
+No devices found
+swapz3           v3.0.0
+0
+total 0
+drwxr-xr-x 2 root root 0 Oct 12 13:46 .
+drwxr-xr-x 5 root root 0 Oct 12 13:46 ..
+total 0
+drwxr-xr-x 2 root root 0 Oct 12 13:45 .
+drwxr-xr-x 9 root root 0 Oct 12 13:45 ..
+1
+32
+1
+500000
+20
+1
+0
+/swapfile
+/dev/sdb1
+configfs_nullb_instances:
+nullb_swapz3_a4_57eccebd
+
+-- ordinary unload owned V3 module --
+
+-- remove owned null_blk instance --
+
+-- final inventory --
+No devices found
+null_blk               94208  0
+Filename				Type		Size		Used		Priority
+/swapfile                               file		524284		473832		-1
+/dev/sdb1                               partition	121863164	505448		-1
+cleanup_finish=2026-10-12T13:48:03-07:00
