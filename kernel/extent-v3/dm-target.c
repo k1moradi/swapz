@@ -69,6 +69,20 @@ struct sv3_dm {
 	struct sv3_compressed_page planned[SV3_MAX_RECORDS];
 	sv3_u8 planned_to_batch[SV3_MAX_RECORDS];
 	sv3_u8 used[SV3_MAX_RECORDS];
+	/* Separate GC metadata and compressed record storage. Foreground upper
+	 * BIO descriptors/data stay immutable throughout an emergency cleaning. */
+	struct sv3_pending_bio gc_pending[SV3_MAX_RECORDS];
+	struct sv3_compressed_page gc_planned[SV3_MAX_RECORDS];
+	sv3_u8 gc_to_pending[SV3_MAX_RECORDS];
+	sv3_u8 gc_used[SV3_MAX_RECORDS];
+	sv3_u8 gc_count;
+	u8 *gc_bytes_store;
+	sv3_u32 *gc_scores;  /* [physical 1MiB segments] */
+	sv3_u32 segment_count;
+	u64 gc_victims;
+	u64 gc_pages;
+	u64 gc_read_bytes;
+	u64 gc_write_bytes;
 	sv3_u8 batch_count;
 	sv3_u8 max_window;
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
@@ -249,6 +263,8 @@ static void sv3_order_window(struct sv3_dm *ctx)
 		};
 	}
 }
+
+static int sv3_gc_compact_one(struct sv3_dm *ctx);
 
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
@@ -586,6 +602,8 @@ static void sv3_free(struct sv3_dm *ctx)
 	kvfree(ctx->live_records);
 	kvfree(ctx->extent_classes);
 	vfree(ctx->batch_bytes);
+	vfree(ctx->gc_bytes_store);
+	kvfree(ctx->gc_scores);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -658,6 +676,9 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	ctx->logical_pages = logical;
 	ctx->physical_blocks = physical;
+	ctx->segment_count = physical / SV3_SEGMENT_BLOCKS;
+	ctx->gc_scores = kvcalloc(ctx->segment_count,
+				  sizeof(*ctx->gc_scores), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
@@ -675,13 +696,15 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Never reuse a partially-live segment; full live relocation is gated. */
 	ctx->authority.reuse_dead_segments = 1;
 	ctx->batch_bytes = vzalloc(SV3_BATCH_BYTES);
+	ctx->gc_bytes_store = vzalloc(SV3_BATCH_BYTES);
 	ctx->input_page = vzalloc(SV3_BLOCK_BYTES);
 	ctx->read_page = vzalloc(SV3_BLOCK_BYTES);
 	ctx->read_compressed = vzalloc(SV3_BLOCK_BYTES);
 	ctx->engine.write_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->engine.read_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
-	if (!ctx->batch_bytes || !ctx->input_page ||
+	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
+	    !ctx->gc_scores || !ctx->input_page ||
 	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
 	    !ctx->lz4_workmem) {
@@ -758,7 +781,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
-		       "write_verify_blocks=%u failed=%u error=%d",
+		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
+		       "dead_segment_reuses=%u write_verify_blocks=%u failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
@@ -766,6 +790,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->raw_pages, ctx->discard_pages, ctx->windows,
 		       ctx->reordered_records, ctx->authority.next_block,
 		       ctx->authority.reserve_blocks,
+		       ctx->gc_victims, ctx->gc_pages,
+		       ctx->gc_read_bytes, ctx->gc_write_bytes,
+		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->failed, ctx->last_error);
 		break;
