@@ -128,7 +128,7 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 			    const struct sv3_compressed_page *pages,
 			    sv3_u8 count, sv3_u8 *committed_pages)
 {
-	sv3_u8 classes[SV3_MAX_RECORDS], takes[SV3_MAX_RECORDS];
+	struct sv3_tx *tx;
 	sv3_u8 extent_count, entry = 0, group;
 	int error;
 
@@ -136,34 +136,35 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 	    !engine->io.write_extent || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
-	error = sv3_engine_plan(pages, count, classes, takes, &extent_count);
+	error = sv3_engine_plan(pages, count, engine->plan_classes,
+				engine->plan_takes, &extent_count);
 	if (error)
 		return error;
 
 	for (group = 0; group < extent_count; ++group) {
-		struct sv3_tx tx;
 		struct sv3_builder builder;
-		sv3_u32 logical[SV3_MAX_RECORDS];
 		sv3_u8 completed = 0;
 		sv3_u8 j;
-		const sv3_u8 blocks = classes[group];
-		const sv3_u8 take = takes[group];
+		const sv3_u8 blocks = engine->plan_classes[group];
+		const sv3_u8 take = engine->plan_takes[group];
 		const sv3_u32 bytes = (sv3_u32)blocks * SV3_BLOCK_BYTES;
 
+		tx = &engine->pending;
 		for (j = 0; j < take; ++j)
-			logical[j] = pages[entry + j].logical_page;
-		error = sv3_stage(engine->authority, logical, take, blocks, &tx);
+			engine->logical_scratch[j] = pages[entry + j].logical_page;
+		error = sv3_stage(engine->authority, engine->logical_scratch,
+				  take, blocks, tx);
 		if (error)
 			return error;
 		error = sv3_begin(&builder, engine->write_scratch,
-				  bytes, tx.sequence);
+				  bytes, tx->sequence);
 		if (error)
 			goto abort_transaction;
 		for (j = 0; j < take; ++j) {
 			const struct sv3_compressed_page *page = &pages[entry + j];
 
 			error = sv3_append(&builder, page->logical_page,
-					   tx.records[j].generation,
+					   tx->records[j].generation,
 					   page->payload, page->length);
 			if (error)
 				goto abort_transaction;
@@ -179,14 +180,14 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 		 */
 		engine->submitted_blocks += blocks;
 		error = engine->io.write_extent(engine->io.opaque,
-						tx.start_block, blocks,
+						tx->start_block, blocks,
 						engine->write_scratch, &completed);
 		if (completed > blocks) {
 			completed = blocks;
 			error = -EUCLEAN;
 		}
 		engine->completed_blocks += completed;
-		error = sv3_finish(engine->authority, &tx,
+		error = sv3_finish(engine->authority, tx,
 				   engine->write_scratch, bytes,
 				   completed, error);
 		if (error)
@@ -195,7 +196,7 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 		*committed_pages = entry;
 		continue;
 abort_transaction:
-		sv3_abort(engine->authority, &tx);
+		sv3_abort(engine->authority, tx);
 		return error;
 	}
 	return 0;
