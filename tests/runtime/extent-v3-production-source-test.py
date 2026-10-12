@@ -162,6 +162,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
         self.assertIn("coalesce > SV3_MAX_COALESCE_MS", ctor)
         self.assertIn("ctx->window_size_counts[count]++", body("sv3_flush_window"))
+        self.assertIn("ctx->window_bins[0]++", body("sv3_flush_window"))
+        self.assertIn("ctx->window_bins[5]++", body("sv3_flush_window"))
+        self.assertIn("gc_read_reqs=%llu gc_write_reqs=%llu", DM)
+        self.assertIn("ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs",
+                      body("sv3_gc_compact_one"))
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertLess(worker.index("sv3_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
