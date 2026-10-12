@@ -71,16 +71,21 @@ def summarize(input_path, output_prefix):
                              if row["repetition"] > 0)
         if len(repetitions) != len(set(repetitions)):
             raise ValueError(f"duplicate repetitions: {workload}/{window}")
-        if repetitions and repetitions != list(range(1, len(repetitions) + 1)):
+        if not repetitions:
+            raise ValueError(f"no measured repetitions: {workload}/{window}")
+        if repetitions != list(range(1, len(repetitions) + 1)):
             raise ValueError(f"non-contiguous repetitions: {workload}/{window}")
+        measured = [row for row in group if row["repetition"] > 0]
+        warmup_runs = sum(row["repetition"] == 0 for row in group)
         record = {
             "workload": workload,
             "window": window,
-            "runs": len(group),
-            "reader_samples": sorted(row["read_pages"] for row in group),
+            "runs": len(measured),
+            "warmup_runs": warmup_runs,
+            "reader_samples": sorted(row["read_pages"] for row in measured),
         }
         for metric in METRICS:
-            values = [row[metric] for row in group]
+            values = [row[metric] for row in measured]
             record[f"{metric}_median"] = statistics.median(values)
             record[f"{metric}_p95_across_runs"] = percentile(values, 95)
             record[f"{metric}_max_across_runs"] = max(values)

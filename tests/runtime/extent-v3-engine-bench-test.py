@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Rootless tests for the exact-C V3 benchmark and deterministic fixtures."""
 import json
+import statistics
 import subprocess
 import tempfile
 import unittest
@@ -133,7 +134,7 @@ class ExtentV3EngineBenchTests(unittest.TestCase):
     def test_summary_rejects_and_reports_accounting(self):
         raw = subprocess.run(
             [str(self.binary), "--synthetic", "--scenario", "control2072",
-             "--window", "16", "--reps", "2", "--warmups", "0",
+             "--window", "16", "--reps", "2", "--warmups", "2",
              "--seed", "12345"],
             cwd=ROOT, check=True, capture_output=True, text=True, timeout=30)
         source = self.directory / "summary-input.jsonl"
@@ -147,8 +148,14 @@ class ExtentV3EngineBenchTests(unittest.TestCase):
         self.assertEqual(len(summary["engine_runs"]), 1)
         row = summary["engine_runs"][0]
         self.assertEqual(row["runs"], 2)
+        self.assertEqual(row["warmup_runs"], 2)
         self.assertEqual(row["ordered4_model_bytes_median"], 65536)
         self.assertEqual(row["v3_written_bytes_median"], 40960)
+        source_rows = [json.loads(line) for line in raw.stdout.splitlines()]
+        measured_plan_times = [entry["plan_wall_ns"] for entry in source_rows
+                               if entry["repetition"] > 0]
+        self.assertEqual(row["plan_wall_ns_median"],
+                         statistics.median(measured_plan_times))
         self.assertTrue(row["all_run_counters_reconciled"])
         self.assertTrue(prefix.with_suffix(".summary.csv").is_file())
 
