@@ -115,7 +115,7 @@ static int test_integrity(void)
 	extent[d.payload_offset] ^= 0x80;
 	CHECK(sv3_validate(extent, 8192) == 0);
 	CHECK(sv3_lookup(extent, 8192, 2, &d, &p) == -EBADMSG);
-	extent[d.payload_offset] = original; /* d reset by failed lookup! */
+	/* A failed lookup intentionally zeros the output; rebuild below. */
 	/* Rebuild rather than rely on a failed lookup's wiped output. */
 	CHECK(sv3_begin(&b, extent, 8192, 77) == 0);
 	for (index = 0; index < 3; ++index) {
@@ -161,9 +161,12 @@ static int test_read_spans(void)
 	CHECK(sv3_lookup(extent, SV3_MAX_EXTENT_BYTES, 1, &d, &p) == 0);
 	CHECK(d.payload_offset == 12240);
 	CHECK(sv3_record_read_blocks(&d) == 3); /* metadata + two payload blocks */
+	CHECK(sv3_lookup(extent, SV3_MAX_EXTENT_BYTES, 5, &d, &p) == 0);
+	CHECK(d.payload_offset == 3952);
+	CHECK(sv3_record_read_blocks(&d) == 2); /* payload spans blocks 0-1 */
 	CHECK(sv3_lookup(extent, SV3_MAX_EXTENT_BYTES, 6, &d, &p) == 0);
 	CHECK(d.payload_offset == 1880);
-	CHECK(sv3_record_read_blocks(&d) == 2); /* payload spans metadata block */
+	CHECK(sv3_record_read_blocks(&d) == 1); /* wholly in metadata block 0 */
 	d.payload_length = 0;
 	CHECK(sv3_record_read_blocks(&d) == -EINVAL);
 	return 0;
