@@ -47,6 +47,7 @@ struct sv3_authority {
 	sv3_u32 active_start;
 	sv3_u32 active_sequence;
 	sv3_u8 active_blocks;
+	sv3_u8 active_count;
 	int in_flight;
 };
 
