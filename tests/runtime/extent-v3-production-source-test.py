@@ -60,7 +60,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("sv3_gc_choose_victim(ctx,", body("sv3_gc_compact_one"))
         self.assertIn("if (a->live_records[start + off])", AUTH)
         self.assertIn("if (map->start_block / SV3_SEGMENT_BLOCKS == segment)", AUTH)
-        self.assertIn("ctx->gc_scores[m->start_block / SV3_SEGMENT_BLOCKS]++", DM)
+        self.assertIn("cost = sv3_gc_live_byte_cost(m)", DM)
+        self.assertIn("ctx->gc_scores[segment] += cost", DM)
+        self.assertIn("sv3_gc_prefer(score, count, best, best_count)", DM)
         self.assertIn("sv3_engine_read_page(&ctx->engine", body("sv3_gc_compact_one"))
         self.assertIn("sv3_gc_flush(ctx)", body("sv3_gc_compact_one"))
         self.assertIn("sv3_finish_raw(&ctx->authority", body("sv3_gc_move_raw"))
@@ -97,7 +99,8 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("SV3_WORK_QUANTUM_BIOS", worker)
         self.assertIn("if (!--remaining)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
-        self.assertIn("queue_work(ctx->workqueue, &ctx->worker)", worker)
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
+        self.assertIn("cond_resched()", worker)
         self.assertLess(worker.index("sv3_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
 
@@ -145,6 +148,34 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("one_page_windows", body("sv3_flush_window"))
         self.assertIn("worker_requeues", body("sv3_worker"))
 
+    def test_online_batching_bounded_and_barrier_first(self):
+        admitted = body("sv3_map")
+        ctor = body("sv3_ctr")
+        drain = body("sv3_drain")
+        worker = body("sv3_worker")
+        self.assertIn("SV3_MAX_COALESCE_MS", DM)
+        self.assertIn("msecs_to_jiffies(ctx->coalesce_ms)", admitted)
+        self.assertIn("REQ_PREFLUSH | REQ_FUA", admitted)
+        self.assertIn("bio_op(bio) != REQ_OP_WRITE", admitted)
+        self.assertIn("queue_delayed_work(ctx->workqueue", admitted)
+        self.assertIn("mod_delayed_work(ctx->workqueue", admitted)
+        self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
+        self.assertIn("coalesce > SV3_MAX_COALESCE_MS", ctor)
+        self.assertIn("ctx->window_size_counts[count]++", body("sv3_flush_window"))
+        self.assertIn("flush_delayed_work(&ctx->worker)", drain)
+        self.assertLess(worker.index("sv3_flush_window(ctx)"),
+                        worker.index("list_splice_init(&local, &ctx->incoming)"))
+
+    def test_gc_uses_committed_actual_payload_lengths(self):
+        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        self.assertIn("payload_lengths[index] = decoded.payload_length", authority)
+        self.assertIn(".payload_length = payload_lengths[index]", authority)
+        self.assertIn(".payload_length = SV3_BLOCK_BYTES", authority)
+        self.assertIn("decoded->payload_length != current->payload_length", authority)
+        self.assertIn("ctx->gc_cost_policy", body("sv3_gc_choose_victim"))
+        self.assertIn("gc_selected_live_bytes", body("sv3_gc_choose_victim"))
+        self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("sv3_status"))
+
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("sv3_status"))
         self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))
@@ -161,8 +192,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         admitted.index("if (!ctx->accepting)"))
         self.assertLess(admitted.index("if (!ctx->accepting)"),
                         admitted.index("list_add_tail(&entry->list"))
-        self.assertLess(admitted.index("queue_work(ctx->workqueue"),
+        self.assertLess(admitted.index("queue_delayed_work(ctx->workqueue"),
                         admitted.index("spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\treturn DM_MAPIO_SUBMITTED"))
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
+        self.assertIn("flush_delayed_work(&ctx->worker)", drained)
         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
                         drained.index("flush_workqueue(ctx->workqueue)"))
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", drained)
