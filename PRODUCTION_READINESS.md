@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.2.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.3.** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
