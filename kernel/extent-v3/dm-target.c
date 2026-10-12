@@ -350,12 +350,16 @@ static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
 	error = sv3_lower_read(ctx, old->start_block, 1, ctx->input_page);
 	if (error)
 		return error;
+	/* Never propagate a corrupted raw page into a new GC location. */
+	error = sv3_verify_raw(&ctx->authority, logical, ctx->input_page);
+	if (error)
+		return error;
 	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
 	if (error)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1,
 				ctx->input_page, &completed);
-	error = sv3_finish_raw(&ctx->authority, &tx, completed, error);
+	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error)
 		ctx->gc_pages++;
 	return error;
@@ -593,7 +597,7 @@ static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1, ctx->input_page,
 				&completed);
-	error = sv3_finish_raw(&ctx->authority, &tx, completed, error);
+	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error) {
 		ctx->raw_pages++;
 		ctx->logical_write_bytes += SV3_BLOCK_BYTES;
@@ -669,6 +673,9 @@ static int sv3_read(struct sv3_dm *ctx, struct bio *bio)
 		    map->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
 		error = sv3_lower_read(ctx, map->start_block, 1, ctx->read_page);
+		if (error)
+			return error;
+		error = sv3_verify_raw(&ctx->authority, logical, ctx->read_page);
 		if (error)
 			return error;
 	} else {
