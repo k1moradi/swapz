@@ -42,6 +42,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("SV3_BUILD_SMOKE", MK)
         self.assertIn("3.0.0-alpha.1", GOALS)
 
+    def test_alpha_rejects_all_physical_devices(self):
+        ctr = body("sv3_ctr")
+        self.assertIn('disk_name, "nullb", 5', ctr)
+        self.assertIn('swapz3 alpha accepts null_blk backing only', ctr)
+        self.assertIn("goto fail;", ctr)
+
     def test_real_v3_not_memory_smoke(self):
         for snippet in ("dm_register_target(&sv3_target)",
                         "LZ4_compress_fast(", "LZ4_decompress_safe(",
