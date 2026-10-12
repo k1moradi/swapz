@@ -26,6 +26,7 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include "engine.h"
+#include "gc-cost.h"
 
 #if PAGE_SIZE != SV3_BLOCK_BYTES
 #error "swapz3 V3.0-alpha requires 4KiB PAGE_SIZE"
@@ -447,14 +448,10 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 			continue;
 		if (m->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
-		if (!m->payload_length ||
-		    (m->raw ? (m->payload_length != SV3_BLOCK_BYTES) :
-		     (m->payload_length > SV3_MAX_COMPRESSED)))
+		cost = sv3_gc_live_byte_cost(m);
+		if (!cost)
 			return -EUCLEAN;
 		segment = m->start_block / SV3_SEGMENT_BLOCKS;
-		/* 16B V3 descriptor per compressed record plus LZ4 bytes.
-		 * Raw page consumes one full physical 4096B allocation. */
-		cost = m->payload_length + (m->raw ? 0U : 16U);
 		if (ctx->gc_scores[segment] > ~(sv3_u32)0 - cost ||
 		    ctx->gc_live_counts[segment] == ~(sv3_u16)0)
 			return -EOVERFLOW;
@@ -468,8 +465,7 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		if (!count || segment == ctx->authority.open_segment)
 			continue;
 		score = ctx->gc_cost_policy ? ctx->gc_scores[segment] : count;
-		if (score < best ||
-		    (score == best && count < best_count)) {
+		if (sv3_gc_prefer(score, count, best, best_count)) {
 			best = score;
 			best_count = count;
 			selected = segment;
