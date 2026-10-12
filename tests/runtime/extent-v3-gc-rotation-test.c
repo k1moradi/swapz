@@ -147,12 +147,100 @@ static int test_failed_handoff_does_not_change_roles(void)
 	return 0;
 }
 
+/*
+ * Match Codex's exact 32MiB / 1024-page geometry: 30 foreground segments
+ * followed by two initially free reserve segments. Repeat eight successful
+ * foreground evacuations; a static reserve-tail design fails by relocating
+ * live records between segment30 and segment31 without freeing foreground.
+ */
+static struct sv3_authority large_a;
+static struct sv3_map large_maps[1024];
+static sv3_u16 large_live[32U * SV3_SEGMENT_BLOCKS];
+static sv3_u8 large_classes[32U * SV3_SEGMENT_BLOCKS];
+static sv3_u8 large_roles[32];
+
+static int large_write(sv3_u32 page)
+{
+	struct sv3_tx tx;
+	int error = sv3_stage(&large_a, &page, 1, 1, &tx);
+
+	if (error)
+		return error;
+	return sv3_finish_raw(&large_a, &tx, raw, 1, 0);
+}
+
+static int large_relocate(sv3_u32 segment)
+{
+	struct sv3_tx tx;
+	sv3_u32 page;
+	int error = sv3_gc_begin_rotation(&large_a, segment);
+
+	if (error)
+		return error;
+	for (page = 0; page < 1024; ++page) {
+		if (!large_maps[page].valid ||
+		    large_maps[page].start_block / SV3_SEGMENT_BLOCKS != segment)
+			continue;
+		error = sv3_stage(&large_a, &page, 1, 1, &tx);
+		if (error)
+			return error;
+		error = sv3_finish_raw(&large_a, &tx, raw, 1, 0);
+		if (error)
+			return error;
+	}
+	return sv3_gc_commit_rotation(&large_a, segment);
+}
+
+static int test_exact_32mib_foreground_progress(void)
+{
+	sv3_u32 segment, i, rotation, reserve_count;
+
+	CHECK(sv3_authority_init(&large_a, large_maps, large_live,
+				large_classes, 1024,
+				32U * SV3_SEGMENT_BLOCKS) == 0);
+	large_a.reuse_dead_segments = 1;
+	CHECK(sv3_enable_segment_rotation(&large_a, large_roles, 32) == 0);
+	for (segment = 0; segment < 30; ++segment)
+		for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+			CHECK(large_write(segment) == 0);
+	CHECK(large_a.next_block == 30U * SV3_SEGMENT_BLOCKS);
+	CHECK(large_write(100) == -ENOSPC);
+	for (rotation = 0; rotation < 8; ++rotation) {
+		sv3_u32 dest;
+
+		/* Every old foreground victim has one correct live raw page. */
+		CHECK(large_relocate(rotation) == 0);
+		dest = large_maps[rotation].start_block /
+		       SV3_SEGMENT_BLOCKS;
+		CHECK(dest < 32 && large_roles[dest] == 1);
+		CHECK(large_roles[rotation] == 0);
+		CHECK(large_a.open_segment == dest);
+		CHECK(large_write(100 + rotation) == 0);
+		CHECK(large_maps[100 + rotation].start_block /
+		      SV3_SEGMENT_BLOCKS == dest);
+		for (i = 0; i <= rotation; ++i)
+			CHECK(large_maps[i].valid &&
+			      large_live[large_maps[i].start_block] &&
+			      large_maps[i].raw_crc32c ==
+			      sv3_crc32c_bytes(raw, sizeof(raw)));
+		reserve_count = 0;
+		for (i = 0; i < 32; ++i)
+			if (!large_roles[i])
+				reserve_count++;
+		CHECK(reserve_count == 2);
+	}
+	/* Two reserved capacity segments are preserved after every rotation.
+	 * No foreground ENOSPC retry was needed for new pages 100..107. */
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
 
 	CHECK(test_three_rotations_and_foreground_progress() == 0); passed++;
 	CHECK(test_failed_handoff_does_not_change_roles() == 0); passed++;
+	CHECK(test_exact_32mib_foreground_progress() == 0); passed++;
 	printf("SV3_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }
