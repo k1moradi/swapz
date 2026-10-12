@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.5 production Device Mapper target (release-hardening branch)
+# Current development: V3.0.0-alpha.5 experimental Device Mapper target (PR #52)
 
 The active `dm-swapz.ko` (target name `swapz3`) is built from
 `kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and
@@ -10,12 +10,24 @@ logical write prefix, bounded to four GC attempts per write window. Shared
 physical extents are protected by whole-range discard preflight and
 one-lock BIO admission/drain.
 
-**Safety gate:** This is not yet a qualified system swap target. Current CI
-is exact-C source/mocked lower I/O and a **compile-only** `dm-swapz.ko`
-build. No loaded V3 kernel swap, actual null_blk GC churn, SD-card write, fio
-p99 or long-lived fault injection has been independently verified. Do not
-run it on `/dev/sdb1`, the system swap or an unrelated device until the
-loaded-target test procedures and teardown guards pass. Absolute no reboot.
+**Safety gate:** This is NOT a qualified system swap target.
+Independent [alpha.4 loaded tests](https://github.com/k1moradi/swapz/pull/51)
+did verify eight rotating GC handoffs, page readback, controlled faults
+and 1,024-BIO drains on an owned RAM-backed null_blk. However the
+**new alpha.5** lower-flush meter and conservative GC selector have
+only exact-source/test + compile CI, not independent loaded-kernel
+qualification. The previously reported `REQ_OP_FLUSH` BIO error was
+caused by an invalid test-helper opcode; Linux uses a **zero-length
+WRITE|PREFLUSH** BIO for an actual standalone flush. The new
+`flush_fail_nth` diagnostic injects EIO *before lower submission*
+and MUST NOT be advertised as a genuine device-originated error.
+The alpha.5 collector also rejects provably non-reclaimable full-live
+victims before wasting 1MiB of lower GC traffic.
+
+**Do not** use active swap, `/dev/sdb1`, unrelated physical backing,
+or bypass null_blk-only admission. NEVER reboot. Read the authoritative
+[alpha.5 retest protocol](ONLINE_IO_RETEST.md) and
+[readiness ledger](../../PRODUCTION_READINESS.md).
 
 The older sections below document the initial memory-only codec research
 milestone, which remains available as `SV3_BUILD_SMOKE=1`. They are
