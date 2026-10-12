@@ -163,6 +163,95 @@ int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
 	return 0;
 }
 
+/*
+ * Both raw fallbacks and compressed extents share one physical-log allocator.
+ * Raw writes never publish on short or failed lower I/O.  The raw marker is
+ * held exclusively in volatile mappings, NEVER guessed from media content.
+ */
+int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
+		   sv3_u8 completed_blocks, int io_error)
+{
+	struct sv3_map *old;
+	sv3_u32 page;
+	int error;
+
+	if (!sv3_is_active(a, tx))
+		return -ESTALE;
+	if (tx->count != 1 || tx->extent_blocks != 1) {
+		error = -EINVAL;
+		goto fail;
+	}
+	if (io_error || completed_blocks != 1) {
+		error = io_error < 0 ? io_error : -EIO;
+		goto fail;
+	}
+	page = tx->records[0].logical_page;
+	if (page >= a->logical_pages) {
+		error = -ERANGE;
+		goto fail;
+	}
+	old = &a->maps[page];
+	if (old->generation == ~(sv3_u32)0 ||
+	    old->generation + 1U != tx->records[0].generation ||
+	    a->live_records[tx->start_block] ||
+	    a->extent_classes[tx->start_block]) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+	if (old->valid &&
+	    (old->start_block >= a->physical_blocks ||
+	     !sv3_legal_class(old->extent_blocks) ||
+	     a->extent_classes[old->start_block] != old->extent_blocks ||
+	     !a->live_records[old->start_block])) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+	a->live_records[tx->start_block] = 1;
+	a->extent_classes[tx->start_block] = 1;
+	if (old->valid)
+		a->live_records[old->start_block]--;
+	*old = (struct sv3_map){
+		.start_block = tx->start_block,
+		.sequence = tx->sequence,
+		.generation = tx->records[0].generation,
+		.extent_blocks = 1,
+		.record_index = 0,
+		.raw = 1,
+		.valid = 1,
+	};
+	sv3_forget_active(a, 1);
+	return 0;
+fail:
+	sv3_forget_active(a, 0);
+	return error;
+}
+
+int sv3_discard_page(struct sv3_authority *a, sv3_u32 logical_page)
+{
+	struct sv3_map *old;
+	sv3_u32 generation;
+
+	if (!a || !a->maps || logical_page >= a->logical_pages)
+		return -EINVAL;
+	if (a->in_flight)
+		return -EBUSY;
+	old = &a->maps[logical_page];
+	if (old->generation == ~(sv3_u32)0)
+		return -EOVERFLOW;
+	if (old->valid &&
+	    (old->start_block >= a->physical_blocks ||
+	     !sv3_legal_class(old->extent_blocks) ||
+	     a->extent_classes[old->start_block] != old->extent_blocks ||
+	     !a->live_records[old->start_block]))
+		return -EUCLEAN;
+	generation = old->generation + 1U;
+	if (old->valid)
+		a->live_records[old->start_block]--;
+	memset(old, 0, sizeof(*old));
+	old->generation = generation;
+	return 0;
+}
+
 static sv3_u32 sv3_disk_sequence(const sv3_u8 *bytes)
 {
 	/* Sequence bytes 8-11, always LE, no unaligned u32 access. */
@@ -297,6 +386,8 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	    current->extent_blocks != observed->extent_blocks ||
 	    current->record_index != observed->record_index)
 		return -ESTALE;
+	if (current->raw)
+		return -EOPNOTSUPP;
 	if (!extent ||
 	    bytes_total != (sv3_u32)current->extent_blocks * SV3_BLOCK_BYTES)
 		return -EINVAL;
