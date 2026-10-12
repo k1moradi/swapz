@@ -109,7 +109,7 @@ static int test_three_rotations_and_foreground_progress(void)
 	CHECK(roles[2] == 0 && roles[1] == 1);
 	CHECK(a.open_segment == 1 && a.maps[0].start_block == 256);
 	CHECK(a.maps[1].valid && a.maps[1].start_block == 0);
-	CHECK(a.maps[2].valid && a.maps[2].start_block == 513);
+	CHECK(a.maps[2].valid && a.maps[2].start_block == 257); /* moved with victim 2 */
 	CHECK(a.maps[3].valid && a.maps[3].start_block == 1);
 	for (cycle = 0; cycle < 4; ++cycle) {
 		CHECK(write_raw(4) == 0);
