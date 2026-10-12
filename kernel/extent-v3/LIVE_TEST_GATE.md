@@ -84,6 +84,8 @@ be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
 - Cold read p50/p95/p99 only if achieved read load matches baseline.
   Low-QD contention, GC, and test storage service-rate must be comparable.
 
+The active release gate ledger is [PRODUCTION_READINESS.md](../../PRODUCTION_READINESS.md). The renamed alpha.2 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz3 module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
+
 ## Independent correctness blockers that prohibit SD / system swap
 
 - No demonstrated loaded-kernel V3 target roundtrip on owned null_blk.
