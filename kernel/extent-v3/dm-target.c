@@ -212,6 +212,32 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	return 0;
 }
 
+/*
+ * Linux does not accept REQ_OP_FLUSH as an upper bio opcode; a valid
+ * empty upper flush is a zero-sector REQ_OP_WRITE|REQ_PREFLUSH.
+ * blkdev_issue_flush() submits that protocol itself and may complete
+ * without an actual hardware command if the lower queue has no volatile
+ * write-back cache. Every actual invocation is accounted separately from
+ * physical read/write traffic. A controlled, *pre-submission* failure is
+ * supported only for owned null_blk alpha qualification.
+ */
+static int sv3_kernel_lower_flush(void *opaque)
+{
+	struct sv3_dm *ctx = opaque;
+
+	return blkdev_issue_flush(ctx->backing->bdev);
+}
+
+static int sv3_issue_flush(struct sv3_dm *ctx)
+{
+	int error = sv3_flush_accounted(&ctx->flush_meter,
+				      sv3_kernel_lower_flush, ctx);
+
+	if (error)
+		sv3_fail(ctx, error);
+	return error;
+}
+
 static int sv3_lower_write(void *opaque, sv3_u32 block, sv3_u8 blocks,
 			   const sv3_u8 *bytes, sv3_u8 *completed)
 {
@@ -676,7 +702,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	 * the newly published RAM mapping must not be trusted after -EIO.
 	 */
 	if (!error && committed == count && needs_fua)
-		error = blkdev_issue_flush(ctx->backing->bdev);
+		error = sv3_issue_flush(ctx);
 	if (error && needs_fua)
 		sv3_fail(ctx, error);
 	for (index = 0; index < count; ++index) {
@@ -785,7 +811,7 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 			return error;
 		error = sv3_raw_write(ctx, bio, logical);
 		if (!error && (bio->bi_opf & REQ_FUA))
-			error = blkdev_issue_flush(ctx->backing->bdev);
+			error = sv3_issue_flush(ctx);
 		if (error)
 			sv3_fail(ctx, error);
 		sv3_complete(bio, error);
@@ -933,7 +959,7 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 		}
 	}
 	if (bio->bi_opf & REQ_PREFLUSH) {
-		error = blkdev_issue_flush(ctx->backing->bdev);
+		error = sv3_issue_flush(ctx);
 		if (error) {
 			sv3_fail(ctx, error);
 			sv3_complete(bio, error);
@@ -956,11 +982,6 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 		break;
 	case REQ_OP_DISCARD:
 		error = sv3_discard(ctx, bio);
-		break;
-	case REQ_OP_FLUSH:
-		error = blkdev_issue_flush(ctx->backing->bdev);
-		if (error)
-			sv3_fail(ctx, error);
 		break;
 	default:
 		error = -EOPNOTSUPP;
@@ -1059,7 +1080,10 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 		    count / SV3_SECTORS >
 				ctx->logical_pages - sector / SV3_SECTORS)
 			return DM_MAPIO_KILL;
-	} else if (bio_op(bio) != REQ_OP_FLUSH) {
+	} else {
+		/* A REQ_OP_FLUSH upper BIO is invalid on Linux: blk-core
+		 * rejects it before dm's ->map. The real empty-flush
+		 * protocol is WRITE|PREFLUSH with zero sectors. */
 		return DM_MAPIO_KILL;
 	}
 	entry = dm_per_bio_data(bio, sizeof(*entry));
@@ -1129,7 +1153,7 @@ static void sv3_drain(struct dm_target *ti)
 	}
 	/* Every admitted BIO was queued under the same lock before this drain. */
 	if (!ctx->failed) {
-		int error = blkdev_issue_flush(ctx->backing->bdev);
+		int error = sv3_issue_flush(ctx);
 
 		if (error)
 			sv3_fail(ctx, error);
