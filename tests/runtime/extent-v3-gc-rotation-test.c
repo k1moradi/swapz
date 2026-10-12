@@ -49,20 +49,26 @@ static int write_raw(sv3_u32 page)
 /* A small exact-authority mock of an owned lower completion. The payload
  * stays byte-identical and the new generation publishes only after 1/1
  * successful completion. The final role swap validates all mapping refs. */
-static int relocate_only_live_page(sv3_u32 page, sv3_u32 victim)
+static int relocate_all_live_pages(sv3_u32 victim)
 {
 	struct sv3_tx tx;
+	sv3_u32 page;
 	int error;
 
 	error = sv3_gc_begin_rotation(&a, victim);
 	if (error)
 		return error;
-	error = sv3_stage(&a, &page, 1, 1, &tx);
-	if (error)
-		return error;
-	error = sv3_finish_raw(&a, &tx, raw, 1, 0);
-	if (error)
-		return error;
+	for (page = 0; page < 16; ++page) {
+		if (!maps[page].valid ||
+		    maps[page].start_block / SV3_SEGMENT_BLOCKS != victim)
+			continue;
+		error = sv3_stage(&a, &page, 1, 1, &tx);
+		if (error)
+			return error;
+		error = sv3_finish_raw(&a, &tx, raw, 1, 0);
+		if (error)
+			return error;
+	}
 	return sv3_gc_commit_rotation(&a, victim);
 }
 
@@ -86,7 +92,7 @@ static int test_three_rotations_and_foreground_progress(void)
 	CHECK(write_raw(2) == -ENOSPC);
 	/* GC cannot pick a reserved victim: src must be eligible foreground. */
 	CHECK(sv3_gc_begin_rotation(&a, 2) == -EINVAL);
-	CHECK(relocate_only_live_page(0, 0) == 0);
+	CHECK(relocate_all_live_pages(0) == 0);
 	CHECK(roles[0] == 0 && roles[2] == 1);
 	CHECK(a.open_segment == 2 && a.maps[0].start_block == 512);
 	CHECK(a.next_block == 513);
@@ -94,13 +100,13 @@ static int test_three_rotations_and_foreground_progress(void)
 	 * than restoring cursor to the previously exhausted segment 1. */
 	CHECK(write_raw(2) == 0 && a.maps[2].start_block == 513);
 	/* First free reserve is now the *old* foreground victim 0. */
-	CHECK(relocate_only_live_page(1, 1) == 0);
+	CHECK(relocate_all_live_pages(1) == 0);
 	CHECK(roles[1] == 0 && roles[0] == 1);
 	CHECK(a.open_segment == 0 && a.maps[1].start_block == 0);
 	CHECK(write_raw(3) == 0 && a.maps[3].start_block == 1);
 	/* Rotate a third time, now from the formerly reserved segment2.
 	 * Neither reserve segment3 nor another reserve may be a victim. */
-	CHECK(relocate_only_live_page(0, 2) == 0);
+	CHECK(relocate_all_live_pages(2) == 0);
 	CHECK(roles[2] == 0 && roles[1] == 1);
 	CHECK(a.open_segment == 1 && a.maps[0].start_block == 256);
 	CHECK(a.maps[1].valid && a.maps[1].start_block == 0);
@@ -122,20 +128,22 @@ static int test_failed_handoff_does_not_change_roles(void)
 	sv3_u32 saved;
 
 	CHECK(setup() == 0);
-	CHECK(write_raw(0) == 0);
+	for (unsigned int i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+		CHECK(write_raw(0) == 0);
 	CHECK(write_raw(1) == 0);
 	saved = maps[0].start_block;
-	CHECK(sv3_gc_begin_rotation(&a, 0) == -EINVAL); /* OPEN protected */
-	/* Normal writes must not enter segments2/3 even if they are empty. */
-	CHECK(a.next_block == 2);
-	/* A foreground relocation from a dead candidate must not
-	 * silently exchange the roles while source still has a live map. */
-	CHECK(sv3_gc_begin_rotation(&a, 1) == 0);
+	CHECK(sv3_gc_begin_rotation(&a, 1) == -EINVAL); /* OPEN protected */
+	/* Normal writes never enter segments2/3 when they are reserved. */
+	CHECK(a.next_block == 257);
+	/* Start GC of foreground segment0 but do NOT relocate its live
+	 * page0. Even a staged/aborted reserve write cannot permit the
+	 * source victim to become foreground reusable. */
+	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
 	CHECK(sv3_stage(&a, &page, 1, 1, &tx) == 0);
 	CHECK(tx.start_block >= 512 && tx.start_block < 768);
 	CHECK(sv3_abort(&a, &tx) == 0);
-	CHECK(sv3_gc_commit_rotation(&a, 1) == -EUCLEAN);
-	CHECK(roles[1] == 1 && roles[2] == 0);
+	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(roles[0] == 1 && roles[2] == 0);
 	CHECK(maps[0].start_block == saved && live[saved]);
 	return 0;
 }
