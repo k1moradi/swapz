@@ -1,0 +1,73 @@
+name: Experimental V3 aligned extent codec
+
+on:
+  pull_request:
+    paths:
+      - 'kernel/extent-v3/**'
+      - 'tests/runtime/extent-v3-codec-test.c'
+      - 'tests/runtime/extent-v3-authority-test.c'
+      - 'tests/runtime/extent-v3-engine-test.c'
+      - '.github/workflows/extent-v3-codec.yml'
+  push:
+    branches:
+      - feat/kernel-v3-aligned-extent-codec
+
+permissions:
+  contents: read
+
+jobs:
+  exact-c:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and execute exact V3 kernel codec C with sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-codec-test.c kernel/extent-v3/codec.c \
+            -o "$RUNNER_TEMP/sv3-codec-test"
+          "$RUNNER_TEMP/sv3-codec-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-authority-test.c \
+            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
+            -o "$RUNNER_TEMP/sv3-authority-test"
+          "$RUNNER_TEMP/sv3-authority-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-engine-test.c \
+            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
+            kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-engine-test"
+          "$RUNNER_TEMP/sv3-engine-test"
+          git diff --check
+
+  compile-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install distribution headers without loading anything
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            build-essential linux-headers-generic-hwe-24.04
+      - name: Compile research module W=1 without touching existing swapz
+        shell: bash
+        run: |
+          set -euo pipefail
+          KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
+          test -n "$KDIR"
+          echo "SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "CODEC_BLOB=$(git rev-parse HEAD:kernel/extent-v3/codec.c)"
+          make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
+          test -s kernel/extent-v3/swapz_extent_v3.ko
+          sha256sum kernel/extent-v3/swapz_extent_v3.ko
+          echo "COMPILE_ONLY; NO MODULE LOAD"
