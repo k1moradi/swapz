@@ -1,3 +1,28 @@
+# Current development: V3.0.0-alpha.1 production Device Mapper target (PR #45)
+
+The active `dm-swapz3.ko` (target name `swapz3`) is built from
+`kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and
+packing engine. It now includes **experimental low-live 1MiB segment
+relocation**, using compressed-object size regrouping and raw 4KiB fallback.
+A victim is never marked reusable until a final full mapping/refcount scan
+proves it entirely dead. Foreground ENOSPC retries only the uncommitted
+logical write prefix, bounded to four GC attempts per write window. Shared
+physical extents are protected by whole-range discard preflight and
+one-lock BIO admission/drain.
+
+**Safety gate:** This is not yet a qualified system swap target. Current CI
+is exact-C source/mocked lower I/O and a **compile-only** `dm-swapz3.ko`
+build. No loaded V3 kernel swap, actual null_blk GC churn, SD-card write, fio
+p99 or long-lived fault injection has been independently verified. Do not
+run it on `/dev/sdb1`, the system swap or an unrelated device until the
+loaded-target test procedures and teardown guards pass. Absolute no reboot.
+
+The older sections below document the initial memory-only codec research
+milestone, which remains available as `SV3_BUILD_SMOKE=1`. They are
+**historical** and do not override [V3_GOALS.md](../../V3_GOALS.md).
+
+---
+
 # Main-developer V3 aligned extent prototype — kernel C
 
 **Draft research prototype. NOT a production swap device, NOT yet a DM target.**
