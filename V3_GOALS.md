@@ -90,6 +90,8 @@ ratio or physical writes alone. A device whose minimum read is one physical
   until crash-consistent durable metadata, boot/resume and power-loss tests
   are independently qualified.
 
+The current release-blocking qualification checklist is [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md), not a claimed alpha.2 production approval.
+
 ## Hard exit gates (do not imply success merely from CI)
 
 **M1 — codec + transaction core.** Versioned 4/8/16KiB bytes, CRC32C,
