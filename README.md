@@ -1,17 +1,31 @@
 # swapz: V3.0.0-alpha.1 development
 
-The **active project direction** is **zsmalloc-inspired size-aware object
-reordering and compaction measured in actual physical 4 KiB I/O units**.
-See [V3_GOALS.md](V3_GOALS.md) for the authoritative goals, version decision,
-safety gates and the remaining production work.
+> **Project vision:** the ultimate success criterion is **fewer measured
+> lower-device 4 KiB-equivalent reads and writes** on SD cards, SSDs and
+> HDDs **under the same verified swap workload** — without sacrificing
+> correct data, cold swap-in latency or safe GC. **Passing tests or achieving
+> a better simulated compression ratio does not prove an I/O win.**
+
+Read [VISION.md](VISION.md) for the detailed definition of real I/O savings,
+the difference between 4 KiB-equivalent transferred blocks and request
+counts, read/write/GC tradeoffs, evidence requirements, and go/no-go rules.
+[V3_GOALS.md](V3_GOALS.md) defines the active technical milestones and
+version decision.
+
+The **active implementation direction** is zsmalloc-inspired object-size
+classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
+extents when useful, and live-only size-classed compaction.
 
 A separate experimental Device Mapper target, `swapz3`
 (`kernel/extent-v3/dm-swapz3.ko`), is being developed for LZ4
 4 KiB logical pages, bounded size-compatible 4 KiB packing and aligned
 8/16 KiB extents to remove the uniform ~2,072-byte compression cliff.
-**Current alpha has NO safe physical-segment GC/reuse and must not be used
-for sustained system swap, the SD-card benchmark, or unattended activation.**
-Rootless and compilation evidence is not live loaded-target qualification.
+**Current alpha includes experimental physical-segment GC code, but its
+live-record relocation/reuse has NOT passed independent loaded-kernel
+validation; it must not be used for sustained system swap, the SD-card
+benchmark, or unattended activation.** The target deliberately accepts
+owned `null_blk` backing only. Rootless tests and kernel compilation do
+not establish loaded-target correctness or physical-media improvement.
 
 **V2.2 below is preserved as the matched control**, not the active algorithm
 roadmap. Its `dm-swapz.ko`, on-disk `SPWZ` and DKMS `0.2.2` identifiers
