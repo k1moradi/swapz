@@ -8,6 +8,7 @@ on:
       - 'tests/runtime/extent-v3-authority-test.c'
       - 'tests/runtime/extent-v3-tx-snapshot-test.c'
       - 'tests/runtime/extent-v3-write-verify-test.c'
+      - 'tests/runtime/extent-v3-dead-segment-test.c'
       - 'tests/runtime/extent-v3-engine-test.c'
       - '.github/workflows/extent-v3-codec.yml'
   push:
@@ -57,6 +58,13 @@ jobs:
           cc -std=c11 -O1 -g -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I kernel/extent-v3 \
+            tests/runtime/extent-v3-dead-segment-test.c \
+            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
+            -o "$RUNNER_TEMP/sv3-dead-segment-test"
+          "$RUNNER_TEMP/sv3-dead-segment-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
             tests/runtime/extent-v3-engine-test.c \
             kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
             kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-engine-test"
@@ -85,5 +93,7 @@ jobs:
           echo "CODEC_BLOB=$(git rev-parse HEAD:kernel/extent-v3/codec.c)"
           make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
           test -s kernel/extent-v3/swapz_extent_v3.ko
+          test -s kernel/extent-v3/dm-swapz3.ko
+          sha256sum kernel/extent-v3/dm-swapz3.ko
           sha256sum kernel/extent-v3/swapz_extent_v3.ko
           echo "COMPILE_ONLY; NO MODULE LOAD"
