@@ -1,0 +1,5 @@
+write page=0 n=-1 errno=5
+VERIFY_ALL phase=initial pages=1024 bytes=4194304 PASS
+PHASE initial complete
+VERIFY_ALL phase=sparse-overwrite pages=1024 bytes=4194304 PASS
+PHASE sparse-overwrite complete

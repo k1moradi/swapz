@@ -1,0 +1,78 @@
+[Sun Oct 11 00:31:50 2026] dm_swapz: loading out-of-tree module taints kernel.
+[Sun Oct 11 00:31:50 2026] dm_swapz: module verification failed: signature and/or required key missing - tainting kernel
+[Mon Oct 12 05:23:29 2026] null_blk: disk swapz3v3-codex-20261012-01 created
+[Mon Oct 12 05:23:57 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created
+[Mon Oct 12 05:24:20 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:32:12 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:32:40 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:36:30 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:40:58 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:42:06 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:47:30 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 24 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:47:30 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 3, async page read
+[Mon Oct 12 05:47:30 2026]  nullb_swapz3_codex_20261012_01: unable to read partition table
+[Mon Oct 12 05:47:30 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created
+[Mon Oct 12 05:47:30 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=16 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:47:30 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 16 op 0x1:(WRITE) flags 0x1000800 phys_seg 1 prio class 2
+[Mon Oct 12 05:47:30 2026] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[Mon Oct 12 05:48:07 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 24 op 0x0:(READ) flags 0x800 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] Dev nullb_swapz3_codex_20261012_01: unable to read RDB block 0
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[Mon Oct 12 05:52:09 2026] Buffer I/O error on dev nullb_swapz3_codex_20261012_01, logical block 0, async page read
+[Mon Oct 12 05:52:09 2026]  nullb_swapz3_codex_20261012_01: unable to read partition table
+[Mon Oct 12 05:52:09 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created
+[Mon Oct 12 05:52:09 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:52:09 2026] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[Mon Oct 12 05:52:36 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created
+[Mon Oct 12 05:52:36 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:52:41 2026] device-mapper: swapz3: V3 alpha: lower or mapping error -74; rejecting subsequent I/O
+[Mon Oct 12 05:53:29 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:53:29 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x1000800 phys_seg 1 prio class 2
+[Mon Oct 12 05:53:29 2026] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[Mon Oct 12 05:53:48 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:53:50 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 0 op 0x0:(READ) flags 0x1000800 phys_seg 1 prio class 2
+[Mon Oct 12 05:53:50 2026] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[Mon Oct 12 05:55:45 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=1 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:55:49 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=2 LIVE GC EXPERIMENTAL
+[Mon Oct 12 05:55:54 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=3 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:02:29 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=3 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:02:34 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=2 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:02:39 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=1 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:02:44 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:05:24 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:05:29 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=1 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:05:34 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=2 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:05:40 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=3 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:15:44 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:15:54 2026] workqueue: sv3_worker [dm_swapz3] hogged CPU for >10000us 4 times, consider switching to WQ_UNBOUND
+[Mon Oct 12 06:15:54 2026] workqueue: sv3_worker [dm_swapz3] hogged CPU for >10000us 5 times, consider switching to WQ_UNBOUND
+[Mon Oct 12 06:15:54 2026] workqueue: sv3_worker [dm_swapz3] hogged CPU for >10000us 7 times, consider switching to WQ_UNBOUND
+[Mon Oct 12 06:15:55 2026] workqueue: sv3_worker [dm_swapz3] hogged CPU for >10000us 11 times, consider switching to WQ_UNBOUND
+[Mon Oct 12 06:15:56 2026] workqueue: sv3_worker [dm_swapz3] hogged CPU for >10000us 19 times, consider switching to WQ_UNBOUND
+[Mon Oct 12 06:23:34 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created
+[Mon Oct 12 06:23:59 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:24:13 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:24:18 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:27:54 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created
+[Mon Oct 12 06:27:54 2026] device-mapper: swapz3: V3 alpha 3.0.0-alpha.1 logical_pages=1024 physical_blocks=2048 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[Mon Oct 12 06:27:54 2026] I/O error, dev nullb_swapz3_codex_20261012_01, sector 12288 op 0x1:(WRITE) flags 0x1000800 phys_seg 1 prio class 2
+[Mon Oct 12 06:27:54 2026] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[Mon Oct 12 06:28:52 2026] null_blk: disk nullb_swapz3_codex_20261012_01 created

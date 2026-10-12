@@ -1,0 +1,11 @@
+VERIFY_ALL phase=initial pages=1024 bytes=4194304 PASS
+PHASE initial complete
+VERIFY_ALL phase=sparse-overwrite pages=1024 bytes=4194304 PASS
+PHASE sparse-overwrite complete
+VERIFY_ALL phase=gc1 pages=1024 bytes=4194304 PASS
+PHASE gc1 trigger and readback complete
+VERIFY_ALL phase=fill-victim pages=1024 bytes=4194304 PASS
+PHASE refill after gc1 complete
+VERIFY_ALL phase=gc2 pages=1024 bytes=4194304 PASS
+PHASE gc2 trigger and readback complete
+GC_COMPRESSED_WORKLOAD_PASS

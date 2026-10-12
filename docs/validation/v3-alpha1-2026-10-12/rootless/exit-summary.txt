@@ -1,0 +1,1 @@
+all_rootless_commands_exit=0

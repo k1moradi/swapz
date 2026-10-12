@@ -1,0 +1,4 @@
+PR #45 exact source commit CI:
+Rootless combined source qualification: https://github.com/k1moradi/swapz/actions/runs/38237178923 PASS
+Experimental V3 aligned extent codec: https://github.com/k1moradi/swapz/actions/runs/38237178867 PASS
+Rootless teardown safety: https://github.com/k1moradi/swapz/actions/runs/38237178891 PASS

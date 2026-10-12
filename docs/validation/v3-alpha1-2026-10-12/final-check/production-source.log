@@ -1,0 +1,13 @@
+test_allocation_has_gc_reserve_and_fail_closed_reuse (__main__.V3ProductionSourceQualification.test_allocation_has_gc_reserve_and_fail_closed_reuse) ... ok
+test_alpha_rejects_all_physical_devices (__main__.V3ProductionSourceQualification.test_alpha_rejects_all_physical_devices) ... ok
+test_discard_validates_entire_range_before_mutating (__main__.V3ProductionSourceQualification.test_discard_validates_entire_range_before_mutating) ... ok
+test_fua_acknowledged_only_after_flush (__main__.V3ProductionSourceQualification.test_fua_acknowledged_only_after_flush) ... ok
+test_gc_does_not_consume_or_complete_upper_bios (__main__.V3ProductionSourceQualification.test_gc_does_not_consume_or_complete_upper_bios) ... ok
+test_map_and_teardown_are_owned (__main__.V3ProductionSourceQualification.test_map_and_teardown_are_owned) ... ok
+test_real_v3_not_memory_smoke (__main__.V3ProductionSourceQualification.test_real_v3_not_memory_smoke) ... ok
+test_separate_target_and_3_0_alpha_version (__main__.V3ProductionSourceQualification.test_separate_target_and_3_0_alpha_version) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.011s
+
+OK

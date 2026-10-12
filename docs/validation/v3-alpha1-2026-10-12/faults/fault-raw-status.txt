@@ -1,0 +1,1 @@
+0 8192 swapz3 version=3.0.0-alpha.1 mode=alpha-no-gc logical_write=0 logical_read=122880 physical_write=0 physical_write_reqs=0 physical_read=0 physical_read_reqs=0 compressed=0 raw=0 discarded=0 windows=0 reordered=0 cursor=1 reserve=512 gc_victims=0 gc_pages=0 gc_read=0 gc_write=0 dead_segment_reuses=0 write_verify_blocks=0 failed=1 error=-5

@@ -1,0 +1,1051 @@
+{
+  "alignment_gaps": [
+    17,
+    31
+  ],
+  "cursor_blocks": 34,
+  "device": "/dev/nullb_swapz3_codex_20261012_01",
+  "dump_sha256": "182143361f23b1a6b5081e3cbd397d1ff9fdcd89e520a2082fd27aed7fe201ac",
+  "extent_blocks": 32,
+  "extent_count": 26,
+  "extents": [
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 0,
+          "payload_crc32c": "018b170e",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 8,
+          "payload_crc32c": "0d0ddb3b",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 1,
+      "start_block": 0
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 1,
+          "payload_crc32c": "aff6a504",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 9,
+          "payload_crc32c": "d11db389",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 2,
+      "start_block": 1
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 2,
+          "payload_crc32c": "9062633e",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 10,
+          "payload_crc32c": "49d301a6",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 3,
+      "start_block": 2
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 3,
+          "payload_crc32c": "fee7f952",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 11,
+          "payload_crc32c": "15ed7999",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 4,
+      "start_block": 3
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 4,
+          "payload_crc32c": "c1733f68",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 12,
+          "payload_crc32c": "8d23cbb6",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 5,
+      "start_block": 4
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 5,
+          "payload_crc32c": "6f0e8d62",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 13,
+          "payload_crc32c": "5133a304",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 6,
+      "start_block": 5
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 6,
+          "payload_crc32c": "509a4b58",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 14,
+          "payload_crc32c": "c9fd112b",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 7,
+      "start_block": 6
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 7,
+          "payload_crc32c": "b4c098e1",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 15,
+          "payload_crc32c": "766e99cd",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "clustered",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 8,
+      "start_block": 7
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 16,
+          "payload_crc32c": "722a6496",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 17,
+          "payload_crc32c": "9bd30128",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 9,
+      "start_block": 8
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 18,
+          "payload_crc32c": "e3c310a6",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 19,
+          "payload_crc32c": "5f23cb38",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 10,
+      "start_block": 9
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 20,
+          "payload_crc32c": "b2d24cf0",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 21,
+          "payload_crc32c": "1bfd11a5",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 11,
+      "start_block": 10
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 22,
+          "payload_crc32c": "233b38c0",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 23,
+          "payload_crc32c": "741ea704",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 12,
+      "start_block": 11
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 24,
+          "payload_crc32c": "f8f52d43",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 25,
+          "payload_crc32c": "30c07d99",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 13,
+      "start_block": 12
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 26,
+          "payload_crc32c": "691c5973",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 29,
+          "payload_crc32c": "b0ee6d14",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 14,
+      "start_block": 13
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 28,
+          "payload_crc32c": "380d0525",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 31,
+          "payload_crc32c": "97b357dd",
+          "payload_length": 1623,
+          "payload_offset": 249,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 15,
+      "start_block": 14
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 2,
+      "read_requests": 2,
+      "record_count": 2,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 30,
+          "payload_crc32c": "a9e47115",
+          "payload_length": 2224,
+          "payload_offset": 1872,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 27,
+          "payload_crc32c": "a73b8e6f",
+          "payload_length": 1622,
+          "payload_offset": 250,
+          "phase": "alternating",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 16,
+      "start_block": 15
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 1,
+      "read_requests": 1,
+      "record_count": 1,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 32,
+          "payload_crc32c": "79ff2d46",
+          "payload_length": 2082,
+          "payload_offset": 2014,
+          "phase": "uniform50",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 17,
+      "start_block": 16
+    },
+    {
+      "class_blocks": 2,
+      "read_blocks": 5,
+      "read_requests": 5,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 33,
+          "payload_crc32c": "6b64ddfa",
+          "payload_length": 2082,
+          "payload_offset": 6110,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 34,
+          "payload_crc32c": "a51b2e99",
+          "payload_length": 2082,
+          "payload_offset": 4028,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 35,
+          "payload_crc32c": "bb157397",
+          "payload_length": 2082,
+          "payload_offset": 1946,
+          "phase": "uniform50",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 18,
+      "start_block": 18
+    },
+    {
+      "class_blocks": 2,
+      "read_blocks": 5,
+      "read_requests": 5,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 36,
+          "payload_crc32c": "756a80f4",
+          "payload_length": 2082,
+          "payload_offset": 6110,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 37,
+          "payload_crc32c": "67f17048",
+          "payload_length": 2082,
+          "payload_offset": 4028,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 38,
+          "payload_crc32c": "a98e832b",
+          "payload_length": 2082,
+          "payload_offset": 1946,
+          "phase": "uniform50",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 19,
+      "start_block": 20
+    },
+    {
+      "class_blocks": 2,
+      "read_blocks": 5,
+      "read_requests": 5,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 39,
+          "payload_crc32c": "739f6428",
+          "payload_length": 2082,
+          "payload_offset": 6110,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 40,
+          "payload_crc32c": "bde0974b",
+          "payload_length": 2082,
+          "payload_offset": 4028,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 41,
+          "payload_crc32c": "af7b67f7",
+          "payload_length": 2082,
+          "payload_offset": 1946,
+          "phase": "uniform50",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 20,
+      "start_block": 22
+    },
+    {
+      "class_blocks": 2,
+      "read_blocks": 5,
+      "read_requests": 5,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 42,
+          "payload_crc32c": "61049494",
+          "payload_length": 2082,
+          "payload_offset": 6110,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 43,
+          "payload_crc32c": "7f0ac99a",
+          "payload_length": 2082,
+          "payload_offset": 4028,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 44,
+          "payload_crc32c": "b1753af9",
+          "payload_length": 2082,
+          "payload_offset": 1946,
+          "phase": "uniform50",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 21,
+      "start_block": 24
+    },
+    {
+      "class_blocks": 2,
+      "read_blocks": 5,
+      "read_requests": 5,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 45,
+          "payload_crc32c": "a3eeca45",
+          "payload_length": 2082,
+          "payload_offset": 6110,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 46,
+          "payload_crc32c": "6d913926",
+          "payload_length": 2082,
+          "payload_offset": 4028,
+          "phase": "uniform50",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 47,
+          "payload_crc32c": "77f338b1",
+          "payload_length": 2082,
+          "payload_offset": 1946,
+          "phase": "uniform50",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 22,
+      "start_block": 26
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 3,
+      "read_requests": 3,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 48,
+          "payload_crc32c": "821324cf",
+          "payload_length": 1055,
+          "payload_offset": 3041,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 49,
+          "payload_crc32c": "ad175164",
+          "payload_length": 1055,
+          "payload_offset": 1986,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 50,
+          "payload_crc32c": "d4ace766",
+          "payload_length": 1055,
+          "payload_offset": 931,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 23,
+      "start_block": 28
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 3,
+      "read_requests": 3,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 51,
+          "payload_crc32c": "bb5be934",
+          "payload_length": 1055,
+          "payload_offset": 3041,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 52,
+          "payload_crc32c": "c2e05f36",
+          "payload_length": 1055,
+          "payload_offset": 1986,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 53,
+          "payload_crc32c": "ede42a9d",
+          "payload_length": 1055,
+          "payload_offset": 931,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 24,
+      "start_block": 29
+    },
+    {
+      "class_blocks": 1,
+      "read_blocks": 3,
+      "read_requests": 3,
+      "record_count": 3,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 54,
+          "payload_crc32c": "945f9c9f",
+          "payload_length": 1055,
+          "payload_offset": 3041,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 55,
+          "payload_crc32c": "9e9569c3",
+          "payload_length": 1055,
+          "payload_offset": 1986,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 56,
+          "payload_crc32c": "e72edfc1",
+          "payload_length": 1055,
+          "payload_offset": 931,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 25,
+      "start_block": 30
+    },
+    {
+      "class_blocks": 2,
+      "read_blocks": 11,
+      "read_requests": 11,
+      "record_count": 7,
+      "records": [
+        {
+          "generation": 1,
+          "logical_page": 57,
+          "payload_crc32c": "c82aaa6a",
+          "payload_length": 1055,
+          "payload_offset": 7137,
+          "phase": "uniform75",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 58,
+          "payload_crc32c": "b1911c68",
+          "payload_length": 1055,
+          "payload_offset": 6082,
+          "phase": "uniform75",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 59,
+          "payload_crc32c": "de66123a",
+          "payload_length": 1055,
+          "payload_offset": 5027,
+          "phase": "uniform75",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 60,
+          "payload_crc32c": "a7dda438",
+          "payload_length": 1055,
+          "payload_offset": 3972,
+          "phase": "uniform75",
+          "predicted_read_blocks": 2,
+          "predicted_read_requests": 2
+        },
+        {
+          "generation": 1,
+          "logical_page": 61,
+          "payload_crc32c": "88d9d193",
+          "payload_length": 1055,
+          "payload_offset": 2917,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 62,
+          "payload_crc32c": "f1626791",
+          "payload_length": 1055,
+          "payload_offset": 1862,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        },
+        {
+          "generation": 1,
+          "logical_page": 63,
+          "payload_crc32c": "a2f2b343",
+          "payload_length": 1055,
+          "payload_offset": 807,
+          "phase": "uniform75",
+          "predicted_read_blocks": 1,
+          "predicted_read_requests": 1
+        }
+      ],
+      "sequence": 26,
+      "start_block": 32
+    }
+  ],
+  "predicted_read_blocks": 78,
+  "predicted_read_requests": 78,
+  "summary": {
+    "alternating": {
+      "classes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "extent_count": 8,
+      "payload_lengths": [
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1622
+      ],
+      "physical_blocks": 8,
+      "predicted_read_blocks": 16,
+      "predicted_read_requests": 16,
+      "records": 16
+    },
+    "clustered": {
+      "classes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "extent_count": 8,
+      "payload_lengths": [
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623,
+        2224,
+        1623
+      ],
+      "physical_blocks": 8,
+      "predicted_read_blocks": 16,
+      "predicted_read_requests": 16,
+      "records": 16
+    },
+    "uniform50": {
+      "classes": [
+        1,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "extent_count": 6,
+      "payload_lengths": [
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082,
+        2082
+      ],
+      "physical_blocks": 11,
+      "predicted_read_blocks": 26,
+      "predicted_read_requests": 26,
+      "records": 16
+    },
+    "uniform75": {
+      "classes": [
+        1,
+        1,
+        1,
+        2
+      ],
+      "extent_count": 4,
+      "payload_lengths": [
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055,
+        1055
+      ],
+      "physical_blocks": 5,
+      "predicted_read_blocks": 20,
+      "predicted_read_requests": 20,
+      "records": 16
+    }
+  }
+}

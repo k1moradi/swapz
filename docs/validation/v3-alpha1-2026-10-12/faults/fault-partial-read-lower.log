@@ -1,0 +1,4 @@
+LOWER_BLOCK block=0 bytes=4096 magic=SWZ3
+LOWER_BLOCK block=1 bytes=4096 magic=Þ\`
+LOWER_BLOCK block=2 bytes=4096 magic=SWZ3
+LOWER_BLOCK block=3 bytes=-1 magic=----

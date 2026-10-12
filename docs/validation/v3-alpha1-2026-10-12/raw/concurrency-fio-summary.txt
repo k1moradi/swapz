@@ -1,0 +1,7 @@
+job=reader error=0 read_bytes=596590592 read_ios=145652 read_iops=48534.49 write_bytes=0 write_ios=0 write_iops=0.00 runtime_ms=3001
+  read_clat_ns p50=64256 p95=114176 p99=191488
+  verify=None
+job=writer error=0 read_bytes=262144 read_ios=64 read_iops=21333.33 write_bytes=262144 write_ios=64 write_iops=12800.00 runtime_ms=5
+  read_clat_ns p50=75264 p95=610304 p99=626688
+  write_clat_ns p50=168960 p95=823296 p99=831488
+  verify=None

@@ -1,0 +1,7 @@
+cwd=/tmp/swapz-pr45-validate
+compile_exit=0
+compile_command=cc -std=c11 -O0 -g -Wall -Wextra -Werror -I kernel/extent-v3 tests/runtime/extent-v3-write-verify-test.c kernel/extent-v3/engine.c kernel/extent-v3/authority.c kernel/extent-v3/codec.c -o /tmp/swapz-pr45-evidence/variant-binaries/gcc-o0-write-verify
+
+
+run_exit=0
+SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7
