@@ -70,6 +70,25 @@ static int test_io_aware_cost_corrects_loaded_gc_counterexample(void)
 	return 0;
 }
 
+static int test_reclaim_headroom_preflight(void)
+{
+	const sv3_u32 capacity = SV3_SEGMENT_BLOCKS * SV3_BLOCK_BYTES;
+
+	CHECK(!sv3_gc_has_possible_headroom(0));
+	CHECK(sv3_gc_has_possible_headroom(4096));
+	CHECK(sv3_gc_has_possible_headroom(capacity - 1));
+	CHECK(!sv3_gc_has_possible_headroom(capacity));
+	CHECK(!sv3_gc_has_possible_headroom(capacity + 4096));
+	/* 256 distinct raw pages each use a complete 4KiB container,
+	 * so moving them into one 1MiB reserve cannot free a single block.
+	 * Avoid wasting 256 reads+256 writes before inevitable ENOSPC. */
+	CHECK(!sv3_gc_has_possible_headroom(
+	      SV3_SEGMENT_BLOCKS * sv3_gc_live_byte_cost(
+		      &(struct sv3_map){ .valid=1, .raw=1,
+				   .extent_blocks=1, .payload_length=4096 })));
+	return 0;
+}
+
 static int test_raw_and_invalid_cost(void)
 {
 	struct sv3_map m = { .valid = 1, .raw = 1,
@@ -127,6 +146,7 @@ int main(void)
 	CHECK(test_raw_and_invalid_cost() == 0); passed++;
 	CHECK(test_exact_committed_payload_lengths() == 0); passed++;
 	CHECK(test_io_aware_cost_corrects_loaded_gc_counterexample() == 0); passed++;
+	CHECK(test_reclaim_headroom_preflight() == 0); passed++;
 	printf("SV3_GC_COST_TESTS_PASS=%d\n", passed);
 	return 0;
 }
