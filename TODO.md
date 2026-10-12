@@ -1,3 +1,30 @@
+## NOW: V3.0.0-alpha.1 — physical 4 KiB I/O density
+
+Authoritative scope: [V3_GOALS.md](V3_GOALS.md). The older V2.x task list
+below is preserved for comparison/maintenance, **not the active milestone**.
+
+- [x] Implement versioned 4/8/16 KiB SWZ3 extent codec with CRC32C.
+- [x] Implement immutable staged transaction authority; reject forged
+      records, torn completions and stale generations.
+- [x] Implement bounded adaptive classes and optional physical-read budget.
+- [x] Add main-developer real experimental `swapz3` Device Mapper target
+      source: LZ4, bounded reorder, raw pages, selective reads, upper discard,
+      flush/FUA and synchronous lower DM I/O. **Compilation != host pass**.
+- [ ] Verify direct Device Mapper target's exact loaded module/source SHA,
+      read/write/FUA/discard/lifecycle integrity on disposable `null_blk`.
+- [ ] Complete **physical segment recycling / bounded live-only GC** before
+      any sustained system-swap or physical SD-card test.
+- [ ] Prove GC liveness, generation/CRC, reader ownership, flush-before-reuse,
+      failure/quarantine and reserve safety with actual completed bytes.
+- [ ] Validate low-QD mixed and uniform ~2072B fio with matched achieved
+      reader IOPS and cold-read p99, including GC overhead.
+- [ ] Add independently guarded SD-only hardware harness, preserving
+      active swap and absolute NO REBOOT restriction.
+- [ ] Qualify V3 release, packaging and activation separately from V2.2.
+- [ ] Keep persistent hibernation for V4, not V3.
+
+---
+
 # swapz TODO\n\nSee `ROADMAP.md` for version boundaries and `VALIDATION.md` for completed evidence.\n\n## Now — V2.2 performance characterization\n\nCorrectness baseline: `v2.2-correctness-pass` @ `0f40f52956ff0b4ffc18549b916a54ce55847c02`.\n\n### Verify permanent harness cleanup\n\n- [x] Pull current `main` (verified at focused retest; recheck for each new campaign).\n- [x] Run `tests/runtime/staged-rewrite-fault.sh` with the checked-in deterministic incompressible replacement.\n- [x] Run `tests/runtime/staged-write-fault.sh` on the host's built-in DM error target.\n- [x] Run `SWAPZ_LONG_STRATEGY=staged tests/runtime/correctness.sh` without temporary edits.\n- [x] Confirm no test-owned DM/loop state remains after PASS.\n\n### Benchmark backend follow-up
 
 - [ ] Treat the 20 MiB/s `null_blk mbps` backend as valid only within its per-tick request budget.
