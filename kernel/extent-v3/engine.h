@@ -39,6 +39,12 @@ struct sv3_engine {
 	 * This tests immediate write/read consistency, not power-loss durability.
 	 */
 	int verify_after_write;
+	/*
+	 * 0 = byte-minimal planner; 1..3 = physical 4KiB read blocks per
+	 * compressed record, including uncached metadata block zero.
+	 * This is a planning policy, not a hardware latency guarantee.
+	 */
+	sv3_u8 max_read_blocks_per_record;
 	sv3_u32 write_verify_read_blocks;
 	sv3_u32 submitted_blocks;
 	sv3_u32 completed_blocks;
@@ -49,6 +55,10 @@ struct sv3_engine {
 int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 		    sv3_u8 *classes, sv3_u8 *records_per_extent,
 		    sv3_u8 *extent_count);
+int sv3_engine_plan_bounded(const struct sv3_compressed_page *pages,
+			    sv3_u8 count, sv3_u8 max_read_blocks,
+			    sv3_u8 *classes, sv3_u8 *records_per_extent,
+			    sv3_u8 *extent_count);
 /*
  * Partial failure returns a nonzero status and sets *committed_pages to
  * exactly the prefix whose complete extents became authoritative. It NEVER

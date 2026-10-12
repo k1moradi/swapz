@@ -306,6 +306,61 @@ static int test_lower_read_failure_does_not_fake_bytes(void)
 	return 0;
 }
 
+/*
+ * Force the actual planner and full read path to honor a cold-read cap.
+ * Unlike read-cost tie-breaking, this permits an explicit write/read
+ * tradeoff for a latency-sensitive host.
+ */
+static int test_read_budget_tradeoff_on_uniform_2072(void)
+{
+	struct sv3_compressed_page pages[16];
+	sv3_u8 planned[SV3_MAX_RECORDS], takes[SV3_MAX_RECORDS], groups;
+	sv3_u8 committed, output[3568];
+	sv3_u16 length;
+	sv3_u32 class_blocks, i, j;
+	sv3_u8 cap;
+
+	prepare(pages, 16, 0, 0);
+	CHECK(sv3_engine_plan_bounded(pages, 16, 4, planned,
+				      takes, &groups) == -EINVAL);
+	for (cap = 0; cap <= 3; ++cap) {
+		CHECK(setup() == 0);
+		prepare(pages, 16, 0, 0);
+		engine.max_read_blocks_per_record = cap;
+		CHECK(sv3_engine_plan_bounded(pages, 16, cap, planned,
+					      takes, &groups) == 0);
+		class_blocks = 0;
+		j = 0;
+		for (i = 0; i < groups; ++i) {
+			CHECK(planned[i] == 1 || planned[i] == 2 ||
+			      planned[i] == 4);
+			class_blocks += planned[i];
+			j += takes[i];
+		}
+		CHECK(j == 16);
+		committed = 99;
+		CHECK(sv3_engine_write_window(&engine, pages, 16,
+					      &committed) == 0);
+		CHECK(committed == 16);
+		CHECK(disk.write_blocks == class_blocks);
+		for (i = 0; i < 16; ++i) {
+			disk.read_blocks = 0;
+			CHECK(sv3_engine_read_page(&engine, i, output,
+						   sizeof(output), &length) == 0);
+			CHECK(length == 2072);
+			CHECK(!memcmp(output, originals[i], length));
+			CHECK(!cap || disk.read_blocks <= cap);
+		}
+		if (cap == 0 || cap == 3)
+			CHECK(class_blocks == 10);
+		if (cap == 1)
+			CHECK(class_blocks == 16);
+		if (cap == 2)
+			CHECK(class_blocks == 11);
+	}
+	return 0;
+}
+
 int main(void)
 {
 	int completed = 0;
@@ -319,6 +374,7 @@ int main(void)
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
+	CHECK(test_read_budget_tradeoff_on_uniform_2072() == 0); completed++;
 	free(disk.storage);
 	printf("SV3_EXACT_ENGINE_TESTS_PASS=%d\n", completed);
 	return 0;
