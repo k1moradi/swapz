@@ -49,6 +49,22 @@ static inline sv3_u32 sv3_gc_estimated_io_cost(const struct sv3_map *m)
 	return bytes + reads * SV3_BLOCK_BYTES;
 }
 
+/*
+ * A single 1MiB destination MUST retain some free space for the
+ * blocked foreground write. A lower bound on the relocated object
+ * footprint is the sum of raw page bytes or compressed payloads plus
+ * V3 descriptors. If even that optimistic lower bound fills the whole
+ * destination, no packing heuristic can produce useful reclaim.
+ *
+ * This is a necessary condition, NOT a promise that a candidate with
+ * less data fits after 4/8/16KiB extent/header fragmentation.
+ */
+static inline int sv3_gc_has_possible_headroom(sv3_u32 live_bytes)
+{
+	return live_bytes && live_bytes <
+	       SV3_SEGMENT_BLOCKS * SV3_BLOCK_BYTES;
+}
+
 /* For the selected policy choose lower relocation cost, then fewer
  * records. Stable segment scan order breaks remaining ties. */
 static inline int sv3_gc_prefer(sv3_u32 score, sv3_u16 count,
