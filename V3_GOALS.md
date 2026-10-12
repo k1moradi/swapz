@@ -1,5 +1,41 @@
 # swapz V3 — active project goals (supersedes the old V2.x sequencing)
 
+## Mission and decisive success test
+
+> **The ultimate success criterion is fewer ACTUAL lower-device 4 KiB-equivalent
+> I/O transfers on the SD card, SSD or HDD under a verified workload — not a
+> larger modeled compression ratio, a better synthetic packing density, or
+> more green CI checks.**
+
+Read the complete normative [swapz vision and evidence standard](VISION.md).
+This governs feature priority, comparative benchmarks, PR review and V3
+release decisions.
+
+- **Correctness first:** full 4 KiB logical data readback, safe upper/lower
+  completion and flush ordering, mapping generations, GC, reserve ownership
+  and teardown are mandatory prerequisites, not performance indicators.
+- **Primary physical evidence:** report independently measured lower-device
+  **write and read sector deltas**, converted to aligned 4 KiB-equivalent
+  units, PLUS **read and write request counts**, with **GC traffic included**.
+  One 16 KiB lower command consumes four 4 KiB-equivalent transfer units
+  although it is one command; never conflate the two measures.
+- **Observable performance:** compare achieved useful swap-in/out IOPS,
+  cold-read p95/p99, worker stalls, CPU and RAM costs under matched actual
+  workloads. Extra read blocks, GC rewrites or latency may erase write savings.
+- **Evidence hierarchy:** geometry is a hypothesis, rootless exact-C/CI
+  establishes safety boundaries, owned `null_blk` establishes loaded-kernel
+  behavior, and verified SD/SSD/HDD tests establish whether V3 actually
+  benefits the target device class. Do not silently promote one level into
+  another.
+- **Release decision:** no overall 'winner' unless exact data integrity
+  holds, the measured total lower-I/O frontier improves materially on
+  matched workloads, and swap-in latency/CPU/GC do not regress
+  unacceptably. Preserve V2.2 as control and publish counterexamples.
+
+**Measurement caveat:** 4 KiB is swapz's aligned host-level accounting unit;
+it is not a promise about internal flash NAND program/erase granularity,
+every HDD's physical sector size, or actual flash endurance.
+
 ## Product direction
 
 **Minimize completed lower 4 KiB block writes and reads on slow SD/eMMC,
@@ -101,5 +137,8 @@ source, `.ko`, active mapper and lower-device identity are reconciled.
 
 V3 becomes a user-facing release only when it handles real compressed and
 raw swap pages with long-lived GC, passes exact readback under real device
-fault/pressure conditions and improves the measured completed physical
-4KiB read/write I/O frontier without unacceptable read p99/CPU regressions.
+fault/pressure conditions and **materially improves the independently
+reconciled lower 4 KiB-equivalent read/write I/O frontier including GC** under
+matched achieved load and flush/drain rules, without unacceptable swap-in
+p99, CPU or memory regressions. The detailed go/no-go and inconclusive
+criteria are mandatory in [VISION.md](VISION.md).
