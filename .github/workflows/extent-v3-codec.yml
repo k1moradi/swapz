@@ -16,6 +16,7 @@ on:
       - 'tests/runtime/extent-v3-randomized-engine-test.c'
       - 'tests/runtime/extent-v3-gc-forbidden-test.c'
       - 'tests/runtime/extent-v3-gc-cost-test.c'
+      - 'tests/runtime/extent-v3-flush-test.c'
       - 'tests/runtime/extent-v3-gc-rotation-test.c'
       - 'tests/runtime/extent-v3-gc-engine-rotation-test.c'
       - '.github/workflows/extent-v3-codec.yml'
@@ -107,6 +108,12 @@ jobs:
             kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
             -o "$RUNNER_TEMP/sv3-gc-cost-test"
           "$RUNNER_TEMP/sv3-gc-cost-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-flush-test.c \
+            -o "$RUNNER_TEMP/sv3-flush-test"
+          "$RUNNER_TEMP/sv3-flush-test"
           cc -std=c11 -O1 -g -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I kernel/extent-v3 \
