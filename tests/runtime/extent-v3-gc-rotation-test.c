@@ -234,6 +234,19 @@ static int test_exact_32mib_foreground_progress(void)
 	return 0;
 }
 
+static int test_empty_gc_destination_cannot_rotate_roles(void)
+{
+	CHECK(setup() == 0);
+	/* Calling GC on an otherwise empty foreground source is invalid
+	 * as a progress action: do not turn an untouched empty reserve into
+	 * foreground without actually relocating any survivor. */
+	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
+	CHECK(a.gc_destination == 2 && a.next_block == 512);
+	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(roles[0] == 1 && roles[2] == 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -241,6 +254,7 @@ int main(void)
 	CHECK(test_three_rotations_and_foreground_progress() == 0); passed++;
 	CHECK(test_failed_handoff_does_not_change_roles() == 0); passed++;
 	CHECK(test_exact_32mib_foreground_progress() == 0); passed++;
+	CHECK(test_empty_gc_destination_cannot_rotate_roles() == 0); passed++;
 	printf("SV3_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }
