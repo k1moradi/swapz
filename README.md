@@ -1,3 +1,25 @@
+# swapz: V3.0.0-alpha.1 development
+
+The **active project direction** is **zsmalloc-inspired size-aware object
+reordering and compaction measured in actual physical 4 KiB I/O units**.
+See [V3_GOALS.md](V3_GOALS.md) for the authoritative goals, version decision,
+safety gates and the remaining production work.
+
+A separate experimental Device Mapper target, `swapz3`
+(`kernel/extent-v3/dm-swapz3.ko`), is being developed for LZ4
+4 KiB logical pages, bounded size-compatible 4 KiB packing and aligned
+8/16 KiB extents to remove the uniform ~2,072-byte compression cliff.
+**Current alpha has NO safe physical-segment GC/reuse and must not be used
+for sustained system swap, the SD-card benchmark, or unattended activation.**
+Rootless and compilation evidence is not live loaded-target qualification.
+
+**V2.2 below is preserved as the matched control**, not the active algorithm
+roadmap. Its `dm-swapz.ko`, on-disk `SPWZ` and DKMS `0.2.2` identifiers
+remain distinct from V3 `SWZ3`. No in-place upgrade is supported.
+Persistent hibernation moves to a future separately qualified V4 milestone.
+
+---
+
 # swapz V2.2 (streaming experiment)
 
 `swapz` is an experimental Device Mapper target for **dedicated swap partitions on slow storage**.  It targets old HDDs, USB flash drives, SD/eMMC media, and SATA SSDs where storage bandwidth and flash write endurance matter more than high queue-depth NVMe throughput.

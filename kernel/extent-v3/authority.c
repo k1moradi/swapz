@@ -29,7 +29,8 @@ int sv3_authority_init(struct sv3_authority *a,
 	if (reserve < 2U * SV3_SEGMENT_BLOCKS)
 		reserve = 2U * SV3_SEGMENT_BLOCKS;
 	if (reserve >= physical_blocks ||
-	    logical_pages > physical_blocks - reserve)
+	    logical_pages > ((physical_blocks - reserve) /
+			     SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS)
 		return -ENOSPC;
 
 	memset(a, 0, sizeof(*a));
@@ -44,8 +45,75 @@ int sv3_authority_init(struct sv3_authority *a,
 	a->logical_pages = logical_pages;
 	a->physical_blocks = physical_blocks;
 	a->reserve_blocks = reserve;
+	a->open_segment = ~(sv3_u32)0;
 	a->next_sequence = 1;
 	return 0;
+}
+
+/*
+ * The safe, strictly limited first V3 GC step: reuse only wholly-dead
+ * 1MiB segments.  A live object is NEVER copied or overwritten here.
+ *
+ * Each candidate is checked against BOTH physical live-record counts and
+ * all valid logical mappings, because a corrupt refcount must not cause
+ * silent live-data overwrite.  No segment in the fixed reserve tail is used.
+ * One ordered worker owns maps, segment metadata and the active write.
+ */
+static int sv3_pick_dead_segment(struct sv3_authority *a)
+{
+	sv3_u32 count = (a->physical_blocks - a->reserve_blocks) /
+			SV3_SEGMENT_BLOCKS;
+	sv3_u32 scan;
+
+	if (!count)
+		return -ENOSPC;
+	for (scan = 0; scan < count; ++scan) {
+		sv3_u32 segment = (a->next_segment_probe + scan) % count;
+		sv3_u32 start = segment * SV3_SEGMENT_BLOCKS;
+		sv3_u32 off, logical;
+		int used = 0, blocked = 0;
+
+		for (off = 0; off < SV3_SEGMENT_BLOCKS; ++off) {
+			if (a->live_records[start + off]) {
+				blocked = 1;
+				break;
+			}
+			if (a->extent_classes[start + off])
+				used = 1;
+		}
+		if (blocked)
+			continue;
+		for (logical = 0; logical < a->logical_pages; ++logical) {
+			const struct sv3_map *map = &a->maps[logical];
+
+			if (!map->valid)
+				continue;
+			if (map->start_block >= a->physical_blocks)
+				return -EUCLEAN;
+			if (map->start_block / SV3_SEGMENT_BLOCKS == segment) {
+				blocked = 1;
+				break;
+			}
+		}
+		if (blocked)
+			continue;
+		/*
+		 * Segment has no authoritative records and no pending writes.
+		 * The previous contents are disposable swap bytes, not durable
+		 * data. Reuse the WHOLE segment; stage never crosses its edge.
+		 */
+		memset(a->live_records + start, 0,
+		       SV3_SEGMENT_BLOCKS * sizeof(*a->live_records));
+		memset(a->extent_classes + start, 0,
+		       SV3_SEGMENT_BLOCKS * sizeof(*a->extent_classes));
+		if (used)
+			a->recycled_dead_segments++;
+		a->next_block = start;
+		a->open_segment = segment;
+		a->next_segment_probe = (segment + 1U) % count;
+		return 0;
+	}
+	return -ENOSPC;
 }
 
 int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
@@ -74,17 +142,48 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 		}
 	}
 
-	limit = a->physical_blocks - a->reserve_blocks;
-	if (a->next_block > limit)
-		return -ENOSPC;
-	/* Classes 1,2,4 divide the 1MiB segment width without crossing it. */
-	if (blocks - 1U > limit - a->next_block)
-		return -ENOSPC;
-	start = (a->next_block + blocks - 1U) & ~(sv3_u32)(blocks - 1U);
-	if (start > limit || blocks > limit - start ||
-	    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
-		return -ENOSPC;
+	if (!a->reuse_dead_segments) {
+		/* Frozen append-only behavior used by the original V3 model. */
+		limit = a->physical_blocks - a->reserve_blocks;
+		if (a->next_block > limit ||
+		    blocks - 1U > limit - a->next_block)
+			return -ENOSPC;
+		start = (a->next_block + blocks - 1U) &
+			~(sv3_u32)(blocks - 1U);
+		if (start > limit || blocks > limit - start ||
+		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
+			return -ENOSPC;
+	} else {
+		limit = ((a->physical_blocks - a->reserve_blocks) /
+			 SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
+		/*
+		 * Reuse the OPEN segment only while the entire aligned extent fits.
+		 * A crossed segment edge MUST run the mapped-record liveness scan;
+		 * merely advancing to the numerically next segment can destroy data
+		 * after physical cursor wrap.
+		 */
+		start = a->next_block;
+		if (a->open_segment == ~(sv3_u32)0 ||
+		    start >= limit || blocks - 1U > limit - start ||
+		    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) >
+				limit - blocks ||
+		    (((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) /
+		     SV3_SEGMENT_BLOCKS) != a->open_segment ||
+		    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) %
+				SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS) {
+			int error = sv3_pick_dead_segment(a);
 
+			if (error)
+				return error;
+			start = a->next_block;
+		}
+		start = (start + blocks - 1U) & ~(sv3_u32)(blocks - 1U);
+		if (start >= limit || blocks > limit - start ||
+		    start / SV3_SEGMENT_BLOCKS != a->open_segment ||
+		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
+			return -EUCLEAN;
+
+	}
 	memset(out, 0, sizeof(*out));
 	out->start_block = start;
 	out->sequence = a->next_sequence++;
@@ -160,6 +259,95 @@ int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
 	if (!sv3_is_active(a, tx))
 		return -ESTALE;
 	sv3_forget_active(a, 0);
+	return 0;
+}
+
+/*
+ * Both raw fallbacks and compressed extents share one physical-log allocator.
+ * Raw writes never publish on short or failed lower I/O.  The raw marker is
+ * held exclusively in volatile mappings, NEVER guessed from media content.
+ */
+int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
+		   sv3_u8 completed_blocks, int io_error)
+{
+	struct sv3_map *old;
+	sv3_u32 page;
+	int error;
+
+	if (!sv3_is_active(a, tx))
+		return -ESTALE;
+	if (tx->count != 1 || tx->extent_blocks != 1) {
+		error = -EINVAL;
+		goto fail;
+	}
+	if (io_error || completed_blocks != 1) {
+		error = io_error < 0 ? io_error : -EIO;
+		goto fail;
+	}
+	page = tx->records[0].logical_page;
+	if (page >= a->logical_pages) {
+		error = -ERANGE;
+		goto fail;
+	}
+	old = &a->maps[page];
+	if (old->generation == ~(sv3_u32)0 ||
+	    old->generation + 1U != tx->records[0].generation ||
+	    a->live_records[tx->start_block] ||
+	    a->extent_classes[tx->start_block]) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+	if (old->valid &&
+	    (old->start_block >= a->physical_blocks ||
+	     !sv3_legal_class(old->extent_blocks) ||
+	     a->extent_classes[old->start_block] != old->extent_blocks ||
+	     !a->live_records[old->start_block])) {
+		error = -EUCLEAN;
+		goto fail;
+	}
+	a->live_records[tx->start_block] = 1;
+	a->extent_classes[tx->start_block] = 1;
+	if (old->valid)
+		a->live_records[old->start_block]--;
+	*old = (struct sv3_map){
+		.start_block = tx->start_block,
+		.sequence = tx->sequence,
+		.generation = tx->records[0].generation,
+		.extent_blocks = 1,
+		.record_index = 0,
+		.raw = 1,
+		.valid = 1,
+	};
+	sv3_forget_active(a, 1);
+	return 0;
+fail:
+	sv3_forget_active(a, 0);
+	return error;
+}
+
+int sv3_discard_page(struct sv3_authority *a, sv3_u32 logical_page)
+{
+	struct sv3_map *old;
+	sv3_u32 generation;
+
+	if (!a || !a->maps || logical_page >= a->logical_pages)
+		return -EINVAL;
+	if (a->in_flight)
+		return -EBUSY;
+	old = &a->maps[logical_page];
+	if (old->generation == ~(sv3_u32)0)
+		return -EOVERFLOW;
+	if (old->valid &&
+	    (old->start_block >= a->physical_blocks ||
+	     !sv3_legal_class(old->extent_blocks) ||
+	     a->extent_classes[old->start_block] != old->extent_blocks ||
+	     !a->live_records[old->start_block]))
+		return -EUCLEAN;
+	generation = old->generation + 1U;
+	if (old->valid)
+		a->live_records[old->start_block]--;
+	memset(old, 0, sizeof(*old));
+	old->generation = generation;
 	return 0;
 }
 
@@ -297,6 +485,8 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	    current->extent_blocks != observed->extent_blocks ||
 	    current->record_index != observed->record_index)
 		return -ESTALE;
+	if (current->raw)
+		return -EOPNOTSUPP;
 	if (!extent ||
 	    bytes_total != (sv3_u32)current->extent_blocks * SV3_BLOCK_BYTES)
 		return -EINVAL;
