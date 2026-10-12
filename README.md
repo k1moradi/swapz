@@ -1,12 +1,20 @@
 # swapz: V3.0.0-alpha.2 development
 
-> **Project vision:** the ultimate success criterion is **fewer measured
-> lower-device 4 KiB-equivalent reads and writes** on SD cards, SSDs and
-> HDDs **under the same verified swap workload** — without sacrificing
-> correct data, cold swap-in latency or safe GC. **Passing tests or achieving
-> a better simulated compression ratio does not prove an I/O win.**
+> **Project vision:** the ultimate success criterion is **less measured
+> lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
+> swap workload**: independent read and write **BYTES and REQUEST COUNTS**,
+> including GC, with acceptable swap-in latency and CPU. **4KiB is our
+> current format unit, not the native I/O size of every 512n, 512e or 4Kn
+> device**. Green CI and simulated compression ratios do NOT prove a win.
 
 **Production readiness is not established.** See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the exact loaded-kernel, FUA, GC, V2.2 control and physical-media release gates.
+
+Read [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) for Linux swap pages,
+512n/512e/4Kn sectors, swap partitions versus swap files, filesystem
+clusters and 512-byte block-stat accounting; read
+[PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md) to distinguish real
+packing improvements from singleton-window limits, GC write amplification,
+coding bugs and the missing physical-media benchmark.
 
 Read [VISION.md](VISION.md) for the detailed definition of real I/O savings,
 the difference between 4 KiB-equivalent transferred blocks and request
