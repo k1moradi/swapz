@@ -5,7 +5,7 @@
 > Lower *request counts* and lower *sectors* are separate measurements.
 > A green CI job or a synthetic packing ratio is not the performance exit gate.
 >
-> **ACTIVE ROADMAP OVERRIDE (V3.0.0-alpha.1):** [V3_GOALS.md](V3_GOALS.md)
+> **ACTIVE ROADMAP OVERRIDE (V3.0.0-alpha.2):** [V3_GOALS.md](V3_GOALS.md)
 > supersedes the prior 'V2.2 now / V2.3 media / V2.4 byte-tight / V3.0
 > hibernate' sequencing below. We now have an intentionally incompatible
 > versioned SWZ3 on-disk format and experimental `swapz3` target. V2.2

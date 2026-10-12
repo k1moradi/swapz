@@ -46,6 +46,8 @@ int sv3_authority_init(struct sv3_authority *a,
 	a->physical_blocks = physical_blocks;
 	a->reserve_blocks = reserve;
 	a->open_segment = ~(sv3_u32)0;
+	a->gc_forbidden_open = ~(sv3_u32)0;
+	a->gc_forbidden_victim = ~(sv3_u32)0;
 	a->next_sequence = 1;
 	return 0;
 }
@@ -75,6 +77,17 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 		sv3_u32 off, logical;
 		int used = 0, blocked = 0;
 
+		/*
+		 * GC temporarily borrows the segment ring. Never let it
+		 * allocate into the paused foreground OPEN segment even if
+		 * all current mappings there are dead: the foreground cursor
+		 * will be restored after GC. Nor may it allocate into the
+		 * victim until the entire move is verified complete.
+		 */
+		if (a->gc_allocation &&
+		    (segment == a->gc_forbidden_open ||
+		     segment == a->gc_forbidden_victim))
+			continue;
 		for (off = 0; off < SV3_SEGMENT_BLOCKS; ++off) {
 			if (a->live_records[start + off]) {
 				blocked = 1;
@@ -272,7 +285,7 @@ int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
  * held exclusively in volatile mappings, NEVER guessed from media content.
  */
 int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
-		   sv3_u8 completed_blocks, int io_error)
+		   const void *raw_page, sv3_u8 completed_blocks, int io_error)
 {
 	struct sv3_map *old;
 	sv3_u32 page;
@@ -281,6 +294,10 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 	if (!sv3_is_active(a, tx))
 		return -ESTALE;
 	if (tx->count != 1 || tx->extent_blocks != 1) {
+		error = -EINVAL;
+		goto fail;
+	}
+	if (!io_error && completed_blocks == 1 && !raw_page) {
 		error = -EINVAL;
 		goto fail;
 	}
@@ -317,6 +334,7 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 		.start_block = tx->start_block,
 		.sequence = tx->sequence,
 		.generation = tx->records[0].generation,
+		.raw_crc32c = sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES),
 		.extent_blocks = 1,
 		.record_index = 0,
 		.raw = 1,
@@ -327,6 +345,30 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 fail:
 	sv3_forget_active(a, 0);
 	return error;
+}
+
+/*
+ * The raw-page format deliberately consumes exactly one full 4KiB lower
+ * block; any on-media checksum would force a second write. The volatile
+ * mapping authority retains the CRC32C instead. This is NOT persistent
+ * metadata and does not provide crash recovery.
+ */
+int sv3_verify_raw(const struct sv3_authority *a, sv3_u32 logical_page,
+		   const void *raw_page)
+{
+	const struct sv3_map *m;
+
+	if (!a || !a->maps || !raw_page || logical_page >= a->logical_pages)
+		return -EINVAL;
+	m = &a->maps[logical_page];
+	if (!m->valid || !m->raw || m->extent_blocks != 1 ||
+	    m->start_block >= a->physical_blocks ||
+	    a->extent_classes[m->start_block] != 1 ||
+	    !a->live_records[m->start_block])
+		return -EUCLEAN;
+	if (sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES) != m->raw_crc32c)
+		return -EBADMSG;
+	return 0;
 }
 
 int sv3_discard_page(struct sv3_authority *a, sv3_u32 logical_page)

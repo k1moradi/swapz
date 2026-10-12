@@ -1,10 +1,12 @@
-# swapz: V3.0.0-alpha.1 development
+# swapz: V3.0.0-alpha.2 development
 
 > **Project vision:** the ultimate success criterion is **fewer measured
 > lower-device 4 KiB-equivalent reads and writes** on SD cards, SSDs and
 > HDDs **under the same verified swap workload** — without sacrificing
 > correct data, cold swap-in latency or safe GC. **Passing tests or achieving
 > a better simulated compression ratio does not prove an I/O win.**
+
+**Production readiness is not established.** See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the exact loaded-kernel, FUA, GC, V2.2 control and physical-media release gates.
 
 Read [VISION.md](VISION.md) for the detailed definition of real I/O savings,
 the difference between 4 KiB-equivalent transferred blocks and request
@@ -17,7 +19,7 @@ classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
 extents when useful, and live-only size-classed compaction.
 
 A separate experimental Device Mapper target, `swapz3`
-(`kernel/extent-v3/dm-swapz3.ko`), is being developed for LZ4
+(`kernel/extent-v3/dm-swapz.ko`, **not** the frozen V2.2 module in `kernel/`), is being developed for LZ4
 4 KiB logical pages, bounded size-compatible 4 KiB packing and aligned
 8/16 KiB extents to remove the uniform ~2,072-byte compression cliff.
 **Current alpha includes experimental physical-segment GC code, but its

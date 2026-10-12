@@ -20,6 +20,7 @@
 #include <linux/lz4.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/sched.h>
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 #include <linux/spinlock.h>
@@ -31,7 +32,8 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.1"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.2"
+#define SV3_WORK_QUANTUM_BIOS 64U
 
 struct sv3_bio_ref {
 	struct list_head list;
@@ -101,6 +103,14 @@ struct sv3_dm {
 	u64 physical_write_reqs;
 	u64 physical_read_bytes;
 	u64 physical_read_reqs;
+	/* Submitted I/O, including failed/torn lower requests. These counters
+	 * are NOT completed or proven-media bytes; never mix the two. */
+	u64 lower_write_submitted_bytes;
+	u64 lower_write_submitted_reqs;
+	u64 lower_read_submitted_bytes;
+	u64 lower_read_submitted_reqs;
+	u64 worker_requeues;
+	u64 one_page_windows;
 	u64 compressed_pages;
 	u64 raw_pages;
 	u64 discard_pages;
@@ -156,6 +166,15 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	region.bdev = ctx->backing->bdev;
 	region.sector = (sector_t)block * SV3_SECTORS;
 	region.count = (sector_t)blocks * SV3_SECTORS;
+	if (op == REQ_OP_READ) {
+		ctx->lower_read_submitted_bytes +=
+			(u64)blocks * SV3_BLOCK_BYTES;
+		ctx->lower_read_submitted_reqs++;
+	} else {
+		ctx->lower_write_submitted_bytes +=
+			(u64)blocks * SV3_BLOCK_BYTES;
+		ctx->lower_write_submitted_reqs++;
+	}
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
 	if (error || bitmap)
 		return error ? error : -EIO;
@@ -186,6 +205,30 @@ static int sv3_lower_read(void *opaque, sv3_u32 block, sv3_u8 blocks,
 			  sv3_u8 *destination)
 {
 	return sv3_lower(opaque, REQ_OP_READ, block, blocks, destination);
+}
+
+/*
+ * Optional diagnostic verification for raw pages, matching the compressed
+ * engine's verify-after-write behavior. The raw page has no spare on-media
+ * bytes for CRC, so compare a fresh complete lower read to the original
+ * data BEFORE sv3_finish_raw publishes mapping authority. This is not an
+ * fsync/power-loss guarantee. Disabled in the default performance policy.
+ */
+static int sv3_verify_raw_write(struct sv3_dm *ctx, sv3_u32 block,
+				const u8 *original)
+{
+	int error;
+
+	if (!ctx->engine.verify_after_write)
+		return 0;
+	if (!original || ctx->read_page == original)
+		return -EINVAL;
+	error = sv3_lower_read(ctx, block, 1, ctx->read_page);
+	if (error)
+		return error;
+	ctx->engine.write_verify_read_blocks++;
+	return memcmp(ctx->read_page, original, SV3_BLOCK_BYTES) ?
+		-EBADMSG : 0;
 }
 
 static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
@@ -349,12 +392,19 @@ static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
 	error = sv3_lower_read(ctx, old->start_block, 1, ctx->input_page);
 	if (error)
 		return error;
+	/* Never propagate a corrupted raw page into a new GC location. */
+	error = sv3_verify_raw(&ctx->authority, logical, ctx->input_page);
+	if (error)
+		return error;
 	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
 	if (error)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1,
 				ctx->input_page, &completed);
-	error = sv3_finish_raw(&ctx->authority, &tx, completed, error);
+	if (!error && completed == 1)
+		error = sv3_verify_raw_write(ctx, tx.start_block,
+					   ctx->input_page);
+	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error)
 		ctx->gc_pages++;
 	return error;
@@ -416,6 +466,8 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	 * there. Restore the foreground cursor after the victim is drained.
 	 */
 	a->gc_allocation = 1;
+	a->gc_forbidden_open = old_open;
+	a->gc_forbidden_victim = victim;
 	a->open_segment = ~(sv3_u32)0;
 	a->next_segment_probe =
 		(ctx->physical_blocks - a->reserve_blocks) /
@@ -426,6 +478,11 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 		struct sv3_map snapshot = ctx->maps[logical];
 		sv3_u16 length;
 
+		/* GC can scan a large volatile map while the worker owns it.
+		 * Yield CPU periodically without permitting another mapping
+		 * writer: the same worker remains the only authority owner. */
+		if (!(logical & 63U))
+			cond_resched();
 		if (!snapshot.valid ||
 		    snapshot.start_block / SV3_SEGMENT_BLOCKS != victim)
 			continue;
@@ -496,6 +553,8 @@ out:
 	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
 	ctx->gc_count = 0;
 	a->gc_allocation = 0;
+	a->gc_forbidden_open = ~(sv3_u32)0;
+	a->gc_forbidden_victim = ~(sv3_u32)0;
 	a->next_block = old_next;
 	a->open_segment = old_open;
 	a->next_segment_probe = error ? old_probe : victim;
@@ -559,6 +618,8 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		}
 	}
 	ctx->windows++;
+	if (count == 1)
+		ctx->one_page_windows++;
 	ctx->batch_count = 0;
 	if (error || committed != count) {
 		sv3_fail(ctx, error ? error : -EIO);
@@ -592,7 +653,10 @@ static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1, ctx->input_page,
 				&completed);
-	error = sv3_finish_raw(&ctx->authority, &tx, completed, error);
+	if (!error && completed == 1)
+		error = sv3_verify_raw_write(ctx, tx.start_block,
+					   ctx->input_page);
+	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error) {
 		ctx->raw_pages++;
 		ctx->logical_write_bytes += SV3_BLOCK_BYTES;
@@ -668,6 +732,9 @@ static int sv3_read(struct sv3_dm *ctx, struct bio *bio)
 		    map->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
 		error = sv3_lower_read(ctx, map->start_block, 1, ctx->read_page);
+		if (error)
+			return error;
+		error = sv3_verify_raw(&ctx->authority, logical, ctx->read_page);
 		if (error)
 			return error;
 	} else {
@@ -823,22 +890,32 @@ static void sv3_worker(struct work_struct *work)
 	LIST_HEAD(local);
 	struct sv3_bio_ref *entry, *next;
 	unsigned long flags;
+	unsigned int remaining = SV3_WORK_QUANTUM_BIOS;
 
-	for (;;) {
+	{
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		list_for_each_entry_safe(entry, next, &local, list) {
 			list_del_init(&entry->list);
 			sv3_process(ctx, entry->bio);
+			if (!--remaining)
+				break;
 		}
 		/* No timer to wait for more records: seal what is available. */
 		if (ctx->batch_count)
 			sv3_flush_window(ctx);
+		/*
+		 * Unprocessed older entries MUST precede newly admitted BIOs.
+		 * Requeue under the same lock as admission and suspend. Every
+		 * pending write batch is completed before the work item yields.
+		 */
 		spin_lock_irqsave(&ctx->queue_lock, flags);
-		if (list_empty(&ctx->incoming)) {
-			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			break;
+		if (!list_empty(&local))
+			list_splice_init(&local, &ctx->incoming);
+		if (!list_empty(&ctx->incoming)) {
+			ctx->worker_requeues++;
+			queue_work(ctx->workqueue, &ctx->worker);
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
@@ -963,17 +1040,19 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct sv3_dm *ctx;
 	u64 logical, physical;
-	u32 budget = 0, window = SV3_MAX_RECORDS;
+	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
 	int error;
 
-	if (argc < 1 || argc > 3 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <dedicated backing> [max_read_blocks 0..3] [window 1..64]; 4K aligned";
+	if (argc < 1 || argc > 4 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
 		return -EINVAL;
 	if (argc > 2 && (kstrtou32(argv[2], 10, &window) ||
 			 window < 1 || window > SV3_MAX_RECORDS))
+		return -EINVAL;
+	if (argc > 3 && (kstrtou32(argv[3], 10, &verify) || verify > 1U))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -982,6 +1061,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->target = ti;
 	ctx->max_window = (sv3_u8)window;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
+	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_WORK(&ctx->worker, sv3_worker);
@@ -1127,13 +1207,17 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 	(void)flags;
 	switch (type) {
 	case STATUSTYPE_INFO:
-		DMEMIT("version=%s mode=alpha-no-gc logical_write=%llu logical_read=%llu "
+		DMEMIT("version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
-		       "dead_segment_reuses=%u write_verify_blocks=%u failed=%u error=%d",
+		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
+		       "write_submitted=%llu write_submitted_reqs=%llu "
+		       "read_submitted=%llu read_submitted_reqs=%llu "
+		       "worker_requeues=%llu one_page_windows=%llu "
+		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
@@ -1145,11 +1229,18 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
+		       ctx->engine.verify_after_write,
+		       ctx->lower_write_submitted_bytes,
+		       ctx->lower_write_submitted_reqs,
+		       ctx->lower_read_submitted_bytes,
+		       ctx->lower_read_submitted_reqs,
+		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u", ctx->backing->name,
-		       ctx->engine.max_read_blocks_per_record, ctx->max_window);
+		DMEMIT("%s %u %u %u", ctx->backing->name,
+		       ctx->engine.max_read_blocks_per_record,
+		       ctx->max_window, ctx->engine.verify_after_write);
 		break;
 	case STATUSTYPE_IMA:
 	default:
@@ -1186,5 +1277,5 @@ module_init(sv3_dm_init);
 module_exit(sv3_dm_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("swapz main developer");
-MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; GC disabled");
+MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC");
 MODULE_ALIAS("dm-swapz3");
