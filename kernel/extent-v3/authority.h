@@ -50,6 +50,8 @@ struct sv3_authority {
 	 * default; the separately reviewed Device Mapper target enables this.
 	 */
 	sv3_u8 reuse_dead_segments;
+	/* Only the serialized GC worker may set this, never foreground. */
+	sv3_u8 gc_allocation;
 	sv3_u32 next_sequence;
 	sv3_u32 abandoned_blocks;
 	sv3_u32 committed_blocks;
