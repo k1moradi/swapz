@@ -91,9 +91,14 @@ jobs:
           test -n "$KDIR"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
           echo "CODEC_BLOB=$(git rev-parse HEAD:kernel/extent-v3/codec.c)"
+          # The normal kernel build produces ONLY the actual V3 DM target.
           make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
-          test -s kernel/extent-v3/swapz_extent_v3.ko
           test -s kernel/extent-v3/dm-swapz3.ko
           sha256sum kernel/extent-v3/dm-swapz3.ko
+          # Research smoke is separately built from the same source, never
+          # linked in the same Kbuild invocation as dm-swapz3.
+          make -C kernel/extent-v3 KDIR="$KDIR" clean
+          make -C kernel/extent-v3 KDIR="$KDIR" SV3_BUILD_SMOKE=1 W=1 -j2 all
+          test -s kernel/extent-v3/swapz_extent_v3.ko
           sha256sum kernel/extent-v3/swapz_extent_v3.ko
           echo "COMPILE_ONLY; NO MODULE LOAD"
