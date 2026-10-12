@@ -1001,17 +1001,19 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct sv3_dm *ctx;
 	u64 logical, physical;
-	u32 budget = 0, window = SV3_MAX_RECORDS;
+	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
 	int error;
 
-	if (argc < 1 || argc > 3 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <dedicated backing> [max_read_blocks 0..3] [window 1..64]; 4K aligned";
+	if (argc < 1 || argc > 4 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
 		return -EINVAL;
 	if (argc > 2 && (kstrtou32(argv[2], 10, &window) ||
 			 window < 1 || window > SV3_MAX_RECORDS))
+		return -EINVAL;
+	if (argc > 3 && (kstrtou32(argv[3], 10, &verify) || verify > 1U))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -1020,6 +1022,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->target = ti;
 	ctx->max_window = (sv3_u8)window;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
+	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_WORK(&ctx->worker, sv3_worker);
@@ -1171,7 +1174,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
-		       "dead_segment_reuses=%u write_verify_blocks=%u "
+		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
 		       "worker_requeues=%llu one_page_windows=%llu "
@@ -1187,6 +1190,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
+		       ctx->engine.verify_after_write,
 		       ctx->lower_write_submitted_bytes,
 		       ctx->lower_write_submitted_reqs,
 		       ctx->lower_read_submitted_bytes,
@@ -1195,8 +1199,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u", ctx->backing->name,
-		       ctx->engine.max_read_blocks_per_record, ctx->max_window);
+		DMEMIT("%s %u %u %u", ctx->backing->name,
+		       ctx->engine.max_read_blocks_per_record,
+		       ctx->max_window, ctx->engine.verify_after_write);
 		break;
 	case STATUSTYPE_IMA:
 	default:
