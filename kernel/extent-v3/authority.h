@@ -45,6 +45,11 @@ struct sv3_authority {
 	sv3_u32 open_segment;		/* UINT32_MAX before the first allocation */
 	sv3_u32 next_segment_probe;
 	sv3_u32 recycled_dead_segments;
+	/*
+	 * Runtime-only opt-in. Preserves old research append-only semantics by
+	 * default; the separately reviewed Device Mapper target enables this.
+	 */
+	sv3_u8 reuse_dead_segments;
 	sv3_u32 next_sequence;
 	sv3_u32 abandoned_blocks;
 	sv3_u32 committed_blocks;
