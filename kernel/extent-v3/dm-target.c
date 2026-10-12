@@ -501,8 +501,9 @@ out:
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
+	sv3_u8 gc_attempts = 0;
 	bool needs_fua = false;
-	int error;
+	int error = 0;
 
 	if (!count)
 		return 0;
@@ -510,8 +511,28 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
-	error = sv3_engine_write_window(&ctx->engine, ctx->planned,
-					 count, &committed);
+	while (committed < count) {
+		sv3_u8 succeeded = 0;
+
+		error = sv3_engine_write_window(&ctx->engine,
+				ctx->planned + committed,
+				count - committed, &succeeded);
+		committed += succeeded;
+		if (!error)
+			continue;
+		if (error == -ENOSPC && gc_attempts++ < 4) {
+			/*
+			 * The engine committed only the explicitly returned
+			 * prefix. Keep pending BIOs and buffers intact while
+			 * relocating one fully verified low-live segment.
+			 * Retry ONLY the remaining logical records afterwards.
+			 */
+			error = sv3_gc_compact_one(ctx);
+			if (!error)
+				continue;
+		}
+		break;
+	}
 	/*
 	 * Do not end any upper FUA BIO before the lower cache flush reports
 	 * success. A failed post-write flush permanently fails this target:
@@ -551,6 +572,17 @@ static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
 	if (error)
 		return error;
 	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	if (error == -ENOSPC) {
+		/* GC may use input_page, so recopy the still-owned upper BIO
+		 * after victim relocation, before writing a raw replacement. */
+		error = sv3_gc_compact_one(ctx);
+		if (error)
+			return error;
+		error = sv3_copy_bio(bio, ctx->input_page, false);
+		if (error)
+			return error;
+		error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	}
 	if (error)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1, ctx->input_page,
