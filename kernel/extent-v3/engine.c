@@ -180,10 +180,11 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 		 */
 		engine->submitted_blocks += blocks;
 		error = engine->io.write_extent(engine->io.opaque,
-						tx->start_block, blocks,
-						engine->write_scratch, &completed);
+							tx->start_block, blocks,
+							engine->write_scratch, &completed);
 		if (completed > blocks) {
-			completed = blocks;
+			/* An impossible count makes every completion claim ambiguous. */
+			completed = 0;
 			error = -EUCLEAN;
 		}
 		engine->completed_blocks += completed;

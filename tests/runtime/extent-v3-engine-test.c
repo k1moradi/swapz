@@ -31,6 +31,7 @@ struct memory_disk {
 	sv3_u32 write_blocks;
 	sv3_u32 read_blocks;
 	sv3_u32 fail_write_on_call;
+	sv3_u32 overcount_write_on_call;
 	int fail_reads;
 };
 
@@ -48,6 +49,10 @@ static int lower_write(void *opaque, sv3_u32 start, sv3_u8 blocks,
 	    (sv3_u32)blocks > PHYSICAL_BLOCKS - start)
 		return -ERANGE;
 	m->write_calls++;
+	if (m->write_calls == m->overcount_write_on_call) {
+		*completed = (sv3_u8)(blocks + 1U);
+		return 0;
+	}
 	if (m->write_calls == m->fail_write_on_call)
 		permitted = blocks > 1 ? 1 : 0;
 	if (permitted) {
@@ -82,6 +87,7 @@ static int setup(void)
 	disk.write_blocks = 0;
 	disk.read_blocks = 0;
 	disk.fail_write_on_call = 0;
+	disk.overcount_write_on_call = 0;
 	disk.fail_reads = 0;
 	if (sv3_authority_init(&authority, maps, live, classes,
 			       LOGICAL_PAGES, PHYSICAL_BLOCKS))
@@ -306,6 +312,24 @@ static int test_lower_read_failure_does_not_fake_bytes(void)
 	return 0;
 }
 
+static int test_impossible_completion_count_is_not_accounted(void)
+{
+	struct sv3_compressed_page pages[1];
+	sv3_u8 committed = 99;
+
+	CHECK(setup() == 0);
+	prepare(pages, 1, 0, 0);
+	disk.overcount_write_on_call = 1;
+	CHECK(sv3_engine_write_window(&engine, pages, 1, &committed) ==
+	      -EUCLEAN);
+	CHECK(committed == 0);
+	CHECK(disk.write_blocks == 0);
+	CHECK(engine.submitted_blocks == 1 && engine.completed_blocks == 0);
+	CHECK(!maps[0].valid && authority.abandoned_blocks == 1);
+	CHECK(!authority.in_flight);
+	return 0;
+}
+
 int main(void)
 {
 	int completed = 0;
@@ -319,6 +343,8 @@ int main(void)
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
+	CHECK(test_impossible_completion_count_is_not_accounted() == 0);
+	completed++;
 	free(disk.storage);
 	printf("SV3_EXACT_ENGINE_TESTS_PASS=%d\n", completed);
 	return 0;
