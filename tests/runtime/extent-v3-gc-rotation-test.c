@@ -247,6 +247,36 @@ static int test_empty_gc_destination_cannot_rotate_roles(void)
 	return 0;
 }
 
+static int test_gc_cannot_spill_into_second_reserve(void)
+{
+	struct sv3_tx tx;
+	sv3_u32 page = 7;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	/* Segment0 remains live while foreground moves to segment1. */
+	for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+		CHECK(write_raw(0) == 0);
+	CHECK(write_raw(1) == 0);
+	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
+	CHECK(a.gc_destination == 2);
+	/* Deliberately consume the WHOLE single GC destination without
+	 * evacuating the source page0. An unsafe collector would spill
+	 * into reserve3, then claim false foreground reclaim progress. */
+	for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+		CHECK(write_raw(page) == 0);
+	CHECK(a.next_block == 768 && a.open_segment == 2);
+	CHECK(sv3_stage(&a, &page, 1, 1, &tx) == -ENOSPC);
+	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(roles[0] == 1 && roles[1] == 1);
+	CHECK(roles[2] == 0 && roles[3] == 0);
+	CHECK(maps[0].valid && maps[0].start_block == 255);
+	CHECK(live[255] == 1 && maps[0].raw_crc32c ==
+	      sv3_crc32c_bytes(raw, SV3_BLOCK_BYTES));
+	CHECK(a.gc_destination == 2); /* fail-closed, not committed */
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -255,6 +285,7 @@ int main(void)
 	CHECK(test_failed_handoff_does_not_change_roles() == 0); passed++;
 	CHECK(test_exact_32mib_foreground_progress() == 0); passed++;
 	CHECK(test_empty_gc_destination_cannot_rotate_roles() == 0); passed++;
+	CHECK(test_gc_cannot_spill_into_second_reserve() == 0); passed++;
 	printf("SV3_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }
