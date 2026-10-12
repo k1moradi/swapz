@@ -6,9 +6,9 @@
  * pages, LZ4, bounded size-aware write windows and synchronous dm-io through
  * one WQ_MEM_RECLAIM worker. No in-place compatibility with dm-swapz V2.2.
  *
- * IMPORTANT ALPHA LIMIT: physical allocation is append-only, and GC/recycling
- * is deliberately NOT enabled until relocation/refcount correctness is proven.
- * On ENOSPC fail closed; do not load for unlimited live swap pressure.
+ * IMPORTANT ALPHA LIMIT: GC is experimentally live with rotating reserved
+ * segments, but it remains null_blk-only until independently qualified.
+ * On ENOSPC or failed lower I/O, fail closed; never use as system swap.
  */
 #define DM_MSG_PREFIX "swapz3"
 #include <linux/bio.h>
@@ -27,13 +27,14 @@
 #include <linux/string.h>
 #include "engine.h"
 #include "gc-cost.h"
+#include "flush-qual.h"
 
 #if PAGE_SIZE != SV3_BLOCK_BYTES
 #error "swapz3 V3.0-alpha requires 4KiB PAGE_SIZE"
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.4"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.5"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 
@@ -86,11 +87,13 @@ struct sv3_dm {
 	sv3_u8 gc_used[SV3_MAX_RECORDS];
 	sv3_u8 gc_count;
 	u8 *gc_bytes_store;
-	sv3_u32 *gc_scores;  /* estimated relocation bytes per segment */
+	sv3_u32 *gc_scores;  /* authoritative payload+descriptor bytes */
+	sv3_u32 *gc_io_scores; /* conservative read+write cost per victim */
 	sv3_u16 *gc_live_counts; /* count for ties/control comparison */
 	sv3_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	sv3_u32 segment_count;
-	sv3_u8 gc_cost_policy; /* 0=original record count; 1=live bytes */
+	sv3_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
+	u64 gc_selected_io_cost;
 	u64 gc_selected_live_bytes;
 	u64 gc_selected_live_records;
 	u64 gc_victims;
@@ -129,6 +132,7 @@ struct sv3_dm {
 	u64 lower_write_submitted_reqs;
 	u64 lower_read_submitted_bytes;
 	u64 lower_read_submitted_reqs;
+	struct sv3_flush_meter flush_meter;
 	u64 worker_requeues;
 	u64 one_page_windows;
 	u64 compressed_pages;
@@ -1167,6 +1171,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
+	kvfree(ctx->gc_io_scores);
 	kvfree(ctx->gc_live_counts);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
@@ -1194,11 +1199,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct sv3_dm *ctx;
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
-	u32 gc_policy = 1, coalesce = 0;
+	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
 	int error;
 
-	if (argc < 1 || argc > 6 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes] [coalesce_ms 0..4]";
+	if (argc < 1 || argc > 7 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1209,10 +1214,15 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 3 && (kstrtou32(argv[3], 10, &verify) || verify > 1U))
 		return -EINVAL;
 	if (argc > 4 && (kstrtou32(argv[4], 10, &gc_policy) ||
-			 gc_policy > 1U))
+			 gc_policy > 2U))
 		return -EINVAL;
 	if (argc > 5 && (kstrtou32(argv[5], 10, &coalesce) ||
 			 coalesce > SV3_MAX_COALESCE_MS))
+		return -EINVAL;
+	/* Fault injection is a diagnostic only, restricted by the same
+	 * null_blk admission guard as all live V3 alpha IO. */
+	if (argc > 6 && (kstrtou32(argv[6], 10, &flush_fail_nth) ||
+			 flush_fail_nth > 64U))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -1222,6 +1232,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->max_window = (sv3_u8)window;
 	ctx->gc_cost_policy = gc_policy;
 	ctx->coalesce_ms = coalesce;
+	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
@@ -1269,6 +1280,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->segment_count = physical / SV3_SEGMENT_BLOCKS;
 	ctx->gc_scores = kvcalloc(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
+	ctx->gc_io_scores = kvcalloc(ctx->segment_count,
+				     sizeof(*ctx->gc_io_scores), GFP_KERNEL);
 	ctx->gc_live_counts = kvcalloc(ctx->segment_count,
 				      sizeof(*ctx->gc_live_counts), GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
@@ -1280,8 +1293,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
 	    !ctx->discard_epoch || !ctx->discard_count ||
-	    !ctx->gc_scores || !ctx->gc_live_counts ||
-	    !ctx->segment_roles) {
+	    !ctx->gc_scores || !ctx->gc_io_scores ||
+	    !ctx->gc_live_counts || !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -1310,7 +1323,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.read_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
-	    !ctx->gc_scores || !ctx->input_page ||
+	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
 	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
 	    !ctx->lz4_workmem) {
@@ -1430,10 +1443,11 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
-		       ctx->gc_cost_policy, ctx->coalesce_ms);
+		       ctx->gc_cost_policy, ctx->coalesce_ms,
+		       ctx->flush_meter.fail_nth);
 		break;
 	case STATUSTYPE_IMA:
 	default:
