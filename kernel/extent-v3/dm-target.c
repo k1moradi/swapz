@@ -477,22 +477,27 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
 	memset(ctx->gc_live_counts, 0,
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_live_counts));
+	memset(ctx->gc_io_scores, 0,
+	       (size_t)ctx->segment_count * sizeof(*ctx->gc_io_scores));
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
 		const struct sv3_map *m = &ctx->maps[logical];
-		sv3_u32 cost;
+		sv3_u32 cost, io_cost;
 
 		if (!m->valid)
 			continue;
 		if (m->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
 		cost = sv3_gc_live_byte_cost(m);
-		if (!cost)
+		io_cost = sv3_gc_estimated_io_cost(m);
+		if (!cost || !io_cost)
 			return -EUCLEAN;
 		segment = m->start_block / SV3_SEGMENT_BLOCKS;
 		if (ctx->gc_scores[segment] > ~(sv3_u32)0 - cost ||
+		    ctx->gc_io_scores[segment] > ~(sv3_u32)0 - io_cost ||
 		    ctx->gc_live_counts[segment] == ~(sv3_u16)0)
 			return -EOVERFLOW;
 		ctx->gc_scores[segment] += cost;
+		ctx->gc_io_scores[segment] += io_cost;
 		ctx->gc_live_counts[segment]++;
 	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
@@ -505,7 +510,17 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		if (!count || !ctx->segment_roles[segment] ||
 		    segment == ctx->authority.open_segment)
 			continue;
-		score = ctx->gc_cost_policy ? ctx->gc_scores[segment] : count;
+		switch (ctx->gc_cost_policy) {
+		case 0:
+			score = count;
+			break;
+		case 1:
+			score = ctx->gc_scores[segment];
+			break;
+		default:
+			score = ctx->gc_io_scores[segment];
+			break;
+		}
 		if (sv3_gc_prefer(score, count, best, best_count)) {
 			best = score;
 			best_count = count;
@@ -517,6 +532,7 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 	*victim = selected;
 	ctx->gc_selected_live_bytes += ctx->gc_scores[selected];
 	ctx->gc_selected_live_records += ctx->gc_live_counts[selected];
+	ctx->gc_selected_io_cost += ctx->gc_io_scores[selected];
 	return 0;
 }
 
@@ -1428,10 +1444,13 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "last_gc_victim=%u last_gc_destination=%u "
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
+		       "gc_selected_io_estimate=%llu "
 		       "gc_read_reqs=%llu gc_write_reqs=%llu "
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
+		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
+		       "flush_injected=%llu flush_fault_nth=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
@@ -1449,7 +1468,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->last_gc_victim, ctx->last_gc_destination,
 		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
-		       ctx->gc_selected_live_records,
+		       ctx->gc_selected_live_records, ctx->gc_selected_io_cost,
 		       ctx->gc_read_reqs, ctx->gc_write_reqs,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
@@ -1458,6 +1477,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_write_submitted_reqs,
 		       ctx->lower_read_submitted_bytes,
 		       ctx->lower_read_submitted_reqs,
+		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
+		       ctx->flush_meter.failures, ctx->flush_meter.injected,
+		       ctx->flush_meter.fail_nth,
 		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->window_records_total, ctx->coalesce_ms,
 		       ctx->window_bins[0], ctx->window_bins[1],
