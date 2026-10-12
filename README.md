@@ -1,4 +1,4 @@
-# swapz: V3.0.0-alpha.4 development
+# swapz: V3.0.0-alpha.5 development
 
 > **Project vision:** the ultimate success criterion is **less measured
 > lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
@@ -26,19 +26,29 @@ The **active implementation direction** is zsmalloc-inspired object-size
 classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
 extents when useful, and live-only size-classed compaction.
 
-**V3.0.0-alpha.4 online-I/O candidate:** [PR #49](https://github.com/k1moradi/swapz/pull/49)
-now lets the real `dm-swapz.ko` V3 target hold incoming writes for an
-**optional** 0..4ms timer interval (`coalesce_ms=0` by default), letting
-compatible sizes accumulate before the finite 64-record sort/write.
-READ, FUA, preflush and discard wake the worker immediately. GC now
-defaults to selecting the victim with the lowest estimated authoritative
-**live LZ4 payload bytes** (rather than fewest live records), with
-`gc_policy=0` retained as the original count-based benchmark control.
-Actual write-window histogram and GC read/write requests are exposed for
-independent I/O reconciliation. These are experimental performance policies,
-NOT proven physical SD/SSD/HDD wins. Follow
+**V3.0.0-alpha.5 kernel validation candidate:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
+retains the real `dm-swapz.ko` online packing path from [PR #49](https://github.com/k1moradi/swapz/pull/49)
+and the verified rotating reserve GC from [PR #50](https://github.com/k1moradi/swapz/pull/50).
+The optional 0–4ms coalescing interval (default zero) can collect
+compatible write records before size-aware packing, while reads and
+flush/FUA barriers bypass the wait.
+
+After an independent loaded `null_blk` study found that choosing fewer
+compressed survivor bytes could DOUBLE GC read+write transfer volume,
+the collector now defaults to **`gc=2`**, an estimated lower read +
+relocation cost. `gc=0` (live record count) and `gc=1` (live bytes)
+remain for honest matched tests. The collector rejects victims whose
+authoritative survivor bytes cannot possibly leave usable free space.
+A valid standalone Linux upper cache-flush BIO is **empty
+`REQ_OP_WRITE|REQ_PREFLUSH`**, not `REQ_OP_FLUSH` (the latter is
+internal to the block request layer). All lower-flush calls and
+failure outcomes are metered, with default-off **null_blk-only alpha
+fault injection** to qualify upper completion and failure propagation.
+
+These are production-code experiments, **not** proven SD/SSD/HDD
+savings or permission to deploy as swap. See
 [kernel/extent-v3/ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
-before any loaded-kernel test.
+and [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) before testing.
 
 A separate experimental Device Mapper target, `swapz3`
 (`kernel/extent-v3/dm-swapz.ko`, **not** the frozen V2.2 module in `kernel/`), is being developed for LZ4

@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.4.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.5.** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -120,7 +120,7 @@ sourced numbers and the concrete engineering response.
   estimator prefers three 500B pages. Separate authority tests verify
   actual 2200B/1600B records publish those precise payload lengths,
   fail-closed limits, and raw record cost.
-- **Version/provenance:** `V3.0.0-alpha.4`, installed V3 build artifact
+- **Version/provenance:** `V3.0.0-alpha.5`, installed V3 build artifact
   `dm-swapz.ko` and alpha DM target keyword `swapz3`. Rebuilt host
   module SHA, source blobs, vermagic and backing major/minor must be
   captured anew. The alpha.1 and alpha.2 evidence cannot certify it.
@@ -155,7 +155,7 @@ former foreground victim therefore becomes next cycle's reserve.
 Memory-only exact-production-C authority and codec/engine tests
 exercise repeated handoffs, old-map preservation on incomplete
 relocation, and eight rotations on the exact 32MiB geometry.
-**Current version: 3.0.0-alpha.4.**
+**Current version: 3.0.0-alpha.5.**
 
 This is **source implementation evidence**, NOT a loaded-kernel
 approval. [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
@@ -163,9 +163,62 @@ makes the exact original workload and ≥8 GC rotations the **first
 host gate**. No physical SD/HDD/SSD test or relaxing the null_blk
 safety restriction until this and later independent gates pass.
 
+## Alpha.5: correct upper-flush contract, bounded fault injection and I/O-aware GC
+
+The independent [alpha.4 loaded report](https://github.com/k1moradi/swapz/pull/51)
+validated the original 32MiB/1024-page GC progress correction with eight
+rotating reserves, full readback and bounded failures. It also found two
+new release-significant points:
+
+- **Incorrect flush test:** a test helper submitted a standalone
+  `REQ_OP_FLUSH` **BIO**. This opcode is *only synthesized inside Linux
+  at the request layer*; `block/blk-core.c` rejects direct BIOs with
+  `-EOPNOTSUPP` BEFORE the Device Mapper target sees them. The
+  supported **zero-length upper standalone flush** is a
+  `REQ_OP_WRITE | REQ_PREFLUSH` BIO. That valid encoding and upper
+  FUA succeeded during alpha.4 bounded loaded testing. Therefore the
+  invalid BIO rejection is **NOT a proven kernel target flush bug**.
+  Nevertheless, genuine lower-cache-flush failure propagation and
+  once-only upper completion remain loaded release gates.
+- **Invalid GC cost assumption:** the default byte-only policy chose
+  three 496B compressed survivors (three actual 4KiB lower reads,
+  one 4KiB relocation write) over one 3335B survivor (one read,
+  one write). Choosing fewer compressed bytes **doubled the total
+  measured GC transfers** in that matched case; it does not make
+  size-aware GC inherently a failure, but requires read-inclusive
+  measurement.
+
+[Main-developer PR #52](https://github.com/k1moradi/swapz/pull/52)
+adds an actual production adapter around every lower
+`blkdev_issue_flush()` call, with `flush_calls/ok/err/injected`
+counters. A **default-OFF diagnostic 0..64th-flush EIO** can be
+configured only on the existing strictly null_blk-only alpha target.
+It returns a **synthetic failure before lower submission**, exercises
+the target's fail-closed and BIO completion logic, and must not be
+reported as a real device-originated error. Independently injected
+genuine lower failures remain a separate gate.
+
+GC policy **`2` is now the default**, conservatively scoring
+per-record lower selective-read overhead in addition to copied
+payload+descriptor bytes. `gc=0` live-record count and `gc=1`
+live bytes are preserved as matched controls; `gc=2` is an
+**estimate**, not a measured winner. Physical lower GC bytes/requests
+must be recorded for all three. Candidates whose live byte lower
+bound already consumes an entire 1MiB destination are excluded
+**before any relocation I/O**—there is no possibility of reclaiming
+a foreground-writable block from them.
+
+Alpha.5 has **not been loaded** on Codex's host at time of
+implementation. Its new module hash is different from the validated
+alpha.4 `dm-swapz.ko`. Retest valid upper flush success, injected
+synthetic failure, real lower failure (if safely possible), then GC
+policy 0/1/2 and only afterward sustained I/O performance. The
+`null_blk`-only constructor guard remains unchanged. **NO REBOOT,
+NO active swap or physical-media I/O**.
+
 ## Required production exit gates (hard)
 
-- [ ] **G1, loaded alpha.3 correctness.** Independent static review followed
+- [ ] **G1, loaded alpha.5 correctness.** Independent static review followed
       by exact-source/module hash, target UUID and owned memory-backed
       `null_blk` checks. Repeat all exact 4KiB compressed, raw,
       overwrite, discard, sparse, reorder, CRC and GC cases. Demonstrate

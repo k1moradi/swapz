@@ -1,4 +1,4 @@
-# V3.0.0-alpha.4: online packing + GC economics independent retest gate
+# V3.0.0-alpha.5: online packing + GC economics independent retest gate
 
 **This file describes a TEST CANDIDATE, not a release.** All work must pass
 the existing [LIVE_TEST_GATE.md](LIVE_TEST_GATE.md) and
@@ -22,8 +22,9 @@ and verified module teardown between them. The previous alpha.1
 
 ```text
 <owned_memory_backed_nullb_block_device> [read_cap 0..3] [window 1..64]
-                                     [write_verify 0..1] [gc 0..1]
+                                     [write_verify 0..1] [gc 0..2]
                                      [coalesce_ms 0..4]
+                                     [test_fail_flush_nth 0..64]
 ```
 
 All optional arguments are positional. Defaults:
@@ -32,9 +33,11 @@ All optional arguments are positional. Defaults:
 - `window=64`: 64 compressed records maximum per bounded write batch.
 - `write_verify=0`: optional whole-extent readback disabled; enable 1
   **only for corruption experiments**, separately account the extra reads.
-- `gc=1`: choose victim by estimated LIVE **payload bytes** plus 16B
-  metadata per compressed record; `gc=0` is the old LIVE **record-count**
-  control. Neither is a claim about internal NAND or device sector size.
+- `gc=2` (default): conservative total estimated selective READ +
+  relocation payload/descriptor cost. `gc=1` is live payload bytes;
+  `gc=0` is original live record-count. Compare all THREE.
+- `test_fail_flush_nth=0` (default): no synthetic lower flush error;
+  1..64 injects one pre-submission EIO for **owned null_blk** testing only.
 - `coalesce_ms=0`: immediate old worker behavior (control); choose
   `1,2,4` for opt-in bounded admission accumulation. On some kernels
   a 1ms delay rounds up to one jiffy; record actual `CONFIG_HZ`
@@ -82,7 +85,7 @@ outside the reserve tail after GC. There was **no demonstrated false
 upper completion or data corruption**, but **progress FAILED**.
 
 The main developer fixed this in [PR #50](https://github.com/k1moradi/swapz/pull/50)
-and version **3.0.0-alpha.4**, with explicit per-1MiB-segment roles:
+and version **3.0.0-alpha.5**, with explicit per-1MiB-segment roles:
 foreground only selects foreground victims, GC writes into ONE verified
 dead reserve destination, and a completed all-live evacuation
 **atomically swaps roles** so the old victim becomes a free reserve
@@ -135,6 +138,70 @@ handoffs plus an eight-rotation 32MiB reproduction) and
 engine readback plus injected failed relocation) exercise the real
 authority/codec engine in memory, not the DM/kernel lifetime.
 
+## New alpha.5 flush protocol and GC selection correction — MUST READ
+
+The independent [alpha.4 report](https://github.com/k1moradi/swapz/pull/51)
+reported an upper `REQ_OP_FLUSH` BIO failed with `-EOPNOTSUPP`.
+**That exact BIO is invalid in Linux**. The kernel's
+`block/blk-core.c:submit_bio_noacct()` rejects `REQ_OP_FLUSH`
+at the BIO layer before it can reach this target; it is generated
+internally by the request-level flush state machine.
+
+A **valid standalone upper cache-flush BIO** is:
+```c
+bio->bi_opf = REQ_OP_WRITE | REQ_PREFLUSH;
+bio->bi_iter.bi_size = 0; /* zero-length EMPTY write, no data vectors */
+```
+Equivalent authoritative kernel helper: `blkdev_issue_flush(<owned_DM_bdev>)`.
+That helper itself constructs the above encoding. A separate real
+`REQ_FUA` on a 4096-byte upper `REQ_OP_WRITE` and a zero-length
+`REQ_OP_WRITE|REQ_PREFLUSH` MUST be independently observed at DM.
+The old invalid helper should be retained as an **expected negative
+test** that returns `-EOPNOTSUPP` *before the target is invoked*;
+do not use it as a target flush result.
+
+The actual target still advertises `num_flush_bios=1` and
+`flush_supported=true`. The production `sv3_issue_flush()`
+adapter now meters **logical lower-flush calls, successes, failures,
+synthetically injected errors**. The status counters
+`flush_calls`, `flush_ok`, `flush_err`, `flush_injected`,
+`flush_fault_nth` must reconcile: calls=ok+err. A completed
+`blkdev_issue_flush()` may generate **zero physical commands** if
+the lower queue has no advertised volatile write-back cache;
+do not conflate this counter with a device-level command count.
+
+**Safety-gated alpha fault injection** (still RAM null_blk ONLY):
+a new optional last positional `test_fail_flush_nth=0..64` argument.
+Default zero means disabled. Value 1 fails the FIRST target-invoked
+lower-flush operation with synthetic `-EIO` *before submission*.
+Record target fail-closed, correct upper once-only completion and
+that `flush_injected` increments. Test the three paths separately:
+(1) valid standalone WRITE|PREFLUSH with 0 sectors,
+(2) a 4096B WRITE|FUA that forces post-write flush,
+(3) READ/WRITE followed by presuspend requiring a final lower flush.
+If the completed lower flush fails, no upper FUA or PREFLUSH
+may report success. The injection validates **upper propagation only**;
+it is **NOT** a genuine device-originated lower flush error.
+A separately controlled owned null_blk fault mechanism is required
+for that independent gate if supported. Do not inject global faults.
+
+**GC policies are now three-way:** `gc=0` live RECORD COUNT,
+`gc=1` live PAYLOAD BYTES, `gc=2` conservative estimated
+lower READ+relocation cost (**new default**). The third policy
+charges every survivor for a selective metadata/payload lower read
+(1/2/3 aligned 4KiB units for source extents of 1/2/4 units)
+plus compressed payload and 16B descriptor or one raw 4KiB write.
+This is an estimated *relative* score, not exact completed I/O or
+NAND wear. The prior independent report showed gc=1 doubled total
+GC traffic on three tiny compressed records vs one large record.
+Use its fixture as the first matched 0/1/2 policy regression; publish
+the independently measured actual GC read/write requests and bytes,
+`gc_selected_io_estimate`, CPU and cold-read latency.
+
+Authoritative references:
+[Linux submit_bio_noacct](https://github.com/torvalds/linux/blob/master/block/blk-core.c),
+[Linux blkdev_issue_flush](https://github.com/torvalds/linux/blob/master/block/blk-flush.c).
+
 ## Functional and concurrency safety before benchmarking
 
 - Byte-exact independently verified compressed/raw roundtrips (including
@@ -174,8 +241,9 @@ with identical exact-LZ4 payload seeds and arrival schedule:
    alternating large/small, and repeated 50% / 75% record distributions.
 4. Competing cold readers, repeated overwrite/discard and frequent
    FUA barriers. Measure read p50/p95/p99, CPU and recovery time.
-5. During sustained churn, compare `gc=0` versus `gc=1` at otherwise
-   identical settings and compressed-size histograms.
+5. During sustained churn, compare `gc=0`, `gc=1` and `gc=2`
+   with identical achieved workload and compressed-size histograms.
+   Measure actual lower GC READS as well as relocation WRITES.
 
 Before and after *fully drained* phases, reconcile lower device
 `/sys/block/<owned_nullb>/stat` 512-byte accounting-sector deltas,
