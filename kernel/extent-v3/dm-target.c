@@ -1075,10 +1075,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct sv3_dm *ctx;
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
+	u32 gc_policy = 1;
 	int error;
 
-	if (argc < 1 || argc > 4 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1]";
+	if (argc < 1 || argc > 5 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1088,12 +1089,16 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -EINVAL;
 	if (argc > 3 && (kstrtou32(argv[3], 10, &verify) || verify > 1U))
 		return -EINVAL;
+	if (argc > 4 && (kstrtou32(argv[4], 10, &gc_policy) ||
+			 gc_policy > 1U))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 	ti->private = ctx;
 	ctx->target = ti;
 	ctx->max_window = (sv3_u8)window;
+	ctx->gc_cost_policy = gc_policy;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
@@ -1250,6 +1255,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
+		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
@@ -1264,6 +1270,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.reserve_blocks,
 		       ctx->gc_victims, ctx->gc_pages,
 		       ctx->gc_read_bytes, ctx->gc_write_bytes,
+		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
+		       ctx->gc_selected_live_records,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->engine.verify_after_write,
@@ -1275,9 +1283,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
-		       ctx->max_window, ctx->engine.verify_after_write);
+		       ctx->max_window, ctx->engine.verify_after_write,
+		       ctx->gc_cost_policy);
 		break;
 	case STATUSTYPE_IMA:
 	default:
