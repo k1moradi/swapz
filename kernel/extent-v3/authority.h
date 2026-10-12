@@ -15,6 +15,9 @@ struct sv3_map {
 	sv3_u32 start_block;
 	sv3_u32 sequence;
 	sv3_u32 generation;
+	/* Volatile sidecar integrity for a full raw 4KiB fallback page.
+	 * Raw has no space for an on-media CRC without another physical block. */
+	sv3_u32 raw_crc32c;
 	sv3_u8 extent_blocks;
 	sv3_u8 record_index;
 	sv3_u8 raw;
@@ -96,7 +99,10 @@ int sv3_abort(struct sv3_authority *authority, const struct sv3_tx *tx);
  * only call finish_raw after the WHOLE lower write completes.
  */
 int sv3_finish_raw(struct sv3_authority *authority, const struct sv3_tx *tx,
-		   sv3_u8 completed_blocks, int io_error);
+		   const void *raw_page, sv3_u8 completed_blocks, int io_error);
+/* Check raw payload integrity against volatile authoritative CRC. */
+int sv3_verify_raw(const struct sv3_authority *authority,
+		   sv3_u32 logical_page, const void *raw_page);
 /* Serialized explicit logical discard: invalidate and advance generation. */
 int sv3_discard_page(struct sv3_authority *authority, sv3_u32 logical_page);
 /* Fail-closed multi-page discard: prevalidate entire range before mutation. */
