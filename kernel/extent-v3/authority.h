@@ -17,6 +17,7 @@ struct sv3_map {
 	sv3_u32 generation;
 	sv3_u8 extent_blocks;
 	sv3_u8 record_index;
+	sv3_u8 raw;
 	sv3_u8 valid;
 };
 
@@ -75,6 +76,15 @@ int sv3_finish(struct sv3_authority *authority, const struct sv3_tx *tx,
 	       sv3_u8 completed_blocks, int io_error);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
 int sv3_abort(struct sv3_authority *authority, const struct sv3_tx *tx);
+/*
+ * Raw 4KiB page (LZ4 fallback) occupies a whole aligned block and has no
+ * V3 descriptor. The caller must stage exactly one record / one block and
+ * only call finish_raw after the WHOLE lower write completes.
+ */
+int sv3_finish_raw(struct sv3_authority *authority, const struct sv3_tx *tx,
+		   sv3_u8 completed_blocks, int io_error);
+/* Serialized explicit logical discard: invalidate and advance generation. */
+int sv3_discard_page(struct sv3_authority *authority, sv3_u32 logical_page);
 /* Binds on-media readback to current in-memory mapping and generation. */
 int sv3_read_authoritative(const struct sv3_authority *authority,
 			   sv3_u32 logical_page, const struct sv3_map *observed,
