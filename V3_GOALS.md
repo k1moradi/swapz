@@ -72,13 +72,19 @@ The necessary pipeline is:
    compressed records; this is NOT a statement about device physical sectors.
 5. Read only the 4 KiB metadata block and additional blocks actually
    containing the requested record. Expose a per-record 4 KiB read budget.
-6. Reclaim stale records with generation-safe segment-local GC, relocating
-   only live objects into dense extents, without invalidating old authority
-   until replacement lower writes finish. Recycle a victim only after all
-   live records have moved and read pins / IO ownership are safe.
+6. Reclaim stale records with generation-safe rotating-reserve GC,
+   relocating only live objects into dense extents. Recycle the victim
+   ONLY when every live record has moved and foreground actually receives
+   usable space. **Rank victims by real lower READ plus WRITE cost rather
+   than assuming compressed payload bytes are a sufficient proxy**.
+   Preflight victims whose unavoidable live footprint already fills the
+   destination; do not waste 1MiB relocating data that cannot free space.
 7. Preserve raw incompressible 4 KiB pages and zero/discard handling.
-8. Drain before flush/FUA, reject torn writes, preserve mapping authority
-   and byte-exact reads, and account lower **completed bytes and requests**.
+8. Drain before cache flush/FUA; the valid Linux empty flush BIO is
+   `REQ_OP_WRITE|REQ_PREFLUSH`, NOT request-only `REQ_OP_FLUSH`.
+   Reject torn writes, preserve mapping authority and byte-exact reads,
+   report independently successful/failed lower flush calls, and account
+   lower **completed read/write bytes and requests**.
 9. Benchmark meaningful workloads on verified disposable devices: uniform
    2,072B, 1,048B, clustered 2,200/1,600B, alternating, mixed and hot/cold;
    report **read/write bytes+requests** and GC separately, device sector
