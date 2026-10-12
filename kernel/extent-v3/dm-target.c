@@ -478,6 +478,11 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 		struct sv3_map snapshot = ctx->maps[logical];
 		sv3_u16 length;
 
+		/* GC can scan a large volatile map while the worker owns it.
+		 * Yield CPU periodically without permitting another mapping
+		 * writer: the same worker remains the only authority owner. */
+		if (!(logical & 63U))
+			cond_resched();
 		if (!snapshot.valid ||
 		    snapshot.start_block / SV3_SEGMENT_BLOCKS != victim)
 			continue;
