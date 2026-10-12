@@ -137,8 +137,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn("a->" + name, gc)
         self.assertIn("segment == a->gc_forbidden_open", authority)
         self.assertIn("segment == a->gc_forbidden_victim", authority)
-        self.assertLess(gc.index("a->gc_forbidden_victim = victim"),
-                        gc.index("a->open_segment ="))
+        self.assertIn("sv3_gc_begin_rotation(a, victim)", gc)
+        self.assertIn("sv3_gc_commit_rotation(a, victim)", gc)
+        self.assertIn("sv3_enable_segment_rotation(&ctx->authority", body("sv3_ctr"))
+        self.assertIn("!ctx->segment_roles[segment]", body("sv3_gc_choose_victim"))
+        self.assertIn("a->segment_foreground[dest] = 1", authority)
+        self.assertIn("a->segment_foreground[victim] = 0", authority)
 
     def test_optional_write_verify_before_raw_publication(self):
         ctor = body("sv3_ctr")
