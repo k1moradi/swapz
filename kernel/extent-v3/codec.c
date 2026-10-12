@@ -235,19 +235,16 @@ int sv3_validate(const void *bytes, sv3_u32 bytes_total)
 	return 0;
 }
 
-int sv3_lookup(const void *bytes, sv3_u32 bytes_total, sv3_u8 index,
-	       struct sv3_decoded *out, const sv3_u8 **payload)
+int sv3_peek(const void *bytes, sv3_u32 bytes_total, sv3_u8 index,
+	     struct sv3_decoded *out)
 {
 	struct sv3_header header;
 	struct sv3_record record;
-	sv3_u16 start, length;
-	sv3_u32 checksum;
 	int error;
 
-	if (!out || !payload)
+	if (!out)
 		return -EINVAL;
 	*out = (struct sv3_decoded){ 0 };
-	*payload = NULL;
 	error = sv3_validate(bytes, bytes_total);
 	if (error)
 		return error;
@@ -255,17 +252,31 @@ int sv3_lookup(const void *bytes, sv3_u32 bytes_total, sv3_u8 index,
 	if (index >= header.record_count)
 		return -ERANGE;
 	sv3_get_record(bytes, index, &record);
-	start = sv3_le16(record.payload_offset_le);
-	length = sv3_le16(record.payload_length_le);
-	checksum = sv3_le32(record.payload_crc32c_le);
-	if (sv3_crc32c_bytes((const sv3_u8 *)bytes + start, length) != checksum)
-		return -EBADMSG;
 	out->logical_page = sv3_le32(record.logical_page_le);
 	out->generation = sv3_le32(record.generation_le);
-	out->payload_offset = start;
-	out->payload_length = length;
-	out->payload_crc32c = checksum;
-	*payload = (const sv3_u8 *)bytes + start;
+	out->payload_offset = sv3_le16(record.payload_offset_le);
+	out->payload_length = sv3_le16(record.payload_length_le);
+	out->payload_crc32c = sv3_le32(record.payload_crc32c_le);
+	return 0;
+}
+
+int sv3_lookup(const void *bytes, sv3_u32 bytes_total, sv3_u8 index,
+	       struct sv3_decoded *out, const sv3_u8 **payload)
+{
+	int error;
+
+	if (!out || !payload)
+		return -EINVAL;
+	*payload = NULL;
+	error = sv3_peek(bytes, bytes_total, index, out);
+	if (error)
+		return error;
+	if (sv3_crc32c_bytes((const sv3_u8 *)bytes + out->payload_offset,
+			     out->payload_length) != out->payload_crc32c) {
+		*out = (struct sv3_decoded){ 0 };
+		return -EBADMSG;
+	}
+	*payload = (const sv3_u8 *)bytes + out->payload_offset;
 	return 0;
 }
 
