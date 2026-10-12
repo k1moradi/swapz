@@ -7,6 +7,7 @@ on:
       - 'tests/runtime/extent-v3-codec-test.c'
       - 'tests/runtime/extent-v3-authority-test.c'
       - 'tests/runtime/extent-v3-tx-snapshot-test.c'
+      - 'tests/runtime/extent-v3-write-verify-test.c'
       - 'tests/runtime/extent-v3-engine-test.c'
       - '.github/workflows/extent-v3-codec.yml'
   push:
@@ -46,6 +47,13 @@ jobs:
             kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
             -o "$RUNNER_TEMP/sv3-tx-snapshot-test"
           "$RUNNER_TEMP/sv3-tx-snapshot-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-write-verify-test.c \
+            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
+            kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-write-verify-test"
+          "$RUNNER_TEMP/sv3-write-verify-test"
           cc -std=c11 -O1 -g -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             -I kernel/extent-v3 \
