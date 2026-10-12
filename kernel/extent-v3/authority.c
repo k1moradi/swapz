@@ -230,6 +230,15 @@ int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
 	    a->next_block <= dest * SV3_SEGMENT_BLOCKS ||
 	    a->next_block > (dest + 1U) * SV3_SEGMENT_BLOCKS)
 		return -EUCLEAN;
+	/*
+	 * GC is invoked because foreground allocation needs capacity.
+	 * If survivor relocation consumes all 256 destination blocks, the
+	 * role exchange would merely rename a FULL reserve segment as
+	 * foreground: no new foreground write could succeed. Fail closed
+	 * with no role exchange rather than reporting false GC progress.
+	 */
+	if (a->next_block == (dest + 1U) * SV3_SEGMENT_BLOCKS)
+		return -ENOSPC;
 	for (logical = 0; logical < a->logical_pages; ++logical) {
 		const struct sv3_map *m = &a->maps[logical];
 
