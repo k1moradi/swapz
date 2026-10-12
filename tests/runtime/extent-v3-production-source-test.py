@@ -112,6 +112,17 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("sv3_verify_raw(&ctx->authority, logical, ctx->input_page)",
                       body("sv3_gc_move_raw"))
 
+    def test_gc_explicitly_forbids_paused_open_and_victim(self):
+        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        gc = body("sv3_gc_compact_one")
+        for name in ("gc_forbidden_open", "gc_forbidden_victim"):
+            self.assertIn(name, authority)
+            self.assertIn("a->" + name, gc)
+        self.assertIn("segment == a->gc_forbidden_open", authority)
+        self.assertIn("segment == a->gc_forbidden_victim", authority)
+        self.assertLess(gc.index("a->gc_forbidden_victim = victim"),
+                        gc.index("a->open_segment ="))
+
     def test_optional_write_verify_before_raw_publication(self):
         ctor = body("sv3_ctr")
         verifier = body("sv3_verify_raw_write")
