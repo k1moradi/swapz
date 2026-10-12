@@ -1,14 +1,18 @@
-# swapz vision — optimize **real physical I/O**, not a compression score
+# swapz vision — optimize **real device I/O cost**, not compression scores
 
-> **Our ultimate success criterion is fewer actual physical 4 KiB-equivalent
-> I/O transfers on the SD card, SSD or HDD under a verified workload, while
-> preserving correct swap behavior and acceptable swap-in latency. Passing
-> more tests or achieving a better simulated compression ratio is not, by
-> itself, a performance win.**
+> **Our ultimate success criterion is less *measured, host-visible lower-device
+> I/O* under an identical, verified swap workload on the actual SD card, SSD
+> or HDD: record both read/write BYTES and request COUNTS, including GC, while
+> preserving correct data, achieved useful throughput, latency and CPU cost.
+> 4 KiB is our present V3 *allocation and normalization size*, NOT a
+> universal physical-device I/O operation or sector size. Passing more tests
+> or achieving a higher simulated compression ratio is not a performance win.**
 
 This is the project's **north star and acceptance standard** for V3 and all
-later versions. [V3_GOALS.md](V3_GOALS.md) is the implementation roadmap;
-this document defines *what we are optimizing* and *what evidence counts*.
+later versions. Read [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) for 512n, 512e,
+4Kn, filesystem cluster sizes, swap partitions/files and precise block-layer
+stat units. [V3_GOALS.md](V3_GOALS.md) is the algorithm roadmap; this
+document defines *what we are optimizing* and *what evidence counts*.
 
 ## 1. Start with the device, not the compressor
 
@@ -19,20 +23,21 @@ Block-layer I/O has address and alignment granularity, and device-specific
 request, transfer and media-program costs. An isolated compressed object may
 still consume a full 4 KiB addressed block.
 
-**Our chosen allocation and accounting unit is an aligned 4 KiB lower block.**
-This is a design decision, not a claim that every SSD's NAND page, every HDD's
-physical sector, or every device's internally transferred unit is precisely
-4 KiB. Some drives expose 512-byte logical sectors or have larger internal
-write/erase granularity. Kernel and device counters measure *host-visible*
-sectors/requests; only hardware telemetry can substantiate internal flash
-programming or endurance claims.
+**Current V3 fixed format:** aligned 4096-byte lower allocation units, with
+4/8/16KiB physical *extents*. This is a format policy for kernels where
+`PAGE_SIZE=4096`, NOT a universal device read/write granularity. A 512n
+disk can address 512-byte sectors, a 512e disk has 512-byte logical but
+commonly 4KiB physical sectors, and a 4Kn disk has 4KiB logical sectors.
+Filesystem allocation clusters are a different concept. The device may
+prefer transfers larger than its logical or physical sectors.
 
-The key question is therefore: **For the same useful swap workload, how many
-4 KiB-equivalent blocks and lower I/O requests were actually transferred?**
-
-A 16 KiB lower request counts as **four 4 KiB-equivalent blocks** and **one
-request**. We report both numbers; collapsing requests and bytes into a
-single “I/O count” would conceal important tradeoffs.
+The key question: **How many host-visible lower READ and WRITE BYTES and
+REQUESTS were actually transferred for the same useful completed swap work,
+including GC?** Use 4KiB *equivalents* only as normalization. A 16KiB write
+means 16KiB transferred (four normalized 4KiB units) in perhaps **one
+command**, NOT four physical operations. Host statistics cannot by
+themselves reveal SSD NAND programming, SD-card erases or internal RMW.
+Measure request counts, sectors and latency separately.
 
 ## 2. Packing density is useful only if it removes actual I/O
 
@@ -74,8 +79,8 @@ two payload blocks. Cache hits may change actual transfer counts.
 Thus **“minimize writes at any cost” is not the vision**. The real objective
 is a device- and workload-specific frontier between:
 
-- completed lower **write 4 KiB-equivalent blocks and write requests**;
-- completed lower **read 4 KiB-equivalent blocks and read requests**;
+- completed lower **write bytes/512-byte stat sectors and write requests** (4KiB equivalents only as normalization);
+- completed lower **read bytes/512-byte stat sectors and read requests** (with real device geometry);
 - **GC and relocation I/O**, including reads and rewrite traffic, never
   hidden from totals;
 - achieved swap-in/swap-out rate, congestion, real drain and **p95/p99
@@ -98,10 +103,10 @@ For every completed, fully drained *paired benchmark*, report the following
 | Measure | Grounded definition |
 | --- | --- |
 | Logical useful bytes | Accepted/read-back-verified 4 KiB logical pages; distinguish offered, submitted and actually completed operations |
-| Lower write sectors | Host-visible sectors transferred by the specifically owned backing device during the measured phase (state sector size) |
-| Lower write 4 KiB equivalents | Lower write bytes / 4096, only when supported by sector deltas and alignment; a 16 KiB request is four units |
+| Lower write sectors | **512-byte accounting sectors** from owned lower device sysfs-stat deltas, NOT the device's logical or physical sector size |
+| Lower write 4 KiB equivalents | **delta write stat sectors / 8**, an accounting normalization, NOT a physical-operation count |
 | Lower write requests | Measured completed lower write commands/BIOs; separately report flushes, discards and any aggregation |
-| Lower read sectors / 4 KiB equivalents / requests | The corresponding physical lower read measurements, especially under cold swap-in and GC |
+| Lower read sectors / 4 KiB equivalents / requests | Same **512-byte stat units**, bytes, optional 4KiB equivalents and independently counted read requests |
 | GC read and write bytes / requests | Lower I/O caused by live relocation, included in total traffic and **also** displayed separately |
 | Useful logical / lower write bytes | Explicitly labeled **write-byte reduction** for a comparable workload, not compression ratio or I/O-operation reduction |
 | Read amplification | Lower backing read blocks or bytes per successfully serviced logical swap-in; distinguish cache effects and GC |
@@ -162,9 +167,9 @@ A performance claim of “V3 is better” requires all of:
 
 1. Exact logical data integrity, correct completion semantics, safe drain,
    GC/reclamation and device-ownership behavior under the target workload.
-2. A **material, repeated reduction in measured completed lower 4 KiB
-   equivalent I/O**, reported for **both writes and reads** plus actual
-   lower requests, including GC overhead.
+2. A **material, repeated improvement in measured host-visible lower-I/O
+   cost**: read/write bytes AND requests separately, with GC, accounting
+   for a real device's sector geometry and not masking read regressions.
 3. A demonstrated device-relevant benefit—less contention, higher useful
    completed throughput, better or acceptable swap-in p99, or fewer measured
    host writes on endurance-constrained media—**without** an unacceptable
