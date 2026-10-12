@@ -61,6 +61,11 @@ struct sv3_dm {
 	struct sv3_map *maps;
 	sv3_u16 *live_records;
 	sv3_u8 *extent_classes;
+	/* Per-discard epoch/delta scratch validates shared-extent liveness
+	 * before any mapping or generation is mutated. */
+	sv3_u32 *discard_epoch;
+	sv3_u16 *discard_count;
+	sv3_u32 discard_serial;
 	sv3_u32 physical_blocks;
 	sv3_u32 logical_pages;
 
@@ -703,21 +708,43 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 	{
 		sector_t check_sector = sector;
 		sector_t check_remaining = remaining;
+		sv3_u32 epoch = ++ctx->discard_serial;
 
+		if (!epoch) {
+			memset(ctx->discard_epoch, 0,
+			       (size_t)ctx->physical_blocks *
+			       sizeof(*ctx->discard_epoch));
+			epoch = ++ctx->discard_serial;
+		}
 		while (check_remaining) {
 			sv3_u32 logical = (sv3_u32)(check_sector / SV3_SECTORS);
 			const struct sv3_map *m = &ctx->maps[logical];
 
 			if (m->generation == ~(sv3_u32)0)
 				return -EOVERFLOW;
-			if (m->valid &&
-			    (m->start_block >= ctx->physical_blocks ||
-			     (m->extent_blocks != 1 && m->extent_blocks != 2 &&
-			      m->extent_blocks != 4) ||
-			     ctx->extent_classes[m->start_block] !=
-				     m->extent_blocks ||
-			     !ctx->live_records[m->start_block]))
-				return -EUCLEAN;
+			if (m->valid) {
+				sv3_u32 start = m->start_block;
+
+				if (start >= ctx->physical_blocks ||
+				    (m->extent_blocks != 1 &&
+				     m->extent_blocks != 2 &&
+				     m->extent_blocks != 4) ||
+				    ctx->extent_classes[start] != m->extent_blocks ||
+				    !ctx->live_records[start])
+					return -EUCLEAN;
+				if (ctx->discard_epoch[start] != epoch) {
+					ctx->discard_epoch[start] = epoch;
+					ctx->discard_count[start] = 0;
+				}
+				/*
+				 * Every logical page in this DISCARD sharing the
+				 * same physical extent consumes a separate live
+				 * record. Check the aggregated count first.
+				 */
+				if (++ctx->discard_count[start] >
+				    ctx->live_records[start])
+					return -EUCLEAN;
+			}
 			check_sector += SV3_SECTORS;
 			check_remaining -= SV3_SECTORS;
 		}
@@ -907,6 +934,8 @@ static void sv3_free(struct sv3_dm *ctx)
 	kvfree(ctx->maps);
 	kvfree(ctx->live_records);
 	kvfree(ctx->extent_classes);
+	kvfree(ctx->discard_epoch);
+	kvfree(ctx->discard_count);
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
@@ -988,7 +1017,10 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
-	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes) {
+	ctx->discard_epoch = kvcalloc(physical, sizeof(*ctx->discard_epoch), GFP_KERNEL);
+	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
+	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
+	    !ctx->discard_epoch || !ctx->discard_count) {
 		error = -ENOMEM;
 		goto fail;
 	}
