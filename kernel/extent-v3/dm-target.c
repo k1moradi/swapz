@@ -1092,9 +1092,13 @@ static void sv3_drain(struct dm_target *ti)
 	flush_delayed_work(&ctx->worker);
 	drain_workqueue(ctx->workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (!list_empty(&ctx->incoming) || ctx->batch_count)
+	if (!list_empty(&ctx->incoming) || ctx->batch_count) {
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("V3 drain invariant: accepted BIOs remain after draining");
-	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		sv3_fail(ctx, -EUCLEAN);
+	} else {
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	}
 	/* Every admitted BIO was queued under the same lock before this drain. */
 	if (!ctx->failed) {
 		int error = blkdev_issue_flush(ctx->backing->bdev);
