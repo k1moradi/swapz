@@ -1,0 +1,144 @@
+Module                  Size  Used by
+tcp_diag               20480  0
+inet_diag              24576  1 tcp_diag
+dm_delay               16384  0
+xfrm_interface         32768  0
+xfrm6_tunnel           16384  1 xfrm_interface
+tunnel4                12288  1 xfrm_interface
+tunnel6                12288  2 xfrm_interface,xfrm6_tunnel
+xfrm_user              69632  2
+rfcomm                110592  4
+snd_seq_dummy          12288  0
+snd_hrtimer            12288  1
+snd_seq               126976  7 snd_seq_dummy
+snd_seq_device         16384  1 snd_seq
+twofish_generic        20480  0
+twofish_x86_64_3way    32768  0
+twofish_x86_64         16384  1 twofish_x86_64_3way
+twofish_common         94208  3 twofish_x86_64,twofish_generic,twofish_x86_64_3way
+serpent_sse2_x86_64    49152  0
+serpent_generic        24576  1 serpent_sse2_x86_64
+blowfish_generic       12288  0
+blowfish_x86_64        24576  0
+blowfish_common        16384  2 blowfish_generic,blowfish_x86_64
+cast5_generic          24576  0
+cast_common            12288  1 cast5_generic
+des3_ede_x86_64        49152  0
+des_generic            12288  0
+libdes                 32768  2 des_generic,des3_ede_x86_64
+algif_skcipher         12288  0
+camellia_generic       45056  0
+camellia_x86_64        61440  0
+xcbc                   12288  0
+md4                    16384  0
+cmac                   12288  2
+algif_hash             20480  0
+ccm                    20480  9
+af_alg                 32768  2 algif_hash,algif_skcipher
+qrtr                   53248  2
+bnep                   32768  2
+amdgpu              21585920  0
+amdxcp                 12288  1 amdgpu
+drm_panel_backlight_quirks    12288  1 amdgpu
+gpu_sched              69632  1 amdgpu
+drm_buddy              28672  1 amdgpu
+binfmt_misc            24576  1
+btusb                  81920  0
+btmtk                  36864  1 btusb
+btrtl                  36864  1 btusb
+btbcm                  24576  1 btusb
+btintel                73728  1 btusb
+b43                   589824  0
+bluetooth            1134592  30 btrtl,btmtk,btintel,btbcm,bnep,btusb,rfcomm
+radeon               2301952  5
+cordic                 12288  1 b43
+platform_profile       20480  0
+snd_hda_codec_alc269   151552  1
+bcma                   90112  1 b43
+snd_hda_codec_realtek_lib    65536  1 snd_hda_codec_alc269
+snd_hda_scodec_component    20480  1 snd_hda_codec_alc269
+snd_hda_codec_atihdmi    24576  1
+snd_hda_codec_generic   126976  2 snd_hda_codec_realtek_lib,snd_hda_codec_alc269
+snd_hda_codec_hdmi     65536  1 snd_hda_codec_atihdmi
+intel_powerclamp       28672  0
+drm_ttm_helper         20480  2 amdgpu,radeon
+ttm                   139264  3 amdgpu,radeon,drm_ttm_helper
+dell_laptop            40960  0
+mac80211             1937408  1 b43
+snd_hda_intel          65536  2
+coretemp               24576  0
+kvm_intel             552960  0
+drm_exec               12288  2 amdgpu,radeon
+dell_smm_hwmon         36864  0
+uvcvideo              147456  0
+cfg80211             1548288  2 b43,mac80211
+snd_hda_codec         212992  6 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_hda_codec_atihdmi
+drm_suballoc_helper    24576  2 amdgpu,radeon
+kvm                  1527808  1 kvm_intel
+snd_hda_core          151552  7 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_hda_codec_atihdmi
+videobuf2_vmalloc      20480  1 uvcvideo
+uvc                    12288  1 uvcvideo
+drm_display_helper    307200  2 amdgpu,radeon
+libarc4                12288  1 mac80211
+videobuf2_memops       16384  1 videobuf2_vmalloc
+videobuf2_v4l2         36864  1 uvcvideo
+irqbypass              16384  1 kvm
+videobuf2_common       90112  4 videobuf2_vmalloc,videobuf2_v4l2,uvcvideo,videobuf2_memops
+at24                   32768  0
+videodev              376832  2 videobuf2_v4l2,uvcvideo
+cec                   106496  2 drm_display_helper,amdgpu
+mei_pxp                16384  0
+rc_core                81920  1 cec
+snd_intel_dspcfg       45056  1 snd_hda_intel
+snd_intel_sdw_acpi     16384  1 snd_intel_dspcfg
+snd_hwdep              24576  1 snd_hda_codec
+snd_pcm               208896  4 snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_core
+ums_realtek            24576  1
+uas                    32768  0
+intel_cstate           20480  0
+snd_timer              53248  3 snd_seq,snd_hrtimer,snd_pcm
+snd                   147456  17 snd_hda_codec_generic,snd_seq,snd_seq_device,snd_hda_codec_hdmi,snd_hwdep,snd_hda_intel,snd_hda_codec,snd_timer,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_pcm
+dell_wmi               28672  1 dell_laptop
+soundcore              16384  1 snd
+joydev                 32768  0
+i2c_i801               36864  0
+i2c_algo_bit           16384  2 amdgpu,radeon
+mc                     90112  4 videodev,videobuf2_v4l2,uvcvideo,videobuf2_common
+dell_smbios            36864  2 dell_wmi,dell_laptop
+dcdbas                 24576  1 dell_smbios
+input_leds             12288  0
+wmi_bmof               12288  0
+sparse_keymap          12288  1 dell_wmi
+dell_wmi_descriptor    20480  2 dell_wmi,dell_smbios
+mac_hid                12288  0
+usb_storage            86016  2 uas,ums_realtek
+i2c_smbus              20480  1 i2c_i801
+i2c_mux                20480  1 i2c_i801
+r8169                 151552  0
+realtek                57344  1
+lpc_ich                32768  0
+mei_me                 61440  1
+ssb                   106496  1 b43
+mei                   184320  3 mei_pxp,mei_me
+sch_fq_codel           28672  2
+efi_pstore             12288  0
+hid_generic            12288  0
+usbhid                 86016  0
+hid                   282624  2 usbhid,hid_generic
+psmouse               225280  0
+video                  77824  4 dell_wmi,amdgpu,radeon,dell_laptop
+wmi                    36864  6 video,dell_wmi,wmi_bmof,dell_smm_hwmon,dell_smbios,dell_wmi_descriptor
+ahci                   53248  1
+libahci                57344  1 ahci
+serio_raw              20480  0
+lp                     32768  0
+esp4_offload           16384  0
+ppdev                  24576  0
+esp4                   28672  1 esp4_offload
+parport                81920  2 lp,ppdev
+xfrm_algo              16384  2 esp4,xfrm_user
+msr                    12288  0
+dmi_sysfs              28672  0
+autofs4                61440  2
+lz4                    12288  8
+lz4_compress           24576  1 lz4

@@ -1,0 +1,60 @@
+2026-10-12T02:36:01,397167-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:02,245476-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:02,245700-07:00 usb 1-1-port4: unable to enumerate USB device
+2026-10-12T02:36:09,861318-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:09,923825-07:00 usb 1-1.4: new high-speed USB device number 12 using ehci-pci
+2026-10-12T02:36:10,789163-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:10,789286-07:00 usb 1-1-port4: attempt power cycle
+2026-10-12T02:36:12,173055-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:13,037226-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:13,037456-07:00 usb 1-1-port4: unable to enumerate USB device
+2026-10-12T02:36:14,159772-07:00 usb 1-1.4: new high-speed USB device number 15 using ehci-pci
+2026-10-12T02:36:14,636744-07:00 usb 1-1.4: device not accepting address 15, error -71
+2026-10-12T02:36:15,485231-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:15,485452-07:00 usb 1-1-port4: attempt power cycle
+2026-10-12T02:36:16,645037-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:16,717743-07:00 usb 1-1.4: new high-speed USB device number 19 using ehci-pci
+2026-10-12T02:36:17,132737-07:00 usb 1-1.4: device not accepting address 19, error -71
+2026-10-12T02:36:17,132954-07:00 usb 1-1-port4: unable to enumerate USB device
+2026-10-12T02:36:17,310714-07:00 usb 1-1.4: new high-speed USB device number 20 using ehci-pci
+2026-10-12T02:36:18,165218-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:18,227738-07:00 usb 1-1.4: new high-speed USB device number 21 using ehci-pci
+2026-10-12T02:36:18,344703-07:00 usb 1-1.4: New USB device found, idVendor=0c45, idProduct=6480, bcdDevice=9a.07
+2026-10-12T02:36:18,344714-07:00 usb 1-1.4: New USB device strings: Mfr=2, Product=1, SerialNumber=0
+2026-10-12T02:36:18,344719-07:00 usb 1-1.4: Product: Laptop_Integrated_Webcam_1.3M
+2026-10-12T02:36:18,344723-07:00 usb 1-1.4: Manufacturer: CKF9139G164010000M90
+2026-10-12T02:36:18,349733-07:00 uvcvideo 1-1.4:1.0: Found UVC 1.00 device Laptop_Integrated_Webcam_1.3M (0c45:6480)
+2026-10-12T02:36:21,448093-07:00 usb 1-1.4: USB disconnect, device number 21
+2026-10-12T02:36:22,740927-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:23,589068-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:23,589343-07:00 usb 1-1-port4: attempt power cycle
+2026-10-12T02:36:24,749038-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:24,821638-07:00 usb 1-1.4: new high-speed USB device number 25 using ehci-pci
+2026-10-12T02:36:24,876476-07:00 usb 1-1.4: New USB device found, idVendor=0c45, idProduct=6480, bcdDevice=9a.07
+2026-10-12T02:36:24,876492-07:00 usb 1-1.4: New USB device strings: Mfr=2, Product=1, SerialNumber=0
+2026-10-12T02:36:24,876500-07:00 usb 1-1.4: Product: Laptop_Integrated_Webcam_1.3M
+2026-10-12T02:36:24,876506-07:00 usb 1-1.4: Manufacturer: CKF9139G164010000M90
+2026-10-12T02:36:24,881326-07:00 uvcvideo 1-1.4:1.0: Found UVC 1.00 device Laptop_Integrated_Webcam_1.3M (0c45:6480)
+2026-10-12T02:36:26,056095-07:00 usb 1-1.4: USB disconnect, device number 25
+2026-10-12T02:36:27,277088-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:28,125106-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:28,125287-07:00 usb 1-1-port4: attempt power cycle
+2026-10-12T02:36:29,284940-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:30,341079-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:30,341333-07:00 usb 1-1-port4: unable to enumerate USB device
+2026-10-12T02:36:34,100987-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:34,948964-07:00 usb 1-1-port4: Cannot enable. Maybe the USB cable is bad?
+2026-10-12T02:36:34,949218-07:00 usb 1-1-port4: attempt power cycle
+2026-10-12T02:36:36,159499-07:00 usb 1-1.4: new high-speed USB device number 32 using ehci-pci
+2026-10-12T02:36:36,214098-07:00 usb 1-1.4: New USB device found, idVendor=0c45, idProduct=6480, bcdDevice=9a.07
+2026-10-12T02:36:36,214109-07:00 usb 1-1.4: New USB device strings: Mfr=2, Product=1, SerialNumber=0
+2026-10-12T02:36:36,214114-07:00 usb 1-1.4: Product: Laptop_Integrated_Webcam_1.3M
+2026-10-12T02:36:36,214118-07:00 usb 1-1.4: Manufacturer: CKF9139G164010000M90
+2026-10-12T02:36:36,221622-07:00 uvcvideo 1-1.4:1.0: Found UVC 1.00 device Laptop_Integrated_Webcam_1.3M (0c45:6480)
+2026-10-12T02:36:40,135833-07:00 usb 1-1.4: USB disconnect, device number 32
+2026-10-12T02:36:40,980461-07:00 usb 1-1.4: new high-speed USB device number 33 using ehci-pci
+2026-10-12T02:36:41,107452-07:00 usb 1-1.4: New USB device found, idVendor=0c45, idProduct=6480, bcdDevice=9a.07
+2026-10-12T02:36:41,107462-07:00 usb 1-1.4: New USB device strings: Mfr=2, Product=1, SerialNumber=0
+2026-10-12T02:36:41,107468-07:00 usb 1-1.4: Product: Laptop_Integrated_Webcam_1.3M
+2026-10-12T02:36:41,107472-07:00 usb 1-1.4: Manufacturer: CKF9139G164010000M90
+2026-10-12T02:36:41,112756-07:00 uvcvideo 1-1.4:1.0: Found UVC 1.00 device Laptop_Integrated_Webcam_1.3M (0c45:6480)

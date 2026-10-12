@@ -1,0 +1,5 @@
+uname: 7.0.0-38-generic
+hostname: Inspiron1564Linux
+boot_id: 8d9202c7-b75e-4bd4-95cc-8ca0d9167b19
+uptime: 182935.06 713513.44
+No reboot command was issued during this validation.

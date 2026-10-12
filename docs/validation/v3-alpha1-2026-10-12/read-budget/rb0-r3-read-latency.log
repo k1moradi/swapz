@@ -1,0 +1,1 @@
+READ_LATENCY_PASS samples=3200 rounds=50 pages=64 p50_ns=42341 p95_ns=52128 p99_ns=66087 max_ns=439006 exact=1

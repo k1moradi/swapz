@@ -1,0 +1,9 @@
+Owned test target was removed by exact UUID before this final step.
+Final inventory showed no Device Mapper mappings; dm_swapz3 reference count was zero.
+Ordinary rmmod dm_swapz3: PASS; /sys/module/dm_swapz3 absent.
+Owned null_blk config: memory_backed=1, size=8 MiB, power=1, badblocks empty, badblocks_partial_io=0, no holders, not swap, only nullb config/device present.
+Power set to 0 on the exact owned configfs instance; its block device disappeared. The exact configfs directory was removed.
+Ordinary rmmod null_blk: PASS; /sys/module/null_blk absent.
+Final inventory: no DM mappings, no nullb block/config entries, no dm_swapz3 or null_blk module.
+Active swap entries remained /swapfile and /dev/sdb1; no swap command was run.
+No reboot command was run. Protected .state SHA-256 values match the recorded values.

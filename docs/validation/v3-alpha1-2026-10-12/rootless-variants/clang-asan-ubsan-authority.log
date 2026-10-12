@@ -1,0 +1,7 @@
+cwd=/tmp/swapz-pr45-validate
+compile_exit=0
+compile_command=clang -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -I kernel/extent-v3 tests/runtime/extent-v3-authority-test.c kernel/extent-v3/authority.c kernel/extent-v3/codec.c -o /tmp/swapz-pr45-evidence/variant-binaries/clang-asan-ubsan-authority
+
+
+run_exit=0
+SV3_EXACT_AUTHORITY_TESTS_PASS=10

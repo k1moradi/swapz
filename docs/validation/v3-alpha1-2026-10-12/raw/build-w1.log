@@ -1,0 +1,24 @@
+make: Entering directory '/tmp/swapz-pr45-validate/kernel/extent-v3'
+make -C /lib/modules/7.0.0-38-generic/build M=/tmp/swapz-pr45-validate/kernel/extent-v3 SV3_BUILD_SMOKE= modules
+make[1]: Entering directory '/usr/src/linux-headers-7.0.0-38-generic'
+make[2]: Entering directory '/tmp/swapz-pr45-validate/kernel/extent-v3'
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  dm-target.o
+  CC [M]  codec.o
+  CC [M]  authority.o
+  CC [M]  engine.o
+  LD [M]  dm-swapz3.o
+  MODPOST Module.symvers
+  CC [M]  dm-swapz3.mod.o
+  CC [M]  .module-common.o
+  LD [M]  dm-swapz3.ko
+  BTF [M] dm-swapz3.ko
+Skipping BTF generation for dm-swapz3.ko due to unavailability of vmlinux
+make[2]: Leaving directory '/tmp/swapz-pr45-validate/kernel/extent-v3'
+make[1]: Leaving directory '/usr/src/linux-headers-7.0.0-38-generic'
+make: Leaving directory '/tmp/swapz-pr45-validate/kernel/extent-v3'

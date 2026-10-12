@@ -1,0 +1,11 @@
+cwd=/tmp/swapz-pr45-validate
+compile_exit=0
+compile_command=cc -std=c11 -O0 -g -Wall -Wextra -Werror -I kernel/extent-v3 tests/runtime/extent-v3-randomized-engine-test.c kernel/extent-v3/engine.c kernel/extent-v3/authority.c kernel/extent-v3/codec.c -o /tmp/swapz-pr45-evidence/variant-binaries/gcc-o0-randomized-engine
+
+
+run_exit=0
+RANDOM_ENGINE_PASS cap=0 windows=100 generated_records=3242 writes=790 blocks=1541 reads=5984 next_block=1794
+RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953
+RANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950
+RANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776
+RANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass

@@ -1,0 +1,2 @@
+RAW_INPUT bytes=4096 lz4_compress_return=0 expected_raw_fallback=1
+RAW_WRITE_RESULT bytes=-1 errno=5 (Input/output error)
