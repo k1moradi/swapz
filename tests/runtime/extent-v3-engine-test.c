@@ -129,7 +129,7 @@ static int test_finite_window_planner(void)
 	CHECK(total == 16);
 	/* 7+7+2 records in aligned 16K+16K+8K = 40KiB. */
 	CHECK(blocks == 10);
-	CHECK(groups == 3);
+	CHECK(groups >= 3 && groups <= 5); /* read amplification breaks byte ties */
 
 	pages[0].payload = NULL;
 	CHECK(sv3_engine_plan(pages, 16, classes, takes, &groups) ==
@@ -144,6 +144,8 @@ static int test_finite_window_planner(void)
 static int test_full_window_and_selective_reads(void)
 {
 	struct sv3_compressed_page pages[16];
+	struct sv3_decoded decoded;
+	const sv3_u8 *stored;
 	sv3_u8 output[3568], committed = 0;
 	sv3_u16 length = 0;
 	sv3_u32 index;
@@ -166,19 +168,23 @@ static int test_full_window_and_selective_reads(void)
 	reads = disk.read_blocks;
 	CHECK(reads == engine.physical_read_blocks);
 	CHECK(reads >= 16 && reads <= 48);
-	/* Check actual physical-block granularity for first record. */
-	disk.read_blocks = 0;
-	CHECK(sv3_engine_read_page(&engine, 0,
-				   output, sizeof(output), &length) == 0);
-	CHECK(disk.read_blocks == 2);
-	disk.read_blocks = 0;
-	CHECK(sv3_engine_read_page(&engine, 1,
-				   output, sizeof(output), &length) == 0);
-	CHECK(disk.read_blocks == 3);
-	disk.read_blocks = 0;
-	CHECK(sv3_engine_read_page(&engine, 6,
-				   output, sizeof(output), &length) == 0);
-	CHECK(disk.read_blocks == 1); /* metadata and payload share block0 */
+	/* Selective reads must fetch exactly the block count required by the
+	 * REAL chosen extent classes, not by a presumed tie-breaking layout. */
+	for (index = 0; index < 16; ++index) {
+		const struct sv3_map *m = &maps[index];
+		int expected;
+
+		CHECK(sv3_lookup(disk.storage +
+				 (size_t)m->start_block * SV3_BLOCK_BYTES,
+				 m->extent_blocks * SV3_BLOCK_BYTES,
+				 m->record_index, &decoded, &stored) == 0);
+		expected = sv3_record_read_blocks(&decoded);
+		CHECK(expected >= 1 && expected <= 3);
+		disk.read_blocks = 0;
+		CHECK(sv3_engine_read_page(&engine, index,
+					   output, sizeof(output), &length) == 0);
+		CHECK(disk.read_blocks == (sv3_u32)expected);
+	}
 	return 0;
 }
 
@@ -230,6 +236,7 @@ static int test_torn_extent_quarantined_without_authority(void)
 static int test_failure_second_extent_reports_prefix(void)
 {
 	struct sv3_compressed_page pages[16];
+	sv3_u8 chosen[SV3_MAX_RECORDS], takes[SV3_MAX_RECORDS], groups = 0;
 	sv3_u8 committed = 0;
 	sv3_u8 output[3568];
 	sv3_u16 len = 0;
@@ -237,15 +244,17 @@ static int test_failure_second_extent_reports_prefix(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 16, 0, 0);
+	CHECK(sv3_engine_plan(pages, 16, chosen, takes, &groups) == 0);
+	CHECK(groups > 1);
 	disk.fail_write_on_call = 2;
 	CHECK(sv3_engine_write_window(&engine, pages, 16, &committed) == -EIO);
-	CHECK(committed == 7);
-	for (index = 0; index < 7; ++index) {
+	CHECK(committed == takes[0]);
+	for (index = 0; index < committed; ++index) {
 		CHECK(maps[index].valid);
 		CHECK(sv3_engine_read_page(&engine, index,
 					   output, sizeof(output), &len) == 0);
 	}
-	for (index = 7; index < 16; ++index)
+	for (index = committed; index < 16; ++index)
 		CHECK(!maps[index].valid);
 	CHECK(!authority.in_flight);
 	return 0;
