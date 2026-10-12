@@ -101,6 +101,26 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertLess(worker.index("sv3_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
 
+    def test_raw_crc_protection_and_gc_relocation(self):
+        auth = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        auth_h = (ROOT / "kernel/extent-v3/authority.h").read_text()
+        self.assertIn("raw_crc32c", auth_h)
+        self.assertIn("sv3_verify_raw(", auth)
+        self.assertIn("sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES)", auth)
+        self.assertIn("sv3_verify_raw(&ctx->authority, logical, ctx->read_page)",
+                      body("sv3_read"))
+        self.assertIn("sv3_verify_raw(&ctx->authority, logical, ctx->input_page)",
+                      body("sv3_gc_move_raw"))
+
+    def test_attempted_and_completed_lower_io_are_distinct(self):
+        lower = body("sv3_lower")
+        self.assertLess(lower.index("ctx->lower_write_submitted_reqs++"),
+                        lower.index("error = dm_io(&req"))
+        self.assertLess(lower.index("error = dm_io(&req"),
+                        lower.index("ctx->physical_write_reqs++"))
+        self.assertIn("one_page_windows", body("sv3_flush_window"))
+        self.assertIn("worker_requeues", body("sv3_worker"))
+
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("sv3_status"))
         self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))
