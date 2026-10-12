@@ -37,10 +37,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.3"', DM)
+        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.4"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.3", GOALS)
+        self.assertIn("3.0.0-alpha.4", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
@@ -137,8 +137,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn("a->" + name, gc)
         self.assertIn("segment == a->gc_forbidden_open", authority)
         self.assertIn("segment == a->gc_forbidden_victim", authority)
-        self.assertLess(gc.index("a->gc_forbidden_victim = victim"),
-                        gc.index("a->open_segment ="))
+        self.assertIn("sv3_gc_begin_rotation(a, victim)", gc)
+        self.assertIn("sv3_gc_commit_rotation(a, victim)", gc)
+        self.assertIn("sv3_enable_segment_rotation(&ctx->authority", body("sv3_ctr"))
+        self.assertIn("!ctx->segment_roles[segment]", body("sv3_gc_choose_victim"))
+        self.assertIn("a->segment_foreground[dest] = 1", authority)
+        self.assertIn("a->segment_foreground[victim] = 0", authority)
 
     def test_optional_write_verify_before_raw_publication(self):
         ctor = body("sv3_ctr")

@@ -47,6 +47,16 @@ struct sv3_authority {
 	sv3_u32 logical_pages;
 	sv3_u32 physical_blocks;
 	sv3_u32 reserve_blocks;
+	/*
+	 * Optional production GC segment roles: one byte per 1MiB segment.
+	 * 1 = foreground writable; 0 = reserved GC destination. Roles are
+	 * exchanged ONLY after a fully verified live relocation. A fixed
+	 * numeric "reserve tail" is not sustainable across GC cycles.
+	 * NULL retains the original research allocator/test behavior.
+	 */
+	sv3_u8 *segment_foreground;
+	sv3_u32 segment_count;
+	sv3_u32 gc_destination;
 	sv3_u32 next_block;
 	sv3_u32 open_segment;		/* UINT32_MAX before the first allocation */
 	sv3_u32 next_segment_probe;
@@ -77,6 +87,22 @@ struct sv3_authority {
 	struct sv3_tx active_tx;
 	int in_flight;
 };
+
+/*
+ * Enable rotating GC reserve ownership, using a preallocated segment_count
+ * byte array. Must be called on a fresh authority before staging any write.
+ * Initially first physical-reserve segments are foreground and the tail
+ * is reserve; after successful GC, victim and destination exchange roles.
+ */
+int sv3_enable_segment_rotation(struct sv3_authority *authority,
+				sv3_u8 *segment_roles,
+				sv3_u32 segment_count);
+/* Begin GC into ONE entirely dead reserve segment (not a foreground one).
+ * Caller preserves the foreground cursor until commit; no nested GC. */
+int sv3_gc_begin_rotation(struct sv3_authority *authority, sv3_u32 victim);
+/* Swap physical roles ONLY after the source victim is wholly dead.
+ * Leaves foreground cursor inside new (formerly reserve) destination. */
+int sv3_gc_commit_rotation(struct sv3_authority *authority, sv3_u32 victim);
 
 /* Returns -ENOSPC unless capacity supports logical pages plus GC reserve. */
 int sv3_authority_init(struct sv3_authority *authority,

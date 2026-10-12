@@ -48,6 +48,7 @@ int sv3_authority_init(struct sv3_authority *a,
 	a->open_segment = ~(sv3_u32)0;
 	a->gc_forbidden_open = ~(sv3_u32)0;
 	a->gc_forbidden_victim = ~(sv3_u32)0;
+	a->gc_destination = ~(sv3_u32)0;
 	a->next_sequence = 1;
 	return 0;
 }
@@ -63,9 +64,11 @@ int sv3_authority_init(struct sv3_authority *a,
  */
 static int sv3_pick_dead_segment(struct sv3_authority *a)
 {
-	sv3_u32 count = (a->gc_allocation ?
-				a->physical_blocks :
-				a->physical_blocks - a->reserve_blocks) /
+	sv3_u32 count = a->segment_foreground ?
+			a->segment_count :
+			(a->gc_allocation ?
+			 a->physical_blocks :
+			 a->physical_blocks - a->reserve_blocks) /
 			SV3_SEGMENT_BLOCKS;
 	sv3_u32 scan;
 
@@ -87,6 +90,19 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 		if (a->gc_allocation &&
 		    (segment == a->gc_forbidden_open ||
 		     segment == a->gc_forbidden_victim))
+			continue;
+		/*
+		 * In rotating mode a GC destination must be one of the
+		 * reserved, entirely dead segments. Foreground allocation
+		 * must never consume reserved space. Once GC has begun it
+		 * may NOT spill into another reserve segment: a complete
+		 * handoff needs exactly one destination and one victim.
+		 */
+		if (a->segment_foreground &&
+		    (a->gc_allocation ?
+		     (a->segment_foreground[segment] ||
+		      a->gc_destination != ~(sv3_u32)0) :
+		     !a->segment_foreground[segment]))
 			continue;
 		for (off = 0; off < SV3_SEGMENT_BLOCKS; ++off) {
 			if (a->live_records[start + off]) {
@@ -131,6 +147,122 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 	return -ENOSPC;
 }
 
+/*
+ * The original fixed reserve tail is retained for research callers that
+ * do not opt in. The production Device Mapper target supplies a
+ * persistent per-segment role array so GC can exchange its just-evacuated
+ * foreground victim with its fully written reserved destination.
+ */
+int sv3_enable_segment_rotation(struct sv3_authority *a,
+				sv3_u8 *roles, sv3_u32 count)
+{
+	sv3_u32 i, foreground;
+
+	if (!a || !a->maps || !roles || a->segment_foreground ||
+	    a->in_flight || a->gc_allocation || a->next_sequence != 1 ||
+	    a->next_block || a->open_segment != ~(sv3_u32)0 ||
+	    count != a->physical_blocks / SV3_SEGMENT_BLOCKS)
+		return -EINVAL;
+	foreground = (a->physical_blocks - a->reserve_blocks) /
+		     SV3_SEGMENT_BLOCKS;
+	if (foreground < 1 || count - foreground < 2)
+		return -ENOSPC;
+	for (i = 0; i < count; ++i)
+		roles[i] = i < foreground ? 1 : 0;
+	a->segment_foreground = roles;
+	a->segment_count = count;
+	a->gc_destination = ~(sv3_u32)0;
+	return 0;
+}
+
+/*
+ * Force relocation into ONE verified dead reserve segment. Do not touch
+ * the foreground cursor here: the sole DM worker saves it before GC and
+ * restores it on any failure. No lower I/O has occurred if this fails.
+ */
+int sv3_gc_begin_rotation(struct sv3_authority *a, sv3_u32 victim)
+{
+	int error;
+
+	if (!a || !a->segment_foreground || a->in_flight ||
+	    a->gc_allocation || victim >= a->segment_count ||
+	    !a->segment_foreground[victim] ||
+	    victim == a->open_segment)
+		return -EINVAL;
+	a->gc_allocation = 1;
+	a->gc_forbidden_open = a->open_segment;
+	a->gc_forbidden_victim = victim;
+	a->gc_destination = ~(sv3_u32)0;
+	a->open_segment = ~(sv3_u32)0;
+	a->next_segment_probe = 0;
+	error = sv3_pick_dead_segment(a);
+	if (error) {
+		/* Caller will restore the saved foreground cursor. */
+		a->gc_allocation = 0;
+		a->gc_forbidden_open = ~(sv3_u32)0;
+		a->gc_forbidden_victim = ~(sv3_u32)0;
+		return error;
+	}
+	a->gc_destination = a->open_segment;
+	return 0;
+}
+
+/*
+ * Commit one evacuated victim -> free reserve, one new GC destination ->
+ * foreground. All new physical writes and authority publications have
+ * completed before this function is invoked by the sole DM worker.
+ * A failed validation must NEVER change roles or re-enable unsafe reuse.
+ */
+int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
+{
+	sv3_u32 dest, logical, block;
+
+	if (!a || !a->segment_foreground || !a->gc_allocation ||
+	    a->in_flight || victim >= a->segment_count ||
+	    victim != a->gc_forbidden_victim)
+		return -EINVAL;
+	dest = a->gc_destination;
+	if (dest >= a->segment_count ||
+	    !a->segment_foreground[victim] ||
+	    a->segment_foreground[dest] || dest == victim ||
+	    dest == a->gc_forbidden_open ||
+	    a->open_segment != dest ||
+	    a->next_block <= dest * SV3_SEGMENT_BLOCKS ||
+	    a->next_block > (dest + 1U) * SV3_SEGMENT_BLOCKS)
+		return -EUCLEAN;
+	/*
+	 * GC is invoked because foreground allocation needs capacity.
+	 * If survivor relocation consumes all 256 destination blocks, the
+	 * role exchange would merely rename a FULL reserve segment as
+	 * foreground: no new foreground write could succeed. Fail closed
+	 * with no role exchange rather than reporting false GC progress.
+	 */
+	if (a->next_block == (dest + 1U) * SV3_SEGMENT_BLOCKS)
+		return -ENOSPC;
+	for (logical = 0; logical < a->logical_pages; ++logical) {
+		const struct sv3_map *m = &a->maps[logical];
+
+		if (m->valid && (m->start_block >= a->physical_blocks ||
+		    m->start_block / SV3_SEGMENT_BLOCKS == victim))
+			return -EUCLEAN;
+	}
+	for (block = victim * SV3_SEGMENT_BLOCKS;
+	     block < (victim + 1U) * SV3_SEGMENT_BLOCKS; ++block)
+		if (a->live_records[block])
+			return -EUCLEAN;
+	/* Commit both roles without further lower I/O or fallible work. */
+	a->segment_foreground[dest] = 1;
+	a->segment_foreground[victim] = 0;
+	a->gc_allocation = 0;
+	a->gc_forbidden_open = ~(sv3_u32)0;
+	a->gc_forbidden_victim = ~(sv3_u32)0;
+	a->gc_destination = ~(sv3_u32)0;
+	a->next_segment_probe = (victim + 1U) % a->segment_count;
+	/* Deliberately leave OPEN and next_block pointing at GC destination:
+	 * subsequent foreground writes use the *same* compacted segment. */
+	return 0;
+}
+
 int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	      sv3_u8 count, sv3_u8 blocks, struct sv3_tx *out)
 {
@@ -169,9 +301,10 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
 			return -ENOSPC;
 	} else {
-		limit = ((a->gc_allocation ?
-				 a->physical_blocks :
-				 a->physical_blocks - a->reserve_blocks) /
+		limit = a->segment_foreground ? a->physical_blocks :
+			((a->gc_allocation ?
+			  a->physical_blocks :
+			  a->physical_blocks - a->reserve_blocks) /
 			 SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
 		/*
 		 * Reuse the OPEN segment only while the entire aligned extent fits.

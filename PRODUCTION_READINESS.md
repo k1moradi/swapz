@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.3.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.4.** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -120,7 +120,7 @@ sourced numbers and the concrete engineering response.
   estimator prefers three 500B pages. Separate authority tests verify
   actual 2200B/1600B records publish those precise payload lengths,
   fail-closed limits, and raw record cost.
-- **Version/provenance:** `V3.0.0-alpha.3`, installed V3 build artifact
+- **Version/provenance:** `V3.0.0-alpha.4`, installed V3 build artifact
   `dm-swapz.ko` and alpha DM target keyword `swapz3`. Rebuilt host
   module SHA, source blobs, vermagic and backing major/minor must be
   captured anew. The alpha.1 and alpha.2 evidence cannot certify it.
@@ -130,6 +130,38 @@ are in [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md).
 **The release gates below remain unchecked until new host evidence
 exists.** No SD/HDD/SSD I/O or active swap manipulation is authorized
 by this source update; the `null_blk` constructor guard remains.
+
+## CRITICAL alpha.3 GC progress failure and alpha.4 correction
+
+Codex's exact [loaded report](https://github.com/k1moradi/swapz/pull/49#issuecomment-6129397157)
+found a **REAL GC reclaim-progress failure** on a 32MiB/1024-page
+owned RAM null_blk. The previous selector considered reserve
+segments30/31 as GC victims even though normal foreground staging
+could only reuse segments0..29; GC restored the old fixed
+foreground cursor. After two successful relocations, reserve30→31
+had NOT produced any foreground-usable space; the next write
+returned `-ENOSPC` without a false success. Neither this fault nor
+Codex's report demonstrates data corruption.
+
+Main developer [PR #50](https://github.com/k1moradi/swapz/pull/50)
+changes the **allocator ownership model**, not just the victim score:
+a preallocated segment-role map identifies foreground vs reserve;
+GC can select only foreground victims and allocate into ONE
+wholly-dead reserve-role destination; a verified complete live-record
+evacuation exchanges the victim/destination roles, keeping the
+foreground cursor in the compacted destination. On any I/O/error
+path no roles change and the target fails closed. A fully emptied
+former foreground victim therefore becomes next cycle's reserve.
+Memory-only exact-production-C authority and codec/engine tests
+exercise repeated handoffs, old-map preservation on incomplete
+relocation, and eight rotations on the exact 32MiB geometry.
+**Current version: 3.0.0-alpha.4.**
+
+This is **source implementation evidence**, NOT a loaded-kernel
+approval. [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
+makes the exact original workload and ≥8 GC rotations the **first
+host gate**. No physical SD/HDD/SSD test or relaxing the null_blk
+safety restriction until this and later independent gates pass.
 
 ## Required production exit gates (hard)
 
