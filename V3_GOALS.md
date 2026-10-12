@@ -80,7 +80,7 @@ ratio or physical writes alone. A device whose minimum read is one physical
   any proven production-like functionality. Package `dkms.conf` for the old
   `dm-swapz.ko` intentionally stays `0.2.2`; old installations must never
   silently upgrade to an incompatible layout.
-- **V3.0.0-alpha.1** is the **new active development line**. Its distinct
+- **V3.0.0-alpha.2** is the **new active development line**. Its distinct
   `SWZ3` format and the experimental DM target name `swapz3` do not
   decode V2.2's `SPWZ` layout. No in-place migration is supported.
   V3 does **not** imply persistent/resumable data.
