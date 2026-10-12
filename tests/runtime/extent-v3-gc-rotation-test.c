@@ -234,6 +234,42 @@ static int test_exact_32mib_foreground_progress(void)
 	return 0;
 }
 
+/*
+ * All 256 source pages are LIVE. Copying the victim into one reserve
+ * consumes all 256 destination blocks; source is now fully evacuated.
+ * A GC commit must still refuse the role handoff: it creates ZERO
+ * foreground-writable blocks and falsely promises allocation progress.
+ */
+static int test_full_destination_is_not_gc_progress(void)
+{
+	sv3_u32 page;
+
+	CHECK(sv3_authority_init(&large_a, large_maps, large_live,
+				large_classes, 1024,
+				32U * SV3_SEGMENT_BLOCKS) == 0);
+	large_a.reuse_dead_segments = 1;
+	CHECK(sv3_enable_segment_rotation(&large_a, large_roles, 32) == 0);
+	for (page = 0; page < SV3_SEGMENT_BLOCKS; ++page)
+		CHECK(large_write(page) == 0);
+	/* Keep the foreground OPEN segment1 while evacuating segment0. */
+	CHECK(large_write(800) == 0);
+	CHECK(large_a.open_segment == 1);
+	CHECK(sv3_gc_begin_rotation(&large_a, 0) == 0);
+	CHECK(large_a.gc_destination == 30);
+	for (page = 0; page < SV3_SEGMENT_BLOCKS; ++page)
+		CHECK(large_write(page) == 0);
+	CHECK(large_a.next_block == 31U * SV3_SEGMENT_BLOCKS);
+	CHECK(sv3_gc_commit_rotation(&large_a, 0) == -ENOSPC);
+	CHECK(large_roles[0] == 1 && large_roles[30] == 0 &&
+	      large_roles[31] == 0);
+	for (page = 0; page < SV3_SEGMENT_BLOCKS; ++page)
+		CHECK(large_maps[page].valid &&
+		      large_maps[page].start_block ==
+			      30U * SV3_SEGMENT_BLOCKS + page &&
+		      large_live[large_maps[page].start_block] == 1);
+	return 0;
+}
+
 static int test_empty_gc_destination_cannot_rotate_roles(void)
 {
 	CHECK(setup() == 0);
@@ -286,6 +322,7 @@ int main(void)
 	CHECK(test_exact_32mib_foreground_progress() == 0); passed++;
 	CHECK(test_empty_gc_destination_cannot_rotate_roles() == 0); passed++;
 	CHECK(test_gc_cannot_spill_into_second_reserve() == 0); passed++;
+	CHECK(test_full_destination_is_not_gc_progress() == 0); passed++;
 	printf("SV3_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }
