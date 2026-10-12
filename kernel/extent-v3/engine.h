@@ -33,6 +33,13 @@ struct sv3_engine {
 	sv3_u32 logical_scratch[SV3_MAX_RECORDS];
 	sv3_u8 plan_classes[SV3_MAX_RECORDS];
 	sv3_u8 plan_takes[SV3_MAX_RECORDS];
+	/*
+	 * Optional diagnostic: read back each whole completed extent and
+	 * byte-compare it BEFORE publishing mappings. Expensive; OFF by default.
+	 * This tests immediate write/read consistency, not power-loss durability.
+	 */
+	int verify_after_write;
+	sv3_u32 write_verify_read_blocks;
 	sv3_u32 submitted_blocks;
 	sv3_u32 completed_blocks;
 	sv3_u32 physical_read_blocks;
