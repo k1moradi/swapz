@@ -824,23 +824,31 @@ static void sv3_worker(struct work_struct *work)
 	LIST_HEAD(local);
 	struct sv3_bio_ref *entry, *next;
 	unsigned long flags;
+	unsigned int remaining = SV3_WORK_QUANTUM_BIOS;
 
-	for (;;) {
+	{
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		list_for_each_entry_safe(entry, next, &local, list) {
 			list_del_init(&entry->list);
 			sv3_process(ctx, entry->bio);
+			if (!--remaining)
+				break;
 		}
 		/* No timer to wait for more records: seal what is available. */
 		if (ctx->batch_count)
 			sv3_flush_window(ctx);
+		/*
+		 * Unprocessed older entries MUST precede newly admitted BIOs.
+		 * Requeue under the same lock as admission and suspend. Every
+		 * pending write batch is completed before the work item yields.
+		 */
 		spin_lock_irqsave(&ctx->queue_lock, flags);
-		if (list_empty(&ctx->incoming)) {
-			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			break;
-		}
+		if (!list_empty(&local))
+			list_splice_init(&local, &ctx->incoming);
+		if (!list_empty(&ctx->incoming))
+			queue_work(ctx->workqueue, &ctx->worker);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
 }
