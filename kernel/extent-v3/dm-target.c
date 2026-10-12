@@ -672,6 +672,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Insufficient capacity for uncompressed pages plus V3 reserve";
 		goto fail;
 	}
+	/* Never reuse a partially-live segment; full live relocation is gated. */
+	ctx->authority.reuse_dead_segments = 1;
 	ctx->batch_bytes = vzalloc(SV3_BATCH_BYTES);
 	ctx->input_page = vzalloc(SV3_BLOCK_BYTES);
 	ctx->read_page = vzalloc(SV3_BLOCK_BYTES);
