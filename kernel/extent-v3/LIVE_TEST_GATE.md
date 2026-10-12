@@ -1,4 +1,4 @@
-# swapz V3.0.0-alpha.2 — loaded-kernel admission gate for Codex
+# swapz V3.0.0-alpha.5 — loaded-kernel admission gate for Codex
 
 **THIS IS NOT AN AUTHORIZATION TO RUN V3 ON A PHYSICAL DISK OR AS SYSTEM SWAP.**
 
@@ -22,9 +22,20 @@ be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
   `kernel/`; only ONE of these incompatible implementations can be
   installed or loaded at a time. Keep V2.2 and V3 checkouts/builds separate,
   and never use the previous alpha.1 `dm_swapz3` test module hash to
-  qualify the current alpha.2 driver.
-- **Explicit loaded FUA BIO**, not only fdatasync/PREFLUSH, is still a
-  release gate; test exact upper completion timing and fault propagation.
+  qualify the current alpha.5 driver.
+- **Correct BIO flush encoding:** Linux rejects a direct
+  `REQ_OP_FLUSH` BIO before the target receives it. Test a valid
+  zero-length `REQ_OP_WRITE | REQ_PREFLUSH` BIO (or
+  `blkdev_issue_flush(<owned DM bdev>)`) for standalone cache flush.
+  Separately test actual upper FUA write and lower write/flush errors.
+  A direct `REQ_OP_FLUSH` probe returning -EOPNOTSUPP is an
+  **expected test-helper error**, not a V3 target bug.
+- **Real and synthetic flush failures:** alpha.5 positional
+  `test_fail_flush_nth=1..64` injects a diagnostic pre-submission EIO
+  ONLY on memory-backed null_blk. Confirm upper once-only EIO, fail-closed
+  state and `flush_calls=flush_ok+flush_err` counters. This does NOT
+  establish genuine device-originated flush failure handling; independently
+  qualify that separately.
 - **Raw 4KiB integrity:** deliberately mutate a raw fallback block on
   the owned backing and prove swapz rejects its CRC32C both on logical
   read and GC relocation before copying it into a new extent.
@@ -84,7 +95,7 @@ be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
 - Cold read p50/p95/p99 only if achieved read load matches baseline.
   Low-QD contention, GC, and test storage service-rate must be comparable.
 
-The active release gate ledger is [PRODUCTION_READINESS.md](../../PRODUCTION_READINESS.md). The renamed alpha.2 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz3 module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
+The active release gate ledger is [PRODUCTION_READINESS.md](../../PRODUCTION_READINESS.md). The renamed alpha.5 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz3 module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
 
 ## Independent correctness blockers that prohibit SD / system swap
 
@@ -96,7 +107,7 @@ The active release gate ledger is [PRODUCTION_READINESS.md](../../PRODUCTION_REA
   device ownership.
 - No comparisons to the V2.2 baseline with matched reader achieved IOPS.
 
-The project remains **draft V3.0.0-alpha.2**, not a production release.
+The project remains **draft V3.0.0-alpha.5**, not a production release.
 No SD/HDD/SSD tests or unattended `swapon` should occur before a
 separately reviewed release-gate commit removes the null_blk-only guard.
 
@@ -127,8 +138,9 @@ The current `null_blk`-only target admission remains mandatory.
 ## Mandatory physical-I/O success metrics
 
 The benchmark's goal is specified by [the project vision](../../VISION.md):
-**fewer REAL lower-device 4 KiB-equivalent read/write transfers under a
-verified workload**, not a better synthetic compression ratio.
+**less actual lower-device read and write BYTES AND request
+counts under the same verified achieved workload**, including GC.
+4KiB equivalents are normalization, not physical-operation counts.
 
 - For *each* V2.2/V3 matched run, record lower **512-byte Linux
   stat-sector deltas**, lower read/write **bytes** and independent request
