@@ -992,6 +992,19 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot open V3 dedicated backing device";
 		goto fail;
 	}
+	/*
+	 * Alpha device admission is intentionally stricter than user
+	 * authorization. Only an owned, RAM-backed null_blk node may become
+	 * a live V3 target before fault/reclaim qualification; a physical
+	 * SD, HDD or SSD partition must never be selected accidentally.
+	 * Device ownership/UUID checks remain the test harness's duty.
+	 */
+	if (!ctx->backing->bdev->bd_disk ||
+	    strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5)) {
+		ti->error = "swapz3 alpha accepts null_blk backing only";
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
 	if (bdev_is_zoned(ctx->backing->bdev) ||
 	    bdev_read_only(ctx->backing->bdev) ||
 	    bdev_logical_block_size(ctx->backing->bdev) > SV3_BLOCK_BYTES ||
