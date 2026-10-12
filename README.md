@@ -6,6 +6,8 @@
 > correct data, cold swap-in latency or safe GC. **Passing tests or achieving
 > a better simulated compression ratio does not prove an I/O win.**
 
+**Production readiness is not established.** See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the exact loaded-kernel, FUA, GC, V2.2 control and physical-media release gates.
+
 Read [VISION.md](VISION.md) for the detailed definition of real I/O savings,
 the difference between 4 KiB-equivalent transferred blocks and request
 counts, read/write/GC tradeoffs, evidence requirements, and go/no-go rules.
