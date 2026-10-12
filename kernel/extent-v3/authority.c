@@ -64,9 +64,10 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	for (index = 0; index < count; ++index) {
 		sv3_u8 earlier;
 
-		if (pages[index] >= a->logical_pages ||
-		    a->maps[pages[index]].generation == ~(sv3_u32)0)
+		if (pages[index] >= a->logical_pages)
 			return -ERANGE;
+		if (a->maps[pages[index]].generation == ~(sv3_u32)0)
+			return -EOVERFLOW;
 		for (earlier = 0; earlier < index; ++earlier) {
 			if (pages[earlier] == pages[index])
 				return -EEXIST;
@@ -102,6 +103,7 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	a->active_start = start;
 	a->active_sequence = out->sequence;
 	a->active_blocks = blocks;
+	a->active_count = count;
 	a->in_flight = 1;
 	return 0;
 }
@@ -113,6 +115,7 @@ static int sv3_is_active(const struct sv3_authority *a,
 		tx->start_block == a->active_start &&
 		tx->sequence == a->active_sequence &&
 		tx->extent_blocks == a->active_blocks &&
+		tx->count == a->active_count &&
 		sv3_legal_class(tx->extent_blocks) &&
 		tx->count > 0 && tx->count <= SV3_MAX_RECORDS;
 }
@@ -126,6 +129,7 @@ static void sv3_forget_active(struct sv3_authority *a, int published)
 	a->in_flight = 0;
 	a->active_sequence = 0;
 	a->active_blocks = 0;
+	a->active_count = 0;
 }
 
 int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
