@@ -97,7 +97,7 @@ staged-generation immutability, quarantine and fail-closed publication.
 PRs #40, #42, #43 and independent PR #41 underpin these tests.
 
 **M2 — actual standalone V3 Device Mapper target.** Separate
-`dm-swapz3.ko` with actual LZ4+raw fallback, sorted bounded write windows,
+`dm-swapz.ko` with actual LZ4+raw fallback, sorted bounded write windows,
 lower synchronous DM I/O, exact per-upper-BIO ownership and completion,
 targeted reads, whole-range discard, flush/FUA and safe removal.
 Validate on rootless source tests and *real loaded* `null_blk` only after
