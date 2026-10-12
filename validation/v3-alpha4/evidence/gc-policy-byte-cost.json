@@ -1,0 +1,38 @@
+{
+  "policy": 1,
+  "target_name": "swapz3-a4-gc1-57eccebd",
+  "target_uuid": "SWAPZ3-A4-GC1-57ECCEBD",
+  "result": "PASS",
+  "candidate_lz4_lengths": {
+    "large": 3335,
+    "small": [
+      496,
+      496,
+      496
+    ]
+  },
+  "expected_victim": 1,
+  "actual_victim": 1,
+  "destination": 30,
+  "selected_pages": 3,
+  "selected_cost_bytes": 1536,
+  "status_deltas": {
+    "nullblk_read_requests": 17,
+    "nullblk_read_bytes": 69632,
+    "nullblk_write_requests": 2,
+    "nullblk_write_bytes": 8192,
+    "target_physical_read_bytes": 69632,
+    "target_physical_write_bytes": 8192,
+    "target_physical_read_reqs": 17,
+    "target_physical_write_reqs": 2,
+    "target_gc_read_bytes": 12288,
+    "target_gc_write_bytes": 4096,
+    "target_gc_read_reqs": 3,
+    "target_gc_write_reqs": 1,
+    "additional_non_gc_read_bytes": 53248,
+    "additional_non_gc_read_requests": 13
+  },
+  "final_cursor": 7683,
+  "reserve_blocks": 512,
+  "readback": "all 1024 pages verified after GC and after independent foreground write"
+}

@@ -1,0 +1,63 @@
+[202195.815918] null_blk: disk nullb_swapz3_a4_57eccebd created
+[202852.865542] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[203614.902188] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=6400 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[203669.297185] device-mapper: swapz3: V3 alpha: lower or mapping error -28; rejecting subsequent I/O
+[203669.325199] Buffer I/O error on dev dm-0, logical block 0, async page read
+[203857.998334] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[204131.206060] SV3BIO probe_begin target=/dev/mapper/swapz3-a4-functional-57eccebd
+[204381.879896] null_blk: disk nullb_swapz3_a4_57eccebd created
+[204429.262794] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[204429.552378] SV3BIO probe_begin target=/dev/mapper/swapz3-a4-barrier-cache-57eccebd
+[204550.449694] SV3BIO probe_begin target=/dev/mapper/swapz3-a4-barrier-cache-57eccebd
+[204917.980067] SV3BIO probe_begin target=/dev/mapper/swapz3-a4-functional-57eccebd
+[205018.235965] SV3BIO probe_begin target=/dev/mapper/swapz3-a4-barrier-cache-57eccebd
+[205126.866784] null_blk: disk nullb_swapz3_a4_57eccebd created
+[205140.085765] null_blk: disk nullb_swapz3_a4_57eccebd created
+[205310.583538] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[205310.823929] SV3QUEUE begin target=/dev/mapper/swapz3-a4-q4-57eccebd count=1024
+[205424.148698] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[205424.427192] SV3QUEUE begin target=/dev/mapper/swapz3-a4-q0-57eccebd count=1024
+[205454.345327] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[205454.565424] SV3QUEUE begin target=/dev/mapper/swapz3-a4-q1-57eccebd count=1024
+[205455.431269] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[205455.653719] SV3QUEUE begin target=/dev/mapper/swapz3-a4-q2-57eccebd count=1024
+[205598.038286] null_blk: disk nullb_swapz3_a4_57eccebd created
+[205598.072859] I/O error, dev nullb_swapz3_a4_57eccebd, sector 32760 op 0x0:(READ) flags 0x800 phys_seg 2 prio class 2
+[205811.423302] null_blk: disk nullb_swapz3_a4_57eccebd created
+[205811.516318] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[205861.512579] I/O error, dev nullb_swapz3_a4_57eccebd, sector 61440 op 0x1:(WRITE) flags 0x1000800 phys_seg 1 prio class 2
+[205861.512601] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[205861.534307] Buffer I/O error on dev dm-0, logical block 0, async page read
+[205936.407379] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[205970.382503] I/O error, dev nullb_swapz3_a4_57eccebd, sector 4088 op 0x0:(READ) flags 0x1000800 phys_seg 1 prio class 2
+[205970.382534] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[205970.408949] Buffer I/O error on dev dm-0, logical block 0, async page read
+[206153.201641] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[206153.596592] device-mapper: swapz3: V3 alpha: lower or mapping error -74; rejecting subsequent I/O
+[206206.944474] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[206207.245648] device-mapper: swapz3: V3 alpha: lower or mapping error -74; rejecting subsequent I/O
+[206258.152757] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[206297.973468] device-mapper: swapz3: V3 alpha: lower or mapping error -74; rejecting subsequent I/O
+[206297.994210] Buffer I/O error on dev dm-0, logical block 0, async page read
+[206865.081151] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[206905.849645] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207114.398416] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207167.652709] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207298.200836] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207410.691540] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207570.853052] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207653.090768] I/O error, dev nullb_swapz3_a4_57eccebd, sector 8 op 0x0:(READ) flags 0x800000 phys_seg 1 prio class 2
+[207653.090788] Buffer I/O error on dev nullb_swapz3_a4_57eccebd, logical block 1, async page read
+[207653.090797] Dev nullb_swapz3_a4_57eccebd: unable to read RDB block 8
+[207653.090829]  nullb_swapz3_a4_57eccebd: unable to read partition table
+[207653.090857] null_blk: disk nullb_swapz3_a4_57eccebd created
+[207721.047617] null_blk: disk nullb_swapz3_a4_57eccebd created
+[207769.185938] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207769.445031] SV3BIO probe_begin target=/dev/mapper/swapz3-a4-fua-error-57eccebd
+[207769.445211] I/O error, dev nullb_swapz3_a4_57eccebd, sector 800 op 0x1:(WRITE) flags 0x1000800 phys_seg 1 prio class 2
+[207769.445223] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[207964.663698] null_blk: disk nullb_swapz3_a4_57eccebd created
+[207964.715123] device-mapper: swapz3: V3 alpha 3.0.0-alpha.4 logical_pages=1024 physical_blocks=8192 window=64 read_cap=0 LIVE GC EXPERIMENTAL
+[207970.237320] I/O error, dev nullb_swapz3_a4_57eccebd, sector 61448 op 0x1:(WRITE) flags 0x1000800 phys_seg 1 prio class 2
+[207970.237340] device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O
+[207970.242094] Buffer I/O error on dev dm-0, logical block 0, async page read

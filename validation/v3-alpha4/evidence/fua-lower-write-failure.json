@@ -1,0 +1,21 @@
+{
+  "result": "PASS_FAIL_CLOSED",
+  "probe_insmod_exit": 1,
+  "upper_callbacks": {
+    "preceding_write": -5,
+    "fua_write": -5,
+    "completions_each": 1
+  },
+  "window_records": 2,
+  "window_bins": {
+    "win2": 1
+  },
+  "lower_failed_sector": 800,
+  "successful_physical_bytes_total": 409600,
+  "logical_bytes_acknowledged": 405504,
+  "status_failed": 1,
+  "status_error": -5,
+  "lower_destination_unchanged": true,
+  "ordinary_exact_uuid_teardown": "PASS",
+  "interpretation": "The two-write window was reported failed to both upper BIOs exactly once; the first lower block write completed but no logical bytes from this failed window were acknowledged. This validates fail-closed error propagation, not successful FUA ordering under a lower flush error."
+}

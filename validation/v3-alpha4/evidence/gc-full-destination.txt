@@ -1,0 +1,17 @@
+trigger command: timeout 120s sudo -n /tmp/swapz-v3-alpha4-evidence-57eccebd/live/write-once /dev/mapper/swapz3-a4-full-dest-57eccebd 0 63000
+trigger exit: 1
+pwrite_page=0 seed=63000 bytes=-1 errno=28 (No space left on device)
+
+status after trigger:
+0 51200 swapz3 version=3.0.0-alpha.4 mode=alpha-live-gc logical_write=26214400 logical_read=53125120 physical_write=27262976 physical_write_reqs=6656 physical_read=53825536 physical_read_reqs=13141 compressed=0 raw=6400 discarded=0 windows=0 reordered=0 cursor=6400 reserve=1600 gc_victims=0 gc_role_rotations=0 last_gc_victim=0 last_gc_destination=0 gc_pages=256 gc_read=1048576 gc_write=1048576 gc_policy=1 gc_selected_bytes=1048576 gc_selected_pages=256 gc_read_reqs=256 gc_write_reqs=256 dead_segment_reuses=0 write_verify_blocks=0 verify=0 write_submitted=27262976 write_submitted_reqs=6656 read_submitted=53825536 read_submitted_reqs=13141 worker_requeues=13 one_page_windows=0 window_records=0 coalesce_ms=0 win1=0 win2=0 win3_4=0 win5_8=0 win9_16=0 win17_64=0 coalesce_deferred=0 coalesce_urgent=12972 failed=1 error=-28
+
+pretrigger full readback exit/stdout:
+0
+verify_pages=6400 errors=0 result=PASS
+
+source/destination raw read exits:
+0
+0
+
+ordinary removal exit:
+0

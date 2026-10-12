@@ -1,0 +1,17 @@
+== early rotation batch ==
+
+== continuation rotations 4 through 8 ==
+ROTATION_PASS n=4 victim=1 destination=30 reserves=2 cursor=7936 gc_read=4096 gc_write=4096 lower_write=8192 lower_write_req=2 target_read=12288 lower_read=61440 lower_read_req=15 read_unattributed=49152 all_pages=1024
+ROTATION_PASS n=5 victim=0 destination=1 reserves=2 cursor=512 gc_read=4096 gc_write=4096 lower_write=8192 lower_write_req=2 target_read=61440 lower_read=61440 lower_read_req=15 read_unattributed=0 all_pages=1024
+ROTATION_PASS n=6 victim=30 destination=0 reserves=2 cursor=256 gc_read=4096 gc_write=4096 lower_write=8192 lower_write_req=2 target_read=61440 lower_read=61440 lower_read_req=15 read_unattributed=0 all_pages=1024
+ROTATION_PASS n=7 victim=1 destination=30 reserves=2 cursor=7936 gc_read=4096 gc_write=4096 lower_write=8192 lower_write_req=2 target_read=61440 lower_read=61440 lower_read_req=15 read_unattributed=0 all_pages=1024
+ROTATION_PASS n=8 victim=0 destination=1 reserves=2 cursor=512 gc_read=4096 gc_write=4096 lower_write=8192 lower_write_req=2 target_read=61440 lower_read=61440 lower_read_req=15 read_unattributed=0 all_pages=1024
+GC_EIGHT_ROTATIONS_PASS rotations=8 reserves=2 full_pages_verified_after_each_trigger_and_fill=1024
+FINAL_STATUS version=3.0.0-alpha.4 mode=alpha-live-gc logical_write=39813120 logical_read=129703936 physical_write=39845888 physical_write_reqs=9728 physical_read=65220608 physical_read_reqs=15923 compressed=2 raw=9718 discarded=0 windows=2 reordered=0 cursor=512 reserve=512 gc_victims=8 gc_role_rotations=8 last_gc_victim=0 last_gc_destination=1 gc_pages=8 gc_read=32768 gc_write=32768 gc_policy=1 gc_selected_bytes=15452 gc_selected_pages=8 gc_read_reqs=8 gc_write_reqs=8 dead_segment_reuses=7 write_verify_blocks=0 verify=0 write_submitted=39845888 write_submitted_reqs=9728 read_submitted=65220608 read_submitted_reqs=15923 worker_requeues=24 one_page_windows=2 window_records=2 coalesce_ms=0 win1=2 win2=0 win3_4=0 win5_8=0 win9_16=0 win17_64=0 coalesce_deferred=0 coalesce_urgent=31666 failed=0 error=0
+
+== final DM status ==
+0 8192 swapz3 version=3.0.0-alpha.4 mode=alpha-live-gc logical_write=39813120 logical_read=129703936 physical_write=39845888 physical_write_reqs=9728 physical_read=65220608 physical_read_reqs=15923 compressed=2 raw=9718 discarded=0 windows=2 reordered=0 cursor=512 reserve=512 gc_victims=8 gc_role_rotations=8 last_gc_victim=0 last_gc_destination=1 gc_pages=8 gc_read=32768 gc_write=32768 gc_policy=1 gc_selected_bytes=15452 gc_selected_pages=8 gc_read_reqs=8 gc_write_reqs=8 dead_segment_reuses=7 write_verify_blocks=0 verify=0 write_submitted=39845888 write_submitted_reqs=9728 read_submitted=65220608 read_submitted_reqs=15923 worker_requeues=24 one_page_windows=2 window_records=2 coalesce_ms=0 win1=2 win2=0 win3_4=0 win5_8=0 win9_16=0 win17_64=0 coalesce_deferred=0 coalesce_urgent=31666 failed=0 error=0
+
+== full image result ==
+verify_pages=1024 errors=0 result=PASS
+exit=0

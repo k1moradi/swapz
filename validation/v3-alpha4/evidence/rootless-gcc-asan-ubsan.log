@@ -1,0 +1,80 @@
+source=57eccebd6138831074e69ffc0179ae82831e2d60
+compiler=cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+
+=== codec-test build ===
+=== codec-test run ===
+SV3_EXACT_PRODUCTION_C_TESTS_PASS=8
+
+=== authority-test build ===
+=== authority-test run ===
+SV3_EXACT_AUTHORITY_TESTS_PASS=10
+
+=== tx-snapshot-test build ===
+=== tx-snapshot-test run ===
+SV3_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=4
+
+=== write-verify-test build ===
+=== write-verify-test run ===
+SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7
+
+=== dead-segment-test build ===
+=== dead-segment-test run ===
+SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=4
+
+=== raw-discard-test build ===
+=== raw-discard-test run ===
+SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=7
+
+=== production-source-test ===
+test_allocation_has_gc_reserve_and_fail_closed_reuse (__main__.V3ProductionSourceQualification.test_allocation_has_gc_reserve_and_fail_closed_reuse) ... ok
+test_alpha_rejects_all_physical_devices (__main__.V3ProductionSourceQualification.test_alpha_rejects_all_physical_devices) ... ok
+test_attempted_and_completed_lower_io_are_distinct (__main__.V3ProductionSourceQualification.test_attempted_and_completed_lower_io_are_distinct) ... ok
+test_discard_validates_entire_range_before_mutating (__main__.V3ProductionSourceQualification.test_discard_validates_entire_range_before_mutating) ... ok
+test_fua_acknowledged_only_after_flush (__main__.V3ProductionSourceQualification.test_fua_acknowledged_only_after_flush) ... ok
+test_gc_does_not_consume_or_complete_upper_bios (__main__.V3ProductionSourceQualification.test_gc_does_not_consume_or_complete_upper_bios) ... ok
+test_gc_explicitly_forbids_paused_open_and_victim (__main__.V3ProductionSourceQualification.test_gc_explicitly_forbids_paused_open_and_victim) ... ok
+test_gc_status_is_truthful (__main__.V3ProductionSourceQualification.test_gc_status_is_truthful) ... ok
+test_gc_uses_committed_actual_payload_lengths (__main__.V3ProductionSourceQualification.test_gc_uses_committed_actual_payload_lengths) ... ok
+test_map_and_teardown_are_owned (__main__.V3ProductionSourceQualification.test_map_and_teardown_are_owned) ... ok
+test_online_batching_bounded_and_barrier_first (__main__.V3ProductionSourceQualification.test_online_batching_bounded_and_barrier_first) ... ok
+test_optional_write_verify_before_raw_publication (__main__.V3ProductionSourceQualification.test_optional_write_verify_before_raw_publication) ... ok
+test_raw_crc_protection_and_gc_relocation (__main__.V3ProductionSourceQualification.test_raw_crc_protection_and_gc_relocation) ... ok
+test_real_v3_not_memory_smoke (__main__.V3ProductionSourceQualification.test_real_v3_not_memory_smoke) ... ok
+test_separate_target_and_3_0_alpha_version (__main__.V3ProductionSourceQualification.test_separate_target_and_3_0_alpha_version) ... ok
+test_shutdown_completes_all_accepted_queued_bios (__main__.V3ProductionSourceQualification.test_shutdown_completes_all_accepted_queued_bios) ... ok
+test_worker_yields_after_finite_window_and_preserves_fifo (__main__.V3ProductionSourceQualification.test_worker_yields_after_finite_window_and_preserves_fifo) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.029s
+
+OK
+
+=== engine-test build ===
+=== engine-test run ===
+SV3_EXACT_ENGINE_TESTS_PASS=9
+
+=== randomized-engine-test build ===
+=== randomized-engine-test run ===
+RANDOM_ENGINE_PASS cap=0 windows=100 generated_records=3242 writes=790 blocks=1541 reads=5984 next_block=1794
+RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953
+RANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950
+RANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776
+RANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass
+
+=== gc-forbidden-test build ===
+=== gc-forbidden-test run ===
+SV3_GC_FORBIDDEN_SEGMENT_TESTS_PASS=3
+
+=== gc-cost-test build ===
+=== gc-cost-test run ===
+SV3_GC_COST_TESTS_PASS=3
+
+=== gc-rotation-test build ===
+=== gc-rotation-test run ===
+SV3_ROTATING_GC_TESTS_PASS=6
+
+=== gc-engine-rotation-test build ===
+=== gc-engine-rotation-test run ===
+SV3_GC_ENGINE_ROTATION_TESTS_PASS=2
+
+EXACT_C_SANITIZER_MATRIX: PASS
