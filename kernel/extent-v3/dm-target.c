@@ -695,6 +695,33 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 	    remaining / SV3_SECTORS >
 			ctx->logical_pages - sector / SV3_SECTORS)
 		return -ERANGE;
+	/*
+	 * The discard must be all-or-nothing on any detectable mapping,
+	 * generation or liveness corruption. Validate every affected logical
+	 * page before changing even the first generation or refcount.
+	 */
+	{
+		sector_t check_sector = sector;
+		sector_t check_remaining = remaining;
+
+		while (check_remaining) {
+			sv3_u32 logical = (sv3_u32)(check_sector / SV3_SECTORS);
+			const struct sv3_map *m = &ctx->maps[logical];
+
+			if (m->generation == ~(sv3_u32)0)
+				return -EOVERFLOW;
+			if (m->valid &&
+			    (m->start_block >= ctx->physical_blocks ||
+			     (m->extent_blocks != 1 && m->extent_blocks != 2 &&
+			      m->extent_blocks != 4) ||
+			     ctx->extent_classes[m->start_block] !=
+				     m->extent_blocks ||
+			     !ctx->live_records[m->start_block]))
+				return -EUCLEAN;
+			check_sector += SV3_SECTORS;
+			check_remaining -= SV3_SECTORS;
+		}
+	}
 	while (remaining) {
 		error = sv3_discard_page(&ctx->authority,
 				       (sv3_u32)(sector / SV3_SECTORS));
@@ -1000,7 +1027,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
-	DMINFO("V3 alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u NO GC",
+	DMINFO("V3 alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
 	       SV3_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
 	       ctx->max_window, (unsigned int)budget);
 	return 0;
