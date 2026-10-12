@@ -61,7 +61,9 @@ int sv3_authority_init(struct sv3_authority *a,
  */
 static int sv3_pick_dead_segment(struct sv3_authority *a)
 {
-	sv3_u32 count = (a->physical_blocks - a->reserve_blocks) /
+	sv3_u32 count = (a->gc_allocation ?
+				a->physical_blocks :
+				a->physical_blocks - a->reserve_blocks) /
 			SV3_SEGMENT_BLOCKS;
 	sv3_u32 scan;
 
@@ -154,7 +156,9 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
 			return -ENOSPC;
 	} else {
-		limit = ((a->physical_blocks - a->reserve_blocks) /
+		limit = ((a->gc_allocation ?
+				 a->physical_blocks :
+				 a->physical_blocks - a->reserve_blocks) /
 			 SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
 		/*
 		 * Reuse the OPEN segment only while the entire aligned extent fits.

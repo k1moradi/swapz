@@ -50,6 +50,12 @@ struct sv3_authority {
 	 * default; the separately reviewed Device Mapper target enables this.
 	 */
 	sv3_u8 reuse_dead_segments;
+	/* Only the serialized GC worker may set this, never foreground. */
+	sv3_u8 gc_allocation;
+	/* GC may NOT allocate into the paused foreground OPEN segment or
+	 * the victim being relocated, even if its current live count is zero. */
+	sv3_u32 gc_forbidden_open;
+	sv3_u32 gc_forbidden_victim;
 	sv3_u32 next_sequence;
 	sv3_u32 abandoned_blocks;
 	sv3_u32 committed_blocks;
@@ -93,6 +99,9 @@ int sv3_finish_raw(struct sv3_authority *authority, const struct sv3_tx *tx,
 		   sv3_u8 completed_blocks, int io_error);
 /* Serialized explicit logical discard: invalidate and advance generation. */
 int sv3_discard_page(struct sv3_authority *authority, sv3_u32 logical_page);
+/* Fail-closed multi-page discard: prevalidate entire range before mutation. */
+int sv3_discard_range(struct sv3_authority *authority,
+		      sv3_u32 first_page, sv3_u32 page_count);
 /* Binds on-media readback to current in-memory mapping and generation. */
 int sv3_read_authoritative(const struct sv3_authority *authority,
 			   sv3_u32 logical_page, const struct sv3_map *observed,

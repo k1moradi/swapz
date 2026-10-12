@@ -61,6 +61,11 @@ struct sv3_dm {
 	struct sv3_map *maps;
 	sv3_u16 *live_records;
 	sv3_u8 *extent_classes;
+	/* Per-discard epoch/delta scratch validates shared-extent liveness
+	 * before any mapping or generation is mutated. */
+	sv3_u32 *discard_epoch;
+	sv3_u16 *discard_count;
+	sv3_u32 discard_serial;
 	sv3_u32 physical_blocks;
 	sv3_u32 logical_pages;
 
@@ -69,6 +74,20 @@ struct sv3_dm {
 	struct sv3_compressed_page planned[SV3_MAX_RECORDS];
 	sv3_u8 planned_to_batch[SV3_MAX_RECORDS];
 	sv3_u8 used[SV3_MAX_RECORDS];
+	/* Separate GC metadata and compressed record storage. Foreground upper
+	 * BIO descriptors/data stay immutable throughout an emergency cleaning. */
+	struct sv3_pending_bio gc_pending[SV3_MAX_RECORDS];
+	struct sv3_compressed_page gc_planned[SV3_MAX_RECORDS];
+	sv3_u8 gc_to_pending[SV3_MAX_RECORDS];
+	sv3_u8 gc_used[SV3_MAX_RECORDS];
+	sv3_u8 gc_count;
+	u8 *gc_bytes_store;
+	sv3_u32 *gc_scores;  /* [physical 1MiB segments] */
+	sv3_u32 segment_count;
+	u64 gc_victims;
+	u64 gc_pages;
+	u64 gc_read_bytes;
+	u64 gc_write_bytes;
 	sv3_u8 batch_count;
 	sv3_u8 max_window;
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
@@ -250,11 +269,246 @@ static void sv3_order_window(struct sv3_dm *ctx)
 	}
 }
 
+/*
+ * Size-classed live relocation. The victim is NEVER erased by this function.
+ * Instead, every live logical map is re-encoded into a new, fully completed
+ * physical extent (or raw block), then old per-extent liveness is decremented.
+ * Only after a final mapping+refcount scan proves the victim wholly dead may
+ * the normal allocator reuse it. All callbacks are synchronous, under one
+ * serialized worker; NO recursive GC calls can occur.
+ */
+static void sv3_gc_sort(struct sv3_dm *ctx)
+{
+	sv3_u8 position = 0, i;
+
+	memset(ctx->gc_used, 0, sizeof(ctx->gc_used));
+	while (position < ctx->gc_count) {
+		int largest = -1, partner = -1, slack_best = INT_MAX;
+
+		for (i = 0; i < ctx->gc_count; ++i)
+			if (!ctx->gc_used[i] &&
+			    (largest < 0 || ctx->gc_pending[i].length >
+			     ctx->gc_pending[largest].length))
+				largest = i;
+		ctx->gc_used[largest] = 1;
+		ctx->gc_to_pending[position++] = largest;
+		for (i = 0; i < ctx->gc_count; ++i) {
+			int slack;
+
+			if (ctx->gc_used[i])
+				continue;
+			slack = SV3_BLOCK_BYTES - 48 -
+				ctx->gc_pending[largest].length -
+				ctx->gc_pending[i].length;
+			if (slack >= 0 && slack < slack_best) {
+				slack_best = slack;
+				partner = i;
+			}
+		}
+		if (partner >= 0) {
+			ctx->gc_used[partner] = 1;
+			ctx->gc_to_pending[position++] = partner;
+		}
+	}
+	for (position = 0; position < ctx->gc_count; ++position) {
+		sv3_u8 index = ctx->gc_to_pending[position];
+
+		ctx->gc_planned[position] = (struct sv3_compressed_page) {
+			.logical_page = ctx->gc_pending[index].logical,
+			.payload = ctx->gc_bytes_store +
+				(size_t)index * SV3_BLOCK_BYTES,
+			.length = ctx->gc_pending[index].length,
+		};
+	}
+}
+
+static int sv3_gc_flush(struct sv3_dm *ctx)
+{
+	sv3_u8 completed = 0;
+	int error;
+
+	if (!ctx->gc_count)
+		return 0;
+	sv3_gc_sort(ctx);
+	error = sv3_engine_write_window(&ctx->engine, ctx->gc_planned,
+					 ctx->gc_count, &completed);
+	ctx->gc_pages += completed;
+	ctx->gc_count = 0;
+	return error;
+}
+
+static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
+			   const struct sv3_map *old)
+{
+	struct sv3_tx tx;
+	sv3_u8 completed = 0;
+	int error;
+
+	if (old->extent_blocks != 1 || old->start_block >= ctx->physical_blocks)
+		return -EUCLEAN;
+	error = sv3_lower_read(ctx, old->start_block, 1, ctx->input_page);
+	if (error)
+		return error;
+	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	if (error)
+		return error;
+	error = sv3_lower_write(ctx, tx.start_block, 1,
+				ctx->input_page, &completed);
+	error = sv3_finish_raw(&ctx->authority, &tx, completed, error);
+	if (!error)
+		ctx->gc_pages++;
+	return error;
+}
+
+static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
+{
+	sv3_u32 logical, segment, selected = ~(sv3_u32)0;
+	sv3_u32 best = ~(sv3_u32)0;
+
+	memset(ctx->gc_scores, 0,
+	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		const struct sv3_map *m = &ctx->maps[logical];
+
+		if (!m->valid)
+			continue;
+		if (m->start_block >= ctx->physical_blocks)
+			return -EUCLEAN;
+		ctx->gc_scores[m->start_block / SV3_SEGMENT_BLOCKS]++;
+	}
+	for (segment = 0; segment < ctx->segment_count; ++segment) {
+		sv3_u32 live = ctx->gc_scores[segment];
+
+		if (!live || segment == ctx->authority.open_segment)
+			continue;
+		if (live < best) {
+			best = live;
+			selected = segment;
+		}
+	}
+	if (selected == ~(sv3_u32)0)
+		return -ENOSPC;
+	*victim = selected;
+	return 0;
+}
+
+static int sv3_gc_compact_one(struct sv3_dm *ctx)
+{
+	struct sv3_authority *a = &ctx->authority;
+	sv3_u32 old_next, old_open, old_probe, victim, logical, block;
+	u64 before_read, before_write;
+	int error;
+
+	if (a->in_flight || a->gc_allocation)
+		return -EBUSY;
+	error = sv3_gc_choose_victim(ctx, &victim);
+	if (error)
+		return error;
+	old_next = a->next_block;
+	old_open = a->open_segment;
+	old_probe = a->next_segment_probe;
+	before_read = ctx->physical_read_bytes;
+	before_write = ctx->physical_write_bytes;
+	/*
+	 * Temporarily allow the worker to use a genuinely FREE segment from
+	 * the full physical region, including the reserved tail. The liveness
+	 * scanner rejects old physical bytes whenever a live mapping points
+	 * there. Restore the foreground cursor after the victim is drained.
+	 */
+	a->gc_allocation = 1;
+	a->open_segment = ~(sv3_u32)0;
+	a->next_segment_probe =
+		(ctx->physical_blocks - a->reserve_blocks) /
+		SV3_SEGMENT_BLOCKS;
+	ctx->gc_count = 0;
+
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		struct sv3_map snapshot = ctx->maps[logical];
+		sv3_u16 length;
+
+		if (!snapshot.valid ||
+		    snapshot.start_block / SV3_SEGMENT_BLOCKS != victim)
+			continue;
+		if (snapshot.raw) {
+			error = sv3_gc_flush(ctx);
+			if (error)
+				goto out;
+			error = sv3_gc_move_raw(ctx, logical, &snapshot);
+			if (error)
+				goto out;
+			continue;
+		}
+		/* Existing media bytes remain authoritative until this page's
+		 * full replacement is successfully committed by the V3 engine. */
+		error = sv3_engine_read_page(&ctx->engine, logical,
+						ctx->read_compressed,
+						SV3_BLOCK_BYTES, &length);
+		if (error)
+			goto out;
+		if (!length || length > SV3_MAX_COMPRESSED) {
+			error = -EUCLEAN;
+			goto out;
+		}
+		memcpy(ctx->gc_bytes_store +
+		       (size_t)ctx->gc_count * SV3_BLOCK_BYTES,
+		       ctx->read_compressed, length);
+		ctx->gc_pending[ctx->gc_count++] =
+			(struct sv3_pending_bio) {
+				.bio = NULL,
+				.logical = logical,
+				.length = length,
+			};
+		if (ctx->gc_count == SV3_MAX_RECORDS) {
+			error = sv3_gc_flush(ctx);
+			if (error)
+				goto out;
+		}
+	}
+	error = sv3_gc_flush(ctx);
+	if (error)
+		goto out;
+
+	/*
+	 * Do not deem the victim reclaimable merely because GC wrote some
+	 * replacements. Independently verify no live mapping and no physical
+	 * liveness record remain in the original segment. If this test fails,
+	 * return an error without recycling any physical bytes.
+	 */
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		const struct sv3_map *m = &ctx->maps[logical];
+
+		if (m->valid &&
+		    m->start_block / SV3_SEGMENT_BLOCKS == victim) {
+			error = -EUCLEAN;
+			goto out;
+		}
+	}
+	for (block = victim * SV3_SEGMENT_BLOCKS;
+	     block < (victim + 1) * SV3_SEGMENT_BLOCKS; ++block) {
+		if (a->live_records[block]) {
+			error = -EUCLEAN;
+			goto out;
+		}
+	}
+	ctx->gc_victims++;
+out:
+	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
+	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
+	ctx->gc_count = 0;
+	a->gc_allocation = 0;
+	a->next_block = old_next;
+	a->open_segment = old_open;
+	a->next_segment_probe = error ? old_probe : victim;
+	return error;
+}
+
+
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
+	sv3_u8 gc_attempts = 0;
 	bool needs_fua = false;
-	int error;
+	int error = 0;
 
 	if (!count)
 		return 0;
@@ -262,8 +516,28 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
-	error = sv3_engine_write_window(&ctx->engine, ctx->planned,
-					 count, &committed);
+	while (committed < count) {
+		sv3_u8 succeeded = 0;
+
+		error = sv3_engine_write_window(&ctx->engine,
+				ctx->planned + committed,
+				count - committed, &succeeded);
+		committed += succeeded;
+		if (!error)
+			continue;
+		if (error == -ENOSPC && gc_attempts++ < 4) {
+			/*
+			 * The engine committed only the explicitly returned
+			 * prefix. Keep pending BIOs and buffers intact while
+			 * relocating one fully verified low-live segment.
+			 * Retry ONLY the remaining logical records afterwards.
+			 */
+			error = sv3_gc_compact_one(ctx);
+			if (!error)
+				continue;
+		}
+		break;
+	}
 	/*
 	 * Do not end any upper FUA BIO before the lower cache flush reports
 	 * success. A failed post-write flush permanently fails this target:
@@ -303,6 +577,17 @@ static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
 	if (error)
 		return error;
 	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	if (error == -ENOSPC) {
+		/* GC may use input_page, so recopy the still-owned upper BIO
+		 * after victim relocation, before writing a raw replacement. */
+		error = sv3_gc_compact_one(ctx);
+		if (error)
+			return error;
+		error = sv3_copy_bio(bio, ctx->input_page, false);
+		if (error)
+			return error;
+		error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	}
 	if (error)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1, ctx->input_page,
@@ -415,6 +700,55 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 	    remaining / SV3_SECTORS >
 			ctx->logical_pages - sector / SV3_SECTORS)
 		return -ERANGE;
+	/*
+	 * The discard must be all-or-nothing on any detectable mapping,
+	 * generation or liveness corruption. Validate every affected logical
+	 * page before changing even the first generation or refcount.
+	 */
+	{
+		sector_t check_sector = sector;
+		sector_t check_remaining = remaining;
+		sv3_u32 epoch = ++ctx->discard_serial;
+
+		if (!epoch) {
+			memset(ctx->discard_epoch, 0,
+			       (size_t)ctx->physical_blocks *
+			       sizeof(*ctx->discard_epoch));
+			epoch = ++ctx->discard_serial;
+		}
+		while (check_remaining) {
+			sv3_u32 logical = (sv3_u32)(check_sector / SV3_SECTORS);
+			const struct sv3_map *m = &ctx->maps[logical];
+
+			if (m->generation == ~(sv3_u32)0)
+				return -EOVERFLOW;
+			if (m->valid) {
+				sv3_u32 start = m->start_block;
+
+				if (start >= ctx->physical_blocks ||
+				    (m->extent_blocks != 1 &&
+				     m->extent_blocks != 2 &&
+				     m->extent_blocks != 4) ||
+				    ctx->extent_classes[start] != m->extent_blocks ||
+				    !ctx->live_records[start])
+					return -EUCLEAN;
+				if (ctx->discard_epoch[start] != epoch) {
+					ctx->discard_epoch[start] = epoch;
+					ctx->discard_count[start] = 0;
+				}
+				/*
+				 * Every logical page in this DISCARD sharing the
+				 * same physical extent consumes a separate live
+				 * record. Check the aggregated count first.
+				 */
+				if (++ctx->discard_count[start] >
+				    ctx->live_records[start])
+					return -EUCLEAN;
+			}
+			check_sector += SV3_SECTORS;
+			check_remaining -= SV3_SECTORS;
+		}
+	}
 	while (remaining) {
 		error = sv3_discard_page(&ctx->authority,
 				       (sv3_u32)(sector / SV3_SECTORS));
@@ -541,9 +875,17 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 	INIT_LIST_HEAD(&entry->list);
 	entry->bio = bio;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
+	/*
+	 * Admission and shutdown share queue_lock: presuspend cannot finish
+	 * draining while a previously admitted BIO is added after the drain.
+	 */
+	if (!ctx->accepting) {
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		return DM_MAPIO_KILL;
+	}
 	list_add_tail(&entry->list, &ctx->incoming);
-	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	queue_work(ctx->workqueue, &ctx->worker);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return DM_MAPIO_SUBMITTED;
 }
 
@@ -551,9 +893,13 @@ static void sv3_drain(struct dm_target *ti)
 {
 	struct sv3_dm *ctx = ti->private;
 
+	unsigned long flags;
+
+	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	flush_workqueue(ctx->workqueue);
-	/* Any last batch is drained in the worker, before the flush. */
+	/* Every admitted BIO had already been queued under the same lock. */
 	if (!ctx->failed) {
 		int error = blkdev_issue_flush(ctx->backing->bdev);
 
@@ -565,9 +911,12 @@ static void sv3_drain(struct dm_target *ti)
 static void sv3_resume(struct dm_target *ti)
 {
 	struct sv3_dm *ctx = ti->private;
+	unsigned long flags;
 
+	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!ctx->failed)
 		WRITE_ONCE(ctx->accepting, true);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 }
 
 static void sv3_free(struct sv3_dm *ctx)
@@ -585,7 +934,11 @@ static void sv3_free(struct sv3_dm *ctx)
 	kvfree(ctx->maps);
 	kvfree(ctx->live_records);
 	kvfree(ctx->extent_classes);
+	kvfree(ctx->discard_epoch);
+	kvfree(ctx->discard_count);
 	vfree(ctx->batch_bytes);
+	vfree(ctx->gc_bytes_store);
+	kvfree(ctx->gc_scores);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -639,6 +992,19 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot open V3 dedicated backing device";
 		goto fail;
 	}
+	/*
+	 * Alpha device admission is intentionally stricter than user
+	 * authorization. Only an owned, RAM-backed null_blk node may become
+	 * a live V3 target before fault/reclaim qualification; a physical
+	 * SD, HDD or SSD partition must never be selected accidentally.
+	 * Device ownership/UUID checks remain the test harness's duty.
+	 */
+	if (!ctx->backing->bdev->bd_disk ||
+	    strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5)) {
+		ti->error = "swapz3 alpha accepts null_blk backing only";
+		error = -EOPNOTSUPP;
+		goto fail;
+	}
 	if (bdev_is_zoned(ctx->backing->bdev) ||
 	    bdev_read_only(ctx->backing->bdev) ||
 	    bdev_logical_block_size(ctx->backing->bdev) > SV3_BLOCK_BYTES ||
@@ -658,10 +1024,16 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	ctx->logical_pages = logical;
 	ctx->physical_blocks = physical;
+	ctx->segment_count = physical / SV3_SEGMENT_BLOCKS;
+	ctx->gc_scores = kvcalloc(ctx->segment_count,
+				  sizeof(*ctx->gc_scores), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
-	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes) {
+	ctx->discard_epoch = kvcalloc(physical, sizeof(*ctx->discard_epoch), GFP_KERNEL);
+	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
+	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
+	    !ctx->discard_epoch || !ctx->discard_count) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -675,13 +1047,15 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Never reuse a partially-live segment; full live relocation is gated. */
 	ctx->authority.reuse_dead_segments = 1;
 	ctx->batch_bytes = vzalloc(SV3_BATCH_BYTES);
+	ctx->gc_bytes_store = vzalloc(SV3_BATCH_BYTES);
 	ctx->input_page = vzalloc(SV3_BLOCK_BYTES);
 	ctx->read_page = vzalloc(SV3_BLOCK_BYTES);
 	ctx->read_compressed = vzalloc(SV3_BLOCK_BYTES);
 	ctx->engine.write_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->engine.read_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
-	if (!ctx->batch_bytes || !ctx->input_page ||
+	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
+	    !ctx->gc_scores || !ctx->input_page ||
 	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
 	    !ctx->lz4_workmem) {
@@ -713,7 +1087,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
-	DMINFO("V3 alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u NO GC",
+	DMINFO("V3 alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
 	       SV3_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
 	       ctx->max_window, (unsigned int)budget);
 	return 0;
@@ -758,7 +1132,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
-		       "write_verify_blocks=%u failed=%u error=%d",
+		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
+		       "dead_segment_reuses=%u write_verify_blocks=%u failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
@@ -766,6 +1141,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->raw_pages, ctx->discard_pages, ctx->windows,
 		       ctx->reordered_records, ctx->authority.next_block,
 		       ctx->authority.reserve_blocks,
+		       ctx->gc_victims, ctx->gc_pages,
+		       ctx->gc_read_bytes, ctx->gc_write_bytes,
+		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->failed, ctx->last_error);
 		break;
