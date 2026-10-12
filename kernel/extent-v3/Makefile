@@ -10,8 +10,11 @@ ifeq ($(SV3_BUILD_SMOKE),1)
 obj-m += swapz_extent_v3.o
 swapz_extent_v3-y := codec.o authority.o engine.o smoke.o
 else
-obj-m += dm-swapz3.o
-dm-swapz3-y := dm-target.o codec.o authority.o engine.o
+# V3 uses the established production module artifact name.  The V2.2
+# module with the same basename exists ONLY in its separate kernel/ build;
+# these are alternative implementations, not loadable side by side.
+obj-m += dm-swapz.o
+dm-swapz-y := dm-target.o codec.o authority.o engine.o
 endif
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
