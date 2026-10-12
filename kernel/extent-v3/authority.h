@@ -18,6 +18,9 @@ struct sv3_map {
 	/* Volatile sidecar integrity for a full raw 4KiB fallback page.
 	 * Raw has no space for an on-media CRC without another physical block. */
 	sv3_u32 raw_crc32c;
+	/* Volatile compressed payload bytes (4096 for raw). Required for
+	 * real live-byte GC victim selection without reading every extent. */
+	sv3_u16 payload_length;
 	sv3_u8 extent_blocks;
 	sv3_u8 record_index;
 	sv3_u8 raw;
