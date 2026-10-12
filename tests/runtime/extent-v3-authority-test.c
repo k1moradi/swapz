@@ -217,6 +217,35 @@ static int test_generation_overflow_and_duplicate_rejections(void)
 	maps[4].generation = UINT32_MAX;
 	CHECK(sv3_stage(&authority, good, 1, 2, &tx) == -EOVERFLOW);
 	CHECK(authority.next_block == 0 && authority.in_flight == 0);
+	maps[4].generation = 0;
+	authority.next_sequence = UINT32_MAX;
+	CHECK(sv3_stage(&authority, good, 1, 2, &tx) == -EOVERFLOW);
+	CHECK(authority.next_block == 0 && authority.in_flight == 0);
+	return 0;
+}
+
+static int test_mismatched_transaction_envelope_is_rejected(void)
+{
+	const sv3_u32 pages[] = {5};
+	struct sv3_tx tx, forged;
+
+	CHECK(init() == 0);
+	CHECK(sv3_stage(&authority, pages, 1, 2, &tx) == 0);
+	forged = tx;
+	forged.start_block++;
+	CHECK(sv3_finish(&authority, &forged, NULL, 0, 0, 0) == -ESTALE);
+	forged = tx;
+	forged.sequence++;
+	CHECK(sv3_abort(&authority, &forged) == -ESTALE);
+	forged = tx;
+	forged.extent_blocks = 1;
+	CHECK(sv3_abort(&authority, &forged) == -ESTALE);
+	forged = tx;
+	forged.count++;
+	CHECK(sv3_abort(&authority, &forged) == -ESTALE);
+	CHECK(authority.in_flight && !maps[5].valid);
+	CHECK(sv3_abort(&authority, &tx) == 0);
+	CHECK(!authority.in_flight && authority.abandoned_blocks == 2);
 	return 0;
 }
 
@@ -290,6 +319,7 @@ int main(void)
 	CHECK(test_last_corrupt_sibling_prevents_all_publication() == 0); passed++;
 	CHECK(test_header_corruption_and_wrong_sequence() == 0); passed++;
 	CHECK(test_generation_overflow_and_duplicate_rejections() == 0); passed++;
+	CHECK(test_mismatched_transaction_envelope_is_rejected() == 0); passed++;
 	CHECK(test_allocator_reserve_exhaustion() == 0); passed++;
 	CHECK(test_short_write_always_quarantines() == 0); passed++;
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;

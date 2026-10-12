@@ -32,6 +32,7 @@ struct memory_disk {
 	sv3_u32 read_blocks;
 	sv3_u32 fail_write_on_call;
 	sv3_u32 overcount_write_on_call;
+	sv3_u32 short_success_write_on_call;
 	int fail_reads;
 };
 
@@ -51,6 +52,16 @@ static int lower_write(void *opaque, sv3_u32 start, sv3_u8 blocks,
 	m->write_calls++;
 	if (m->write_calls == m->overcount_write_on_call) {
 		*completed = (sv3_u8)(blocks + 1U);
+		return 0;
+	}
+	if (m->write_calls == m->short_success_write_on_call) {
+		permitted = blocks > 1 ? blocks - 1U : 0;
+		if (permitted) {
+			memcpy(m->storage + (size_t)start * SV3_BLOCK_BYTES,
+			       payload, (size_t)permitted * SV3_BLOCK_BYTES);
+			m->write_blocks += permitted;
+		}
+		*completed = permitted;
 		return 0;
 	}
 	if (m->write_calls == m->fail_write_on_call)
@@ -88,6 +99,7 @@ static int setup(void)
 	disk.read_blocks = 0;
 	disk.fail_write_on_call = 0;
 	disk.overcount_write_on_call = 0;
+	disk.short_success_write_on_call = 0;
 	disk.fail_reads = 0;
 	if (sv3_authority_init(&authority, maps, live, classes,
 			       LOGICAL_PAGES, PHYSICAL_BLOCKS))
@@ -330,6 +342,42 @@ static int test_impossible_completion_count_is_not_accounted(void)
 	return 0;
 }
 
+static int test_success_status_with_short_completion_is_rejected(void)
+{
+	struct sv3_compressed_page pages[3];
+	sv3_u8 committed = 0;
+
+	CHECK(setup() == 0);
+	prepare(pages, 3, 0, 10);
+	disk.short_success_write_on_call = 1;
+	CHECK(sv3_engine_write_window(&engine, pages, 3, &committed) == -EIO);
+	CHECK(committed == 0);
+	CHECK(disk.write_blocks == 1 && engine.completed_blocks == 1);
+	CHECK(!maps[0].valid && !maps[1].valid && !maps[2].valid);
+	CHECK(authority.abandoned_blocks == 2 && !authority.in_flight);
+	return 0;
+}
+
+static int test_repeated_slot_across_extents_publishes_latest(void)
+{
+	struct sv3_compressed_page pages[2];
+	sv3_u8 committed = 0, output[SV3_MAX_COMPRESSED];
+	sv3_u16 length = 0;
+
+	CHECK(setup() == 0);
+	prepare(pages, 2, 3, 0);
+	pages[1].logical_page = pages[0].logical_page;
+	CHECK(sv3_engine_write_window(&engine, pages, 2, &committed) == 0);
+	CHECK(committed == 2 && disk.write_blocks == 2);
+	CHECK(maps[3].valid && maps[3].generation == 2);
+	CHECK(live[maps[3].start_block] == 1);
+	CHECK(sv3_engine_read_page(&engine, 3, output, sizeof(output),
+				   &length) == 0);
+	CHECK(length == pages[1].length);
+	CHECK(!memcmp(output, pages[1].payload, length));
+	return 0;
+}
+
 int main(void)
 {
 	int completed = 0;
@@ -344,6 +392,10 @@ int main(void)
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
 	CHECK(test_impossible_completion_count_is_not_accounted() == 0);
+	completed++;
+	CHECK(test_success_status_with_short_completion_is_rejected() == 0);
+	completed++;
+	CHECK(test_repeated_slot_across_extents_publishes_latest() == 0);
 	completed++;
 	free(disk.storage);
 	printf("SV3_EXACT_ENGINE_TESTS_PASS=%d\n", completed);
