@@ -1,4 +1,4 @@
-# swapz: V3.0.0-alpha.2 development
+# swapz: V3.0.0-alpha.3 development
 
 > **Project vision:** the ultimate success criterion is **less measured
 > lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
