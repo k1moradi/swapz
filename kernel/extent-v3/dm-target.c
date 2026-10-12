@@ -418,17 +418,17 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	ctx->gc_count = 0;
 
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		struct sv3_map current = ctx->maps[logical];
+		struct sv3_map snapshot = ctx->maps[logical];
 		sv3_u16 length;
 
-		if (!current.valid ||
-		    current.start_block / SV3_SEGMENT_BLOCKS != victim)
+		if (!snapshot.valid ||
+		    snapshot.start_block / SV3_SEGMENT_BLOCKS != victim)
 			continue;
-		if (current.raw) {
+		if (snapshot.raw) {
 			error = sv3_gc_flush(ctx);
 			if (error)
 				goto out;
-			error = sv3_gc_move_raw(ctx, logical, &current);
+			error = sv3_gc_move_raw(ctx, logical, &snapshot);
 			if (error)
 				goto out;
 			continue;
