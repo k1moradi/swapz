@@ -104,6 +104,8 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	a->active_sequence = out->sequence;
 	a->active_blocks = blocks;
 	a->active_count = count;
+	/* All original record identities and generations are now authoritative. */
+	a->active_tx = *out;
 	a->in_flight = 1;
 	return 0;
 }
@@ -111,13 +113,33 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 static int sv3_is_active(const struct sv3_authority *a,
 			 const struct sv3_tx *tx)
 {
-	return a && tx && a->in_flight &&
-		tx->start_block == a->active_start &&
-		tx->sequence == a->active_sequence &&
-		tx->extent_blocks == a->active_blocks &&
-		tx->count == a->active_count &&
-		sv3_legal_class(tx->extent_blocks) &&
-		tx->count > 0 && tx->count <= SV3_MAX_RECORDS;
+	sv3_u8 index;
+
+	if (!a || !tx || !a->in_flight ||
+	    tx->start_block != a->active_start ||
+	    tx->sequence != a->active_sequence ||
+	    tx->extent_blocks != a->active_blocks ||
+	    tx->count != a->active_count ||
+	    tx->start_block != a->active_tx.start_block ||
+	    tx->sequence != a->active_tx.sequence ||
+	    tx->extent_blocks != a->active_tx.extent_blocks ||
+	    tx->count != a->active_tx.count ||
+	    !sv3_legal_class(tx->extent_blocks) ||
+	    !tx->count || tx->count > SV3_MAX_RECORDS)
+		return 0;
+
+	/* Compare fields, not padding, and NEVER trust a caller-mutated
+	 * tx record in either finish or abort before this full identity check.
+	 * A rejected forged handle leaves the original transaction in flight.
+	 */
+	for (index = 0; index < tx->count; ++index) {
+		if (tx->records[index].logical_page !=
+				a->active_tx.records[index].logical_page ||
+		    tx->records[index].generation !=
+				a->active_tx.records[index].generation)
+			return 0;
+	}
+	return 1;
 }
 
 static void sv3_forget_active(struct sv3_authority *a, int published)
@@ -130,6 +152,7 @@ static void sv3_forget_active(struct sv3_authority *a, int published)
 	a->active_sequence = 0;
 	a->active_blocks = 0;
 	a->active_count = 0;
+	memset(&a->active_tx, 0, sizeof(a->active_tx));
 }
 
 int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
