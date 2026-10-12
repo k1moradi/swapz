@@ -73,6 +73,12 @@ int sv3_append(struct sv3_builder *builder, sv3_u32 logical_page,
 	       sv3_u32 generation, const void *payload, sv3_u16 length);
 int sv3_seal(struct sv3_builder *builder);
 int sv3_validate(const void *bytes, sv3_u32 bytes_total);
+/*
+ * Reads/verifies ONLY metadata (block zero contains at most 1040 metadata
+ * bytes). The caller may then fetch just the target record's payload blocks.
+ */
+int sv3_peek(const void *bytes, sv3_u32 bytes_total, sv3_u8 index,
+	     struct sv3_decoded *out);
 int sv3_lookup(const void *bytes, sv3_u32 bytes_total, sv3_u8 index,
 	       struct sv3_decoded *out, const sv3_u8 **payload);
 int sv3_record_read_blocks(const struct sv3_decoded *record);
