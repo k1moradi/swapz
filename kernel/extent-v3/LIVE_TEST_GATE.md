@@ -1,4 +1,4 @@
-# swapz V3.0.0-alpha.1 — loaded-kernel admission gate for Codex
+# swapz V3.0.0-alpha.2 — loaded-kernel admission gate for Codex
 
 **THIS IS NOT AN AUTHORIZATION TO RUN V3 ON A PHYSICAL DISK OR AS SYSTEM SWAP.**
 
@@ -10,16 +10,29 @@ be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
 
 ## Distinguish the two independently built modules
 
-- `make -C kernel/extent-v3 W=1 all`: output `dm-swapz3.ko`, an
+- `make -C kernel/extent-v3 W=1 all`: output `dm-swapz.ko`, an
   EXPERIMENTAL actual DM target with `swapz3` name and source
   `dm-target.c + codec.c + authority.c + engine.c`.
 - `make -C kernel/extent-v3 SV3_BUILD_SMOKE=1 W=1 all`:
   `swapz_extent_v3.ko`, in-memory self-test module, **not** a DM target.
 - Never link or use them in the same modpost build; run `make clean` between.
+- **Module identity:** the V3 installed artifact is **`dm-swapz.ko`**
+  (loaded Linux module `dm_swapz`), but its distinct alpha DM target
+  keyword stays `swapz3`. V2.2 also builds `dm-swapz.ko` in
+  `kernel/`; only ONE of these incompatible implementations can be
+  installed or loaded at a time. Keep V2.2 and V3 checkouts/builds separate,
+  and never use the previous alpha.1 `dm_swapz3` test module hash to
+  qualify the current alpha.2 driver.
+- **Explicit loaded FUA BIO**, not only fdatasync/PREFLUSH, is still a
+  release gate; test exact upper completion timing and fault propagation.
+- **Raw 4KiB integrity:** deliberately mutate a raw fallback block on
+  the owned backing and prove swapz rejects its CRC32C both on logical
+  read and GC relocation before copying it into a new extent.
+
 - The old `kernel/dm-swapz.ko` is the frozen V2.2 target named `swapz`
   and its results cannot be counted as loaded V3 validation.
 - Track: checkout Git SHA, four source Git blob SHAs, exact
-  `sha256sum dm-swapz3.ko`, `modinfo` vermagic, `uname -r`, GCC and
+  `sha256sum dm-swapz.ko`, `modinfo` vermagic, `uname -r`, GCC and
   loaded-module identity before *any* destructive test operation.
 
 ## Admission and safety
@@ -81,7 +94,7 @@ be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
   device ownership.
 - No comparisons to the V2.2 baseline with matched reader achieved IOPS.
 
-The project remains **draft V3.0.0-alpha.1**, not a production release.
+The project remains **draft V3.0.0-alpha.2**, not a production release.
 No SD/HDD/SSD tests or unattended `swapon` should occur before a
 separately reviewed release-gate commit removes the null_blk-only guard.
 
@@ -107,7 +120,7 @@ verified workload**, not a better synthetic compression ratio.
   swap-in), p50/p95/p99 latency, CPU cost and reserve pressure. A write
   reduction that breaks read service is not an overall win.
 - Keep source and target identity pinned: exact Git SHA, source blob SHA,
-  compiled `dm-swapz3.ko` SHA-256 and vermagic, actual mapped
+  compiled `dm-swapz.ko` SHA-256 and vermagic, actual mapped
   `swapz3` target/UUID, physical backing major:minor and test isolation.
 - Report one-window geometry, rootless benchmark, loaded `null_blk` and
   genuine SD/SSD/HDD results as **four distinct evidence classes**. Do not
