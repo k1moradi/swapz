@@ -142,35 +142,48 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 		}
 	}
 
-	limit = ((a->physical_blocks - a->reserve_blocks) /
-		 SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
-	/*
-	 * Reuse the OPEN segment only while the entire aligned extent fits.
-	 * A crossed segment edge MUST run the mapped-record liveness scan;
-	 * merely advancing to the numerically next segment can destroy data
-	 * after physical cursor wrap.
-	 */
-	start = a->next_block;
-	if (a->open_segment == ~(sv3_u32)0 ||
-	    start >= limit || blocks - 1U > limit - start ||
-	    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) >
-			limit - blocks ||
-	    (((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) /
-	     SV3_SEGMENT_BLOCKS) != a->open_segment ||
-	    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) %
-			SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS) {
-		int error = sv3_pick_dead_segment(a);
-
-		if (error)
-			return error;
+	if (!a->reuse_dead_segments) {
+		/* Frozen append-only behavior used by the original V3 model. */
+		limit = a->physical_blocks - a->reserve_blocks;
+		if (a->next_block > limit ||
+		    blocks - 1U > limit - a->next_block)
+			return -ENOSPC;
+		start = (a->next_block + blocks - 1U) &
+			~(sv3_u32)(blocks - 1U);
+		if (start > limit || blocks > limit - start ||
+		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
+			return -ENOSPC;
+	} else {
+		limit = ((a->physical_blocks - a->reserve_blocks) /
+			 SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
+		/*
+		 * Reuse the OPEN segment only while the entire aligned extent fits.
+		 * A crossed segment edge MUST run the mapped-record liveness scan;
+		 * merely advancing to the numerically next segment can destroy data
+		 * after physical cursor wrap.
+		 */
 		start = a->next_block;
-	}
-	start = (start + blocks - 1U) & ~(sv3_u32)(blocks - 1U);
-	if (start >= limit || blocks > limit - start ||
-	    start / SV3_SEGMENT_BLOCKS != a->open_segment ||
-	    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
-		return -EUCLEAN;
+		if (a->open_segment == ~(sv3_u32)0 ||
+		    start >= limit || blocks - 1U > limit - start ||
+		    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) >
+				limit - blocks ||
+		    (((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) /
+		     SV3_SEGMENT_BLOCKS) != a->open_segment ||
+		    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) %
+				SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS) {
+			int error = sv3_pick_dead_segment(a);
 
+			if (error)
+				return error;
+			start = a->next_block;
+		}
+		start = (start + blocks - 1U) & ~(sv3_u32)(blocks - 1U);
+		if (start >= limit || blocks > limit - start ||
+		    start / SV3_SEGMENT_BLOCKS != a->open_segment ||
+		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
+			return -EUCLEAN;
+
+	}
 	memset(out, 0, sizeof(*out));
 	out->start_block = start;
 	out->sequence = a->next_sequence++;
