@@ -2,6 +2,9 @@
 # Independent module; never linked to the existing dm-swapz.ko target.
 ifneq ($(KERNELRELEASE),)
 obj-m += swapz_extent_v3.o
+# V3 alpha runtime target: explicit build, never replaces dm-swapz.ko.
+obj-m += dm-swapz3.o
+dm-swapz3-y := dm-target.o codec.o authority.o engine.o
 swapz_extent_v3-y := codec.o authority.o engine.o smoke.o
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
