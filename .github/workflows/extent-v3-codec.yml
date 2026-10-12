@@ -7,6 +7,8 @@ on:
       - 'tests/runtime/extent-v3-codec-test.c'
       - 'tests/runtime/extent-v3-authority-test.c'
       - 'tests/runtime/extent-v3-engine-test.c'
+      - 'tests/runtime/extent-v3-engine-bench-test.py'
+      - 'research/extent-v3-bench/**'
       - '.github/workflows/extent-v3-codec.yml'
   push:
     branches:
@@ -45,6 +47,11 @@ jobs:
             kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
             kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-engine-test"
           "$RUNNER_TEMP/sv3-engine-test"
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq liblz4-dev
+          python3 -B tests/runtime/extent-v3-engine-bench-test.py -v
+          python3 -m py_compile research/extent-v3-bench/summarize.py \
+            tests/runtime/extent-v3-engine-bench-test.py
           git diff --check
 
   compile-only:

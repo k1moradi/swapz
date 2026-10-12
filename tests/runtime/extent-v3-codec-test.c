@@ -218,6 +218,58 @@ static int test_metadata_and_format_guards(void)
 	return 0;
 }
 
+static int test_maximum_descriptor_count(void)
+{
+	struct sv3_builder b;
+	struct sv3_header header;
+	struct sv3_decoded decoded;
+	const uint8_t *stored;
+	uint8_t one_byte = 0x5a;
+	unsigned int index;
+
+	CHECK(sv3_begin(&b, extent, SV3_MAX_EXTENT_BYTES, 41) == 0);
+	for (index = 0; index < SV3_MAX_RECORDS; ++index)
+		CHECK(sv3_append(&b, index, 1, &one_byte, 1) == 0);
+	CHECK(sv3_append(&b, SV3_MAX_RECORDS, 1, &one_byte, 1) == -ENOSPC);
+	CHECK(sv3_seal(&b) == 0);
+	CHECK(sv3_validate(extent, SV3_MAX_EXTENT_BYTES) == 0);
+	memcpy(&header, extent, sizeof(header));
+	CHECK(header.record_count == SV3_MAX_RECORDS);
+	for (index = 0; index < SV3_MAX_RECORDS; ++index) {
+		CHECK(sv3_lookup(extent, SV3_MAX_EXTENT_BYTES, index,
+				 &decoded, &stored) == 0);
+		CHECK(decoded.logical_page == index && decoded.payload_length == 1);
+		CHECK(*stored == one_byte);
+	}
+	return 0;
+}
+
+static int test_payload_on_and_across_4k_boundaries(void)
+{
+	struct sv3_builder b;
+	struct sv3_decoded decoded;
+	const uint8_t *stored;
+	unsigned int index;
+
+	CHECK(sv3_begin(&b, extent, SV3_MAX_EXTENT_BYTES, 42) == 0);
+	for (index = 0; index < 4; ++index) {
+		set_payload(3072, index + 8U);
+		CHECK(sv3_append(&b, 300 + index, 1, payload, 3072) == 0);
+	}
+	CHECK(sv3_seal(&b) == 0);
+	CHECK(sv3_validate(extent, SV3_MAX_EXTENT_BYTES) == 0);
+	CHECK(sv3_lookup(extent, SV3_MAX_EXTENT_BYTES, 3,
+			 &decoded, &stored) == 0);
+	CHECK(decoded.payload_offset == SV3_BLOCK_BYTES);
+	CHECK(sv3_record_read_blocks(&decoded) == 2);
+	CHECK(memcmp(stored, payload, 3072) == 0); /* last page used salt 11 */
+	CHECK(sv3_lookup(extent, SV3_MAX_EXTENT_BYTES, 2,
+			 &decoded, &stored) == 0);
+	CHECK(decoded.payload_offset == 7168);
+	CHECK(sv3_record_read_blocks(&decoded) == 3);
+	return 0;
+}
+
 int main(void)
 {
 	int tests = 0;
@@ -232,6 +284,8 @@ int main(void)
 	CHECK(test_integrity() == 0); tests++;
 	CHECK(test_read_spans() == 0); tests++;
 	CHECK(test_metadata_and_format_guards() == 0); tests++;
+	CHECK(test_maximum_descriptor_count() == 0); tests++;
+	CHECK(test_payload_on_and_across_4k_boundaries() == 0); tests++;
 	printf("SV3_EXACT_PRODUCTION_C_TESTS_PASS=%d\n", tests);
 	return 0;
 }
