@@ -13,7 +13,7 @@
 
 static int __init sv3_module_init(void)
 {
-	struct sv3_authority authority;
+	struct sv3_authority *authority = NULL;
 	struct sv3_builder builder;
 	struct sv3_tx tx;
 	struct sv3_decoded decoded;
@@ -32,16 +32,18 @@ static int __init sv3_module_init(void)
 	maps = kvcalloc(16, sizeof(*maps), GFP_KERNEL);
 	live = kvcalloc(1024, sizeof(*live), GFP_KERNEL);
 	classes = kvcalloc(1024, sizeof(*classes), GFP_KERNEL);
-	if (!extent || !compressed || !maps || !live || !classes) {
+	authority = kzalloc(sizeof(*authority), GFP_KERNEL);
+	if (!extent || !compressed || !maps || !live || !classes ||
+	    !authority) {
 		error = -ENOMEM;
 		goto out;
 	}
-	error = sv3_authority_init(&authority, maps, live, classes, 16, 1024);
+	error = sv3_authority_init(authority, maps, live, classes, 16, 1024);
 	if (error)
 		goto out;
 	for (index = 0; index < ARRAY_SIZE(pages); ++index)
 		pages[index] = index;
-	error = sv3_stage(&authority, pages, ARRAY_SIZE(pages), 4, &tx);
+	error = sv3_stage(authority, pages, ARRAY_SIZE(pages), 4, &tx);
 	if (error)
 		goto out;
 	error = sv3_begin(&builder, extent, SV3_MAX_EXTENT_BYTES,
@@ -66,11 +68,11 @@ static int __init sv3_module_init(void)
 	if (error)
 		goto abort;
 	/* The complete extent write has been simulated IN MEMORY. */
-	error = sv3_finish(&authority, &tx, extent, SV3_MAX_EXTENT_BYTES, 4, 0);
+	error = sv3_finish(authority, &tx, extent, SV3_MAX_EXTENT_BYTES, 4, 0);
 	if (error)
 		goto out;
 	for (index = 0; index < ARRAY_SIZE(pages); ++index) {
-		error = sv3_read_authoritative(&authority, index, &maps[index],
+		error = sv3_read_authoritative(authority, index, &maps[index],
 					       extent, SV3_MAX_EXTENT_BYTES,
 					       &decoded, &stored);
 		if (error)
@@ -83,13 +85,13 @@ static int __init sv3_module_init(void)
 			goto out;
 		}
 	}
-	if (live[tx.start_block] != 7 || authority.committed_blocks != 4) {
+	if (live[tx.start_block] != 7 || authority->committed_blocks != 4) {
 		error = -EUCLEAN;
 		goto out;
 	}
 	/* CRC32C corruption is rejected by the authoritative read path. */
 	extent[decoded.payload_offset] ^= 0x40;
-	if (sv3_read_authoritative(&authority, 6, &maps[6], extent,
+	if (sv3_read_authoritative(authority, 6, &maps[6], extent,
 				   SV3_MAX_EXTENT_BYTES, &decoded,
 				   &stored) != -EBADMSG) {
 		error = -EUCLEAN;
@@ -100,13 +102,14 @@ static int __init sv3_module_init(void)
 	goto out;
 abort:
 	/* On every pre-submission failure the reserved range stays quarantined. */
-	sv3_abort(&authority, &tx);
+	sv3_abort(authority, &tx);
 out:
 	kvfree(extent);
 	kfree(compressed);
 	kvfree(maps);
 	kvfree(live);
 	kvfree(classes);
+	kfree(authority);
 	return error;
 }
 
