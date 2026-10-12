@@ -88,6 +88,7 @@ struct sv3_dm {
 	u8 *gc_bytes_store;
 	sv3_u32 *gc_scores;  /* estimated relocation bytes per segment */
 	sv3_u16 *gc_live_counts; /* count for ties/control comparison */
+	sv3_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	sv3_u32 segment_count;
 	sv3_u8 gc_cost_policy; /* 0=original record count; 1=live bytes */
 	u64 gc_selected_live_bytes;
@@ -465,7 +466,11 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		sv3_u16 count = ctx->gc_live_counts[segment];
 		sv3_u32 score;
 
-		if (!count || segment == ctx->authority.open_segment)
+		/* GC must create *foreground usable* space. Evacuating a
+		 * reserve segment only moves survivors between GC reserves
+		 * and causes false progress followed by foreground ENOSPC. */
+		if (!count || !ctx->segment_roles[segment] ||
+		    segment == ctx->authority.open_segment)
 			continue;
 		score = ctx->gc_cost_policy ? ctx->gc_scores[segment] : count;
 		if (sv3_gc_prefer(score, count, best, best_count)) {
@@ -503,18 +508,15 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	before_read_reqs = ctx->physical_read_reqs;
 	before_write_reqs = ctx->physical_write_reqs;
 	/*
-	 * Temporarily allow the worker to use a genuinely FREE segment from
-	 * the full physical region, including the reserved tail. The liveness
-	 * scanner rejects old physical bytes whenever a live mapping points
-	 * there. Restore the foreground cursor after the victim is drained.
+	 * Copying GC: choose exactly ONE wholly dead reserve segment. After
+	 * successfully evacuating the foreground victim, exchange physical
+	 * roles and keep the foreground cursor inside the newly compacted
+	 * destination. This replenishes the reserve rather than gradually
+	 * filling a fixed tail or cycling between two reserve segments.
 	 */
-	a->gc_allocation = 1;
-	a->gc_forbidden_open = old_open;
-	a->gc_forbidden_victim = victim;
-	a->open_segment = ~(sv3_u32)0;
-	a->next_segment_probe =
-		(ctx->physical_blocks - a->reserve_blocks) /
-		SV3_SEGMENT_BLOCKS;
+	error = sv3_gc_begin_rotation(a, victim);
+	if (error)
+		goto out;
 	ctx->gc_count = 0;
 
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
@@ -590,6 +592,11 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 			goto out;
 		}
 	}
+	/* Atomically exchange reserve/foreground ownership only after ALL
+	 * authoritative mappings and live refcounts vacate the victim. */
+	error = sv3_gc_commit_rotation(a, victim);
+	if (error)
+		goto out;
 	ctx->gc_victims++;
 out:
 	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
@@ -597,12 +604,19 @@ out:
 	ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs;
 	ctx->gc_write_reqs += ctx->physical_write_reqs - before_write_reqs;
 	ctx->gc_count = 0;
-	a->gc_allocation = 0;
-	a->gc_forbidden_open = ~(sv3_u32)0;
-	a->gc_forbidden_victim = ~(sv3_u32)0;
-	a->next_block = old_next;
-	a->open_segment = old_open;
-	a->next_segment_probe = error ? old_probe : victim;
+	if (error) {
+		/* No role exchange on failure. All previous authoritative
+		 * records remain intact; any committed partial relocation is
+		 * still live in its reserved destination. Fail closed rather
+		 * than treating that reserve as freely overwritable. */
+		a->gc_allocation = 0;
+		a->gc_forbidden_open = ~(sv3_u32)0;
+		a->gc_forbidden_victim = ~(sv3_u32)0;
+		a->gc_destination = ~(sv3_u32)0;
+		a->next_block = old_next;
+		a->open_segment = old_open;
+		a->next_segment_probe = old_probe;
+	}
 	return error;
 }
 
@@ -1144,6 +1158,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
 	kvfree(ctx->gc_live_counts);
+	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -1246,6 +1261,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
 	ctx->gc_live_counts = kvcalloc(ctx->segment_count,
 				      sizeof(*ctx->gc_live_counts), GFP_KERNEL);
+	ctx->segment_roles = kvcalloc(ctx->segment_count,
+				     sizeof(*ctx->segment_roles), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
@@ -1253,7 +1270,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
 	    !ctx->discard_epoch || !ctx->discard_count ||
-	    !ctx->gc_scores || !ctx->gc_live_counts) {
+	    !ctx->gc_scores || !ctx->gc_live_counts ||
+	    !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -1264,8 +1282,15 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Insufficient capacity for uncompressed pages plus V3 reserve";
 		goto fail;
 	}
-	/* Never reuse a partially-live segment; full live relocation is gated. */
+	/* Production allocator exchanges ownership of one GC reserve segment
+	 * and one fully evacuated foreground victim every completed cycle. */
 	ctx->authority.reuse_dead_segments = 1;
+	error = sv3_enable_segment_rotation(&ctx->authority,
+					  ctx->segment_roles, ctx->segment_count);
+	if (error) {
+		ti->error = "Cannot initialize rotating GC reserve roles";
+		goto fail;
+	}
 	ctx->batch_bytes = vzalloc(SV3_BATCH_BYTES);
 	ctx->gc_bytes_store = vzalloc(SV3_BATCH_BYTES);
 	ctx->input_page = vzalloc(SV3_BLOCK_BYTES);
