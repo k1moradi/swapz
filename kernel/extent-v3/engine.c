@@ -136,6 +136,14 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 	    !engine->io.write_extent || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
+	/*
+	 * Never stage or submit a potentially destructive extent if the
+	 * requested read-after-write guard cannot run with isolated scratch.
+	 */
+	if (engine->verify_after_write &&
+	    (!engine->read_scratch || !engine->io.read_blocks ||
+	     engine->read_scratch == engine->write_scratch))
+		return -EINVAL;
 	error = sv3_engine_plan(pages, count, engine->plan_classes,
 				engine->plan_takes, &extent_count);
 	if (error)
@@ -192,6 +200,26 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 			error = -EUCLEAN;
 		}
 		engine->completed_blocks += completed;
+		if (engine->verify_after_write && !error &&
+		    completed == blocks) {
+			/*
+			 * Full write completion does not guarantee the lower media
+			 * actually retained the intended bytes. Optional direct
+			 * readback verifies the exact COMPLETE extent, including
+			 * header, descriptors, padding and sibling payloads.
+			 * Failures abort/quarantine BEFORE any mapping publication.
+			 */
+			memset(engine->read_scratch, 0, bytes);
+			error = engine->io.read_blocks(
+				engine->io.opaque, tx->start_block,
+				blocks, engine->read_scratch);
+			if (!error) {
+				engine->write_verify_read_blocks += blocks;
+				if (memcmp(engine->write_scratch,
+					   engine->read_scratch, bytes))
+					error = -EBADMSG;
+			}
+		}
 		error = sv3_finish(engine->authority, tx,
 				   engine->write_scratch, bytes,
 				   completed, error);
