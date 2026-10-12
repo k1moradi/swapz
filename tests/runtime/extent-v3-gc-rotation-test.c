@@ -75,7 +75,6 @@ static int relocate_all_live_pages(sv3_u32 victim)
 static int test_three_rotations_and_foreground_progress(void)
 {
 	unsigned int i, cycle;
-	sv3_u32 victim;
 
 	CHECK(setup() == 0);
 	CHECK(roles[0] == 1 && roles[1] == 1);
