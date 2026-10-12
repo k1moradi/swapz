@@ -97,7 +97,6 @@ static int test_integrity(void)
 	struct sv3_builder b;
 	struct sv3_decoded d;
 	const uint8_t *p;
-	uint8_t original;
 	uint8_t *metadata = extent + sizeof(struct sv3_header);
 	unsigned int index;
 
@@ -111,7 +110,6 @@ static int test_integrity(void)
 	CHECK(sv3_lookup(extent, 8192, 2, &d, &p) == 0);
 
 	/* A payload outside the metadata changes no header bytes. */
-	original = extent[d.payload_offset];
 	extent[d.payload_offset] ^= 0x80;
 	CHECK(sv3_validate(extent, 8192) == 0);
 	CHECK(sv3_lookup(extent, 8192, 2, &d, &p) == -EBADMSG);
