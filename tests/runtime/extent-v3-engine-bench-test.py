@@ -130,6 +130,28 @@ class ExtentV3EngineBenchTests(unittest.TestCase):
         self.assertEqual(rows[0]["operations"], 2048)
         self.assertEqual(rows[0]["error"], 0)
 
+    def test_summary_rejects_and_reports_accounting(self):
+        raw = subprocess.run(
+            [str(self.binary), "--synthetic", "--scenario", "control2072",
+             "--window", "16", "--reps", "2", "--warmups", "0",
+             "--seed", "12345"],
+            cwd=ROOT, check=True, capture_output=True, text=True, timeout=30)
+        source = self.directory / "summary-input.jsonl"
+        source.write_text(raw.stdout)
+        prefix = self.directory / "summary-result"
+        subprocess.run(
+            ["python3", str(ROOT / "research/extent-v3-bench/summarize.py"),
+             "--input", str(source), "--output-prefix", str(prefix)],
+            cwd=ROOT, check=True, capture_output=True, text=True, timeout=30)
+        summary = json.loads(prefix.with_suffix(".summary.json").read_text())
+        self.assertEqual(len(summary["engine_runs"]), 1)
+        row = summary["engine_runs"][0]
+        self.assertEqual(row["runs"], 2)
+        self.assertEqual(row["ordered4_model_bytes_median"], 65536)
+        self.assertEqual(row["v3_written_bytes_median"], 40960)
+        self.assertTrue(row["all_run_counters_reconciled"])
+        self.assertTrue(prefix.with_suffix(".summary.csv").is_file())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
