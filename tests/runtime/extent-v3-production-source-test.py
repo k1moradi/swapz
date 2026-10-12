@@ -37,10 +37,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.1"', DM)
-        self.assertIn("obj-m += dm-swapz3.o", MK)
+        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.2"', DM)
+        self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.1", GOALS)
+        self.assertIn("3.0.0-alpha.2", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
@@ -91,6 +91,20 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->gc_read_bytes", gc)
         self.assertIn("ctx->gc_write_bytes", gc)
         self.assertIn("a->gc_allocation = 0", gc)
+
+    def test_worker_yields_after_finite_window_and_preserves_fifo(self):
+        worker = body("sv3_worker")
+        self.assertIn("SV3_WORK_QUANTUM_BIOS", worker)
+        self.assertIn("if (!--remaining)", worker)
+        self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
+        self.assertIn("queue_work(ctx->workqueue, &ctx->worker)", worker)
+        self.assertLess(worker.index("sv3_flush_window(ctx)"),
+                        worker.index("list_splice_init(&local, &ctx->incoming)"))
+
+    def test_gc_status_is_truthful(self):
+        self.assertIn("mode=alpha-live-gc", body("sv3_status"))
+        self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))
+        self.assertIn("experimental live GC", DM)
 
     def test_map_and_teardown_are_owned(self):
         admitted = body("sv3_map")
