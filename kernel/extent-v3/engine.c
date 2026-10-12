@@ -18,7 +18,7 @@ static int sv3_page_valid(const struct sv3_compressed_page *page)
 /* How many *ordered* records fit the size class, without duplicate slots. */
 static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
 			   sv3_u8 count, sv3_u8 start, sv3_u8 blocks,
-			   sv3_u32 *read_blocks)
+			   sv3_u8 max_read_blocks, sv3_u32 *read_blocks)
 {
 	sv3_u32 payload_start = (sv3_u32)blocks * SV3_BLOCK_BYTES;
 	sv3_u8 included = 0;
@@ -28,7 +28,7 @@ static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
 	for (index = start; index < count; ++index) {
 		sv3_u8 earlier;
 		sv3_u32 offset;
-		sv3_u32 first, last;
+		sv3_u32 first, last, record_reads;
 		const struct sv3_compressed_page *page = &pages[index];
 
 		if (included == SV3_MAX_RECORDS)
@@ -46,16 +46,25 @@ static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
 			break;
 		first = offset / SV3_BLOCK_BYTES;
 		last = (payload_start - 1U) / SV3_BLOCK_BYTES;
-		*read_blocks += last - first + 1U + (first ? 1U : 0U);
+		record_reads = last - first + 1U + (first ? 1U : 0U);
+		/*
+		 * Full logical record must fit both geometry and read budget.
+		 * Because we preserve arrival order, we cannot skip this record
+		 * and pick a later one without making an explicit new extent.
+		 */
+		if (max_read_blocks && record_reads > max_read_blocks)
+			break;
+		*read_blocks += record_reads;
 		payload_start = offset;
 		included++;
 	}
 	return included;
 }
 
-int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
-		    sv3_u8 *classes, sv3_u8 *records_per_extent,
-		    sv3_u8 *extent_count)
+int sv3_engine_plan_bounded(const struct sv3_compressed_page *pages,
+			    sv3_u8 count, sv3_u8 max_read_blocks,
+			    sv3_u8 *classes, sv3_u8 *records_per_extent,
+			    sv3_u8 *extent_count)
 {
 	sv3_u32 costs[SV3_MAX_RECORDS + 1U];
 	sv3_u32 reads[SV3_MAX_RECORDS + 1U];
@@ -67,7 +76,7 @@ int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 	sv3_u8 position = 0;
 
 	if (!pages || !classes || !records_per_extent || !extent_count ||
-	    !count || count > SV3_MAX_RECORDS)
+	    !count || count > SV3_MAX_RECORDS || max_read_blocks > 3U)
 		return -EINVAL;
 	*extent_count = 0;
 	for (index = 0; index < count; ++index) {
@@ -88,6 +97,7 @@ int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 			sv3_u8 blocks = (sv3_u8)(1U << class_index);
 			sv3_u32 local_read_blocks;
 			sv3_u8 take = sv3_fit_count(pages, count, index, blocks,
+						   max_read_blocks,
 						   &local_read_blocks);
 			sv3_u32 candidate_bytes, candidate_reads;
 			sv3_u8 candidate_batches;
@@ -124,6 +134,15 @@ int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 	return 0;
 }
 
+int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
+		    sv3_u8 *classes, sv3_u8 *records_per_extent,
+		    sv3_u8 *extent_count)
+{
+	return sv3_engine_plan_bounded(pages, count, 0,
+				      classes, records_per_extent,
+				      extent_count);
+}
+
 int sv3_engine_write_window(struct sv3_engine *engine,
 			    const struct sv3_compressed_page *pages,
 			    sv3_u8 count, sv3_u8 *committed_pages)
@@ -144,8 +163,10 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 	    (!engine->read_scratch || !engine->io.read_blocks ||
 	     engine->read_scratch == engine->write_scratch))
 		return -EINVAL;
-	error = sv3_engine_plan(pages, count, engine->plan_classes,
-				engine->plan_takes, &extent_count);
+	error = sv3_engine_plan_bounded(pages, count,
+					engine->max_read_blocks_per_record,
+					engine->plan_classes,
+					engine->plan_takes, &extent_count);
 	if (error)
 		return error;
 
