@@ -39,6 +39,37 @@ static int test_bytes_vs_count_victim_policy(void)
 	return 0;
 }
 
+static int test_io_aware_cost_corrects_loaded_gc_counterexample(void)
+{
+	/* Alpha.4: one 3335-byte survivor required 4KiB read+write;
+	 * three 496-byte survivors required three 4KiB reads and one
+	 * packed 4KiB write. Both extents held one lower 4KiB block. */
+	struct sv3_map large = { .valid = 1, .extent_blocks = 1,
+				.payload_length = 3335 };
+	struct sv3_map tiny = { .valid = 1, .extent_blocks = 1,
+			       .payload_length = 496 };
+	struct sv3_map multi = { .valid = 1, .extent_blocks = 4,
+				.payload_length = 2082 };
+	sv3_u32 one, three;
+
+	CHECK(sv3_gc_live_byte_cost(&large) == 3351);
+	CHECK(3 * sv3_gc_live_byte_cost(&tiny) == 1536);
+	CHECK(3 * sv3_gc_live_byte_cost(&tiny) <
+	      sv3_gc_live_byte_cost(&large)); /* byte policy gets it wrong */
+	one = sv3_gc_estimated_io_cost(&large);
+	three = 3 * sv3_gc_estimated_io_cost(&tiny);
+	CHECK(one == 7447 && three == 13824);
+	CHECK(!sv3_gc_prefer(three, 3, one, 1));
+	CHECK(sv3_gc_prefer(one, 1, three, 3));
+	CHECK(sv3_gc_estimated_io_cost(&multi) ==
+	      2098 + 3 * SV3_BLOCK_BYTES);
+	multi.extent_blocks = 3;
+	CHECK(sv3_gc_estimated_io_cost(&multi) == 0);
+	tiny.valid = 0;
+	CHECK(sv3_gc_estimated_io_cost(&tiny) == 0);
+	return 0;
+}
+
 static int test_raw_and_invalid_cost(void)
 {
 	struct sv3_map m = { .valid = 1, .raw = 1,
@@ -95,6 +126,7 @@ int main(void)
 	CHECK(test_bytes_vs_count_victim_policy() == 0); passed++;
 	CHECK(test_raw_and_invalid_cost() == 0); passed++;
 	CHECK(test_exact_committed_payload_lengths() == 0); passed++;
+	CHECK(test_io_aware_cost_corrects_loaded_gc_counterexample() == 0); passed++;
 	printf("SV3_GC_COST_TESTS_PASS=%d\n", passed);
 	return 0;
 }
