@@ -48,6 +48,12 @@ struct sv3_authority {
 	sv3_u32 active_sequence;
 	sv3_u8 active_blocks;
 	sv3_u8 active_count;
+	/*
+	 * Worker-owned immutable staged descriptor snapshot. The caller may
+	 * retain or mutate its returned sv3_tx, but publication must never trust
+	 * caller-supplied record identities or generations absent this match.
+	 */
+	struct sv3_tx active_tx;
 	int in_flight;
 };
 
