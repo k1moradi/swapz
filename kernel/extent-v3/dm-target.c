@@ -84,8 +84,12 @@ struct sv3_dm {
 	sv3_u8 gc_used[SV3_MAX_RECORDS];
 	sv3_u8 gc_count;
 	u8 *gc_bytes_store;
-	sv3_u32 *gc_scores;  /* [physical 1MiB segments] */
+	sv3_u32 *gc_scores;  /* estimated relocation bytes per segment */
+	sv3_u16 *gc_live_counts; /* count for ties/control comparison */
 	sv3_u32 segment_count;
+	sv3_u8 gc_cost_policy; /* 0=original record count; 1=live bytes */
+	u64 gc_selected_live_bytes;
+	u64 gc_selected_live_records;
 	u64 gc_victims;
 	u64 gc_pages;
 	u64 gc_read_bytes;
@@ -410,35 +414,64 @@ static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
 	return error;
 }
 
+/*
+ * Evaluate actual authoritative compressed-body BYTES + descriptor cost,
+ * rather than treating a live 200-byte record like a live 4096-byte raw
+ * page. This is a conservative cost estimate, not a prediction of the
+ * optimizer's final physical extent count or actual read amplification.
+ * It can be switched to the old count heuristic for matched benchmarks.
+ */
 static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 {
 	sv3_u32 logical, segment, selected = ~(sv3_u32)0;
 	sv3_u32 best = ~(sv3_u32)0;
+	sv3_u16 best_count = ~(sv3_u16)0;
 
 	memset(ctx->gc_scores, 0,
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
+	memset(ctx->gc_live_counts, 0,
+	       (size_t)ctx->segment_count * sizeof(*ctx->gc_live_counts));
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
 		const struct sv3_map *m = &ctx->maps[logical];
+		sv3_u32 cost;
 
 		if (!m->valid)
 			continue;
 		if (m->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
-		ctx->gc_scores[m->start_block / SV3_SEGMENT_BLOCKS]++;
+		if (!m->payload_length ||
+		    (m->raw ? (m->payload_length != SV3_BLOCK_BYTES) :
+		     (m->payload_length > SV3_MAX_COMPRESSED)))
+			return -EUCLEAN;
+		segment = m->start_block / SV3_SEGMENT_BLOCKS;
+		/* 16B V3 descriptor per compressed record plus LZ4 bytes.
+		 * Raw page consumes one full physical 4096B allocation. */
+		cost = m->payload_length + (m->raw ? 0U : 16U);
+		if (ctx->gc_scores[segment] > ~(sv3_u32)0 - cost ||
+		    ctx->gc_live_counts[segment] == ~(sv3_u16)0)
+			return -EOVERFLOW;
+		ctx->gc_scores[segment] += cost;
+		ctx->gc_live_counts[segment]++;
 	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
-		sv3_u32 live = ctx->gc_scores[segment];
+		sv3_u16 count = ctx->gc_live_counts[segment];
+		sv3_u32 score;
 
-		if (!live || segment == ctx->authority.open_segment)
+		if (!count || segment == ctx->authority.open_segment)
 			continue;
-		if (live < best) {
-			best = live;
+		score = ctx->gc_cost_policy ? ctx->gc_scores[segment] : count;
+		if (score < best ||
+		    (score == best && count < best_count)) {
+			best = score;
+			best_count = count;
 			selected = segment;
 		}
 	}
 	if (selected == ~(sv3_u32)0)
 		return -ENOSPC;
 	*victim = selected;
+	ctx->gc_selected_live_bytes += ctx->gc_scores[selected];
+	ctx->gc_selected_live_records += ctx->gc_live_counts[selected];
 	return 0;
 }
 
@@ -1016,6 +1049,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
+	kvfree(ctx->gc_live_counts);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -1107,13 +1141,16 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->segment_count = physical / SV3_SEGMENT_BLOCKS;
 	ctx->gc_scores = kvcalloc(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
+	ctx->gc_live_counts = kvcalloc(ctx->segment_count,
+				      sizeof(*ctx->gc_live_counts), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
 	ctx->discard_epoch = kvcalloc(physical, sizeof(*ctx->discard_epoch), GFP_KERNEL);
 	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
-	    !ctx->discard_epoch || !ctx->discard_count) {
+	    !ctx->discard_epoch || !ctx->discard_count ||
+	    !ctx->gc_scores || !ctx->gc_live_counts) {
 		error = -ENOMEM;
 		goto fail;
 	}
