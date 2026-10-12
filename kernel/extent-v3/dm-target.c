@@ -94,6 +94,9 @@ struct sv3_dm {
 	u64 gc_selected_live_bytes;
 	u64 gc_selected_live_records;
 	u64 gc_victims;
+	u64 gc_role_rotations;
+	sv3_u32 last_gc_victim;
+	sv3_u32 last_gc_destination;
 	u64 gc_pages;
 	u64 gc_read_bytes;
 	u64 gc_write_bytes;
@@ -594,9 +597,16 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	}
 	/* Atomically exchange reserve/foreground ownership only after ALL
 	 * authoritative mappings and live refcounts vacate the victim. */
-	error = sv3_gc_commit_rotation(a, victim);
-	if (error)
-		goto out;
+	{
+		sv3_u32 destination = a->gc_destination;
+
+		error = sv3_gc_commit_rotation(a, victim);
+		if (error)
+			goto out;
+		ctx->last_gc_victim = victim;
+		ctx->last_gc_destination = destination;
+		ctx->gc_role_rotations++;
+	}
 	ctx->gc_victims++;
 out:
 	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
@@ -1377,7 +1387,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
-		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
+		       "gc_victims=%llu gc_role_rotations=%llu "
+		       "last_gc_victim=%u last_gc_destination=%u "
+		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
 		       "gc_read_reqs=%llu gc_write_reqs=%llu "
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
@@ -1396,8 +1408,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->raw_pages, ctx->discard_pages, ctx->windows,
 		       ctx->reordered_records, ctx->authority.next_block,
 		       ctx->authority.reserve_blocks,
-		       ctx->gc_victims, ctx->gc_pages,
-		       ctx->gc_read_bytes, ctx->gc_write_bytes,
+		       ctx->gc_victims, ctx->gc_role_rotations,
+		       ctx->last_gc_victim, ctx->last_gc_destination,
+		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
 		       ctx->gc_selected_live_records,
 		       ctx->gc_read_reqs, ctx->gc_write_reqs,
