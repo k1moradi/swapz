@@ -68,7 +68,8 @@ The necessary pipeline is:
    4Kn or larger-preferred-I/O lower device.
 4. Use versioned, aligned **8 or 16 KiB extents** for cases such as
    2,072-byte LZ4 objects where two cannot fit inside a single 4 KiB block.
-   Physical blocks can contain parts of different compressed records.
+   An aligned V3 allocation unit can contain fragments of different
+   compressed records; this is NOT a statement about device physical sectors.
 5. Read only the 4 KiB metadata block and additional blocks actually
    containing the requested record. Expose a per-record 4 KiB read budget.
 6. Reclaim stale records with generation-safe segment-local GC, relocating
