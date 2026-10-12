@@ -158,7 +158,7 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 		error = sv3_begin(&builder, engine->write_scratch,
 				  bytes, tx.sequence);
 		if (error)
-			goto abort;
+			goto abort_transaction;
 		for (j = 0; j < take; ++j) {
 			const struct sv3_compressed_page *page = &pages[entry + j];
 
@@ -166,11 +166,11 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 					   tx.records[j].generation,
 					   page->payload, page->length);
 			if (error)
-				goto abort;
+				goto abort_transaction;
 		}
 		error = sv3_seal(&builder);
 		if (error)
-			goto abort;
+			goto abort_transaction;
 
 		/*
 		 * Synchronous and completion-confirmed lower I/O. The on-media
@@ -193,11 +193,12 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 			return error;
 		entry += take;
 		*committed_pages = entry;
+		continue;
+abort_transaction:
+		sv3_abort(engine->authority, &tx);
+		return error;
 	}
 	return 0;
-abort:
-	sv3_abort(engine->authority, &tx);
-	return error;
 }
 
 int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
