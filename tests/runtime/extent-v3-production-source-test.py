@@ -37,10 +37,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.2"', DM)
+        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.3"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.2", GOALS)
+        self.assertIn("3.0.0-alpha.3", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
@@ -60,7 +60,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("sv3_gc_choose_victim(ctx,", body("sv3_gc_compact_one"))
         self.assertIn("if (a->live_records[start + off])", AUTH)
         self.assertIn("if (map->start_block / SV3_SEGMENT_BLOCKS == segment)", AUTH)
-        self.assertIn("ctx->gc_scores[m->start_block / SV3_SEGMENT_BLOCKS]++", DM)
+        self.assertIn("cost = sv3_gc_live_byte_cost(m)", DM)
+        self.assertIn("ctx->gc_scores[segment] += cost", DM)
+        self.assertIn("sv3_gc_prefer(score, count, best, best_count)", DM)
         self.assertIn("sv3_engine_read_page(&ctx->engine", body("sv3_gc_compact_one"))
         self.assertIn("sv3_gc_flush(ctx)", body("sv3_gc_compact_one"))
         self.assertIn("sv3_finish_raw(&ctx->authority", body("sv3_gc_move_raw"))
@@ -97,9 +99,24 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("SV3_WORK_QUANTUM_BIOS", worker)
         self.assertIn("if (!--remaining)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
-        self.assertIn("queue_work(ctx->workqueue, &ctx->worker)", worker)
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
+        self.assertIn("cond_resched()", worker)
         self.assertLess(worker.index("sv3_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
+
+    def test_shutdown_completes_all_accepted_queued_bios(self):
+        worker = body("sv3_worker")
+        drain = body("sv3_drain")
+        self.assertIn("for (;;)", worker)
+        self.assertIn("remaining = SV3_WORK_QUANTUM_BIOS", worker)
+        self.assertIn("if (ctx->accepting)", worker)
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
+        self.assertIn("cond_resched();", worker)
+        self.assertLess(worker.index("if (ctx->accepting)"),
+                        worker.rindex("cond_resched();"))
+        self.assertIn("drain_workqueue(ctx->workqueue)", drain)
+        self.assertIn("V3 drain invariant: accepted BIOs remain", drain)
+        self.assertIn("sv3_fail(ctx, -EUCLEAN)", drain)
 
     def test_raw_crc_protection_and_gc_relocation(self):
         auth = (ROOT / "kernel/extent-v3/authority.c").read_text()
@@ -145,6 +162,39 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("one_page_windows", body("sv3_flush_window"))
         self.assertIn("worker_requeues", body("sv3_worker"))
 
+    def test_online_batching_bounded_and_barrier_first(self):
+        admitted = body("sv3_map")
+        ctor = body("sv3_ctr")
+        drain = body("sv3_drain")
+        worker = body("sv3_worker")
+        self.assertIn("SV3_MAX_COALESCE_MS", DM)
+        self.assertIn("msecs_to_jiffies(ctx->coalesce_ms)", admitted)
+        self.assertIn("REQ_PREFLUSH | REQ_FUA", admitted)
+        self.assertIn("bio_op(bio) != REQ_OP_WRITE", admitted)
+        self.assertIn("queue_delayed_work(ctx->workqueue", admitted)
+        self.assertIn("mod_delayed_work(ctx->workqueue", admitted)
+        self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
+        self.assertIn("coalesce > SV3_MAX_COALESCE_MS", ctor)
+        self.assertIn("ctx->window_size_counts[count]++", body("sv3_flush_window"))
+        self.assertIn("ctx->window_bins[0]++", body("sv3_flush_window"))
+        self.assertIn("ctx->window_bins[5]++", body("sv3_flush_window"))
+        self.assertIn("gc_read_reqs=%llu gc_write_reqs=%llu", DM)
+        self.assertIn("ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs",
+                      body("sv3_gc_compact_one"))
+        self.assertIn("flush_delayed_work(&ctx->worker)", drain)
+        self.assertLess(worker.index("sv3_flush_window(ctx)"),
+                        worker.index("list_splice_init(&local, &ctx->incoming)"))
+
+    def test_gc_uses_committed_actual_payload_lengths(self):
+        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        self.assertIn("payload_lengths[index] = decoded.payload_length", authority)
+        self.assertIn(".payload_length = payload_lengths[index]", authority)
+        self.assertIn(".payload_length = SV3_BLOCK_BYTES", authority)
+        self.assertIn("decoded->payload_length != current->payload_length", authority)
+        self.assertIn("ctx->gc_cost_policy", body("sv3_gc_choose_victim"))
+        self.assertIn("gc_selected_live_bytes", body("sv3_gc_choose_victim"))
+        self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("sv3_status"))
+
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("sv3_status"))
         self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))
@@ -155,16 +205,23 @@ class V3ProductionSourceQualification(unittest.TestCase):
         drained = body("sv3_drain")
         self.assertIn("dm_per_bio_data(", admitted)
         self.assertIn("WQ_MEM_RECLAIM", body("sv3_ctr"))
-        self.assertIn("flush_workqueue(ctx->workqueue)", drained)
+        self.assertIn("drain_workqueue(ctx->workqueue)", drained)
+        self.assertLess(drained.index("mod_delayed_work(ctx->workqueue"),
+                        drained.index("flush_delayed_work(&ctx->worker)"))
+        self.assertLess(drained.index("flush_delayed_work(&ctx->worker)"),
+                        drained.index("drain_workqueue(ctx->workqueue)"))
+        self.assertIn("cancel_delayed_work_sync(&ctx->worker)", body("sv3_free"))
         self.assertIn("destroy_workqueue(ctx->workqueue)", body("sv3_free"))
         self.assertLess(admitted.index("spin_lock_irqsave(&ctx->queue_lock"),
                         admitted.index("if (!ctx->accepting)"))
         self.assertLess(admitted.index("if (!ctx->accepting)"),
                         admitted.index("list_add_tail(&entry->list"))
-        self.assertLess(admitted.index("queue_work(ctx->workqueue"),
+        self.assertLess(admitted.index("queue_delayed_work(ctx->workqueue"),
                         admitted.index("spin_unlock_irqrestore(&ctx->queue_lock, flags);\n\treturn DM_MAPIO_SUBMITTED"))
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
+        self.assertIn("flush_delayed_work(&ctx->worker)", drained)
         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
-                        drained.index("flush_workqueue(ctx->workqueue)"))
+                        drained.index("drain_workqueue(ctx->workqueue)"))
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", drained)
 
 

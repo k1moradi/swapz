@@ -361,6 +361,33 @@ static int test_read_budget_tradeoff_on_uniform_2072(void)
 	return 0;
 }
 
+static int test_mapping_length_mismatch_stops_before_payload_io(void)
+{
+	struct sv3_compressed_page pages[7];
+	sv3_u8 output[3568], committed = 0;
+	sv3_u16 length = 91;
+	sv3_u16 original;
+
+	CHECK(setup() == 0);
+	prepare(pages, 7, 0, 0);
+	CHECK(sv3_engine_write_window(&engine, pages, 7, &committed) == 0);
+	CHECK(committed == 7 && maps[6].valid);
+	original = maps[6].payload_length;
+	CHECK(original == 2072);
+	maps[6].payload_length = original - 1;
+	disk.read_blocks = 0;
+	CHECK(sv3_engine_read_page(&engine, 6, output,
+				   sizeof(output), &length) == -EUCLEAN);
+	CHECK(length == 0 && disk.read_blocks == 1);
+	/* Restore the accurate authoritative length. The physical payload
+	 * was never modified; reading it must still succeed byte-for-byte. */
+	maps[6].payload_length = original;
+	CHECK(sv3_engine_read_page(&engine, 6, output,
+				   sizeof(output), &length) == 0);
+	CHECK(length == original && !memcmp(output, originals[6], length));
+	return 0;
+}
+
 int main(void)
 {
 	int completed = 0;
@@ -375,6 +402,7 @@ int main(void)
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
 	CHECK(test_read_budget_tradeoff_on_uniform_2072() == 0); completed++;
+	CHECK(test_mapping_length_mismatch_stops_before_payload_io() == 0); completed++;
 	free(disk.storage);
 	printf("SV3_EXACT_ENGINE_TESTS_PASS=%d\n", completed);
 	return 0;

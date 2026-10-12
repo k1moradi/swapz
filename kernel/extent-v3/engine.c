@@ -291,7 +291,8 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	if (error)
 		return error;
 	if (peek.logical_page != logical_page ||
-	    peek.generation != observed.generation)
+	    peek.generation != observed.generation ||
+	    peek.payload_length != observed.payload_length)
 		return -EUCLEAN;
 	first = peek.payload_offset / SV3_BLOCK_BYTES;
 	last = ((sv3_u32)peek.payload_offset +

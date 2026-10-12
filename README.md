@@ -1,4 +1,4 @@
-# swapz: V3.0.0-alpha.2 development
+# swapz: V3.0.0-alpha.3 development
 
 > **Project vision:** the ultimate success criterion is **less measured
 > lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
@@ -25,6 +25,20 @@ version decision.
 The **active implementation direction** is zsmalloc-inspired object-size
 classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
 extents when useful, and live-only size-classed compaction.
+
+**V3.0.0-alpha.3 online-I/O candidate:** [PR #49](https://github.com/k1moradi/swapz/pull/49)
+now lets the real `dm-swapz.ko` V3 target hold incoming writes for an
+**optional** 0..4ms timer interval (`coalesce_ms=0` by default), letting
+compatible sizes accumulate before the finite 64-record sort/write.
+READ, FUA, preflush and discard wake the worker immediately. GC now
+defaults to selecting the victim with the lowest estimated authoritative
+**live LZ4 payload bytes** (rather than fewest live records), with
+`gc_policy=0` retained as the original count-based benchmark control.
+Actual write-window histogram and GC read/write requests are exposed for
+independent I/O reconciliation. These are experimental performance policies,
+NOT proven physical SD/SSD/HDD wins. Follow
+[kernel/extent-v3/ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
+before any loaded-kernel test.
 
 A separate experimental Device Mapper target, `swapz3`
 (`kernel/extent-v3/dm-swapz.ko`, **not** the frozen V2.2 module in `kernel/`), is being developed for LZ4

@@ -26,14 +26,16 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include "engine.h"
+#include "gc-cost.h"
 
 #if PAGE_SIZE != SV3_BLOCK_BYTES
 #error "swapz3 V3.0-alpha requires 4KiB PAGE_SIZE"
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.2"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.3"
 #define SV3_WORK_QUANTUM_BIOS 64U
+#define SV3_MAX_COALESCE_MS 4U
 
 struct sv3_bio_ref {
 	struct list_head list;
@@ -51,7 +53,7 @@ struct sv3_dm {
 	struct dm_dev *backing;
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
-	struct work_struct worker;
+	struct delayed_work worker;
 	spinlock_t queue_lock;
 	struct list_head incoming;
 	bool accepting;
@@ -84,14 +86,28 @@ struct sv3_dm {
 	sv3_u8 gc_used[SV3_MAX_RECORDS];
 	sv3_u8 gc_count;
 	u8 *gc_bytes_store;
-	sv3_u32 *gc_scores;  /* [physical 1MiB segments] */
+	sv3_u32 *gc_scores;  /* estimated relocation bytes per segment */
+	sv3_u16 *gc_live_counts; /* count for ties/control comparison */
 	sv3_u32 segment_count;
+	sv3_u8 gc_cost_policy; /* 0=original record count; 1=live bytes */
+	u64 gc_selected_live_bytes;
+	u64 gc_selected_live_records;
 	u64 gc_victims;
 	u64 gc_pages;
 	u64 gc_read_bytes;
 	u64 gc_write_bytes;
+	u64 gc_read_reqs;
+	u64 gc_write_reqs;
 	sv3_u8 batch_count;
 	sv3_u8 max_window;
+	/* Admission coalescing is optional and bounded by one timer expiry.
+	 * No write is published/ACKed until its actual lower I/O completes. */
+	sv3_u8 coalesce_ms;
+	u64 coalesce_deferred;
+	u64 coalesce_urgent;
+	u64 window_records_total;
+	u64 window_size_counts[SV3_MAX_RECORDS + 1];
+	u64 window_bins[6]; /* 1,2,3-4,5-8,9-16,17-64 */
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
 	u8 *input_page;        /* VMALLOC: 4KiB copy from upper bio */
 	u8 *read_page;         /* VMALLOC: 4KiB decompressed upper bio */
@@ -410,35 +426,59 @@ static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
 	return error;
 }
 
+/*
+ * Evaluate actual authoritative compressed-body BYTES + descriptor cost,
+ * rather than treating a live 200-byte record like a live 4096-byte raw
+ * page. This is a conservative cost estimate, not a prediction of the
+ * optimizer's final physical extent count or actual read amplification.
+ * It can be switched to the old count heuristic for matched benchmarks.
+ */
 static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 {
 	sv3_u32 logical, segment, selected = ~(sv3_u32)0;
 	sv3_u32 best = ~(sv3_u32)0;
+	sv3_u16 best_count = ~(sv3_u16)0;
 
 	memset(ctx->gc_scores, 0,
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
+	memset(ctx->gc_live_counts, 0,
+	       (size_t)ctx->segment_count * sizeof(*ctx->gc_live_counts));
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
 		const struct sv3_map *m = &ctx->maps[logical];
+		sv3_u32 cost;
 
 		if (!m->valid)
 			continue;
 		if (m->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
-		ctx->gc_scores[m->start_block / SV3_SEGMENT_BLOCKS]++;
+		cost = sv3_gc_live_byte_cost(m);
+		if (!cost)
+			return -EUCLEAN;
+		segment = m->start_block / SV3_SEGMENT_BLOCKS;
+		if (ctx->gc_scores[segment] > ~(sv3_u32)0 - cost ||
+		    ctx->gc_live_counts[segment] == ~(sv3_u16)0)
+			return -EOVERFLOW;
+		ctx->gc_scores[segment] += cost;
+		ctx->gc_live_counts[segment]++;
 	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
-		sv3_u32 live = ctx->gc_scores[segment];
+		sv3_u16 count = ctx->gc_live_counts[segment];
+		sv3_u32 score;
 
-		if (!live || segment == ctx->authority.open_segment)
+		if (!count || segment == ctx->authority.open_segment)
 			continue;
-		if (live < best) {
-			best = live;
+		score = ctx->gc_cost_policy ? ctx->gc_scores[segment] : count;
+		if (sv3_gc_prefer(score, count, best, best_count)) {
+			best = score;
+			best_count = count;
 			selected = segment;
 		}
 	}
 	if (selected == ~(sv3_u32)0)
 		return -ENOSPC;
 	*victim = selected;
+	ctx->gc_selected_live_bytes += ctx->gc_scores[selected];
+	ctx->gc_selected_live_records += ctx->gc_live_counts[selected];
 	return 0;
 }
 
@@ -447,6 +487,7 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	struct sv3_authority *a = &ctx->authority;
 	sv3_u32 old_next, old_open, old_probe, victim, logical, block;
 	u64 before_read, before_write;
+	u64 before_read_reqs, before_write_reqs;
 	int error;
 
 	if (a->in_flight || a->gc_allocation)
@@ -459,6 +500,8 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	old_probe = a->next_segment_probe;
 	before_read = ctx->physical_read_bytes;
 	before_write = ctx->physical_write_bytes;
+	before_read_reqs = ctx->physical_read_reqs;
+	before_write_reqs = ctx->physical_write_reqs;
 	/*
 	 * Temporarily allow the worker to use a genuinely FREE segment from
 	 * the full physical region, including the reserved tail. The liveness
@@ -551,6 +594,8 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 out:
 	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
 	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
+	ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs;
+	ctx->gc_write_reqs += ctx->physical_write_reqs - before_write_reqs;
 	ctx->gc_count = 0;
 	a->gc_allocation = 0;
 	a->gc_forbidden_open = ~(sv3_u32)0;
@@ -618,6 +663,20 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		}
 	}
 	ctx->windows++;
+	ctx->window_records_total += count;
+	ctx->window_size_counts[count]++;
+	if (count == 1)
+		ctx->window_bins[0]++;
+	else if (count == 2)
+		ctx->window_bins[1]++;
+	else if (count <= 4)
+		ctx->window_bins[2]++;
+	else if (count <= 8)
+		ctx->window_bins[3]++;
+	else if (count <= 16)
+		ctx->window_bins[4]++;
+	else
+		ctx->window_bins[5]++;
 	if (count == 1)
 		ctx->one_page_windows++;
 	ctx->batch_count = 0;
@@ -884,40 +943,67 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 	sv3_complete(bio, error);
 }
 
+/*
+ * Normal operation: a finite quantum keeps write ownership and CPU
+ * latency bounded, with older queued BIOs ahead of new admissions.
+ * Presuspend: admission is closed under queue_lock, so the same worker
+ * may finish ALL previously accepted BIOs without building a potentially
+ * unbounded chain of requeued delayed works during drain_workqueue().
+ */
 static void sv3_worker(struct work_struct *work)
 {
-	struct sv3_dm *ctx = container_of(work, struct sv3_dm, worker);
+	struct sv3_dm *ctx =
+		container_of(to_delayed_work(work), struct sv3_dm, worker);
 	LIST_HEAD(local);
 	struct sv3_bio_ref *entry, *next;
 	unsigned long flags;
-	unsigned int remaining = SV3_WORK_QUANTUM_BIOS;
+	unsigned int remaining;
 
-	{
+	for (;;) {
+		remaining = SV3_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+
 		list_for_each_entry_safe(entry, next, &local, list) {
 			list_del_init(&entry->list);
 			sv3_process(ctx, entry->bio);
+			if (!(remaining & 7U))
+				cond_resched();
 			if (!--remaining)
 				break;
 		}
-		/* No timer to wait for more records: seal what is available. */
+		/*
+		 * Never carry a partially published upper write window
+		 * across work items; a later read/FUA could overtake it.
+		 */
 		if (ctx->batch_count)
 			sv3_flush_window(ctx);
-		/*
-		 * Unprocessed older entries MUST precede newly admitted BIOs.
-		 * Requeue under the same lock as admission and suspend. Every
-		 * pending write batch is completed before the work item yields.
-		 */
+
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
-		if (!list_empty(&ctx->incoming)) {
+		if (list_empty(&ctx->incoming)) {
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			return;
+		}
+		if (ctx->accepting) {
+			/*
+			 * Preserves FIFO: unfinished older BIOs are already
+			 * at the head, ahead of concurrently admitted BIOs.
+			 */
 			ctx->worker_requeues++;
-			queue_work(ctx->workqueue, &ctx->worker);
+			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		/*
+		 * Shutdown: no new admissions. Complete every previously
+		 * accepted BIO in this invocation. Avoid requeue chains or
+		 * leaving accepted BIOs behind flush_delayed_work().
+		 */
+		cond_resched();
 	}
 }
 
@@ -961,7 +1047,23 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 		return DM_MAPIO_KILL;
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
-	queue_work(ctx->workqueue, &ctx->worker);
+	/*
+	 * First ordinary WRITE starts one finite coalescing interval; later
+	 * writes join without extending the deadline. Urgent reads, discard,
+	 * flush/FUA and preflush bypass that wait to preserve swap-in latency
+	 * and ordering. Workqueue is serialized and completes every upper BIO.
+	 * On already-running work, the next work item is queued normally.
+	 */
+	if (bio_op(bio) != REQ_OP_WRITE ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+	    !bio_sectors(bio)) {
+		ctx->coalesce_urgent++;
+		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	} else if (queue_delayed_work(ctx->workqueue, &ctx->worker,
+				      msecs_to_jiffies(ctx->coalesce_ms))) {
+		if (ctx->coalesce_ms)
+			ctx->coalesce_deferred++;
+	}
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return DM_MAPIO_SUBMITTED;
 }
@@ -975,8 +1077,29 @@ static void sv3_drain(struct dm_target *ti)
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	flush_workqueue(ctx->workqueue);
-	/* Every admitted BIO had already been queued under the same lock. */
+	/*
+	 * flush_delayed_work() only waits for the last queued instance.
+	 * This worker can chain itself after its 64-BIO quantum, so merely
+	 * flushing that instance (or the workqueue once) is insufficient:
+	 * presuspend must not return while a requeued accepted BIO exists.
+	 *
+	 * The admission lock is now closed. Force the pending timer to fire,
+	 * wait for it, then drain *all chained* worker executions before
+	 * releasing the target. drain_workqueue() explicitly allows chaining
+	 * by work already executing on the draining queue.
+	 */
+	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	flush_delayed_work(&ctx->worker);
+	drain_workqueue(ctx->workqueue);
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (!list_empty(&ctx->incoming) || ctx->batch_count) {
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		DMERR("V3 drain invariant: accepted BIOs remain after draining");
+		sv3_fail(ctx, -EUCLEAN);
+	} else {
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	}
+	/* Every admitted BIO was queued under the same lock before this drain. */
 	if (!ctx->failed) {
 		int error = blkdev_issue_flush(ctx->backing->bdev);
 
@@ -1001,7 +1124,11 @@ static void sv3_free(struct sv3_dm *ctx)
 	if (!ctx)
 		return;
 	if (ctx->workqueue) {
-		flush_workqueue(ctx->workqueue);
+		/* The constructor-failure path has no accepted BIOs.
+		 * The live teardown path already closed admission and drained
+		 * every chained work item before arriving here. */
+		cancel_delayed_work_sync(&ctx->worker);
+		drain_workqueue(ctx->workqueue);
 		destroy_workqueue(ctx->workqueue);
 	}
 	if (ctx->io_client)
@@ -1016,6 +1143,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
+	kvfree(ctx->gc_live_counts);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -1041,10 +1169,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct sv3_dm *ctx;
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
+	u32 gc_policy = 1, coalesce = 0;
 	int error;
 
-	if (argc < 1 || argc > 4 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1]";
+	if (argc < 1 || argc > 6 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes] [coalesce_ms 0..4]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1054,17 +1183,25 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -EINVAL;
 	if (argc > 3 && (kstrtou32(argv[3], 10, &verify) || verify > 1U))
 		return -EINVAL;
+	if (argc > 4 && (kstrtou32(argv[4], 10, &gc_policy) ||
+			 gc_policy > 1U))
+		return -EINVAL;
+	if (argc > 5 && (kstrtou32(argv[5], 10, &coalesce) ||
+			 coalesce > SV3_MAX_COALESCE_MS))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 	ti->private = ctx;
 	ctx->target = ti;
 	ctx->max_window = (sv3_u8)window;
+	ctx->gc_cost_policy = gc_policy;
+	ctx->coalesce_ms = coalesce;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
-	INIT_WORK(&ctx->worker, sv3_worker);
+	INIT_DELAYED_WORK(&ctx->worker, sv3_worker);
 
 	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
 			      &ctx->backing);
@@ -1107,13 +1244,16 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->segment_count = physical / SV3_SEGMENT_BLOCKS;
 	ctx->gc_scores = kvcalloc(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
+	ctx->gc_live_counts = kvcalloc(ctx->segment_count,
+				      sizeof(*ctx->gc_live_counts), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
 	ctx->discard_epoch = kvcalloc(physical, sizeof(*ctx->discard_epoch), GFP_KERNEL);
 	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
-	    !ctx->discard_epoch || !ctx->discard_count) {
+	    !ctx->discard_epoch || !ctx->discard_count ||
+	    !ctx->gc_scores || !ctx->gc_live_counts) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -1213,10 +1353,16 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "compressed=%llu raw=%llu discarded=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
+		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
+		       "gc_read_reqs=%llu gc_write_reqs=%llu "
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
 		       "worker_requeues=%llu one_page_windows=%llu "
+		       "window_records=%llu coalesce_ms=%u "
+		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
+		       "win9_16=%llu win17_64=%llu "
+		       "coalesce_deferred=%llu coalesce_urgent=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1227,6 +1373,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.reserve_blocks,
 		       ctx->gc_victims, ctx->gc_pages,
 		       ctx->gc_read_bytes, ctx->gc_write_bytes,
+		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
+		       ctx->gc_selected_live_records,
+		       ctx->gc_read_reqs, ctx->gc_write_reqs,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->engine.verify_after_write,
@@ -1235,12 +1384,18 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_read_submitted_bytes,
 		       ctx->lower_read_submitted_reqs,
 		       ctx->worker_requeues, ctx->one_page_windows,
+		       ctx->window_records_total, ctx->coalesce_ms,
+		       ctx->window_bins[0], ctx->window_bins[1],
+		       ctx->window_bins[2], ctx->window_bins[3],
+		       ctx->window_bins[4], ctx->window_bins[5],
+		       ctx->coalesce_deferred, ctx->coalesce_urgent,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
-		       ctx->max_window, ctx->engine.verify_after_write);
+		       ctx->max_window, ctx->engine.verify_after_write,
+		       ctx->gc_cost_policy, ctx->coalesce_ms);
 		break;
 	case STATUSTYPE_IMA:
 	default:

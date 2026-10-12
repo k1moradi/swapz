@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.2.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.3.** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -82,7 +82,7 @@ They do not validate the renamed/rebuilt alpha.2 `dm-swapz.ko`.
   cost, not only the sorting function.
 - **Real implementation bugs:** the alpha.1 workqueue CPU-hog report,
   missing forbidden-GC-segment enforcement, and earlier status/raw
-  integrity defects. Alpha.2 fixes are not yet independently
+  integrity defects. Alpha.2/3 fixes are not yet independently
   qualified on the loaded physical host.
 - **Missing evidence:** loaded V2.2 apples-to-apples measurements,
   loaded alpha.2 FUA and hostile GC, repeated concurrency with no
@@ -93,9 +93,47 @@ They do not validate the renamed/rebuilt alpha.2 `dm-swapz.ko`.
 See [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md) for
 sourced numbers and the concrete engineering response.
 
+## Main-developer alpha.3: the online-I/O performance candidate
+
+[PR #49](https://github.com/k1moradi/swapz/pull/49) implements the
+**actual Device Mapper** changes described by the prior diagnosis:
+
+- **Admission pipeline:** bounded `coalesce_ms=0..4` batches arrival
+  across an opt-in timer, without perpetually resetting the deadline.
+  Urgent reads, discard, preflush and FUA bypass it. Default `0` preserves
+  the alpha.2 latency/control policy. Worker owns all delayed BIOs and
+  drains the timer during suspend/removal.
+- **Measured opportunity:** exact window-size buckets `win1`, `win2`,
+  `win3_4`, `win5_8`, `win9_16`, `win17_64`,
+  `window_records` and coalescing counters, so increased density
+  cannot be claimed without proving compatible pages were actually
+  staged together. The new delay may hurt QD1 swap-out p99.
+- **GC economics:** authoritative volatile `payload_length` is recorded
+  only after full CRC-checked extent publication, and verified against
+  subsequent reads. Raw records cost 4096B; compressed records cost
+  verified LZ4 bytes plus 16B descriptor each. `gc=1` selects
+  lowest estimated LIVE bytes; `gc=0` preserves old live-record-count
+  comparison. Report both estimated victim bytes and **ACTUAL GC read
+  and write bytes AND request counts**, not invented flash wear savings.
+- **Exact-C qualification:** a deterministic regression shows old
+  count-based GC would prefer one 3500B page, whereas the new byte
+  estimator prefers three 500B pages. Separate authority tests verify
+  actual 2200B/1600B records publish those precise payload lengths,
+  fail-closed limits, and raw record cost.
+- **Version/provenance:** `V3.0.0-alpha.3`, installed V3 build artifact
+  `dm-swapz.ko` and alpha DM target keyword `swapz3`. Rebuilt host
+  module SHA, source blobs, vermagic and backing major/minor must be
+  captured anew. The alpha.1 and alpha.2 evidence cannot certify it.
+
+The precise independent actual-kernel workload and safety instructions
+are in [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md).
+**The release gates below remain unchecked until new host evidence
+exists.** No SD/HDD/SSD I/O or active swap manipulation is authorized
+by this source update; the `null_blk` constructor guard remains.
+
 ## Required production exit gates (hard)
 
-- [ ] **G1, loaded alpha.2 correctness.** Independent static review followed
+- [ ] **G1, loaded alpha.3 correctness.** Independent static review followed
       by exact-source/module hash, target UUID and owned memory-backed
       `null_blk` checks. Repeat all exact 4KiB compressed, raw,
       overwrite, discard, sparse, reorder, CRC and GC cases. Demonstrate
