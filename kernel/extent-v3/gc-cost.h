@@ -24,6 +24,31 @@ static inline sv3_u32 sv3_gc_live_byte_cost(const struct sv3_map *m)
 	return (sv3_u32)m->payload_length + sizeof(struct sv3_record);
 }
 
+/*
+ * Conservative host I/O-cost estimate for a single authoritative record.
+ * A GC move MUST issue a selective lower read of the source before writing
+ * the destination. A packed V3 extent may take more than one block to
+ * fetch the metadata and record payload. The actual read path and read
+ * cache/budget decide the completed count, so this is a selection
+ * heuristic, NOT a measured or guaranteed bound on physical IO.
+ *
+ * Raw: 1 lower 4KiB read + a 4KiB copy; compressed: up to 1/2/3
+ * lower reads for 1/2/4-block extents plus payload+descriptor write cost.
+ * Explicitly penalizing PER-RECORD reads corrects the 3 tiny records
+ * versus 1 large record counterexample found by loaded alpha.4 tests.
+ */
+static inline sv3_u32 sv3_gc_estimated_io_cost(const struct sv3_map *m)
+{
+	sv3_u32 bytes = sv3_gc_live_byte_cost(m);
+	sv3_u32 reads;
+
+	if (!bytes || (m->extent_blocks != 1 && m->extent_blocks != 2 &&
+		       m->extent_blocks != 4))
+		return 0;
+	reads = m->extent_blocks == 4 ? 3 : m->extent_blocks;
+	return bytes + reads * SV3_BLOCK_BYTES;
+}
+
 /* For the selected policy choose lower relocation cost, then fewer
  * records. Stable segment scan order breaks remaining ties. */
 static inline int sv3_gc_prefer(sv3_u32 score, sv3_u16 count,
