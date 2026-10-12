@@ -112,6 +112,19 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("sv3_verify_raw(&ctx->authority, logical, ctx->input_page)",
                       body("sv3_gc_move_raw"))
 
+    def test_optional_write_verify_before_raw_publication(self):
+        ctor = body("sv3_ctr")
+        verifier = body("sv3_verify_raw_write")
+        for name in ("sv3_gc_move_raw", "sv3_raw_write"):
+            raw = body(name)
+            self.assertLess(raw.index("sv3_verify_raw_write(ctx"),
+                            raw.index("sv3_finish_raw(&ctx->authority"))
+        self.assertIn("engine.verify_after_write = verify", ctor)
+        self.assertIn("verify > 1U", ctor)
+        self.assertIn("if (!ctx->engine.verify_after_write)", verifier)
+        self.assertIn("return memcmp(", verifier)
+        self.assertIn("-EBADMSG", verifier)
+
     def test_attempted_and_completed_lower_io_are_distinct(self):
         lower = body("sv3_lower")
         self.assertLess(lower.index("ctx->lower_write_submitted_reqs++"),
