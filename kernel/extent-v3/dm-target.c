@@ -34,6 +34,7 @@
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
 #define SV3_ALPHA_VERSION "3.0.0-alpha.2"
 #define SV3_WORK_QUANTUM_BIOS 64U
+#define SV3_MAX_COALESCE_MS 4U
 
 struct sv3_bio_ref {
 	struct list_head list;
@@ -51,7 +52,7 @@ struct sv3_dm {
 	struct dm_dev *backing;
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
-	struct work_struct worker;
+	struct delayed_work worker;
 	spinlock_t queue_lock;
 	struct list_head incoming;
 	bool accepting;
@@ -96,6 +97,13 @@ struct sv3_dm {
 	u64 gc_write_bytes;
 	sv3_u8 batch_count;
 	sv3_u8 max_window;
+	/* Admission coalescing is optional and bounded by one timer expiry.
+	 * No write is published/ACKed until its actual lower I/O completes. */
+	sv3_u8 coalesce_ms;
+	u64 coalesce_deferred;
+	u64 coalesce_urgent;
+	u64 window_records_total;
+	u64 window_size_counts[SV3_MAX_RECORDS + 1];
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
 	u8 *input_page;        /* VMALLOC: 4KiB copy from upper bio */
 	u8 *read_page;         /* VMALLOC: 4KiB decompressed upper bio */
@@ -651,6 +659,8 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		}
 	}
 	ctx->windows++;
+	ctx->window_records_total += count;
+	ctx->window_size_counts[count]++;
 	if (count == 1)
 		ctx->one_page_windows++;
 	ctx->batch_count = 0;
@@ -919,7 +929,8 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 
 static void sv3_worker(struct work_struct *work)
 {
-	struct sv3_dm *ctx = container_of(work, struct sv3_dm, worker);
+	struct sv3_dm *ctx =
+		container_of(to_delayed_work(work), struct sv3_dm, worker);
 	LIST_HEAD(local);
 	struct sv3_bio_ref *entry, *next;
 	unsigned long flags;
@@ -932,6 +943,8 @@ static void sv3_worker(struct work_struct *work)
 		list_for_each_entry_safe(entry, next, &local, list) {
 			list_del_init(&entry->list);
 			sv3_process(ctx, entry->bio);
+			if (!(remaining & 7U))
+				cond_resched();
 			if (!--remaining)
 				break;
 		}
@@ -948,7 +961,7 @@ static void sv3_worker(struct work_struct *work)
 			list_splice_init(&local, &ctx->incoming);
 		if (!list_empty(&ctx->incoming)) {
 			ctx->worker_requeues++;
-			queue_work(ctx->workqueue, &ctx->worker);
+			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
@@ -994,7 +1007,23 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 		return DM_MAPIO_KILL;
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
-	queue_work(ctx->workqueue, &ctx->worker);
+	/*
+	 * First ordinary WRITE starts one finite coalescing interval; later
+	 * writes join without extending the deadline. Urgent reads, discard,
+	 * flush/FUA and preflush bypass that wait to preserve swap-in latency
+	 * and ordering. Workqueue is serialized and completes every upper BIO.
+	 * On already-running work, the next work item is queued normally.
+	 */
+	if (bio_op(bio) != REQ_OP_WRITE ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+	    !bio_sectors(bio)) {
+		ctx->coalesce_urgent++;
+		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	} else if (queue_delayed_work(ctx->workqueue, &ctx->worker,
+				      msecs_to_jiffies(ctx->coalesce_ms))) {
+		if (ctx->coalesce_ms)
+			ctx->coalesce_deferred++;
+	}
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return DM_MAPIO_SUBMITTED;
 }
@@ -1008,6 +1037,10 @@ static void sv3_drain(struct dm_target *ti)
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	/* Pending timer must not survive into suspended teardown. The worker
+	 * flushes all pending windows and requeues older BIOs before returning. */
+	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	flush_delayed_work(&ctx->worker);
 	flush_workqueue(ctx->workqueue);
 	/* Every admitted BIO had already been queued under the same lock. */
 	if (!ctx->failed) {
@@ -1034,6 +1067,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	if (!ctx)
 		return;
 	if (ctx->workqueue) {
+		flush_delayed_work(&ctx->worker);
 		flush_workqueue(ctx->workqueue);
 		destroy_workqueue(ctx->workqueue);
 	}
@@ -1103,7 +1137,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
-	INIT_WORK(&ctx->worker, sv3_worker);
+	INIT_DELAYED_WORK(&ctx->worker, sv3_worker);
 
 	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
 			      &ctx->backing);
