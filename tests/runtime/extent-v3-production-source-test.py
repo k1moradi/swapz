@@ -82,10 +82,45 @@ class V3ProductionSourceQualification(unittest.TestCase):
 
     def test_fua_acknowledged_only_after_flush(self):
         flush = body("sv3_flush_window")
-        self.assertLess(flush.index("blkdev_issue_flush("),
+        self.assertLess(flush.index("sv3_issue_flush(ctx)"),
                         flush.index("sv3_complete(bio, 0)"))
         self.assertIn("if (error && needs_fua)", flush)
         self.assertNotIn("DM_MAPIO_KILL; /* Until FUA", body("sv3_map"))
+
+    def test_valid_empty_flush_protocol_and_failure_accounting(self):
+        # REQ_OP_FLUSH as a BIO is rejected in Linux blk-core itself.
+        # The supported upper-bio encoding is zero sector WRITE|PREFLUSH.
+        admitted = body("sv3_map")
+        process = body("sv3_process")
+        lower = body("sv3_issue_flush")
+        raw = body("sv3_accept_write")
+        drain = body("sv3_drain")
+        self.assertIn("REQ_OP_WRITE && !count", admitted)
+        self.assertIn("bio->bi_opf & REQ_PREFLUSH", admitted)
+        self.assertNotIn("bio_op(bio) != REQ_OP_FLUSH", admitted)
+        self.assertNotIn("case REQ_OP_FLUSH:", process)
+        self.assertIn("if (bio->bi_opf & REQ_PREFLUSH)", process)
+        self.assertIn("sv3_issue_flush(ctx)", process)
+        self.assertIn("sv3_issue_flush(ctx)", raw)
+        self.assertIn("sv3_issue_flush(ctx)", drain)
+        self.assertIn("sv3_flush_accounted(&ctx->flush_meter", lower)
+        self.assertIn("sv3_fail(ctx, error)", lower)
+        self.assertIn("flush_calls=%llu flush_ok=%llu flush_err=%llu", DM)
+        self.assertIn("flush_injected=%llu flush_fault_nth=%u", DM)
+        self.assertIn("flush_fail_nth > 64U", body("sv3_ctr"))
+        self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("sv3_ctr"))
+
+    def test_gc_io_aware_default_retains_old_control_policies(self):
+        choose = body("sv3_gc_choose_victim")
+        ctor = body("sv3_ctr")
+        self.assertIn("gc_policy = 2", ctor)
+        self.assertIn("gc_policy > 2U", ctor)
+        self.assertIn("sv3_gc_estimated_io_cost(m)", choose)
+        self.assertIn("ctx->gc_io_scores[segment] += io_cost", choose)
+        self.assertIn("case 0:", choose)
+        self.assertIn("case 1:", choose)
+        self.assertIn("score = ctx->gc_io_scores[segment]", choose)
+        self.assertIn("gc_selected_io_estimate", body("sv3_status"))
 
     def test_gc_does_not_consume_or_complete_upper_bios(self):
         gc = body("sv3_gc_compact_one")
