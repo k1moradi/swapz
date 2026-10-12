@@ -42,6 +42,7 @@ struct sv3_authority {
 	sv3_u32 physical_blocks;
 	sv3_u32 reserve_blocks;
 	sv3_u32 next_block;
+	sv3_u32 open_segment;		/* UINT32_MAX before the first allocation */
 	sv3_u32 next_segment_probe;
 	sv3_u32 recycled_dead_segments;
 	sv3_u32 next_sequence;
