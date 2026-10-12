@@ -85,6 +85,38 @@ The project remains **draft V3.0.0-alpha.1**, not a production release.
 No SD/HDD/SSD tests or unattended `swapon` should occur before a
 separately reviewed release-gate commit removes the null_blk-only guard.
 
+## Mandatory physical-I/O success metrics
+
+The benchmark's goal is specified by [the project vision](../../VISION.md):
+**fewer REAL lower-device 4 KiB-equivalent read/write transfers under a
+verified workload**, not a better synthetic compression ratio.
+
+- For *each* V2.2/V3 matched run, record lower sectors and completed lower
+  read/write requests **separately**; report equivalent 4 KiB units as
+  bytes/4096. A 16 KiB request is **four transfer units**, one request.
+- Include all GC relocation writes **and reads**, foreground I/O, and lower
+  cache-flush/discard activity as distinct dimensions. Do not omit the
+  IO needed to free a packed segment.
+- Reconcile status counters against the uniquely owned backing device's
+  pre/post sector and request counters after confirmed drain. If independent
+  observation is not available, mark the result **unverified**, not PASS.
+- Compare identical actual LZ4 input-size distributions, logical operations,
+  seeds, flush/barrier behavior, hot/cold rewrites, device configuration and
+  **achieved** reader/writer IOPS (not merely requested IOPS).
+- Show cold-read amplification (4 KiB backing blocks per successful logical
+  swap-in), p50/p95/p99 latency, CPU cost and reserve pressure. A write
+  reduction that breaks read service is not an overall win.
+- Keep source and target identity pinned: exact Git SHA, source blob SHA,
+  compiled `dm-swapz3.ko` SHA-256 and vermagic, actual mapped
+  `swapz3` target/UUID, physical backing major:minor and test isolation.
+- Report one-window geometry, rootless benchmark, loaded `null_blk` and
+  genuine SD/SSD/HDD results as **four distinct evidence classes**. Do not
+  claim physical-media improvement from only the first three.
+
+The current constructor's **null_blk-only** restriction remains in force.
+Even a completely green loaded-null_blk report is *not* authorization to
+test the SD card until a separate independently reviewed release gate.
+
 ## Report acceptance
 
 Attach source/module identities, command exit codes, raw logs and hashes.
