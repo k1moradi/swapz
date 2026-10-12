@@ -183,7 +183,12 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 						tx->start_block, blocks,
 						engine->write_scratch, &completed);
 		if (completed > blocks) {
-			completed = blocks;
+			/*
+			 * A lower callback claiming impossible completion counts
+			 * is not trustworthy: do not count any validated blocks.
+			 * sv3_finish() quarantines the whole allocated extent.
+			 */
+			completed = 0;
 			error = -EUCLEAN;
 		}
 		engine->completed_blocks += completed;
