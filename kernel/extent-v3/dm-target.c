@@ -253,18 +253,32 @@ static void sv3_order_window(struct sv3_dm *ctx)
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
+	bool needs_fua = false;
 	int error;
 
 	if (!count)
 		return 0;
 	sv3_order_window(ctx);
+	for (index = 0; index < count; ++index)
+		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
+			needs_fua = true;
 	error = sv3_engine_write_window(&ctx->engine, ctx->planned,
 					 count, &committed);
+	/*
+	 * Do not end any upper FUA BIO before the lower cache flush reports
+	 * success. A failed post-write flush permanently fails this target:
+	 * the newly published RAM mapping must not be trusted after -EIO.
+	 */
+	if (!error && committed == count && needs_fua)
+		error = blkdev_issue_flush(ctx->backing->bdev);
+	if (error && needs_fua)
+		sv3_fail(ctx, error);
 	for (index = 0; index < count; ++index) {
 		struct bio *bio = ctx->batch[ctx->planned_to_batch[index]].bio;
 
-		if (index < committed) {
+		if (index < committed && !ctx->failed) {
 			ctx->logical_write_bytes += SV3_BLOCK_BYTES;
+			ctx->compressed_pages++;
 			sv3_complete(bio, 0);
 		} else {
 			sv3_complete(bio, error ? error : -EIO);
@@ -348,18 +362,10 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		.length = (sv3_u16)length,
 	};
 	ctx->batch_count++;
-	ctx->compressed_pages++;
-	if (bio->bi_opf & REQ_FUA) {
-		error = sv3_flush_window(ctx);
-		if (!error)
-			error = blkdev_issue_flush(ctx->backing->bdev);
-		if (error)
-			sv3_fail(ctx, error);
-		/* FUA was submitted through the current finite window, so the
-		 * BIO has already completed at the flush. Future integration
-		 * must postpone individual FUA success until lower cache flush.
-		 * For now reject REQ_FUA at map intake rather than misreport. */
-	}
+	/* FUA enforces an immediate drained window and is acknowledged only
+	 * after sv3_flush_window() issues the matching lower cache flush. */
+	if (bio->bi_opf & REQ_FUA)
+		sv3_flush_window(ctx);
 	return 0;
 }
 
@@ -514,8 +520,6 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 
 	if (!READ_ONCE(ctx->accepting))
 		return DM_MAPIO_KILL;
-	if (bio_op(bio) == REQ_OP_WRITE && (bio->bi_opf & REQ_FUA))
-		return DM_MAPIO_KILL; /* Until FUA success is correctly deferred. */
 	if (bio_op(bio) == REQ_OP_READ || bio_op(bio) == REQ_OP_WRITE) {
 		if ((bio_op(bio) == REQ_OP_WRITE && !count &&
 		     (bio->bi_opf & REQ_PREFLUSH))) {
