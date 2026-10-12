@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.3.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.4.** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -120,7 +120,7 @@ sourced numbers and the concrete engineering response.
   estimator prefers three 500B pages. Separate authority tests verify
   actual 2200B/1600B records publish those precise payload lengths,
   fail-closed limits, and raw record cost.
-- **Version/provenance:** `V3.0.0-alpha.3`, installed V3 build artifact
+- **Version/provenance:** `V3.0.0-alpha.4`, installed V3 build artifact
   `dm-swapz.ko` and alpha DM target keyword `swapz3`. Rebuilt host
   module SHA, source blobs, vermagic and backing major/minor must be
   captured anew. The alpha.1 and alpha.2 evidence cannot certify it.
