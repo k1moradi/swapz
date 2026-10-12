@@ -1,4 +1,4 @@
-# swapz: V3.0.0-alpha.1 development
+# swapz: V3.0.0-alpha.2 development
 
 > **Project vision:** the ultimate success criterion is **fewer measured
 > lower-device 4 KiB-equivalent reads and writes** on SD cards, SSDs and
