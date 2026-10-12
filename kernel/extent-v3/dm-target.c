@@ -96,6 +96,8 @@ struct sv3_dm {
 	u64 gc_pages;
 	u64 gc_read_bytes;
 	u64 gc_write_bytes;
+	u64 gc_read_reqs;
+	u64 gc_write_reqs;
 	sv3_u8 batch_count;
 	sv3_u8 max_window;
 	/* Admission coalescing is optional and bounded by one timer expiry.
@@ -105,6 +107,7 @@ struct sv3_dm {
 	u64 coalesce_urgent;
 	u64 window_records_total;
 	u64 window_size_counts[SV3_MAX_RECORDS + 1];
+	u64 window_bins[6]; /* 1,2,3-4,5-8,9-16,17-64 */
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
 	u8 *input_page;        /* VMALLOC: 4KiB copy from upper bio */
 	u8 *read_page;         /* VMALLOC: 4KiB decompressed upper bio */
@@ -484,6 +487,7 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	struct sv3_authority *a = &ctx->authority;
 	sv3_u32 old_next, old_open, old_probe, victim, logical, block;
 	u64 before_read, before_write;
+	u64 before_read_reqs, before_write_reqs;
 	int error;
 
 	if (a->in_flight || a->gc_allocation)
@@ -496,6 +500,8 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	old_probe = a->next_segment_probe;
 	before_read = ctx->physical_read_bytes;
 	before_write = ctx->physical_write_bytes;
+	before_read_reqs = ctx->physical_read_reqs;
+	before_write_reqs = ctx->physical_write_reqs;
 	/*
 	 * Temporarily allow the worker to use a genuinely FREE segment from
 	 * the full physical region, including the reserved tail. The liveness
@@ -588,6 +594,8 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 out:
 	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
 	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
+	ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs;
+	ctx->gc_write_reqs += ctx->physical_write_reqs - before_write_reqs;
 	ctx->gc_count = 0;
 	a->gc_allocation = 0;
 	a->gc_forbidden_open = ~(sv3_u32)0;
@@ -657,6 +665,18 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	ctx->windows++;
 	ctx->window_records_total += count;
 	ctx->window_size_counts[count]++;
+	if (count == 1)
+		ctx->window_bins[0]++;
+	else if (count == 2)
+		ctx->window_bins[1]++;
+	else if (count <= 4)
+		ctx->window_bins[2]++;
+	else if (count <= 8)
+		ctx->window_bins[3]++;
+	else if (count <= 16)
+		ctx->window_bins[4]++;
+	else
+		ctx->window_bins[5]++;
 	if (count == 1)
 		ctx->one_page_windows++;
 	ctx->batch_count = 0;
@@ -1290,11 +1310,14 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
+		       "gc_read_reqs=%llu gc_write_reqs=%llu "
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
 		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
+		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
+		       "win9_16=%llu win17_64=%llu "
 		       "coalesce_deferred=%llu coalesce_urgent=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
@@ -1308,6 +1331,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
 		       ctx->gc_selected_live_records,
+		       ctx->gc_read_reqs, ctx->gc_write_reqs,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->engine.verify_after_write,
@@ -1317,6 +1341,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_read_submitted_reqs,
 		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->window_records_total, ctx->coalesce_ms,
+		       ctx->window_bins[0], ctx->window_bins[1],
+		       ctx->window_bins[2], ctx->window_bins[3],
+		       ctx->window_bins[4], ctx->window_bins[5],
 		       ctx->coalesce_deferred, ctx->coalesce_urgent,
 		       ctx->failed, ctx->last_error);
 		break;
