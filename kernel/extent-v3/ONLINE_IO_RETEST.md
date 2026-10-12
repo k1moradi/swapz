@@ -1,4 +1,4 @@
-# V3.0.0-alpha.3: online packing + GC economics independent retest gate
+# V3.0.0-alpha.4: online packing + GC economics independent retest gate
 
 **This file describes a TEST CANDIDATE, not a release.** All work must pass
 the existing [LIVE_TEST_GATE.md](LIVE_TEST_GATE.md) and
