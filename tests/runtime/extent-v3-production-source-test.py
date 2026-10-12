@@ -37,10 +37,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.2"', DM)
+        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.3"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.2", GOALS)
+        self.assertIn("3.0.0-alpha.3", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
