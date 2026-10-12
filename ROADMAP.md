@@ -1,3 +1,10 @@
+> **PROJECT NORTH STAR:** [VISION.md](VISION.md) — success means
+> demonstrably fewer host-visible lower **4 KiB-equivalent read/write
+> transfers**, including garbage collection, under identical verified
+> workloads with acceptable achieved IOPS, swap-in p99, CPU and correctness.
+> Lower *request counts* and lower *sectors* are separate measurements.
+> A green CI job or a synthetic packing ratio is not the performance exit gate.
+>
 > **ACTIVE ROADMAP OVERRIDE (V3.0.0-alpha.1):** [V3_GOALS.md](V3_GOALS.md)
 > supersedes the prior 'V2.2 now / V2.3 media / V2.4 byte-tight / V3.0
 > hibernate' sequencing below. We now have an intentionally incompatible
