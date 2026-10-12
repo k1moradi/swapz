@@ -28,6 +28,11 @@ struct sv3_engine {
 	struct sv3_io io;
 	sv3_u8 *write_scratch; /* at least 16384 bytes */
 	sv3_u8 *read_scratch;  /* at least 16384 bytes */
+	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
+	struct sv3_tx pending;
+	sv3_u32 logical_scratch[SV3_MAX_RECORDS];
+	sv3_u8 plan_classes[SV3_MAX_RECORDS];
+	sv3_u8 plan_takes[SV3_MAX_RECORDS];
 	sv3_u32 submitted_blocks;
 	sv3_u32 completed_blocks;
 	sv3_u32 physical_read_blocks;
