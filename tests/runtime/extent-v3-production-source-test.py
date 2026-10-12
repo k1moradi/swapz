@@ -66,7 +66,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         discard.index("while (remaining)"))
         self.assertLess(discard.index("if (m->generation =="),
                         discard.index("sv3_discard_page(&ctx->authority"))
-        self.assertIn("!ctx->live_records[m->start_block]", discard)
+        self.assertIn("ctx->discard_epoch[start]", discard)
+        self.assertIn("ctx->discard_count[start]", discard)
+        self.assertIn("ctx->live_records[start]", discard)
+        self.assertLess(discard.index("++ctx->discard_count[start]"),
+                        discard.index("sv3_discard_page(&ctx->authority"))
 
     def test_fua_acknowledged_only_after_flush(self):
         flush = body("sv3_flush_window")
