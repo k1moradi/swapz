@@ -227,7 +227,7 @@ int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
 	    a->segment_foreground[dest] || dest == victim ||
 	    dest == a->gc_forbidden_open ||
 	    a->open_segment != dest ||
-	    a->next_block < dest * SV3_SEGMENT_BLOCKS ||
+	    a->next_block <= dest * SV3_SEGMENT_BLOCKS ||
 	    a->next_block > (dest + 1U) * SV3_SEGMENT_BLOCKS)
 		return -EUCLEAN;
 	for (logical = 0; logical < a->logical_pages; ++logical) {
