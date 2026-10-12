@@ -46,6 +46,8 @@ int sv3_authority_init(struct sv3_authority *a,
 	a->physical_blocks = physical_blocks;
 	a->reserve_blocks = reserve;
 	a->open_segment = ~(sv3_u32)0;
+	a->gc_forbidden_open = ~(sv3_u32)0;
+	a->gc_forbidden_victim = ~(sv3_u32)0;
 	a->next_sequence = 1;
 	return 0;
 }
@@ -75,6 +77,17 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 		sv3_u32 off, logical;
 		int used = 0, blocked = 0;
 
+		/*
+		 * GC temporarily borrows the segment ring. Never let it
+		 * allocate into the paused foreground OPEN segment even if
+		 * all current mappings there are dead: the foreground cursor
+		 * will be restored after GC. Nor may it allocate into the
+		 * victim until the entire move is verified complete.
+		 */
+		if (a->gc_allocation &&
+		    (segment == a->gc_forbidden_open ||
+		     segment == a->gc_forbidden_victim))
+			continue;
 		for (off = 0; off < SV3_SEGMENT_BLOCKS; ++off) {
 			if (a->live_records[start + off]) {
 				blocked = 1;
