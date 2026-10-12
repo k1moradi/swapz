@@ -335,6 +335,7 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 		.sequence = tx->sequence,
 		.generation = tx->records[0].generation,
 		.raw_crc32c = sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES),
+		.payload_length = SV3_BLOCK_BYTES,
 		.extent_blocks = 1,
 		.record_index = 0,
 		.raw = 1,
@@ -362,6 +363,7 @@ int sv3_verify_raw(const struct sv3_authority *a, sv3_u32 logical_page,
 		return -EINVAL;
 	m = &a->maps[logical_page];
 	if (!m->valid || !m->raw || m->extent_blocks != 1 ||
+	    m->payload_length != SV3_BLOCK_BYTES ||
 	    m->start_block >= a->physical_blocks ||
 	    a->extent_classes[m->start_block] != 1 ||
 	    !a->live_records[m->start_block])
@@ -409,6 +411,7 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 	       sv3_u8 completed_blocks, int io_error)
 {
 	const sv3_u8 *image = extent;
+	sv3_u16 payload_lengths[SV3_MAX_RECORDS] = { 0 };
 	sv3_u8 index;
 	int error = 0;
 
@@ -443,6 +446,12 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 		error = sv3_lookup(image, bytes_total, index, &decoded, &payload);
 		if (error)
 			goto fail;
+		payload_lengths[index] = decoded.payload_length;
+		if (!payload_lengths[index] ||
+		    payload_lengths[index] > SV3_MAX_COMPRESSED) {
+			error = -EUCLEAN;
+			goto fail;
+		}
 		if (logical >= a->logical_pages ||
 		    decoded.logical_page != logical ||
 		    decoded.generation != tx->records[index].generation) {
@@ -499,6 +508,7 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 			.start_block = tx->start_block,
 			.sequence = tx->sequence,
 			.generation = tx->records[index].generation,
+			.payload_length = payload_lengths[index],
 			.extent_blocks = tx->extent_blocks,
 			.record_index = index,
 			.valid = 1,
@@ -529,7 +539,8 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	    current->sequence != observed->sequence ||
 	    current->generation != observed->generation ||
 	    current->extent_blocks != observed->extent_blocks ||
-	    current->record_index != observed->record_index)
+	    current->record_index != observed->record_index ||
+	    current->payload_length != observed->payload_length)
 		return -ESTALE;
 	if (current->raw)
 		return -EOPNOTSUPP;
@@ -542,6 +553,7 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 		return error;
 	if (decoded->logical_page != logical_page ||
 	    decoded->generation != current->generation ||
+	    decoded->payload_length != current->payload_length ||
 	    sv3_disk_sequence(extent) != current->sequence) {
 		*decoded = (struct sv3_decoded){ 0 };
 		*payload = NULL;
