@@ -943,6 +943,13 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 	sv3_complete(bio, error);
 }
 
+/*
+ * Normal operation: a finite quantum keeps write ownership and CPU
+ * latency bounded, with older queued BIOs ahead of new admissions.
+ * Presuspend: admission is closed under queue_lock, so the same worker
+ * may finish ALL previously accepted BIOs without building a potentially
+ * unbounded chain of requeued delayed works during drain_workqueue().
+ */
 static void sv3_worker(struct work_struct *work)
 {
 	struct sv3_dm *ctx =
@@ -950,12 +957,14 @@ static void sv3_worker(struct work_struct *work)
 	LIST_HEAD(local);
 	struct sv3_bio_ref *entry, *next;
 	unsigned long flags;
-	unsigned int remaining = SV3_WORK_QUANTUM_BIOS;
+	unsigned int remaining;
 
-	{
+	for (;;) {
+		remaining = SV3_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+
 		list_for_each_entry_safe(entry, next, &local, list) {
 			list_del_init(&entry->list);
 			sv3_process(ctx, entry->bio);
@@ -964,22 +973,37 @@ static void sv3_worker(struct work_struct *work)
 			if (!--remaining)
 				break;
 		}
-		/* No timer to wait for more records: seal what is available. */
+		/*
+		 * Never carry a partially published upper write window
+		 * across work items; a later read/FUA could overtake it.
+		 */
 		if (ctx->batch_count)
 			sv3_flush_window(ctx);
-		/*
-		 * Unprocessed older entries MUST precede newly admitted BIOs.
-		 * Requeue under the same lock as admission and suspend. Every
-		 * pending write batch is completed before the work item yields.
-		 */
+
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
-		if (!list_empty(&ctx->incoming)) {
+		if (list_empty(&ctx->incoming)) {
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			return;
+		}
+		if (ctx->accepting) {
+			/*
+			 * Preserves FIFO: unfinished older BIOs are already
+			 * at the head, ahead of concurrently admitted BIOs.
+			 */
 			ctx->worker_requeues++;
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		/*
+		 * Shutdown: no new admissions. Complete every previously
+		 * accepted BIO in this invocation. Avoid requeue chains or
+		 * leaving accepted BIOs behind flush_delayed_work().
+		 */
+		cond_resched();
 	}
 }
 
