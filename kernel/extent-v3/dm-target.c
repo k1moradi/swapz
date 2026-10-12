@@ -1053,12 +1053,25 @@ static void sv3_drain(struct dm_target *ti)
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	WRITE_ONCE(ctx->accepting, false);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	/* Pending timer must not survive into suspended teardown. The worker
-	 * flushes all pending windows and requeues older BIOs before returning. */
+	/*
+	 * flush_delayed_work() only waits for the last queued instance.
+	 * This worker can chain itself after its 64-BIO quantum, so merely
+	 * flushing that instance (or the workqueue once) is insufficient:
+	 * presuspend must not return while a requeued accepted BIO exists.
+	 *
+	 * The admission lock is now closed. Force the pending timer to fire,
+	 * wait for it, then drain *all chained* worker executions before
+	 * releasing the target. drain_workqueue() explicitly allows chaining
+	 * by work already executing on the draining queue.
+	 */
 	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 	flush_delayed_work(&ctx->worker);
-	flush_workqueue(ctx->workqueue);
-	/* Every admitted BIO had already been queued under the same lock. */
+	drain_workqueue(ctx->workqueue);
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (!list_empty(&ctx->incoming) || ctx->batch_count)
+		DMERR("V3 drain invariant: accepted BIOs remain after draining");
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	/* Every admitted BIO was queued under the same lock before this drain. */
 	if (!ctx->failed) {
 		int error = blkdev_issue_flush(ctx->backing->bdev);
 
@@ -1083,8 +1096,11 @@ static void sv3_free(struct sv3_dm *ctx)
 	if (!ctx)
 		return;
 	if (ctx->workqueue) {
-		flush_delayed_work(&ctx->worker);
-		flush_workqueue(ctx->workqueue);
+		/* The constructor-failure path has no accepted BIOs.
+		 * The live teardown path already closed admission and drained
+		 * every chained work item before arriving here. */
+		cancel_delayed_work_sync(&ctx->worker);
+		drain_workqueue(ctx->workqueue);
 		destroy_workqueue(ctx->workqueue);
 	}
 	if (ctx->io_client)
