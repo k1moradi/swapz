@@ -1109,11 +1109,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct sv3_dm *ctx;
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
-	u32 gc_policy = 1;
+	u32 gc_policy = 1, coalesce = 0;
 	int error;
 
-	if (argc < 1 || argc > 5 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes]";
+	if (argc < 1 || argc > 6 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes] [coalesce_ms 0..4]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1126,6 +1126,9 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 4 && (kstrtou32(argv[4], 10, &gc_policy) ||
 			 gc_policy > 1U))
 		return -EINVAL;
+	if (argc > 5 && (kstrtou32(argv[5], 10, &coalesce) ||
+			 coalesce > SV3_MAX_COALESCE_MS))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -1133,6 +1136,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->target = ti;
 	ctx->max_window = (sv3_u8)window;
 	ctx->gc_cost_policy = gc_policy;
+	ctx->coalesce_ms = coalesce;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	spin_lock_init(&ctx->queue_lock);
@@ -1294,6 +1298,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
 		       "worker_requeues=%llu one_page_windows=%llu "
+		       "window_records=%llu coalesce_ms=%u "
+		       "coalesce_deferred=%llu coalesce_urgent=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1314,13 +1320,15 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_read_submitted_bytes,
 		       ctx->lower_read_submitted_reqs,
 		       ctx->worker_requeues, ctx->one_page_windows,
+		       ctx->window_records_total, ctx->coalesce_ms,
+		       ctx->coalesce_deferred, ctx->coalesce_urgent,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
-		       ctx->gc_cost_policy);
+		       ctx->gc_cost_policy, ctx->coalesce_ms);
 		break;
 	case STATUSTYPE_IMA:
 	default:
