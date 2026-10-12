@@ -264,7 +264,239 @@ static void sv3_order_window(struct sv3_dm *ctx)
 	}
 }
 
-static int sv3_gc_compact_one(struct sv3_dm *ctx);
+/*
+ * Size-classed live relocation. The victim is NEVER erased by this function.
+ * Instead, every live logical map is re-encoded into a new, fully completed
+ * physical extent (or raw block), then old per-extent liveness is decremented.
+ * Only after a final mapping+refcount scan proves the victim wholly dead may
+ * the normal allocator reuse it. All callbacks are synchronous, under one
+ * serialized worker; NO recursive GC calls can occur.
+ */
+static void sv3_gc_sort(struct sv3_dm *ctx)
+{
+	sv3_u8 position = 0, i;
+
+	memset(ctx->gc_used, 0, sizeof(ctx->gc_used));
+	while (position < ctx->gc_count) {
+		int largest = -1, partner = -1, slack_best = INT_MAX;
+
+		for (i = 0; i < ctx->gc_count; ++i)
+			if (!ctx->gc_used[i] &&
+			    (largest < 0 || ctx->gc_pending[i].length >
+			     ctx->gc_pending[largest].length))
+				largest = i;
+		ctx->gc_used[largest] = 1;
+		ctx->gc_to_pending[position++] = largest;
+		for (i = 0; i < ctx->gc_count; ++i) {
+			int slack;
+
+			if (ctx->gc_used[i])
+				continue;
+			slack = SV3_BLOCK_BYTES - 48 -
+				ctx->gc_pending[largest].length -
+				ctx->gc_pending[i].length;
+			if (slack >= 0 && slack < slack_best) {
+				slack_best = slack;
+				partner = i;
+			}
+		}
+		if (partner >= 0) {
+			ctx->gc_used[partner] = 1;
+			ctx->gc_to_pending[position++] = partner;
+		}
+	}
+	for (position = 0; position < ctx->gc_count; ++position) {
+		sv3_u8 index = ctx->gc_to_pending[position];
+
+		ctx->gc_planned[position] = (struct sv3_compressed_page) {
+			.logical_page = ctx->gc_pending[index].logical,
+			.payload = ctx->gc_bytes_store +
+				(size_t)index * SV3_BLOCK_BYTES,
+			.length = ctx->gc_pending[index].length,
+		};
+	}
+}
+
+static int sv3_gc_flush(struct sv3_dm *ctx)
+{
+	sv3_u8 completed = 0;
+	int error;
+
+	if (!ctx->gc_count)
+		return 0;
+	sv3_gc_sort(ctx);
+	error = sv3_engine_write_window(&ctx->engine, ctx->gc_planned,
+					 ctx->gc_count, &completed);
+	ctx->gc_pages += completed;
+	ctx->gc_count = 0;
+	return error;
+}
+
+static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
+			   const struct sv3_map *old)
+{
+	struct sv3_tx tx;
+	sv3_u8 completed = 0;
+	int error;
+
+	if (old->extent_blocks != 1 || old->start_block >= ctx->physical_blocks)
+		return -EUCLEAN;
+	error = sv3_lower_read(ctx, old->start_block, 1, ctx->input_page);
+	if (error)
+		return error;
+	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	if (error)
+		return error;
+	error = sv3_lower_write(ctx, tx.start_block, 1,
+				ctx->input_page, &completed);
+	error = sv3_finish_raw(&ctx->authority, &tx, completed, error);
+	if (!error)
+		ctx->gc_pages++;
+	return error;
+}
+
+static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
+{
+	sv3_u32 logical, segment, selected = ~(sv3_u32)0;
+	sv3_u32 best = ~(sv3_u32)0;
+
+	memset(ctx->gc_scores, 0,
+	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		const struct sv3_map *m = &ctx->maps[logical];
+
+		if (!m->valid)
+			continue;
+		if (m->start_block >= ctx->physical_blocks)
+			return -EUCLEAN;
+		ctx->gc_scores[m->start_block / SV3_SEGMENT_BLOCKS]++;
+	}
+	for (segment = 0; segment < ctx->segment_count; ++segment) {
+		sv3_u32 live = ctx->gc_scores[segment];
+
+		if (!live || segment == ctx->authority.open_segment)
+			continue;
+		if (live < best) {
+			best = live;
+			selected = segment;
+		}
+	}
+	if (selected == ~(sv3_u32)0)
+		return -ENOSPC;
+	*victim = selected;
+	return 0;
+}
+
+static int sv3_gc_compact_one(struct sv3_dm *ctx)
+{
+	struct sv3_authority *a = &ctx->authority;
+	sv3_u32 old_next, old_open, old_probe, victim, logical, block;
+	u64 before_read, before_write;
+	int error;
+
+	if (a->in_flight || a->gc_allocation)
+		return -EBUSY;
+	error = sv3_gc_choose_victim(ctx, &victim);
+	if (error)
+		return error;
+	old_next = a->next_block;
+	old_open = a->open_segment;
+	old_probe = a->next_segment_probe;
+	before_read = ctx->physical_read_bytes;
+	before_write = ctx->physical_write_bytes;
+	/*
+	 * Temporarily allow the worker to use a genuinely FREE segment from
+	 * the full physical region, including the reserved tail. The liveness
+	 * scanner rejects old physical bytes whenever a live mapping points
+	 * there. Restore the foreground cursor after the victim is drained.
+	 */
+	a->gc_allocation = 1;
+	a->open_segment = ~(sv3_u32)0;
+	a->next_segment_probe =
+		(ctx->physical_blocks - a->reserve_blocks) /
+		SV3_SEGMENT_BLOCKS;
+	ctx->gc_count = 0;
+
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		struct sv3_map current = ctx->maps[logical];
+		sv3_u16 length;
+
+		if (!current.valid ||
+		    current.start_block / SV3_SEGMENT_BLOCKS != victim)
+			continue;
+		if (current.raw) {
+			error = sv3_gc_flush(ctx);
+			if (error)
+				goto out;
+			error = sv3_gc_move_raw(ctx, logical, &current);
+			if (error)
+				goto out;
+			continue;
+		}
+		/* Existing media bytes remain authoritative until this page's
+		 * full replacement is successfully committed by the V3 engine. */
+		error = sv3_engine_read_page(&ctx->engine, logical,
+						ctx->read_compressed,
+						SV3_BLOCK_BYTES, &length);
+		if (error)
+			goto out;
+		if (!length || length > SV3_MAX_COMPRESSED) {
+			error = -EUCLEAN;
+			goto out;
+		}
+		memcpy(ctx->gc_bytes_store +
+		       (size_t)ctx->gc_count * SV3_BLOCK_BYTES,
+		       ctx->read_compressed, length);
+		ctx->gc_pending[ctx->gc_count++] =
+			(struct sv3_pending_bio) {
+				.bio = NULL,
+				.logical = logical,
+				.length = length,
+			};
+		if (ctx->gc_count == SV3_MAX_RECORDS) {
+			error = sv3_gc_flush(ctx);
+			if (error)
+				goto out;
+		}
+	}
+	error = sv3_gc_flush(ctx);
+	if (error)
+		goto out;
+
+	/*
+	 * Do not deem the victim reclaimable merely because GC wrote some
+	 * replacements. Independently verify no live mapping and no physical
+	 * liveness record remain in the original segment. If this test fails,
+	 * return an error without recycling any physical bytes.
+	 */
+	for (logical = 0; logical < ctx->logical_pages; ++logical) {
+		const struct sv3_map *m = &ctx->maps[logical];
+
+		if (m->valid &&
+		    m->start_block / SV3_SEGMENT_BLOCKS == victim) {
+			error = -EUCLEAN;
+			goto out;
+		}
+	}
+	for (block = victim * SV3_SEGMENT_BLOCKS;
+	     block < (victim + 1) * SV3_SEGMENT_BLOCKS; ++block) {
+		if (a->live_records[block]) {
+			error = -EUCLEAN;
+			goto out;
+		}
+	}
+	ctx->gc_victims++;
+out:
+	ctx->gc_read_bytes += ctx->physical_read_bytes - before_read;
+	ctx->gc_write_bytes += ctx->physical_write_bytes - before_write;
+	ctx->gc_count = 0;
+	a->gc_allocation = 0;
+	a->next_block = old_next;
+	a->open_segment = old_open;
+	a->next_segment_probe = error ? old_probe : victim;
+	return error;
+}
+
 
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
