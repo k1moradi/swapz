@@ -207,6 +207,30 @@ static int sv3_lower_read(void *opaque, sv3_u32 block, sv3_u8 blocks,
 	return sv3_lower(opaque, REQ_OP_READ, block, blocks, destination);
 }
 
+/*
+ * Optional diagnostic verification for raw pages, matching the compressed
+ * engine's verify-after-write behavior. The raw page has no spare on-media
+ * bytes for CRC, so compare a fresh complete lower read to the original
+ * data BEFORE sv3_finish_raw publishes mapping authority. This is not an
+ * fsync/power-loss guarantee. Disabled in the default performance policy.
+ */
+static int sv3_verify_raw_write(struct sv3_dm *ctx, sv3_u32 block,
+				const u8 *original)
+{
+	int error;
+
+	if (!ctx->engine.verify_after_write)
+		return 0;
+	if (!original || ctx->read_page == original)
+		return -EINVAL;
+	error = sv3_lower_read(ctx, block, 1, ctx->read_page);
+	if (error)
+		return error;
+	ctx->engine.write_verify_read_blocks++;
+	return memcmp(ctx->read_page, original, SV3_BLOCK_BYTES) ?
+		-EBADMSG : 0;
+}
+
 static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 {
 	struct bio_vec vec;
@@ -377,6 +401,9 @@ static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1,
 				ctx->input_page, &completed);
+	if (!error && completed == 1)
+		error = sv3_verify_raw_write(ctx, tx.start_block,
+					   ctx->input_page);
 	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error)
 		ctx->gc_pages++;
@@ -617,6 +644,9 @@ static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
 		return error;
 	error = sv3_lower_write(ctx, tx.start_block, 1, ctx->input_page,
 				&completed);
+	if (!error && completed == 1)
+		error = sv3_verify_raw_write(ctx, tx.start_block,
+					   ctx->input_page);
 	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error) {
 		ctx->raw_pages++;
