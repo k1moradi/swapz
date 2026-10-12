@@ -191,7 +191,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
         drained = body("sv3_drain")
         self.assertIn("dm_per_bio_data(", admitted)
         self.assertIn("WQ_MEM_RECLAIM", body("sv3_ctr"))
-        self.assertIn("flush_workqueue(ctx->workqueue)", drained)
+        self.assertIn("drain_workqueue(ctx->workqueue)", drained)
+        self.assertLess(drained.index("mod_delayed_work(ctx->workqueue"),
+                        drained.index("flush_delayed_work(&ctx->worker)"))
+        self.assertLess(drained.index("flush_delayed_work(&ctx->worker)"),
+                        drained.index("drain_workqueue(ctx->workqueue)"))
+        self.assertIn("cancel_delayed_work_sync(&ctx->worker)", body("sv3_free"))
         self.assertIn("destroy_workqueue(ctx->workqueue)", body("sv3_free"))
         self.assertLess(admitted.index("spin_lock_irqsave(&ctx->queue_lock"),
                         admitted.index("if (!ctx->accepting)"))
@@ -202,7 +207,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", admitted)
         self.assertIn("flush_delayed_work(&ctx->worker)", drained)
         self.assertLess(drained.index("WRITE_ONCE(ctx->accepting, false)"),
-                        drained.index("flush_workqueue(ctx->workqueue)"))
+                        drained.index("drain_workqueue(ctx->workqueue)"))
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", drained)
 
 
