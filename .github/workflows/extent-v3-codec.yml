@@ -13,6 +13,7 @@ on:
       - 'tests/runtime/extent-v3-production-source-test.py'
       - 'V3_GOALS.md'
       - 'tests/runtime/extent-v3-engine-test.c'
+      - 'tests/runtime/extent-v3-randomized-engine-test.c'
       - '.github/workflows/extent-v3-codec.yml'
   push:
     branches:
@@ -80,6 +81,14 @@ jobs:
             kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
             kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-engine-test"
           "$RUNNER_TEMP/sv3-engine-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-randomized-engine-test.c \
+            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
+            kernel/extent-v3/codec.c \
+            -o "$RUNNER_TEMP/sv3-randomized-engine-test"
+          "$RUNNER_TEMP/sv3-randomized-engine-test"
           git diff --check
 
   compile-only:
@@ -104,10 +113,10 @@ jobs:
           echo "CODEC_BLOB=$(git rev-parse HEAD:kernel/extent-v3/codec.c)"
           # The normal kernel build produces ONLY the actual V3 DM target.
           make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
-          test -s kernel/extent-v3/dm-swapz3.ko
-          sha256sum kernel/extent-v3/dm-swapz3.ko
+          test -s kernel/extent-v3/dm-swapz.ko
+          sha256sum kernel/extent-v3/dm-swapz.ko
           # Research smoke is separately built from the same source, never
-          # linked in the same Kbuild invocation as dm-swapz3.
+          # linked in the same Kbuild invocation as dm-swapz.
           make -C kernel/extent-v3 KDIR="$KDIR" clean
           make -C kernel/extent-v3 KDIR="$KDIR" SV3_BUILD_SMOKE=1 W=1 -j2 all
           test -s kernel/extent-v3/swapz_extent_v3.ko
