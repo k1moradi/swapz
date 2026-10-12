@@ -104,6 +104,20 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertLess(worker.index("sv3_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
 
+    def test_shutdown_completes_all_accepted_queued_bios(self):
+        worker = body("sv3_worker")
+        drain = body("sv3_drain")
+        self.assertIn("for (;;)", worker)
+        self.assertIn("remaining = SV3_WORK_QUANTUM_BIOS", worker)
+        self.assertIn("if (ctx->accepting)", worker)
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
+        self.assertIn("cond_resched();", worker)
+        self.assertLess(worker.index("if (ctx->accepting)"),
+                        worker.rindex("cond_resched();"))
+        self.assertIn("drain_workqueue(ctx->workqueue)", drain)
+        self.assertIn("V3 drain invariant: accepted BIOs remain", drain)
+        self.assertIn("sv3_fail(ctx, -EUCLEAN)", drain)
+
     def test_raw_crc_protection_and_gc_relocation(self):
         auth = (ROOT / "kernel/extent-v3/authority.c").read_text()
         auth_h = (ROOT / "kernel/extent-v3/authority.h").read_text()
