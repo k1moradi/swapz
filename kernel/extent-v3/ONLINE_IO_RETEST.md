@@ -71,6 +71,70 @@ hung-task warning. Repeat with `coalesce_ms=0,1,2,4`, FUA barriers,
 a pending timer at suspend, and lower I/O faults. Any hang or callback
 ownership uncertainty is a STOP condition; do not force teardown.
 
+## NEW hard release blocker: exact alpha.3 reclaim-progress reproduction
+
+Independent Codex [PR #49 result](https://github.com/k1moradi/swapz/pull/49#issuecomment-6129397157)
+found `-ENOSPC` after two successful GC relocations on **32MiB null_blk
+backing, 1024 logical swap pages**, while moving compressed survivors
+from fixed reserve segment30 to reserve segment31. The old selector
+admitted reserve victims, and the foreground cursor was restored
+outside the reserve tail after GC. There was **no demonstrated false
+upper completion or data corruption**, but **progress FAILED**.
+
+The main developer fixed this in [PR #50](https://github.com/k1moradi/swapz/pull/50)
+and version **3.0.0-alpha.4**, with explicit per-1MiB-segment roles:
+foreground only selects foreground victims, GC writes into ONE verified
+dead reserve destination, and a completed all-live evacuation
+**atomically swaps roles** so the old victim becomes a free reserve
+segment and the new destination becomes foreground writable.
+The foreground cursor remains inside the newly compacted segment,
+not restored into the old exhausted foreground pool.
+
+**The very first loaded test for alpha.4 MUST be a high-priority
+reproduction gate, before faults or benchmarks:**
+
+1. Pin the exact new `dm-swapz.ko` source blob SHA, module SHA256,
+   vermagic and DM UUID. The old alpha.3 `a006d565...` module
+   SHA256 is not evidence for alpha.4.
+2. On a new **test-owned, memory-backed** 32MiB `null_blk` device,
+   configure the same 1024-page logical target, GC byte policy and
+   payload mixture that exposed the original problem. Test *no
+   physical SD/SSD/HDD*, *no system swapon*, *no reboot*.
+3. Force **at least EIGHT full live-record GC rotations**, not merely
+   two. After each, assert `gc_role_rotations` increments,
+   `last_gc_victim` refers to a previously foreground segment,
+   `last_gc_destination` refers to its genuinely reserved GC
+   destination, and the newly foreground destination has room for
+   at least the expected next page. The reserve-role count must remain
+   constant (two in this test) and no unverified segment may be reused.
+4. Immediately submit a new foreground write after every successful
+   GC. It must **not** fail because the reclaimed victim lies in
+   the former fixed reserve tail. Byte-verify ALL 1024 relevant
+   logical pages after each GC phase, including compressed and raw
+   survivors plus zero/discard and same-slot overwrites.
+5. Compare the `gc_policy=0` live-record count and `gc_policy=1`
+   live-byte score with identical fixtures and show the selected
+   victims. **GC selection from a reserve-role segment is a failure.**
+   Record actual lower read/write bytes AND requests, GC overhead and
+   attempted vs completed I/O. An estimate in
+   `gc_selected_bytes` is not a measured physical-sector saving.
+6. Inject a lower write failure midway through victim evacuation and
+   a case in which survivor bytes cannot fit ONE reserve segment.
+   No role exchange may occur; previous authoritative mappings
+   remain valid, no foreground BIO can be falsely acknowledged,
+   and the target must fail closed/quarantine uncertain media.
+   Do not force-remove a target with unknown callbacks.
+7. Only after this exact progress/integrity gate passes may you
+   proceed to the coalescing, FUA, concurrency and sustained
+   low-QD benchmark matrix below.
+
+**Rootless evidence is not loaded-host proof.** The new exact C
+tests `extent-v3-gc-rotation-test.c` (four-segment repeated
+handoffs plus an eight-rotation 32MiB reproduction) and
+`extent-v3-gc-engine-rotation-test.c` (byte-exact full compressed
+engine readback plus injected failed relocation) exercise the real
+authority/codec engine in memory, not the DM/kernel lifetime.
+
 ## Functional and concurrency safety before benchmarking
 
 - Byte-exact independently verified compressed/raw roundtrips (including
