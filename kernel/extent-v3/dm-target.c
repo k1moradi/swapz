@@ -202,7 +202,7 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	/* Inject at the common physical WRITE boundary, including foreground
 	 * mixed runs, serialized controls and GC relocation. Never count this
 	 * synthetic rejection as submitted/completed lower-device I/O. */
-	if (op == REQ_OP_WRITE &&
+	if (op == REQ_OP_WRITE && ctx->write_fault_nth &&
 	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
 		ctx->write_fault_injected++;
 		return -EIO;
