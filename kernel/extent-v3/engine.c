@@ -355,6 +355,8 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 	if (!e || !e->authority || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
+	if (!pages || !count || count > SV3_MAX_RECORDS)
+		return -EINVAL;
 	if (!e->bulk_scratch || !e->bulk_txs || !e->io.write_run ||
 	    e->verify_after_write || count <= 1)
 		return sv3_engine_write_window(e, pages, count,
@@ -406,8 +408,8 @@ retry_stage:
 		tx = &e->bulk_txs[staged];
 		for (j = 0; j < take; ++j)
 			e->logical_scratch[j] = pages[entry + j].logical_page;
-		error = sv3_stage(e->authority, e->logical_scratch,
-				  take, blocks, tx);
+		error = sv3_stage_batch(e->authority, e->logical_scratch,
+					take, blocks, tx);
 		if (error == -EAGAIN && staged) {
 			error = sv3_bulk_flush(e, run_start, run_blocks,
 					       staged, committed_pages);
