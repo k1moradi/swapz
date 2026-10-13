@@ -180,6 +180,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertLess(flush.index("e->io.write_run"),
                         flush.index("sv3_finish_raw(e->authority, tx"))
         self.assertIn("ctx->planned[index].raw", complete)
+        self.assertIn("bulk_mixed_io=%u", body("sv3_status"))
+        self.assertIn("bulk_raw_only_io=%u", body("sv3_status"))
+        self.assertIn("bulk_raw_entries=%u", body("sv3_status"))
         self.assertLess(complete.index("sv3_issue_flush(ctx)"),
                         complete.index("sv3_complete(bio, 0)"))
         self.assertIn("sv3_flush_window(ctx)", process)
