@@ -34,7 +34,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.5"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.6"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 
@@ -168,7 +168,7 @@ static void sv3_fail(struct sv3_dm *ctx, int error)
  * Scratch is vmalloc-backed: DM_IO_VMA, never DM_IO_KMEM.
  */
 static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
-		     sv3_u8 blocks, u8 *bytes)
+		     sv3_u16 blocks, u8 *bytes)
 {
 	struct dm_io_region region;
 	struct dm_io_request req = {
@@ -245,6 +245,29 @@ static int sv3_lower_write(void *opaque, sv3_u32 block, sv3_u8 blocks,
 	int error;
 
 	*completed = 0;
+	error = sv3_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
+	if (!error)
+		*completed = blocks;
+	return error;
+}
+
+/*
+ * A single synchronous dm_io submission covers many adjacent, individually
+ * valid SWZ3 extents. The portable engine does NOT publish their logical
+ * maps until this WHOLE lower submission has completed successfully.
+ * dm_io request count is NOT guaranteed to equal block-queue request
+ * count after bio splitting/merging; independent null_blk stat is needed.
+ */
+static int sv3_lower_write_run(void *opaque, sv3_u32 block,
+			      sv3_u16 blocks, const sv3_u8 *bytes,
+			      sv3_u16 *completed)
+{
+	struct sv3_dm *ctx = opaque;
+	int error;
+
+	*completed = 0;
+	if (!blocks || blocks > SV3_BULK_BLOCKS)
+		return -ERANGE;
 	error = sv3_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
 	if (!error)
 		*completed = blocks;
@@ -423,7 +446,7 @@ static int sv3_gc_flush(struct sv3_dm *ctx)
 	if (!ctx->gc_count)
 		return 0;
 	sv3_gc_sort(ctx);
-	error = sv3_engine_write_window(&ctx->engine, ctx->gc_planned,
+	error = sv3_engine_write_window_batched(&ctx->engine, ctx->gc_planned,
 					 ctx->gc_count, &completed);
 	ctx->gc_pages += completed;
 	ctx->gc_count = 0;
@@ -698,7 +721,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	while (committed < count) {
 		sv3_u8 succeeded = 0;
 
-		error = sv3_engine_write_window(&ctx->engine,
+		error = sv3_engine_write_window_batched(&ctx->engine,
 				ctx->planned + committed,
 				count - committed, &succeeded);
 		committed += succeeded;
@@ -1224,6 +1247,8 @@ static void sv3_free(struct sv3_dm *ctx)
 	vfree(ctx->read_compressed);
 	vfree(ctx->engine.write_scratch);
 	vfree(ctx->engine.read_scratch);
+	vfree(ctx->engine.bulk_scratch);
+	kvfree(ctx->engine.bulk_txs);
 	kfree(ctx->lz4_workmem);
 	kfree(ctx);
 }
@@ -1366,11 +1391,16 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->read_compressed = vzalloc(SV3_BLOCK_BYTES);
 	ctx->engine.write_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->engine.read_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
+	ctx->engine.bulk_scratch = vzalloc(SV3_BULK_BLOCKS * SV3_BLOCK_BYTES);
+	ctx->engine.bulk_txs = kvcalloc(SV3_MAX_RECORDS,
+				       sizeof(*ctx->engine.bulk_txs),
+				       GFP_KERNEL);
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
 	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
+	    !ctx->engine.bulk_scratch || !ctx->engine.bulk_txs ||
 	    !ctx->lz4_workmem) {
 		error = -ENOMEM;
 		goto fail;
@@ -1378,6 +1408,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.authority = &ctx->authority;
 	ctx->engine.io.opaque = ctx;
 	ctx->engine.io.write_extent = sv3_lower_write;
+	ctx->engine.io.write_run = sv3_lower_write_run;
 	ctx->engine.io.read_blocks = sv3_lower_read;
 	ctx->io_client = dm_io_client_create();
 	if (IS_ERR(ctx->io_client)) {
@@ -1456,6 +1487,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "read_submitted=%llu read_submitted_reqs=%llu "
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
+		       "bulk_io=%u bulk_extents=%u bulk_padding=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
@@ -1485,6 +1517,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
+		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
+		       ctx->engine.bulk_padding_blocks,
 		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->window_records_total, ctx->coalesce_ms,
 		       ctx->window_bins[0], ctx->window_bins[1],
