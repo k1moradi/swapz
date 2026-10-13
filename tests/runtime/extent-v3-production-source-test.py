@@ -61,6 +61,56 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("SV3_BUILD_SMOKE", MK)
         self.assertIn("3.0.0-alpha.7", GOALS)
 
+    def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
+        accept = body("sv3_accept_write")
+        status = body("sv3_status")
+        self.assertIn("length = LZ4_compress_fast(", accept)
+        self.assertIn("ctx->lz4_attempts++", accept)
+        self.assertIn("ctx->lz4_size_bins[5]++", accept)
+        self.assertIn("ctx->lz4_accepted_bytes += length", accept)
+        for threshold in ("256", "1024", "2048", "3072"):
+            self.assertIn(f"length <= {threshold}", accept)
+        self.assertLess(accept.index("length = LZ4_compress_fast("),
+                        accept.index("ctx->lz4_attempts++"))
+        self.assertLess(accept.index("ctx->lz4_size_bins[5]++"),
+                        accept.index("if (length <= 0 && ctx->engine.bulk_enabled"))
+        self.assertIn("lz4_attempts=%llu lz4_accepted_bytes=%llu", status)
+        self.assertIn("lz4_size_3073_3568=%llu lz4_raw_fallback=%llu", status)
+        self.assertIn("ctx->lz4_size_bins[5]", status)
+        self.assertNotIn("LZ4_compress_fast(", body("sv3_gc_compact_one"))
+
+    def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
+        import importlib.util
+        path = ROOT / "tests/runtime/anon-page-fixture.py"
+        spec = importlib.util.spec_from_file_location("anon_page_fixture", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for name in module.PROFILES:
+            a = module.page_bytes(123, 7, name)
+            self.assertEqual(len(a), 4096, name)
+            self.assertEqual(a, module.page_bytes(123, 7, name))
+        self.assertEqual(len(module.schedule(7, 103, module.parse_weights(
+            module.DEFAULT_WEIGHTS))), 103)
+        # Fully deterministic without installing liblz4 on rootless CI:
+        # the fake compressor exercises manifest/scheduling logic, not
+        # the real compression size measurement claim.
+        fake = lambda src, dst, page_size, cap, acceleration: (
+            0 if bytes(src)[:4] == b"\\0" * 4 else 1024)
+        raw_a, report_a = module.generate(91, 31, module.parse_weights(
+            module.DEFAULT_WEIGHTS), fake)
+        raw_b, report_b = module.generate(91, 31, module.parse_weights(
+            module.DEFAULT_WEIGHTS), fake)
+        self.assertEqual(raw_a, raw_b)
+        self.assertEqual(report_a, report_b)
+        self.assertEqual(len(raw_a), 31 * 4096)
+        self.assertEqual(sum(report_a["lz4_size_buckets"].values()), 31)
+        self.assertEqual(sum(report_a["profile_pages"].values()), 31)
+        self.assertEqual(report_a["fixture_sha256"],
+                         __import__("hashlib").sha256(raw_a).hexdigest())
+        self.assertEqual(module.classify(0), "raw")
+        self.assertEqual(module.classify(3568), "3073_3568")
+        self.assertEqual(module.classify(256), "1_256")
+
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
         self.assertIn('disk_name, "nullb", 5', ctr)
