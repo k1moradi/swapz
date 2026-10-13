@@ -1,4 +1,4 @@
-# swapz: V3.0.0-alpha.5 development
+# swapz: V3.0.0-alpha.6 development
 
 > **Project vision:** the ultimate success criterion is **less measured
 > lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
@@ -26,7 +26,7 @@ The **active implementation direction** is zsmalloc-inspired object-size
 classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
 extents when useful, and live-only size-classed compaction.
 
-**V3.0.0-alpha.5 kernel validation candidate:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
+**V3.0.0-alpha.6 kernel validation candidate:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
 retains the real `dm-swapz.ko` online packing path from [PR #49](https://github.com/k1moradi/swapz/pull/49)
 and the verified rotating reserve GC from [PR #50](https://github.com/k1moradi/swapz/pull/50).
 The optional 0–4ms coalescing interval (default zero) can collect
