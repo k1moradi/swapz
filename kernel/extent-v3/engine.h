@@ -15,7 +15,7 @@ struct sv3_io {
 	int (*write_extent)(void *opaque, sv3_u32 start_block, sv3_u8 blocks,
 			    const sv3_u8 *bytes, sv3_u8 *completed_blocks);
 	/* Optional single synchronous lower write for a 1..64-block
-	 * concatenation of individually valid, aligned SWZ3 extents.
+	 * concatenation of individually valid SWZ3 extents and raw blocks.
 	 * The authority publishes NONE before this callback has returned
 	 * full confirmed completion. See sv3_batch_pause()/resume(). */
 	int (*write_run)(void *opaque, sv3_u32 start_block, sv3_u16 blocks,
@@ -28,6 +28,9 @@ struct sv3_compressed_page {
 	sv3_u32 logical_page;
 	const sv3_u8 *payload;
 	sv3_u16 length;
+	/* True for an uncompressed 4096-byte page. Raw entries follow all
+	 * compressed entries in a mixed physical write window. */
+	sv3_u8 raw;
 };
 
 struct sv3_engine {
@@ -44,6 +47,8 @@ struct sv3_engine {
 	struct sv3_tx *bulk_txs; /* at least SV3_MAX_RECORDS transactions */
 	sv3_u16 bulk_offsets[SV3_MAX_RECORDS];
 	sv3_u8 bulk_takes[SV3_MAX_RECORDS];
+	/* Snapshot publication is type-specific: compressed or raw CRC. */
+	sv3_u8 bulk_raw[SV3_MAX_RECORDS];
 	/* 0=per-extent; 1=adjacent only, no added bytes (default);
 	 * 2=also coalesce aligned padding gaps, count extra write bytes. */
 	sv3_u8 bulk_enabled;
@@ -90,8 +95,8 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 			    const struct sv3_compressed_page *pages,
 			    sv3_u8 count, sv3_u8 *committed_pages);
 /*
- * Optional batched physically adjacent extent writer. Stages multiple
- * logically independent extents but publishes no mapping until ONE
+ * Optional batched physically adjacent extent/raw writer. Stages multiple
+ * logically independent records but publishes no mapping until ONE
  * confirmed lower write completes. Respects 1MiB segment boundary,
  * a 256KiB memory/I/O cap, and the prior committed-page-prefix ABI.
  */
