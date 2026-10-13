@@ -196,6 +196,77 @@ static int test_real_aggregation_and_readback(void)
 	return 0;
 }
 
+/*
+ * A failed lower group replacing already-authoritative pages must keep
+ * the OLD generations and OLD readable media intact. No upper BIO in
+ * the failed group can claim success, even if the driver successfully
+ * reserved every new physical extent before submitting lower I/O.
+ */
+static int test_overwrite_failed_run_preserves_old_pages(void)
+{
+	struct sv3_map original[16];
+	sv3_u8 committed = 0;
+	unsigned int i, j;
+
+	CHECK(setup() == 0);
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16);
+	memcpy(original, maps, sizeof(original));
+	for (i = 0; i < 16; ++i)
+		memset(payloads[i], 0xa7, pages[i].length);
+	fail_on_run = run_calls + 1;
+	committed = 91;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == -EIO);
+	CHECK(committed == 0 && !a.in_flight && !a.batch_pending);
+	CHECK(!ownership_violation && !maps_visible_during_run);
+	for (i = 0; i < 16; ++i) {
+		sv3_u8 output[SV3_MAX_COMPRESSED];
+		sv3_u16 length = 0;
+
+		CHECK(maps[i].valid &&
+		      maps[i].start_block == original[i].start_block &&
+		      maps[i].generation == original[i].generation &&
+		      maps[i].sequence == original[i].sequence);
+		CHECK(sv3_engine_read_page(&e, i, output,
+					  sizeof(output), &length) == 0);
+		CHECK(length == pages[i].length);
+		for (j = 0; j < length; ++j)
+			CHECK(output[j] == (sv3_u8)(i + 1U));
+	}
+	return 0;
+}
+
+static int test_successful_bulk_overwrite_publishes_after_completion(void)
+{
+	sv3_u8 committed = 0;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16);
+	for (i = 0; i < 16; ++i)
+		memset(payloads[i], 0xb8, pages[i].length);
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16 && !maps_visible_during_run);
+	CHECK(!a.in_flight && !a.batch_pending && !ownership_violation);
+	for (i = 0; i < 16; ++i) {
+		sv3_u8 output[SV3_MAX_COMPRESSED];
+		sv3_u16 length = 0;
+
+		CHECK(maps[i].valid && maps[i].generation == 2);
+		CHECK(sv3_engine_read_page(&e, i, output,
+					  sizeof(output), &length) == 0);
+		CHECK(length == pages[i].length);
+		CHECK(!memcmp(output, payloads[i], length));
+	}
+	return 0;
+}
+
 static int test_failed_run_acks_nothing(void)
 {
 	sv3_u8 committed = 87;
@@ -436,6 +507,8 @@ int main(void)
 
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
+	CHECK(test_overwrite_failed_run_preserves_old_pages() == 0); passed++;
+	CHECK(test_successful_bulk_overwrite_publishes_after_completion() == 0); passed++;
 	CHECK(test_short_run_acks_nothing() == 0); passed++;
 	CHECK(test_corrupted_completed_run_detected_on_read() == 0); passed++;
 	CHECK(test_duplicate_slots_use_original_sequential_path() == 0); passed++;
