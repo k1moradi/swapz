@@ -25,8 +25,8 @@ test physical partial completions; actual media error propagation remains
 an independent, unqualified requirement.
 
 Info status includes `write_fault_nth`, `write_fault_calls`,
-`write_fault_injected`. `write_fault_calls` includes every attempted
-lower write at this adapter boundary; `write_fault_injected` counts
+`write_fault_injected`. `write_fault_calls` counts attempted lower writes **only while the test
+injector is armed** (and stays zero when disabled); `write_fault_injected` counts
 pre-submission synthetic rejections. Existing `write_submitted_reqs`
 and `physical_write_reqs` **exclude** these rejections; compare backing
 `/sys/block/<owned-nullb>/stat` after confirmed drain. Neither target-side
