@@ -271,6 +271,44 @@ static int test_duplicate_slots_use_original_sequential_path(void)
 	return 0;
 }
 
+static int test_padding_option_measures_exact_request_byte_tradeoff(void)
+{
+	const sv3_u16 lengths[4] = { 700, 3500, 700, 3500 };
+	sv3_u8 committed = 0;
+	unsigned int adjacent_calls;
+	unsigned long long adjacent_bytes;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	for (i = 0; i < 4; ++i) {
+		memset(payloads[i], (int)i + 1, lengths[i]);
+		pages[i].length = lengths[i];
+	}
+	/* The real DP plans [1 block x1 record] then [2 blocks x3
+	 * records]. Physical alignment skips block1. Mode1 does not
+	 * overwrite it; mode2 explicitly pads one extra physical block. */
+	CHECK(sv3_engine_write_window_batched(&e, pages, 4,
+					     &committed) == 0);
+	CHECK(committed == 4 && e.bulk_padding_blocks == 0);
+	CHECK(validate_prefix(4) == 0);
+	adjacent_calls = run_calls;
+	adjacent_bytes = lower_written_bytes;
+	CHECK(adjacent_calls == 2 && adjacent_bytes == 3U * SV3_BLOCK_BYTES);
+	CHECK(setup() == 0);
+	for (i = 0; i < 4; ++i) {
+		memset(payloads[i], (int)i + 1, lengths[i]);
+		pages[i].length = lengths[i];
+	}
+	e.bulk_enabled = 2;
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 4,
+					     &committed) == 0);
+	CHECK(committed == 4 && validate_prefix(4) == 0);
+	CHECK(e.bulk_padding_blocks == 1 && run_calls == 1);
+	CHECK(lower_written_bytes == adjacent_bytes + SV3_BLOCK_BYTES);
+	return 0;
+}
+
 static int test_same_input_no_padding_writes_identical_bytes(void)
 {
 	sv3_u8 committed = 0;
@@ -405,6 +443,7 @@ int main(void)
 	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
 	CHECK(test_explicit_padding_mode_preserves_crc_and_authority() == 0); passed++;
 	CHECK(test_same_input_no_padding_writes_identical_bytes() == 0); passed++;
+	CHECK(test_padding_option_measures_exact_request_byte_tradeoff() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
