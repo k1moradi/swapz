@@ -1270,10 +1270,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
+	u32 lower_bulk = 1;
 	int error;
 
-	if (argc < 1 || argc > 7 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64]";
+	if (argc < 1 || argc > 8 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0|1]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1294,6 +1295,9 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 6 && (kstrtou32(argv[6], 10, &flush_fail_nth) ||
 			 flush_fail_nth > 64U))
 		return -EINVAL;
+	if (argc > 7 && (kstrtou32(argv[7], 10, &lower_bulk) ||
+			 lower_bulk > 1U))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -1305,6 +1309,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
+	ctx->engine.bulk_enabled = lower_bulk;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_DELAYED_WORK(&ctx->worker, sv3_worker);
@@ -1487,7 +1492,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "read_submitted=%llu read_submitted_reqs=%llu "
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
-		       "bulk_io=%u bulk_extents=%u bulk_padding=%u "
+		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
@@ -1517,6 +1522,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
+		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,
 		       ctx->worker_requeues, ctx->one_page_windows,
@@ -1528,11 +1534,12 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
 		       ctx->gc_cost_policy, ctx->coalesce_ms,
-		       ctx->flush_meter.fail_nth);
+		       ctx->flush_meter.fail_nth,
+		       ctx->engine.bulk_enabled);
 		break;
 	case STATUSTYPE_IMA:
 	default:
