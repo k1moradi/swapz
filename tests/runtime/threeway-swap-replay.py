@@ -15,6 +15,7 @@ import os
 import random
 import re
 import stat
+import subprocess
 import struct
 import tempfile
 import time
@@ -179,7 +180,7 @@ def check_plan(trace_path, manifest, fixture_pages):
     return rows, latest
 
 
-def check_owned_block(path, st, candidate, args):
+def check_owned_block(path, st, candidate, args, logical_pages):
     if not args.owned_nullblk_name or not args.expected_dev:
         raise ValueError("block I/O requires owned null_blk identity and exact major:minor")
     name = args.owned_nullblk_name
@@ -197,7 +198,10 @@ def check_owned_block(path, st, candidate, args):
         raise ValueError("major/minor mismatch against independently pinned owned device")
     sysdev = Path("/sys/dev/block") / actual
     actual_name = sysdev.resolve().name
+    sectors = int((sysdev / "size").read_text().strip())
     if candidate == "off":
+        if sectors * 512 < logical_pages * PAGE:
+            raise ValueError("owned null_blk is smaller than logical working range")
         if args.expected_dm_uuid or actual != null_dev or actual_name != name:
             raise ValueError("off control must use the bare exact owned null_blk")
     else:
@@ -211,6 +215,17 @@ def check_owned_block(path, st, candidate, args):
             raise ValueError("DM UUID and exact mapped block device differ")
         if {entry.name for entry in (sysdev / "slaves").iterdir()} != {name}:
             raise ValueError("DM target does not depend exclusively on owned null_blk")
+        if sectors * 512 != logical_pages * PAGE:
+            raise ValueError("DM mapping size differs from exact workload")
+        dm_name = (sysdev / "dm/name").read_text().strip()
+        got = subprocess.run(["dmsetup", "table", dm_name],
+                             check=True, capture_output=True, text=True,
+                             timeout=10).stdout.strip().split()
+        want_type = "swapz" if candidate == "v22" else "swapz3"
+        if len(got) < 4 or got[:4] != [
+            "0", str(logical_pages * PAGE // 512), want_type, null_dev
+        ]:
+            raise ValueError("DM target type/length/backing differs from candidate")
     for line in Path("/proc/swaps").read_text().splitlines()[1:]:
         item = line.split()[0]
         try:
@@ -238,15 +253,21 @@ def check_device(args, logical_pages):
         path = path.resolve(strict=True)
     st = path.stat()
     if stat.S_ISBLK(st.st_mode):
-        identity = check_owned_block(path, st, args.candidate, args)
+        identity = check_owned_block(path, st, args.candidate, args, logical_pages)
         return path, os.O_RDWR | os.O_DIRECT | os.O_CLOEXEC, identity
     if not stat.S_ISREG(st.st_mode) or not args.regular_file_test:
         raise ValueError("only explicitly opted-in rootless test files or owned null_blk")
     root = Path(tempfile.gettempdir()).resolve()
     if not path.resolve().is_relative_to(root) or not path.name.startswith("swapz-replay-"):
         raise ValueError("rootless regular test file must be named swapz-replay-* under tempdir")
-    if str(path) in {line.split()[0] for line in Path("/proc/swaps").read_text().splitlines()[1:]}:
-        raise ValueError("refusing an active swap file")
+    for line in Path("/proc/swaps").read_text().splitlines()[1:]:
+        swap_path = line.split()[0]
+        try:
+            swap_st = Path(swap_path).stat()
+        except OSError:
+            continue
+        if (st.st_ino, st.st_dev) == (swap_st.st_ino, swap_st.st_dev):
+            raise ValueError("refusing any active swap file inode")
     if st.st_size != logical_pages * PAGE:
         raise ValueError("test file must already exist and have exact logical size")
     return path, os.O_RDWR | os.O_CLOEXEC, {"test_regular_file": str(path)}
