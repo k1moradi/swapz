@@ -11,30 +11,58 @@ preferred I/O sizes, with acceptable swap-in p99 and CPU. 4KiB
 equivalents are a normalization, not physical operation counts.
 Correctness tests are mandatory but do not establish this outcome.
 
-## Alpha.7 mixed-format qualification remains BLOCKED on loaded evidence
+## Alpha.7: independent loaded bounded-burst win; sustained gate STILL OPEN
 
-[Draft PR #55](https://github.com/k1moradi/swapz/pull/55) stacks a
-bounded mixed compressed/raw lower-write stream on alpha.6's deferred
-publication. The previous 1024-write comparator contained **205 raw
-fallback pages**, each requiring a separate `dm_io` submission in
-alpha.6. The new implementation changes source submission behavior,
-but **no actual backing-device request improvement is established**.
+[Developer PR #55](https://github.com/k1moradi/swapz/pull/55) adds
+mixed raw/compressed lower-write streaming. [Independent Codex
+validation PR #56](https://github.com/k1moradi/swapz/pull/56) tested
+the exact unchanged source `0e199159cea3dd479224ce59513ee9c0a810a0d6`
+on test-owned memory-backed `null_blk` and reports **35 successful,
+fully byte-verified 1,024-page trials**, five each for frozen V2.2,
+alpha.6 bulk=0/1/2, and alpha.7 bulk=0/1/2. Backing request/sector
+deltas reconciled to DM target write counters.
 
-The candidate's exact-production-C tests exercise raw-only/mixed
-grouping, raw CRC readback, uncertain lower I/O, committed prefix,
-overwrites (including raw/compressed representation changes) and the
-same 819/205 class distribution across reset rootless windows.
-These are modeled lower callbacks, not matched loaded 1024-page runs.
-CI must pass at the FINAL SHA before independent testing begins.
+| Loaded candidate | Backing write requests | Backing write bytes |
+|---|---:|---:|
+| Frozen V2.2 | 26 | 1,679,360 |
+| V3 alpha.6 bulk=0/1/2 | 419 | 1,716,224 |
+| V3 alpha.7 bulk=0 | 419 | 1,716,224 |
+| **V3 alpha.7 bulk=1/2** | **16** | **905,216** |
 
-Release gates: loaded owned-null_blk correctness under mixed
-FUA/PREFLUSH, discard, overwrite, GC, failure injection, suspend/drain;
-independent backing-device request and byte accounting; a repeated
-matched V2.2 comparison; achieved rate, CPU and p95/p99 latency.
-A full failure prohibits a broad performance campaign. Production
-deployment and physical media remain out of scope.
+The original frozen workload includes 819 compressed records and
+205 raw pages; **each compressed record is only ~57B after LZ4**,
+a highly favorable case. Exactly 205 raw physical blocks plus 16
+compressed blocks account for the 221 × 4KiB observed lower write
+bytes. Source status reports 16 mixed runs, and independent backing
+stats report 16 actual writes. This validates a *real bounded-burst*
+improvement, not merely modeled submissions.
 
-See [the exact alpha.7 protocol](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md).
+The loaded tests also passed the exercised mixed read/overwrite/discard,
+FUA/PREFLUSH, synthetic lower-flush EIO, eight reserve-role GC
+rotations with refill, and 1,024-BIO drain/suspend cases. The tested
+GC full-destination case refused relocation with zero GC I/O.
+**These do NOT establish** real lower-device write fault behavior,
+partial/torn lower completion, steady-state GC cost, sustained fio
+throughput, achieved-rate matching, realistic 1–3KiB compressed-page
+mixes, CPU/memory, or cold-read p95/p99. The five-trial matrix was
+grouped rather than counterbalanced; treat the result as repeatable
+for its deterministic burst, not as an unrestricted performance claim.
+
+[Follow-up draft PR #57](https://github.com/k1moradi/swapz/pull/57)
+adds an opt-in, target-local, **pre-submission** lower-write EIO test
+boundary to exercise mixed-run/GC error propagation on owned null_blk,
+and extends the exact production-C tests with realistic 1–3KiB
+compressed/raw mixed records. That new source and its live tests require
+separate SHA-pinned qualification. The injector does not model torn media.
+
+**Release remains NOT READY.** Gates: loaded fault/error and prefix
+publication, varied realistic-size input, matched achieved IOPS,
+read/write request+byte accounting including GC, CPU, p95/p99,
+and repeated counterbalanced V2.2 comparison; no active swap or
+physical storage tests. See
+[alpha.7 design](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md)
+and [fault qualification gate](
+kernel/extent-v3/LOWER_WRITE_FAULT_QUALIFICATION.md).
 
 ## What is already supported by evidence
 
@@ -180,7 +208,7 @@ former foreground victim therefore becomes next cycle's reserve.
 Memory-only exact-production-C authority and codec/engine tests
 exercise repeated handoffs, old-map preservation on incomplete
 relocation, and eight rotations on the exact 32MiB geometry.
-**Current version: 3.0.0-alpha.6.**
+**Current experimental development version: 3.0.0-alpha.7.**
 
 This is **source implementation evidence**, NOT a loaded-kernel
 approval. [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
