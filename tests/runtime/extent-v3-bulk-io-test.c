@@ -898,6 +898,68 @@ static int test_mixed_819_205_distribution_economy(void)
 	return 0;
 }
 
+/*
+ * The 819/205 loaded fixture compresses its 819 pages to just ~57 bytes.
+ * This test instead exercises the actual production C engine with 1-3KiB+
+ * compressed records and 25% raw pages, including SWZ3 4/8/16KiB extents.
+ * Request-call savings are not backing queue request counts.
+ */
+static int test_mixed_realistic_payloads_keep_zero_padding(void)
+{
+	const unsigned int compressed = 48, total = 64;
+	unsigned int i, combined_calls;
+	unsigned long long combined_bytes;
+	sv3_u8 committed = 0;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(compressed, total);
+	for (i = 0; i < compressed; ++i) {
+		sv3_u16 bytes = i % 3 == 0 ? 3500 : i % 3 == 1 ? 2089 : 1032;
+
+		memset(payloads[i], (int)(i + 1U), bytes);
+		pages[i].length = bytes;
+	}
+	CHECK(sv3_engine_write_window_batched(&e, pages, total,
+					     &committed) == 0);
+	CHECK(committed == total && e.bulk_padding_blocks == 0);
+	CHECK(e.bulk_raw_entries == total - compressed);
+	CHECK(!maps_visible_during_run && !ownership_violation);
+	CHECK(validate_mixed_prefix(total, total) == 0);
+	combined_calls = run_calls;
+	combined_bytes = lower_written_bytes;
+
+	/* Exact same source pages with compressed-only planner plus raw
+	 * serialized control must transfer identical bytes, even with
+	 * alignment gaps. Bulk mode 1 cannot secretly write padding. */
+	CHECK(setup() == 0);
+	prepare_raw_tail(compressed, total);
+	for (i = 0; i < compressed; ++i) {
+		sv3_u16 bytes = i % 3 == 0 ? 3500 : i % 3 == 1 ? 2089 : 1032;
+
+		memset(payloads[i], (int)(i + 1U), bytes);
+		pages[i].length = bytes;
+	}
+	e.bulk_enabled = 0;
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, compressed,
+					     &committed) == 0);
+	CHECK(committed == compressed);
+	for (i = compressed; i < total; ++i) {
+		struct sv3_tx tx;
+		sv3_u8 done = 0;
+		sv3_u32 logical = i;
+
+		CHECK(sv3_stage(&a, &logical, 1, 1, &tx) == 0);
+		CHECK(write_extent(NULL, tx.start_block, 1,
+				   raw_payloads[i], &done) == 0);
+		CHECK(sv3_finish_raw(&a, &tx, raw_payloads[i], done, 0) == 0);
+	}
+	CHECK(lower_written_bytes == combined_bytes);
+	CHECK(extent_calls > combined_calls);
+	CHECK(validate_mixed_prefix(total, total) == 0);
+	return 0;
+}
+
 static int test_malformed_mixed_input_fails_before_staging(void)
 {
 	sv3_u8 committed = 44;
@@ -952,6 +1014,7 @@ int main(void)
 	CHECK(test_mixed_later_run_failure_keeps_only_completed_prefix() == 0); passed++;
 	CHECK(test_mixed_successful_cross_format_overwrite() == 0); passed++;
 	CHECK(test_mixed_819_205_distribution_economy() == 0); passed++;
+	CHECK(test_mixed_realistic_payloads_keep_zero_padding() == 0); passed++;
 	CHECK(test_malformed_mixed_input_fails_before_staging() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
 	return 0;
