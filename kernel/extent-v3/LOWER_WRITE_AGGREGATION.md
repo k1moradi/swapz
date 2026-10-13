@@ -133,6 +133,38 @@ and a segment-boundary failure that preserves exactly the committed
 prefix of earlier successful combined runs. These are lower-IO
 mocked tests, NOT loaded kernel proof.
 
+## Second-pass main-developer review: overwrite and GC authority fences
+
+A standalone code review of the exact alpha.6 batching implementation
+identified an under-tested edge: `sv3_bulk_flush` can overwrite *existing*
+authoritative logical mappings, not just populate empty slots. New
+exact-C tests first publish 16 existing compressed pages, then stage
+replacement generations using combined lower runs:
+
+- Inject `-EIO` on the first overwrite lower run. Assert zero replacement
+  completions, every original mapping generation/start/sequence unchanged,
+  **and byte-exact OLD compressed payloads readable** from the original
+  physical media after the failed write.
+- Permit the entire replacement lower run. Assert old generations are
+  invisible to new publication until actual synchronous lower completion,
+  then exactly the NEW generation and bytes are readable. Neither run may
+  leave `batch_pending` or in-flight authority.
+- Independently, `sv3_gc_compact_one()` now refuses GC selection when
+  `batch_pending` or `batch_replaying` is set, beyond its earlier
+  `in_flight` gate. Scanning a segment whose new physical extents are
+  reserved-but-unpublished could otherwise mistake it for an entirely
+  dead segment and allow unsafe early reuse. The presuspend drain
+  already rejects unfinished bulk ownership; source contracts now pin
+  both rules.
+
+These are **source/physical-memory mock tests**, not a license to
+read from a *live failed Device Mapper target* after a kernel lower-I/O
+failure. The production target intentionally fails closed on such an
+error. To validate preservation of old logical mappings in the loaded
+kernel, use a newly owned, isolated, faultable `null_blk` device or
+an exact-C test seam and inspect authority without attempting an
+unsafe continuing I/O sequence on a target already marked failed.
+
 ## Independent loaded test order — do not skip gates
 
 1. Pin exact new source sha + every production blob SHA and freshly
