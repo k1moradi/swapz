@@ -582,7 +582,15 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	u64 before_read_reqs, before_write_reqs;
 	int error;
 
-	if (a->in_flight || a->gc_allocation)
+	/*
+	 * GC may only begin after every deferred contiguous lower WRITE has
+	 * been completely replayed or aborted. An in-flight group has already
+	 * reserved real physical blocks but has NOT published its authority;
+	 * scanning its apparent zero-live segment here would risk recycling
+	 * those reservations before lower completion.
+	 */
+	if (a->in_flight || a->batch_pending || a->batch_replaying ||
+	    a->gc_allocation)
 		return -EBUSY;
 	error = sv3_gc_choose_victim(ctx, &victim);
 	if (error)
