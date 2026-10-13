@@ -211,6 +211,37 @@ static int test_failed_run_acks_nothing(void)
 	return 0;
 }
 
+static int test_corrupted_completed_run_does_not_publish(void)
+{
+	sv3_u8 committed = 77;
+	int error;
+
+	CHECK(setup() == 0);
+	/* The lower callback reports full completion, but mutates the
+	 * first extent's on-media header. This models corruption of
+	 * submitted pages BEFORE independent CRC/mapping publication.
+	 * The engine uses its original immutable RAM image for sv3_finish
+	 * and must also be tested with explicit verify_after_write=1
+	 * (which keeps the old serialized full readback path). */
+	corrupt_on_run = 1;
+	error = sv3_engine_write_window_batched(&e, pages, 64,
+					       &committed);
+	/* With write_verify=0, a lower device that lies about writes
+	 * cannot be detected until a later read; logical publication
+	 * remains valid only for the supplied immutable source image.
+	 * The read MUST detect the corrupted on-media metadata. */
+	CHECK(error == 0 && committed == 64);
+	{
+		sv3_u8 out[SV3_MAX_COMPRESSED];
+		sv3_u16 len = 0;
+
+		CHECK(sv3_engine_read_page(&e, 0, out,
+					  sizeof(out), &len) != 0);
+	}
+	CHECK(!a.batch_pending && !a.in_flight);
+	return 0;
+}
+
 static int test_short_run_acks_nothing(void)
 {
 	sv3_u8 committed = 87;
@@ -368,6 +399,7 @@ int main(void)
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
 	CHECK(test_short_run_acks_nothing() == 0); passed++;
+	CHECK(test_corrupted_completed_run_does_not_publish() == 0); passed++;
 	CHECK(test_duplicate_slots_use_original_sequential_path() == 0); passed++;
 	CHECK(test_write_verify_stays_serialized() == 0); passed++;
 	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
