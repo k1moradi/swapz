@@ -146,6 +146,17 @@ struct sv3_dm {
 	u64 one_page_windows;
 	u64 compressed_pages;
 	u64 raw_pages;
+	/*
+	 * Attempt-side histogram, NOT acknowledged logical writes or media
+	 * occupancy. Only user-supplied foreground 4KiB WRITE pages enter
+	 * this histogram; GC copies, verification and synthetic readback do
+	 * not. Samples can include later failed / aborted windows.
+	 * Index 0..4: successful LZ4 <=256/1024/2048/3072/3568 bytes;
+	 * index 5: LZ4 did not fit SV3_MAX_COMPRESSED -> raw fallback.
+	 */
+	u64 lz4_attempts;
+	u64 lz4_accepted_bytes;
+	u64 lz4_size_bins[6];
 	u64 discard_pages;
 	u64 windows;
 	u64 reordered_records;
@@ -898,6 +909,27 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 				(size_t)ctx->batch_count * SV3_BLOCK_BYTES,
 			SV3_BLOCK_BYTES, SV3_MAX_COMPRESSED, 1,
 			ctx->lz4_workmem);
+	/* Account for compressibility as the kernel itself observes it.
+	 * A file extension or userspace fixture label is not the codec result;
+	 * raw fallback is already selected when the configured output cap
+	 * cannot be met. Do not interpret these attempt counters as committed
+	 * pages, or infer the original anonymous/file-backed memory type. */
+	ctx->lz4_attempts++;
+	if (length <= 0)
+		ctx->lz4_size_bins[5]++;
+	else {
+		ctx->lz4_accepted_bytes += length;
+		if (length <= 256)
+			ctx->lz4_size_bins[0]++;
+		else if (length <= 1024)
+			ctx->lz4_size_bins[1]++;
+		else if (length <= 2048)
+			ctx->lz4_size_bins[2]++;
+		else if (length <= 3072)
+			ctx->lz4_size_bins[3]++;
+		else
+			ctx->lz4_size_bins[4]++;
+	}
 	if (length <= 0 && ctx->engine.bulk_enabled &&
 	    !ctx->engine.verify_after_write) {
 		/* Preserve the complete original 4KiB page in worker-owned
@@ -1559,6 +1591,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "
 		       "compressed=%llu raw=%llu discarded=%llu "
+		       "lz4_attempts=%llu lz4_accepted_bytes=%llu "
+		       "lz4_size_le256=%llu lz4_size_257_1024=%llu "
+		       "lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
+		       "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_role_rotations=%llu "
 		       "last_gc_victim=%u last_gc_destination=%u "
@@ -1584,7 +1620,12 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
 		       ctx->physical_read_reqs, ctx->compressed_pages,
-		       ctx->raw_pages, ctx->discard_pages, ctx->windows,
+		       ctx->raw_pages, ctx->discard_pages,
+		       ctx->lz4_attempts, ctx->lz4_accepted_bytes,
+		       ctx->lz4_size_bins[0], ctx->lz4_size_bins[1],
+		       ctx->lz4_size_bins[2], ctx->lz4_size_bins[3],
+		       ctx->lz4_size_bins[4], ctx->lz4_size_bins[5],
+		       ctx->windows,
 		       ctx->reordered_records, ctx->authority.next_block,
 		       ctx->authority.reserve_blocks,
 		       ctx->gc_victims, ctx->gc_role_rotations,
