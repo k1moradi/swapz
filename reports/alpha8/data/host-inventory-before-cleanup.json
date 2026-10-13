@@ -1,0 +1,137 @@
+{
+  "captured_unix": 1791905648.6924856,
+  "results": [
+    {
+      "name": "kernel",
+      "argv": [
+        "uname",
+        "-a"
+      ],
+      "exit_code": 0,
+      "output": "Linux Inspiron1564Linux 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux\n"
+    },
+    {
+      "name": "swaps",
+      "argv": [
+        "cat",
+        "/proc/swaps"
+      ],
+      "exit_code": 0,
+      "output": "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swapfile                               file\t\t524284\t\t511024\t\t-1\n/dev/sdb1                               partition\t121863164\t988592\t\t-1\n"
+    },
+    {
+      "name": "dmsetup",
+      "argv": [
+        "sudo",
+        "-n",
+        "dmsetup",
+        "ls",
+        "--tree"
+      ],
+      "exit_code": 0,
+      "output": "No devices found\n"
+    },
+    {
+      "name": "lsblk",
+      "argv": [
+        "lsblk",
+        "-o",
+        "NAME,TYPE,PKNAME,SIZE,FSTYPE,MOUNTPOINTS"
+      ],
+      "exit_code": 0,
+      "output": "NAME                     TYPE PKNAME   SIZE FSTYPE   MOUNTPOINTS\nloop0                    loop         66.8M squashfs /snap/core24/2124\nloop1                    loop        262.2M squashfs /snap/firefox/8995\nloop2                    loop            4K squashfs /snap/bare/5\nloop3                    loop        614.5M squashfs /snap/gnome-46-2404/164\nloop4                    loop        262.3M squashfs /snap/firefox/9036\nloop5                    loop         91.7M squashfs /snap/gtk-common-themes/1535\nloop6                    loop          402M squashfs /snap/mesa-2404/1839\nloop7                    loop         50.3M squashfs /snap/snapd/27738\nloop8                    loop         44.7M squashfs /snap/snapd/28254\nsda                      disk        465.8G          \n\u251c\u2500sda1                   part sda      549M ntfs     \n\u251c\u2500sda2                   part sda     49.7G ntfs     \n\u251c\u2500sda3                   part sda      533M ntfs     \n\u251c\u2500sda4                   part sda        1K          \n\u251c\u2500sda5                   part sda    346.4G ntfs     \n\u2514\u2500sda6                   part sda     68.6G ext4     /\nsdb                      disk        116.2G          \n\u2514\u2500sdb1                   part sdb    116.2G swap     [SWAP]\nsr0                      rom          1024M          \nnullb_swapz_pr59_68dca6f disk           40M          \n"
+    },
+    {
+      "name": "modules",
+      "argv": [
+        "lsmod"
+      ],
+      "exit_code": 0,
+      "output": "Module                  Size  Used by\ndm_swapz               61440  0\nnull_blk               94208  2\nunix_diag              12288  0\ntcp_diag               20480  0\ninet_diag              24576  1 tcp_diag\ndm_delay               16384  0\nxfrm_interface         32768  0\nxfrm6_tunnel           16384  1 xfrm_interface\ntunnel4                12288  1 xfrm_interface\ntunnel6                12288  2 xfrm_interface,xfrm6_tunnel\nxfrm_user              69632  2\nrfcomm                110592  4\nsnd_seq_dummy          12288  0\nsnd_hrtimer            12288  1\nsnd_seq               126976  7 snd_seq_dummy\nsnd_seq_device         16384  1 snd_seq\ntwofish_generic        20480  0\ntwofish_x86_64_3way    32768  0\ntwofish_x86_64         16384  1 twofish_x86_64_3way\ntwofish_common         94208  3 twofish_x86_64,twofish_generic,twofish_x86_64_3way\nserpent_sse2_x86_64    49152  0\nserpent_generic        24576  1 serpent_sse2_x86_64\nblowfish_generic       12288  0\nblowfish_x86_64        24576  0\nblowfish_common        16384  2 blowfish_generic,blowfish_x86_64\ncast5_generic          24576  0\ncast_common            12288  1 cast5_generic\ndes3_ede_x86_64        49152  0\ndes_generic            12288  0\nlibdes                 32768  2 des_generic,des3_ede_x86_64\nalgif_skcipher         12288  0\ncamellia_generic       45056  0\ncamellia_x86_64        61440  0\nxcbc                   12288  0\nmd4                    16384  0\ncmac                   12288  2\nalgif_hash             20480  0\nccm                    20480  9\naf_alg                 32768  2 algif_hash,algif_skcipher\nqrtr                   53248  2\nbnep                   32768  2\namdgpu              21585920  0\namdxcp                 12288  1 amdgpu\ndrm_panel_backlight_quirks    12288  1 amdgpu\ngpu_sched              69632  1 amdgpu\ndrm_buddy              28672  1 amdgpu\nbinfmt_misc            24576  1\nbtusb                  81920  0\nbtmtk                  36864  1 btusb\nbtrtl                  36864  1 btusb\nbtbcm                  24576  1 btusb\nbtintel                73728  1 btusb\nb43                   589824  0\nbluetooth            1134592  30 btrtl,btmtk,btintel,btbcm,bnep,btusb,rfcomm\nradeon               2301952  5\ncordic                 12288  1 b43\nplatform_profile       20480  0\nsnd_hda_codec_alc269   151552  1\nbcma                   90112  1 b43\nsnd_hda_codec_realtek_lib    65536  1 snd_hda_codec_alc269\nsnd_hda_scodec_component    20480  1 snd_hda_codec_alc269\nsnd_hda_codec_atihdmi    24576  1\nsnd_hda_codec_generic   126976  2 snd_hda_codec_realtek_lib,snd_hda_codec_alc269\nsnd_hda_codec_hdmi     65536  1 snd_hda_codec_atihdmi\nintel_powerclamp       28672  0\ndrm_ttm_helper         20480  2 amdgpu,radeon\nttm                   139264  3 amdgpu,radeon,drm_ttm_helper\ndell_laptop            40960  0\nmac80211             1937408  1 b43\nsnd_hda_intel          65536  2\ncoretemp               24576  0\nkvm_intel             552960  0\ndrm_exec               12288  2 amdgpu,radeon\ndell_smm_hwmon         36864  0\nuvcvideo              147456  0\ncfg80211             1548288  2 b43,mac80211\nsnd_hda_codec         212992  6 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_hda_codec_atihdmi\ndrm_suballoc_helper    24576  2 amdgpu,radeon\nkvm                  1527808  1 kvm_intel\nsnd_hda_core          151552  7 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_hda_codec_atihdmi\nvideobuf2_vmalloc      20480  1 uvcvideo\nuvc                    12288  1 uvcvideo\ndrm_display_helper    307200  2 amdgpu,radeon\nlibarc4                12288  1 mac80211\nvideobuf2_memops       16384  1 videobuf2_vmalloc\nvideobuf2_v4l2         36864  1 uvcvideo\nirqbypass              16384  1 kvm\nvideobuf2_common       90112  4 videobuf2_vmalloc,videobuf2_v4l2,uvcvideo,videobuf2_memops\nat24                   32768  0\nvideodev              376832  2 videobuf2_v4l2,uvcvideo\ncec                   106496  2 drm_display_helper,amdgpu\nmei_pxp                16384  0\nrc_core                81920  1 cec\nsnd_intel_dspcfg       45056  1 snd_hda_intel\nsnd_intel_sdw_acpi     16384  1 snd_intel_dspcfg\nsnd_hwdep              24576  1 snd_hda_codec\nsnd_pcm               208896  4 snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_core\nums_realtek            24576  1\nuas                    32768  0\nintel_cstate           20480  0\nsnd_timer              53248  3 snd_seq,snd_hrtimer,snd_pcm\nsnd                   147456  17 snd_hda_codec_generic,snd_seq,snd_seq_device,snd_hda_codec_hdmi,snd_hwdep,snd_hda_intel,snd_hda_codec,snd_timer,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_pcm\ndell_wmi               28672  1 dell_laptop\nsoundcore              16384  1 snd\njoydev                 32768  0\ni2c_i801               36864  0\ni2c_algo_bit           16384  2 amdgpu,radeon\nmc                     90112  4 videodev,videobuf2_v4l2,uvcvideo,videobuf2_common\ndell_smbios            36864  2 dell_wmi,dell_laptop\ndcdbas                 24576  1 dell_smbios\ninput_leds             12288  0\nwmi_bmof               12288  0\nsparse_keymap          12288  1 dell_wmi\ndell_wmi_descriptor    20480  2 dell_wmi,dell_smbios\nmac_hid                12288  0\nusb_storage            86016  2 uas,ums_realtek\ni2c_smbus              20480  1 i2c_i801\ni2c_mux                20480  1 i2c_i801\nr8169                 151552  0\nrealtek                57344  1\nlpc_ich                32768  0\nmei_me                 61440  1\nssb                   106496  1 b43\nmei                   184320  3 mei_pxp,mei_me\nsch_fq_codel           28672  2\nefi_pstore             12288  0\nhid_generic            12288  0\nusbhid                 86016  0\nhid                   282624  2 usbhid,hid_generic\npsmouse               225280  0\nvideo                  77824  4 dell_wmi,amdgpu,radeon,dell_laptop\nwmi                    36864  6 video,dell_wmi,wmi_bmof,dell_smm_hwmon,dell_smbios,dell_wmi_descriptor\nahci                   53248  1\nlibahci                57344  1 ahci\nserio_raw              20480  0\nlp                     32768  0\nesp4_offload           16384  0\nppdev                  24576  0\nesp4                   28672  1 esp4_offload\nparport                81920  2 lp,ppdev\nxfrm_algo              16384  2 esp4,xfrm_user\nmsr                    12288  0\ndmi_sysfs              28672  0\nautofs4                61440  2\nlz4                    12288  8\nlz4_compress           24576  2 lz4,dm_swapz\n"
+    },
+    {
+      "name": "module_status",
+      "argv": [
+        "sudo",
+        "-n",
+        "modinfo",
+        "dm_swapz"
+      ],
+      "exit_code": 1,
+      "output": "modinfo: ERROR: Module dm_swapz not found.\n"
+    },
+    {
+      "name": "owned_nullb_dev",
+      "argv": [
+        "cat",
+        "/sys/block/nullb_swapz_pr59_68dca6f/dev"
+      ],
+      "exit_code": 0,
+      "output": "251:0\n"
+    },
+    {
+      "name": "owned_nullb_inflight",
+      "argv": [
+        "cat",
+        "/sys/block/nullb_swapz_pr59_68dca6f/inflight"
+      ],
+      "exit_code": 0,
+      "output": "       0        0\n"
+    },
+    {
+      "name": "owned_nullb_holders",
+      "argv": [
+        "find",
+        "/sys/block/nullb_swapz_pr59_68dca6f/holders",
+        "-mindepth",
+        "1",
+        "-maxdepth",
+        "1",
+        "-printf",
+        "%f\\n"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "name": "test_modules",
+      "argv": [
+        "bash",
+        "-lc",
+        "lsmod | grep -E \"sv3_|swapz_io\" || true"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "name": "protected_state_hashes",
+      "argv": [
+        "sha256sum",
+        "/home/keivan/swapz/local-batch-regression-0-verify.state",
+        "/home/keivan/swapz/local-verify-0-verify.state"
+      ],
+      "exit_code": 0,
+      "output": "42edb55a8d096325a1c4118909cf0da6845c4745bbb769e4231861877f1efb61  /home/keivan/swapz/local-batch-regression-0-verify.state\n5810e0aefccd0d464e432afd8de7ba885e5a9f6f8b560beddcb14ba9c82963a3  /home/keivan/swapz/local-verify-0-verify.state\n"
+    },
+    {
+      "name": "swapz_related_dmesg",
+      "argv": [
+        "bash",
+        "-lc",
+        "sudo -n dmesg --time-format=iso | grep -E \"swapz3|SV3|Buffer I/O error on dev dm-0|dm-swapz\" | tail -100"
+      ],
+      "exit_code": 0,
+      "output": "2026-10-13T06:48:25,698036-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:49:09,834820-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:50:38,020132-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:51:22,136365-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:52:50,308463-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:53:34,363767-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:54:18,342791-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:55:02,516361-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:55:46,691366-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:56:30,670820-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:57:58,965002-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T06:58:43,001235-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:00:11,252586-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:01:39,597681-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:02:23,780203-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:03:07,940945-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:03:52,033343-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:04:36,199957-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:05:20,333080-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:06:48,589754-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:07:32,701843-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:09:00,872188-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:10:29,055992-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:11:13,265975-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:11:57,335500-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:12:41,490166-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:13:25,734124-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:14:09,780678-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:15:38,290845-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:16:22,503789-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:17:50,985961-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:19:46,880564-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:20:31,036703-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:21:14,988934-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:21:59,124862-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:22:43,122390-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:23:27,078296-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:24:55,198704-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:25:39,146419-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:27:07,402357-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.7 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:28:11,270891-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:29:39,526220-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:31:07,802739-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:31:51,940044-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:32:35,945323-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:33:20,072754-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:35:08,913877-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:36:37,127519-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:38:05,288745-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:38:49,266136-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:39:33,234961-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:40:17,532967-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:42:14,520559-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=8192 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:43:18,842847-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=8192 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:43:50,389144-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=8192 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:43:57,410375-07:00 device-mapper: swapz3: V3 alpha: lower or mapping error -5; rejecting subsequent I/O\n2026-10-13T07:43:57,436069-07:00 Buffer I/O error on dev dm-0, logical block 0, async page read\n2026-10-13T07:44:11,265817-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:45:39,542211-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:47:07,804940-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:47:51,908444-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:48:35,904329-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:49:19,860858-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:52:29,480926-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:53:39,484328-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:55:27,329610-07:00 device-mapper: table: 252:0: swapz3: Insufficient capacity for uncompressed pages plus V3 reserve (-ENOSPC)\n2026-10-13T07:56:38,228442-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=8192 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:56:40,052842-07:00 device-mapper: swapz3: V3 alpha: lower or mapping error -28; rejecting subsequent I/O\n2026-10-13T07:56:40,061223-07:00 Buffer I/O error on dev dm-0, logical block 0, async page read\n2026-10-13T07:58:50,596650-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=8192 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T07:58:52,393151-07:00 device-mapper: swapz3: V3 alpha: lower or mapping error -28; rejecting subsequent I/O\n2026-10-13T07:58:52,400085-07:00 Buffer I/O error on dev dm-0, logical block 0, async page read\n2026-10-13T08:00:41,021289-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:02:09,149651-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:03:37,438187-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:04:21,511897-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:05:05,430710-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:05:49,381328-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:07:17,762882-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:08:45,846154-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:10:13,971117-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:10:58,004690-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:11:42,070258-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:12:26,138717-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:13:54,523335-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:15:22,589926-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:16:50,754975-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:17:34,702830-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:18:18,777166-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:19:02,731259-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:20:31,189646-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:21:59,449431-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:23:27,588721-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:24:11,686153-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:24:55,662009-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:25:39,760800-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:27:14,930728-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:28:43,172243-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:30:11,302406-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n2026-10-13T08:30:55,273320-07:00 device-mapper: swapz3: V3 alpha 3.0.0-alpha.8 logical_pages=4096 physical_blocks=10240 window=64 read_cap=0 LIVE GC EXPERIMENTAL\n"
+    },
+    {
+      "name": "kernel_problem_dmesg",
+      "argv": [
+        "bash",
+        "-lc",
+        "sudo -n dmesg --time-format=iso | grep -Ei \"workqueue.*hog|BUG:|Oops:|lockdep|hung task|use-after-free|general protection fault\" | tail -100 || true"
+      ],
+      "exit_code": 0,
+      "output": ""
+    }
+  ]
+}

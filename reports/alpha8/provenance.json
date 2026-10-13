@@ -1,0 +1,59 @@
+{
+  "repository": "k1moradi/swapz",
+  "tested_pr": 59,
+  "tested_branch": "feat/v3-read-bypass-diagnostics",
+  "tested_source_commit": "68dca6fcd2b322524555becfd54d475cdaf973e1",
+  "base_pr57_commit": "2e71c0c90b7f6f4ec96340583a0bc5c517bae97c",
+  "frozen_v22_commit": "3a89ebbeba21c814dcf724e227b31d38445a3f9a",
+  "other_reference_pr57": "2e71c0c90b7f6f4ec96340583a0bc5c517bae97c",
+  "production_blobs": {
+    "kernel/extent-v3/dm-target.c": "ed1ce82e92034bb2b47dd189a7433abcc22edfcd",
+    "kernel/extent-v3/engine.c": "885662604fde89f62d99a9aa211010a8be3f613b",
+    "kernel/extent-v3/authority.c": "8e43663f2ba5b8eb2f0abb824db902a459385188",
+    "kernel/extent-v3/codec.c": "f88d2697a5c15aa068ddd5d7853a5c38af397810",
+    "kernel/extent-v3/Makefile": "be0bb1a01287069c97c6459e016d8f010bb47e74"
+  },
+  "host": {
+    "system": "Ubuntu 26.04.1 x86_64",
+    "kernel_release": "7.0.0-38-generic",
+    "gcc": "15.2",
+    "clang": "23.1.3",
+    "fio": "3.41",
+    "liblz4": "1.10.0"
+  },
+  "production_module": {
+    "filename": "dm-swapz.ko",
+    "loaded_name": "dm_swapz",
+    "target_type": "swapz3",
+    "vermagic": "7.0.0-38-generic SMP preempt mod_unload modversions",
+    "srcversion": "BC8065C2CA507B0C1113ECF",
+    "W1_sha256": "2dfc2b809ac1c8ecc9e48340a2cb25af6eff3a957abf74d8287c9667acc574eb",
+    "W2_sha256": "a8cba8e1d7ffe84f91cf125fea5441885cc3d71c2e08e0bf1a3de4d11155332e",
+    "loaded_benchmark_build": "W=1"
+  },
+  "owned_backing": {
+    "configfs_instance": "nullb_swapz_pr59_68dca6f",
+    "device": "/dev/nullb_swapz_pr59_68dca6f",
+    "major_minor": "251:0",
+    "size_mib": 40,
+    "memory_backed": 1,
+    "logical_block_bytes": 512,
+    "mbps": 20,
+    "completion_nsec": 500000,
+    "queue_mode": 2,
+    "hw_queue_depth": 64,
+    "submit_queues": 1
+  },
+  "task_changes": "validation report, scripts, fixture copies, and helper sources only; no production kernel source changed",
+  "ci_at_candidate_head": {
+    "build_exact_c_sanitizer": "https://github.com/k1moradi/swapz/actions/runs/38397405438",
+    "teardown": "https://github.com/k1moradi/swapz/actions/runs/38397405441",
+    "combined": "https://github.com/k1moradi/swapz/actions/runs/38397405457"
+  },
+  "safety": {
+    "rebooted": false,
+    "physical_media_benchmarked": false,
+    "swapoff_or_swapon": false,
+    "protected_physical_media_touched": false
+  }
+}

@@ -1,0 +1,10 @@
+filename:       /tmp/swapz-alpha8-evidence/build/dm-swapz-W2.ko
+alias:          dm-swapz3
+description:    V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC
+author:         swapz main developer
+license:        GPL
+srcversion:     BC8065C2CA507B0C1113ECF
+depends:        lz4_compress
+name:           dm_swapz
+retpoline:      Y
+vermagic:       7.0.0-38-generic SMP preempt mod_unload modversions 

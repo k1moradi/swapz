@@ -1,0 +1,13 @@
+{
+  "seed": 0,
+  "generator": "random.Random(seed).randbytes(4096), then copy first 587 bytes to final 587 bytes",
+  "lz4": "LZ4_compress_fast(input=4096, capacity=3568, acceleration=1)",
+  "liblz4_path": "liblz4.so.1",
+  "liblz4_version": "1.10.0",
+  "compressed_length": 3535,
+  "raw_fallback": false,
+  "decompression_roundtrip": "PASS",
+  "page_path": "reports/alpha8/fixtures/full-destination-3535-page.bin",
+  "page_sha256": "2c504b208c007e125311590f602d9965dcdc12545385b990c87e4f8539309135",
+  "compressed_sha256": "34e11ed0e8d2224c2a655c71e001106921822dbb91e41dec86dfda1bc802fb33"
+}
