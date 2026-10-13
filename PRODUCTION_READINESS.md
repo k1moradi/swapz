@@ -252,6 +252,19 @@ complete runs retain their exact committed-prefix semantics.
 No group crosses a 1MiB segment boundary. Any attempted
 unrelated stage or discard during paused transactions is rejected.
 
+**Still-blocking mixed-format request economics:** the loaded
+1,024-write alpha.5 fixture contained **819 compressed and 205
+incompressible/raw pages**. Alpha.6's bounded bulk submission applies
+only to compressed extents: each raw fallback still produces one
+synchronous `dm_io` lower write. So on the same fixture, alpha.6
+still entails **at least 205 raw lower submissions** independently
+of any gains aggregating compressed extents. This source-level floor
+does NOT equal independently measured block-layer requests, but it
+means **compressed-only batching cannot plausibly erase the entire
+V2.2 26-request deficit**. Mixed raw/compressed lower streaming
+is a separate, high-priority architectural development requirement,
+not a feature to assume has been implemented or qualified in PR #54.
+
 Three **same-binary** controls:
 `lower_bulk=0` historical per-extent synchronous calls,
 `lower_bulk=1` **default adjacent-only**, with NO new padding
