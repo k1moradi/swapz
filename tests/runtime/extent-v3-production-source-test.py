@@ -33,6 +33,23 @@ def body(symbol: str) -> str:
     raise AssertionError("Unclosed function: " + symbol)
 
 
+def source_body(symbol: str, source: str) -> str:
+    match = re.search(r"(?:static\\s+)?(?:int|void)\\s+" + re.escape(symbol) +
+                      r"\\s*\\([^;]*?\\)\\s*\\{", source, re.S)
+    if not match:
+        raise AssertionError(f"Missing source symbol {symbol}")
+    start = match.end()
+    depth = 1
+    for pos in range(start, len(source)):
+        if source[pos] == "{":
+            depth += 1
+        elif source[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:pos]
+    raise AssertionError("Unclosed source function: " + symbol)
+
+
 class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
@@ -113,10 +130,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_bounded_lower_run_aggregation_preserves_commit_gate(self):
         engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
         authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
-        writer = body("sv3_engine_write_window_batched", engine)
-        flush = body("sv3_bulk_flush", engine)
-        pause = body("sv3_batch_pause", authority)
-        resume = body("sv3_batch_resume", authority)
+        writer = source_body("sv3_engine_write_window_batched", engine)
+        flush = source_body("sv3_bulk_flush", engine)
+        pause = source_body("sv3_batch_pause", authority)
+        resume = source_body("sv3_batch_resume", authority)
         self.assertIn("SV3_BULK_BLOCKS 64U",
                       (ROOT / "kernel/extent-v3/engine.h").read_text())
         self.assertIn("sv3_engine_write_window_batched(&ctx->engine", DM)
@@ -132,7 +149,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->batch_pending++", pause)
         self.assertIn("a->batch_replaying = 1", resume)
         self.assertIn("ctx->engine.bulk_writes", body("sv3_status"))
-        self.assertIn("!a->batch_pending", body("sv3_gc_commit_rotation", authority))
+        self.assertIn("!a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
         choose = body("sv3_gc_choose_victim")
