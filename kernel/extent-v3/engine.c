@@ -288,7 +288,7 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 			  sv3_u8 *committed_pages)
 {
 	sv3_u16 completed = 0;
-	sv3_u8 i;
+	sv3_u8 i, raw_entries = 0;
 	int error;
 
 	if (!count)
@@ -346,7 +346,16 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 			return cleanup ? cleanup : error;
 		}
 		*committed_pages += e->bulk_takes[i];
+		if (e->bulk_raw[i])
+			raw_entries++;
 	}
+	/* These composition counters count fully published runs, not
+	 * attempted I/O and not independent backing-device requests. */
+	e->bulk_raw_entries += raw_entries;
+	if (raw_entries == count)
+		e->bulk_raw_only_runs++;
+	else if (raw_entries)
+		e->bulk_mixed_runs++;
 	return 0;
 }
 
