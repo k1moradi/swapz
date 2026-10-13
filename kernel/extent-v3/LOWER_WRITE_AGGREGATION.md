@@ -26,6 +26,34 @@ sustained win: they delayed write completion and increased lower reads
 on difficult record sizes. Do NOT claim that format bytes/packing
 scores imply hardware request or endurance savings.
 
+## Release-significant unresolved limit: 205 raw-page submissions
+
+The original **same-input** 1024-write benchmark included **819 compressed
+pages and 205 raw/incompressible pages**. Alpha.6's `lower_bulk=1/2`
+combines **compressed extents only**: each raw fallback still calls
+`sv3_raw_write()` -> `sv3_lower_write()` -> one synchronous
+`dm_io` per RAW 4KiB page. Thus the tested fixture imposes
+**at least 205 RAW lower submit calls**, before any compressed-extent
+writes, whereas actual loaded V2.2 completed its entire mixed fixture
+in **26 backing write requests**.
+
+This is a *provable source-level lower bound on V3 submissions*, NOT
+a new loaded host request count or a guarantee about block-layer
+merging/splitting. It is strong evidence that **compressed-only
+aggregation in alpha.6 cannot by itself fix the reported request
+regression**. Crucially, no source CI result should be presented as
+proof alpha.6 now beats V2.2 under that mixed workload.
+
+**Follow-on architecture priority:** stage *both* raw and compressed
+output into a single bounded physical write stream, without changing
+on-media raw/compressed authority, mapping generations, CRCs, or
+upper completion and barrier sequencing. First compare the saved
+`lower_bulk=0/1/2` controls to quantify the remaining raw
+submission floor and size-class/write-byte tradeoffs. Then design
+a separate, independently reviewed mixed raw+compressed grouping
+change rather than silently adding unsafe cross-format batching
+to the unqualified alpha.6 release candidate.
+
 ## Actual alpha.6 production behavior
 
 The same SWZ3 physical 4/8/16KiB extents and CRCs are retained.
