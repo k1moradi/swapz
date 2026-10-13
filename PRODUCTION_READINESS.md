@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.6.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.7 (draft mixed lower-write candidate).** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -10,6 +10,31 @@ flush operations and the device's actual logical/physical sector and
 preferred I/O sizes, with acceptable swap-in p99 and CPU. 4KiB
 equivalents are a normalization, not physical operation counts.
 Correctness tests are mandatory but do not establish this outcome.
+
+## Alpha.7 mixed-format qualification remains BLOCKED on loaded evidence
+
+[Draft PR #55](https://github.com/k1moradi/swapz/pull/55) stacks a
+bounded mixed compressed/raw lower-write stream on alpha.6's deferred
+publication. The previous 1024-write comparator contained **205 raw
+fallback pages**, each requiring a separate `dm_io` submission in
+alpha.6. The new implementation changes source submission behavior,
+but **no actual backing-device request improvement is established**.
+
+The candidate's exact-production-C tests exercise raw-only/mixed
+grouping, raw CRC readback, uncertain lower I/O, committed prefix,
+overwrites (including raw/compressed representation changes) and the
+same 819/205 class distribution across reset rootless windows.
+These are modeled lower callbacks, not matched loaded 1024-page runs.
+CI must pass at the FINAL SHA before independent testing begins.
+
+Release gates: loaded owned-null_blk correctness under mixed
+FUA/PREFLUSH, discard, overwrite, GC, failure injection, suspend/drain;
+independent backing-device request and byte accounting; a repeated
+matched V2.2 comparison; achieved rate, CPU and p95/p99 latency.
+A full failure prohibits a broad performance campaign. Production
+deployment and physical media remain out of scope.
+
+See [the exact alpha.7 protocol](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md).
 
 ## What is already supported by evidence
 
