@@ -64,6 +64,37 @@ physical storage tests. See
 and [fault qualification gate](
 kernel/extent-v3/LOWER_WRITE_FAULT_QUALIFICATION.md).
 
+## Independent alpha.8 evidence and anonymous-memory target (2026-10-13)
+
+[PR #60](https://github.com/k1moradi/swapz/pull/60) independently
+validated [alpha.8 PR #59](https://github.com/k1moradi/swapz/pull/59).
+Loaded same-page/disjoint-read, barriers, GC, suspend/drain and
+controlled corrupted-backing fail-close scenarios passed **within
+the documented test scope**; device-originated read/write/flush fault
+coverage, kernel-worker CPU accounting and asynchronous buffer error
+attribution remain incomplete.
+
+At matched QD8 / 5,000 IOPS / 150,000 operations, lower write requests
+were **V2.2=118782; alpha.8 bypass-off=119438; bypass-on=119512**.
+Bypass-on did not beat bypass-off or V2.2, so **do not enable it by
+default or treat saturated write batching improvements as a
+matched-rate victory**. The direct-I/O synthetic fixture used in that
+campaign is not a measured Linux anonymous swap population.
+
+The existing alpha.7 production path **already** attempts LZ4 then
+falls back to an uncompressed 4KiB raw record if the output cannot
+fit 3,568 bytes. The primary next gate is the
+[anonymous-page compression qualification](kernel/extent-v3/ANON_COMPRESSIBILITY_QUALIFICATION.md).
+This observational branch adds true kernel codec-input size bins
+without changing this raw/compressed decision. Its counters measure
+attempts, **not acknowledged operations**, unique pages or real
+media I/O. A speculative high-entropy prefilter is explicitly
+deferred until a reproducible end-to-end CPU + lower-I/O win has
+been demonstrated on distributions relevant to anonymous memory.
+
+No physical-media, active-swap, swapoff/swapon or reboot permission
+is implied.
+
 ## What is already supported by evidence
 
 Codex's **independent V3.0.0-alpha.1** loaded host [PR #46 report](
