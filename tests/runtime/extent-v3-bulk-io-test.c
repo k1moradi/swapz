@@ -32,6 +32,7 @@ static unsigned int fail_on_run;
 static unsigned int corrupt_on_run;
 static unsigned int short_on_run;
 static unsigned int maps_visible_during_run;
+static unsigned int ownership_violation;
 
 static int read_blocks(void *opaque, sv3_u32 block, sv3_u8 blocks, sv3_u8 *out)
 {
@@ -71,6 +72,16 @@ static int write_run(void *opaque, sv3_u32 block, sv3_u16 blocks,
 	    (block + blocks - 1U) / SV3_SEGMENT_BLOCKS)
 		return -ERANGE;
 	run_calls++;
+	{
+		struct sv3_tx unauthorized;
+		sv3_u32 logical = 0;
+
+		/* Lower callback executes with staged-but-UNPUBLISHED maps.
+		 * No unrelated discard or direct stage may race its ownership. */
+		if (sv3_stage(&a, &logical, 1, 1, &unauthorized) != -EBUSY ||
+		    sv3_discard_page(&a, logical) != -EBUSY)
+			ownership_violation++;
+	}
 	for (i = 0; i < SV3_MAX_RECORDS; ++i)
 		if (maps[i].valid)
 			maps_visible_during_run++;
@@ -115,6 +126,7 @@ static int setup(void)
 	extent_calls = run_calls = read_calls = 0;
 	fail_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
+	ownership_violation = 0;
 	for (i = 0; i < SV3_MAX_RECORDS; ++i) {
 		sv3_u16 length = i % 3 == 0 ? 2089 : i % 3 == 1 ? 1032 : 2200;
 
@@ -156,7 +168,7 @@ static int test_real_aggregation_and_readback(void)
 	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
 					     &committed) == 0);
 	CHECK(committed == 64);
-	CHECK(!maps_visible_during_run);
+	CHECK(!maps_visible_during_run && !ownership_violation);
 	CHECK(e.bulk_extents >= 3 && run_calls >= 1);
 	CHECK(run_calls < e.bulk_extents);
 	CHECK(run_calls < 20);
@@ -224,6 +236,60 @@ static int test_write_verify_stays_serialized(void)
 	return 0;
 }
 
+static int test_forged_deferred_snapshot_is_rejected(void)
+{
+	struct sv3_tx tx, forged;
+	sv3_u32 page = 0;
+
+	CHECK(setup() == 0);
+	CHECK(sv3_stage_batch(&a, &page, 1, 1, &tx) == 0);
+	CHECK(sv3_batch_pause(&a, &tx) == 0);
+	CHECK(!maps[0].valid && a.batch_pending == 1);
+	forged = tx;
+	forged.records[0].logical_page = 1;
+	CHECK(sv3_batch_resume(&a, &forged) == -ESTALE);
+	CHECK(!maps[0].valid && !maps[1].valid);
+	CHECK(sv3_batch_resume(&a, &tx) == 0);
+	CHECK(sv3_abort(&a, &tx) == 0);
+	CHECK(!a.batch_pending && !a.in_flight && !maps[0].valid);
+	return 0;
+}
+
+static int test_error_after_completed_prefix_at_segment_boundary(void)
+{
+	sv3_u8 committed = 0;
+	sv3_u8 raw[SV3_BLOCK_BYTES];
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	memset(raw, 0x83, sizeof(raw));
+	/* Fill foreground segment0 to within 4 blocks, while preserving
+	 * one existing valid logical mapping outside the 0..63 window. */
+	for (i = 0; i < SV3_SEGMENT_BLOCKS - 4; ++i) {
+		struct sv3_tx tx;
+		sv3_u32 page = 80;
+		sv3_u8 complete = 0;
+
+		CHECK(sv3_stage(&a, &page, 1, 1, &tx) == 0);
+		CHECK(write_extent(NULL, tx.start_block, 1, raw,
+				   &complete) == 0);
+		CHECK(sv3_finish_raw(&a, &tx, raw, complete, 0) == 0);
+	}
+	CHECK(a.next_block == SV3_SEGMENT_BLOCKS - 4);
+	/* The last four block slots were intentionally left empty: the
+	 * previous loop allocated 252 blocks. */
+	CHECK(maps[80].valid && maps[80].raw);
+	fail_on_run = 2;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == -EIO);
+	CHECK(run_calls == 2 && committed > 0 && committed < 64);
+	CHECK(!ownership_violation);
+	CHECK(validate_prefix(committed) == 0);
+	CHECK(maps[80].valid && maps[80].raw_crc32c ==
+	      sv3_crc32c_bytes(raw, sizeof(raw)));
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -233,6 +299,8 @@ int main(void)
 	CHECK(test_short_run_acks_nothing() == 0); passed++;
 	CHECK(test_duplicate_slots_use_original_sequential_path() == 0); passed++;
 	CHECK(test_write_verify_stays_serialized() == 0); passed++;
+	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
+	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
 	return 0;
 }
