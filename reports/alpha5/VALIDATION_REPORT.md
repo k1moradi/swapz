@@ -1,8 +1,8 @@
 # swapz V3.0.0-alpha.5 independent qualification
 
-Date: 2026-10-12  
-Test host: `Inspiron1564Linux`, Ubuntu 26.04.1, x86_64, kernel `7.0.0-38-generic`  
-Validation worktree: `/tmp/swapz-v3-alpha5-validation-cb8624b`  
+Date: 2026-10-12
+Test host: `Inspiron1564Linux`, Ubuntu 26.04.1, x86_64, kernel `7.0.0-38-generic`
+Validation worktree: `/tmp/swapz-v3-alpha5-validation-cb8624b`
 Evidence directory (raw logs retained on host): `/tmp/swapz-v3-alpha5-evidence-cb8624b`
 
 ## Executive result
