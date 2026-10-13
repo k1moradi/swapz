@@ -94,8 +94,14 @@ struct sv3_authority {
 	 */
 	sv3_u8 batch_pending;
 	sv3_u8 batch_replaying;
+	sv3_u8 batch_stage_allowed;
+	sv3_u8 batch_consumed;
 	sv3_u32 batch_segment;
 	sv3_u32 batch_first_sequence;
+	/* CRC of the exact immutable staged transaction snapshots,
+	 * including record identities and generations. A forged caller
+	 * snapshot can never publish an unrelated page into a batch. */
+	sv3_u32 batch_hashes[SV3_MAX_RECORDS];
 };
 
 /*
@@ -138,6 +144,9 @@ int sv3_finish(struct sv3_authority *authority, const struct sv3_tx *tx,
  * Failed lower writes require resume+abort of every snapshot. No upper BIO
  * may be acknowledged during this protocol.
  */
+int sv3_stage_batch(struct sv3_authority *authority,
+		    const sv3_u32 *logical_pages, sv3_u8 count,
+		    sv3_u8 blocks, struct sv3_tx *out);
 int sv3_batch_pause(struct sv3_authority *authority, const struct sv3_tx *tx);
 int sv3_batch_resume(struct sv3_authority *authority, const struct sv3_tx *tx);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
