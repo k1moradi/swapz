@@ -34,7 +34,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.6"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.7"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 
@@ -47,6 +47,8 @@ struct sv3_pending_bio {
 	struct bio *bio;
 	sv3_u32 logical;
 	sv3_u16 length;
+	/* True only for the full 4KiB incompressible fallback. */
+	sv3_u8 raw;
 };
 
 struct sv3_dm {
@@ -349,10 +351,14 @@ static void sv3_order_window(struct sv3_dm *ctx)
 		sv3_u8 i;
 
 		for (i = 0; i < ctx->batch_count; ++i)
-			if (!ctx->used[i] &&
+			if (!ctx->used[i] && !ctx->batch[i].raw &&
 			    (largest < 0 ||
 			     ctx->batch[i].length > ctx->batch[largest].length))
 				largest = i;
+		/* All raw pages go after the compressed DP-planned prefix so
+		 * they can share one physically contiguous, deferred lower run. */
+		if (largest < 0)
+			break;
 		ctx->used[largest] = 1;
 		ctx->planned_to_batch[position++] = (u8)largest;
 
@@ -360,7 +366,7 @@ static void sv3_order_window(struct sv3_dm *ctx)
 		for (i = 0; i < ctx->batch_count; ++i) {
 			int remaining;
 
-			if (ctx->used[i])
+			if (ctx->used[i] || ctx->batch[i].raw)
 				continue;
 			remaining = SV3_BLOCK_BYTES - 48 -
 				ctx->batch[largest].length - ctx->batch[i].length;
@@ -374,6 +380,14 @@ static void sv3_order_window(struct sv3_dm *ctx)
 			ctx->planned_to_batch[position++] = (u8)partner;
 		}
 	}
+	/* The unsorted tail contains raw pages in their original order. */
+	{
+		sv3_u8 index;
+
+		for (index = 0; index < ctx->batch_count; ++index)
+			if (!ctx->used[index])
+				ctx->planned_to_batch[position++] = index;
+	}
 	for (position = 0; position < ctx->batch_count; ++position) {
 		sv3_u8 index = ctx->planned_to_batch[position];
 
@@ -383,6 +397,7 @@ static void sv3_order_window(struct sv3_dm *ctx)
 			.logical_page = ctx->batch[index].logical,
 			.payload = ctx->batch_bytes + (size_t)index * SV3_BLOCK_BYTES,
 			.length = ctx->batch[index].length,
+			.raw = ctx->batch[index].raw,
 		};
 	}
 }
@@ -772,7 +787,10 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 
 		if (index < committed && !ctx->failed) {
 			ctx->logical_write_bytes += SV3_BLOCK_BYTES;
-			ctx->compressed_pages++;
+			if (ctx->planned[index].raw)
+				ctx->raw_pages++;
+			else
+				ctx->compressed_pages++;
 			sv3_complete(bio, 0);
 		} else {
 			sv3_complete(bio, error ? error : -EIO);
@@ -867,6 +885,24 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 				(size_t)ctx->batch_count * SV3_BLOCK_BYTES,
 			SV3_BLOCK_BYTES, SV3_MAX_COMPRESSED, 1,
 			ctx->lz4_workmem);
+	if (length <= 0 && ctx->engine.bulk_enabled &&
+	    !ctx->engine.verify_after_write) {
+		/* Preserve the complete original 4KiB page in worker-owned
+		 * staging. Admission and FUA ordering match compressed BIOs;
+		 * CRC authority is published only after the shared lower write. */
+		memcpy(ctx->batch_bytes +
+		       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
+		       ctx->input_page, SV3_BLOCK_BYTES);
+		ctx->batch[ctx->batch_count++] = (struct sv3_pending_bio) {
+			.bio = bio,
+			.logical = logical,
+			.length = SV3_BLOCK_BYTES,
+			.raw = 1,
+		};
+		if (bio->bi_opf & REQ_FUA)
+			sv3_flush_window(ctx);
+		return 0;
+	}
 	if (length <= 0) {
 		error = sv3_flush_window(ctx);
 		if (error)
@@ -1517,6 +1553,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
+		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
@@ -1550,6 +1587,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,
+		       ctx->engine.bulk_mixed_runs,
+		       ctx->engine.bulk_raw_only_runs,
+		       ctx->engine.bulk_raw_entries,
 		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->window_records_total, ctx->coalesce_ms,
 		       ctx->window_bins[0], ctx->window_bins[1],

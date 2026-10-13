@@ -66,6 +66,15 @@ block-layer request counts, not just `dm_io` invocation totals.
 A huge reduction in lower requests is a **test hypothesis**,
 not a source-proven hardware result.
 
+**V3.0.0-alpha.7** [draft PR #55](https://github.com/k1moradi/swapz/pull/55)
+now explores mixed raw/compressed grouping to address the 205
+previously independent raw writes in the matched test. It reuses
+alpha.6's bounded deferred-publication authority protocol and preserves
+the same-binary `lower_bulk=0` and verification controls. This is an
+**unqualified candidate**, not an independently loaded request-count win;
+see [the mixed lower-write gate](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md).
+Do not relax the `null_blk`-only guard or extrapolate to active storage.
+
 **Priority ordering:** byte-exact and FUA/fault safety first;
 then lower request count versus V2.2; then read amplification
 and online window occupancy; then GC cost/read duplication,

@@ -54,7 +54,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.6"', DM)
+        version = (ROOT / "kernel/extent-v3/VERSION").read_text().strip()
+        self.assertRegex(version, r"^3\.0\.0-alpha\.[0-9]+$")
+        self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
         self.assertIn("3.0.0-alpha.6", GOALS)
@@ -160,6 +162,32 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("batch_hashes", authority)
         self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
+
+    def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
+        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
+        writer = source_body("sv3_engine_write_window_batched", engine)
+        flush = source_body("sv3_bulk_flush", engine)
+        accept = body("sv3_accept_write")
+        complete = body("sv3_flush_window")
+        process = body("sv3_process")
+        self.assertIn("!ctx->engine.verify_after_write", accept)
+        self.assertIn("ctx->engine.bulk_enabled", accept)
+        self.assertIn("ctx->batch_count++", accept)
+        self.assertIn(".raw = 1", accept)
+        self.assertIn("ctx->batch[index].raw", body("sv3_order_window"))
+        self.assertIn("e->bulk_raw[staged] = raw", writer)
+        self.assertIn("sv3_finish_raw(e->authority, tx", flush)
+        self.assertLess(flush.index("e->io.write_run"),
+                        flush.index("sv3_finish_raw(e->authority, tx"))
+        self.assertIn("ctx->planned[index].raw", complete)
+        self.assertIn("bulk_mixed_io=%u", body("sv3_status"))
+        self.assertIn("bulk_raw_only_io=%u", body("sv3_status"))
+        self.assertIn("bulk_raw_entries=%u", body("sv3_status"))
+        self.assertLess(complete.index("sv3_issue_flush(ctx)"),
+                        complete.index("sv3_complete(bio, 0)"))
+        self.assertIn("sv3_flush_window(ctx)", process)
+        self.assertIn("REQ_PREFLUSH", process)
+        self.assertIn("sv3_raw_write(ctx, bio, logical)", accept)
 
     def test_gc_refuses_any_unpublished_lower_group(self):
         compact = body("sv3_gc_compact_one")
