@@ -55,7 +55,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
         version = (ROOT / "kernel/extent-v3/VERSION").read_text().strip()
-        self.assertRegex(version, r"^3\\.0\\.0-alpha\\.[0-9]+$")
+        self.assertRegex(version, r"^3\.0\.0-alpha\.[0-9]+$")
         self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
