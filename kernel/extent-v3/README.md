@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.5 experimental Device Mapper target (PR #52)
+# Current development: V3.0.0-alpha.6 experimental Device Mapper target (PR #52)
 
 The active `dm-swapz.ko` (target name `swapz3`) is built from
 `kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and
