@@ -44,6 +44,35 @@ sizes, filesystem cluster sizes and device-internal programming can differ.
 Profile and qualify per device class; do not infer NAND endurance from
 host-visible sectors.
 
+## Current primary engineering blocker: lower-write request explosion
+
+The independent [alpha.5 matched 1024-write loaded measurement](https://github.com/k1moradi/swapz/pull/53)
+found **419 V3 synchronous extent writes** versus **26 real V2.2
+streaming writes**, with V3 moving **2.2% MORE written bytes**.
+Thus the bottleneck is not merely imperfect object-size sorting:
+the real online output I/O submission pipeline destroys the request
+economics of otherwise compact SWZ3 extents.
+
+**V3.0.0-alpha.6** [PR #54](https://github.com/k1moradi/swapz/pull/54)
+prioritizes bounded **adjacent physical lower-write aggregation
+without early authority publication**. Separate `lower_bulk=0`
+historical calls, `lower_bulk=1` adjacent-only (no added padding
+bytes, DEFAULT), and `lower_bulk=2` padding-permitted (request-versus
+write-byte control) within the SAME tested module. Up to 64 lower
+4KiB units can be transferred as one synchronous `dm_io` call,
+while each 4/8/16KiB extent retains its immutable format and CRC
+and gets published only after complete lower I/O. Compare exact
+block-layer request counts, not just `dm_io` invocation totals.
+A huge reduction in lower requests is a **test hypothesis**,
+not a source-proven hardware result.
+
+**Priority ordering:** byte-exact and FUA/fault safety first;
+then lower request count versus V2.2; then read amplification
+and online window occupancy; then GC cost/read duplication,
+CPU and p99; finally separately authorized physical-media testing.
+A better packing ratio does NOT offset unacceptable cold reads
+or false completion.
+
 ## Product direction
 
 **Minimize actually observed lower-device read/write cost on slow
