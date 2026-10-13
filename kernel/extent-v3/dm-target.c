@@ -1274,7 +1274,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int error;
 
 	if (argc < 1 || argc > 8 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0|1]";
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1296,7 +1296,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			 flush_fail_nth > 64U))
 		return -EINVAL;
 	if (argc > 7 && (kstrtou32(argv[7], 10, &lower_bulk) ||
-			 lower_bulk > 1U))
+			 lower_bulk > 2U))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
