@@ -72,7 +72,7 @@ def page_bytes(seed, index, profile):
         prefix = 512 + (index * 29) % 3072
         b[:prefix] = raw[:prefix]
         for pos in range(prefix, PAGE, 64):
-            b[pos:min(pos + 16, PAGE)] = b"MEM:node:value:42"[:PAGE - pos]
+            b[pos:min(pos + 16, PAGE)] = b"MEM:node:value:42"[:min(16, PAGE - pos)]
     else:
         raise ValueError(profile)
     return bytes(b)
