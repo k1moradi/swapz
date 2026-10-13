@@ -107,6 +107,7 @@ static void prepare(struct sv3_compressed_page *pages, sv3_u8 count,
 		pages[index].logical_page = base + index;
 		pages[index].payload = originals[index];
 		pages[index].length = sizeof(originals[index]);
+		pages[index].raw = 0;
 	}
 }
 

@@ -66,6 +66,11 @@ Counters are not substitute evidence of lower-media improvements.
 
 ## Qualification gates
 
+For post-PR #56 owned-null_blk **synthetic lower-write failure**
+qualification (including mixed-run first/later EIO and GC relocation), see
+[LOWER_WRITE_FAULT_QUALIFICATION.md](LOWER_WRITE_FAULT_QUALIFICATION.md).
+This is opt-in and does not constitute a device-originated torn-write test.
+
 The production-source exact-C test extends
 `tests/runtime/extent-v3-bulk-io-test.c` with mixed compressed/raw and
 raw-only grouping, physical byte/request-call comparison to the
