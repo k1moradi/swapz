@@ -123,6 +123,7 @@ static int setup(void)
 	e.read_scratch = reader;
 	e.bulk_scratch = bulk;
 	e.bulk_txs = bulk_txs;
+	e.bulk_enabled = 1;
 	extent_calls = run_calls = read_calls = 0;
 	fail_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
@@ -222,6 +223,20 @@ static int test_duplicate_slots_use_original_sequential_path(void)
 	return 0;
 }
 
+static int test_bulk_control_uses_original_lower_requests(void)
+{
+	sv3_u8 committed = 0;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == 0);
+	CHECK(committed == 64 && run_calls == 0);
+	CHECK(extent_calls > 3 && e.bulk_extents == 0);
+	CHECK(validate_prefix(64) == 0);
+	return 0;
+}
+
 static int test_write_verify_stays_serialized(void)
 {
 	sv3_u8 committed = 0;
@@ -299,6 +314,7 @@ int main(void)
 	CHECK(test_short_run_acks_nothing() == 0); passed++;
 	CHECK(test_duplicate_slots_use_original_sequential_path() == 0); passed++;
 	CHECK(test_write_verify_stays_serialized() == 0); passed++;
+	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
