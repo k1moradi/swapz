@@ -1,4 +1,4 @@
-# swapz V3.0.0-alpha.5 — loaded-kernel admission gate for Codex
+# swapz V3.0.0-alpha.6 — loaded-kernel admission gate for Codex
 
 **THIS IS NOT AN AUTHORIZATION TO RUN V3 ON A PHYSICAL DISK OR AS SYSTEM SWAP.**
 
@@ -107,7 +107,7 @@ The active release gate ledger is [PRODUCTION_READINESS.md](../../PRODUCTION_REA
   device ownership.
 - No comparisons to the V2.2 baseline with matched reader achieved IOPS.
 
-The project remains **draft V3.0.0-alpha.5**, not a production release.
+The project remains **draft V3.0.0-alpha.6**, not a production release.
 No SD/HDD/SSD tests or unattended `swapon` should occur before a
 separately reviewed release-gate commit removes the null_blk-only guard.
 
