@@ -82,9 +82,21 @@ static int write_run(void *opaque, sv3_u32 block, sv3_u16 blocks,
 		    sv3_discard_page(&a, logical) != -EBUSY)
 			ownership_violation++;
 	}
-	for (i = 0; i < SV3_MAX_RECORDS; ++i)
-		if (maps[i].valid)
-			maps_visible_during_run++;
+	/* Older, already completed combined runs legitimately published
+	 * mappings. Only the current run's NEW generations must remain
+	 * invisible until this lower callback returns success. */
+	for (i = 0; i < a.batch_pending; ++i) {
+		const struct sv3_tx *tx = &bulk_txs[i];
+		sv3_u8 j;
+
+		for (j = 0; j < tx->count; ++j) {
+			sv3_u32 logical = tx->records[j].logical_page;
+
+			if (maps[logical].generation >=
+			    tx->records[j].generation)
+				maps_visible_during_run++;
+		}
+	}
 	if (fail_on_run && run_calls == fail_on_run)
 		return -EIO;
 	if (short_on_run && run_calls == short_on_run) {
