@@ -215,6 +215,8 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         worker.rindex("cond_resched();"))
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
         self.assertIn("V3 drain invariant: accepted BIOs remain", drain)
+        self.assertIn("ctx->authority.batch_pending", drain)
+        self.assertIn("ctx->authority.in_flight", drain)
         self.assertIn("sv3_fail(ctx, -EUCLEAN)", drain)
 
     def test_raw_crc_protection_and_gc_relocation(self):
