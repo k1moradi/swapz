@@ -37,7 +37,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.5"', DM)
+        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.6"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
         self.assertIn("3.0.0-alpha.5", GOALS)
@@ -109,6 +109,30 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("flush_injected=%llu flush_fault_nth=%u", DM)
         self.assertIn("flush_fail_nth > 64U", body("sv3_ctr"))
         self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("sv3_ctr"))
+
+    def test_bounded_lower_run_aggregation_preserves_commit_gate(self):
+        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
+        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        writer = body("sv3_engine_write_window_batched", engine)
+        flush = body("sv3_bulk_flush", engine)
+        pause = body("sv3_batch_pause", authority)
+        resume = body("sv3_batch_resume", authority)
+        self.assertIn("SV3_BULK_BLOCKS 64U",
+                      (ROOT / "kernel/extent-v3/engine.h").read_text())
+        self.assertIn("sv3_engine_write_window_batched(&ctx->engine", DM)
+        self.assertIn("ctx->engine.io.write_run = sv3_lower_write_run", DM)
+        self.assertIn("sv3_batch_pause(e->authority, tx)", writer)
+        self.assertIn("sv3_bulk_flush(e, run_start", writer)
+        self.assertIn("sv3_batch_resume(e->authority, tx)", flush)
+        self.assertLess(flush.index("e->io.write_run"),
+                        flush.index("sv3_batch_resume(e->authority, tx)"))
+        self.assertLess(flush.index("sv3_batch_resume(e->authority, tx)"),
+                        flush.index("sv3_finish(e->authority, tx"))
+        self.assertIn("sv3_bulk_abort(e, count, 0)", flush)
+        self.assertIn("a->batch_pending++", pause)
+        self.assertIn("a->batch_replaying = 1", resume)
+        self.assertIn("ctx->engine.bulk_writes", body("sv3_status"))
+        self.assertIn("!a->batch_pending", body("sv3_gc_commit_rotation", authority))
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
         choose = body("sv3_gc_choose_victim")
