@@ -52,6 +52,18 @@ Existing `lower_bulk=0` and `verify_after_write=1` retain the original
 serialized raw path and are diagnostic controls. Compressed-only
 singletons/duplicate-slot control behavior also remains unchanged.
 
+## Run-composition telemetry
+
+DM info status now exposes `bulk_mixed_io`, `bulk_raw_only_io`
+and `bulk_raw_entries`. These count **successfully fully published**
+runs/entries only. Existing `bulk_io`, `bulk_extents`, `raw`,
+`compressed`, completed/attempted physical bytes and requests remain
+available for reconciliation. A run containing both formats cannot
+meaningfully assign its single submission to raw versus compressed:
+use the composition counters to identify it, and separate backing
+`/sys/block/nullb*/stat` deltas to determine actual requests.
+Counters are not substitute evidence of lower-media improvements.
+
 ## Qualification gates
 
 The production-source exact-C test extends
