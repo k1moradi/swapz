@@ -90,6 +90,7 @@ struct sv3_dm {
 	sv3_u32 *gc_scores;  /* authoritative payload+descriptor bytes */
 	sv3_u32 *gc_io_scores; /* conservative read+write cost per victim */
 	sv3_u16 *gc_live_counts; /* count for ties/control comparison */
+	sv3_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	sv3_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	sv3_u32 segment_count;
 	sv3_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
@@ -502,6 +503,9 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_live_counts));
 	memset(ctx->gc_io_scores, 0,
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_io_scores));
+	memset(ctx->gc_min_live_blocks, 0,
+	       (size_t)ctx->segment_count *
+			       sizeof(*ctx->gc_min_live_blocks));
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
 		const struct sv3_map *m = &ctx->maps[logical];
 		sv3_u32 cost, io_cost;
@@ -521,6 +525,8 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 			return -EOVERFLOW;
 		ctx->gc_scores[segment] += cost;
 		ctx->gc_io_scores[segment] += io_cost;
+		ctx->gc_min_live_blocks[segment] +=
+					sv3_gc_min_live_blocks(m);
 		ctx->gc_live_counts[segment]++;
 	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
@@ -536,7 +542,8 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		/* Reject a provably non-reclaimable full victim BEFORE paying
 		 * for up to 1MiB of GC reads/writes. Such an eviction could
 		 * only fill its sole reserve destination and return ENOSPC. */
-		if (!sv3_gc_has_possible_headroom(ctx->gc_scores[segment]))
+		if (!sv3_gc_candidate_can_free_block(ctx->gc_scores[segment],
+					      ctx->gc_min_live_blocks[segment]))
 			continue;
 		switch (ctx->gc_cost_policy) {
 		case 0:
@@ -1241,6 +1248,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	kvfree(ctx->gc_scores);
 	kvfree(ctx->gc_io_scores);
 	kvfree(ctx->gc_live_counts);
+	kvfree(ctx->gc_min_live_blocks);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
@@ -1359,6 +1367,9 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				     sizeof(*ctx->gc_io_scores), GFP_KERNEL);
 	ctx->gc_live_counts = kvcalloc(ctx->segment_count,
 				      sizeof(*ctx->gc_live_counts), GFP_KERNEL);
+	ctx->gc_min_live_blocks = kvcalloc(ctx->segment_count,
+					  sizeof(*ctx->gc_min_live_blocks),
+					  GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
@@ -1369,7 +1380,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
 	    !ctx->discard_epoch || !ctx->discard_count ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
-	    !ctx->gc_live_counts || !ctx->segment_roles) {
+	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
+	    !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
 	}
