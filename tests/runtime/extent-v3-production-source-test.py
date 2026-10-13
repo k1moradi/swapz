@@ -137,7 +137,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         status = body("sv3_status")
         self.assertIn('disk_name, "nullb", 5', ctor)
         self.assertIn("argc < 1 || argc > 9", ctor)
-        self.assertIn("write_fail_nth > 64U", ctor)
+        self.assertIn("write_fail_nth > 65535U", ctor)
         self.assertIn("ctx->write_fault_nth = write_fail_nth", ctor)
         self.assertIn("op == REQ_OP_WRITE", lower)
         self.assertIn("++ctx->write_fault_calls == ctx->write_fault_nth", lower)
