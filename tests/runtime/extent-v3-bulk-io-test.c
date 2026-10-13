@@ -33,6 +33,7 @@ static unsigned int corrupt_on_run;
 static unsigned int short_on_run;
 static unsigned int maps_visible_during_run;
 static unsigned int ownership_violation;
+static unsigned long long lower_written_bytes;
 
 static int read_blocks(void *opaque, sv3_u32 block, sv3_u8 blocks, sv3_u8 *out)
 {
@@ -55,6 +56,7 @@ static int write_extent(void *opaque, sv3_u32 block, sv3_u8 blocks,
 	memcpy(media + (size_t)block * SV3_BLOCK_BYTES, src,
 	       (size_t)blocks * SV3_BLOCK_BYTES);
 	extent_calls++;
+	lower_written_bytes += (unsigned long long)blocks * SV3_BLOCK_BYTES;
 	*completed = blocks;
 	return 0;
 }
@@ -109,6 +111,7 @@ static int write_run(void *opaque, sv3_u32 block, sv3_u16 blocks,
 	       (size_t)blocks * SV3_BLOCK_BYTES);
 	if (corrupt_on_run && run_calls == corrupt_on_run)
 		media[(size_t)block * SV3_BLOCK_BYTES + 7] ^= 1;
+	lower_written_bytes += (unsigned long long)blocks * SV3_BLOCK_BYTES;
 	*completed = blocks;
 	return 0;
 }
@@ -140,6 +143,7 @@ static int setup(void)
 	fail_on_run = short_on_run = corrupt_on_run = 0;
 	maps_visible_during_run = 0;
 	ownership_violation = 0;
+	lower_written_bytes = 0;
 	for (i = 0; i < SV3_MAX_RECORDS; ++i) {
 		sv3_u16 length = i % 3 == 0 ? 2089 : i % 3 == 1 ? 1032 : 2200;
 
@@ -233,6 +237,31 @@ static int test_duplicate_slots_use_original_sequential_path(void)
 	CHECK(run_calls == 0 && extent_calls >= 2);
 	CHECK(maps[0].valid && maps[0].generation == 2);
 	CHECK(!a.batch_pending);
+	return 0;
+}
+
+static int test_same_input_no_padding_writes_identical_bytes(void)
+{
+	sv3_u8 committed = 0;
+	unsigned long long combined_bytes;
+	unsigned int combined_calls;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 1;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == 0);
+	CHECK(committed == 64 && !e.bulk_padding_blocks);
+	combined_bytes = lower_written_bytes;
+	combined_calls = run_calls;
+	CHECK(setup() == 0);
+	e.bulk_enabled = 0;
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == 0);
+	CHECK(committed == 64);
+	CHECK(lower_written_bytes == combined_bytes);
+	CHECK(extent_calls > combined_calls);
+	CHECK(validate_prefix(64) == 0);
 	return 0;
 }
 
@@ -343,6 +372,7 @@ int main(void)
 	CHECK(test_write_verify_stays_serialized() == 0); passed++;
 	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
 	CHECK(test_explicit_padding_mode_preserves_crc_and_authority() == 0); passed++;
+	CHECK(test_same_input_no_padding_writes_identical_bytes() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
