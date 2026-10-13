@@ -1,0 +1,8 @@
+commit cb8624b35c775adff853b2354df7153d96b282ad
+2321706baa9ce4126f5648f0bd4effc79083ae9f kernel/extent-v3/dm-target.c
+188485298a456ab1b6fc0005542cae3f9c2c3088 kernel/extent-v3/authority.c
+9adb78c28538587ede9369a2ddbdfb7b31540e57 kernel/extent-v3/authority.h
+05a2c7184aabf7b05a3c6e4f57028dbeb0ca1c47 kernel/extent-v3/engine.c
+f88d2697a5c15aa068ddd5d7853a5c38af397810 kernel/extent-v3/codec.c
+05715e34a23323c5b70dc8196065d9bbe092b87f kernel/extent-v3/gc-cost.h
+be0bb1a01287069c97c6459e016d8f010bb47e74 kernel/extent-v3/Makefile
