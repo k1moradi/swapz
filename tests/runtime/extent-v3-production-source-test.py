@@ -149,6 +149,16 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->batch_pending++", pause)
         self.assertIn("a->batch_replaying = 1", resume)
         self.assertIn("ctx->engine.bulk_writes", body("sv3_status"))
+        self.assertIn("bulk_mode=%u", body("sv3_status"))
+        ctor = body("sv3_ctr")
+        self.assertIn("lower_bulk = 1", ctor)
+        self.assertIn("lower_bulk > 2U", ctor)
+        self.assertIn("ctx->engine.bulk_enabled = lower_bulk", ctor)
+        self.assertIn("e->bulk_enabled == 1", writer)
+        self.assertIn("aligned != run_start + run_blocks", writer)
+        self.assertIn("sv3_stage_batch(e->authority", writer)
+        self.assertIn("batch_hashes", authority)
+        self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
