@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Rootless proof that all three labels replay one exact immutable I/O plan.
+
+This does NOT load V2.2/V3 modules: same regular-file replay code tests only
+the trace contract, oracle, safety guard and fail-closed triplet comparator.
+"""
+import json
+import os
+import random
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+PAGE = 4096
+SCRIPT = Path(__file__).with_name("threeway-swap-replay.py")
+
+
+class ThreeWayReplayContract(unittest.TestCase):
+    def run_cmd(self, *args, success=True):
+        run = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
+                             capture_output=True, text=True, timeout=30)
+        if success and run.returncode:
+            self.fail(f"command {args}: rc={run.returncode}\n{run.stdout}\n{run.stderr}")
+        if not success:
+            self.assertNotEqual(run.returncode, 0, repr(args))
+        return run
+
+    def test_threeway_exact_bytes_and_ordered_wave_oracle(self):
+        for layout in ("disjoint", "same-region"):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                fixture = root / "fixture.bin"
+                rng = random.Random(119)
+                pages = [
+                    bytes([index]) * PAGE if index % 3 != 1
+                    else rng.randbytes(PAGE) for index in range(16)
+                ]
+                fixture.write_bytes(b"".join(pages))
+                plan = root / "plan"
+                reader_start = 32 if layout == "disjoint" else 0
+                self.run_cmd("prepare", "--fixture", fixture,
+                             "--output-dir", plan, "--seed", "0xfeed123",
+                             "--logical-pages", 64, "--writer-pages", 16,
+                             "--reader-start", reader_start,
+                             "--reader-pages", 16, "--layout", layout,
+                             "--qd", 4, "--read-pct", 50,
+                             "--warmup-ops", 32, "--measure-ops", 128,
+                             "--iops", 0)
+                manifest = json.loads((plan / "manifest.json").read_text())
+                self.assertEqual(manifest["fixture_pages"], 16)
+                self.assertEqual(manifest["measure_ops"], 128)
+                reports = []
+                for candidate in ("off", "v22", "v3"):
+                    path = root / f"swapz-replay-{candidate}.bin"
+                    with path.open("wb") as handle:
+                        handle.truncate(64 * PAGE)
+                    out = root / f"{candidate}.json"
+                    self.run_cmd("run", "--fixture", fixture,
+                                 "--trace", plan / "trace.jsonl",
+                                 "--manifest", plan / "manifest.json",
+                                 "--candidate", candidate,
+                                 "--source-sha", "rootless-test-not-a-module",
+                                 "--device", path,
+                                 "--result", out, "--regular-file-test")
+                    self.assertTrue(out.is_file())
+                    reports.append(out)
+                compare = self.run_cmd("compare", "--reports", *reports)
+                result = json.loads(compare.stdout)
+                self.assertEqual(result["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT")
+                self.assertEqual(result["fixture_sha256"], manifest["fixture_sha256"])
+                self.assertEqual(result["trace_sha256"], manifest["trace_sha256"])
+                self.assertEqual(len(result["results"]), 3)
+                expected = manifest["expected_post_sha256"]
+                for report_path in reports:
+                    record = json.loads(report_path.read_text())
+                    self.assertEqual(record["verified_post_sha256"], expected)
+                    self.assertEqual(record["write_ops"] + record["read_ops"], 128)
+                    self.assertEqual(record["warmup_ops"], 32)
+                    self.assertEqual(record["verified_pages"], 64)
+                    self.assertEqual(record["verdict"], "PASS")
+                # Fail-closed: altered trace provenance makes triplet invalid.
+                tampered = json.loads(reports[0].read_text())
+                tampered["write_payload_stream_sha256"] = "0" * 64
+                reports[0].write_text(json.dumps(tampered) + "\n")
+                self.run_cmd("compare", "--reports", *reports, success=False)
+                # Fail-closed: altered fixture bytes are rejected before I/O.
+                fixture.write_bytes(fixture.read_bytes()[:-PAGE] +
+                                    b"Z" * PAGE)
+                forbidden = root / "swapz-replay-refused.bin"
+                with forbidden.open("wb") as handle:
+                    handle.truncate(64 * PAGE)
+                self.run_cmd("run", "--fixture", fixture,
+                             "--trace", plan / "trace.jsonl",
+                             "--manifest", plan / "manifest.json",
+                             "--candidate", "off",
+                             "--source-sha", "rootless-test",
+                             "--device", forbidden,
+                             "--result", root / "refused.json",
+                             "--regular-file-test", success=False)
+                self.assertFalse((root / "refused.json").exists())
+
+    def test_protected_regular_file_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            bad = root / "not-an-owned-benchmark-file.bin"
+            bad.write_bytes(b"\0" * (PAGE * 8))
+            # A regular file needs a distinctive name plus an explicit
+            # rootless-test opt-in. Arbitrary file paths are never writable.
+            sys.path.insert(0, str(SCRIPT.parent))
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("threeway", SCRIPT)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            class A: pass
+            a = A()
+            a.device = str(bad)
+            a.regular_file_test = True
+            with self.assertRaises(ValueError):
+                mod.check_device(a, 8)
+            a.device = str(root / "swapz-replay-allowed.bin")
+            with (root / "swapz-replay-allowed.bin").open("wb") as file:
+                file.truncate(8 * PAGE)
+            a.regular_file_test = False
+            with self.assertRaises(ValueError):
+                mod.check_device(a, 8)
+
+    def test_manifest_cannot_have_duplicate_inflight_slot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(bytes([1]) * PAGE * 16)
+            plan = root / "plan"
+            self.run_cmd("prepare", "--fixture", fixture,
+                         "--output-dir", plan, "--qd", 4,
+                         "--logical-pages", 64, "--writer-pages", 16,
+                         "--reader-start", 32, "--reader-pages", 16,
+                         "--warmup-ops", 4, "--measure-ops", 8)
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("threeway", SCRIPT)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mf = json.loads((plan / "manifest.json").read_text())
+            # Plan validation checks both SHA and in-wave independence.
+            rows = [json.loads(line) for line in (plan / "trace.jsonl").read_text().splitlines()]
+            rows[1]["page"] = rows[0]["page"]
+            replacement = "".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n"
+                                  for r in rows).encode()
+            (plan / "trace.jsonl").write_bytes(replacement)
+            mf["trace_sha256"] = mod.sha(replacement)
+            with self.assertRaisesRegex(ValueError, "same logical page"):
+                mod.check_plan(plan / "trace.jsonl", mf, 16)
+
+
+if __name__ == "__main__":
+    unittest.main()
