@@ -1,4 +1,4 @@
-# V3.0.0-alpha.5: online packing + GC economics independent retest gate
+# V3.0.0-alpha.6: online packing + GC economics independent retest gate
 
 **This file describes a TEST CANDIDATE, not a release.** All work must pass
 the existing [LIVE_TEST_GATE.md](LIVE_TEST_GATE.md) and
@@ -85,7 +85,7 @@ outside the reserve tail after GC. There was **no demonstrated false
 upper completion or data corruption**, but **progress FAILED**.
 
 The main developer fixed this in [PR #50](https://github.com/k1moradi/swapz/pull/50)
-and version **3.0.0-alpha.5**, with explicit per-1MiB-segment roles:
+and version **3.0.0-alpha.6**, with explicit per-1MiB-segment roles:
 foreground only selects foreground victims, GC writes into ONE verified
 dead reserve destination, and a completed all-live evacuation
 **atomically swaps roles** so the old victim becomes a free reserve
