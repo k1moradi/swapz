@@ -1198,7 +1198,8 @@ static void sv3_drain(struct dm_target *ti)
 	flush_delayed_work(&ctx->worker);
 	drain_workqueue(ctx->workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (!list_empty(&ctx->incoming) || ctx->batch_count) {
+	if (!list_empty(&ctx->incoming) || ctx->batch_count ||
+	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("V3 drain invariant: accepted BIOs remain after draining");
 		sv3_fail(ctx, -EUCLEAN);
