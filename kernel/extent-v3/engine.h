@@ -44,6 +44,7 @@ struct sv3_engine {
 	struct sv3_tx *bulk_txs; /* at least SV3_MAX_RECORDS transactions */
 	sv3_u16 bulk_offsets[SV3_MAX_RECORDS];
 	sv3_u8 bulk_takes[SV3_MAX_RECORDS];
+	sv3_u8 bulk_enabled; /* 0=original synchronous per-extent control */
 	sv3_u32 bulk_writes;
 	sv3_u32 bulk_extents;
 	sv3_u32 bulk_padding_blocks;
