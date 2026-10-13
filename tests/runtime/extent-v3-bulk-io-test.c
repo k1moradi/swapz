@@ -628,6 +628,8 @@ static int test_mixed_and_raw_only_share_lower_runs(void)
 					     &committed) == 0);
 	CHECK(committed == 64);
 	CHECK(run_calls < 16 && extent_calls == 0);
+	CHECK(e.bulk_raw_entries == 16);
+	CHECK(e.bulk_mixed_runs + e.bulk_raw_only_runs > 0);
 	CHECK(!maps_visible_during_run && !ownership_violation);
 	CHECK(e.bulk_padding_blocks == 0);
 	CHECK(validate_mixed_prefix(64, 64) == 0);
@@ -638,6 +640,8 @@ static int test_mixed_and_raw_only_share_lower_runs(void)
 	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
 					     &committed) == 0);
 	CHECK(committed == 64 && run_calls == 1 && extent_calls == 0);
+	CHECK(e.bulk_raw_only_runs == 1 && !e.bulk_mixed_runs);
+	CHECK(e.bulk_raw_entries == 64);
 	CHECK(lower_written_bytes == 64ULL * SV3_BLOCK_BYTES);
 	CHECK(!maps_visible_during_run && !ownership_violation);
 	CHECK(validate_mixed_prefix(64, 64) == 0);
@@ -858,6 +862,7 @@ static int test_mixed_819_205_distribution_economy(void)
 		CHECK(sv3_engine_write_window_batched(&e, pages, 64,
 						     &committed) == 0);
 		CHECK(committed == 64);
+		CHECK(e.bulk_raw_entries == 64 - compressed_count);
 		CHECK(validate_mixed_prefix(64, 64) == 0);
 		CHECK(!e.bulk_padding_blocks && !maps_visible_during_run);
 		combined_bytes = lower_written_bytes;
