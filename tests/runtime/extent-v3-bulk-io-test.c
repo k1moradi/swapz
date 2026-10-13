@@ -211,7 +211,7 @@ static int test_failed_run_acks_nothing(void)
 	return 0;
 }
 
-static int test_corrupted_completed_run_does_not_publish(void)
+static int test_corrupted_completed_run_detected_on_read(void)
 {
 	sv3_u8 committed = 77;
 	int error;
@@ -399,7 +399,7 @@ int main(void)
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
 	CHECK(test_short_run_acks_nothing() == 0); passed++;
-	CHECK(test_corrupted_completed_run_does_not_publish() == 0); passed++;
+	CHECK(test_corrupted_completed_run_detected_on_read() == 0); passed++;
 	CHECK(test_duplicate_slots_use_original_sequential_path() == 0); passed++;
 	CHECK(test_write_verify_stays_serialized() == 0); passed++;
 	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
