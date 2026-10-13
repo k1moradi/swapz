@@ -51,7 +51,7 @@ and real V2.2 loaded comparison**, latency, GC and lower sysfs I/O accounting.
 The constructor remains **null_blk-only**; no active SD card or system
 swap may be modified and no reboot is allowed.
 
-**V3.0.0-alpha.6 kernel validation candidate:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
+**Prior V3.0.0-alpha.5 correctness baseline:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
 retains the real `dm-swapz.ko` online packing path from [PR #49](https://github.com/k1moradi/swapz/pull/49)
 and the verified rotating reserve GC from [PR #50](https://github.com/k1moradi/swapz/pull/50).
 The optional 0–4ms coalescing interval (default zero) can collect
