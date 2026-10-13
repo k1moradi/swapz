@@ -59,7 +59,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.6", GOALS)
+        self.assertIn("3.0.0-alpha.7", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
@@ -128,6 +128,30 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("flush_injected=%llu flush_fault_nth=%u", DM)
         self.assertIn("flush_fail_nth > 64U", body("sv3_ctr"))
         self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("sv3_ctr"))
+
+    def test_owned_nullblk_lower_write_fault_is_pre_submission_and_counted(self):
+        # This tests fail-closed propagation through the actual dm_io adapter.
+        # It cannot model a device-originated partial/torn write.
+        ctor = body("sv3_ctr")
+        lower = body("sv3_lower")
+        status = body("sv3_status")
+        self.assertIn('disk_name, "nullb", 5', ctor)
+        self.assertIn("argc < 1 || argc > 9", ctor)
+        self.assertIn("write_fail_nth > 64U", ctor)
+        self.assertIn("ctx->write_fault_nth = write_fail_nth", ctor)
+        self.assertIn("op == REQ_OP_WRITE", lower)
+        self.assertIn("++ctx->write_fault_calls == ctx->write_fault_nth", lower)
+        self.assertIn("ctx->write_fault_injected++", lower)
+        self.assertIn("return -EIO", lower)
+        self.assertLess(lower.index("ctx->write_fault_injected++"),
+                        lower.index("ctx->lower_write_submitted_reqs++"))
+        self.assertLess(lower.index("ctx->write_fault_injected++"),
+                        lower.index("error = dm_io(&req"))
+        self.assertIn("sv3_lower(ctx, REQ_OP_WRITE", body("sv3_lower_write"))
+        self.assertIn("sv3_lower(ctx, REQ_OP_WRITE", body("sv3_lower_write_run"))
+        self.assertIn("write_fault_nth=%u write_fault_calls=%llu "
+                      "write_fault_injected=%llu", status)
+        self.assertIn("ctx->engine.bulk_enabled, ctx->write_fault_nth", status)
 
     def test_bounded_lower_run_aggregation_preserves_commit_gate(self):
         engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
