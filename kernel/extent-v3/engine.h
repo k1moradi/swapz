@@ -55,6 +55,11 @@ struct sv3_engine {
 	sv3_u32 bulk_writes;
 	sv3_u32 bulk_extents;
 	sv3_u32 bulk_padding_blocks;
+	/* Successful fully published runs by media composition, not a claim
+	 * about block-layer merged/split requests. */
+	sv3_u32 bulk_mixed_runs;
+	sv3_u32 bulk_raw_only_runs;
+	sv3_u32 bulk_raw_entries;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
 	struct sv3_tx pending;
 	sv3_u32 logical_scratch[SV3_MAX_RECORDS];
