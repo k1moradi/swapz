@@ -33,7 +33,9 @@ The authority now supports **up to 64 reserved-but-UNPUBLISHED**
 immutable transaction snapshots, restricted to one physical 1MiB
 segment and a 64-block/256KiB contiguous lower run. The exact engine
 builds independently valid extent images at their reserved physical
-offsets and fills any intervening alignment padding with zeros.
+offsets. The **default adjacent-only mode NEVER writes extra padding
+bytes**: any physical alignment gap ends the prior run. Optional
+mode 2 combines across gaps and explicitly counts zero-filled padding.
 Each lower run submits **one synchronous `dm_io` call** for 1..64
 contiguous 4KiB blocks. A queue may split that into multiple **real
 block requests** — independent `null_blk` sysfs stats determine the
@@ -50,9 +52,8 @@ can publish its independently completed logical prefix, but the
 following failed run cannot claim even one successful logical page.
 Unexpected metadata validation failure likewise fails closed.
 
-The authority checks a cryptographic? **NO:** CRC32C is only an
-accidental-corruption detection fingerprint for its staged
-transaction snapshots, not cryptographic authentication.
+The authority uses CRC32C to detect accidental mutation of staged
+transaction snapshots, **not** as cryptographic authentication.
 Unrelated stage or logical discard while the group is pending
 returns `-EBUSY`. A GC victim exchange is forbidden while any
 paused transaction exists. Duplicate logical slots and
@@ -64,14 +65,17 @@ per-extent path to preserve their ordering/readback semantics.
 ```text
 <owned_ram_nullb> [read_cap 0..3] [window 1..64]
     [verify 0|1] [gc 0..2] [coalesce_ms 0..4]
-    [test_fail_flush_nth 0..64] [lower_bulk 0|1]
+    [test_fail_flush_nth 0..64] [lower_bulk 0|1|2]
 ```
 
-`lower_bulk=1` default: aggregate adjacent extents into up to
-256KiB dm_io transfers, only for batches with more than one distinct
-compressed record. `lower_bulk=0`: **identical binary**, original
-individual synchronous extent writes. The optional verification mode
-uses the original serialized engine path regardless of lower_bulk.
+`lower_bulk=1` (DEFAULT): merge ONLY **physically contiguous**
+extents, adding ZERO lower write bytes through padding.
+`lower_bulk=0`: same-binary original per-extent synchronous writes
+(control). `lower_bulk=2`: additionally combine across alignment
+holes by writing and **accounting** zero-filled padding bytes;
+it can save requests at the cost of MORE lower bytes. The
+optional `verify_after_write=1` mode deliberately forces the
+original serialized engine regardless of lower_bulk.
 
 Status fields: `bulk_mode`, `bulk_io` successful combined submissions,
 `bulk_extents` number of extents completed by them,
@@ -119,7 +123,8 @@ mocked tests, NOT loaded kernel proof.
    resume, no lost requests or workqueue CPU-hog warnings.
 5. **Same-binary comparison**: repeat EXACT prior alpha.5
    1024-write fixture, once `lower_bulk=0` (internal baseline),
-   once `lower_bulk=1`, with matching GC/coalesce/read_cap and
+   once `lower_bulk=1`, optionally `lower_bulk=2`, with matching
+   GC/coalesce/read_cap and
    bit-identical input. Verify 1024 upper readbacks. Compare independent
    null_blk stat **read/write sector bytes AND request counts**,
    including verification I/O and all GC, physical statuses and
