@@ -17,7 +17,7 @@ GOALS = (ROOT / "V3_GOALS.md").read_text()
 
 
 def body(symbol: str) -> str:
-    match = re.search(r"static\s+(?:int|void)\s+" + re.escape(symbol) +
+    match = re.search(r"static\s+(?:int|void|bool)\s+" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
         raise AssertionError(f"Missing production symbol {symbol}")
@@ -34,7 +34,7 @@ def body(symbol: str) -> str:
 
 
 def source_body(symbol: str, source: str) -> str:
-    match = re.search(r"(?:static\s+)?(?:int|void)\s+" + re.escape(symbol) +
+    match = re.search(r"(?:static\s+)?(?:int|void|bool)\s+" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", source, re.S)
     if not match:
         raise AssertionError(f"Missing source symbol {symbol}")
@@ -136,7 +136,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         lower = body("sv3_lower")
         status = body("sv3_status")
         self.assertIn('disk_name, "nullb", 5', ctor)
-        self.assertIn("argc < 1 || argc > 9", ctor)
+        self.assertIn("argc < 1 || argc > 10", ctor)
         self.assertIn("write_fail_nth > 65535U", ctor)
         self.assertIn("ctx->write_fault_nth = write_fail_nth", ctor)
         self.assertIn("op == REQ_OP_WRITE", lower)
