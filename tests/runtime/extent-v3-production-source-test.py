@@ -57,7 +57,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.6"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.5", GOALS)
+        self.assertIn("3.0.0-alpha.6", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
