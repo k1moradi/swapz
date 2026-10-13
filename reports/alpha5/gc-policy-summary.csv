@@ -1,0 +1,7 @@
+test,policy,rotations_or_victims,reserve_blocks,gc_read_B,gc_read_reqs,gc_write_B,gc_write_reqs,total_lower_read_B,total_lower_read_reqs,total_lower_write_B,total_lower_write_reqs,full_readback,post_gc_foreground_write,notes
+eight-rotation,0,8,512,32768,8,32768,8,60858368,14858,39845888,9728,yes,yes,"1,024-page foreground rotation fixture"
+eight-rotation,1,8,512,32768,8,32768,8,60858368,14858,39845888,9728,yes,yes,"1,024-page foreground rotation fixture"
+eight-rotation,2,8,512,32768,8,32768,8,60858368,14858,39845888,9728,yes,yes,"1,024-page foreground rotation fixture"
+large-vs-three-small,0,0,,4096,1,4096,1,8192,2,8192,2,true,PASS,victim=0 destination=30 estimated_live_bytes=3351 estimated_io=7447
+large-vs-three-small,1,1,,12288,3,4096,1,16384,4,8192,2,true,PASS,victim=1 destination=30 estimated_live_bytes=1536 estimated_io=13824
+large-vs-three-small,2,0,,4096,1,4096,1,8192,2,8192,2,true,PASS,victim=0 destination=30 estimated_live_bytes=3351 estimated_io=7447
