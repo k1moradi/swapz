@@ -357,8 +357,8 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 	*committed_pages = 0;
 	if (!pages || !count || count > SV3_MAX_RECORDS)
 		return -EINVAL;
-	if (!e->bulk_scratch || !e->bulk_txs || !e->io.write_run ||
-	    e->verify_after_write || count <= 1)
+	if (!e->bulk_enabled || !e->bulk_scratch || !e->bulk_txs ||
+	    !e->io.write_run || e->verify_after_write || count <= 1)
 		return sv3_engine_write_window(e, pages, count,
 					      committed_pages);
 	/* Duplicate logical slots MUST publish sequentially, so we keep the
