@@ -11,7 +11,7 @@
 
 static int sv3_page_valid(const struct sv3_compressed_page *page)
 {
-	return page && page->payload && page->length > 0 &&
+	return page && !page->raw && page->payload && page->length > 0 &&
 		page->length <= SV3_MAX_COMPRESSED;
 }
 
@@ -327,7 +327,15 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 
 			return cleanup ? cleanup : error;
 		}
-		error = sv3_finish(e->authority, tx,
+		/* Same lower completion, but distinct CRC/mapping publication:
+		 * raw blocks carry no SWZ3 metadata on physical media. */
+		if (e->bulk_raw[i])
+			error = sv3_finish_raw(e->authority, tx,
+				e->bulk_scratch +
+					(size_t)offset * SV3_BLOCK_BYTES,
+				tx->extent_blocks, 0);
+		else
+			error = sv3_finish(e->authority, tx,
 				   e->bulk_scratch +
 					(size_t)offset * SV3_BLOCK_BYTES,
 				   (sv3_u32)tx->extent_blocks * SV3_BLOCK_BYTES,
@@ -346,8 +354,8 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 				   const struct sv3_compressed_page *pages,
 				   sv3_u8 count, sv3_u8 *committed_pages)
 {
-	sv3_u8 extent_count, entry = 0, group;
-	sv3_u8 staged = 0;
+	sv3_u8 extent_count = 0, compressed_count = 0, raw_count = 0;
+	sv3_u8 entry = 0, group, staged = 0;
 	sv3_u32 run_start = 0;
 	sv3_u16 run_blocks = 0;
 	int error;
@@ -357,31 +365,55 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 	*committed_pages = 0;
 	if (!pages || !count || count > SV3_MAX_RECORDS)
 		return -EINVAL;
-	if (!e->bulk_enabled || !e->bulk_scratch || !e->bulk_txs ||
-	    !e->io.write_run || e->verify_after_write || count <= 1)
-		return sv3_engine_write_window(e, pages, count,
-					      committed_pages);
-	/* Duplicate logical slots MUST publish sequentially, so we keep the
-	 * old engine for any input that is not uniquely addressable. */
+	/* Validate every record BEFORE reserving any physical blocks. The
+	 * worker sorts compressed records first and appends the raw tail.
+	 * Malformed or duplicate mixed input must not fall into the old
+	 * SWZ3-only path, which cannot interpret raw data. */
 	for (group = 0; group < count; ++group) {
 		sv3_u8 j;
 
+		if (pages[group].raw) {
+			if (!pages[group].payload ||
+			    pages[group].length != SV3_BLOCK_BYTES)
+				return -EINVAL;
+			raw_count++;
+		} else {
+			if (raw_count || !sv3_page_valid(&pages[group]))
+				return -EINVAL;
+			compressed_count++;
+		}
 		for (j = 0; j < group; ++j)
-			if (pages[group].logical_page == pages[j].logical_page)
+			if (pages[group].logical_page == pages[j].logical_page) {
+				if (raw_count)
+					return -EEXIST;
 				return sv3_engine_write_window(e, pages, count,
 							      committed_pages);
+			}
 	}
-	error = sv3_engine_plan_bounded(pages, count,
+	if (!raw_count && (!e->bulk_enabled || !e->bulk_scratch ||
+	    !e->bulk_txs || !e->io.write_run || e->verify_after_write ||
+	    count <= 1))
+		return sv3_engine_write_window(e, pages, count,
+					      committed_pages);
+	/* Raw admission stays serialized in lower_bulk=0/verify mode.
+	 * Never silently reinterpret it as a compressed SWZ3 record. */
+	if (!e->bulk_enabled || !e->bulk_scratch || !e->bulk_txs ||
+	    !e->io.write_run || e->verify_after_write)
+		return -EOPNOTSUPP;
+	if (compressed_count) {
+		error = sv3_engine_plan_bounded(pages, compressed_count,
 					e->max_read_blocks_per_record,
 					e->plan_classes, e->plan_takes,
 					&extent_count);
-	if (error)
-		return error;
-	for (group = 0; group < extent_count; ++group) {
+		if (error)
+			return error;
+	}
+	for (group = 0; group < extent_count + raw_count; ++group) {
 		struct sv3_builder builder;
 		struct sv3_tx *tx;
-		sv3_u8 blocks = e->plan_classes[group];
-		sv3_u8 take = e->plan_takes[group], j;
+		const sv3_u8 raw = group >= extent_count;
+		sv3_u8 blocks = raw ? 1 : e->plan_classes[group];
+		sv3_u8 take = raw ? 1 : e->plan_takes[group], j;
 		sv3_u32 aligned;
 
 		/*
@@ -452,29 +484,35 @@ retry_stage:
 			sv3_u8 *image = e->bulk_scratch +
 					       (size_t)offset * SV3_BLOCK_BYTES;
 
-			error = sv3_begin(&builder, image,
+			if (raw) {
+				/* A raw block must not acquire a fake SWZ3 header. */
+				memcpy(image, pages[entry].payload, SV3_BLOCK_BYTES);
+			} else {
+				error = sv3_begin(&builder, image,
 					  (sv3_u32)blocks * SV3_BLOCK_BYTES,
 					  tx->sequence);
-			if (error)
-				goto abort_current;
-			for (j = 0; j < take; ++j) {
-				const struct sv3_compressed_page *p =
+				if (error)
+					goto abort_current;
+				for (j = 0; j < take; ++j) {
+					const struct sv3_compressed_page *p =
 							&pages[entry + j];
 
-				error = sv3_append(&builder, p->logical_page,
+					error = sv3_append(&builder, p->logical_page,
 						   tx->records[j].generation,
 						   p->payload, p->length);
+					if (error)
+						goto abort_current;
+				}
+				error = sv3_seal(&builder);
 				if (error)
 					goto abort_current;
 			}
-			error = sv3_seal(&builder);
-			if (error)
-				goto abort_current;
 			error = sv3_batch_pause(e->authority, tx);
 			if (error)
 				goto abort_current;
 			e->bulk_offsets[staged] = offset;
 			e->bulk_takes[staged] = take;
+			e->bulk_raw[staged] = raw;
 			e->bulk_padding_blocks += offset > run_blocks ?
 						      offset - run_blocks : 0;
 			run_blocks = end;
