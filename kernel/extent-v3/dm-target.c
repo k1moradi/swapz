@@ -1553,6 +1553,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
+		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
@@ -1586,6 +1587,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,
+		       ctx->engine.bulk_mixed_runs,
+		       ctx->engine.bulk_raw_only_runs,
+		       ctx->engine.bulk_raw_entries,
 		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->window_records_total, ctx->coalesce_ms,
 		       ctx->window_bins[0], ctx->window_bins[1],
