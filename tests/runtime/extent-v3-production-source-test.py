@@ -161,6 +161,19 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
 
+    def test_gc_large_record_preflight_avoids_pointless_full_relocation(self):
+        choose = body("sv3_gc_choose_victim")
+        cost = (ROOT / "kernel/extent-v3/gc-cost.h").read_text()
+        ctr = body("sv3_ctr")
+        self.assertIn("SV3_GC_UNSHAREABLE_MIN_LENGTH", cost)
+        self.assertIn("sv3_gc_min_live_blocks", cost)
+        self.assertIn("sv3_gc_candidate_can_free_block", cost)
+        self.assertIn("ctx->gc_min_live_blocks[segment] +=", choose)
+        self.assertIn("sv3_gc_candidate_can_free_block", choose)
+        self.assertIn("ctx->gc_no_headroom_skips++", choose)
+        self.assertIn("gc_no_headroom_skips=%llu", body("sv3_status"))
+        self.assertIn("ctx->gc_min_live_blocks = kvcalloc", ctr)
+
     def test_gc_io_aware_default_retains_old_control_policies(self):
         choose = body("sv3_gc_choose_victim")
         ctor = body("sv3_ctr")
