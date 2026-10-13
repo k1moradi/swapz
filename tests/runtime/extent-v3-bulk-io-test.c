@@ -804,7 +804,9 @@ static int test_malformed_mixed_input_fails_before_staging(void)
 	CHECK(!run_calls && !extent_calls);
 	CHECK(setup() == 0);
 	prepare_raw_tail(1, 3);
-	pages[2] = pages[0]; /* duplicate slot in mixed window */
+	pages[1].logical_page = pages[0].logical_page;
+	/* Duplicate compressed/raw logical identities cannot be replayed
+	 * safely inside one deferred group. */
 	CHECK(sv3_engine_write_window_batched(&e, pages, 3,
 					     &committed) == -EEXIST);
 	CHECK(!run_calls && !extent_calls);
