@@ -59,7 +59,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.7", GOALS)
+        self.assertIn("3.0.0-alpha.8", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
@@ -328,6 +328,51 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         lower.index("ctx->physical_write_reqs++"))
         self.assertIn("one_page_windows", body("sv3_flush_window"))
         self.assertIn("worker_requeues", body("sv3_worker"))
+
+    def test_experimental_disjoint_read_bypass_preserves_dependencies(self):
+        ctor = body("sv3_ctr")
+        predicate = body("sv3_read_can_bypass_window")
+        process = body("sv3_process")
+        flush = body("sv3_flush_window")
+        status = body("sv3_status")
+
+        # Default is unchanged. The optional 10th token explicitly opts in.
+        self.assertIn("read_bypass = 0", ctor)
+        self.assertIn("argc < 1 || argc > 10", ctor)
+        self.assertIn("read_bypass > 1U", ctor)
+        self.assertIn("ctx->read_bypass = read_bypass", ctor)
+        self.assertIn('disk_name, "nullb", 5', ctor)
+
+        # Plain, exact-page READ only: no FUA/PREFLUSH reordering.
+        self.assertIn("!ctx->read_bypass", predicate)
+        self.assertIn("bio_op(bio) != REQ_OP_READ", predicate)
+        self.assertIn("REQ_PREFLUSH | REQ_FUA", predicate)
+        self.assertIn("bio_sectors(bio) != SV3_SECTORS", predicate)
+        self.assertIn("ctx->batch[i].logical == logical", predicate)
+        self.assertLess(predicate.index("ctx->batch[i].logical == logical"),
+                        predicate.index("ctx->read_bypassed++"))
+        self.assertIn("ctx->read_conflict_flushes++", predicate)
+        self.assertIn("return false", predicate)
+
+        # The decision gates the original flush, never barriers/discards.
+        self.assertIn("sv3_read_can_bypass_window(ctx, bio)", process)
+        self.assertIn("op != REQ_OP_WRITE && !read_bypasses", process)
+        self.assertIn("bio->bi_opf & REQ_PREFLUSH", process)
+        self.assertIn("sv3_issue_flush(ctx)", process)
+        self.assertIn("case REQ_OP_DISCARD:", process)
+        self.assertLess(process.index("sv3_flush_window(ctx)"),
+                        process.index("sv3_issue_flush(ctx)"))
+
+        # If the bypassed READ fails, pending writes are completed with
+        # error, never later submitted by the final worker drain.
+        self.assertIn("if (ctx->failed)", flush)
+        self.assertIn("sv3_complete(ctx->batch[index].bio, latched)", flush)
+        self.assertIn("ctx->batch_count = 0", flush)
+        self.assertLess(flush.index("if (ctx->failed)"),
+                        flush.index("sv3_order_window(ctx)"))
+        self.assertIn("read_bypass=%u read_bypassed=%llu "
+                      "read_conflict_flushes=%llu", status)
+        self.assertIn("ctx->read_bypass", status)
 
     def test_online_batching_bounded_and_barrier_first(self):
         admitted = body("sv3_map")
