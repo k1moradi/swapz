@@ -27,6 +27,8 @@ static sv3_u8 scratch[SV3_MAX_EXTENT_BYTES], reader[SV3_MAX_EXTENT_BYTES];
 static sv3_u8 bulk[SV3_BULK_BLOCKS * SV3_BLOCK_BYTES];
 static sv3_u8 payloads[SV3_MAX_RECORDS][SV3_MAX_COMPRESSED];
 static struct sv3_compressed_page pages[SV3_MAX_RECORDS];
+/* Exact 4KiB raw originals, distinct from the compressed test payloads. */
+static sv3_u8 raw_payloads[SV3_MAX_RECORDS][SV3_BLOCK_BYTES];
 static unsigned int extent_calls, run_calls, read_calls;
 static unsigned int fail_on_run;
 static unsigned int corrupt_on_run;
@@ -568,6 +570,253 @@ static int test_error_after_completed_prefix_at_segment_boundary(void)
 	return 0;
 }
 
+
+/*
+ * Production mixed-window ABI: the target moves raw fallbacks after all
+ * compressed entries, but retains the original BIO order in its index map.
+ * Both formats share a run without sharing on-media representation.
+ */
+static void prepare_raw_tail(unsigned int compressed_count, unsigned int count)
+{
+	unsigned int i, j;
+
+	for (i = compressed_count; i < count; ++i) {
+		for (j = 0; j < SV3_BLOCK_BYTES; ++j)
+			raw_payloads[i][j] = (sv3_u8)(i * 13U + j);
+		pages[i].raw = 1;
+		pages[i].length = SV3_BLOCK_BYTES;
+		pages[i].payload = raw_payloads[i];
+	}
+}
+
+static int validate_mixed_prefix(unsigned int count, unsigned int committed)
+{
+	unsigned int i;
+
+	for (i = 0; i < count; ++i) {
+		sv3_u8 output[SV3_BLOCK_BYTES];
+		sv3_u16 length = 0;
+
+		CHECK((maps[i].valid != 0) == (i < committed));
+		if (i >= committed)
+			continue;
+		CHECK(maps[i].raw == pages[i].raw);
+		if (pages[i].raw) {
+			CHECK(maps[i].extent_blocks == 1);
+			CHECK(maps[i].payload_length == SV3_BLOCK_BYTES);
+			CHECK(read_blocks(NULL, maps[i].start_block, 1, output) == 0);
+			CHECK(!memcmp(output, pages[i].payload, SV3_BLOCK_BYTES));
+			CHECK(sv3_verify_raw(&a, i, output) == 0);
+		} else {
+			CHECK(sv3_engine_read_page(&e, i, output, sizeof(output),
+						   &length) == 0);
+			CHECK(length == pages[i].length);
+			CHECK(!memcmp(output, pages[i].payload, length));
+		}
+	}
+	CHECK(!a.batch_pending && !a.in_flight);
+	return 0;
+}
+
+static int test_mixed_and_raw_only_share_lower_runs(void)
+{
+	sv3_u8 committed = 0;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(48, 64);
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == 0);
+	CHECK(committed == 64);
+	CHECK(run_calls < 16 && extent_calls == 0);
+	CHECK(!maps_visible_during_run && !ownership_violation);
+	CHECK(e.bulk_padding_blocks == 0);
+	CHECK(validate_mixed_prefix(64, 64) == 0);
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(0, 64);
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == 0);
+	CHECK(committed == 64 && run_calls == 1 && extent_calls == 0);
+	CHECK(lower_written_bytes == 64ULL * SV3_BLOCK_BYTES);
+	CHECK(!maps_visible_during_run && !ownership_violation);
+	CHECK(validate_mixed_prefix(64, 64) == 0);
+	return 0;
+}
+
+static int test_mixed_default_equal_bytes_vs_serial_raw_control(void)
+{
+	struct sv3_map combined[40];
+	sv3_u8 committed = 0;
+	unsigned int combined_calls, i;
+	unsigned long long combined_bytes;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(24, 40);
+	CHECK(sv3_engine_write_window_batched(&e, pages, 40,
+					     &committed) == 0);
+	CHECK(committed == 40 && e.bulk_padding_blocks == 0);
+	CHECK(validate_mixed_prefix(40, 40) == 0);
+	memcpy(combined, maps, sizeof(combined));
+	combined_calls = run_calls;
+	combined_bytes = lower_written_bytes;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(24, 40);
+	e.bulk_enabled = 0;
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 24,
+					     &committed) == 0);
+	CHECK(committed == 24);
+	for (i = 24; i < 40; ++i) {
+		struct sv3_tx transaction;
+		sv3_u32 logical = i;
+		sv3_u8 completed = 0;
+
+		CHECK(sv3_stage(&a, &logical, 1, 1, &transaction) == 0);
+		CHECK(write_extent(NULL, transaction.start_block, 1,
+				   raw_payloads[i], &completed) == 0);
+		CHECK(sv3_finish_raw(&a, &transaction, raw_payloads[i],
+					     completed, 0) == 0);
+	}
+	CHECK(lower_written_bytes == combined_bytes);
+	CHECK(run_calls == 0 && extent_calls > combined_calls);
+	CHECK(validate_mixed_prefix(40, 40) == 0);
+	for (i = 0; i < 40; ++i) {
+		CHECK(maps[i].start_block == combined[i].start_block);
+		CHECK(maps[i].generation == combined[i].generation);
+		CHECK(maps[i].sequence == combined[i].sequence);
+		CHECK(maps[i].raw_crc32c == combined[i].raw_crc32c);
+		CHECK(maps[i].raw == combined[i].raw);
+	}
+	return 0;
+}
+
+static int test_mixed_lower_failures_quarantine_unpublished_raw(void)
+{
+	unsigned int failure_mode;
+
+	for (failure_mode = 0; failure_mode < 2; ++failure_mode) {
+		sv3_u8 committed = 77;
+
+		CHECK(setup() == 0);
+		prepare_raw_tail(8, 32);
+		if (failure_mode)
+			short_on_run = 1;
+		else
+			fail_on_run = 1;
+		CHECK(sv3_engine_write_window_batched(&e, pages, 32,
+						     &committed) == -EIO);
+		CHECK(committed == 0);
+		CHECK(run_calls == 1 && extent_calls == 0);
+		CHECK(!maps_visible_during_run && !ownership_violation);
+		CHECK(a.abandoned_blocks > 0);
+		CHECK(validate_mixed_prefix(32, 0) == 0);
+	}
+	return 0;
+}
+
+static int test_mixed_failed_overwrite_preserves_old_generations(void)
+{
+	struct sv3_map previous[16];
+	sv3_u8 committed = 0;
+	unsigned int i, j;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(8, 16);
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16);
+	memcpy(previous, maps, sizeof(previous));
+	for (i = 0; i < 8; ++i)
+		memset(payloads[i], 0xdc, pages[i].length);
+	for (i = 8; i < 16; ++i)
+		memset(raw_payloads[i], 0xeb, SV3_BLOCK_BYTES);
+	fail_on_run = run_calls + 1;
+	committed = 55;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == -EIO);
+	CHECK(committed == 0 && !a.batch_pending && !a.in_flight);
+	CHECK(!maps_visible_during_run && !ownership_violation);
+	for (i = 0; i < 16; ++i) {
+		sv3_u8 output[SV3_BLOCK_BYTES];
+		sv3_u16 length = 0;
+
+		CHECK(maps[i].valid);
+		CHECK(maps[i].start_block == previous[i].start_block);
+		CHECK(maps[i].generation == previous[i].generation);
+		CHECK(maps[i].raw_crc32c == previous[i].raw_crc32c);
+		if (i >= 8) {
+			CHECK(read_blocks(NULL, maps[i].start_block, 1, output) == 0);
+			CHECK(sv3_verify_raw(&a, i, output) == 0);
+			for (j = 0; j < SV3_BLOCK_BYTES; ++j)
+				CHECK(output[j] == (sv3_u8)(i * 13U + j));
+		} else {
+			CHECK(sv3_engine_read_page(&e, i, output,
+						   sizeof(output), &length) == 0);
+			CHECK(length == pages[i].length);
+			for (j = 0; j < length; ++j)
+				CHECK(output[j] == (sv3_u8)(i + 1U));
+		}
+	}
+	return 0;
+}
+
+static int test_mixed_later_run_failure_keeps_only_completed_prefix(void)
+{
+	sv3_u8 committed = 0, raw[SV3_BLOCK_BYTES];
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	memset(raw, 0x92, sizeof(raw));
+	/* Leave exactly four blocks in foreground segment zero. */
+	for (i = 0; i < SV3_SEGMENT_BLOCKS - 4; ++i) {
+		struct sv3_tx transaction;
+		sv3_u32 logical = 80;
+		sv3_u8 completed = 0;
+
+		CHECK(sv3_stage(&a, &logical, 1, 1, &transaction) == 0);
+		CHECK(write_extent(NULL, transaction.start_block, 1, raw,
+				   &completed) == 0);
+		CHECK(sv3_finish_raw(&a, &transaction, raw, completed, 0) == 0);
+	}
+	prepare_raw_tail(0, 32);
+	fail_on_run = 2;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 32,
+					     &committed) == -EIO);
+	CHECK(run_calls == 2 && committed == 4);
+	CHECK(validate_mixed_prefix(32, 4) == 0);
+	CHECK(maps[80].valid && maps[80].raw_crc32c ==
+	      sv3_crc32c_bytes(raw, sizeof(raw)));
+	return 0;
+}
+
+static int test_malformed_mixed_input_fails_before_staging(void)
+{
+	sv3_u8 committed = 44;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(1, 2);
+	pages[1].length = SV3_BLOCK_BYTES - 1;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 2,
+					     &committed) == -EINVAL);
+	CHECK(committed == 0 && !a.batch_pending && !a.in_flight);
+	CHECK(!run_calls && !extent_calls);
+	CHECK(setup() == 0);
+	prepare_raw_tail(1, 3);
+	pages[2] = pages[0]; /* duplicate slot in mixed window */
+	CHECK(sv3_engine_write_window_batched(&e, pages, 3,
+					     &committed) == -EEXIST);
+	CHECK(!run_calls && !extent_calls);
+	CHECK(setup() == 0);
+	prepare_raw_tail(0, 2);
+	e.bulk_enabled = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 2,
+					     &committed) == -EOPNOTSUPP);
+	CHECK(!run_calls && !extent_calls);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -587,6 +836,12 @@ int main(void)
 	CHECK(test_padding_option_measures_exact_request_byte_tradeoff() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
+	CHECK(test_mixed_and_raw_only_share_lower_runs() == 0); passed++;
+	CHECK(test_mixed_default_equal_bytes_vs_serial_raw_control() == 0); passed++;
+	CHECK(test_mixed_lower_failures_quarantine_unpublished_raw() == 0); passed++;
+	CHECK(test_mixed_failed_overwrite_preserves_old_generations() == 0); passed++;
+	CHECK(test_mixed_later_run_failure_keeps_only_completed_prefix() == 0); passed++;
+	CHECK(test_malformed_mixed_input_fails_before_staging() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
 	return 0;
 }
