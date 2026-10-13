@@ -419,6 +419,73 @@ static int test_explicit_padding_mode_preserves_crc_and_authority(void)
 	return 0;
 }
 
+/*
+ * Deterministic exact-production-C differential test: vary every record
+ * size and payload over 32 windows, replay the SAME window with the old
+ * one-dm_io-per-extent path and the new adjacent-only lower aggregation.
+ * Physical allocation and mapping publication must match EXACTLY; the
+ * new mode must not transfer one additional lower byte.
+ */
+static int test_randomized_same_binary_authority_equivalence(void)
+{
+	struct sv3_map baseline[SV3_MAX_RECORDS];
+	unsigned int iteration, i, j;
+	unsigned int old_calls;
+	unsigned long long old_bytes;
+	sv3_u32 seed = 0x5a17c0deU;
+	sv3_u16 sizes[SV3_MAX_RECORDS];
+
+	for (iteration = 0; iteration < 32; ++iteration) {
+		sv3_u8 committed = 0;
+
+		for (i = 0; i < SV3_MAX_RECORDS; ++i) {
+			seed = seed * 1664525U + 1013904223U;
+			sizes[i] = 128 + (sv3_u16)((seed >> 8) % 3350U);
+		}
+		CHECK(setup() == 0);
+		for (i = 0; i < SV3_MAX_RECORDS; ++i) {
+			pages[i].length = sizes[i];
+			memset(payloads[i], (int)(i + iteration + 9U),
+			       sizes[i]);
+		}
+		e.bulk_enabled = 0;
+		CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+						     &committed) == 0);
+		CHECK(committed == 64);
+		memcpy(baseline, maps, sizeof(baseline));
+		old_bytes = lower_written_bytes;
+		old_calls = extent_calls;
+		CHECK(validate_prefix(64) == 0);
+
+		committed = 0;
+		CHECK(setup() == 0);
+		for (i = 0; i < SV3_MAX_RECORDS; ++i) {
+			pages[i].length = sizes[i];
+			memset(payloads[i], (int)(i + iteration + 9U),
+			       sizes[i]);
+		}
+		e.bulk_enabled = 1;
+		CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+						     &committed) == 0);
+		CHECK(committed == 64);
+		CHECK(!e.bulk_padding_blocks && !ownership_violation);
+		CHECK(!maps_visible_during_run);
+		CHECK(lower_written_bytes == old_bytes);
+		CHECK(run_calls <= old_calls);
+		for (j = 0; j < SV3_MAX_RECORDS; ++j) {
+			CHECK(maps[j].valid == baseline[j].valid);
+			CHECK(maps[j].start_block == baseline[j].start_block);
+			CHECK(maps[j].generation == baseline[j].generation);
+			CHECK(maps[j].sequence == baseline[j].sequence);
+			CHECK(maps[j].extent_blocks == baseline[j].extent_blocks);
+			CHECK(maps[j].record_index == baseline[j].record_index);
+			CHECK(maps[j].payload_length == baseline[j].payload_length);
+		}
+		CHECK(validate_prefix(64) == 0);
+	}
+	return 0;
+}
+
 static int test_bulk_control_uses_original_lower_requests(void)
 {
 	sv3_u8 committed = 0;
@@ -516,6 +583,7 @@ int main(void)
 	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
 	CHECK(test_explicit_padding_mode_preserves_crc_and_authority() == 0); passed++;
 	CHECK(test_same_input_no_padding_writes_identical_bytes() == 0); passed++;
+	CHECK(test_randomized_same_binary_authority_equivalence() == 0); passed++;
 	CHECK(test_padding_option_measures_exact_request_byte_tradeoff() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
