@@ -8,6 +8,30 @@ after safety checks. **But the V3 target currently refuses non-null_blk
 backing in its constructor**. This restriction is intentional and may not
 be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
 
+## Alpha.6 NEW first gate — actual lower request aggregation
+
+The alpha.5 default was measured WORSE than V2.2: **419 target
+extent write submissions / 420 backing requests** versus 26 V2.2,
+with 2.2% more write bytes in a matched 1024-page sample. The
+alpha.6 engineering priority is physical lower-write aggregation,
+not another isolated compression simulation. Read the exact
+[LOWER_WRITE_AGGREGATION.md](LOWER_WRITE_AGGREGATION.md) contract
+before loading the newly rebuilt `dm-swapz.ko`.
+
+Compare table `lower_bulk=0` (historical) with `1` (DEFAULT:
+adjacent-only, ZERO added padding bytes) and `2` (explicit
+zero-padding to merge alignment gaps, added bytes accounted).
+Ensure exact readback, short/failed entire lower write, no early
+upper ack, prefix publication across runs, GC reserve role
+handoffs, FUA/PREFLUSH, suspend/drain and independent backing
+`/sys/block/.../stat` read/write bytes/requests before claiming
+ANY benefit. One `dm_io` call is not necessarily one hardware
+request; independent kernel block stats remain decisive.
+
+Never load alpha.6 against physical disk/SD or active system swap,
+never remove the physical-device constructor safeguard and NEVER
+REBOOT.
+
 ## Distinguish the two independently built modules
 
 - `make -C kernel/extent-v3 W=1 all`: output `dm-swapz.ko`, an
