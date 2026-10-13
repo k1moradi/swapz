@@ -26,6 +26,31 @@ The **active implementation direction** is zsmalloc-inspired object-size
 classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
 extents when useful, and live-only size-classed compaction.
 
+**V3.0.0-alpha.6 lower-I/O aggregation experiment:** [main-developer PR #54](https://github.com/k1moradi/swapz/pull/54)
+addresses a **negative measured default-V3 result** in the independent
+[alpha.5 loaded V2.2 comparison](https://github.com/k1moradi/swapz/pull/53):
+V2.2 wrote 1,679,360 B in 26 write requests, while V3 default
+wrote 1,716,224 B in **419 engine submissions / 420 actual backing requests**
+for the same 1024 logical 4KiB writes. Thus alpha.5 had **2.2% MORE
+write bytes and ~16× MORE write requests**, not the project vision's
+required reduction. No sustained V2.2 win or SD-card improvement is
+established.
+
+The new exact kernel C batches independently CRC-valid 4/8/16KiB
+SWZ3 extents into up to **256KiB synchronous contiguous lower writes**,
+without publishing any mapping before complete lower I/O. The
+same-binary table option `lower_bulk=0` preserves the old per-extent
+control; **`lower_bulk=1` defaults to adjacent-only writes with
+ZERO extra padding bytes**, while `lower_bulk=2` explicitly allows
+measured padding bytes in exchange for possible request reduction.
+This also applies to GC-compressed writes; raw pages stay unchanged.
+Exact-C and kernel CI are safety evidence, NOT proof of actual block
+request reduction. See [LOWER_WRITE_AGGREGATION.md](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md)
+for mandatory source/bin hashes, fault/segment tests, **matched same-binary
+and real V2.2 loaded comparison**, latency, GC and lower sysfs I/O accounting.
+The constructor remains **null_blk-only**; no active SD card or system
+swap may be modified and no reboot is allowed.
+
 **V3.0.0-alpha.6 kernel validation candidate:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
 retains the real `dm-swapz.ko` online packing path from [PR #49](https://github.com/k1moradi/swapz/pull/49)
 and the verified rotating reserve GC from [PR #50](https://github.com/k1moradi/swapz/pull/50).
@@ -54,10 +79,11 @@ A separate experimental Device Mapper target, `swapz3`
 (`kernel/extent-v3/dm-swapz.ko`, **not** the frozen V2.2 module in `kernel/`), is being developed for LZ4
 4 KiB logical pages, bounded size-compatible 4 KiB packing and aligned
 8/16 KiB extents to remove the uniform ~2,072-byte compression cliff.
-**Current alpha includes experimental physical-segment GC code, but its
-live-record relocation/reuse has NOT passed independent loaded-kernel
-validation; it must not be used for sustained system swap, the SD-card
-benchmark, or unattended activation.** The target deliberately accepts
+**Prior alpha.4 and alpha.5 GC rotations DID pass bounded
+independent null_blk loaded tests, but the new alpha.6 batching,
+failure behavior, sustained performance and physical-media savings
+are NOT validated. Do not use for system swap, SD-card benchmarking,
+or unattended activation.** The target deliberately accepts
 owned `null_blk` backing only. Rootless tests and kernel compilation do
 not establish loaded-target correctness or physical-media improvement.
 
