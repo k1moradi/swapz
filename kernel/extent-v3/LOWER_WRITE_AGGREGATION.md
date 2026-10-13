@@ -84,6 +84,40 @@ Historical `physical_write_reqs` is a count of successful `dm_io`
 submissions, **NOT** a guarantee about block-device physical
 request count. Reconcile to independent `null_blk` stats.
 
+## Additional GC economics repair: avoid provably futile full evacuation
+
+Codex's alpha.5 full-destination test also exposed a **2MiB
+wasteful GC attempt**: 256 compressed survivors near 3535B each
+caused **1MiB lower reads + 1MiB lower writes**, then failed
+`-ENOSPC` without any role handoff. The previous live-byte preflight
+only proved its estimated payload total was below 1MiB; that is
+necessary but not sufficient to prove physically packable space.
+
+New **exact on-media format lower bound:** at most four compressed
+records of length **3258B or more** fit inside one 16KiB SWZ3
+extent (five records plus header and descriptors exceed capacity).
+At most two fit in 8KiB; one fits in 4KiB. Every such live record
+therefore requires at least one 4KiB physical allocation block
+*on average*, independent of alignment/reordering, and every raw
+page requires its own block. If a selected segment holds **256
+or more** of those qualifying live records, its survivors cannot
+leave a free block in the sole 1MiB GC destination. Reject that
+candidate **before any relocation I/O**. The old payload-byte
+lower bound still applies to smaller records. No new padding,
+raw-page mutation or reserve-role exchange is authorized.
+
+The driver exposes `gc_no_headroom_skips` to quantify these
+preflight rejections; the same segment can be considered more
+than once, so this is a **candidate-check count**, NOT physical
+I/O operations or exact bytes saved. It is a necessary bound,
+not a complete destination-packing proof. Exact-production-C
+tests use `sv3_begin/sv3_append/sv3_seal` to prove 3257B
+five-per-16KiB fits but 3258B does not, and test mixed raw/large
+lower bounds. The next Codex run should repeat the old 256
+x3535B live GC fixture and confirm no pointless 1MiB read/write
+cycle occurs, while dense-but-eligible workloads retain successful
+GC progress and CRC readback.
+
 ## Source tests performed before loaded test
 
 `tests/runtime/extent-v3-bulk-io-test.c` compiles ACTUAL production
