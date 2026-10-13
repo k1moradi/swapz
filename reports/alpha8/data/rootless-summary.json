@@ -1,0 +1,1552 @@
+{
+  "total_commands": 95,
+  "failed_commands": 0,
+  "results": [
+    {
+      "label": "gcc_asan-ubsan_codec_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-codec-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/codec-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.040337562561035,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_codec_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_codec_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/codec-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.05979633331298828,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_codec_run.log",
+      "tail": "SV3_EXACT_PRODUCTION_C_TESTS_PASS=8"
+    },
+    {
+      "label": "gcc_asan-ubsan_authority_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-authority-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/authority-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.7935433387756348,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_authority_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_authority_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/authority-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.03162431716918945,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_authority_run.log",
+      "tail": "SV3_EXACT_AUTHORITY_TESTS_PASS=10"
+    },
+    {
+      "label": "gcc_asan-ubsan_tx_snapshot_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-tx-snapshot-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/tx_snapshot-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.4106414318084717,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_tx_snapshot_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_tx_snapshot_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/tx_snapshot-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.022722482681274414,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_tx_snapshot_run.log",
+      "tail": "SV3_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=4"
+    },
+    {
+      "label": "gcc_asan-ubsan_write_verify_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-write-verify-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/write_verify-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 3.807762861251831,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_write_verify_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_write_verify_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/write_verify-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0509188175201416,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_write_verify_run.log",
+      "tail": "SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7"
+    },
+    {
+      "label": "gcc_asan-ubsan_dead_segment_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-dead-segment-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/dead_segment-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.332113742828369,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_dead_segment_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_dead_segment_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/dead_segment-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.03889918327331543,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_dead_segment_run.log",
+      "tail": "SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=4"
+    },
+    {
+      "label": "gcc_asan-ubsan_raw_discard_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-raw-discard-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/raw_discard-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.4955291748046875,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_raw_discard_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_raw_discard_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/raw_discard-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.027500391006469727,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_raw_discard_run.log",
+      "tail": "SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=7"
+    },
+    {
+      "label": "gcc_asan-ubsan_engine_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-engine-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/engine-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 4.102044105529785,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_engine_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_engine_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/engine-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.08187532424926758,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_engine_run.log",
+      "tail": "SV3_EXACT_ENGINE_TESTS_PASS=9"
+    },
+    {
+      "label": "gcc_asan-ubsan_randomized_engine_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-randomized-engine-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/randomized_engine-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 4.2156877517700195,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_randomized_engine_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_randomized_engine_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/randomized_engine-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 3.0565569400787354,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_randomized_engine_run.log",
+      "tail": "RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953\nRANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950\nRANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776\nRANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass"
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_forbidden_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-forbidden-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_forbidden-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.370149850845337,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_forbidden_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_forbidden_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_forbidden-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.06174468994140625,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_forbidden_run.log",
+      "tail": "SV3_GC_FORBIDDEN_SEGMENT_TESTS_PASS=3"
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_cost_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-cost-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_cost-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.8852341175079346,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_cost_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_cost_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_cost-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.020565271377563477,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_cost_run.log",
+      "tail": "SV3_GC_COST_TESTS_PASS=6"
+    },
+    {
+      "label": "gcc_asan-ubsan_flush_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-flush-test.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/flush-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.3526625633239746,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_flush_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_flush_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/flush-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.02146601676940918,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_flush_run.log",
+      "tail": "SV3_FLUSH_ACCOUNTING_TESTS_PASS=4"
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_rotation_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-rotation-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_rotation-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 3.2421743869781494,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_rotation_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_rotation_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_rotation-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.3757297992706299,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_rotation_run.log",
+      "tail": "SV3_ROTATING_GC_TESTS_PASS=6"
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_engine_rotation_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-engine-rotation-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_engine_rotation-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 4.012141942977905,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_engine_rotation_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_gc_engine_rotation_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_engine_rotation-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.1445920467376709,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_gc_engine_rotation_run.log",
+      "tail": "SV3_GC_ENGINE_ROTATION_TESTS_PASS=2"
+    },
+    {
+      "label": "gcc_asan-ubsan_bulk_io_compile",
+      "command": [
+        "gcc",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-bulk-io-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/bulk_io-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 6.540428161621094,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_bulk_io_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "gcc_asan-ubsan_bulk_io_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/bulk_io-asan-ubsan"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.7632050514221191,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/gcc_asan-ubsan_bulk_io_run.log",
+      "tail": "SV3_BULK_IO_TESTS_PASS=24"
+    },
+    {
+      "label": "clang_O0_codec_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-codec-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/codec-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.3256795406341553,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_codec_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_codec_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/codec-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.007348775863647461,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_codec_run.log",
+      "tail": "SV3_EXACT_PRODUCTION_C_TESTS_PASS=8"
+    },
+    {
+      "label": "clang_O0_authority_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-authority-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/authority-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.44448089599609375,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_authority_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_authority_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/authority-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.009279489517211914,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_authority_run.log",
+      "tail": "SV3_EXACT_AUTHORITY_TESTS_PASS=10"
+    },
+    {
+      "label": "clang_O0_tx_snapshot_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-tx-snapshot-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/tx_snapshot-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.4369056224822998,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_tx_snapshot_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_tx_snapshot_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/tx_snapshot-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0034253597259521484,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_tx_snapshot_run.log",
+      "tail": "SV3_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=4"
+    },
+    {
+      "label": "clang_O0_write_verify_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-write-verify-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/write_verify-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.5329744815826416,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_write_verify_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_write_verify_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/write_verify-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.024151086807250977,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_write_verify_run.log",
+      "tail": "SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7"
+    },
+    {
+      "label": "clang_O0_dead_segment_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-dead-segment-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/dead_segment-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.40143585205078125,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_dead_segment_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_dead_segment_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/dead_segment-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.016968488693237305,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_dead_segment_run.log",
+      "tail": "SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=4"
+    },
+    {
+      "label": "clang_O0_raw_discard_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-raw-discard-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/raw_discard-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.42664456367492676,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_raw_discard_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_raw_discard_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/raw_discard-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.004120588302612305,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_raw_discard_run.log",
+      "tail": "SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=7"
+    },
+    {
+      "label": "clang_O0_engine_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-engine-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/engine-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.5819759368896484,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_engine_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_engine_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/engine-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.06505274772644043,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_engine_run.log",
+      "tail": "SV3_EXACT_ENGINE_TESTS_PASS=9"
+    },
+    {
+      "label": "clang_O0_randomized_engine_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-randomized-engine-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/randomized_engine-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.5363969802856445,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_randomized_engine_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_randomized_engine_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/randomized_engine-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 4.08808445930481,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_randomized_engine_run.log",
+      "tail": "RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953\nRANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950\nRANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776\nRANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass"
+    },
+    {
+      "label": "clang_O0_gc_forbidden_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-forbidden-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_forbidden-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.4088172912597656,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_forbidden_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_gc_forbidden_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_forbidden-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.051659345626831055,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_forbidden_run.log",
+      "tail": "SV3_GC_FORBIDDEN_SEGMENT_TESTS_PASS=3"
+    },
+    {
+      "label": "clang_O0_gc_cost_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-cost-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_cost-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.4406154155731201,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_cost_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_gc_cost_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_cost-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0041637420654296875,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_cost_run.log",
+      "tail": "SV3_GC_COST_TESTS_PASS=6"
+    },
+    {
+      "label": "clang_O0_flush_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-flush-test.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/flush-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.1723647117614746,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_flush_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_flush_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/flush-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0021543502807617188,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_flush_run.log",
+      "tail": "SV3_FLUSH_ACCOUNTING_TESTS_PASS=4"
+    },
+    {
+      "label": "clang_O0_gc_rotation_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-rotation-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_rotation-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.40487027168273926,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_rotation_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_gc_rotation_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_rotation-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.900890588760376,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_rotation_run.log",
+      "tail": "SV3_ROTATING_GC_TESTS_PASS=6"
+    },
+    {
+      "label": "clang_O0_gc_engine_rotation_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-engine-rotation-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_engine_rotation-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.4919712543487549,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_engine_rotation_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_gc_engine_rotation_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_engine_rotation-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.16112446784973145,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_gc_engine_rotation_run.log",
+      "tail": "SV3_GC_ENGINE_ROTATION_TESTS_PASS=2"
+    },
+    {
+      "label": "clang_O0_bulk_io_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O0",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-bulk-io-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/bulk_io-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.655444860458374,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_bulk_io_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O0_bulk_io_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/bulk_io-O0"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.23544979095459,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O0_bulk_io_run.log",
+      "tail": "SV3_BULK_IO_TESTS_PASS=24"
+    },
+    {
+      "label": "clang_O2_codec_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-codec-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/codec-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.736100435256958,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_codec_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_codec_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/codec-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.003285646438598633,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_codec_run.log",
+      "tail": "SV3_EXACT_PRODUCTION_C_TESTS_PASS=8"
+    },
+    {
+      "label": "clang_O2_authority_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-authority-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/authority-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.340820074081421,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_authority_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_authority_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/authority-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.00513911247253418,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_authority_run.log",
+      "tail": "SV3_EXACT_AUTHORITY_TESTS_PASS=10"
+    },
+    {
+      "label": "clang_O2_tx_snapshot_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-tx-snapshot-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/tx_snapshot-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.1057257652282715,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_tx_snapshot_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_tx_snapshot_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/tx_snapshot-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0026848316192626953,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_tx_snapshot_run.log",
+      "tail": "SV3_TX_IMMUTABLE_SNAPSHOT_TESTS_PASS=4"
+    },
+    {
+      "label": "clang_O2_write_verify_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-write-verify-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/write_verify-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.4296588897705078,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_write_verify_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_write_verify_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/write_verify-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.024035930633544922,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_write_verify_run.log",
+      "tail": "SV3_VERIFY_AFTER_WRITE_TESTS_PASS=7"
+    },
+    {
+      "label": "clang_O2_dead_segment_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-dead-segment-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/dead_segment-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.0381016731262207,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_dead_segment_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_dead_segment_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/dead_segment-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0059604644775390625,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_dead_segment_run.log",
+      "tail": "SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=4"
+    },
+    {
+      "label": "clang_O2_raw_discard_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-raw-discard-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/raw_discard-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.051445722579956,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_raw_discard_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_raw_discard_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/raw_discard-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0036830902099609375,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_raw_discard_run.log",
+      "tail": "SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=7"
+    },
+    {
+      "label": "clang_O2_engine_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-engine-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/engine-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.7434990406036377,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_engine_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_engine_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/engine-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.03830909729003906,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_engine_run.log",
+      "tail": "SV3_EXACT_ENGINE_TESTS_PASS=9"
+    },
+    {
+      "label": "clang_O2_randomized_engine_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-randomized-engine-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/randomized_engine-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.669309139251709,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_randomized_engine_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_randomized_engine_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/randomized_engine-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.0839195251464844,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_randomized_engine_run.log",
+      "tail": "RANDOM_ENGINE_PASS cap=1 windows=100 generated_records=3220 writes=1953 blocks=1952 reads=3623 next_block=1953\nRANDOM_ENGINE_PASS cap=2 windows=100 generated_records=3528 writes=1366 blocks=1795 reads=5069 next_block=1950\nRANDOM_ENGINE_PASS cap=3 windows=100 generated_records=3289 writes=850 blocks=1550 reads=5825 next_block=1776\nRANDOM_ENGINE_ALL_CAPS_PASS seed=0x0d3a5eed iterations=400 generated_records=13279 plus duplicate/fault cases records=pass"
+    },
+    {
+      "label": "clang_O2_gc_forbidden_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-forbidden-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_forbidden-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.9031777381896973,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_forbidden_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_gc_forbidden_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_forbidden-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.020109176635742188,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_forbidden_run.log",
+      "tail": "SV3_GC_FORBIDDEN_SEGMENT_TESTS_PASS=3"
+    },
+    {
+      "label": "clang_O2_gc_cost_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-cost-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_cost-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.9610097408294678,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_cost_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_gc_cost_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_cost-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0034160614013671875,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_cost_run.log",
+      "tail": "SV3_GC_COST_TESTS_PASS=6"
+    },
+    {
+      "label": "clang_O2_flush_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-flush-test.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/flush-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.16553521156311035,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_flush_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_flush_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/flush-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0030982494354248047,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_flush_run.log",
+      "tail": "SV3_FLUSH_ACCOUNTING_TESTS_PASS=4"
+    },
+    {
+      "label": "clang_O2_gc_rotation_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-rotation-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_rotation-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.1986863613128662,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_rotation_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_gc_rotation_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_rotation-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.47849464416503906,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_rotation_run.log",
+      "tail": "SV3_ROTATING_GC_TESTS_PASS=6"
+    },
+    {
+      "label": "clang_O2_gc_engine_rotation_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-gc-engine-rotation-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/gc_engine_rotation-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.4698593616485596,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_engine_rotation_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_gc_engine_rotation_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/gc_engine_rotation-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.05144500732421875,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_gc_engine_rotation_run.log",
+      "tail": "SV3_GC_ENGINE_ROTATION_TESTS_PASS=2"
+    },
+    {
+      "label": "clang_O2_bulk_io_compile",
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O2",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-I",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-bulk-io-test.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/engine.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/authority.c",
+        "/tmp/swapz-pr59-validation/kernel/extent-v3/codec.c",
+        "-o",
+        "/tmp/swapz-alpha8-evidence/rootless/bulk_io-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 2.6013026237487793,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_bulk_io_compile.log",
+      "tail": ""
+    },
+    {
+      "label": "clang_O2_bulk_io_run",
+      "command": [
+        "/tmp/swapz-alpha8-evidence/rootless/bulk_io-O2"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.692136287689209,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/clang_O2_bulk_io_run.log",
+      "tail": "SV3_BULK_IO_TESTS_PASS=24"
+    },
+    {
+      "label": "python_extent-v3-production-source-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/extent-v3-production-source-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.23778247833251953,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_extent-v3-production-source-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 25 tests in 0.075s\n\nOK"
+    },
+    {
+      "label": "python_swapz-flush-fua-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-flush-fua-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.990363597869873,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-flush-fua-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 9 tests in 0.829s\n\nOK"
+    },
+    {
+      "label": "python_swapz-pending-pack-ownership-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-pending-pack-ownership-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.1520299911499023,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-pending-pack-ownership-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 11 tests in 0.993s\n\nOK"
+    },
+    {
+      "label": "python_swapz-upper-bio-ownership-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-upper-bio-ownership-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 1.1284945011138916,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-upper-bio-ownership-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 10 tests in 0.966s\n\nOK"
+    },
+    {
+      "label": "python_swapz-mapping-accounting-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-mapping-accounting-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.8448867797851562,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-mapping-accounting-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 7 tests in 0.669s\n\nOK"
+    },
+    {
+      "label": "python_swapz-gc-compressed-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-gc-compressed-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.5183122158050537,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-gc-compressed-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 15 tests in 0.330s\n\nOK"
+    },
+    {
+      "label": "python_swapz-staged-read-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-staged-read-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.9567275047302246,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-staged-read-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 8 tests in 0.726s\n\nOK"
+    },
+    {
+      "label": "python_swapz-published-read-bounds-contract-test.py",
+      "command": [
+        "python3",
+        "-B",
+        "/tmp/swapz-pr59-validation/tests/runtime/swapz-published-read-bounds-contract-test.py",
+        "-v"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.6862165927886963,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/python_swapz-published-read-bounds-contract-test.py.log",
+      "tail": "----------------------------------------------------------------------\nRan 4 tests in 0.522s\n\nOK"
+    },
+    {
+      "label": "bash_n_test-stack-teardown.sh",
+      "command": [
+        "bash",
+        "-n",
+        "/tmp/swapz-pr59-validation/tests/runtime/test-stack-teardown.sh"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0049860477447509766,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/bash_n_test-stack-teardown.sh.log",
+      "tail": ""
+    },
+    {
+      "label": "bash_n_pressure-teardown.sh",
+      "command": [
+        "bash",
+        "-n",
+        "/tmp/swapz-pr59-validation/tests/runtime/pressure-teardown.sh"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.0049877166748046875,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/bash_n_pressure-teardown.sh.log",
+      "tail": ""
+    },
+    {
+      "label": "bash_n_streaming-benchmark-teardown.sh",
+      "command": [
+        "bash",
+        "-n",
+        "/tmp/swapz-pr59-validation/tests/runtime/streaming-benchmark-teardown.sh"
+      ],
+      "exit_code": 0,
+      "elapsed_s": 0.004859209060668945,
+      "log": "/tmp/swapz-alpha8-evidence/rootless/bash_n_streaming-benchmark-teardown.sh.log",
+      "tail": ""
+    }
+  ]
+}

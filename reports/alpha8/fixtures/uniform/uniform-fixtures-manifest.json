@@ -1,0 +1,73 @@
+{
+  "source_fixture_sha256": "823c37ebb366a7c2e453a70faed8d99dc2f90114185f18ceeafdffe9a0029d25",
+  "source_manifest_sha256": "338adb1442d5511167aaf7bb1a6144c4b351084f57b9623a6e3f7e517ecd9a04",
+  "liblz4_version": "1.10.0",
+  "compressor": "LZ4_compress_fast(input=4096, capacity=3568, acceleration=1)",
+  "records": [
+    {
+      "class": "57",
+      "class_id": 0,
+      "source_page_index": 2,
+      "compressed_length_bytes": 56,
+      "raw_fallback": false,
+      "page_sha256": "b9d3a2736e1681eb95b29b1804081deacb59423d0545e590bc8be69be210534d",
+      "pages_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-57-1024-pages.bin",
+      "pages_sha256": "9bb3d7887964e9af093f47f979a9387c12215b4398a815402635c1dbba0fc972",
+      "classmap_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-57-1024-class.bin",
+      "classmap_sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "page_count": 1024
+    },
+    {
+      "class": "1032",
+      "class_id": 1,
+      "source_page_index": 0,
+      "compressed_length_bytes": 1031,
+      "raw_fallback": false,
+      "page_sha256": "b9af3165e0e199065a55c72d7e09f714495216dc9f415529eee4cb4c31e91123",
+      "pages_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-1032-1024-pages.bin",
+      "pages_sha256": "b086447160c1d84583fa6c54e9560bf9fde7cf51c73f4609ed6d01d288ee9488",
+      "classmap_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-1032-1024-class.bin",
+      "classmap_sha256": "5a648d8015900d89664e00e125df179636301a2d8fa191c1aa2bd9358ea53a69",
+      "page_count": 1024
+    },
+    {
+      "class": "2089",
+      "class_id": 2,
+      "source_page_index": 1,
+      "compressed_length_bytes": 2088,
+      "raw_fallback": false,
+      "page_sha256": "a856db1540d38f63e8543a1ea9163494e20d0e4021aea646514a7d73599107ee",
+      "pages_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-2089-1024-pages.bin",
+      "pages_sha256": "2adb258237580fc88517fadb02d0e03dce85e0ed9313ee6342df24a816a00b79",
+      "classmap_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-2089-1024-class.bin",
+      "classmap_sha256": "14d6fc848712815bc1b5fe1ced1b8980eea1e0db781a946dac5aded9769d1984",
+      "page_count": 1024
+    },
+    {
+      "class": "3500",
+      "class_id": 3,
+      "source_page_index": 8,
+      "compressed_length_bytes": 3499,
+      "raw_fallback": false,
+      "page_sha256": "39d5a2fc854d1bfc7674fe938aa7c8be2c8dfef3c8e36eeadaa6a329e6489aab",
+      "pages_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-3500-1024-pages.bin",
+      "pages_sha256": "5a0fb53acc9d682f288582c3143024449dd8a174a0fbe3a1ea0fdb3af0852ffb",
+      "classmap_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-3500-1024-class.bin",
+      "classmap_sha256": "fcb424e6d90e2da82f75e861af6e631e7d6b39d84b956bb83791ec42cce9b422",
+      "page_count": 1024
+    },
+    {
+      "class": "raw",
+      "class_id": 4,
+      "source_page_index": 11,
+      "compressed_length_bytes": null,
+      "raw_fallback": true,
+      "page_sha256": "94bcad1b0ae6db2c1100dd6c3446aaccd704995e71f58380bf38d34048ef825d",
+      "pages_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-raw-1024-pages.bin",
+      "pages_sha256": "e5f8e7ad9627405470760694406d99fb14b2aa14167980c9ebfc92656767ad9f",
+      "classmap_path": "/root/swapz-pr57-validation/evidence/sustained/fixtures/uniform/uniform-raw-1024-class.bin",
+      "classmap_sha256": "59c4f510b8a8d3fcfaf4debd27ad6711acce4899930c915eff5a455fa09ae971",
+      "page_count": 1024
+    }
+  ]
+}

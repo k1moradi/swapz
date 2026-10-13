@@ -1,0 +1,232 @@
+{
+  "timestamp": 1791896267.9029944,
+  "results": [
+    {
+      "name": "pwd",
+      "command": [
+        "pwd"
+      ],
+      "exit_code": 0,
+      "output": "/home/keivan\n"
+    },
+    {
+      "name": "repo_head",
+      "command": [
+        "git",
+        "-C",
+        "/home/keivan/swapz",
+        "rev-parse",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "output": "1fd24f6ba8368a35153e7d2f1405ac633bac86c7\n"
+    },
+    {
+      "name": "repo_status",
+      "command": [
+        "git",
+        "-C",
+        "/home/keivan/swapz",
+        "status",
+        "--short"
+      ],
+      "exit_code": 0,
+      "output": "?? local-batch-regression-0-verify.state\n?? local-verify-0-verify.state\n"
+    },
+    {
+      "name": "remote",
+      "command": [
+        "git",
+        "-C",
+        "/home/keivan/swapz",
+        "remote",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output": "origin\tgit@github.com:k1moradi/swapz.git (fetch)\norigin\tgit@github.com:k1moradi/swapz.git (push)\n"
+    },
+    {
+      "name": "kernel",
+      "command": [
+        "uname",
+        "-a"
+      ],
+      "exit_code": 0,
+      "output": "Linux Inspiron1564Linux 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux\n"
+    },
+    {
+      "name": "swaps",
+      "command": [
+        "cat",
+        "/proc/swaps"
+      ],
+      "exit_code": 0,
+      "output": "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swapfile                               file\t\t524284\t\t519016\t\t-1\n/dev/sdb1                               partition\t121863164\t1013988\t\t-1\n"
+    },
+    {
+      "name": "free",
+      "command": [
+        "free",
+        "-h"
+      ],
+      "exit_code": 0,
+      "output": "               total        used        free      shared  buff/cache   available\nMem:           3.7Gi       1.8Gi       200Mi        74Mi       2.0Gi       1.8Gi\nSwap:          116Gi       1.5Gi       115Gi\n"
+    },
+    {
+      "name": "lsblk",
+      "command": [
+        "lsblk",
+        "-o",
+        "NAME,TYPE,PKNAME,SIZE,FSTYPE,MOUNTPOINTS"
+      ],
+      "exit_code": 0,
+      "output": "NAME   TYPE PKNAME   SIZE FSTYPE   MOUNTPOINTS\nloop0  loop         66.8M squashfs /snap/core24/2124\nloop1  loop        262.2M squashfs /snap/firefox/8995\nloop2  loop            4K squashfs /snap/bare/5\nloop3  loop        614.5M squashfs /snap/gnome-46-2404/164\nloop4  loop        262.3M squashfs /snap/firefox/9036\nloop5  loop         91.7M squashfs /snap/gtk-common-themes/1535\nloop6  loop          402M squashfs /snap/mesa-2404/1839\nloop7  loop         50.3M squashfs /snap/snapd/27738\nloop8  loop         44.7M squashfs /snap/snapd/28254\nsda    disk        465.8G          \n\u251c\u2500sda1 part sda      549M ntfs     \n\u251c\u2500sda2 part sda     49.7G ntfs     \n\u251c\u2500sda3 part sda      533M ntfs     \n\u251c\u2500sda4 part sda        1K          \n\u251c\u2500sda5 part sda    346.4G ntfs     \n\u2514\u2500sda6 part sda     68.6G ext4     /\nsdb    disk        116.2G          \n\u2514\u2500sdb1 part sdb    116.2G swap     [SWAP]\nsr0    rom          1024M          \n"
+    },
+    {
+      "name": "mounts",
+      "command": [
+        "findmnt",
+        "-rn",
+        "-o",
+        "SOURCE,TARGET,FSTYPE"
+      ],
+      "exit_code": 0,
+      "output": "tmpfs /run tmpfs\n/dev/sda6 / ext4\ndevtmpfs /dev devtmpfs\ntmpfs /dev/shm tmpfs\ndevpts /dev/pts devpts\nsysfs /sys sysfs\nsecurityfs /sys/kernel/security securityfs\ncgroup2 /sys/fs/cgroup cgroup2\nnone /sys/fs/pstore pstore\nbpf /sys/fs/bpf bpf\nconfigfs /sys/kernel/config configfs\nproc /proc proc\nsystemd-1 /proc/sys/fs/binfmt_misc autofs\nnone /run/credentials/systemd-journald.service tmpfs\nfusectl /sys/fs/fuse/connections fusectl\nmqueue /dev/mqueue mqueue\ndebugfs /sys/kernel/debug debugfs\nhugetlbfs /dev/hugepages hugetlbfs\ntracefs /sys/kernel/tracing tracefs\nnone /run/credentials/systemd-resolved.service tmpfs\n/dev/loop0 /snap/core24/2124 squashfs\n/dev/loop2 /snap/bare/5 squashfs\n/dev/loop1 /snap/firefox/8995 squashfs\n/dev/loop4 /snap/firefox/9036 squashfs\n/dev/loop3 /snap/gnome-46-2404/164 squashfs\n/dev/loop5 /snap/gtk-common-themes/1535 squashfs\n/dev/loop6 /snap/mesa-2404/1839 squashfs\n/dev/loop8 /snap/snapd/28254 squashfs\n/dev/loop7 /snap/snapd/27738 squashfs\ntmpfs /tmp tmpfs\nbinfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc\ntmpfs /run/user/1000 tmpfs\nportal /run/user/1000/doc fuse.portal\ngvfsd-fuse /run/user/1000/gvfs fuse.gvfsd-fuse\ntmpfs[/snapd/ns] /run/snapd/ns tmpfs\nnsfs[mnt:[4026532354]] /run/snapd/ns/firefox.mnt nsfs\ntracefs /sys/kernel/debug/tracing tracefs\n"
+    },
+    {
+      "name": "modules",
+      "command": [
+        "lsmod"
+      ],
+      "exit_code": 0,
+      "output": "Module                  Size  Used by\nnull_blk               94208  0\nunix_diag              12288  0\ntcp_diag               20480  0\ninet_diag              24576  1 tcp_diag\ndm_delay               16384  0\nxfrm_interface         32768  0\nxfrm6_tunnel           16384  1 xfrm_interface\ntunnel4                12288  1 xfrm_interface\ntunnel6                12288  2 xfrm_interface,xfrm6_tunnel\nxfrm_user              69632  2\nrfcomm                110592  4\nsnd_seq_dummy          12288  0\nsnd_hrtimer            12288  1\nsnd_seq               126976  7 snd_seq_dummy\nsnd_seq_device         16384  1 snd_seq\ntwofish_generic        20480  0\ntwofish_x86_64_3way    32768  0\ntwofish_x86_64         16384  1 twofish_x86_64_3way\ntwofish_common         94208  3 twofish_x86_64,twofish_generic,twofish_x86_64_3way\nserpent_sse2_x86_64    49152  0\nserpent_generic        24576  1 serpent_sse2_x86_64\nblowfish_generic       12288  0\nblowfish_x86_64        24576  0\nblowfish_common        16384  2 blowfish_generic,blowfish_x86_64\ncast5_generic          24576  0\ncast_common            12288  1 cast5_generic\ndes3_ede_x86_64        49152  0\ndes_generic            12288  0\nlibdes                 32768  2 des_generic,des3_ede_x86_64\nalgif_skcipher         12288  0\ncamellia_generic       45056  0\ncamellia_x86_64        61440  0\nxcbc                   12288  0\nmd4                    16384  0\ncmac                   12288  2\nalgif_hash             20480  0\nccm                    20480  9\naf_alg                 32768  2 algif_hash,algif_skcipher\nqrtr                   53248  2\nbnep                   32768  2\namdgpu              21585920  0\namdxcp                 12288  1 amdgpu\ndrm_panel_backlight_quirks    12288  1 amdgpu\ngpu_sched              69632  1 amdgpu\ndrm_buddy              28672  1 amdgpu\nbinfmt_misc            24576  1\nbtusb                  81920  0\nbtmtk                  36864  1 btusb\nbtrtl                  36864  1 btusb\nbtbcm                  24576  1 btusb\nbtintel                73728  1 btusb\nb43                   589824  0\nbluetooth            1134592  30 btrtl,btmtk,btintel,btbcm,bnep,btusb,rfcomm\nradeon               2301952  5\ncordic                 12288  1 b43\nplatform_profile       20480  0\nsnd_hda_codec_alc269   151552  1\nbcma                   90112  1 b43\nsnd_hda_codec_realtek_lib    65536  1 snd_hda_codec_alc269\nsnd_hda_scodec_component    20480  1 snd_hda_codec_alc269\nsnd_hda_codec_atihdmi    24576  1\nsnd_hda_codec_generic   126976  2 snd_hda_codec_realtek_lib,snd_hda_codec_alc269\nsnd_hda_codec_hdmi     65536  1 snd_hda_codec_atihdmi\nintel_powerclamp       28672  0\ndrm_ttm_helper         20480  2 amdgpu,radeon\nttm                   139264  3 amdgpu,radeon,drm_ttm_helper\ndell_laptop            40960  0\nmac80211             1937408  1 b43\nsnd_hda_intel          65536  2\ncoretemp               24576  0\nkvm_intel             552960  0\ndrm_exec               12288  2 amdgpu,radeon\ndell_smm_hwmon         36864  0\nuvcvideo              147456  0\ncfg80211             1548288  2 b43,mac80211\nsnd_hda_codec         212992  6 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_hda_codec_atihdmi\ndrm_suballoc_helper    24576  2 amdgpu,radeon\nkvm                  1527808  1 kvm_intel\nsnd_hda_core          151552  7 snd_hda_codec_generic,snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_hda_codec_atihdmi\nvideobuf2_vmalloc      20480  1 uvcvideo\nuvc                    12288  1 uvcvideo\ndrm_display_helper    307200  2 amdgpu,radeon\nlibarc4                12288  1 mac80211\nvideobuf2_memops       16384  1 videobuf2_vmalloc\nvideobuf2_v4l2         36864  1 uvcvideo\nirqbypass              16384  1 kvm\nvideobuf2_common       90112  4 videobuf2_vmalloc,videobuf2_v4l2,uvcvideo,videobuf2_memops\nat24                   32768  0\nvideodev              376832  2 videobuf2_v4l2,uvcvideo\ncec                   106496  2 drm_display_helper,amdgpu\nmei_pxp                16384  0\nrc_core                81920  1 cec\nsnd_intel_dspcfg       45056  1 snd_hda_intel\nsnd_intel_sdw_acpi     16384  1 snd_intel_dspcfg\nsnd_hwdep              24576  1 snd_hda_codec\nsnd_pcm               208896  4 snd_hda_codec_hdmi,snd_hda_intel,snd_hda_codec,snd_hda_core\nums_realtek            24576  1\nuas                    32768  0\nintel_cstate           20480  0\nsnd_timer              53248  3 snd_seq,snd_hrtimer,snd_pcm\nsnd                   147456  17 snd_hda_codec_generic,snd_seq,snd_seq_device,snd_hda_codec_hdmi,snd_hwdep,snd_hda_intel,snd_hda_codec,snd_timer,snd_hda_codec_realtek_lib,snd_hda_codec_alc269,snd_pcm\ndell_wmi               28672  1 dell_laptop\nsoundcore              16384  1 snd\njoydev                 32768  0\ni2c_i801               36864  0\ni2c_algo_bit           16384  2 amdgpu,radeon\nmc                     90112  4 videodev,videobuf2_v4l2,uvcvideo,videobuf2_common\ndell_smbios            36864  2 dell_wmi,dell_laptop\ndcdbas                 24576  1 dell_smbios\ninput_leds             12288  0\nwmi_bmof               12288  0\nsparse_keymap          12288  1 dell_wmi\ndell_wmi_descriptor    20480  2 dell_wmi,dell_smbios\nmac_hid                12288  0\nusb_storage            86016  2 uas,ums_realtek\ni2c_smbus              20480  1 i2c_i801\ni2c_mux                20480  1 i2c_i801\nr8169                 151552  0\nrealtek                57344  1\nlpc_ich                32768  0\nmei_me                 61440  1\nssb                   106496  1 b43\nmei                   184320  3 mei_pxp,mei_me\nsch_fq_codel           28672  2\nefi_pstore             12288  0\nhid_generic            12288  0\nusbhid                 86016  0\nhid                   282624  2 usbhid,hid_generic\npsmouse               225280  0\nvideo                  77824  4 dell_wmi,amdgpu,radeon,dell_laptop\nwmi                    36864  6 video,dell_wmi,wmi_bmof,dell_smm_hwmon,dell_smbios,dell_wmi_descriptor\nahci                   53248  1\nlibahci                57344  1 ahci\nserio_raw              20480  0\nlp                     32768  0\nesp4_offload           16384  0\nppdev                  24576  0\nesp4                   28672  1 esp4_offload\nparport                81920  2 lp,ppdev\nxfrm_algo              16384  2 esp4,xfrm_user\nmsr                    12288  0\ndmi_sysfs              28672  0\nautofs4                61440  2\nlz4                    12288  8\nlz4_compress           24576  1 lz4\n"
+    },
+    {
+      "name": "dm_ls",
+      "command": [
+        "sudo",
+        "-n",
+        "dmsetup",
+        "ls",
+        "--tree"
+      ],
+      "exit_code": 0,
+      "output": "No devices found\n"
+    },
+    {
+      "name": "dm_targets",
+      "command": [
+        "sudo",
+        "-n",
+        "dmsetup",
+        "targets"
+      ],
+      "exit_code": 0,
+      "output": "delay            v1.5.0\nstriped          v1.7.0\nlinear           v1.5.0\nerror            v1.7.0\n"
+    },
+    {
+      "name": "nullb_configfs",
+      "command": [
+        "sudo",
+        "-n",
+        "find",
+        "/sys/kernel/config/nullb",
+        "-maxdepth",
+        "2",
+        "-printf",
+        "%y %p\\n"
+      ],
+      "exit_code": 0,
+      "output": "d /sys/kernel/config/nullb\nf /sys/kernel/config/nullb/features\n"
+    },
+    {
+      "name": "nullb_parameters",
+      "command": [
+        "sudo",
+        "-n",
+        "sh",
+        "-c",
+        "for f in /sys/module/null_blk/parameters/*; do printf \"%s=\" \"${f##*/}\"; cat \"$f\"; done"
+      ],
+      "exit_code": 0,
+      "output": "blocking=N\nbs=512\ncache_size=0\ncompletion_nsec=10000\ndiscard=N\nfua=Y\ngb=250\nhome_node=-1\nhw_queue_depth=64\nirqmode=1\nmax_sectors=0\nmbps=0\nmemory_backed=N\nno_sched=0\nnr_devices=0\npoll_queues=1\nqueue_mode=2\nrotational=N\nshared_tag_bitmap=N\nshared_tags=N\nsubmit_queues=1\nuse_per_node_hctx=N\nvirt_boundary=N\nzone_append_max_sectors=2147483647\nzone_capacity=0\nzone_full=N\nzone_max_active=0\nzone_max_open=0\nzone_nr_conv=0\nzone_size=256\nzoned=N\n"
+    },
+    {
+      "name": "gcc",
+      "command": [
+        "cc",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+    },
+    {
+      "name": "clang",
+      "command": [
+        "clang",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "Ubuntu clang version 23.1.3 (++20260922084409+67f4a076a097-1~exp1~20260922084419.77)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/lib/llvm-23/bin\n"
+    },
+    {
+      "name": "fio",
+      "command": [
+        "fio",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "fio-3.41\n"
+    },
+    {
+      "name": "lz4",
+      "command": [
+        "pkg-config",
+        "--modversion",
+        "liblz4"
+      ],
+      "exit_code": 0,
+      "output": "1.10.0\n"
+    },
+    {
+      "name": "headers",
+      "command": [
+        "readlink",
+        "-f",
+        "/lib/modules/7.0.0-38-generic/build"
+      ],
+      "exit_code": 0,
+      "output": "/usr/src/linux-headers-7.0.0-38-generic\n"
+    },
+    {
+      "name": "boot_id",
+      "command": [
+        "cat",
+        "/proc/sys/kernel/random/boot_id"
+      ],
+      "exit_code": 0,
+      "output": "8d9202c7-b75e-4bd4-95cc-8ca0d9167b19\n"
+    },
+    {
+      "name": "state_hashes",
+      "command": [
+        "sha256sum",
+        "/home/keivan/swapz/local-batch-regression-0-verify.state",
+        "/home/keivan/swapz/local-verify-0-verify.state"
+      ],
+      "exit_code": 0,
+      "output": "42edb55a8d096325a1c4118909cf0da6845c4745bbb769e4231861877f1efb61  /home/keivan/swapz/local-batch-regression-0-verify.state\n5810e0aefccd0d464e432afd8de7ba885e5a9f6f8b560beddcb14ba9c82963a3  /home/keivan/swapz/local-verify-0-verify.state\n"
+    },
+    {
+      "name": "mod_swapz",
+      "command": [
+        "sudo",
+        "-n",
+        "modinfo",
+        "dm_swapz"
+      ],
+      "exit_code": 1,
+      "output": "modinfo: ERROR: Module dm_swapz not found.\n"
+    }
+  ]
+}

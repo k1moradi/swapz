@@ -1,0 +1,9 @@
+initial_dm=No devices found
+unloading test-owned dm_swapz module with zero references
+final_dm=No devices found
+module=absent
+nullb_config=absent
+nullb_sysfs=absent
+swaps=Filename				Type		Size		Used		Priority
+/swapfile                               file		524284		510940		-1
+/dev/sdb1                               partition	121863164	988500		-1
