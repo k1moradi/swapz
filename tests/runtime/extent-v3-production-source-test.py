@@ -111,6 +111,29 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertEqual(module.classify(3568), "3073_3568")
         self.assertEqual(module.classify(256), "1_256")
 
+    def test_actual_liblz4_anonymous_page_controls(self):
+        import importlib.util
+        path = ROOT / "tests/runtime/anon-page-fixture.py"
+        spec = importlib.util.spec_from_file_location("anon_page_fixture", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            compress = module.lz4_compressor()
+        except RuntimeError as err:
+            self.skipTest(str(err))
+        zero = module.measure(compress, module.page_bytes(444, 0, "zero"))
+        entropy = module.measure(compress, module.page_bytes(444, 0, "entropy"))
+        self.assertGreater(zero, 0)
+        self.assertLessEqual(zero, 256)
+        self.assertEqual(entropy, 0)
+        pages, info = module.generate(
+            444, 70, module.parse_weights(module.DEFAULT_WEIGHTS), compress)
+        self.assertEqual(len(pages), 70 * 4096)
+        self.assertEqual(sum(info["lz4_size_buckets"].values()), 70)
+        self.assertEqual(info["raw_page_bytes"], info["raw_pages"] * 4096)
+        self.assertGreater(info["lz4_accepted_payload_bytes"], 0)
+        self.assertGreater(info["raw_pages"], 0)
+
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
         self.assertIn('disk_name, "nullb", 5', ctr)
