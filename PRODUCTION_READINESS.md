@@ -263,6 +263,20 @@ are source-level lower submission diagnostics; the independent
 backing `null_blk` stats, NOT `dm_io` call counts, prove actual
 request counts after any block-layer splitting.
 
+In addition, Codex reported one GC victim of **256 compressed
+~3535B live records** that cost **1MiB read + 1MiB write**
+and then failed `-ENOSPC` with no role rotation. Alpha.6 now
+uses the exact SWZ3 4/8/16KiB codec geometry to prove that
+**every compressed record >=3258B consumes at least one physical
+4KiB block**, even under ideal packing (five such records
+cannot fit 16KiB with metadata). Raw pages similarly consume
+one block. A candidate containing >=256 such live records
+is rejected as **provably unable to free one block** before
+any GC copy; `gc_no_headroom_skips` counts candidate checks,
+not saved IO operations. The earlier total-payload minimum
+also remains. This reduces unnecessary GC I/O in the reported
+fragmentation class but does not solve all no-progress layouts.
+
 Exact-C ASan/UBSan and W=1/W=2 build are necessary but NOT
 sufficient. A new alpha.6 module (different hash from alpha.5)
 must pass the original 1024-write independent readback, combined
