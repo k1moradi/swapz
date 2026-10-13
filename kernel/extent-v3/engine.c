@@ -396,6 +396,8 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 			if (aligned / SV3_SEGMENT_BLOCKS !=
 					run_start / SV3_SEGMENT_BLOCKS ||
 			    aligned < run_start ||
+			    (e->bulk_enabled == 1 &&
+			     aligned != run_start + run_blocks) ||
 			    aligned - run_start + blocks > SV3_BULK_BLOCKS) {
 				error = sv3_bulk_flush(e, run_start, run_blocks,
 						       staged, committed_pages);
@@ -435,6 +437,8 @@ retry_stage:
 			       SV3_BULK_BLOCKS * SV3_BLOCK_BYTES);
 		}
 		if (tx->start_block < run_start ||
+		    (e->bulk_enabled == 1 && staged &&
+		     tx->start_block != run_start + run_blocks) ||
 		    tx->start_block - run_start + blocks > SV3_BULK_BLOCKS ||
 		    tx->start_block / SV3_SEGMENT_BLOCKS !=
 					run_start / SV3_SEGMENT_BLOCKS) {
