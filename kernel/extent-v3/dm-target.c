@@ -95,6 +95,7 @@ struct sv3_dm {
 	sv3_u32 segment_count;
 	sv3_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
 	u64 gc_selected_io_cost;
+	u64 gc_no_headroom_skips;
 	u64 gc_selected_live_bytes;
 	u64 gc_selected_live_records;
 	u64 gc_victims;
@@ -543,8 +544,10 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		 * for up to 1MiB of GC reads/writes. Such an eviction could
 		 * only fill its sole reserve destination and return ENOSPC. */
 		if (!sv3_gc_candidate_can_free_block(ctx->gc_scores[segment],
-					      ctx->gc_min_live_blocks[segment]))
+					      ctx->gc_min_live_blocks[segment])) {
+			ctx->gc_no_headroom_skips++;
 			continue;
+		}
 		switch (ctx->gc_cost_policy) {
 		case 0:
 			score = count;
@@ -1497,7 +1500,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "last_gc_victim=%u last_gc_destination=%u "
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
-		       "gc_selected_io_estimate=%llu "
+		       "gc_selected_io_estimate=%llu gc_no_headroom_skips=%llu "
 		       "gc_read_reqs=%llu gc_write_reqs=%llu "
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
@@ -1523,6 +1526,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
 		       ctx->gc_selected_live_records, ctx->gc_selected_io_cost,
+		       ctx->gc_no_headroom_skips,
 		       ctx->gc_read_reqs, ctx->gc_write_reqs,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->engine.write_verify_read_blocks,
