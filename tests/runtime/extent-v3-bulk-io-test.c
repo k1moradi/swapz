@@ -175,6 +175,7 @@ static int test_real_aggregation_and_readback(void)
 	CHECK(run_calls < 20);
 	CHECK(extent_calls == 0);
 	CHECK(e.bulk_writes == run_calls);
+	CHECK(e.bulk_padding_blocks == 0); /* default never pads IO */
 	CHECK(validate_prefix(64) == 0);
 	return 0;
 }
@@ -220,6 +221,20 @@ static int test_duplicate_slots_use_original_sequential_path(void)
 	CHECK(run_calls == 0 && extent_calls >= 2);
 	CHECK(maps[0].valid && maps[0].generation == 2);
 	CHECK(!a.batch_pending);
+	return 0;
+}
+
+static int test_explicit_padding_mode_preserves_crc_and_authority(void)
+{
+	sv3_u8 committed = 0;
+
+	CHECK(setup() == 0);
+	e.bulk_enabled = 2;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+					     &committed) == 0);
+	CHECK(committed == 64 && run_calls && !maps_visible_during_run);
+	CHECK(!ownership_violation && run_calls < e.bulk_extents);
+	CHECK(validate_prefix(64) == 0);
 	return 0;
 }
 
@@ -315,6 +330,7 @@ int main(void)
 	CHECK(test_duplicate_slots_use_original_sequential_path() == 0); passed++;
 	CHECK(test_write_verify_stays_serialized() == 0); passed++;
 	CHECK(test_bulk_control_uses_original_lower_requests() == 0); passed++;
+	CHECK(test_explicit_padding_mode_preserves_crc_and_authority() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
