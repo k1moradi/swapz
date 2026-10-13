@@ -834,6 +834,65 @@ static int test_mixed_successful_cross_format_overwrite(void)
 	return 0;
 }
 
+/*
+ * Reproduce the 819-compressed / 205-raw DISTRIBUTION of the earlier
+ * 1024-page benchmark across 16 independently reset 64-record windows.
+ * This is a rootless source submission test, NOT that loaded IO fixture:
+ * backing-block request merging and persistent segment churn remain
+ * separate null_blk validation gates.
+ */
+static int test_mixed_819_205_distribution_economy(void)
+{
+	unsigned int window;
+	unsigned int total_compressed = 0, total_raw = 0;
+	unsigned int combined_calls = 0, serialized_calls = 0;
+
+	for (window = 0; window < 16; ++window) {
+		const unsigned int compressed_count = window < 13 ? 51 : 52;
+		sv3_u8 committed = 0;
+		unsigned int i;
+		unsigned long long combined_bytes;
+
+		CHECK(setup() == 0);
+		prepare_raw_tail(compressed_count, 64);
+		CHECK(sv3_engine_write_window_batched(&e, pages, 64,
+						     &committed) == 0);
+		CHECK(committed == 64);
+		CHECK(validate_mixed_prefix(64, 64) == 0);
+		CHECK(!e.bulk_padding_blocks && !maps_visible_during_run);
+		combined_bytes = lower_written_bytes;
+		combined_calls += run_calls;
+		total_compressed += compressed_count;
+		total_raw += 64 - compressed_count;
+
+		CHECK(setup() == 0);
+		prepare_raw_tail(compressed_count, 64);
+		e.bulk_enabled = 0;
+		committed = 0;
+		CHECK(sv3_engine_write_window_batched(&e, pages,
+						     compressed_count, &committed) == 0);
+		CHECK(committed == compressed_count);
+		for (i = compressed_count; i < 64; ++i) {
+			struct sv3_tx transaction;
+			sv3_u32 logical = i;
+			sv3_u8 completed = 0;
+
+			CHECK(sv3_stage(&a, &logical, 1, 1,
+						&transaction) == 0);
+			CHECK(write_extent(NULL, transaction.start_block, 1,
+					   raw_payloads[i], &completed) == 0);
+			CHECK(sv3_finish_raw(&a, &transaction,
+					     raw_payloads[i], completed, 0) == 0);
+		}
+		CHECK(lower_written_bytes == combined_bytes);
+		serialized_calls += extent_calls;
+		CHECK(validate_mixed_prefix(64, 64) == 0);
+	}
+	CHECK(total_compressed == 819 && total_raw == 205);
+	CHECK(combined_calls < 205 && combined_calls < serialized_calls);
+	return 0;
+}
+
 static int test_malformed_mixed_input_fails_before_staging(void)
 {
 	sv3_u8 committed = 44;
@@ -887,6 +946,7 @@ int main(void)
 	CHECK(test_mixed_failed_overwrite_preserves_old_generations() == 0); passed++;
 	CHECK(test_mixed_later_run_failure_keeps_only_completed_prefix() == 0); passed++;
 	CHECK(test_mixed_successful_cross_format_overwrite() == 0); passed++;
+	CHECK(test_mixed_819_205_distribution_economy() == 0); passed++;
 	CHECK(test_malformed_mixed_input_fails_before_staging() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
 	return 0;
