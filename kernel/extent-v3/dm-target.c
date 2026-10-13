@@ -1343,7 +1343,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int error;
 
 	if (argc < 1 || argc > 9 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..64]";
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1370,7 +1370,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Nth synchronous lower WRITE attempt, regardless of foreground/GC.
 	 * It fails BEFORE dm_io, for isolated fail-closed protocol testing. */
 	if (argc > 8 && (kstrtou32(argv[8], 10, &write_fail_nth) ||
-			 write_fail_nth > 64U))
+			 write_fail_nth > 65535U))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
