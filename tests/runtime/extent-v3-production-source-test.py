@@ -161,6 +161,16 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
 
+    def test_gc_refuses_any_unpublished_lower_group(self):
+        compact = body("sv3_gc_compact_one")
+        self.assertIn("a->batch_pending", compact)
+        self.assertIn("a->batch_replaying", compact)
+        self.assertLess(compact.index("a->batch_pending"),
+                        compact.index("sv3_gc_choose_victim(ctx, &victim)"))
+        drain = body("sv3_drain")
+        self.assertIn("ctx->authority.batch_pending", drain)
+        self.assertIn("ctx->authority.in_flight", drain)
+
     def test_gc_large_record_preflight_avoids_pointless_full_relocation(self):
         choose = body("sv3_gc_choose_victim")
         cost = (ROOT / "kernel/extent-v3/gc-cost.h").read_text()
