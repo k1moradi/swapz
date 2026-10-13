@@ -134,6 +134,11 @@ struct sv3_dm {
 	 * are NOT completed or proven-media bytes; never mix the two. */
 	u64 lower_write_submitted_bytes;
 	u64 lower_write_submitted_reqs;
+	/* Null_blk-only, pre-submission lower WRITE fault injection. It tests
+	 * upper error propagation, NOT partially completed device writes. */
+	u32 write_fault_nth;
+	u64 write_fault_calls;
+	u64 write_fault_injected;
 	u64 lower_read_submitted_bytes;
 	u64 lower_read_submitted_reqs;
 	struct sv3_flush_meter flush_meter;
@@ -194,6 +199,14 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	region.bdev = ctx->backing->bdev;
 	region.sector = (sector_t)block * SV3_SECTORS;
 	region.count = (sector_t)blocks * SV3_SECTORS;
+	/* Inject at the common physical WRITE boundary, including foreground
+	 * mixed runs, serialized controls and GC relocation. Never count this
+	 * synthetic rejection as submitted/completed lower-device I/O. */
+	if (op == REQ_OP_WRITE &&
+	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
+		ctx->write_fault_injected++;
+		return -EIO;
+	}
 	if (op == REQ_OP_READ) {
 		ctx->lower_read_submitted_bytes +=
 			(u64)blocks * SV3_BLOCK_BYTES;
@@ -1326,11 +1339,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
-	u32 lower_bulk = 1;
+	u32 lower_bulk = 1, write_fail_nth = 0;
 	int error;
 
-	if (argc < 1 || argc > 8 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding]";
+	if (argc < 1 || argc > 9 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..64]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1354,6 +1367,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 7 && (kstrtou32(argv[7], 10, &lower_bulk) ||
 			 lower_bulk > 2U))
 		return -EINVAL;
+	/* Nth synchronous lower WRITE attempt, regardless of foreground/GC.
+	 * It fails BEFORE dm_io, for isolated fail-closed protocol testing. */
+	if (argc > 8 && (kstrtou32(argv[8], 10, &write_fail_nth) ||
+			 write_fail_nth > 64U))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -1363,6 +1381,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->gc_cost_policy = gc_policy;
 	ctx->coalesce_ms = coalesce;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
+	ctx->write_fault_nth = write_fail_nth;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
@@ -1550,6 +1569,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "dead_segment_reuses=%u write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
+		       "write_fault_nth=%u write_fault_calls=%llu write_fault_injected=%llu "
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
@@ -1581,6 +1601,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_write_submitted_reqs,
 		       ctx->lower_read_submitted_bytes,
 		       ctx->lower_read_submitted_reqs,
+		       ctx->write_fault_nth, ctx->write_fault_calls,
+		       ctx->write_fault_injected,
 		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
@@ -1599,12 +1621,12 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
 		       ctx->gc_cost_policy, ctx->coalesce_ms,
 		       ctx->flush_meter.fail_nth,
-		       ctx->engine.bulk_enabled);
+		       ctx->engine.bulk_enabled, ctx->write_fault_nth);
 		break;
 	case STATUSTYPE_IMA:
 	default:
