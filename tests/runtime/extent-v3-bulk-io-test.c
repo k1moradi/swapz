@@ -791,6 +791,49 @@ static int test_mixed_later_run_failure_keeps_only_completed_prefix(void)
 	return 0;
 }
 
+/*
+ * A mapping may change representation on overwrite. Ensure publication
+ * decrements the old extent's liveness and switches raw CRC authority
+ * only after the complete replacement lower run.
+ */
+static int test_mixed_successful_cross_format_overwrite(void)
+{
+	sv3_u8 committed = 0;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	prepare_raw_tail(8, 16);
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16 && validate_mixed_prefix(16, 16) == 0);
+
+	/* Four formerly raw logical pages become compressed. */
+	for (i = 0; i < 12; ++i) {
+		memset(payloads[i], 0xc3, 1200);
+		pages[i].payload = payloads[i];
+		pages[i].length = 1200;
+		pages[i].raw = 0;
+	}
+	prepare_raw_tail(12, 16);
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16 && validate_mixed_prefix(16, 16) == 0);
+	for (i = 0; i < 16; ++i)
+		CHECK(maps[i].generation == 2);
+
+	/* Eight formerly compressed logical pages become raw. */
+	prepare_raw_tail(4, 16);
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16,
+					     &committed) == 0);
+	CHECK(committed == 16 && validate_mixed_prefix(16, 16) == 0);
+	for (i = 0; i < 16; ++i)
+		CHECK(maps[i].generation == 3);
+	CHECK(!maps_visible_during_run && !ownership_violation);
+	return 0;
+}
+
 static int test_malformed_mixed_input_fails_before_staging(void)
 {
 	sv3_u8 committed = 44;
@@ -843,6 +886,7 @@ int main(void)
 	CHECK(test_mixed_lower_failures_quarantine_unpublished_raw() == 0); passed++;
 	CHECK(test_mixed_failed_overwrite_preserves_old_generations() == 0); passed++;
 	CHECK(test_mixed_later_run_failure_keeps_only_completed_prefix() == 0); passed++;
+	CHECK(test_mixed_successful_cross_format_overwrite() == 0); passed++;
 	CHECK(test_malformed_mixed_input_fails_before_staging() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
 	return 0;
