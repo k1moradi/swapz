@@ -256,6 +256,241 @@ abort_transaction:
 	return 0;
 }
 
+/*
+ * Bounded lower request aggregation (up to 64 adjacent physical 4KiB
+ * blocks), WITHOUT changing the independent on-disk SWZ3 extents.
+ *
+ * Stage each extent and leave its mapping UNPUBLISHED. Consecutive
+ * transaction snapshots are replayed through the original sv3_finish()
+ * only after the ONE combined lower I/O has completed successfully.
+ * This preserves the original committed-prefix semantics on a failed
+ * group, and prevents false acknowledgement of durable media.
+ */
+static int sv3_bulk_abort(struct sv3_engine *e, sv3_u8 count,
+			  sv3_u8 first)
+{
+	sv3_u8 i;
+	int error;
+
+	for (i = first; i < count; ++i) {
+		error = sv3_batch_resume(e->authority, &e->bulk_txs[i]);
+		if (error)
+			return error;
+		error = sv3_abort(e->authority, &e->bulk_txs[i]);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
+static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
+			  sv3_u16 blocks, sv3_u8 count,
+			  sv3_u8 *committed_pages)
+{
+	sv3_u16 completed = 0;
+	sv3_u8 i;
+	int error;
+
+	if (!count)
+		return 0;
+	if (!blocks || blocks > SV3_BULK_BLOCKS)
+		return -EUCLEAN;
+	e->submitted_blocks += blocks;
+	error = e->io.write_run(e->io.opaque, start, blocks,
+				e->bulk_scratch, &completed);
+	if (completed > blocks) {
+		completed = 0;
+		error = -EUCLEAN;
+	}
+	if (!error && completed != blocks)
+		error = -EIO;
+	/*
+	 * An uncertain lower I/O is NEVER interpreted as partial success.
+	 * Quarantine all its reservations, including possibly written pages,
+	 * and preserve prior authoritative generations.
+	 */
+	if (error) {
+		int cleanup = sv3_bulk_abort(e, count, 0);
+
+		return cleanup ? cleanup : error;
+	}
+	e->completed_blocks += completed;
+	e->bulk_writes++;
+	e->bulk_extents += count;
+	for (i = 0; i < count; ++i) {
+		struct sv3_tx *tx = &e->bulk_txs[i];
+		sv3_u16 offset = e->bulk_offsets[i];
+
+		error = sv3_batch_resume(e->authority, tx);
+		if (error) {
+			int cleanup = sv3_bulk_abort(e, count, i);
+
+			return cleanup ? cleanup : error;
+		}
+		error = sv3_finish(e->authority, tx,
+				   e->bulk_scratch +
+					(size_t)offset * SV3_BLOCK_BYTES,
+				   (sv3_u32)tx->extent_blocks * SV3_BLOCK_BYTES,
+				   tx->extent_blocks, 0);
+		if (error) {
+			int cleanup = sv3_bulk_abort(e, count, i + 1);
+
+			return cleanup ? cleanup : error;
+		}
+		*committed_pages += e->bulk_takes[i];
+	}
+	return 0;
+}
+
+int sv3_engine_write_window_batched(struct sv3_engine *e,
+				   const struct sv3_compressed_page *pages,
+				   sv3_u8 count, sv3_u8 *committed_pages)
+{
+	sv3_u8 extent_count, entry = 0, group;
+	sv3_u8 staged = 0;
+	sv3_u32 run_start = 0;
+	sv3_u16 run_blocks = 0;
+	int error;
+
+	if (!e || !e->authority || !committed_pages)
+		return -EINVAL;
+	*committed_pages = 0;
+	if (!e->bulk_scratch || !e->bulk_txs || !e->io.write_run ||
+	    e->verify_after_write || count <= 1)
+		return sv3_engine_write_window(e, pages, count,
+					      committed_pages);
+	/* Duplicate logical slots MUST publish sequentially, so we keep the
+	 * old engine for any input that is not uniquely addressable. */
+	for (group = 0; group < count; ++group) {
+		sv3_u8 j;
+
+		for (j = 0; j < group; ++j)
+			if (pages[group].logical_page == pages[j].logical_page)
+				return sv3_engine_write_window(e, pages, count,
+							      committed_pages);
+	}
+	error = sv3_engine_plan_bounded(pages, count,
+					e->max_read_blocks_per_record,
+					e->plan_classes, e->plan_takes,
+					&extent_count);
+	if (error)
+		return error;
+	for (group = 0; group < extent_count; ++group) {
+		struct sv3_builder builder;
+		struct sv3_tx *tx;
+		sv3_u8 blocks = e->plan_classes[group];
+		sv3_u8 take = e->plan_takes[group], j;
+		sv3_u32 aligned;
+
+		/*
+		 * Flush the old run BEFORE trying to move the authority
+		 * beyond its pending segment or 256KiB limit. Alignment
+		 * holes are explicitly zero filled and count as real lower
+		 * bytes; never pack across independently recyclable segments.
+		 */
+		if (staged) {
+			aligned = (e->authority->next_block + blocks - 1U) &
+				  ~(sv3_u32)(blocks - 1U);
+			if (aligned / SV3_SEGMENT_BLOCKS !=
+					run_start / SV3_SEGMENT_BLOCKS ||
+			    aligned < run_start ||
+			    aligned - run_start + blocks > SV3_BULK_BLOCKS) {
+				error = sv3_bulk_flush(e, run_start, run_blocks,
+						       staged, committed_pages);
+				if (error)
+					return error;
+				staged = 0;
+			}
+		}
+retry_stage:
+		tx = &e->bulk_txs[staged];
+		for (j = 0; j < take; ++j)
+			e->logical_scratch[j] = pages[entry + j].logical_page;
+		error = sv3_stage(e->authority, e->logical_scratch,
+				  take, blocks, tx);
+		if (error == -EAGAIN && staged) {
+			error = sv3_bulk_flush(e, run_start, run_blocks,
+					       staged, committed_pages);
+			if (error)
+				return error;
+			staged = 0;
+			goto retry_stage;
+		}
+		if (error) {
+			if (staged) {
+				int flushed = sv3_bulk_flush(e, run_start,
+						run_blocks, staged, committed_pages);
+
+				if (flushed)
+					return flushed;
+			}
+			return error;
+		}
+		if (!staged) {
+			run_start = tx->start_block;
+			run_blocks = 0;
+			memset(e->bulk_scratch, 0,
+			       SV3_BULK_BLOCKS * SV3_BLOCK_BYTES);
+		}
+		if (tx->start_block < run_start ||
+		    tx->start_block - run_start + blocks > SV3_BULK_BLOCKS ||
+		    tx->start_block / SV3_SEGMENT_BLOCKS !=
+					run_start / SV3_SEGMENT_BLOCKS) {
+			sv3_abort(e->authority, tx);
+			error = -EUCLEAN;
+			goto abort_group;
+		}
+		{
+			sv3_u16 offset = tx->start_block - run_start;
+			sv3_u16 end = offset + blocks;
+			sv3_u8 *image = e->bulk_scratch +
+					       (size_t)offset * SV3_BLOCK_BYTES;
+
+			error = sv3_begin(&builder, image,
+					  (sv3_u32)blocks * SV3_BLOCK_BYTES,
+					  tx->sequence);
+			if (error)
+				goto abort_current;
+			for (j = 0; j < take; ++j) {
+				const struct sv3_compressed_page *p =
+							&pages[entry + j];
+
+				error = sv3_append(&builder, p->logical_page,
+						   tx->records[j].generation,
+						   p->payload, p->length);
+				if (error)
+					goto abort_current;
+			}
+			error = sv3_seal(&builder);
+			if (error)
+				goto abort_current;
+			error = sv3_batch_pause(e->authority, tx);
+			if (error)
+				goto abort_current;
+			e->bulk_offsets[staged] = offset;
+			e->bulk_takes[staged] = take;
+			e->bulk_padding_blocks += offset > run_blocks ?
+						      offset - run_blocks : 0;
+			run_blocks = end;
+			staged++;
+			entry += take;
+		}
+		continue;
+abort_current:
+		sv3_abort(e->authority, tx);
+abort_group:
+		if (staged) {
+			int cleanup = sv3_bulk_abort(e, staged, 0);
+
+			if (cleanup)
+				return cleanup;
+		}
+		return error;
+	}
+	return sv3_bulk_flush(e, run_start, run_blocks, staged,
+			      committed_pages);
+}
+
 int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			 sv3_u8 *payload, sv3_u16 payload_capacity,
 			 sv3_u16 *payload_length)
