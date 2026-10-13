@@ -150,7 +150,7 @@ could potentially address smaller sectors.
   any proven production-like functionality. Package `dkms.conf` for the old
   `dm-swapz.ko` intentionally stays `0.2.2`; old installations must never
   silently upgrade to an incompatible layout.
-- **V3.0.0-alpha.7** is the **current experimental development line**, with mixed raw/compressed lower-write aggregation stacked on alpha.6. Its distinct
+- **V3.0.0-alpha.8** is the **new opt-in read-dependency batching experiment** stacked on alpha.7 / PR #57. Its `read_bypass=0` default preserves original read/write ordering; `read_bypass=1` is unqualified until loaded null_blk correctness and sustained testing. Mixed lower-I/O remains experimental. Its distinct
   `SWZ3` format and the experimental DM target name `swapz3` do not
   decode V2.2's `SPWZ` layout. No in-place migration is supported.
   V3 does **not** imply persistent/resumable data.

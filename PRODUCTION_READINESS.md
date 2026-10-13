@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.7 (draft mixed lower-write candidate).** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.8 (opt-in disjoint READ batching experiment, draft).** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -63,6 +63,59 @@ physical storage tests. See
 [alpha.7 design](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md)
 and [fault qualification gate](
 kernel/extent-v3/LOWER_WRITE_FAULT_QUALIFICATION.md).
+
+## PR #58: sustained alpha.7 lower-I/O counterevidence (not resolved)
+
+[Independent loaded PR #58](https://github.com/k1moradi/swapz/pull/58)
+tested the exact PR #57 code
+`2e71c0c90b7f6f4ec96340583a0bc5c517bae97c`
+on test-owned, memory-backed null_blk and reports 138 accepted,
+4,096-page fully verified sustained trials. Its **mixed lower-write
+burst improvement remains real**, but the broad performance verdict
+is **MIXED / no general V2.2 win**:
+
+| 80/20 mixed saturated 30-second QD | V2.2 backing write requests | V3 bulk=1 backing write requests |
+|---:|---:|---:|
+| 4 | 55,058 | 85,994 |
+| 8 | 27,592 | 60,448 |
+| 32 | 7,353 | 41,003 |
+
+**Do not compare the absolute bytes of saturated trials as a
+matched-volume result:** the achieved completed operation rates differ.
+Codex's separate same-45,000-operations / 1,500-IOPS paired runs also
+showed V3 *slightly worse* actual backing bytes/requests and reads.
+At QD1, V3's windows were all singletons; 1–4ms timer delays could
+not coalesce them and substantially worsened throughput and write p99.
+At QD8 delayed coalescing saved only about 2.6–2.8% write requests,
+with <0.3% byte reduction and higher read traffic. Neither result
+justifies changing the default coalescing delay.
+
+The source-level V3 policy explicitly flushes pending writes before
+**every** READ; the independent mixed helper reads pages disjoint from
+its write population. This artificially shortens aggregation windows
+without enforcing a same-page data dependency. [Draft alpha.8 read
+bypass protocol](kernel/extent-v3/DISJOINT_READ_BYPASS.md)
+therefore tests a **disabled-by-default**, page-disjoint ordinary READ
+bypass and includes a fail-closed pending-window error-drain path.
+Its actual sustained benefit and safety are **not yet loaded tested**;
+the earlier PR #58 results belong to the **older** alpha.7 binary,
+not to this branch.
+
+Additional unresolved observations in PR #58: 120/120 original
+sustained records reported exactly one more independent backing write
+request than target `physical_write_reqs`, **without extra write
+bytes**. That is not evidence of an additional 4KiB write; a
+zero-length request or harness boundary must be traced. Selected
+read counter intervals also differed. Five generic asynchronous
+page-read Buffer I/O errors appeared around GC fault experiments;
+their origin is unknown. The custom direct-I/O helper supplied
+its **own** CPU and RSS, **not kernel-worker CPU or module memory**.
+The loaded 256-survivor full-destination GC regression was not rerun
+on PR #57; device-originated torn-write/flush fault qualification
+remains blocked.
+
+No physical-media experimentation, active swap modifications,
+swapoff/swapon, or reboot is permitted.
 
 ## What is already supported by evidence
 

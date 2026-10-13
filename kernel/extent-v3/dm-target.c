@@ -34,7 +34,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.7"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.8"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 
@@ -114,6 +114,12 @@ struct sv3_dm {
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
 	sv3_u8 coalesce_ms;
+	/* 0=preserve original read-drains-write-window ordering; 1=allow
+	 * unrelated reads around staged, still-unpublished foreground writes.
+	 * Opt-in only until independently loaded and performance-qualified. */
+	sv3_u8 read_bypass;
+	u64 read_bypassed;
+	u64 read_conflict_flushes;
 	u64 coalesce_deferred;
 	u64 coalesce_urgent;
 	u64 window_records_total;
@@ -751,6 +757,35 @@ out:
 }
 
 
+/*
+ * Only the serialized worker calls this. While no flush/FUA/discard is
+ * pending, a plain read of an unrelated logical slot can observe the
+ * currently authoritative mapping without exposing an unpublished write.
+ * A read of any queued slot must first drain the writes to preserve RAW.
+ * Physical read and lower write regions may share the same backing disk,
+ * but newly reserved write extents cannot overwrite live old mappings.
+ */
+static bool sv3_read_can_bypass_window(struct sv3_dm *ctx, struct bio *bio)
+{
+	sv3_u32 logical;
+	sv3_u8 i;
+
+	if (!ctx->read_bypass || !ctx->batch_count ||
+	    bio_op(bio) != REQ_OP_READ ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+	    bio_sectors(bio) != SV3_SECTORS)
+		return false;
+	logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
+	for (i = 0; i < ctx->batch_count; ++i) {
+		if (ctx->batch[i].logical == logical) {
+			ctx->read_conflict_flushes++;
+			return false;
+		}
+	}
+	ctx->read_bypassed++;
+	return true;
+}
+
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
@@ -760,6 +795,18 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 
 	if (!count)
 		return 0;
+	/* An unrelated read may fail before earlier queued writes have been
+	 * submitted. Never stage/submit those writes after target failure:
+	 * complete every owned BIO once with the latched error and leave no
+	 * unpublished transaction active. */
+	if (ctx->failed) {
+		int latched = ctx->last_error ? ctx->last_error : -EIO;
+
+		for (index = 0; index < count; ++index)
+			sv3_complete(ctx->batch[index].bio, latched);
+		ctx->batch_count = 0;
+		return latched;
+	}
 	sv3_order_window(ctx);
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
@@ -1056,13 +1103,18 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 {
 	int error = 0;
 	const enum req_op op = bio_op(bio);
+	bool read_bypasses;
 
 	if (ctx->failed) {
 		sv3_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
-	/* All nonwrites, preflushes and barriers must drain older writes. */
-	if (op != REQ_OP_WRITE || (bio->bi_opf & REQ_PREFLUSH)) {
+	/* A plain disjoint read can cross a pending write window only when
+	 * explicitly enabled. Same-page reads, all discards, preflush/FUA,
+	 * and unsupported ops retain the original full-drain behavior. */
+	read_bypasses = sv3_read_can_bypass_window(ctx, bio);
+	if ((op != REQ_OP_WRITE && !read_bypasses) ||
+	    (bio->bi_opf & REQ_PREFLUSH)) {
 		error = sv3_flush_window(ctx);
 		if (error) {
 			sv3_complete(bio, error);
@@ -1339,11 +1391,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
-	u32 lower_bulk = 1, write_fail_nth = 0;
+	u32 lower_bulk = 1, write_fail_nth = 0, read_bypass = 0;
 	int error;
 
-	if (argc < 1 || argc > 9 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535]";
+	if (argc < 1 || argc > 10 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [read_bypass 0|1]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1372,6 +1424,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 8 && (kstrtou32(argv[8], 10, &write_fail_nth) ||
 			 write_fail_nth > 65535U))
 		return -EINVAL;
+	/* A guarded experimental read/write independence control, never a
+	 * default semantic change. Only exact 4KiB plain READs qualify. */
+	if (argc > 9 && (kstrtou32(argv[9], 10, &read_bypass) ||
+			read_bypass > 1U))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -1380,6 +1437,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->max_window = (sv3_u8)window;
 	ctx->gc_cost_policy = gc_policy;
 	ctx->coalesce_ms = coalesce;
+	ctx->read_bypass = read_bypass;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->write_fault_nth = write_fail_nth;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
@@ -1579,6 +1637,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
 		       "win9_16=%llu win17_64=%llu "
 		       "coalesce_deferred=%llu coalesce_urgent=%llu "
+		       "read_bypass=%u read_bypassed=%llu read_conflict_flushes=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1618,15 +1677,18 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_bins[2], ctx->window_bins[3],
 		       ctx->window_bins[4], ctx->window_bins[5],
 		       ctx->coalesce_deferred, ctx->coalesce_urgent,
+		       ctx->read_bypass, ctx->read_bypassed,
+		       ctx->read_conflict_flushes,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
 		       ctx->gc_cost_policy, ctx->coalesce_ms,
 		       ctx->flush_meter.fail_nth,
-		       ctx->engine.bulk_enabled, ctx->write_fault_nth);
+		       ctx->engine.bulk_enabled, ctx->write_fault_nth,
+		       ctx->read_bypass);
 		break;
 	case STATUSTYPE_IMA:
 	default:
