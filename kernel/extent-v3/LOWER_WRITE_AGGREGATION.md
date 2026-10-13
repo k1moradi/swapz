@@ -1,3 +1,7 @@
+> **Historical alpha.6 protocol.** The subsequent draft
+> [alpha.7 mixed raw/compressed candidate](MIXED_LOWER_WRITE_AGGREGATION.md)
+> is a separately stacked change, not a loaded validation of alpha.6.
+
 # V3.0.0-alpha.6 — bounded contiguous lower-write aggregation retest
 
 **Kernel architecture change: physical request submission, NOT just compression.**
