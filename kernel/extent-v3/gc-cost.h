@@ -65,6 +65,43 @@ static inline int sv3_gc_has_possible_headroom(sv3_u32 live_bytes)
 	       SV3_SEGMENT_BLOCKS * SV3_BLOCK_BYTES;
 }
 
+/*
+ * PROVEN physical lower bound for large compressed GC survivors.
+ *
+ * At most FOUR >=3258-byte records can occupy one 16KiB SWZ3 extent:
+ * five of them + one header + five 16B descriptors exceed 16384B.
+ * Similarly at most two can occupy an 8KiB extent, or one a 4KiB
+ * extent. Consequently every such survivor requires at least ONE
+ * physical 4KiB allocation unit on average, even with perfect packing.
+ * Each raw record independently requires exactly one dedicated block.
+ * Mixing smaller records cannot lower the required block count.
+ *
+ * This is a NECESSARY bound, not a prediction of fragmentation. Use it
+ * solely to reject victims with a provably full GC destination before
+ * performing potentially 2MiB of wasted relocation I/O.
+ */
+#define SV3_GC_UNSHAREABLE_MIN_LENGTH \
+	((SV3_MAX_EXTENT_BYTES - sizeof(struct sv3_header) - \
+	  5U * sizeof(struct sv3_record)) / 5U + 1U)
+
+static inline sv3_u8 sv3_gc_min_live_blocks(const struct sv3_map *m)
+{
+	if (!m || !m->valid)
+		return 0;
+	if (m->raw)
+		return m->payload_length == SV3_BLOCK_BYTES &&
+		       m->extent_blocks == 1 ? 1 : 0;
+	return m->payload_length >= SV3_GC_UNSHAREABLE_MIN_LENGTH &&
+	       m->payload_length <= SV3_MAX_COMPRESSED ? 1 : 0;
+}
+
+static inline int sv3_gc_candidate_can_free_block(sv3_u32 live_bytes,
+						  sv3_u16 min_live_blocks)
+{
+	return sv3_gc_has_possible_headroom(live_bytes) &&
+	       min_live_blocks < SV3_SEGMENT_BLOCKS;
+}
+
 /* For the selected policy choose lower relocation cost, then fewer
  * records. Stable segment scan order breaks remaining ties. */
 static inline int sv3_gc_prefer(sv3_u32 score, sv3_u16 count,

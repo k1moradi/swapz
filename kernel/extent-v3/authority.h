@@ -86,6 +86,22 @@ struct sv3_authority {
 	 */
 	struct sv3_tx active_tx;
 	int in_flight;
+	/*
+	 * Bounded writer-only group: immutable transactions are kept in the
+	 * engine, and none are published until a combined lower write finishes.
+	 * Unlike in_flight, batch_pending can represent up to 64 RESERVED
+	 * extents in ONE physical segment, but zero committed mappings.
+	 */
+	sv3_u8 batch_pending;
+	sv3_u8 batch_replaying;
+	sv3_u8 batch_stage_allowed;
+	sv3_u8 batch_consumed;
+	sv3_u32 batch_segment;
+	sv3_u32 batch_first_sequence;
+	/* CRC of the exact immutable staged transaction snapshots,
+	 * including record identities and generations. A forged caller
+	 * snapshot can never publish an unrelated page into a batch. */
+	sv3_u32 batch_hashes[SV3_MAX_RECORDS];
 };
 
 /*
@@ -120,6 +136,19 @@ int sv3_stage(struct sv3_authority *authority, const sv3_u32 *logical_pages,
 int sv3_finish(struct sv3_authority *authority, const struct sv3_tx *tx,
 	       const void *extent, sv3_u32 bytes_total,
 	       sv3_u8 completed_blocks, int io_error);
+/*
+ * Serialized batched-lower-write transition: transfer the active stage
+ * to a caller-owned immutable sv3_tx snapshot without publishing mappings.
+ * Stage further extents ONLY inside the same physical segment. On lower
+ * completion restore snapshots in sequence and use normal sv3_finish().
+ * Failed lower writes require resume+abort of every snapshot. No upper BIO
+ * may be acknowledged during this protocol.
+ */
+int sv3_stage_batch(struct sv3_authority *authority,
+		    const sv3_u32 *logical_pages, sv3_u8 count,
+		    sv3_u8 blocks, struct sv3_tx *out);
+int sv3_batch_pause(struct sv3_authority *authority, const struct sv3_tx *tx);
+int sv3_batch_resume(struct sv3_authority *authority, const struct sv3_tx *tx);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
 int sv3_abort(struct sv3_authority *authority, const struct sv3_tx *tx);
 /*

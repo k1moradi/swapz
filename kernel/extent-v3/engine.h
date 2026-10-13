@@ -2,6 +2,7 @@
 #ifndef SWAPZ_V3_EXTENT_ENGINE_H
 #define SWAPZ_V3_EXTENT_ENGINE_H
 #include "authority.h"
+#define SV3_BULK_BLOCKS 64U
 
 /*
  * Experimental synchronous lower-I/O boundary for an ORDERED worker.
@@ -13,6 +14,12 @@ struct sv3_io {
 	void *opaque;
 	int (*write_extent)(void *opaque, sv3_u32 start_block, sv3_u8 blocks,
 			    const sv3_u8 *bytes, sv3_u8 *completed_blocks);
+	/* Optional single synchronous lower write for a 1..64-block
+	 * concatenation of individually valid, aligned SWZ3 extents.
+	 * The authority publishes NONE before this callback has returned
+	 * full confirmed completion. See sv3_batch_pause()/resume(). */
+	int (*write_run)(void *opaque, sv3_u32 start_block, sv3_u16 blocks,
+			 const sv3_u8 *bytes, sv3_u16 *completed_blocks);
 	int (*read_blocks)(void *opaque, sv3_u32 start_block, sv3_u8 blocks,
 			   sv3_u8 *destination);
 };
@@ -28,6 +35,21 @@ struct sv3_engine {
 	struct sv3_io io;
 	sv3_u8 *write_scratch; /* at least 16384 bytes */
 	sv3_u8 *read_scratch;  /* at least 16384 bytes */
+	/*
+	 * Optional, preallocated batch path. 64 lower blocks = 256KiB.
+	 * When absent (or write verification enabled), use the original
+	 * exact per-extent synchronous implementation unchanged.
+	 */
+	sv3_u8 *bulk_scratch; /* at least 64*4096 bytes */
+	struct sv3_tx *bulk_txs; /* at least SV3_MAX_RECORDS transactions */
+	sv3_u16 bulk_offsets[SV3_MAX_RECORDS];
+	sv3_u8 bulk_takes[SV3_MAX_RECORDS];
+	/* 0=per-extent; 1=adjacent only, no added bytes (default);
+	 * 2=also coalesce aligned padding gaps, count extra write bytes. */
+	sv3_u8 bulk_enabled;
+	sv3_u32 bulk_writes;
+	sv3_u32 bulk_extents;
+	sv3_u32 bulk_padding_blocks;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
 	struct sv3_tx pending;
 	sv3_u32 logical_scratch[SV3_MAX_RECORDS];
@@ -67,6 +89,15 @@ int sv3_engine_plan_bounded(const struct sv3_compressed_page *pages,
 int sv3_engine_write_window(struct sv3_engine *engine,
 			    const struct sv3_compressed_page *pages,
 			    sv3_u8 count, sv3_u8 *committed_pages);
+/*
+ * Optional batched physically adjacent extent writer. Stages multiple
+ * logically independent extents but publishes no mapping until ONE
+ * confirmed lower write completes. Respects 1MiB segment boundary,
+ * a 256KiB memory/I/O cap, and the prior committed-page-prefix ABI.
+ */
+int sv3_engine_write_window_batched(struct sv3_engine *engine,
+				   const struct sv3_compressed_page *pages,
+				   sv3_u8 count, sv3_u8 *committed_pages);
 /* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
 int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			 sv3_u8 *payload, sv3_u16 payload_capacity,

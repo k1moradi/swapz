@@ -49,6 +49,7 @@ int sv3_authority_init(struct sv3_authority *a,
 	a->gc_forbidden_open = ~(sv3_u32)0;
 	a->gc_forbidden_victim = ~(sv3_u32)0;
 	a->gc_destination = ~(sv3_u32)0;
+	a->batch_segment = ~(sv3_u32)0;
 	a->next_sequence = 1;
 	return 0;
 }
@@ -185,7 +186,7 @@ int sv3_gc_begin_rotation(struct sv3_authority *a, sv3_u32 victim)
 	int error;
 
 	if (!a || !a->segment_foreground || a->in_flight ||
-	    a->gc_allocation || victim >= a->segment_count ||
+	    a->batch_pending || a->gc_allocation || victim >= a->segment_count ||
 	    !a->segment_foreground[victim] ||
 	    victim == a->open_segment)
 		return -EINVAL;
@@ -218,7 +219,7 @@ int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
 	sv3_u32 dest, logical, block;
 
 	if (!a || !a->segment_foreground || !a->gc_allocation ||
-	    a->in_flight || victim >= a->segment_count ||
+	    a->in_flight || a->batch_pending || victim >= a->segment_count ||
 	    victim != a->gc_forbidden_victim)
 		return -EINVAL;
 	dest = a->gc_destination;
@@ -272,10 +273,28 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	if (!a || !a->maps || !pages || !out ||
 	    !sv3_legal_class(blocks) || !count || count > SV3_MAX_RECORDS)
 		return -EINVAL;
-	if (a->in_flight)
+	if (a->in_flight ||
+	    (a->batch_pending && !a->batch_stage_allowed))
 		return -EBUSY;
 	if (!a->next_sequence || a->next_sequence == ~(sv3_u32)0)
 		return -EOVERFLOW;
+	/*
+	 * A lower-write group has already RESERVED physical extents but none
+	 * has been published. Do not change its physical segment underneath
+	 * the combined IO; the engine flushes the group on -EAGAIN and retries.
+	 */
+	if (a->batch_pending) {
+		sv3_u32 aligned = (a->next_block + blocks - 1U) &
+				  ~(sv3_u32)(blocks - 1U);
+		if (!a->reuse_dead_segments ||
+		    a->open_segment != a->batch_segment ||
+		    aligned >= a->physical_blocks ||
+		    blocks > a->physical_blocks - aligned ||
+		    aligned / SV3_SEGMENT_BLOCKS != a->batch_segment ||
+		    aligned % SV3_SEGMENT_BLOCKS + blocks >
+					SV3_SEGMENT_BLOCKS)
+			return -EAGAIN;
+	}
 	for (index = 0; index < count; ++index) {
 		sv3_u8 earlier;
 
@@ -391,8 +410,106 @@ static int sv3_is_active(const struct sv3_authority *a,
 	return 1;
 }
 
+/*
+ * The sole worker may keep up to 64 staged extents in an isolated
+ * preallocated RAM run. Pausing clears the active identity but DOES NOT
+ * report success, mutate any logical mapping or free the physical blocks.
+ * All paused extents remain reserved in one physical segment.
+ */
+/*
+ * No normal stage/discard/GC operation may enter while lower-batch
+ * snapshots exist. The engine calls this explicit serialized wrapper
+ * for the second and later reservation of an unpublished group.
+ */
+int sv3_stage_batch(struct sv3_authority *a, const sv3_u32 *pages,
+		    sv3_u8 count, sv3_u8 blocks, struct sv3_tx *tx)
+{
+	int error;
+
+	if (!a || a->batch_stage_allowed || a->batch_replaying)
+		return -EBUSY;
+	a->batch_stage_allowed = 1;
+	error = sv3_stage(a, pages, count, blocks, tx);
+	a->batch_stage_allowed = 0;
+	return error;
+}
+
+int sv3_batch_pause(struct sv3_authority *a, const struct sv3_tx *tx)
+{
+	sv3_u32 segment;
+
+	if (!sv3_is_active(a, tx) || !a->reuse_dead_segments ||
+	    a->batch_replaying || a->batch_pending >= SV3_MAX_RECORDS)
+		return -EINVAL;
+	segment = tx->start_block / SV3_SEGMENT_BLOCKS;
+	if (a->batch_pending) {
+		if (segment != a->batch_segment ||
+		    tx->sequence != a->batch_first_sequence + a->batch_pending)
+			return -EUCLEAN;
+	} else {
+		a->batch_first_sequence = tx->sequence;
+		a->batch_segment = segment;
+		a->batch_consumed = 0;
+	}
+	a->batch_hashes[a->batch_pending] =
+		sv3_crc32c_bytes(tx, sizeof(*tx));
+	a->batch_pending++;
+	a->in_flight = 0;
+	a->active_sequence = 0;
+	a->active_blocks = 0;
+	a->active_count = 0;
+	memset(&a->active_tx, 0, sizeof(a->active_tx));
+	return 0;
+}
+
+/* A saved snapshot can only be rearmed in exactly increasing staged
+ * sequence order. Reusing a stage never fabricates physical completion.
+ * The caller MUST subsequently finish/abort the rearmed transaction. */
+int sv3_batch_resume(struct sv3_authority *a, const struct sv3_tx *tx)
+{
+	sv3_u8 i;
+
+	if (!a || !tx || a->in_flight || !a->batch_pending ||
+	    a->batch_replaying || tx->sequence != a->batch_first_sequence ||
+	    tx->start_block / SV3_SEGMENT_BLOCKS != a->batch_segment ||
+	    (tx->extent_blocks != 1 && tx->extent_blocks != 2 &&
+	     tx->extent_blocks != 4) ||
+	    !tx->count || tx->count > SV3_MAX_RECORDS ||
+	    tx->start_block % tx->extent_blocks ||
+	    tx->start_block >= a->physical_blocks ||
+	    tx->extent_blocks > a->physical_blocks - tx->start_block ||
+	    tx->start_block + tx->extent_blocks > a->next_block ||
+	    a->batch_consumed >= SV3_MAX_RECORDS ||
+	    a->batch_hashes[a->batch_consumed] !=
+				sv3_crc32c_bytes(tx, sizeof(*tx)))
+		return -ESTALE;
+	for (i = 0; i < tx->count; ++i)
+		if (tx->records[i].logical_page >= a->logical_pages ||
+		    tx->records[i].generation !=
+		    a->maps[tx->records[i].logical_page].generation + 1U)
+			return -ESTALE;
+	a->active_tx = *tx;
+	a->active_start = tx->start_block;
+	a->active_sequence = tx->sequence;
+	a->active_blocks = tx->extent_blocks;
+	a->active_count = tx->count;
+	a->in_flight = 1;
+	a->batch_replaying = 1;
+	return 0;
+}
+
 static void sv3_forget_active(struct sv3_authority *a, int published)
 {
+	if (a->batch_replaying) {
+		a->batch_replaying = 0;
+		a->batch_pending--;
+		a->batch_first_sequence++;
+		a->batch_consumed++;
+		if (!a->batch_pending) {
+			a->batch_segment = ~(sv3_u32)0;
+			a->batch_consumed = 0;
+		}
+	}
 	if (!published)
 		a->abandoned_blocks += a->active_blocks;
 	else
@@ -513,7 +630,7 @@ int sv3_discard_page(struct sv3_authority *a, sv3_u32 logical_page)
 
 	if (!a || !a->maps || logical_page >= a->logical_pages)
 		return -EINVAL;
-	if (a->in_flight)
+	if (a->in_flight || a->batch_pending)
 		return -EBUSY;
 	old = &a->maps[logical_page];
 	if (old->generation == ~(sv3_u32)0)

@@ -33,14 +33,31 @@ def body(symbol: str) -> str:
     raise AssertionError("Unclosed function: " + symbol)
 
 
+def source_body(symbol: str, source: str) -> str:
+    match = re.search(r"(?:static\s+)?(?:int|void)\s+" + re.escape(symbol) +
+                      r"\s*\([^;]*?\)\s*\{", source, re.S)
+    if not match:
+        raise AssertionError(f"Missing source symbol {symbol}")
+    start = match.end()
+    depth = 1
+    for pos in range(start, len(source)):
+        if source[pos] == "{":
+            depth += 1
+        elif source[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:pos]
+    raise AssertionError("Unclosed source function: " + symbol)
+
+
 class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
-        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.5"', DM)
+        self.assertIn('SV3_ALPHA_VERSION "3.0.0-alpha.6"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.5", GOALS)
+        self.assertIn("3.0.0-alpha.6", GOALS)
 
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
@@ -110,6 +127,63 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("flush_fail_nth > 64U", body("sv3_ctr"))
         self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("sv3_ctr"))
 
+    def test_bounded_lower_run_aggregation_preserves_commit_gate(self):
+        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
+        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        writer = source_body("sv3_engine_write_window_batched", engine)
+        flush = source_body("sv3_bulk_flush", engine)
+        pause = source_body("sv3_batch_pause", authority)
+        resume = source_body("sv3_batch_resume", authority)
+        self.assertIn("SV3_BULK_BLOCKS 64U",
+                      (ROOT / "kernel/extent-v3/engine.h").read_text())
+        self.assertIn("sv3_engine_write_window_batched(&ctx->engine", DM)
+        self.assertIn("ctx->engine.io.write_run = sv3_lower_write_run", DM)
+        self.assertIn("sv3_batch_pause(e->authority, tx)", writer)
+        self.assertIn("sv3_bulk_flush(e, run_start", writer)
+        self.assertIn("sv3_batch_resume(e->authority, tx)", flush)
+        self.assertLess(flush.index("e->io.write_run"),
+                        flush.index("sv3_batch_resume(e->authority, tx)"))
+        self.assertLess(flush.index("sv3_batch_resume(e->authority, tx)"),
+                        flush.index("sv3_finish(e->authority, tx"))
+        self.assertIn("sv3_bulk_abort(e, count, 0)", flush)
+        self.assertIn("a->batch_pending++", pause)
+        self.assertIn("a->batch_replaying = 1", resume)
+        self.assertIn("ctx->engine.bulk_writes", body("sv3_status"))
+        self.assertIn("bulk_mode=%u", body("sv3_status"))
+        ctor = body("sv3_ctr")
+        self.assertIn("lower_bulk = 1", ctor)
+        self.assertIn("lower_bulk > 2U", ctor)
+        self.assertIn("ctx->engine.bulk_enabled = lower_bulk", ctor)
+        self.assertIn("e->bulk_enabled == 1", writer)
+        self.assertIn("aligned != run_start + run_blocks", writer)
+        self.assertIn("sv3_stage_batch(e->authority", writer)
+        self.assertIn("batch_hashes", authority)
+        self.assertIn("batch_stage_allowed", authority)
+        self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
+
+    def test_gc_refuses_any_unpublished_lower_group(self):
+        compact = body("sv3_gc_compact_one")
+        self.assertIn("a->batch_pending", compact)
+        self.assertIn("a->batch_replaying", compact)
+        self.assertLess(compact.index("a->batch_pending"),
+                        compact.index("sv3_gc_choose_victim(ctx, &victim)"))
+        drain = body("sv3_drain")
+        self.assertIn("ctx->authority.batch_pending", drain)
+        self.assertIn("ctx->authority.in_flight", drain)
+
+    def test_gc_large_record_preflight_avoids_pointless_full_relocation(self):
+        choose = body("sv3_gc_choose_victim")
+        cost = (ROOT / "kernel/extent-v3/gc-cost.h").read_text()
+        ctr = body("sv3_ctr")
+        self.assertIn("SV3_GC_UNSHAREABLE_MIN_LENGTH", cost)
+        self.assertIn("sv3_gc_min_live_blocks", cost)
+        self.assertIn("sv3_gc_candidate_can_free_block", cost)
+        self.assertIn("ctx->gc_min_live_blocks[segment] +=", choose)
+        self.assertIn("sv3_gc_candidate_can_free_block", choose)
+        self.assertIn("ctx->gc_no_headroom_skips++", choose)
+        self.assertIn("gc_no_headroom_skips=%llu", body("sv3_status"))
+        self.assertIn("ctx->gc_min_live_blocks = kvcalloc", ctr)
+
     def test_gc_io_aware_default_retains_old_control_policies(self):
         choose = body("sv3_gc_choose_victim")
         ctor = body("sv3_ctr")
@@ -151,6 +225,8 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         worker.rindex("cond_resched();"))
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
         self.assertIn("V3 drain invariant: accepted BIOs remain", drain)
+        self.assertIn("ctx->authority.batch_pending", drain)
+        self.assertIn("ctx->authority.in_flight", drain)
         self.assertIn("sv3_fail(ctx, -EUCLEAN)", drain)
 
     def test_raw_crc_protection_and_gc_relocation(self):

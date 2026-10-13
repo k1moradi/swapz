@@ -11,6 +11,54 @@ plus main-developer fixes in [PR #47](https://github.com/k1moradi/swapz/pull/47)
 Only the exact tested alpha.1 build has *loaded-kernel* evidence; the newer
 alpha.2 changes have rootless/kernel-build evidence, not loaded-host results.
 
+## Newer loaded alpha.5 evidence (supersedes the old missing-baseline claim)
+
+The historical alpha.1/alpha.2 assessment below remains a record of
+what those revisions established, but later [Codex PR #53](https://github.com/k1moradi/swapz/pull/53)
+**DID obtain a real loaded V2.2 control**, not just modeled
+ordered4 geometry. On the same 1024-write, 4MiB useful logical
+input and readback, V2.2 wrote **1,679,360B in 26 requests**,
+while V3 alpha.5 default wrote **1,716,224B in 419
+synchronous dm_io extent submissions / 420 actual backing requests**.
+That is **2.20% MORE write bytes** and roughly **16x MORE write
+requests** in the tested burst. Reads matched at 4MiB/1024 requests.
+Both successfully read back all 1024 pages; there was no
+sustained matched-achieved-IOPS curve or physical SD result.
+
+This is a **MEASURED performance failure for the tested default
+V3 workload**, not merely missing evidence or a size-binning typo.
+The direct code cause is V3 calling one synchronous lower dm_io
+per separate 4/8/16KiB extent, versus V2.2's larger stream
+writes. Higher request setup/dispatch overhead can dominate a
+similar or modestly smaller total written byte count. Smaller
+16-page V3 microbursts saw beneficial write-byte reductions in
+favorable coalescing scenarios, but incurred extra reads and
+multi-ms write p95. No result justifies a general SD win.
+
+[Main-developer alpha.6 PR #54](https://github.com/k1moradi/swapz/pull/54)
+changes the real output pipeline, not just the planner: stage
+multiple individually valid small SWZ3 extents WITHOUT publishing
+authority, issue one bounded 256KiB synchronous contiguous lower
+write, and then publish each only after fully confirmed lower I/O.
+`lower_bulk=0` preserves the same-binary old control;
+`lower_bulk=1` (DEFAULT) aggregates only *adjacent physical*
+extents, adding **no padding write bytes**;
+`lower_bulk=2` explicitly permits zero-filled alignment gaps
+to trade more write bytes for fewer requests. Lower block-layer
+requests may still split after dm_io; compare independently
+measured null_blk requests, not source-level submissions.
+**A performance improvement is a hypothesis until the exact
+alpha.6 module is loaded under a matched V2.2 comparison.**
+
+Later alpha.4 loaded GC tests established reserve-role rotations;
+alpha.5 verified FUA/PREFLUSH and synthetic error propagation.
+In a controlled GC counterexample, live-byte-only selection
+doubled actual relocation traffic; alpha.5's I/O-aware policy
+matched the live-count selector but did not prove a general win.
+The remaining hard blockers are sustained actual request/byte
+economics, read amplification/p99, further GC failures, and
+separately authorized physical media.
+
 ## Evidence for the core algorithm
 
 **Packing and size-aware reordering worked, in bounded windows.** Codex

@@ -1,6 +1,6 @@
 # swapz V3 — production readiness ledger
 
-**Status: NOT READY — V3.0.0-alpha.5.** This is an evidence gate, not a
+**Status: NOT READY — V3.0.0-alpha.6.** This is an evidence gate, not a
 marketing release label. See [VISION.md](VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
@@ -120,7 +120,7 @@ sourced numbers and the concrete engineering response.
   estimator prefers three 500B pages. Separate authority tests verify
   actual 2200B/1600B records publish those precise payload lengths,
   fail-closed limits, and raw record cost.
-- **Version/provenance:** `V3.0.0-alpha.5`, installed V3 build artifact
+- **Version/provenance:** `V3.0.0-alpha.6`, installed V3 build artifact
   `dm-swapz.ko` and alpha DM target keyword `swapz3`. Rebuilt host
   module SHA, source blobs, vermagic and backing major/minor must be
   captured anew. The alpha.1 and alpha.2 evidence cannot certify it.
@@ -155,7 +155,7 @@ former foreground victim therefore becomes next cycle's reserve.
 Memory-only exact-production-C authority and codec/engine tests
 exercise repeated handoffs, old-map preservation on incomplete
 relocation, and eight rotations on the exact 32MiB geometry.
-**Current version: 3.0.0-alpha.5.**
+**Current version: 3.0.0-alpha.6.**
 
 This is **source implementation evidence**, NOT a loaded-kernel
 approval. [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
@@ -216,6 +216,91 @@ policy 0/1/2 and only afterward sustained I/O performance. The
 `null_blk`-only constructor guard remains unchanged. **NO REBOOT,
 NO active swap or physical-media I/O**.
 
+## Alpha.6 main-developer response to the first measured V2.2 performance regression
+
+[Independent Codex PR #53](https://github.com/k1moradi/swapz/pull/53)
+verified alpha.5 FUA/PREFLUSH, eight full GC reserve rotations for each
+victim policy, exact readback and 1,024-BIO suspend/resume on owned
+RAM-backed null_blk. Its measured, same-input 1,024-write V2.2 control
+is **NEGATIVE** for the previous V3 defaults:
+
+| 1024 upper 4KiB writes, full readback | V2.2 | V3 alpha.5 |
+|---|---:|---:|
+| Lower WRITE bytes | 1,679,360 | 1,716,224 (2.20% WORSE) |
+| Lower WRITE requests | 26 | 419 engine submissions / 420 backing |
+| Lower READ bytes | 4,194,304 | 4,194,304 |
+
+The roughly **16× request regression** is explained by actual source:
+alpha.5 sent one synchronous `dm_io` per small 4/8/16KiB extent,
+while V2.2 issued large stream writes. In isolated, favorable
+16-page runs V3 coalescing could reduce written bytes, but sometimes
+doubled read traffic and increased write completion to multiple
+milliseconds. Those microbursts are NOT a sustained or physical-media
+performance win. The user's project vision is emphatically NOT yet
+satisfied.
+
+[Main-developer draft PR #54](https://github.com/k1moradi/swapz/pull/54)
+implements **real physical lower request aggregation**, not another
+isolated packer simulation. The exact kernel engine stages up to 64
+independently valid SWZ3 extents, keeps every logical mapping
+UNPUBLISHED, and submits a synchronous, bounded **256KiB** lower
+write. Only after complete lower success is each saved, CRC32C
+snapshot-restored stage validated and published via unchanged
+`sv3_finish`. A failed/short lower run aborts every unpublished
+extent without acknowledging its upper BIO; previously confirmed
+complete runs retain their exact committed-prefix semantics.
+No group crosses a 1MiB segment boundary. Any attempted
+unrelated stage or discard during paused transactions is rejected.
+
+**Still-blocking mixed-format request economics:** the loaded
+1,024-write alpha.5 fixture contained **819 compressed and 205
+incompressible/raw pages**. Alpha.6's bounded bulk submission applies
+only to compressed extents: each raw fallback still produces one
+synchronous `dm_io` lower write. So on the same fixture, alpha.6
+still entails **at least 205 raw lower submissions** independently
+of any gains aggregating compressed extents. This source-level floor
+does NOT equal independently measured block-layer requests, but it
+means **compressed-only batching cannot plausibly erase the entire
+V2.2 26-request deficit**. Mixed raw/compressed lower streaming
+is a separate, high-priority architectural development requirement,
+not a feature to assume has been implemented or qualified in PR #54.
+
+Three **same-binary** controls:
+`lower_bulk=0` historical per-extent synchronous calls,
+`lower_bulk=1` **default adjacent-only**, with NO new padding
+write bytes, and `lower_bulk=2` permits explicitly counted
+zero-padding across alignment holes to trade additional bytes for
+possibly fewer requests. Verification readback mode remains
+serialized. Status `bulk_mode,bulk_io,bulk_extents,bulk_padding`
+are source-level lower submission diagnostics; the independent
+backing `null_blk` stats, NOT `dm_io` call counts, prove actual
+request counts after any block-layer splitting.
+
+In addition, Codex reported one GC victim of **256 compressed
+~3535B live records** that cost **1MiB read + 1MiB write**
+and then failed `-ENOSPC` with no role rotation. Alpha.6 now
+uses the exact SWZ3 4/8/16KiB codec geometry to prove that
+**every compressed record >=3258B consumes at least one physical
+4KiB block**, even under ideal packing (five such records
+cannot fit 16KiB with metadata). Raw pages similarly consume
+one block. A candidate containing >=256 such live records
+is rejected as **provably unable to free one block** before
+any GC copy; `gc_no_headroom_skips` counts candidate checks,
+not saved IO operations. The earlier total-payload minimum
+also remains. This reduces unnecessary GC I/O in the reported
+fragmentation class but does not solve all no-progress layouts.
+
+Exact-C ASan/UBSan and W=1/W=2 build are necessary but NOT
+sufficient. A new alpha.6 module (different hash from alpha.5)
+must pass the original 1024-write independent readback, combined
+lower error/short completion and prefix preservation, live GC,
+upper FUA/PREFLUSH/suspend, and real V2.2 sustained, matched-achieved
+IOPS tests. **Do not count this as a win before lower READ and WRITE
+bytes AND request counts, CPU and p99 improve without damaging
+correctness.** See the [dedicated alpha.6 gate](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md).
+The constructor remains null_blk-only; no active /dev/sdb1, physical
+disk, /swapfile or reboot is authorized.
+
 ## Required production exit gates (hard)
 
 - [ ] **G1, loaded alpha.5 correctness.** Independent static review followed
@@ -241,7 +326,13 @@ NO active swap or physical-media I/O**.
       exhaustion and failed relocation. Never reuse partly live segments.
       Under faults, no upper success for unpublished data; preserve old
       mapping data and leave teardown ownership safe.
-- [ ] **G5, measured V2.2 control and online packing opportunity.** Same
+- [ ] **G5, repeatable V2.2-vs-V3 measured IO WIN and request aggregation.**
+      The alpha.5 default's actual write requests were ~16× V2.2,
+      so alpha.6 requires an independently measured improvement, not
+      merely compilation or lower dm_io *submission* counters.
+      Compare lower_bulk 0/1/2 under equal workload, all GC and
+      latency costs, then the ACTUAL mutually exclusive loaded V2.2
+      control. Preserve negative/mixed results. Same
       actual LZ4 page bytes, compressed-size histogram, arrivals,
       read/write mix and achieved load on independently owned equal
       `null_blk` configuration, with **mutually exclusive builds** of

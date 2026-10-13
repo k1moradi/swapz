@@ -19,6 +19,7 @@ on:
       - 'tests/runtime/extent-v3-flush-test.c'
       - 'tests/runtime/extent-v3-gc-rotation-test.c'
       - 'tests/runtime/extent-v3-gc-engine-rotation-test.c'
+      - 'tests/runtime/extent-v3-bulk-io-test.c'
       - '.github/workflows/extent-v3-codec.yml'
   push:
     branches:
@@ -129,6 +130,14 @@ jobs:
             kernel/extent-v3/codec.c \
             -o "$RUNNER_TEMP/sv3-gc-engine-rotation-test"
           "$RUNNER_TEMP/sv3-gc-engine-rotation-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I kernel/extent-v3 \
+            tests/runtime/extent-v3-bulk-io-test.c \
+            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
+            kernel/extent-v3/codec.c \
+            -o "$RUNNER_TEMP/sv3-bulk-io-test"
+          "$RUNNER_TEMP/sv3-bulk-io-test"
           git diff --check
 
   compile-only:

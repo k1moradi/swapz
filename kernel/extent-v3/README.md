@@ -1,4 +1,17 @@
-# Current development: V3.0.0-alpha.5 experimental Device Mapper target (PR #52)
+# Current development: V3.0.0-alpha.6 experimental Device Mapper target (PR #54)
+
+**V3.0.0-alpha.6 adds physical request aggregation, not another
+compression-size heuristic.** The independent alpha.5 loaded test
+confirmed a roughly **16x MORE lower write requests** vs real V2.2
+on one matched 1024-write burst. Alpha.6 groups up to 64 aligned
+4KiB lower physical units / 256KiB into a single synchronous dm_io,
+while retaining individual SWZ3 extents and mapping publication only
+after confirmed lower completion. Controls `lower_bulk=0/1/2`
+respectively disable aggregation, combine adjacent-only without
+additional write padding (DEFAULT), and optionally transfer
+zero-padding across alignment holes. See
+[LOWER_WRITE_AGGREGATION.md](LOWER_WRITE_AGGREGATION.md).
+**No actual loaded alpha.6 performance benefit is yet proven.**
 
 The active `dm-swapz.ko` (target name `swapz3`) is built from
 `kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and

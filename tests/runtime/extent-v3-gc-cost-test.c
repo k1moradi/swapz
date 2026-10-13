@@ -89,6 +89,46 @@ static int test_reclaim_headroom_preflight(void)
 	return 0;
 }
 
+static int test_proven_large_record_gc_block_bound(void)
+{
+	struct sv3_map m = { .valid = 1, .extent_blocks = 4,
+			    .payload_length = 3258 };
+	struct sv3_builder builder;
+	sv3_u8 image[SV3_MAX_EXTENT_BYTES];
+	sv3_u8 payload[3258];
+	unsigned int i;
+	const sv3_u32 optimistic_bytes =
+		SV3_SEGMENT_BLOCKS * (3258U + sizeof(struct sv3_record));
+
+	/* Five of 3257B fit a 16KiB extent. Five of 3258B do NOT.
+	 * The exact production codec establishes this physical boundary. */
+	CHECK(SV3_GC_UNSHAREABLE_MIN_LENGTH == 3258);
+	memset(payload, 0x34, sizeof(payload));
+	CHECK(sv3_begin(&builder, image, sizeof(image), 3) == 0);
+	for (i = 0; i < 5; ++i)
+		CHECK(sv3_append(&builder, i, 1, payload, 3257) == 0);
+	CHECK(sv3_seal(&builder) == 0);
+	CHECK(sv3_begin(&builder, image, sizeof(image), 4) == 0);
+	for (i = 0; i < 4; ++i)
+		CHECK(sv3_append(&builder, i, 1, payload, 3258) == 0);
+	CHECK(sv3_append(&builder, 4, 1, payload, 3258) != 0);
+	CHECK(sv3_gc_min_live_blocks(&m) == 1);
+	CHECK(sv3_gc_has_possible_headroom(optimistic_bytes));
+	CHECK(!sv3_gc_candidate_can_free_block(
+	      optimistic_bytes, SV3_SEGMENT_BLOCKS));
+	CHECK(sv3_gc_candidate_can_free_block(
+	      optimistic_bytes, SV3_SEGMENT_BLOCKS - 1));
+	m.payload_length = 3257;
+	CHECK(!sv3_gc_min_live_blocks(&m));
+	m.payload_length = 3535;
+	CHECK(sv3_gc_min_live_blocks(&m) == 1);
+	m.raw = 1;
+	m.extent_blocks = 1;
+	m.payload_length = 4096;
+	CHECK(sv3_gc_min_live_blocks(&m) == 1);
+	return 0;
+}
+
 static int test_raw_and_invalid_cost(void)
 {
 	struct sv3_map m = { .valid = 1, .raw = 1,
@@ -147,6 +187,7 @@ int main(void)
 	CHECK(test_exact_committed_payload_lengths() == 0); passed++;
 	CHECK(test_io_aware_cost_corrects_loaded_gc_counterexample() == 0); passed++;
 	CHECK(test_reclaim_headroom_preflight() == 0); passed++;
+	CHECK(test_proven_large_record_gc_block_bound() == 0); passed++;
 	printf("SV3_GC_COST_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -1,4 +1,4 @@
-# V3.0.0-alpha.5: online packing + GC economics independent retest gate
+# V3.0.0-alpha.6: online packing + GC economics independent retest gate
 
 **This file describes a TEST CANDIDATE, not a release.** All work must pass
 the existing [LIVE_TEST_GATE.md](LIVE_TEST_GATE.md) and
@@ -6,6 +6,40 @@ the existing [LIVE_TEST_GATE.md](LIVE_TEST_GATE.md) and
 Only an independently owned RAM-backed `null_blk` is permitted by the
 kernel constructor. **Do not remove this guard. Never reboot. Do not modify
 active swap, the protected SD partition or other device mappings.**
+
+## Alpha.6 PRIMARY performance fix and safety gate — lower write aggregation
+
+The original alpha.5 reports below remain historical. Read
+[LOWER_WRITE_AGGREGATION.md](LOWER_WRITE_AGGREGATION.md)
+FIRST for the newer actual kernel implementation and changed
+table arguments.
+
+The independently measured alpha.5 default benchmark was a
+**PERFORMANCE REGRESSION**: V2.2 completed 1024 matched logical
+writes with 1,679,360 lower write bytes and 26 requests; V3
+completed the same writes with 1,716,224 bytes and **419 dm_io
+extent submissions (420 actual backing requests)**.
+Alpha.6 attempts to address exactly that by coalescing adjacent
+physical SWZ3 extents into one 256KiB maximum synchronous lower
+write WITHOUT acknowledging or publishing any mapping early.
+
+New last positional `lower_bulk`:
+`0` old per-extent control;
+`1` (DEFAULT) adjacent-only with ZERO extra padding write bytes;
+`2` adjacent plus explicit zero-filled physical alignment holes,
+which can lower request counts but increase bytes transferred.
+The maximum combined write remains inside one 1MiB physical segment;
+one returned dm_io does not prove one block-layer hardware request.
+Use independent `null_blk` write requests and sector-bytes.
+
+The FIRST host gate: exact alpha.6 W=1/W=2 module+hash,
+`lower_bulk=0/1/2` with identical 1024-write seeds,
+CRC readback, 1024-BIO suspend, read/FUA/PREFLUSH, fail-stop
+on a combined lower write error, previous successfully committed
+prefix and eight GC role handoffs. Only then can the loaded
+V2.2 control and sustained achieved-load measurements proceed.
+Never touch active `/dev/sdb1` or `/swapfile`; no physical
+backing and **no reboot**.
 
 ## Provenance and module identity
 
@@ -25,6 +59,7 @@ and verified module teardown between them. The previous alpha.1
                                      [write_verify 0..1] [gc 0..2]
                                      [coalesce_ms 0..4]
                                      [test_fail_flush_nth 0..64]
+                                     [lower_bulk 0|1|2]
 ```
 
 All optional arguments are positional. Defaults:
@@ -85,7 +120,7 @@ outside the reserve tail after GC. There was **no demonstrated false
 upper completion or data corruption**, but **progress FAILED**.
 
 The main developer fixed this in [PR #50](https://github.com/k1moradi/swapz/pull/50)
-and version **3.0.0-alpha.5**, with explicit per-1MiB-segment roles:
+and version **3.0.0-alpha.6**, with explicit per-1MiB-segment roles:
 foreground only selects foreground victims, GC writes into ONE verified
 dead reserve destination, and a completed all-live evacuation
 **atomically swaps roles** so the old victim becomes a free reserve
