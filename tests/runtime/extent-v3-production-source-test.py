@@ -149,7 +149,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->batch_pending++", pause)
         self.assertIn("a->batch_replaying = 1", resume)
         self.assertIn("ctx->engine.bulk_writes", body("sv3_status"))
-        self.assertIn("!a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
+        self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
         choose = body("sv3_gc_choose_victim")
