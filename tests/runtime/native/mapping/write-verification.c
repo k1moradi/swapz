@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../kernel/extent-v3/engine.h"
+#include "engine.h"
 
 #define CHECK(expr) do { \
 	if (!(expr)) { \

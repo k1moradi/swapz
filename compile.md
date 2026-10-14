@@ -91,3 +91,14 @@ harness to the active tree. These are mechanical **workflow checks**,
 not evidence of loaded V3 performance, physical-media readiness or
 an I/O reduction. The historical module remains inspectable in Git
 history without being part of required builds.
+
+## Reusable native source-tree layout
+
+The 14 current kernel-C tests are grouped under
+`tests/runtime/native/{codec,mapping,gc,io}/`; only
+`tests/suites/Makefile` contains the declarative test-to-production-C
+link map. Its one `BUILD_NATIVE` recipe writes test binaries to
+`build/tests/native/`. All four semantic `make test-*` interfaces
+remain stable. The production source files and test assertions were
+not altered by this organization pass. Use `make test` to verify
+source path resolution and avoid compilation in `tests/runtime/`.

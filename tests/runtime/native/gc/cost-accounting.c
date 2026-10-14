@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include "../../kernel/extent-v3/gc-cost.h"
+#include "gc-cost.h"
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d failed %s\n", __FILE__, __LINE__, #x); \
 	return 1; \

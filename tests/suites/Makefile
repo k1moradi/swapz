@@ -1,61 +1,45 @@
-# Reusable meaningful names, directly exercising existing production C.
-# Version-specific filenames remain compatibility paths, not suite API names.
+# One shared compile rule for all 14 production-C invariant tests.
 ROOT := $(abspath $(CURDIR)/../..)
 OUT := $(ROOT)/build/tests/native
+NATIVE := $(ROOT)/tests/runtime/native
+KERNEL := $(ROOT)/kernel/extent-v3
+CODEC := $(KERNEL)/codec.c
+AUTH := $(KERNEL)/authority.c
+ENGINE := $(KERNEL)/engine.c
 CC ?= cc
 CFLAGS ?= -std=c11 -O1 -g -Wall -Wextra -Werror
 ifeq ($(SANITIZE),1)
 CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
-CPPFLAGS += -I$(ROOT)/kernel/extent-v3
+CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io clean
-PROGRAMS := codec-roundtrip mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting flush-ordering gc-rotation gc-engine-rotation lower-write-aggregation
+PROGRAMS := codec-roundtrip mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation
+
+codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
+mapping-authority_SRC := $(NATIVE)/mapping/authority.c $(AUTH) $(CODEC)
+transaction-publication_SRC := $(NATIVE)/mapping/transaction-publication.c $(AUTH) $(CODEC)
+write-verification_SRC := $(NATIVE)/mapping/write-verification.c $(ENGINE) $(AUTH) $(CODEC)
+dead-segment-reclamation_SRC := $(NATIVE)/mapping/dead-segment.c $(AUTH) $(CODEC)
+raw-discard_SRC := $(NATIVE)/mapping/raw-discard.c $(AUTH) $(CODEC)
+online-packing_SRC := $(NATIVE)/mapping/online-packing.c $(ENGINE) $(AUTH) $(CODEC)
+randomized-authority_SRC := $(NATIVE)/mapping/randomized-authority.c $(ENGINE) $(AUTH) $(CODEC)
+gc-forbidden-victim_SRC := $(NATIVE)/gc/forbidden-victim.c $(AUTH) $(CODEC)
+gc-cost-accounting_SRC := $(NATIVE)/gc/cost-accounting.c $(AUTH) $(CODEC)
+gc-rotation_SRC := $(NATIVE)/gc/rotation.c $(AUTH) $(CODEC)
+gc-engine-rotation_SRC := $(NATIVE)/gc/engine-rotation.c $(ENGINE) $(AUTH) $(CODEC)
+flush-ordering_SRC := $(NATIVE)/io/flush-ordering.c
+lower-write-aggregation_SRC := $(NATIVE)/io/lower-write-aggregation.c $(ENGINE) $(AUTH) $(CODEC)
 
 $(OUT):
 	@mkdir -p "$@"
 
-$(OUT)/codec-roundtrip: $(ROOT)/tests/runtime/extent-v3-codec-test.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/mapping-authority: $(ROOT)/tests/runtime/extent-v3-authority-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/transaction-publication: $(ROOT)/tests/runtime/extent-v3-tx-snapshot-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/write-verification: $(ROOT)/tests/runtime/extent-v3-write-verify-test.c $(ROOT)/kernel/extent-v3/engine.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/dead-segment-reclamation: $(ROOT)/tests/runtime/extent-v3-dead-segment-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/raw-discard: $(ROOT)/tests/runtime/extent-v3-raw-discard-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/online-packing: $(ROOT)/tests/runtime/extent-v3-engine-test.c $(ROOT)/kernel/extent-v3/engine.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/randomized-authority: $(ROOT)/tests/runtime/extent-v3-randomized-engine-test.c $(ROOT)/kernel/extent-v3/engine.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/gc-forbidden-victim: $(ROOT)/tests/runtime/extent-v3-gc-forbidden-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/gc-cost-accounting: $(ROOT)/tests/runtime/extent-v3-gc-cost-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/flush-ordering: $(ROOT)/tests/runtime/extent-v3-flush-test.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/gc-rotation: $(ROOT)/tests/runtime/extent-v3-gc-rotation-test.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/gc-engine-rotation: $(ROOT)/tests/runtime/extent-v3-gc-engine-rotation-test.c $(ROOT)/kernel/extent-v3/engine.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
-
-$(OUT)/lower-write-aggregation: $(ROOT)/tests/runtime/extent-v3-bulk-io-test.c $(ROOT)/kernel/extent-v3/engine.c $(ROOT)/kernel/extent-v3/authority.c $(ROOT)/kernel/extent-v3/codec.c | $(OUT)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $^ -o "$@"
+# Consolidate identical compile recipes, not the individual safety assertions.
+define BUILD_NATIVE
+$(OUT)/$(1): $$($(1)_SRC) | $(OUT)
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) $$^ -o "$$@"
+endef
+$(foreach name,$(PROGRAMS),$(eval $(call BUILD_NATIVE,$(name))))
 
 test-codec: $(OUT)/codec-roundtrip
 	@set -e; "$(OUT)/codec-roundtrip"

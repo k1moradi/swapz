@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include "../../kernel/extent-v3/codec.h"
+#include "codec.h"
 
 #define CHECK(expression) do { \
 	if (!(expression)) { \

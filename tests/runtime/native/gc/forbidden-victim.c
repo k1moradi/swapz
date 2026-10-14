@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#include "../../kernel/extent-v3/authority.h"
+#include "authority.h"
 
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d FAILED: %s\n", __FILE__, __LINE__, #x); \

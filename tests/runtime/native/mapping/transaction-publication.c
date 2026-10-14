@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include "../../kernel/extent-v3/authority.h"
+#include "authority.h"
 
 #define CHECK(expr) do { \
 	if (!(expr)) { \

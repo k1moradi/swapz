@@ -22,9 +22,9 @@ write-payload-stream SHA256 (every 4KiB payload, sequence and offset),
 full initial image, read expectations and final byte-exact image
 readback. Equal number of useful READs and WRITEs and matched
 **achieved** IOPS are mandatory. Use
-`tests/runtime/anon-page-fixture.py` and
-`tests/runtime/io-replay.py`, with
-`tests/runtime/io-replay-test.py` for rootless helper contracts.
+`tests/runtime/benchmark/anon-page-fixture.py` and
+`tests/runtime/benchmark/io-replay.py`, with
+`tests/runtime/benchmark/io-replay-test.py` for rootless helper contracts.
 The replay's wave barriers control dependencies but do not imply
 identical microsecond-level arrival time or native Linux reclaim.
 

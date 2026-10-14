@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include "../../kernel/extent-v3/authority.h"
+#include "authority.h"
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d failed: %s\n", __FILE__, __LINE__, #x); \
 	return 1; \

@@ -27,7 +27,7 @@ make test-lower-io         # flush/FUA, lower write aggregation
 make -C tests/suites test-all
 ~~~
 
-There are **14 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`. Retain existing historical `tests/runtime/extent-v3-*.c` and `v22-*` names for reproducibility; avoid duplicating their logic to satisfy a naming convention. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
+There are **14 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
 
 ## Minimum correctness matrix
 
@@ -81,7 +81,7 @@ compliance.
 
 `make test` runs V3 native C suites without the retired C++ model; the
 latter is retained for explicit historical reproduction only.
-`python3 -B tests/runtime/io-replay-test.py -v` verifies the
+`python3 -B tests/runtime/benchmark/io-replay-test.py -v` verifies the
 **two-arm** off/V3 oracle including bad-input rejection in safe rootless
 files. Benchmarks require an actual loaded V3 module before claiming
 performance. Regressions focus on 2:1-ish **measured** LZ4 inputs, raw
@@ -97,3 +97,25 @@ was restored before final qualification. This compatibility suite is
 **not** an active V2.2 benchmarking requirement; no retired V2.2
 performance comparison should enter new V3 lower-I/O reports. Keep
 real V3 kernel C and owned-null_blk safety contracts enforced.
+
+## Runtime tree consolidation — October 14, 2026
+
+Moved/renamed all **14 C native test sources** into
+`tests/runtime/native/{codec,mapping,gc,io}/` with functional names;
+all test logic and the 14 output executable identities remain. A
+**single Make compile rule** now builds them against the same production
+kernel codec/authority/engine implementations, preserving their suites.
+Moved the three active anonymous-page/immutable-replay scripts to
+`tests/runtime/benchmark/`, and renamed the V3 production-source
+contract test to `tests/runtime/native/source-contract-test.py`.
+Updated source-relative includes/import paths and active workflow
+references. Deleted old root-level names; historical Git commits
+retain the exact original files. Run `make test`, direct source
+contracts and the off/V3 replay test at **final HEAD**.
+
+The remaining V2.2/pressure/recall and old-host helpers remain at
+`tests/runtime/` while their sibling imports and literal workflow
+references are audited. Their safety CI is **not waived or replaced by
+inert stubs**. Subsequent legacy relocation requires explicit test
+parity; this is not a claim that all historical duplicate Python
+utilities have been eliminated.

@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
-#include "../../kernel/extent-v3/authority.h"
+#include "authority.h"
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", \
 	__FILE__, __LINE__, #x); return 1; } } while (0)
 #define NPHYS 1024U

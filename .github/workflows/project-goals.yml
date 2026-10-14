@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           make -C tests test
-          python3 -B tests/runtime/io-replay-test.py -v
+          python3 -B tests/runtime/benchmark/io-replay-test.py -v
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
       - name: Enforce V3-only active defaults and two-arm benchmark

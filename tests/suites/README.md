@@ -35,3 +35,7 @@ and [readiness ledger](../../PRODUCTION_READINESS.md).
 
 The historical C++ model is no longer a default V3 test gate; invoke
 `make -C tests legacy-model` only for archival reproduction.
+
+Build definitions are now consolidated to one Make rule, not one
+copied compile command per test. All 14 C binaries and original
+assertions are retained; see `tests/runtime/README.md` for the tree.

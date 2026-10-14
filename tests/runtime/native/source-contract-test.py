@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 DM = (ROOT / "kernel/extent-v3/dm-target.c").read_text()
 AUTH = (ROOT / "kernel/extent-v3/authority.c").read_text()
 MK = (ROOT / "kernel/extent-v3/Makefile").read_text()
@@ -81,7 +81,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
 
     def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
         import importlib.util
-        path = ROOT / "tests/runtime/anon-page-fixture.py"
+        path = ROOT / "tests/runtime/benchmark/anon-page-fixture.py"
         spec = importlib.util.spec_from_file_location("anon_page_fixture", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -113,7 +113,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
 
     def test_actual_liblz4_anonymous_page_controls(self):
         import importlib.util
-        path = ROOT / "tests/runtime/anon-page-fixture.py"
+        path = ROOT / "tests/runtime/benchmark/anon-page-fixture.py"
         spec = importlib.util.spec_from_file_location("anon_page_fixture", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -139,7 +139,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         # oracle. They do NOT claim a loaded V3 module test.
         import subprocess
         import sys
-        script = ROOT / "tests/runtime/io-replay-test.py"
+        script = ROOT / "tests/runtime/benchmark/io-replay-test.py"
         result = subprocess.run([sys.executable, str(script)],
                                 capture_output=True, text=True, timeout=40)
         self.assertEqual(result.returncode, 0,

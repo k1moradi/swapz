@@ -62,8 +62,8 @@ for the exact same logical pages and operations, including GC, without
 compromising read p99, CPU/memory, ordering or data integrity?**
 
 Use the immutable fixture and two-arm replay:
-`tests/runtime/anon-page-fixture.py`,
-`tests/runtime/io-replay.py`, and `tests/runtime/io-replay-test.py`.
+`tests/runtime/benchmark/anon-page-fixture.py`,
+`tests/runtime/benchmark/io-replay.py`, and `tests/runtime/benchmark/io-replay-test.py`.
 The *off* arm means **bare test-owned RAM-backed null_blk**, not
 disabling a host's actual swap. The V3 arm receives identical 4096B
 page payloads, addresses, operations and a full readback oracle.
@@ -94,3 +94,13 @@ Never reboot, `swapon`, or `swapoff`. Do not access `/dev/sdb1`,
 or unowned `null_blk`. Loaded tests, when authorized, must use new,
 uniquely owned **RAM-backed null_blk** and safe identity checks and
 teardown. V3's null_blk-only guard must not be relaxed for benchmarking.
+
+## Organized V3 runtime checks
+
+[tests/runtime/README.md](tests/runtime/README.md) now indexes
+function-named native C tests and paired-input benchmark contracts.
+Native source tests are in `tests/runtime/native/`; the synthetic
+anonymous-page fixture and immutable replay are in
+`tests/runtime/benchmark/`. The four native test targets and actual
+production-C compilation semantics are unchanged. Historical host
+helpers remain separate to preserve safety coverage.

@@ -6,8 +6,8 @@ on:
     paths:
       - 'kernel/extent-v3/**'
       - 'tests/suites/**'
-      - 'tests/runtime/extent-v3-*.c'
-      - 'tests/runtime/extent-v3-production-source-test.py'
+      - 'tests/runtime/native/**'
+      - 'tests/runtime/benchmark/**'
       - 'Makefile'
       - 'V3_GOALS.md'
       - '.github/workflows/extent-v3-codec.yml'
@@ -29,7 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           make -C tests/suites SANITIZE=1 test-all
-          python3 -B tests/runtime/extent-v3-production-source-test.py -v
+          python3 -B tests/runtime/native/source-contract-test.py -v
           git diff --check
   compile-only:
     runs-on: ubuntu-24.04
