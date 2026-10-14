@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.13"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.14"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -1092,9 +1092,9 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
-		/* All eight upper BIOs and immutable bytes are already
-		 * worker-owned. Only the existing physical-commit gate may
-		 * publish the chosen 16KiB+4KiB-or-better layout and ACK. */
+		/* All seven immutable staged upper writes fit one 16KiB
+		 * extent. The existing physical-success gate alone can
+		 * publish mapping generations and complete these BIOs. */
 		ctx->next_window_close = SV3_CLOSE_PACK_READY;
 		ctx->packed_early_commits++;
 		sv3_flush_window(ctx);

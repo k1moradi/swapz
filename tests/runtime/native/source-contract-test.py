@@ -516,15 +516,15 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
-    def test_alpha13_pack_ready_only_after_compressed_admission(self):
+    def test_alpha14_pack_ready_only_after_seven_compressed_admissions(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         writer = body("sv3_accept_write")
         flush = body("sv3_flush_window")
         status = body("sv3_status")
         self.assertIn("sv3_window_pack_ready(", policy)
-        self.assertIn("largest_seven_bytes - shortest", policy)
+        self.assertIn("extent_bytes += pending[i].length", policy)
         self.assertIn("SV3_MAX_EXTENT_BYTES", policy)
-        self.assertIn("!retain_ms || read_budget || count != 8U", policy)
+        self.assertIn("!retain_ms || read_budget || count != 7U", policy)
         self.assertIn("pending[i].raw", policy)
         self.assertLess(writer.index("ctx->batch_count++"),
                         writer.index("sv3_window_pack_ready("))

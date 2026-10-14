@@ -704,3 +704,31 @@ WRITE byte ratio does NOT prove a higher maximum logical input
 MB/s at a fixed disk bandwidth limit. This requires a separately
 qualified, explicitly controlled and saturated bandwidth ceiling;
 RAM-only `null_blk` cannot be treated as physical SSD evidence.
+
+## Alpha.14 C-first seven-record early commit gate (2026-10-14)
+
+In the updated production `window-policy.h` predicate, an
+explicitly retained unrestricted-read window is pack-ready
+only when **exactly seven** immutable staged non-RAW,
+nonzero-length LZ4 records fit in a **single 16KiB extent**:
+the real SWZ3 header (16B), seven descriptors (7x16B)
+and **all seven actual compressed payload lengths** sum
+to no more than 16384B. For seven 2073B records,
+the exact footprint is 14639B, proving a 16KiB planner
+candidate instead of 7 separate 4KiB units (28KiB).
+The earlier alpha.13 eight-record rule waited for another
+arrival and could require 16+4KiB; this experiment attempts
+to reduce that wait without sacrificing format density.
+It does **not** guarantee a lower I/O or p99 win.
+
+Rootless direct production-C tests must reject count 6/8,
+retention off, restricted read budgets, NULL, RAW,
+zero or oversized payloads, 7x3568B overfull records
+and unfittable shuffled short-outlier cases; exercise the
+valid 7x2073B case. Preserve worker admission-before-rule,
+FUA-before-early-closure, complete synchronous lower
+I/O + authoritative mapping publication, unique BIO completion,
+timer expiry, GC, exact status close-reason conservation,
+no physical-device access and safe quarantine. Alpha.14
+loaded tests and higher input MB/s at fixed disk MB/s
+are **NOT RUN**; the kernel revision remains experimental.

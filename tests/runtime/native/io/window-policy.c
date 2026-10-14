@@ -84,7 +84,7 @@ static int test_caller_fences_override_independence(void)
 	return 0;
 }
 
-static int test_pack_ready_eight_medium_pages(void)
+static int test_pack_ready_seven_medium_pages(void)
 {
 	struct sv3_pending_bio batch[8] = { 0 };
 	unsigned int i;
@@ -93,50 +93,50 @@ static int test_pack_ready_eight_medium_pages(void)
 		batch[i].logical = 100 + i;
 		batch[i].length = 2073;
 	}
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
-	CHECK(sv3_window_pack_ready(batch, 8, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 8, 0, 0));
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 1));
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 3));
-	CHECK(!sv3_window_pack_ready(NULL, 8, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 9, 2, 0));
+	/* 7*2073 + 16 + 7*16 = 14639B, inside one 16KiB extent. */
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(sv3_window_pack_ready(batch, 7, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 0, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 1));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 3));
+	CHECK(!sv3_window_pack_ready(NULL, 7, 2, 0));
 	return 0;
 }
 
 static int test_pack_ready_rejects_raw_and_unfittable(void)
 {
-	struct sv3_pending_bio batch[8] = { 0 };
+	struct sv3_pending_bio batch[7] = { 0 };
 	unsigned int i;
 
-	for (i = 0; i < 8; ++i) {
+	for (i = 0; i < 7; ++i) {
 		batch[i].logical = 200 + i;
 		batch[i].length = 2073;
 	}
 	batch[4].raw = 1;
 	batch[4].length = SV3_BLOCK_BYTES;
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
 	batch[4].raw = 0;
 	batch[4].length = 0;
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
 	batch[4].length = SV3_MAX_COMPRESSED + 1;
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
 	batch[4].length = SV3_MAX_COMPRESSED;
-	CHECK(sv3_window_pack_ready(batch, 8, 2, 0));
-	for (i = 0; i < 8; ++i)
+	CHECK(sv3_window_pack_ready(batch, 7, 2, 0));
+	for (i = 0; i < 7; ++i)
 		batch[i].length = SV3_MAX_COMPRESSED;
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
-	for (i = 0; i < 8; ++i)
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
+	for (i = 0; i < 7; ++i)
 		batch[i].length = 2000;
-	CHECK(sv3_window_pack_ready(batch, 8, 1, 0));
-	/* The smallest outlier cannot disguise an overlarge seven,
-	 * regardless of which index holds the short payload. */
-	for (i = 0; i < 8; ++i)
-		batch[i].length = 2400;
-	batch[7].length = 100;
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
-	batch[7].length = 2400;
+	CHECK(sv3_window_pack_ready(batch, 7, 1, 0));
+	/* Moving a short outlier does not make six 2800B pages fit. */
+	for (i = 0; i < 7; ++i)
+		batch[i].length = 2800;
+	batch[6].length = 100;
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
+	batch[6].length = 2800;
 	batch[0].length = 100;
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
 	return 0;
 }
 
@@ -214,7 +214,7 @@ int main(void)
 	CHECK(test_every_pending_slot_fences_read() == 0); passed++;
 	CHECK(test_disabled_empty_and_invalid_window() == 0); passed++;
 	CHECK(test_caller_fences_override_independence() == 0); passed++;
-	CHECK(test_pack_ready_eight_medium_pages() == 0); passed++;
+	CHECK(test_pack_ready_seven_medium_pages() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;
 	CHECK(test_exact_nanosecond_deadline() == 0); passed++;

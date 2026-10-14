@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.13, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.14, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -165,6 +165,25 @@ null fields for rootless runs; see `benchmark.md`.
 This is a **fixed-input byte saving**, NOT higher demonstrated
 maximum input throughput under an identical saturated disk budget.
 A sustained RAM-only controlled-bandwidth experiment is still open.
+
+## Alpha.14 opt-in C-first seven-page early commit
+
+The owner-loaded alpha.13 retained trial at `0a443ca4`
+measured **1.5435 MB/s** completed logical WRITEs and
+**1.0062 MB/s** independently observed lower WRITEs,
+a **34.81% write-byte reduction** and 79.4% fewer lower
+WRITE requests than uncompressed at matched ~503 IOPS.
+The byte-exact oracle, matched input, two owned RAM devices
+and safe teardown passed; sampled WRITE p99 was **2.788ms**
+versus **0.984ms** off. There was no GC or disk saturation.
+
+Alpha.14 changes the actual production C early-commit
+predicate: seven admitted non-RAW LZ4 pages may commit when
+their exact SWZ3 metadata plus payloads fit one 16KiB extent,
+without waiting for alpha.13's eighth record or deadline.
+Default `retain_ms=0`, read/FUA barriers, physical authority
+and null_blk-only admission are unchanged. Loaded alpha.14
+safety and performance have **NOT RUN**.
 
 ## The active performance question
 
