@@ -175,6 +175,10 @@ class PairReplayContract(unittest.TestCase):
         name = "nullb-swapz-0123456789abcdef"
         tokens = f"0 32768 swapz3 {lower} 0 64 0 2 0 0 1 0"
         self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["window"], 64)
+        self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["retain_ms"], 0)
+        self.assertEqual(module.validate_v3_table(
+            tokens + " 2", 4096, lower, name
+        )["retain_ms"], 2)
         fake_block = SimpleNamespace(st_mode=__import__("stat").S_IFBLK,
                                      st_rdev=os.makedev(251, 7))
         with patch.object(module.Path, "stat", return_value=fake_block):
@@ -188,7 +192,9 @@ class PairReplayContract(unittest.TestCase):
             tokens.replace("32768", "32760"),
             tokens.replace("swapz3", "linear"),
             tokens + "\n" + tokens,
-            tokens + " 0",
+            tokens + " 0 0",
+            tokens + " 5",
+            tokens + " -1",
             tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 1 1 0"),
             tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 0 1 1"),
         ):

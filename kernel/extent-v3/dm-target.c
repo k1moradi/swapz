@@ -1193,6 +1193,8 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 	return 0;
 }
 
+static bool sv3_retention_expired(struct sv3_dm *ctx);
+
 static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 {
 	int error = 0;

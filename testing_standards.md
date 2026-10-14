@@ -558,3 +558,19 @@ quiescent timer rearm, urgent admission and drain. This does not
 substitute for loaded dependent-read/overwrite/FUA/GC/suspend/fault
 tests or a same-source opt-in/control comparison. **Host alpha.11
 loaded: NOT RUN.** Keep `retain_ms=0` as default.
+
+### Exact-head alpha.11 CI repair and constructor/table alignment
+
+The first alpha.11 direct-main commit (`0a750dcf`) FAILED
+native/source CI because `body()` recognized only `int`/`void`
+helper signatures and the preexisting constructor contract expected
+the obsolete 9-argument limit. Kbuild also FAILED with an implicit
+forward declaration of `sv3_retention_expired` in `sv3_process`.
+The repair adds a forward prototype, expands source function
+recognition to `bool`/`unsigned long`, updates the constructor
+argument test to `argc<=10`, and accepts both the historical
+12-field V3 table and new 13-field table with a tightly checked
+`retain_ms=0..4` final field. Any extra, negative or out-of-range
+field is refused. The old table implies **retention off**.
+No loaded alpha.11 execution follows merely from source/CI green;
+first test the default on owned null_blk.

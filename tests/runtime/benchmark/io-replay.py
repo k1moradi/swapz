@@ -241,7 +241,7 @@ def validate_v3_table(table, logical_pages, lower_dev, disk_name):
     if len(rows) != 1:
         raise ValueError("expected exactly one V3 DM table extent")
     fields = rows[0].split()
-    if len(fields) != 12 or fields[:3] != [
+    if len(fields) not in (12, 13) or fields[:3] != [
         "0", str(logical_pages * PAGE // 512), "swapz3"
     ]:
         raise ValueError("unexpected V3 DM table geometry or arguments")
@@ -256,16 +256,19 @@ def validate_v3_table(table, logical_pages, lower_dev, disk_name):
     if any(re.fullmatch(r"[0-9]+", value) is None for value in fields[4:]):
         raise ValueError("non-numeric V3 configuration")
     (read_budget, window, verify, gc_policy, coalesce_ms,
-     flush_fault, lower_bulk, write_fault) = map(int, fields[4:])
+     flush_fault, lower_bulk, write_fault) = map(int, fields[4:12])
+    retain_ms = int(fields[12]) if len(fields) == 13 else 0
     if not (0 <= read_budget <= 3 and 1 <= window <= 64 and
             0 <= verify <= 1 and 0 <= gc_policy <= 2 and
-            0 <= coalesce_ms <= 4 and 0 <= lower_bulk <= 2):
+            0 <= coalesce_ms <= 4 and 0 <= lower_bulk <= 2 and
+            0 <= retain_ms <= 4):
         raise ValueError("out-of-policy V3 benchmark geometry")
     if flush_fault or write_fault:
         raise ValueError("fault-injected V3 target is not a performance arm")
     return {"read_budget": read_budget, "window": window,
             "verify": verify, "gc_policy": gc_policy,
-            "coalesce_ms": coalesce_ms, "lower_bulk": lower_bulk}
+            "coalesce_ms": coalesce_ms, "lower_bulk": lower_bulk,
+            "retain_ms": retain_ms}
 
 
 def check_owned_block(path, st, candidate, args, logical_pages):
