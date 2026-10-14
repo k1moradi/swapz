@@ -192,3 +192,19 @@ requires a known lower device and real `holders` sysfs directory
 before powering it off. `make verify` always runs `bash -n`; a
 compilation PASS alone cannot certify this privileged script, and the
 loaded deployment remains **NOT RUN by GitHub Actions**.
+
+## Automated isolated execution entry point
+
+`make run` chains all rootless native/source/replay tests,
+matching-running-kernel V3 W=1/W=2 builds, and an **ephemeral**
+unique owned RAM-backed `null_blk` loaded test, with all earlier
+checks required before invoking sudo. Its C oracle writes and verifies
+128 4KiB pages including mixed compressed/raw, overwrites and flush.
+The deployment script logs SHA/vermagic, lower device UUID/major:minor,
+pre/post system swap inventory, target status and teardown; a swap
+inventory change is a failure. It does not benchmark matched-load
+lower-device amplification and does not establish production safety.
+CI rootless checks verify the entry point but intentionally **do not
+load any kernel module on hosted runners**. A host without sudo,
+configfs null_blk or valid matching headers is BLOCKED. Users must
+never replace missing RAM devices with physical or current swap.

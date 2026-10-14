@@ -18,7 +18,8 @@ QUARANTINE=0
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
-           findmnt mountpoint mount timeout sha256sum cmp od awk grep tr; do
+           findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
+           tee mktemp ls sleep cat id rmdir; do
 	command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
@@ -35,7 +36,7 @@ for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
 	cmp -s "kernel/extent-v3/$file" "build/kernel/experimental/$file" ||
 		fail "staged module source mismatch: $file"
 done
-[[ ! -e /sys/module/dm_swapz ]] ||
+[[ ! -d /sys/module/dm_swapz ]] ||
 	fail "another dm_swapz module already loaded; do not touch it"
 [[ -r /proc/swaps ]] || fail "cannot audit host swap"
 mkdir -p "$ROOT/build/deploy"
@@ -44,8 +45,9 @@ exec > >(tee -a "$SESSION/session.log") 2>&1
 note "SOURCE_HEAD=$(git rev-parse HEAD)"
 note "RUNNING_KERNEL=$(uname -r)"
 note "MODULE_SHA256=$(sha256sum "$MODULE")"
+SWAPS_BEFORE="$(cat /proc/swaps)"
 note "HOST_SWAPS_BEFORE:"
-cat /proc/swaps
+printf '%s\n' "$SWAPS_BEFORE"
 cleanup() {
 	local rc=$?
 	trap - EXIT HUP INT TERM
@@ -82,7 +84,13 @@ cleanup() {
 			{ note "QUARANTINED: test module remains loaded"; QUARANTINE=1; }
 	fi
 	note "HOST_SWAPS_AFTER:"
-	cat /proc/swaps
+	local swaps_after
+	swaps_after="$(cat /proc/swaps)"
+	printf '%s\n' "$swaps_after"
+	if [[ "$swaps_after" != "$SWAPS_BEFORE" ]]; then
+		note "FAIL: system swap inventory changed during isolated run"
+		rc=1
+	fi
 	if (( QUARANTINE )); then
 		note "BLOCKED: resource retained, never forced; log $SESSION/session.log"
 		exit 1

@@ -28,6 +28,11 @@ jobs:
         run: |
           set -euo pipefail
           make verify
+          # The privileged phase is intentionally not run by GitHub Actions.
+          grep -Fq 'run:' Makefile
+          grep -Fq 'deploy: run' Makefile
+          grep -Fq 'sudo bash tools/deploy-nullblk.sh' Makefile
+          grep -Fq 'SWAPS_BEFORE=' tools/deploy-nullblk.sh
           make build/tests/device-roundtrip
           test -x build/tests/device-roundtrip
           test -x build/tests/native/lower-write-aggregation

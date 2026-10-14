@@ -31,6 +31,25 @@ More than 50% of ongoing engineering effort belongs to the
 **production Linux kernel module's C**. At the end of each implementation,
 update the relevant standard in the same commit and run goal-aligned CI.
 
+## One-command compile, test and isolated deployment
+
+On a Linux developer host with matching kernel headers and sudo, in
+your existing clone:
+
+```sh
+cd ~/swapz && git pull --ff-only origin main && make run
+```
+
+This first runs all safe rootless V3 tests, then builds the kernel module
+with `W=1`/`W=2`, then runs an **ephemeral** owned RAM-backed
+`null_blk` deployment with deterministic C write/readback and cleanup.
+**It does NOT install V3 as system swap**, reboot, touch existing swap
+or use physical media. Results go into `build/deploy/session.*`;
+missing headers/sudo/null_blk block the loaded phase. Use
+`make verify` if you want the rootless-only checks; `make` compiles
+V3 without loading it. See [compile.md](compile.md) and
+[testing_standards.md](testing_standards.md) for gates and limits.
+
 ## Build and test (rootless compilation only)
 
 ```sh

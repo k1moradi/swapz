@@ -39,8 +39,19 @@ build/tests/device-roundtrip: tools/device-roundtrip.c
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-# All unprivileged gates must pass BEFORE privileged deployment.
-deploy: verify v3 build/tests/device-roundtrip
-	@printf 'Loading V3 ONLY onto a fresh owned RAM-backed null_blk.\n'
-	@printf 'This will never swapon/swapoff, reboot or touch physical storage.\n'
-	sudo bash tools/deploy-nullblk.sh
+# Ordered one-command pipeline: never parallelize safety checks and loading.
+# "run" deploys ephemerally only on a fresh owned memory-backed null_blk;
+# it never installs a persistent module or changes the system swap.
+.PHONY: run check
+check: verify
+
+run:
+	@$(MAKE) --no-print-directory verify
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
+	@$(MAKE) --no-print-directory build/tests/device-roundtrip
+	@printf 'All checks passed; attempting isolated RAM-backed V3 deployment.\n'
+	@sudo bash tools/deploy-nullblk.sh
+
+# Backwards-compatible spelling for the same ordered isolated test.
+deploy: run

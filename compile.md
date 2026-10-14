@@ -138,3 +138,36 @@ CI builds W=1/W=2 without loading the module and publishes only the
 compile-time `.ko` plus source/version/vermagic/SHA manifest as a
 short-lived GitHub Actions artifact. Module artifacts are kernel
 version-specific: for actual host deployment, always rebuild locally.
+
+## One-command compile → test → ephemeral isolated deployment
+
+Use `cd ~/swapz && git pull --ff-only origin main && make run` on a
+Linux development host with matching kernel headers and installed
+`make`, C compiler, Device Mapper tools, `null_blk` configfs support,
+and `sudo` privileges. The `main`-only source guard blocks a mismatched
+branch, dirty tracked sources, wrong kernel vermagic or nonidentical
+staged kernel source. `make run` is a strictly ordered pipeline:
+
+1. `make verify` executes all 14 production-C tests, V3 source
+   contracts, the off/V3 rootless replay oracle and deployment-shell
+   syntax/safety contract checks. **No kernel module is loaded yet.**
+2. Build V3 with `W=1` and `W=2` against the *running* kernel's
+   `KDIR`; compile the standalone C device roundtrip oracle. All
+   outputs stay under the reused `build/` root.
+3. **Only after all prior steps succeed**, `sudo` invokes
+   `tools/deploy-nullblk.sh` to create a unique 64MiB RAM-backed
+   `null_blk`, insert the exact V3 module, make a unique 16MiB DM
+   mapping, write/overwrite/read back 128 deterministic 4KiB pages,
+   exercise flushes, print target status and lower counters, and
+   perform ordinary ownership-verified teardown.
+4. Save logs under `build/deploy/session.*`, report PASS/FAIL/BLOCKED,
+   and quarantine unexpected resource ownership or busy holders
+   instead of force removal. The script checks the system swap
+   inventory before and after and fails if it changes.
+
+`make deploy` remains an alias for this same **ordered** pipeline;
+`make check` and `make verify` provide nonprivileged checks only.
+The default `make` merely compiles V3. **No permanent deployment,
+DKMS installation, system swap enablement, reboot or physical-disk
+I/O is authorized.** An environment lacking supported safe `null_blk`
+or sudo must report BLOCKED rather than work around isolation.
