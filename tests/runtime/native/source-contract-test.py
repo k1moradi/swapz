@@ -516,6 +516,28 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
+    def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
+        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
+        reorder = body("sv3_order_window")
+        greedy = body("sv3_order_window_greedy")
+        flush = body("sv3_flush_window")
+        self.assertIn("sv3_window_uniform_compressed(", policy)
+        self.assertIn("!pending || !count || count > SV3_MAX_RECORDS", policy)
+        self.assertIn("pending[0].raw || !pending[0].length", policy)
+        self.assertIn("pending[index].raw || pending[index].length != length",
+                      policy)
+        self.assertIn("sv3_window_uniform_compressed(ctx->batch", reorder)
+        self.assertIn("ctx->planned_to_batch[position] = position", reorder)
+        self.assertIn("sv3_order_window_greedy(ctx)", reorder)
+        self.assertLess(reorder.index("sv3_order_window_greedy(ctx)"),
+                        reorder.index("ctx->planned[position] ="))
+        self.assertIn("ctx->used[largest] = 1", greedy)
+        self.assertIn("ctx->planned_to_batch[position++] = (u8)largest",
+                      greedy)
+        self.assertIn("if (index != position)", reorder)
+        self.assertIn("sv3_order_window(ctx)", flush)
+        self.assertIn("sv3_engine_write_window_batched", flush)
+
     def test_alpha16_no_rearm_of_already_queued_retention_timer(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         worker = body("sv3_worker")

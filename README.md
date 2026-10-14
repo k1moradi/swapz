@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.16, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.17, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -246,6 +246,30 @@ preserves read/FUA/GC/completion invariants. New
 The purpose is to improve useful high-QD MB/s
 without sacrificing lower write savings; **alpha.16
 loaded results are NOT RUN**.
+
+## Alpha.17: C-first uniform-page reorder fast path (experimental)
+
+The owner-loaded alpha.16 default smoke and paced QD8 medium
+control/retained pilots **PASSED** at source `59acee35`.
+In the retained pilot, actual useful logical WRITEs were
+~**1.544 MB/s** versus independently measured lower WRITEs
+~**1.006 MB/s**. Its full final oracle and RAM-only teardown
+passed; sampled WRITE p99 was ~**2.688ms** versus off
+~**1.104ms**. The production timer change avoided **844**
+re-arms across 1,202 cumulative retained windows. Alpha.16
+**unpaced** useful throughput remains unmeasured.
+
+All 128 medium fixture pages actually compressed to 2,073B.
+Previously, every kernel write window nevertheless ran the
+quadratic greedy size-reorder scan. In **alpha.17 production C**,
+a full-window predicate recognizes equal-length, valid, non-RAW
+compressed records and uses their proven identical arrival
+order; mixed, RAW or invalid cases retain the exact original
+greedy fallback. The physical extent planner, generation
+authority, completion and FUA/GC paths are unchanged.
+Hypothesis: reduce per-window worker CPU cost at high QD
+without giving up physical WRITE byte savings. Loaded
+alpha.17 throughput/latency remains **NOT RUN**.
 
 ## The active performance question
 

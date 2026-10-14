@@ -68,6 +68,35 @@ static inline int sv3_window_pack_ready(
 }
 
 /*
+ * Equal-length accepted compressed records retain their exact input order
+ * under the production greedy ordering: largest is always the earliest
+ * remaining record and, when a 4KiB complement exists, the chosen partner
+ * is the next earliest remaining record. This permits a linear identity
+ * mapping instead of repeated O(n^2) greedy scans for common homogeneous
+ * workloads, with unchanged plan, physical placement and BIO ordering.
+ *
+ * Caller has already fenced duplicate logical pages and barriers before
+ * preparing this bounded window. RAW or invalid lengths use the original
+ * general sorting path, not an assumed compressed record.
+ */
+static inline int sv3_window_uniform_compressed(
+		const struct sv3_pending_bio *pending, sv3_u8 count)
+{
+	sv3_u16 length;
+	sv3_u8 index;
+
+	if (!pending || !count || count > SV3_MAX_RECORDS ||
+	    pending[0].raw || !pending[0].length ||
+	    pending[0].length > SV3_MAX_COMPRESSED)
+		return 0;
+	length = pending[0].length;
+	for (index = 1; index < count; ++index)
+		if (pending[index].raw || pending[index].length != length)
+			return 0;
+	return 1;
+}
+
+/*
  * The retention hrtimer is armed ONLY for nonzero retain_ms. A nonretained
  * window never schedules a timer; skipping its synchronous cancellation
  * avoids an unnecessary timer operation in the single-window write path.

@@ -140,6 +140,51 @@ static int test_pack_ready_rejects_raw_and_unfittable(void)
 	return 0;
 }
 
+static int test_uniform_compressed_identity_sort_safety(void)
+{
+	struct sv3_pending_bio batch[SV3_MAX_RECORDS] = { 0 };
+	struct sv3_pending_bio snapshot[SV3_MAX_RECORDS];
+	sv3_u8 i;
+
+	CHECK(!sv3_window_uniform_compressed(NULL, 1));
+	CHECK(!sv3_window_uniform_compressed(batch, 0));
+	CHECK(!sv3_window_uniform_compressed(batch, SV3_MAX_RECORDS + 1));
+	for (i = 0; i < SV3_MAX_RECORDS; ++i) {
+		batch[i].logical = 100 + i;
+		batch[i].length = 2073;
+	}
+	memcpy(snapshot, batch, sizeof(batch));
+	CHECK(sv3_window_uniform_compressed(batch, 1));
+	CHECK(sv3_window_uniform_compressed(batch, 7));
+	CHECK(sv3_window_uniform_compressed(batch, SV3_MAX_RECORDS));
+	CHECK(!memcmp(batch, snapshot, sizeof(batch)));
+	batch[SV3_MAX_RECORDS - 1].length = 2072;
+	CHECK(!sv3_window_uniform_compressed(batch, SV3_MAX_RECORDS));
+	CHECK(sv3_window_uniform_compressed(batch, 7));
+	batch[SV3_MAX_RECORDS - 1].length = 2073;
+	batch[0].raw = 1;
+	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	batch[0].raw = 0;
+	batch[3].raw = 1;
+	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	batch[3].raw = 0;
+	batch[2].length = 0;
+	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	batch[2].length = 2073;
+	batch[0].length = SV3_MAX_COMPRESSED + 1U;
+	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	/* Tiny uniform compressed payloads may pair into a 4KiB block;
+	 * the greedy ordering is still first-then-next, i.e. identity. */
+	for (i = 0; i < SV3_MAX_RECORDS; ++i)
+		batch[i].length = 500;
+	CHECK(sv3_window_uniform_compressed(batch, 8));
+	/* RAW controls and mixed entropy retain the greedy fallback. */
+	batch[4].length = SV3_BLOCK_BYTES;
+	batch[4].raw = 1;
+	CHECK(!sv3_window_uniform_compressed(batch, 8));
+	return 0;
+}
+
 static int test_timer_cancel_only_for_enabled_retention(void)
 {
 	unsigned int retain;
@@ -244,6 +289,7 @@ int main(void)
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
+	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;
 	CHECK(test_exact_nanosecond_deadline() == 0); passed++;
 	CHECK(test_expiry_remains_pinned_after_later_arrivals() == 0); passed++;

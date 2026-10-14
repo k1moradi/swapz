@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.16"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.17"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -406,7 +406,7 @@ static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
  *
  * NEVER reorder across flush/FUA, discard, dependent reads or duplicate slots.
  */
-static void sv3_order_window(struct sv3_dm *ctx)
+static void sv3_order_window_greedy(struct sv3_dm *ctx)
 {
 	sv3_u8 position = 0;
 
@@ -453,6 +453,22 @@ static void sv3_order_window(struct sv3_dm *ctx)
 		for (index = 0; index < ctx->batch_count; ++index)
 			if (!ctx->used[index])
 				ctx->planned_to_batch[position++] = index;
+	}
+}
+
+static void sv3_order_window(struct sv3_dm *ctx)
+{
+	sv3_u8 position;
+
+	if (sv3_window_uniform_compressed(ctx->batch, ctx->batch_count)) {
+		/* Equal compressed lengths imply stable greedy identity order,
+		 * regardless of whether two records share a 4KiB extent.
+		 * Avoid scanning every already-consumed record at every step.
+		 * The actual extent planner and commit gate are UNCHANGED. */
+		for (position = 0; position < ctx->batch_count; ++position)
+			ctx->planned_to_batch[position] = position;
+	} else {
+		sv3_order_window_greedy(ctx);
 	}
 	for (position = 0; position < ctx->batch_count; ++position) {
 		sv3_u8 index = ctx->planned_to_batch[position];

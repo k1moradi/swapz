@@ -848,3 +848,50 @@ fault/suspend races and GC on loaded alpha.16
 are **NOT RUN**. The exact medium fixture is
 synthetic and null_blk-only; no physical device
 claim is permitted.
+
+## Alpha.17 production-C homogeneous compressed ordering fast path
+
+Owner source `59acee3534fd46fbcaabb51a1f30a366098ed1fd`
+ran alpha.16 loaded default smoke and paced QD8 medium
+control+retained comparison on fresh owned RAM null_blk;
+byte-exact 128-page and 1024-page oracles, independent
+lower READ/WRITE stats, unchanged host swap configuration
+and ordinary teardown **PASS**. The retained V3 arm achieved
+~1.54353 logical WRITE MB/s with 1.00621 lower WRITE
+MB/s, actual 2,048,000 lower WRITE bytes / 158 requests
+versus 3,141,632B / 767 off (34.81% byte saving).
+READ lower bytes/requests were unchanged (1,052,672B /
+257), and WRITE p99 was 2.688ms V3 against 1.104ms
+off, in this short sample. Across wider cumulative state,
+`windows=1202`, `retain_timer_arms=1202`,
+`retain_timer_arm_skips=844`, `close_pack_ready=64`,
+`close_deadline=1138`, `gc_victims=0`. The requested
+QD32 **unpaced alpha.16 comparison was NOT RUN**;
+therefore no new high-throughput gain is established.
+
+Alpha.17 optimizes the actual production
+`sv3_order_window` C path. The existing greedy algorithm
+picks the EARLIEST remaining largest compressed record;
+if all payload lengths are equal, it may pair that record
+with the EARLIEST remaining partner fitting the existing
+4KiB metadata+two-payload bound. In both the pairing
+and no-pairing cases, the resulting order is exactly the
+original arrival order, so the worker can emit a linear
+identity mapping instead of rescanning every remaining
+record in O(n^2) greedy selection. The predicate requires
+nonzero record count <=64, valid non-RAW compressed
+lengths 1..SV3_MAX_COMPRESSED and *all equal lengths*.
+Mixed sizes, RAW, invalid, null or empty windows still
+use the unchanged original greedy logic. Direct native
+production-header tests cover singleton, 7 and 64
+uniform 2073B records, tiny pairing-capable compressed
+payloads, RAW, mixed length, invalid size and bounds.
+Source contracts require both fast and fallback paths
+join the same `planned` construction and original
+`sv3_engine_write_window_batched` lower-success/
+mapping-publication path. No changed storage format,
+algorithm, GC, flush, read or upper BIO contract is
+intended. Loaded alpha.17 performance and sustained
+CPU/GC/fault gates: **NOT RUN**. Do not infer higher
+input MB/s from an algorithmic complexity improvement
+alone.
