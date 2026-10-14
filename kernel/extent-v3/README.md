@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.17 experimental Device Mapper target
+# Current development: V3.0.0-alpha.18 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -263,3 +263,19 @@ Mixed or RAW windows still run the exact original
 greedy implementation. The synthetic 2,073B
 medium fixture exercises this branch, but useful
 higher-QD MB/s remains NOT RUN for alpha.17.
+
+## Alpha.18 phase wall-time measurements
+
+Real production `dm-target.c` accumulates monotonic
+wall nanoseconds for LZ4 attempts, decompression,
+homogeneous/greedy sorting, extent-engine write
+commit, synchronous lower dm_io READ and WRITE,
+and GC relocation. The elapsed helper clamps
+reversed timestamps to zero rather than unsigned
+underflow. The timers are **observability only**:
+no new data format, workload scheduling, authority
+or completion changes. Scopes overlap (engine write
+commit includes lower I/O), and cumulative status
+also includes prefill and oracle operations. They
+are **not** CPU-time or per-measurement-interval
+metrics. Loaded alpha.18 is NOT RUN.

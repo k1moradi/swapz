@@ -135,21 +135,39 @@ Use `main` only and follow the device/host safety restrictions.
       cumulative windows. The owner's attached log
       contains NO unpaced alpha.16 trial, so no high-QD
       throughput improvement was verified.
-- [ ] Owner alpha.17: after loaded default-off smoke and
-      safe teardown, run the QD32 / 16,384-operation
-      `make bench-pair-medium-unpaced` on newly owned RAM
-      devices. Record completed logical WRITE MB/s, lower
-      READ/WRITE bytes AND requests, achieved IOPS, p95/p99,
-      GC, complete image and safe cleanup. Contrast
-      alpha.15's 31.518 MB/s off vs 24.867 MB/s retained
-      V3 and 40.52% lower WRITE bytes; test whether uniform
-      ordering fast path improves throughput without
-      sacrificing storage I/O. Do not claim saturation.
+- [x] Owner alpha.17 `90c0d5b9` loaded smoke, paced
+      QD8 medium default-off/control and retained 2ms
+      comparison PASS: correct byte-exact final image,
+      independently verified owned RAM READ/WRITE sectors
+      and requests, unchanged host swap and safe teardown.
+      Retained candidate: 1.54339 logical WRITE MB/s ->
+      1.00612 lower WRITE MB/s, 2,048,000 lower WRITE
+      bytes/158 requests versus off 3,141,632B/767;
+      sampled WRITE p99 2.742ms versus off 0.994ms.
+      Cumulative 836 hrtimer re-arm skips, 64 pack-ready
+      and 1138 deadline closures, zero GC. **No unpaced
+      QD32 trial was in that log**; speed gain unproven.
+- [ ] Owner alpha.18: run loaded `make run` for default
+      smoke and ordinary teardown, then explicitly
+      `make bench-pair-medium-unpaced` for 16,384
+      measured QD32 operations on newly owned RAM
+      null_blk. Collect useful input and independent
+      lower READ/WRITE MB/s and requests, achieved
+      IOPS, p95/p99, full oracle, GC and safe teardown.
+      Inspect `lz4_wall_ns`, `decode_wall_ns`,
+      `window_sort_wall_ns`, `window_commit_wall_ns`,
+      `lower_read_wall_ns`, `lower_write_wall_ns`
+      and `gc_wall_ns` as **cumulative, potentially
+      overlapping wall time**, not CPU or measurement-only
+      costs. Profile the expensive C path before another
+      speculative scheduling change. Compare to alpha.15's
+      unpaced V3 24.867 MB/s / off 31.518 MB/s
+      without calling RAM null_blk real disk saturation.
 
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.17 behavior when their claims
+      documents and current V3.0.0-alpha.18 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

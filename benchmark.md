@@ -995,3 +995,68 @@ WRITE MB/s vs uncompressed 31.518 MB/s, with
 rate-500 alpha.16 result cannot establish higher
 maximum input MB/s, and no physical disk bandwidth
 ceiling or sustained GC qualification exists.
+
+## Alpha.17 owner-loaded QD8 evidence; alpha.18 C phase diagnostics
+
+The owner tested exact alpha.17
+`90c0d5b9f2f668b50fc8ba1770860ff4611388fa`
+on Linux `7.0.0-38-generic` with module SHA-256
+`ae003b83a5e77f8f5888c9ab6477dace4efa91b88d5137603f5057d26e9b7efb`.
+The owned 128-page V3 C smoke passed the byte-exact
+oracle, 9 exact-zero elisions, independently matched
+183/749,568B lower WRITEs and 490/2,007,040B lower
+READs, and safe teardown. Paired medium fixtures
+and immutable QD8/500-IOPS trace were successfully
+replayed with distinct owned RAM null_blk lower devices.
+The control evidence session was
+`build/benchmark/session.Q4gUVDhs/`, and retained
+evidence session was `build/benchmark/session.4gjrA14A/`.
+Each arm performed exactly 767 WRITE and 257 READ
+4KiB logical operations; 1024-page final readback
+passed with stable existing host swaps and clean
+owned-device teardown.
+
+| QD8 500-IOPS metric | Uncompressed (retained session) | V3 alpha.17 retain=2 |
+|---|---:|---:|
+| Logical WRITE input MB/s | 1.544815 | **1.543393** |
+| Independent lower WRITE MB/s | 1.544815 | **1.006123** |
+| Independent lower WRITE bytes | 3,141,632 | **2,048,000** |
+| Independent lower WRITE requests | 767 | **158** |
+| Lower READ bytes/requests | 1,052,672 / 257 | 1,052,672 / 257 |
+| Sampled WRITE p99 | 0.994ms | **2.742ms** |
+
+This is **34.81% fewer actual backing WRITE bytes**
+and 79.4% fewer WRITE requests under a *paced* load,
+not higher maximum logical input throughput. Cumulative
+status from setup/warmup/measurement/oracle recorded
+`windows=1202`, `close_pack_ready=64`,
+`close_deadline=1138`, `retain_timer_arms=1202`,
+`retain_timer_arm_skips=836`, `gc_victims=0`
+and no target failure. **The attached log did NOT
+run alpha.17 unpaced QD32**, so whether its uniform
+sort fast path improved on alpha.15's **24.867 MB/s**
+retained logical WRITE rate (vs **31.518 MB/s** off)
+is unknown. The QD8 WRITE p99 remains expensive
+and is only a single 767-WRITE sample.
+
+**Alpha.18 is a new production-C measurement hypothesis,
+NOT a throughput result.** Kernel status reports cumulative
+monotonic nanoseconds in existing synchronous code sections
+`lz4_wall_ns` (LZ4 compression attempts),
+`decode_wall_ns` (LZ4 reads),
+`window_sort_wall_ns` (ordering),
+`window_commit_wall_ns` (engine commit, including lower
+I/O/publication), `lower_read_wall_ns` and
+`lower_write_wall_ns` (synchronous dm_io), and
+`gc_wall_ns` (GC relocations). Their intervals
+**overlap** and include prefill, warmup and final
+readback; they are **not kernel CPU utilization**
+or per-benchmark rate measurements until appropriately
+scoped counter deltas are collected. The changes
+do not alter codec, layout, worker or completion policy.
+Next run exact alpha.18 owner-loaded unpaced QD32
+same-source control/V3 on distinct fresh RAM devices.
+Preserve physical requests/bytes, write/read p95/p99,
+full byte oracle and quarantine protections. No CPU,
+GC/fault lifecycle or physical bandwidth ceiling has
+been qualified.

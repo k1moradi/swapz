@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.17
+## One active module: V3.0.0-alpha.18
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -386,3 +386,20 @@ must pass W=1/W=2 compile before owner-safe
 `make run` and the opt-in
 `make bench-pair-medium-unpaced`.
 Alpha.17 loaded throughput is **NOT RUN**.
+
+## Alpha.18 actual-C phase wall-time diagnostic
+
+Active build and owned RAM guard versions advance to
+`3.0.0-alpha.18`. Production `dm-target.c` now
+reports cumulative monotonic elapsed nanoseconds for
+LZ4, decompression, window reorder, engine commit,
+lower synchronous dm_io READ/WRITE and GC. A native
+test runs the exact kernel header elapsed helper with
+forward/equal/backward/boundary timestamps. Source
+contracts check actual timing around C operations
+and status output. These counters are **not** CPU
+usage, do not measure waiting for batch retention,
+and may overlap. Perform W=1/W=2 kernel builds and
+`make verify`, then only owner-run `make run` and
+`make bench-pair-medium-unpaced` on fresh owned
+RAM/null_blk. High-QD loaded alpha.18 is NOT RUN.

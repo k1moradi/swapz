@@ -3,7 +3,7 @@
 **Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
 WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
 is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.17 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.18 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
@@ -307,3 +307,25 @@ read/write bytes and requests, useful MB/s,
 read/write p99, final oracle and safe teardown.
 This fast path is not a substitute for sustained
 GC, CPU profile or fixed-bandwidth validation.
+
+### Alpha.18 phase attribution before another speculative rewrite
+
+The owner-loaded alpha.17 smoke and paced off/V3
+medium comparison at `90c0d5b9` retained 34.81%
+lower WRITE-byte savings with exact readback and safe
+RAM teardown, but WRITE p99 remained 2.742ms against
+off 0.994ms. The log contains no unpaced QD32
+throughput result; the latest qualified unpaced V3
+reference is still alpha.15 at 24.867 logical
+WRITE MB/s versus bare 31.518 MB/s. Alpha.18
+instruments real C compression, decompression,
+ordering, synchronous lower I/O, engine commit and GC
+phase elapsed nanoseconds to separate likely worker
+work from lower-device waits before a further pipeline
+change. These are cumulative wall-times with nested
+scopes, not CPU profiles and not proven throughput wins.
+Require an owner-loaded QD32 unpaced replay of the
+same immutable medium bytes and valid lower-device
+READ/WRITE counters, upper p99 and full oracle before
+choosing the next C optimization. Lifecycle GC and
+fixed physical bandwidth remain unqualified.
