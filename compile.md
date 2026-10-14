@@ -171,3 +171,8 @@ The default `make` merely compiles V3. **No permanent deployment,
 DKMS installation, system swap enablement, reboot or physical-disk
 I/O is authorized.** An environment lacking supported safe `null_blk`
 or sudo must report BLOCKED rather than work around isolation.
+
+
+## 2026-10-14 null_blk configfs naming fix
+
+The first user-loaded Linux 7.0 test passed all C tests and module builds but stopped before V3 insertion because configfs devices may use the configfs name, not /dev/nullbN. V3 kernel admission also requires a nullb-prefixed disk name. The ephemeral harness now creates nullb-swapz-<token>, accepts only its own configfs disk name or the legacy nullb<index> disk, and verifies the registered null_blk driver major, configfs index/minor, sysfs identity, block node rdev, size, mounts, holders and active-swap aliases before module insertion. On failed recognition it logs the config directory and quarantines rather than touching another device. The prior unnamed swapz<token> quarantined config is not automatically deleted; it requires read-only identity and holder inspection. Loaded success on the user's host remains NOT RETESTED.

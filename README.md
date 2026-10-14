@@ -163,3 +163,6 @@ GitHub Actions additionally runs rootless and W=1/W=2 builds on
 with SHA/vermagic. CI-hosted builds are not asserted to be loadable
 on your different running kernel. The isolated loaded deployment
 runs **on your host only when you execute `make deploy`**.
+
+
+**Linux null_blk naming note:** the isolated deployment now recognizes both configfs disk names and legacy nullbN names, with driver/index/rdev verification. Older quarantined test groups are not automatically removed. See compile.md before rerunning after a prior incomplete deployment.

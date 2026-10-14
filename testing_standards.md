@@ -208,3 +208,8 @@ CI rootless checks verify the entry point but intentionally **do not
 load any kernel module on hosted runners**. A host without sudo,
 configfs null_blk or valid matching headers is BLOCKED. Users must
 never replace missing RAM devices with physical or current swap.
+
+
+### Owned null_blk configfs-name qualification
+
+Configfs can expose a custom disk name, unlike the historical /dev/nullbN convention. The deployer must fail closed on ambiguous kernel disk names, verify the actual null_blk major and configfs index/minor against the chosen device node, check the node's real rdev and ensure no mounted or active-swap alias. The current script never creates a fallback physical device, invokes swapoff/swapon or removes an unverified config. Rootless regressions and loaded qualification remain distinct.
