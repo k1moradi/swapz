@@ -97,3 +97,64 @@ Report missing kernel CPU or true device faults as UNMEASURED/BLOCKED.
 Keep source, binary, trace, fixture and raw CSV/JSON evidence on
 `main` with PASS/FAIL/BLOCKED, and update this standard in the
 same commit as every new benchmark protocol or verified finding.
+ 
+## First confirmed isolated V3 loaded run: October 14, 2026
+
+**CORRECTNESS PASS; PERFORMANCE ADVANTAGE NOT ESTABLISHED.**
+User-supplied local `make run` log identifies **kernel
+`7.0.0-38-generic`**, exact source **`68ac4c63c41adad911b0f788b38ae4f567087fd9`**,
+and module SHA-256
+`8d8379385c17ae5fabe67dd6ff58592021ded1906414ca446e1ab7b29719bb9f`.
+The controlled owned RAM-backed null_blk was **64MiB**; its V3 DM
+mapping was **16MiB**. The C test reported **PASS** for direct 4KiB I/O,
+flushes, overwrite and full 128-page readback, followed by clean
+teardown of the **new test mapping/device**, with active swap unchanged.
+Original host evidence location:
+`build/deploy/session.0HbwPYpr/session.log` (on the test host,
+not incorporated into Git evidence).
+
+The V3 target **after-test cumulative counters** were:
+
+| Metric | Result |
+|---|---:|
+| Successful logical WRITE | 786432 B = 192 x 4096 B |
+| Successful lower WRITE | **786432 B in 192 requests** |
+| LZ4 attempts / accepted compressed / RAW fallback | 192 / 128 / 64 |
+| Accepted LZ4 payload bytes (attempt-side) | 70266 B |
+| Successful LZ4 size bins | 96 <=256 B; 32 in 2049..3072 B |
+| Packed windows / one-record windows / records | **128 / 128 / 128** |
+| Bulk lower I/O calls / GC rotations | 0 / 0 |
+| V3 completed lower READ | 1843200 B / 450 requests |
+| Successful verification reads (blocks) | 192 |
+| Flush calls / successful flushes | 386 / 386 |
+| Target failures / errors | 0 / 0 |
+
+The independent **end-of-run** RAM lower device stat reported
+**192 WRITEs / 1536 sectors = 786432 B** and **516 READs / 4128
+sectors = 2113536 B**. It was not paired with a before-measurement
+backing-stat snapshot, and the discrepancy between V3 target's
+450 completed reads and device's 516 cumulative reads is **not yet
+attributed**. Do not treat the full read count as a per-measured-phase
+amplification figure without exact boundaries.
+
+**Interpretation:** This small, favorable compressible-page correctness
+run had **NO lower WRITE-byte saving against its own logical WRITE
+volume**: the successful V3 lower WRITE bytes equaled the
+uncompressed 192 x 4096B writes. The 128 compressed windows were
+singletons, while the 64 RAW pages used their separate write path.
+The average accepted LZ4 payload among the 128 accepted pages was
+~549 B, yet writes still occupied 4096B lower blocks. This is a
+clear **kernel-C window/extent packing investigation target**, not a
+loaded off-versus-V3 matched-rate performance verdict. It used
+verification mode (`verify=1`), which incurs additional lower
+READ work. It did not exercise GC rotations or true device fault
+recovery. No performance/speed/endurance win is claimed.
+
+**Remaining requirement:** run the real two-arm **off versus V3**
+immutable-trace benchmark with paired lower-device snapshots, equal
+achieved work and realistic ~2KiB compressed output controls. Record
+kernel-worker CPU, read p99, and exact GC traffic before optimizing
+`dm-target.c`/worker/extent layout. The older 64MiB configfs device
+observed in the host's **preceding** inventory is NOT proven removed
+by this successful new run; it requires separate read-only owner/
+holder validation before any cleanup.

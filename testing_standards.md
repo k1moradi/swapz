@@ -217,4 +217,28 @@ Configfs can expose a custom disk name, unlike the historical /dev/nullbN conven
 
 ### Rootless regression for null_blk configfs naming
 
-The automated `make verify` suite invokes `tests/runtime/native/nullblk-identity-test.sh`. Using fake sysfs directories only, it verifies configfs-named and historical nullbN discovery, plus fail-closed ambiguous, missing and invalid identities. Discovery alone never authorizes device IO; the privileged harness separately checks null_blk driver major, index/minor and real block node identity. The reported Linux 7.0 loaded failure is not declared fixed without a successful new host run.
+The automated `make verify` suite invokes `tests/runtime/native/nullblk-identity-test.sh`. Using fake sysfs directories only, it verifies configfs-named and historical nullbN discovery, plus fail-closed ambiguous, missing and invalid identities. Discovery alone never authorizes device IO; the privileged harness separately checks null_blk driver major, index/minor and real block node identity. A subsequent user-supplied Linux 7.0.0-38-generic run at source 68ac4c63 confirmed successful configfs-based owned device discovery, loaded V3 128-page overwrite/flush/full readback, and safe teardown of that *new* device. See benchmark.md for the exact counter scope; this result does not demonstrate an I/O reduction.
+
+### Linux 7.0.0-38 loaded PASS and retained older quarantine (2026-10-14)
+
+The host log at exact source `68ac4c63c41adad911b0f788b38ae4f567087fd9`
+reports **PASS** for an owned **64MiB RAM-backed null_blk**, unique
+`SWAPZ-TEST-*` mapping UUID, 128-page C direct-I/O write/overwrite/
+flush/full readback, and ordinary removal of that newly created
+test mapping/device. Before/after `/proc/swaps` were identical
+(`/swapfile` and `/dev/sda1`); neither was modified.
+Native C regressions, 28 V3 source tests and three replay contract
+tests had already passed before the privileged phase. This is a
+**loaded bounded correctness test**, not a matched load, GC rotation,
+device-originated fault or performance qualification.
+
+**Important leftover:** the user had separately shown a **previous**
+configfs entry and 64MiB RAM block device from a blocked earlier run
+(e.g. a name of the form `swapz<hex>`). The successful new
+`nullb-swapz-<hex>` session's cleanup **does not establish removal
+of that older entry**. Never auto-remove a same-prefix device.
+Before any old-resource cleanup, read-only inspect exact configfs
+attributes, driver identity, sysfs major/minor, active swap,
+mounts, holders and DM dependencies; if identity remains uncertain,
+**quarantine** and do not force-remove. A succeeding new run cannot
+retroactively repair an earlier teardown.
