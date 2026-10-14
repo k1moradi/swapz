@@ -1,3 +1,28 @@
+# Agent operating policy (current, mandatory)
+
+**All coding agents must read [AGENTS.md](AGENTS.md).** Work only on
+`main`. **Do not create or publish any new Git branch or pull request
+unless the owner explicitly asks.** Historical references below to deleted
+branches, PR branches or one-off checkouts are archival evidence, **not**
+instructions to restore or recreate them. Never discard a dirty checkout
+with `git reset --hard`, broad `git restore` or `git clean`.
+
+**Spend most development effort on kernel C/C++ code and C/C++ tests**:
+real BIO I/O, LZ4, authority, GC, lower request aggregation, correct
+completion and performance. Codex's independent validation role does not
+mean writing large new Python harnesses by default; prefer small helpers
+only when they directly test a C/C++ source/binary. Do not trade production
+C/C++ work for documentation-only or Python-only activity.
+
+**Safety:** no reboot, active /dev/sdb1 or /swapfile, `swapoff`,
+`swapon`, physical/unowned block devices or forced teardown. Frozen V2.2
+remains the default build; experimental V3 is null_blk-only. Read the exact
+current `main` source, not a version label or a deleted branch name.
+The report below is **historical V2.2 provenance** and is subordinate to
+these current instructions.
+
+---
+
 # swapz V2.2 — Streaming Strategy Validation and Plateau Benchmark
 
 ## Role
@@ -72,30 +97,38 @@ review**.
 
 A failure is useful. Do not optimize the report toward success.
 
-## Mandatory checkout gate
+## Mandatory checkout gate — safe, main-only, NONDESTRUCTIVE
 
-Start with:
+Verify that you are on `main` and observe work owned by other agents:
 
 ```bash
 cd ~/swapz
-git restore .
-git fetch origin --prune
-git switch main
-git reset --hard origin/main
 git status --short
-git rev-parse HEAD
-git rev-parse origin/main
 git branch --show-current
+git rev-parse HEAD
+git fetch origin main
+git rev-parse origin/main
 grep 'PACKAGE_VERSION="0.2.2"' dkms.conf
 ```
+
+**Do not run** `git reset --hard origin/main`, `git restore .`,
+`git clean -fd` or force-push to force matching state. If your checkout
+is on an obsolete branch or contains unrelated uncommitted changes,
+preserve them and STOP rather than deleting them. A clean checkout
+may safely use `git switch main` (existing main only), then check
+`git merge --ff-only origin/main` when appropriate. Never recreate
+any historical branch. A newer remote `main` requires an explicit
+safe fast-forward/rebase assessment, not resetting other agents' work.
 
 Requirements:
 
 ```text
 branch = main
-HEAD = origin/main
-PACKAGE_VERSION = 0.2.2
+working tree conflicts = none
+source revision = exact reported main commit
+PACKAGE_VERSION = 0.2.2 for the default V2.2 package
 ```
+
 
 Verify V2.2 features are present:
 
