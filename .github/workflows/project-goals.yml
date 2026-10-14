@@ -31,6 +31,17 @@ jobs:
           python3 -B tests/runtime/io-replay-test.py -v
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
+      - name: Enforce V3-only active defaults and two-arm benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fxq 'all: v3' Makefile
+          grep -Fxq 'AUTOINSTALL="no"' dkms.conf
+          grep -Fxq 'PACKAGE_VERSION="3.0.0-alpha.7"' dkms.conf
+          grep -Fq 'CANDIDATES = ("off", "v3")' tests/runtime/io-replay.py
+          test ! -e tests/runtime/threeway-swap-replay.py
+          test ! -e tests/runtime/threeway-swap-replay-test.py
+          echo "ACTIVE_V3_ONLY_AND_OFF_V3_BENCHMARK_CONTRACT_PASS"
       - name: Require canonical standards and relevant same-commit learning
         shell: bash
         run: |

@@ -80,3 +80,14 @@ new independently measured benchmark claim. Keep historical Git
 provenance without requiring V2.2 builds or fresh comparisons. Spend
 ongoing engineering effort on safe V3 kernel C and actual reduced
 lower bytes and requests.
+
+## Preventing active-target regressions
+
+The main-branch project-goal workflow now checks that root `make`
+selects `all: v3`, V3 DKMS package identifies alpha.7 with
+`AUTOINSTALL="no"`, and the immutable benchmark accepts **only
+`("off", "v3")`**, rejecting reintroduction of the retired three-way
+harness to the active tree. These are mechanical **workflow checks**,
+not evidence of loaded V3 performance, physical-media readiness or
+an I/O reduction. The historical module remains inspectable in Git
+history without being part of required builds.
