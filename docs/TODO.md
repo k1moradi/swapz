@@ -41,9 +41,19 @@ Use `main` only and follow the device/host safety restrictions.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
-- [ ] Diagnose production-C singleton write windows under asynchronous
-      matched load; evaluate bounded aggregation without violating same-page
-      read ordering, generation authority or PREFLUSH/FUA.
+- [ ] Profile why production-C windows close (worker quantum,
+      unrelated READ, conflicts, FUA/PREFLUSH, deadline, capacity), with
+      actual device-request/sector evidence on matched asynchronous load.
+      Follow [roadmap Stage 3A](ROADMAP.md#3a-diagnose-why-a-pending-window-closes).
+- [ ] If the telemetry shows avoidable singleton closures, prototype
+      bounded **opt-in write-window retention across worker quanta**;
+      preserve a hard timer deadline, exact completion/mapping authority,
+      GC/drain and barriers, and compare against same-source control.
+      See [roadmap Stage 3B](ROADMAP.md#3b-retain-independent-pending-writes-across-work-quanta).
+- [ ] Only if justified by measurements, independently test an unrelated
+      READ bypass (historical alpha.8 bypass had no matched-load win),
+      then investigate lower-run composition and GC fullness economics;
+      do not enable unqualified behavior by default.
 - [ ] Measure completed GC read/write traffic, reserve rotations,
       kernel CPU and RAM, achieved IOPS, cold read p95/p99 and full
       lower-I/O drain. Repeat runs and preserve negative/inconclusive results.
