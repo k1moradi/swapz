@@ -393,3 +393,18 @@ rather than treating exact logical bytes as a performance win.
 The current declared achieved-rate closeness is at most 5%.
 These are rootless CI acceptance gates, **not a completed loaded
 off/V3 experiment or new V3 production-kernel behavior**.
+
+## Isolated paired host-pilot safety contract
+
+The opt-in `bench-pair` target first executes `verify` and
+kernel W=1/W=2 before running the privileged benchmark, and is
+not part of default/run/deploy. The benchmark must create two
+separately owned unique RAM configfs null_blk lowers, verify
+registered major/index, rdev, size, memory backing, mount/holders,
+active swap exclusion and an exact V3 DM UUID/dependency. The replay
+UUID check now requires the newly owned `SWAPZ-TEST-<16hex>`.
+A test-owned mapping is removed normally before its lowers and
+module. Partial setup or changed ownership is quarantined instead
+of force-removed. A rootless opt-in regression checks that help and
+invalid/no flag execute without provisioning. No loaded-pair success
+or host I/O win is claimed until actual owner-host evidence arrives.

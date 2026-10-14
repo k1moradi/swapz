@@ -200,3 +200,13 @@ zero-page optimization, not a replacement for a matched off/V3
 performance benchmark. If it fails, the harness attempts only its
 existing ordinary identity-verified teardown or quarantines resources;
 never changes active swap. Build artifacts remain under `build/`.
+
+## Opt-in two-arm RAM benchmark
+
+`make bench-pair` is not called by `make`, `verify`, `run` or CI
+privileged steps. It completes rootless checks and exact kernel Kbuild
+W=1/W=2, then explicitly invokes
+`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair`
+on a consenting host. Evidence stays in `build/benchmark/session.*/`.
+The test uses only new owned RAM-backed devices and normal teardown,
+or quarantines failed ownership checks. Loaded test: **NOT RUN**.

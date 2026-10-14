@@ -287,7 +287,7 @@ def check_owned_block(path, st, candidate, args, logical_pages):
             raise ValueError("off control must use the bare exact owned null_blk")
     else:
         if not args.expected_dm_uuid or not re.fullmatch(
-            r"SWZ[A-Za-z0-9_-]{4,120}", args.expected_dm_uuid
+            r"SWAPZ-TEST-[a-f0-9]{16}", args.expected_dm_uuid
         ):
             raise ValueError("required trial-specific DM UUID missing")
         if not actual_name.startswith("dm-") or (

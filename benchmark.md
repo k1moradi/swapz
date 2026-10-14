@@ -322,3 +322,19 @@ Within it, `MATCHED_LOAD_MEASUREMENT_ONLY` is still **not** a release
 win: CPU, read p99, GC, repeated trials and actual loaded evidence
 must still satisfy VISION. The new parser/comparison tests use no
 privileged device. First actual loaded off/V3 comparison: **NOT RUN**.
+
+## First isolated Stage 2 two-arm pilot: bounded, not yet loaded
+
+A separate `make bench-pair` opt-in prepares **two** unique 64MiB
+memory-backed null_blk devices with 4096B blocks: one bare
+uncompressed baseline and another with a 4MiB V3 DM target
+(verification/fault injection off, bounded window 64). The shared
+synthetic 128-page fixture and immutable trace cover 1024 logical
+pages, QD=8, 25% reads, 256 warmup and 1024 measured operations
+at offered 500 IOPS. The same full readback oracle and per-device
+stat deltas are required. No active host swap or physical storage is
+altered; unexpected state is quarantined without forced removal.
+`SWAPZ-TEST-<16hex>` is the freshly owned target UUID pattern, not a
+generic `SWZ*` mapping. The source/opt-in checks are rootless only;
+**actual loaded two-arm performance is NOT RUN** and GC, CPU, RAM,
+repeated load and statistically reliable read p99 remain unresolved.

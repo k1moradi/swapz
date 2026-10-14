@@ -29,8 +29,9 @@ CC ?= cc
 verify: test
 	python3 -B tests/runtime/native/source-contract-test.py -v
 	python3 -B tests/runtime/benchmark/io-replay-test.py -v
-	bash -n tools/deploy-nullblk.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh
+	bash -n tools/deploy-nullblk.sh tools/benchmark-owned-pair.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh tests/runtime/benchmark/owned-pair-preflight-test.sh
 	bash tests/runtime/native/nullblk-identity-test.sh
+	bash tests/runtime/benchmark/owned-pair-preflight-test.sh
 	@grep -Fq -- 'dmsetup create "$$DMNAME" --uuid "$$UUID"' tools/deploy-nullblk.sh
 	@grep -Fq -- 'memory_backed' tools/deploy-nullblk.sh
 	@grep -Fq -- 'dmsetup remove' tools/deploy-nullblk.sh
@@ -61,3 +62,11 @@ run:
 
 # Backwards-compatible spelling for the same ordered isolated test.
 deploy: run
+
+# Separate explicitly authorized RAM-only paired performance pilot.
+.PHONY: bench-pair
+bench-pair:
+	@$(MAKE) --no-print-directory verify
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
+	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair

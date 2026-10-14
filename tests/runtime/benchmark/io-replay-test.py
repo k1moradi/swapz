@@ -256,6 +256,11 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "revision mismatch"):
                 compare()
 
+    def test_owned_v3_uuid_matches_owned_pair_harness(self):
+        self.assertIn('r"SWAPZ-TEST-[a-f0-9]{16}"', SCRIPT.read_text())
+        script = SCRIPT.parents[3] / "tools/benchmark-owned-pair.sh"
+        self.assertIn('DMUUID="SWAPZ-TEST-$token"', script.read_text())
+
     def test_protected_regular_file_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

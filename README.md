@@ -216,6 +216,19 @@ request. The read-byte check **PASSED** on the user's owned Linux
 **not** production readiness or a matched off/V3 benchmark (see
 [benchmark.md](benchmark.md)).
 
+## Opt-in owned-RAM off/V3 pilot
+
+`make bench-pair` (explicit separate command) runs rootless checks and
+the kernel build before provisioning **two new RAM-backed null_blk**
+test devices, bare uncompressed off and separately backed V3. It uses
+one synthetic immutable trace and full logical readback, records
+independent lower read/write sectors and requests, preserves reports
+under `build/benchmark/session.*/`, and ordinarily removes only the
+verified owned resources. Uncertain identities or busy resources are
+quarantined. No physical media, system swap activation or forced
+cleanup is permitted. **The loaded pair is NOT RUN at this revision**;
+the bounded pilot is not steady-state GC or release qualification.
+
 ## Complete documentation directory
 
 Every tracked Markdown document is linked directly from this README.

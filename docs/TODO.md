@@ -31,6 +31,9 @@ Use `main` only and follow the device/host safety restrictions.
 
 ## Blocking performance evidence
 
+- [ ] Run the explicit `make bench-pair` owned-RAM pilot, confirm
+      correct teardown and independent counters. Loaded status: NOT RUN.
+      The bounded pilot does not qualify sustained GC or read p99.
 - [ ] Perform the **first** immutable-fixture, same-operation,
       same-achieved-load **uncompressed off versus V3** loaded replay
       on *separately owned* RAM-backed `null_blk`; compare independent
