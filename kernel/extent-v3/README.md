@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.14 experimental Device Mapper target
+# Current development: V3.0.0-alpha.15 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -217,3 +217,15 @@ CRC/generation authority still decide the physical
 submission, publication and completion; default-off
 retention and null_blk-only admission are unchanged.
 Loaded alpha.14 is NOT RUN.
+
+## Alpha.15: default-off unarmed timer cancellation avoidance
+
+The production worker never arms the hrtimer when
+`retain_ms=0`, yet the previous flush called synchronous
+`hrtimer_cancel()` at every one-page window closure.
+Alpha.15 gates that hot-path cancellation on the actual
+retention policy; it remains mandatory for retained
+windows and unconditional in drain/free. No format,
+on-device I/O, GC, FUA or completion rule changes.
+Potential faster nonretained upper IOPS is a hypothesis;
+the owner-loaded QD32 unpaced result is not yet available.

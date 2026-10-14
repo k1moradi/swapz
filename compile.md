@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.14
+## One active module: V3.0.0-alpha.15
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -338,3 +338,16 @@ Unpaced achieved-rate differences are results, not
 matched-load disqualifications. Rootless checks and
 kernel version remain alpha.14; **no loaded unpaced
 throughput result has been reported**.
+
+## Alpha.15 unarmed-timer hot-path optimization
+
+Version gates, Kbuild and owned null_blk scripts now use
+`3.0.0-alpha.15`. `sv3_flush_window` no longer synchronously
+cancels an hrtimer in the default `retain_ms=0` case because
+its worker never arms a timer. For the opt-in retained window,
+timer synchronization, shutdown/free draining, FUA and mapping
+authority are unchanged. Test actual production header predicate
+and source paths, compile W=1/W=2, then owner-only fresh RAM
+`make run` and `make bench-pair-medium-unpaced` after
+passing safety preflight. An increased completed MB/s is
+unproven until measured.

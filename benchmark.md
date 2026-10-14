@@ -828,3 +828,41 @@ qualification preserves observed useful MB/s differences
 rather than applying the paced 5% achieved-rate gate.
 Physical drive saturation, steady-state GC and CPU cost
 remain independent unfinished gates.
+
+## Alpha.14 most recent owner-loaded paced evidence; alpha.15 throughput pending
+
+Owner log source `a3c0a1aefda04c1ac0dfc63624fbb938d63ee381`,
+Linux `7.0.0-38-generic`, module SHA-256
+`7cf9f3e92e84864633c6d2d662a28d74b12ac109dbf3883c9661085b6d4aa488`.
+Both default loaded 128-page full-byte-oracle and two
+distinct 500-IOPS medium-payload pair runs passed with
+unchanged host swap and ordinary owned null_blk teardown.
+In the retained medium session
+`build/benchmark/session.yPOaQcCd`, immutable off and V3
+arms each executed **767 WRITEs and 257 READs**. The
+uncompressed source completed **1.544721 logical WRITE
+MB/s → 1.544721 lower WRITE MB/s**. V3 `retain_ms=2`
+completed **1.543633 logical WRITE MB/s → 1.006280
+lower WRITE MB/s**, with actual independently measured
+lower WRITE bytes 2,048,000 / 158 requests (off 3,141,632
+/ 767). Independently measured lower READ bytes/request
+counts were unchanged at 1,052,672 / 257.
+The byte-exact final 1024-page oracle passed.
+Sampled WRITE p99 **2.696ms** retained versus
+**1.120ms** off; `close_pack_ready=64`,
+`close_deadline=1138`, `gc_victims=0` across broader
+cumulative state. This demonstrates material lower
+WRITE-byte/request savings under a *paced synthetic*
+workload, not saturation or improved maximum throughput.
+
+At new exact **alpha.15**, the production C hot path
+avoids an unnecessary `hrtimer_cancel` for nonretained
+singleton windows but leaves retained behavior alone.
+**There is no alpha.15 loaded unpaced throughput result.**
+Next qualified experiment: existing distinct opt-in
+`make bench-pair-medium-unpaced` (16,384 operations,
+QD32, rate unlimited) on *exclusively owned* RAM
+null_blk, with full readback, independent lower-device
+counters, GC, write/read p99 and ordinary safe teardown.
+Neither null_blk nor the unpaced result imposes or
+demonstrates a fixed saturated physical disk bandwidth.

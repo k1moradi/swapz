@@ -111,10 +111,19 @@ Use `main` only and follow the device/host safety restrictions.
       [readiness ledger](PRODUCTION_READINESS.md);
       V3 remains experimental and null_blk-only.
 
+- [ ] Owner alpha.15: first `make run` default-off
+      loaded safety and full oracle on new owned RAM,
+      then the separate `make bench-pair-medium-unpaced`
+      QD32/16,384-operation benchmark. Record completed
+      logical input WRITE/READ MB/s, independent lower
+      WRITE/READ MB/s and requests, GC, CPU, p95/p99,
+      exact source/module hashes and teardown/quarantine.
+      No unpaced result appears in the latest uploaded log.
+
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.14 behavior when their claims
+      documents and current V3.0.0-alpha.15 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,
