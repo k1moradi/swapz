@@ -4,6 +4,7 @@
 set -Eeuo pipefail
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "$ROOT/tools/nullblk-identity.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
@@ -155,13 +156,7 @@ INDEX="$(cat "$CONFIG/index")"
 # New null_blk names the block disk after configfs; old kernels use nullbN.
 # Only a disk with EXACT expected name or index is permitted.
 for i in {1..50}; do
-    if [[ -r "/sys/block/$CONFIGNAME/dev" && ! -e "/sys/block/nullb$INDEX/dev" ]]; then
-        DISK="$CONFIGNAME"
-        break
-    elif [[ -r "/sys/block/nullb$INDEX/dev" && ! -e "/sys/block/$CONFIGNAME/dev" ]]; then
-        DISK="nullb$INDEX"
-        break
-    fi
+    DISK="$(swapz_resolve_owned_disk "$CONFIGNAME" "$INDEX" "/sys/block")" && break
     sleep 0.1
 done
 [[ -n "$DISK" ]] || fail "owned configfs disk missing or ambiguous: $CONFIG index=$INDEX"

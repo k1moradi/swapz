@@ -29,7 +29,8 @@ CC ?= cc
 verify: test
 	python3 -B tests/runtime/native/source-contract-test.py -v
 	python3 -B tests/runtime/benchmark/io-replay-test.py -v
-	bash -n tools/deploy-nullblk.sh
+	bash -n tools/deploy-nullblk.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh
+	bash tests/runtime/native/nullblk-identity-test.sh
 	@grep -Fq -- 'dmsetup create "$$DMNAME" --uuid "$$UUID"' tools/deploy-nullblk.sh
 	@grep -Fq -- 'memory_backed' tools/deploy-nullblk.sh
 	@grep -Fq -- 'dmsetup remove "$$DMNAME"' tools/deploy-nullblk.sh

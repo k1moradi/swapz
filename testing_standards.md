@@ -213,3 +213,8 @@ never replace missing RAM devices with physical or current swap.
 ### Owned null_blk configfs-name qualification
 
 Configfs can expose a custom disk name, unlike the historical /dev/nullbN convention. The deployer must fail closed on ambiguous kernel disk names, verify the actual null_blk major and configfs index/minor against the chosen device node, check the node's real rdev and ensure no mounted or active-swap alias. The current script never creates a fallback physical device, invokes swapoff/swapon or removes an unverified config. Rootless regressions and loaded qualification remain distinct.
+
+
+### Rootless regression for null_blk configfs naming
+
+The automated `make verify` suite invokes `tests/runtime/native/nullblk-identity-test.sh`. Using fake sysfs directories only, it verifies configfs-named and historical nullbN discovery, plus fail-closed ambiguous, missing and invalid identities. Discovery alone never authorizes device IO; the privileged harness separately checks null_blk driver major, index/minor and real block node identity. The reported Linux 7.0 loaded failure is not declared fixed without a successful new host run.
