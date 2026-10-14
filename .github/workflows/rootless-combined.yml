@@ -1,6 +1,21 @@
 name: Historical V2.2 rootless controls (manual archival run)
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-nbd.yml'
+      - 'kernel/dm-swapz.c'
+      - '.github/workflows/rootless-teardown.yml'
+      - 'tests/runtime/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rootless-combined.yml'
+      - '.github/workflows/rootless-nbd.yml'
+      - 'kernel/dm-swapz.c'
+      - '.github/workflows/rootless-teardown.yml'
+      - 'tests/runtime/**'
   workflow_dispatch:
 
 permissions:

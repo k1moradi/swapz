@@ -10,9 +10,10 @@ until loaded correctness and resource-performance gates are satisfied.
 
 The former V2.2 implementation did not meet the project's compression
 expectations and has been **retired from active development, default
-builds, test suites, and benchmarks**. Its source, old tests, and
+builds, default test suites, and required benchmark comparisons**. Its source, old tests, and
 measurements remain archived in Git history for provenance only.
-No V2.2 comparison is required before improving V3.
+No V2.2 comparison is required before improving V3. Some historical
+rootless safety checks remain automated to avoid losing safety coverage.
 
 ## Start every agent task with these six authoritative documents
 

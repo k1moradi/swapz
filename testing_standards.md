@@ -44,7 +44,7 @@ Any byte mismatch, double/lost completion, authority violation, unsafe GC reuse,
 
 - `.github/workflows/project-goals.yml` on `main` runs native C/C++ tests, userspace build, one-build-root and documentation governance.
 - `.github/workflows/extent-v3-codec.yml` runs actual-C and source gates and V3 W=1/W=2 kernel builds.
-- `.github/workflows/kernel-bestfit4-experimental.yml` and the old V2.2 combined-rootless workflow are **manual archival reproductions only**. Active required gates are V3 exact-source/native C, kernel compile and general teardown safety.
+- `.github/workflows/kernel-bestfit4-experimental.yml` is a **manual archival reproduction only**; the combined rootless compatibility/safety workflow remains push-triggered to preserve existing safety contracts, **not** as a mandatory V2.2 benchmark arm. Active required gates are V3 exact-source/native C, kernel compile and general teardown safety.
 - A code/build/test/CI change must update a **relevant one of the four current standards** in the same `main` commit; add `README.md`/`VISION.md` when their content changes. Document the failure before repair and rerun at the **final exact HEAD**.
 
 Do not infer green workflow status from the previous commit. A compiler-only success does not qualify a newly changed kernel target as loaded safe.

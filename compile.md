@@ -67,7 +67,7 @@ teardown is permitted. `make clean` removes only known compiled targets.
 source/sanitizer contracts and W=1/W=2 builds.
 `.github/workflows/project-goals.yml`: V3 native C and two-arm
 off/V3 fixture/oracle tests; same-commit standards updates and build
-hygiene. Old V2.2 CI workflows are manual-only archives. See
+hygiene. The historical V2.2 kernel-geometry workflow is manual-only; combined rootless source-safety tests remain automated for existing invariants, **not** as a V2.2 benchmark requirement. See
 [testing_standards.md](testing_standards.md) for actual loaded-kernel
 gates. Module build PASS ≠ loaded/physical performance.
 
