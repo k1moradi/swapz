@@ -213,8 +213,63 @@ for i in {1..50}; do
 	sleep 0.1
 done
 [[ -b "/dev/mapper/$DMNAME" ]] || fail "test-only DM device node absent"
-note "TARGET_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
+# Keep the test's independent backing counters from BEFORE the oracle.
+# Null_blk's sysfs stat write fields are requests [4] and 512B sectors [6].
+# Counter samples do not include configuration, prefill, or teardown work.
+status_before="$(dmsetup status "$DMNAME")"
+read -r -a lower_before < "/sys/block/$DISK/stat" ||
+    fail "cannot snapshot owned lower before readback"
+[[ ${#lower_before[@]} -ge 7 ]] ||
+    fail "owned null_blk stat line incomplete"
+note "TARGET_STATUS_BEFORE=$status_before"
+note "LOWER_STATS_BEFORE=${lower_before[*]}"
 timeout --signal=TERM --kill-after=5s 40s "$ORACLE" "/dev/mapper/$DMNAME" ||
 	fail "loaded test roundtrip failed or timed out"
-note "TARGET_STATUS_AFTER=$(dmsetup status "$DMNAME")"
-note "LOWER_STATS=$(cat "/sys/block/$DISK/stat")"
+status_after="$(dmsetup status "$DMNAME")"
+read -r -a lower_after < "/sys/block/$DISK/stat" ||
+    fail "cannot snapshot owned lower after readback"
+[[ ${#lower_after[@]} -ge 7 ]] ||
+    fail "owned null_blk final stat line incomplete"
+note "TARGET_STATUS_AFTER=$status_after"
+note "LOWER_STATS=${lower_after[*]}"
+
+# Exact-zero write savings must appear BOTH in V3's completed media
+# counters and in the separate owned lower-device accounting. Reject
+# a future C regression that merely increments a status counter.
+# The fixed C oracle submits 128 initial + 64 overwrite pages; of
+# those, initial page 0 and eight second-pass pages are ALL zero.
+status_u64() {
+    local line="$1" key="$2"
+    [[ $line =~ (^|[[:space:]])${key}=([0-9]+)($|[[:space:]]) ]] ||
+        return 1
+    printf '%s\n' "${BASH_REMATCH[2]}"
+}
+status_delta() {
+    local key="$1" before_value after_value
+    before_value="$(status_u64 "$status_before" "$key")" ||
+        fail "target status missing pre-oracle $key"
+    after_value="$(status_u64 "$status_after" "$key")" ||
+        fail "target status missing post-oracle $key"
+    (( after_value >= before_value )) || fail "target status $key regressed"
+    printf '%s\n' "$((after_value - before_value))"
+}
+logical_writes="$(status_delta logical_write)"
+zero_writes="$(status_delta zero_elided)"
+target_write_bytes="$(status_delta physical_write)"
+target_write_reqs="$(status_delta physical_write_reqs)"
+(( lower_after[4] >= lower_before[4] &&
+   lower_after[6] >= lower_before[6] )) ||
+    fail "owned lower stat counters regressed"
+lower_write_reqs="$((lower_after[4] - lower_before[4]))"
+lower_write_bytes="$(((lower_after[6] - lower_before[6]) * 512))"
+(( logical_writes == 192 * 4096 )) ||
+    fail "unexpected completed logical work: $logical_writes"
+(( zero_writes == 9 )) ||
+    fail "zero-write recognition changed: $zero_writes (expected 9)"
+(( target_write_bytes <= logical_writes - zero_writes * 4096 )) ||
+    fail "zero elisions did not reduce completed lower bytes"
+(( lower_write_bytes == target_write_bytes )) ||
+    fail "independent lower write sectors disagree with V3"
+(( target_write_reqs > 0 && lower_write_reqs > 0 )) ||
+    fail "nonzero-page lower write requests missing"
+note "PASS_ZERO_WRITE_LOWER_IO=logical_bytes:$logical_writes zero_pages:$zero_writes target_write_bytes:$target_write_bytes lower_write_bytes:$lower_write_bytes target_write_reqs:$target_write_reqs lower_write_reqs:$lower_write_reqs"

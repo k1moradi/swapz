@@ -187,3 +187,16 @@ production engine/authority/codec C; `make verify` includes this
 regression and the source-path contract. The loaded host oracle stays
 at `build/tests/device-roundtrip` and now overwrites exact zero
 pages. There is still **one** reused `~/swapz/build/` output tree.
+
+## Isolated deployment write-stat acceptance check
+
+`make run` uses the compiled 128-page `device-roundtrip` C oracle
+on newly verified RAM-backed `null_blk`. The deployment shell now
+captures the **before/after** V3 and backing-device write snapshots,
+requires the expected nine all-zero logical page elisions in its fixed
+192-write case, and reconciles target completed bytes with the
+independent 512B-sector delta. This is a regression gate for the
+zero-page optimization, not a replacement for a matched off/V3
+performance benchmark. If it fails, the harness attempts only its
+existing ordinary identity-verified teardown or quarantines resources;
+never changes active swap. Build artifacts remain under `build/`.

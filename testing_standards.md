@@ -265,3 +265,30 @@ matched off-versus-V3 two-arm trace with real lower counters remain
 A zero-write optimization cannot be credited as a generic 50% LZ4
 packing win; incompressible/random and nonzero compressible pages
 remain unchanged.
+
+## Loaded V3 zero-elision oracle and host evidence — October 14, 2026
+
+The user loaded new V3 source `4c6e29b848a7f3327c1637a7f8fd234b60b840e8`
+on Linux `7.0.0-38-generic` after successful native C, 29
+source tests and three rootless replay tests. Its 128-page C oracle
+passed overwrite, direct readback, FUA/flush, and clean owned null_blk
+teardown; active swap inventory remained unchanged. Target stats:
+`logical_write=786432`, `zero_elided=9`,
+`physical_write=749568`, `physical_write_reqs=183`, 119 nonzero
+compressed windows all singleton, 64 RAW, no GC rotations or errors.
+The independent 64MiB lower `null_blk` confirmed **183 writes and
+1,464 512B sectors**. This confirms 36 KiB lower-write saving
+**within the synchronous smoke's logical 192-write workload**, not
+a matched off/V3 throughput performance comparison. See
+[benchmark.md](benchmark.md) for complete read counters and caveats.
+
+The isolated deployment script's next release now snapshots independent
+lower request/sector counters **before and after** the oracle and
+rejects a run if its expected nine zero pages are not actually
+accounted for, if completed target writes exceed uncompressed logical
+write bytes minus zero elisions, or if completed target bytes disagree
+with independent lower bytes. The comparison tolerates block-layer
+request merging/splitting; actual write **requests are still recorded
+separately**. These checks are test-scope-specific, not generic
+hardware endurance claims. Rootless CI validates script syntax and
+source contracts; host rerun of this tighter gate is **NOT RUN**.

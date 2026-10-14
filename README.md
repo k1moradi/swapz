@@ -186,3 +186,18 @@ pages during overwrites to exercise the loaded path when run on an
 authorized owned null_blk. Rootless CI builds/tests are not loaded
 performance evidence; no lower-I/O win is asserted until an actual
 post-change loaded run supplies device counters.
+
+## Verified first loaded zero-elision result
+
+On Linux 7.0.0-38, the updated V3 exact-zero C path passed the owned
+128-page readback/flush/overwrite smoke on source `4c6e29b`.
+It elided **9** writes, giving **183 lower requests / 732 KiB**
+instead of the equivalent 192 x 4096B = 768 KiB useful logical writes:
+a **36 KiB (4.69%)** write-side reduction in this controlled,
+synchronous test. Independent lower-device write sectors agreed
+exactly. All remaining **119** nonzero compressed windows were
+singletons; no nonzero compressed-data packing win was established.
+The new `make run` deployment guard verifies the nine elisions
+and reconciles lower-write bytes automatically. This is still a
+null_blk-only development qualification, **not** production readiness
+or a matched off/V3 benchmark (see [benchmark.md](benchmark.md)).

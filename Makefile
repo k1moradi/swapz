@@ -33,7 +33,8 @@ verify: test
 	bash tests/runtime/native/nullblk-identity-test.sh
 	@grep -Fq -- 'dmsetup create "$$DMNAME" --uuid "$$UUID"' tools/deploy-nullblk.sh
 	@grep -Fq -- 'memory_backed' tools/deploy-nullblk.sh
-	@grep -Fq -- 'dmsetup remove "$$DMNAME"' tools/deploy-nullblk.sh
+	@grep -Fq -- 'dmsetup remove "$DMNAME"' tools/deploy-nullblk.sh
+	@grep -Fq -- 'PASS_ZERO_WRITE_LOWER_IO=' tools/deploy-nullblk.sh
 	@printf 'PASS: V3 production C, replay, preflight shell contracts\n'
 
 build/tests/device-roundtrip: tools/device-roundtrip.c

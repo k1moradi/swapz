@@ -194,3 +194,53 @@ separately, plus RAW. This change does not solve singleton-window
 packing of ~2048B nonzero data. A loaded owner-run `make run`
 readback/flush check is a necessary correctness gate; the accepted
 performance claim still requires a matched off/V3 measurement.
+
+## October 14, 2026 — user-loaded exact-zero result, same host
+
+**LOADED CORRECTNESS PASS; measured write-side evidence on one small
+synchronous arm.** The user ran `make run` at exact source
+`4c6e29b848a7f3327c1637a7f8fd234b60b840e8` on kernel
+`7.0.0-38-generic`, compiled module SHA-256
+`42d64bb0cde4eec578f136c00aae129ca051fc0e6dbcc6c91807da4d969e015e`
+and exercised a fresh uniquely owned 64 MiB memory-backed null_blk.
+The 16 MiB V3 target completed all 128-page direct-I/O oracle reads,
+192 writes/overwrites, required flushes, full readback and ordinary
+test-owned cleanup. Active `/swapfile` and `/dev/sda1` swap inventories
+were identical before and after. Host log:
+`build/deploy/session.8K4HCM7d/session.log` (only on user host,
+not a checked-in raw evidence artifact).
+
+| Count or volume | V3 target | Independent owned lower |
+|---|---:|---:|
+| Completed useful logical WRITE | 192 x 4096 = **786,432 bytes** | not applicable |
+| Completed physical WRITE | **183 requests, 749,568 bytes** | **183 requests, 1,464 x 512B = 749,568 bytes** |
+| Exact-zero write elisions | **9** | supported by missing nine 4KiB writes |
+| Accepted nonzero compressed pages / RAW fallbacks | **119 / 64** | payload classification not visible |
+| LZ4 attempts / accepted payload bytes | 192 / 70,243 bytes | not a media-byte counter |
+| Compressed windows / singleton windows | 119 / **119** | no multi-record packing |
+| Completed lower READ | 431 requests / 1,765,376 bytes | **493 requests / 3,944 x 512B = 2,019,328 bytes**, cumulative |
+| Flush calls / successful | 386 / 386 | no independent per-flush count established |
+| GC rotations / target errors | 0 / 0 | no GC/fault qualification |
+
+**Result scope:** Compared with the *same arm's ideal uncompressed
+logical-write equivalent*, 9 x 4096 = **36,864 bytes (36 KiB)** and nine
+4KiB lower writes were avoided, reducing completed lower-write bytes
+by **4.6875%**. This is corroborated by independent `null_blk`
+sector/request counters, not merely `zero_elided`. It is **NOT** a
+controlled off-versus-V3 comparison, a representative anonymous-page
+population, or a sustained performance win. Because the C oracle uses
+`O_DIRECT | O_SYNC` and `fsync`, the 119 singleton nonzero windows
+cannot alone diagnose asynchronous batching. Read device-vs-target
+difference (**62 lower reads / 253,952 bytes**) is **unattributed**;
+the independent device read total is cumulative rather than an
+isolated measured-phase delta. Verification mode was enabled
+(`verify=1`) and contributed lower reads.
+
+**Next engineering gate:** a true identical off/V3 replay with
+pre/post owned lower sysfs snapshots; representative measured LZ4
+output-size distributions including nonzero ~2048B payloads;
+separate CPU/p99, GC and read amplification. The isolated smoke
+harness now checks its own 9 zero elisions against full readback,
+target lower-written bytes, and actual owned lower write-sector
+deltas; failure of this guard is **not** permission to alter active
+swap or move to physical devices.
