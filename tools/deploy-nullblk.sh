@@ -32,7 +32,7 @@ done
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
 git diff --quiet && git diff --cached --quiet ||
 	fail "dirty tracked source: preserve and commit changes first"
-[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.9 ]] ||
+[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.10 ]] ||
 	fail "unexpected active V3 version"
 [[ -s "$MODULE" && -x "$ORACLE" ]] || fail "V3/oracle not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
@@ -297,6 +297,10 @@ window_delta="$(status_delta windows)"
 (( close_total == window_delta )) ||
     fail "window close reasons disagree with actual V3 windows: reasons=$close_total windows=$window_delta"
 note "PASS_WINDOW_CLOSE_REASONS=windows:$window_delta accounted:$close_total gc_pressure:$(status_delta window_gc_pressure)"
+age_total="$(( $(status_delta age_le100us) + $(status_delta age_101_1000us) + $(status_delta age_gt1000us) ))"
+(( age_total == window_delta )) ||
+    fail "window age bins disagree with actual V3 windows: ages=$age_total windows=$window_delta"
+note "PASS_WINDOW_OPEN_AGE=windows:$window_delta bins:$age_total sum_ns:$(status_delta age_sum_ns) max_ns:$(status_delta age_max_ns)"
 if (( lower_read_bytes != target_read_bytes )); then
     # Lower disk stats include readers outside V3; do not assume that an
     # 8KiB excess is an innocent probe or allow a hidden tolerance.

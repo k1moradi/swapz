@@ -45,6 +45,8 @@ verify: test
 	@grep -Fq -- 'PASS_ORACLE_LOWER_READ=' tools/deploy-nullblk.sh
 	@grep -Fq -- 'close_total == window_delta' tools/deploy-nullblk.sh
 	@grep -Fq -- 'PASS_WINDOW_CLOSE_REASONS=' tools/deploy-nullblk.sh
+	@grep -Fq -- 'age_total == window_delta' tools/deploy-nullblk.sh
+	@grep -Fq -- 'PASS_WINDOW_OPEN_AGE=' tools/deploy-nullblk.sh
 	@printf 'PASS: V3 production C, replay, preflight shell contracts\n'
 
 build/tests/device-roundtrip: tools/device-roundtrip.c

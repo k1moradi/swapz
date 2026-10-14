@@ -42,11 +42,14 @@ Use `main` only and follow the device/host safety restrictions.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
-- [ ] Re-run alpha.9 with paired quiescent snapshots; the loaded
-      `a7e5ad69` oracle saw 119 windows/119 FUA closures but
-      **FAILED** independent lower READ accounting by 8,192 B.
-      Do not assume external traffic or weaken the lower-byte gate.
-      Correlate exact closure reasons and ~2KiB pages before Stage 3B.
+- [x] Alpha.9 owner-loaded retest at `f9b9ec88` PASSED:
+      exact lower reads 490/2,007,040B and writes 183/749,568B,
+      119/119 FUA closures, full readback, unchanged host swap
+      and clean teardown. Previous 8KiB mismatch unproven.
+- [ ] Load alpha.10 on newly owned RAM null_blk and qualify
+      `sum(open-age bins)==windows` alongside all existing
+      byte-exact, reason and independent lower-I/O gates.
+      Next measure medium nonzero ~2KiB pages, not FUA smoke alone.
 - [ ] Profile why production-C windows close (worker quantum,
       unrelated READ, conflicts, FUA/PREFLUSH, deadline, capacity), with
       actual device-request/sector evidence on matched asynchronous load.
@@ -71,7 +74,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.9 behavior when their claims
+      documents and current V3.0.0-alpha.10 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

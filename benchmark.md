@@ -436,3 +436,37 @@ truncated stat lines. **New loaded retest: NOT RUN.**
 Quiescence over one sampled interval cannot prove that sporadic
 unowned I/O did not occur during the oracle; persistent discrepancy
 requires additional device-origin diagnosis.
+
+## Alpha.9 owner-loaded quiescent smoke PASS — 2026-10-14
+
+At exact source `f9b9ec88f0764e71e4181ca423e846a361fdc03f`,
+Linux `7.0.0-38-generic`, module SHA-256
+`3d5a4d2f4d365c5e272983d66c8e763f6f20e34a196015c326df68f417b2024e`,
+the owner loaded newly owned RAM null_blk
+`nullb-swapz-6387697bd4080ba1`, 251:0. Original local log:
+`build/deploy/session.YYtOpRDN/session.log`.
+Byte-exact C oracle, flush and overwrites, nine zero elisions,
+host swap unchanged and safe ordinary teardown: PASS.
+The independently measured lower write requests/bytes were
+**183/749,568** on both V3 and null_blk; reads were
+**490/2,007,040** on both, with before/after quiescent attempts
+1 and 2. All **119** window closings were attributed to FUA and
+`PASS_WINDOW_CLOSE_REASONS=windows:119 accounted:119 gc_pressure:0`.
+This validates the observational closure gate, *not* aggregation
+across FUA or a sustained medium-page benefit. The earlier
+unexplained 8,192B excess did **not** recur; its origin remains
+unknown, not retroactively explained.
+
+## Alpha.10 first-admission-to-flush window age — NOT RUN loaded
+
+The worker now measures the monotonic elapsed nanoseconds from the
+first accepted compressed or staged RAW record to *entry* of the
+matching nonempty window flush, before lower device I/O, FUA,
+verification or GC. Three disjoint cumulative buckets (<=100us,
+101..1000us, >1000us) must sum to the window count over an isolated
+oracle interval; sum and maximum ns are diagnostic only.
+The metric does **not** count total upper BIO latency, allocation or
+device write completion time, and does not create a timer or defer
+writes. Next go/no-go remains measuring medium nonzero LZ4 pages
+and matched-load off/V3 device request/sector deltas. Alpha.10
+loaded qualification: **NOT RUN**.

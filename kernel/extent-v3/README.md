@@ -1,4 +1,9 @@
-# Current development: V3.0.0-alpha.9 experimental Device Mapper target
+# Current development: V3.0.0-alpha.10 experimental Device Mapper target
+
+**Alpha.10 measures time from first accepted window record to
+flush entry**, without changing worker scheduling, FUA handling,
+completion authority or the media format. The alpha.9 closing-reason
+telemetry remains in place.
 
 **Alpha.9 adds observational window-closing reasons only**, without
 changing flush ordering, the on-media format, or read-bypass policy.

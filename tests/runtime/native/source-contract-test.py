@@ -496,6 +496,26 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("sv3_flush_window(ctx)", process)
         self.assertIn("sv3_flush_window(ctx)", worker)
 
+    def test_alpha10_open_age_counts_one_per_window_before_io(self):
+        admitted = body("sv3_window_admit_clock")
+        flush = body("sv3_flush_window")
+        write = body("sv3_accept_write")
+        status = body("sv3_status")
+        self.assertIn("if (!ctx->batch_count)", admitted)
+        self.assertIn("ctx->window_first_ns = ktime_get_ns()", admitted)
+        self.assertEqual(write.count("sv3_window_admit_clock(ctx)"), 2)
+        self.assertIn("end_ns = ktime_get_ns()", flush)
+        self.assertIn("ctx->window_first_ns = 0", flush)
+        self.assertLess(flush.index("ctx->window_age_sum_ns += open_age_ns"),
+                        flush.index("sv3_order_window(ctx)"))
+        for counter in ("window_age_le_100us++",
+                        "window_age_101_1000us++", "window_age_gt_1000us++"):
+            self.assertIn(counter, flush)
+        for field in ("age_le100us", "age_101_1000us", "age_gt1000us",
+                      "age_sum_ns", "age_max_ns"):
+            self.assertIn(field + "=%llu", status)
+        self.assertIn("#include <linux/ktime.h>", DM)
+
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("sv3_status"))
         self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))

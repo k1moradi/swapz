@@ -17,6 +17,7 @@
 #include <linux/dm-io.h>
 #include <linux/highmem.h>
 #include <linux/ioprio.h>
+#include <linux/ktime.h>
 #include <linux/lz4.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -34,7 +35,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.9"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.10"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 
@@ -141,6 +142,13 @@ struct sv3_dm {
 	enum sv3_window_close_reason next_window_close;
 	u64 window_close_reasons[SV3_CLOSE_REASON_COUNT];
 	u64 window_gc_pressure;
+	/* First accepted record -> flush entry, excluding physical I/O. */
+	u64 window_first_ns;
+	u64 window_age_sum_ns;
+	u64 window_age_max_ns;
+	u64 window_age_le_100us;
+	u64 window_age_101_1000us;
+	u64 window_age_gt_1000us;
 	u64 window_size_counts[SV3_MAX_RECORDS + 1];
 	u64 window_bins[6]; /* 1,2,3-4,5-8,9-16,17-64 */
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
@@ -788,17 +796,40 @@ out:
 }
 
 
+static void sv3_window_admit_clock(struct sv3_dm *ctx)
+{
+	/* Serialized worker: do not refresh the start for later records. */
+	if (!ctx->batch_count)
+		ctx->window_first_ns = ktime_get_ns();
+}
+
 static int sv3_flush_window(struct sv3_dm *ctx)
 {
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
 	sv3_u8 gc_attempts = 0;
 	bool needs_fua = false;
+	u64 end_ns, open_age_ns;
 	int error = 0;
 
 	if (!count) {
 		ctx->next_window_close = SV3_CLOSE_UNKNOWN;
+		ctx->window_first_ns = 0;
 		return 0;
 	}
+	/* Measure BEFORE any dm_io, GC, verification or lower FUA. */
+	end_ns = ktime_get_ns();
+	open_age_ns = ctx->window_first_ns && end_ns >= ctx->window_first_ns ?
+		end_ns - ctx->window_first_ns : 0;
+	ctx->window_first_ns = 0;
+	ctx->window_age_sum_ns += open_age_ns;
+	if (open_age_ns > ctx->window_age_max_ns)
+		ctx->window_age_max_ns = open_age_ns;
+	if (open_age_ns <= 100000ULL)
+		ctx->window_age_le_100us++;
+	else if (open_age_ns <= 1000000ULL)
+		ctx->window_age_101_1000us++;
+	else
+		ctx->window_age_gt_1000us++;
 	ctx->window_close_reasons[ctx->next_window_close]++;
 	ctx->next_window_close = SV3_CLOSE_UNKNOWN;
 	sv3_order_window(ctx);
@@ -1001,6 +1032,7 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		memcpy(ctx->batch_bytes +
 		       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
 		       ctx->input_page, SV3_BLOCK_BYTES);
+		sv3_window_admit_clock(ctx);
 		ctx->batch[ctx->batch_count++] = (struct sv3_pending_bio) {
 			.bio = bio,
 			.logical = logical,
@@ -1027,6 +1059,7 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		return 0;
 	}
 
+	sv3_window_admit_clock(ctx);
 	ctx->batch[ctx->batch_count] = (struct sv3_pending_bio) {
 		.bio = bio,
 		.logical = logical,
@@ -1713,6 +1746,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_discard=%llu close_preflush=%llu "
 		       "close_quantum=%llu close_idle=%llu close_shutdown=%llu "
 		       "close_other=%llu window_gc_pressure=%llu "
+		       "age_le100us=%llu age_101_1000us=%llu "
+		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1773,6 +1808,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_close_reasons[SV3_CLOSE_SHUTDOWN],
 		       ctx->window_close_reasons[SV3_CLOSE_OTHER],
 		       ctx->window_gc_pressure,
+		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
+		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,
+		       ctx->window_age_max_ns,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

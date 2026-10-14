@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.9
+## One active module: V3.0.0-alpha.10
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -26,7 +26,7 @@ All generated software artifacts belong under the **one persistent
 V3 source: `kernel/extent-v3/{dm-target,engine,authority,codec}.c`.
 Kbuild stages source in `build/kernel/experimental` (for older kernel
 header compatibility) and writes object/`*.ko` there. `dkms.conf`
-now identifies **V3 alpha.9** with **`AUTOINSTALL="no"`** to prevent
+now identifies **V3 alpha.10** with **`AUTOINSTALL="no"`** to prevent
 automatic installation of an experimental module. Even a manual DKMS
 build or a successful compile is **NOT permission** to enable system
 swap, bypass the null_blk-only guard, or load on physical media.
@@ -220,3 +220,13 @@ unsuccessful unrelated-READ bypass and must not be relabeled.
 Run `make verify`, Kbuild W=1/W=2 and the owner-authorized RAM-only
 smoke before interpreting live close counters. Alpha.9 has **NOT
 YET BEEN LOADED** at this source revision.
+
+## Alpha.10 source/version alignment and smoke
+
+The active source, DKMS package, Device Mapper status string, both
+owned RAM null_blk harness guards and exact CI version gate are
+`3.0.0-alpha.10`. No physical-device admission or system swap is
+permitted. Alpha.10 adds window-age diagnostic fields to production
+C and a loaded smoke conservation assertion. Use `make verify`,
+W=1/W=2 Kbuild, then the already authorized `make run` only on
+freshly owned RAM null_blk. Alpha.10 loaded: **NOT RUN**.

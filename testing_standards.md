@@ -480,3 +480,19 @@ inputs; no real devices, sudo or module needed. Quiescence output is
 owned by one serialized shell caller, not concurrency-safe.
 The new loaded retest is **NOT RUN**. Keep version alpha.9: only
 test harness code changes, no new kernel data-path experiment.
+
+## Alpha.10 worker-window open age is not physical write latency
+
+The serialized production-C worker now timestamps the FIRST accepted
+compressed or staged RAW write in an empty window, and at the
+beginning of each nonempty `sv3_flush_window()` captures elapsed
+monotonic nanoseconds BEFORE planning, lower I/O, verification, FUA,
+or GC. Exactly one bucket <=100us, 101..1000us, >1000us must be
+incremented per nonempty window. No count may be added by an empty
+flush. Include `age_sum_ns` and `age_max_ns` as diagnostic,
+not proof of CPU or BIO completion time. First admission must not
+be refreshed by later writes. No worker schedule or completion
+semantics are changed. The owned `make run` harness now checks
+`sum(age bucket deltas) == windows delta` as well as primary
+close-reason conservation. Unit/source and Kbuild W=1/W=2
+qualification are separate from the **NOT RUN alpha.10 loaded gate**.

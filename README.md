@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.9, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.10, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -99,6 +99,20 @@ without changing completion/flush order, the storage format or
 worker scheduler. The earlier negative alpha.8 unrelated READ-bypass
 experiment is historical and is not re-enabled. Alpha.9 loaded
 host qualification: **NOT RUN**.
+
+## Alpha.10 development focus: actual open-window age
+
+The owner-loaded alpha.9 `make run` at `f9b9ec88` passed strict
+lower READ and WRITE byte/request equality, byte-exact oracle,
+119 FUA closure-reason counters and ordinary safe teardown.
+The previous 8KiB discrepancy did not recur but remains
+unattributed. The synchronous FUA smoke does **not** establish
+packing opportunities under a sustained medium-compressed workload.
+
+Alpha.10 adds **open-window age telemetry** in production C (time
+from first admitted page to flush entry). It does not retain windows,
+bypass READs, change FUA or add format states. Loaded alpha.10
+qualification has **NOT RUN**.
 
 ## The active performance question
 
