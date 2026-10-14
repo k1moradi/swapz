@@ -274,6 +274,12 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(manifest["profile_pages"], {"medium": 128})
         self.assertEqual(manifest["lz4_size_buckets"], {"2049_3072": 128})
         self.assertEqual(manifest["raw_pages"], 0)
+        self.assertGreaterEqual(manifest["lz4_min_accepted_payload_bytes"], 2049)
+        self.assertLessEqual(manifest["lz4_max_accepted_payload_bytes"], 2200)
+        self.assertLessEqual(
+            manifest["lz4_min_accepted_payload_bytes"],
+            manifest["lz4_max_accepted_payload_bytes"]
+        )
         for index in range(128):
             chunk = content[index * PAGE:(index + 1) * PAGE]
             self.assertNotEqual(chunk, bytes(PAGE))

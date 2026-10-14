@@ -155,6 +155,8 @@ def generate(seed, count, weights, compress):
     histogram = Counter()
     profile_histogram = {name: Counter() for name in PROFILES}
     total_compressed = 0
+    min_compressed = None
+    max_compressed = None
     for index, name in enumerate(names):
         page = page_bytes(seed, index, name)
         if len(page) != PAGE:
@@ -167,6 +169,8 @@ def generate(seed, count, weights, compress):
         profile_histogram[name][bucket] += 1
         if size:
             total_compressed += size
+            min_compressed = size if min_compressed is None else min(min_compressed, size)
+            max_compressed = size if max_compressed is None else max(max_compressed, size)
     result = {
         "definition": "synthetic anonymous-memory-style, not sampled Linux swap",
         "seed": seed, "pages": count, "page_bytes": PAGE,
@@ -176,6 +180,8 @@ def generate(seed, count, weights, compress):
         "lz4_size_buckets": dict(histogram),
         "profile_lz4_buckets": {k: dict(v) for k, v in profile_histogram.items()},
         "lz4_accepted_payload_bytes": total_compressed,
+        "lz4_min_accepted_payload_bytes": min_compressed,
+        "lz4_max_accepted_payload_bytes": max_compressed,
         "raw_pages": histogram["raw"],
         "raw_page_bytes": histogram["raw"] * PAGE,
         "fixture_sha256": hashlib.sha256(payload).hexdigest(),

@@ -263,6 +263,7 @@ assert manifest["pages"] == 128
 assert manifest["profile_pages"] == {"medium": 128}
 assert manifest["lz4_size_buckets"] == {"2049_3072": 128}
 assert manifest["raw_pages"] == 0
+assert 2049 <= manifest["lz4_min_accepted_payload_bytes"] <= manifest["lz4_max_accepted_payload_bytes"] <= 2200
 assert 128 * 2049 <= manifest["lz4_accepted_payload_bytes"] <= 128 * 2200
 print("MEDIUM_FIXTURE_MEASURED_LZ4_BYTES=" +
       str(manifest["lz4_accepted_payload_bytes"]))

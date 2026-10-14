@@ -515,3 +515,15 @@ Preserve matched offered/achieved rates, independent lower READ/WRITE
 request/byte delta, original immutable trace and complete final
 readback, and exact UUID ownership and ordinary/quarantined teardown.
 This is a feasibility pilot at QD8: host loaded **NOT RUN**.
+
+### Qualification correction — extremes, not only average
+
+Do **not** qualify `medium` data from a histogram bucket plus a mean
+alone: one over-large page can hide behind smaller peers. The
+manifest now retains independently measured `lz4_min_accepted_payload_bytes`
+and `lz4_max_accepted_payload_bytes` (null only when no pages
+compress), and the owned host harness requires the **minimum >= 2049**
+and **maximum <= 2200** before permitting replay. This is a
+fixture-integrity check, not loaded I/O evidence. The broad
+2,049..3,072 size-bin classification remains diagnostic, not
+sufficient for medium acceptance.
