@@ -29,8 +29,9 @@ CC ?= cc
 verify: test
 	python3 -B tests/runtime/native/source-contract-test.py -v
 	python3 -B tests/runtime/benchmark/io-replay-test.py -v
-	bash -n tools/deploy-nullblk.sh tools/benchmark-owned-pair.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh tests/runtime/benchmark/owned-pair-preflight-test.sh
+	bash -n tools/deploy-nullblk.sh tools/quiet-lower-io.sh tools/benchmark-owned-pair.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh tests/runtime/native/quiet-lower-io-test.sh tests/runtime/benchmark/owned-pair-preflight-test.sh
 	bash tests/runtime/native/nullblk-identity-test.sh
+	bash tests/runtime/native/quiet-lower-io-test.sh
 	bash tests/runtime/benchmark/owned-pair-preflight-test.sh
 	@grep -Fq -- 'dmsetup create "$$DMNAME" --uuid "$$UUID"' tools/deploy-nullblk.sh
 	@grep -Fq -- 'memory_backed' tools/deploy-nullblk.sh
@@ -38,7 +39,9 @@ verify: test
 	@grep -Fq -- 'PASS_ZERO_WRITE_LOWER_IO=' tools/deploy-nullblk.sh
 	@grep -Fq -- 'zero_writes == 9' tools/deploy-nullblk.sh
 	@grep -Fq -- 'lower_write_bytes == target_write_bytes' tools/deploy-nullblk.sh
-	@grep -Fq -- 'lower_read_bytes == target_read_bytes' tools/deploy-nullblk.sh
+	@grep -Fq -- 'lower_read_bytes != target_read_bytes' tools/deploy-nullblk.sh
+	@grep -Fq -- 'swapz_capture_quiescent_io' tools/deploy-nullblk.sh
+	@grep -Fq -- 'UNATTRIBUTED_LOWER_READ=' tools/deploy-nullblk.sh
 	@grep -Fq -- 'PASS_ORACLE_LOWER_READ=' tools/deploy-nullblk.sh
 	@grep -Fq -- 'close_total == window_delta' tools/deploy-nullblk.sh
 	@grep -Fq -- 'PASS_WINDOW_CLOSE_REASONS=' tools/deploy-nullblk.sh

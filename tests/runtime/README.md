@@ -29,6 +29,11 @@ loaded V3 benchmark**. The off arm in
 separately authorized loaded tests is bare **owned RAM-backed null_blk**,
 never a host `swapoff`.
 
+The loaded smoke counter helper is exercised rootlessly with fake
+target and block-stat changes via
+`bash tests/runtime/native/quiet-lower-io-test.sh`; it does not
+claim device exclusivity or privileged read-accounting evidence.
+
 ## Historical and general safety helpers
 
 The `legacy/` strategy/evidence tests, root-level `streaming-benchmark-*`, `recall-*`,

@@ -5,6 +5,7 @@ set -Eeuo pipefail
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$ROOT/tools/nullblk-identity.sh"
+source "$ROOT/tools/quiet-lower-io.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
@@ -213,24 +214,28 @@ for i in {1..50}; do
 	sleep 0.1
 done
 [[ -b "/dev/mapper/$DMNAME" ]] || fail "test-only DM device node absent"
-# Keep the test's independent backing counters from BEFORE the oracle.
-# Null_blk stat arrays: read requests [0], 512B read sectors [2],
-# write requests [4], and 512B write sectors [6]. The samples bracket
-# only the oracle, excluding earlier device probing and setup I/O.
-status_before="$(dmsetup status "$DMNAME")"
-read -r -a lower_before < "/sys/block/$DISK/stat" ||
-    fail "cannot snapshot owned lower before readback"
-[[ ${#lower_before[@]} -ge 7 ]] ||
-    fail "owned null_blk stat line incomplete"
+# The target status and independent backing counters are not atomic.
+# Require two unchanging paired samples around the oracle; this does
+# NOT excuse external traffic during the oracle or weaken equality.
+# Null_blk stat: read requests [0], 512B sectors [2], write [4]/[6].
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm settle --timeout=10 ||
+        fail "udev queue did not settle before owned oracle"
+fi
+swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+    fail "target/backing not quiescent before oracle"
+status_before="$SWAPZ_QUIET_STATUS"
+lower_before=("${SWAPZ_QUIET_LOWER[@]}")
+note "QUIESCENT_BEFORE=attempt:$SWAPZ_QUIET_ATTEMPTS"
 note "TARGET_STATUS_BEFORE=$status_before"
 note "LOWER_STATS_BEFORE=${lower_before[*]}"
 timeout --signal=TERM --kill-after=5s 40s "$ORACLE" "/dev/mapper/$DMNAME" ||
-	fail "loaded test roundtrip failed or timed out"
-status_after="$(dmsetup status "$DMNAME")"
-read -r -a lower_after < "/sys/block/$DISK/stat" ||
-    fail "cannot snapshot owned lower after readback"
-[[ ${#lower_after[@]} -ge 7 ]] ||
-    fail "owned null_blk final stat line incomplete"
+    fail "loaded test roundtrip failed or timed out"
+swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+    fail "target/backing not quiescent after oracle"
+status_after="$SWAPZ_QUIET_STATUS"
+lower_after=("${SWAPZ_QUIET_LOWER[@]}")
+note "QUIESCENT_AFTER=attempt:$SWAPZ_QUIET_ATTEMPTS"
 note "TARGET_STATUS_AFTER=$status_after"
 note "LOWER_STATS=${lower_after[*]}"
 
@@ -277,11 +282,6 @@ lower_write_bytes="$(((lower_after[6] - lower_before[6]) * 512))"
     fail "zero elisions did not reduce completed lower bytes"
 (( lower_write_bytes == target_write_bytes )) ||
     fail "independent lower write sectors disagree with V3"
-(( lower_read_bytes == target_read_bytes )) ||
-    fail "independent lower read sectors disagree with V3"
-(( target_write_reqs > 0 && lower_write_reqs > 0 &&
-   target_read_reqs > 0 && lower_read_reqs > 0 )) ||
-    fail "expected oracle lower read/write requests missing"
 # Alpha.9 diagnostic conservation: every *nonempty* V3 write window
 # increments exactly one primary closing reason. Never sum GC pressure
 # encounters or admission coalescing into this independent invariant.
@@ -297,6 +297,15 @@ window_delta="$(status_delta windows)"
 (( close_total == window_delta )) ||
     fail "window close reasons disagree with actual V3 windows: reasons=$close_total windows=$window_delta"
 note "PASS_WINDOW_CLOSE_REASONS=windows:$window_delta accounted:$close_total gc_pressure:$(status_delta window_gc_pressure)"
+if (( lower_read_bytes != target_read_bytes )); then
+    # Lower disk stats include readers outside V3; do not assume that an
+    # 8KiB excess is an innocent probe or allow a hidden tolerance.
+    note "UNATTRIBUTED_LOWER_READ=target_bytes:$target_read_bytes lower_bytes:$lower_read_bytes extra_bytes:$((lower_read_bytes-target_read_bytes)) target_reqs:$target_read_reqs lower_reqs:$lower_read_reqs"
+    fail "independent lower read sectors disagree with V3"
+fi
+(( target_write_reqs > 0 && lower_write_reqs > 0 &&
+   target_read_reqs > 0 && lower_read_reqs > 0 )) ||
+    fail "expected oracle lower read/write requests missing"
 # Front-end dm_io calls need not equal lower queue requests after splits or
 # merges, so report each read/write request pair instead of assuming equality.
 note "PASS_ZERO_WRITE_LOWER_IO=logical_bytes:$logical_writes zero_pages:$zero_writes target_write_bytes:$target_write_bytes lower_write_bytes:$lower_write_bytes target_write_reqs:$target_write_reqs lower_write_reqs:$lower_write_reqs"

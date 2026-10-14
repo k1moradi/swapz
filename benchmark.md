@@ -397,3 +397,42 @@ is reported separately and cannot mask missing close reasons.
 The conservation gate is a diagnostic integrity check, not a
 measurement of packing gains or improved device I/O.
 No alpha.9 loaded-host PASS has yet been reported.
+
+## Alpha.9 owner-loaded smoke — FAIL independent lower READ (2026-10-14)
+
+**FAIL/BLOCKED:** exact source
+`a7e5ad6994a71b07421f12cb6da66a04355c7362`;
+kernel `7.0.0-38-generic`, module SHA-256
+`3d5a4d2f4d365c5e272983d66c8e763f6f20e34a196015c326df68f417b2024e`.
+Owner's host log: `build/deploy/session.TlILja3J/session.log`,
+fresh owned RAM null_blk `nullb-swapz-652778d9e53e3fc2` (251:0).
+Full readback, flush, 9 zero-page elisions, 183 physical writes /
+749,568 bytes and unchanged original host swap with ordinary teardown
+were observed, but the full acceptance gate **FAILED**.
+
+| Interval lower metric | V3 completed | Independent backing |
+|---|---:|---:|
+| Writes | 183 / 749,568 B | 183 / 749,568 B |
+| Reads | 431 / 1,765,376 B | **433 / 1,773,568 B** |
+| Additional lower reads | — | **2 requests, 8,192 B** |
+| Window closures | 119 actual | 119 FUA, all other causes zero |
+
+The backing read sector difference was
+`(3488-24)*512-1,765,376=8,192` B. Two external device probes
+or a sequential target/stat snapshot race are plausible, but neither
+is proven. The instrumented closure reasons conserve correctly in
+the recorded status; the old script rejected lower READ accounting
+before executing its independent reason-conservation assertion.
+
+The harness now optionally waits for udev settle and takes **paired
+unchanged full V3 status and backing stat snapshots** separated by
+200ms, up to 12 bounded attempts, on both sides of the oracle.
+Non-quiescent devices are BLOCKED; an independent READ mismatch is
+still a **FAIL** with its exact unattributed byte/request differences,
+not a whitelisted two-block tolerance. Closure conservation now runs
+even when subsequent independent read reconciliation fails.
+Rootless tests simulate changing target and lower counters and
+truncated stat lines. **New loaded retest: NOT RUN.**
+Quiescence over one sampled interval cannot prove that sporadic
+unowned I/O did not occur during the oracle; persistent discrepancy
+requires additional device-origin diagnosis.

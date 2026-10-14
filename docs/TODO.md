@@ -42,9 +42,11 @@ Use `main` only and follow the device/host safety restrictions.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
-- [ ] Run alpha.9 on newly owned RAM null_blk and verify quiescent
-      `sum(close_*) == windows`; correlate reasons with independent
-      lower sectors and ~2KiB LZ4 fixture before Stage 3B.
+- [ ] Re-run alpha.9 with paired quiescent snapshots; the loaded
+      `a7e5ad69` oracle saw 119 windows/119 FUA closures but
+      **FAILED** independent lower READ accounting by 8,192 B.
+      Do not assume external traffic or weaken the lower-byte gate.
+      Correlate exact closure reasons and ~2KiB pages before Stage 3B.
 - [ ] Profile why production-C windows close (worker quantum,
       unrelated READ, conflicts, FUA/PREFLUSH, deadline, capacity), with
       actual device-request/sector evidence on matched asynchronous load.

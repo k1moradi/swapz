@@ -455,3 +455,28 @@ loaded gate. This validates telemetry accounting only; it does
 not authorize cross-worker retention or replace byte-exact,
 independent lower I/O acceptance. The source and shell contracts
 run in CI; alpha.9 loaded test remains **NOT RUN**.
+
+## Alpha.9 two-extra-lower-read failure and bounded paired counters
+
+The owner-loaded exact `make run` at `a7e5ad69` passed byte-exact
+128-page I/O and 119/119 FUA close-reason accounting, but failed
+independent lower READ accounting by **two 4KiB reads (8,192 B)**.
+Host-local evidence is `build/deploy/session.TlILja3J/session.log`.
+Origin is **not established**; never discount those reads merely
+because they might come from asynchronous udev/device probing or a
+status/stat race.
+
+A new sourceable synchronous counter helper accepts only two
+unchanged full target-status and independently owned backing-stat
+samples, 200ms apart, before and after the oracle; retry at most
+12 times. A changing/missing status, incomplete stat or unsettled
+udev is BLOCKED. This improves measurement boundary provenance but
+does **not** prove isolation during the measured I/O. Keep strict
+target/completed versus device sector equality: no error tolerance.
+Primary `close_*` conservation must run even when read accounting
+subsequently fails. Test the counter helper rootlessly with fake
+V3 status, fake stat, transiently changing read sectors, and invalid
+inputs; no real devices, sudo or module needed. Quiescence output is
+owned by one serialized shell caller, not concurrency-safe.
+The new loaded retest is **NOT RUN**. Keep version alpha.9: only
+test harness code changes, no new kernel data-path experiment.
