@@ -1,4 +1,4 @@
-name: Historical V2.2 rootless controls (manual archival run)
+name: Rootless compatibility and safety contracts (not benchmarks)
 
 on:
   push:

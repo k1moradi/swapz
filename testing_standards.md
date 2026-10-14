@@ -86,3 +86,14 @@ latter is retained for explicit historical reproduction only.
 files. Benchmarks require an actual loaded V3 module before claiming
 performance. Regressions focus on 2:1-ish **measured** LZ4 inputs, raw
 fallback, 4KiB/8KiB/16KiB packing, GC and same-page read ordering.
+
+### Retained rootless compatibility safety checks
+
+The combined-rootless workflow remains **push-triggered** because its
+workflow-contract regressions explicitly verify executable source
+safety gates and their trigger coverage. Removing its push trigger
+caused CI failures on V3 transition commit `c240696`, so the trigger
+was restored before final qualification. This compatibility suite is
+**not** an active V2.2 benchmarking requirement; no retired V2.2
+performance comparison should enter new V3 lower-I/O reports. Keep
+real V3 kernel C and owned-null_blk safety contracts enforced.
