@@ -325,3 +325,18 @@ The actual numerical check is **not executed in hosted CI**, which does
 not create/load null_blk mappings. This note and Makefile additions
 restore same-commit policy compliance without relaxing safety or
 claiming a new performance win.
+
+## Source-contract ownership after documentation moves
+
+The active V3 version contract must read the canonical root `README.md`
+and compare its advertised revision to the actual
+`kernel/extent-v3/VERSION` and production `SV3_ALPHA_VERSION`.
+Do not require an archived goals document, or recreate a removed root
+`V3_GOALS.md`, to make source qualification green. Path-filtered kernel CI
+must watch the active `docs/ROADMAP.md`, not the former root location.
+A documentation move also requires checking Python module-import paths
+and CI path filters: a missing file can prevent *all* source tests from
+running even when the independently compiled native C suites pass.
+This regression was exposed by exact-C and project-goals runs at
+`57ad2c78`; its remedy is a source/test routing correction, not a
+change to validated kernel behavior or a claim of loaded qualification.

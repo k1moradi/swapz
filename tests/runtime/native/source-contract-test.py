@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DM = (ROOT / "kernel/extent-v3/dm-target.c").read_text()
 AUTH = (ROOT / "kernel/extent-v3/authority.c").read_text()
 MK = (ROOT / "kernel/extent-v3/Makefile").read_text()
-GOALS = (ROOT / "V3_GOALS.md").read_text()
+README = (ROOT / "README.md").read_text()
 
 
 def body(symbol: str) -> str:
@@ -59,7 +59,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn("3.0.0-alpha.7", GOALS)
+        self.assertIn(f"revision: **{version}", README)
 
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
         accept = body("sv3_accept_write")

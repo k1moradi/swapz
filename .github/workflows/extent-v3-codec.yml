@@ -10,7 +10,7 @@ on:
       - 'tests/runtime/benchmark/**'
       - 'Makefile'
       - 'tools/**'
-      - 'V3_GOALS.md'
+      - 'docs/ROADMAP.md'
       - '.github/workflows/extent-v3-codec.yml'
   workflow_dispatch:
 
