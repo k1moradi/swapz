@@ -516,27 +516,27 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
-    def test_alpha19_bounded_inline_drain_preserves_fifo_and_shutdown(self):
-        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
+    def test_alpha20_worker_restores_finite_snapshot_requeue(self):
         worker = body("sv3_worker")
+        header = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         status = body("sv3_status")
-        self.assertIn("sv3_worker_can_inline_drain(", policy)
-        self.assertIn("accepting && remaining != 0", policy)
-        self.assertIn("unsigned int remaining = SV3_WORK_QUANTUM_BIOS;", worker)
+        self.assertIn("for (;;)", worker)
+        self.assertIn("remaining = SV3_WORK_QUANTUM_BIOS;", worker)
+        self.assertLess(worker.index("for (;;)"),
+                        worker.index("remaining = SV3_WORK_QUANTUM_BIOS;"))
         self.assertIn("if (!--remaining)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
-        self.assertIn("sv3_worker_can_inline_drain(remaining, ctx->accepting)",
-                      worker)
-        self.assertIn("ctx->worker_inline_drains++", worker)
-        self.assertLess(worker.index("list_splice_init(&local, &ctx->incoming)"),
-                        worker.index("sv3_worker_can_inline_drain("))
-        self.assertLess(worker.index("sv3_worker_can_inline_drain("),
-                        worker.index("ctx->worker_requeues++"))
+        self.assertIn("if (ctx->accepting) {", worker)
+        self.assertIn("ctx->worker_requeues++", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
-        self.assertIn("remaining = SV3_WORK_QUANTUM_BIOS;", worker)
+        self.assertLess(worker.index("list_splice_init(&local, &ctx->incoming)"),
+                        worker.index("ctx->worker_requeues++"))
         self.assertIn("cond_resched();", worker)
-        self.assertIn("worker_inline_drains=%llu", status)
-        self.assertIn("ctx->worker_inline_drains", status)
+        self.assertNotIn("sv3_worker_can_inline_drain", worker)
+        self.assertNotIn("sv3_worker_can_inline_drain", header)
+        self.assertNotIn("worker_inline_drains", status)
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("sv3_drain"))
+        self.assertIn("drain_workqueue(ctx->workqueue)", body("sv3_drain"))
         self.assertIn("sv3_flush_window(ctx)", worker)
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):

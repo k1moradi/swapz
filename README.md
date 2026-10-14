@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.19, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.20, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -326,6 +326,32 @@ accepted BIOs, with all FUA/read/GC/completion
 gates unchanged. `worker_inline_drains` is a new
 cumulative diagnostic, not a throughput guarantee.
 Loaded alpha.19 performance is **NOT RUN**.
+
+## Alpha.20: revert alpha.19 throughput regression in production C
+
+The first alpha.19 owner-loaded QD32 unpaced trial passed its
+immutable 16,384-operation oracle, independently pinned lower
+READ/WRITE requests and bytes, unchanged host swap, and clean
+owned RAM teardown. But **V3 logical WRITE throughput was only
+23.650 MB/s**, vs **32.490 MB/s** uncompressed; V3 transferred
+**14.077 MB/s** to its RAM-backed lower device, saving 40.48%
+WRITE bytes and 83.21% WRITE requests. Sampled WRITE p99
+was 2.594ms V3 vs 1.813ms off. The experiment produced
+**3,153 worker inline drains and zero requeues**, but gave no
+throughput win. V3 absolute logical MB/s was 4.1% lower than
+the separate alpha.18 trial's 24.664 MB/s; cross-run
+variability means this difference is not statistical proof.
+
+**Alpha.20 restores the previous alpha.18 production C worker
+handoff**: normal-mode backlogs requeue after FIFO-preserving
+snapshot processing, even if the current BIO quantum is partly
+unused. Presuspend still drains all previously accepted BIOs
+with `cond_resched`. The unproven inline helper, test and
+telemetry were removed, and a direct source contract now guards
+against inadvertently enabling it again. The codec, format,
+timer, mapping publication, FUA, GC and admission bounds are
+unchanged. Loaded alpha.20 throughput is **NOT RUN**.
+This is evidence-based rollback, not proof of a speed gain.
 
 ## The active performance question
 

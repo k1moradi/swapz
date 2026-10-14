@@ -1015,3 +1015,50 @@ unpaced useful WRITE/READ throughput remain
 **NOT RUN**. Same-source RAM-only comparison,
 full image oracle, independent sectors and
 bounded teardown are mandatory before claims.
+
+## Alpha.20 evidence-based withdrawal of alpha.19 inline drain
+
+The owner ran `make run` then `make bench-pair-medium-unpaced`
+on alpha.19 exact source `841f5517798fb8ce12ae5699b0729dc15a69b36a`,
+Linux `7.0.0-38-generic`, module SHA-256
+`9ed69e810aa99df66598fd24e81fc42632e9f487db8b8a2cf0fa9d0b4b4c55a9`.
+The loaded 128-page smoke and the QD32 16,384-operation unpaced
+off/V3 trial PASSED full byte-exact readback, unchanged system
+swap, independent separate owned RAM null_blk statistics, and
+ordinary safe teardown. Off completed 10,564.904 IOPS,
+**32.48972 useful logical WRITE MB/s -> 32.48972 lower WRITE
+MB/s**. V3 retained completed 7,690.293 IOPS,
+**23.64957 logical WRITE MB/s -> 14.07708 lower WRITE MB/s**.
+This is a 27.21% same-source V3 useful-throughput deficit.
+Independently observed V3 lower WRITE bytes 29,990,912
+vs off 50,384,896 (40.48% saving), requests 2,065 vs
+12,301 (83.21% saving). Lower READ bytes/requests were
+identical at 16,723,968B / 4,083 per arm. Sampled WRITE
+p99 2.594ms V3 vs 1.813ms off; READ p99 3.591ms V3
+vs 2.681ms off. Zero GC victims and target failures.
+Cumulative alpha.19 `worker_inline_drains=3153`,
+`worker_requeues=0`: the proposed optimization was
+used but did not produce a benefit. Previous separate
+alpha.18 test V3 achieved 24.664 logical WRITE MB/s,
+off 30.475 MB/s; cross-version differences are not
+statistically conclusive. Do not promote alpha.19.
+
+**Alpha.20 production C correction** reinstates the
+exact alpha.18 serialized `sv3_worker`, including its
+normal-mode FIFO splicing and bounded workqueue requeue
+even when the snapshot has remaining 64-BIO budget;
+on closed admission it loops with `cond_resched` to
+complete all previously accepted BIOs. Remove unused
+`sv3_worker_can_inline_drain`, its native test and
+`worker_inline_drains` telemetry. Source qualification
+must reject inline continuation and check requeue,
+64-BIO processing, FIFO, full shutdown drain and
+timer cancellation. Existing native randomized
+engine and exact-C safety suites still apply.
+Do not weaken correctness, FUA/GC or ownership
+acceptance criteria. Loaded alpha.20 is NOT RUN;
+potential restoration of prior useful MB/s is a
+hypothesis pending the same RAM-only unpaced run,
+independent lower counters, read/write p99, full
+oracle and ordinary teardown. Physical-disk
+saturation and sustained CPU/GC remain unqualified.

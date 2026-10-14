@@ -211,23 +211,6 @@ static int test_timer_rearm_requires_retention_and_unqueued_timer(void)
 	return 0;
 }
 
-static int test_inline_drain_respects_finite_budget_and_shutdown(void)
-{
-	unsigned int left;
-
-	CHECK(!sv3_worker_can_inline_drain(0, 1));
-	CHECK(!sv3_worker_can_inline_drain(0, 0));
-	CHECK(!sv3_worker_can_inline_drain(1, 0));
-	CHECK(!sv3_worker_can_inline_drain(64, 0));
-	for (left = 1; left <= 64; ++left)
-		CHECK(sv3_worker_can_inline_drain(left, 1));
-	/* A completed 64th BIO must yield to the workqueue even when
-	 * more BIOs arrive; an unfinished 63-BIO mini-wave may drain. */
-	CHECK(sv3_worker_can_inline_drain(1, 1));
-	CHECK(!sv3_worker_can_inline_drain(0, 1));
-	return 0;
-}
-
 static int test_section_wall_ns_never_underflows(void)
 {
 	CHECK(sv3_elapsed_ns(100, 170) == 70ULL);
@@ -317,7 +300,6 @@ int main(void)
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;
-	CHECK(test_inline_drain_respects_finite_budget_and_shutdown() == 0); passed++;
 	CHECK(test_section_wall_ns_never_underflows() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;
 	CHECK(test_exact_nanosecond_deadline() == 0); passed++;

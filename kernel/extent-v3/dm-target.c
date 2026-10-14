@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.19"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.20"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -183,7 +183,6 @@ struct sv3_dm {
 	u64 lower_read_submitted_reqs;
 	struct sv3_flush_meter flush_meter;
 	u64 worker_requeues;
-	u64 worker_inline_drains;
 	u64 one_page_windows;
 	u64 compressed_pages;
 	u64 raw_pages;
@@ -1424,13 +1423,10 @@ static void sv3_worker(struct work_struct *work)
 	LIST_HEAD(local);
 	struct sv3_bio_ref *entry, *next;
 	unsigned long flags;
-	/* One invocation has one bounded 64-BIO quantum in normal mode.
-	 * Continue processing arrivals within the SAME budget while there
-	 * is work, instead of paying a workqueue handoff on each mini-wave.
-	 * Shutdown alone resets budget and drains everything accepted. */
-	unsigned int remaining = SV3_WORK_QUANTUM_BIOS;
+	unsigned int remaining;
 
 	for (;;) {
+		remaining = SV3_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -1508,17 +1504,9 @@ static void sv3_worker(struct work_struct *work)
 		}
 		if (ctx->accepting) {
 			/*
-			 * All unfinished older BIOs were returned to the head
-			 * of incoming above. If the same 64-BIO quantum still
-			 * has budget, take another snapshot and drain INLINE.
-			 * Never spin past the finite worker budget in normal
-			 * operation; the zero-budget branch requeues as before.
+			 * Preserves FIFO: unfinished older BIOs are already
+			 * at the head, ahead of concurrently admitted BIOs.
 			 */
-			if (sv3_worker_can_inline_drain(remaining, ctx->accepting)) {
-				ctx->worker_inline_drains++;
-				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				continue;
-			}
 			ctx->worker_requeues++;
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -1527,11 +1515,9 @@ static void sv3_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		/*
 		 * Shutdown: no new admissions. Complete every previously
-		 * accepted BIO in this invocation. Budget resets ONLY
-		 * after admission has closed, with cond_resched to avoid
-		 * unbounded CPU monopolization during presuspend.
+		 * accepted BIO in this invocation. Avoid requeue chains or
+		 * leaving accepted BIOs behind flush_delayed_work().
 		 */
-		remaining = SV3_WORK_QUANTUM_BIOS;
 		cond_resched();
 	}
 }
@@ -1968,8 +1954,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "flush_injected=%llu flush_fault_nth=%u "
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
 		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
-		       "worker_requeues=%llu worker_inline_drains=%llu "
-		       "one_page_windows=%llu "
+		       "worker_requeues=%llu one_page_windows=%llu "
 		       "window_records=%llu coalesce_ms=%u "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
 		       "win9_16=%llu win17_64=%llu "
@@ -2029,8 +2014,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.bulk_mixed_runs,
 		       ctx->engine.bulk_raw_only_runs,
 		       ctx->engine.bulk_raw_entries,
-		       ctx->worker_requeues, ctx->worker_inline_drains,
-		       ctx->one_page_windows,
+		       ctx->worker_requeues, ctx->one_page_windows,
 		       ctx->window_records_total, ctx->coalesce_ms,
 		       ctx->window_bins[0], ctx->window_bins[1],
 		       ctx->window_bins[2], ctx->window_bins[3],
