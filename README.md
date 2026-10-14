@@ -1,4 +1,4 @@
-# swapz: V3.0.0-alpha.6 development
+# swapz — V2.2 default and experimental V3 kernel target
 
 > **Agent development policy:** [AGENTS.md](AGENTS.md) is mandatory
 > for ChatGPT, Codex, Copilot and other coding agents. **Only `main`**;
@@ -16,16 +16,25 @@
 > current format unit, not the native I/O size of every 512n, 512e or 4Kn
 > device**. Green CI and simulated compression ratios do NOT prove a win.
 
-**Development/build/test rule:** Agents must reread
-[project vision](VISION.md), [active technical goals](V3_GOALS.md),
-[production readiness](PRODUCTION_READINESS.md) and the
-[build/test conventions](docs/BUILD_AND_TEST_CONVENTIONS.md) for
-**every task**. Use **one reused `~/swapz/build/` directory**, native
-Kbuild/Make, and reusable meaningful test-suite names; do not
-create branches. Changes to code/tests/build/CI require a meaningful
-documentation update in the same commit. Goal-aligned native tests
-run automatically on every `main` push. Python remains thin
-supporting glue; most engineering time belongs to kernel C.
+## Start here — six authoritative documents
+
+At the beginning of **every agent task**, read all six on current `main`:
+
+| Document | Purpose |
+|---|---|
+| [README.md](README.md) | Project entry point, status, user-facing commands |
+| [VISION.md](VISION.md) | North-star goal and acceptance criterion |
+| [coding_standards.md](coding_standards.md) | Kernel-C-first engineering, Git and safety |
+| [testing_standards.md](testing_standards.md) | Native C test suites, CI and release gates |
+| [compile.md](compile.md) | Make/Kbuild and only one `~/swapz/build/` directory |
+| [benchmark.md](benchmark.md) | Identical 4KiB inputs; real lower requests/bytes |
+
+The **four standards** are the ONLY current engineering-policy homes;
+historical reports retain evidence, not additional rules. Agents work
+only on `main`, spend more than half of ongoing development effort on
+actual kernel module C, use the one build root, and update a relevant
+standard **in the same commit** as each implementation. Update README
+for user-facing changes and VISION if goals change.
 
 **Production readiness is not established.** See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the exact loaded-kernel, FUA, GC, V2.2 control and physical-media release gates.
 

@@ -8,6 +8,15 @@
 > universal physical-device I/O operation or sector size. Passing more tests
 > or achieving a higher simulated compression ratio is not a performance win.**
 
+**Current engineering policies:** [README.md](README.md),
+[coding_standards.md](coding_standards.md),
+[testing_standards.md](testing_standards.md), [compile.md](compile.md),
+and [benchmark.md](benchmark.md) are the mandatory six documents read
+at the start of **every agent task**. New lessons and policies belong in
+the four standards; README communicates user-facing changes, while this
+VISION governs success criteria. Only `main` is used and all builds
+reuse `~/swapz/build/`. Historical reports are evidence, not policy.
+
 This is the project's **north star and acceptance standard** for V3 and all
 later versions. Read [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) for 512n, 512e,
 4Kn, filesystem cluster sizes, swap partitions/files and precise block-layer

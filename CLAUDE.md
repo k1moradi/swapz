@@ -1,41 +1,11 @@
-# CLAUDE.md — swapz agent policy
+# CLAUDE.md — Agent bootstrap
 
-**Canonical mandatory instructions: [AGENTS.md](AGENTS.md).**
-Read that file in full before editing any file.
+At the start of **every task**, read [AGENTS.md](AGENTS.md) and [README.md](README.md), [VISION.md](VISION.md), [coding_standards.md](coding_standards.md), [testing_standards.md](testing_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md).
+They govern the project; historical instructions do not override them.
 
-**Only work on the existing `main` branch.** Never create or push a
-branch (temporary, feature, fix, validation, release, or PR branch),
-or a branch-backed worktree, unless the repository owner **explicitly**
-requests an exception. Commit small changes directly on `main` with
-tests and exact commit provenance. Preserve existing local work:
-no blind hard resets, full-worktree restore/clean, or force-push.
-
-**Spend strictly more than 50% of ongoing engineering effort on the
-actual Linux kernel module's production C code**: design, implementation,
-review, debugging and profiling of swap I/O, LZ4 compression, raw
-fallback, BIO completion, mapping authority, segment GC, concurrency
-and lower-device I/O economics. Kernel modules are written in C;
-C++ is useful for separately built direct regression tests, not kernel
-C++ compilation. Python, shell, CI, test-fixture generation and Markdown
-must remain supporting work, not the default center of development.
-Never weaken tests or create arbitrary source churn to satisfy a quota.
-
-Preserve the V2.2 default build; V3 is experimental and null_blk-only.
-Never touch real active swap, /dev/sdb1, /swapfile, unrelated/physical
-devices; never swapoff/swapon, reboot or force teardown. Verify
-identical logical 4KiB page inputs across off/V2.2/V3 benchmarks, and
-report measured backing bytes and request counts and correct readback.
-
-Historical branch names in old reports are provenance only and must
-not be recreated. AGENTS.md takes precedence over older instructions.
-
-**EVERY TASK:** Read current-main `VISION.md`, `V3_GOALS.md`,
-`PRODUCTION_READINESS.md`, and `docs/BUILD_AND_TEST_CONVENTIONS.md`
-at the start, and formulate the relevant project-goal correctness /
-lower-I/O hypothesis. Reuse **only `~/swapz/build/`** for all compiled
-artifacts and bytecode. Prefer reusable, behavior-named native-C test
-suites; do not proliferate version-labeled test runners. After **every
-implementation prompt** update relevant Markdown documentation in the
-same commit, execute automated project-goal tests and report their
-result. This is mandatory alongside the main-only / majority kernel C
-rule, not a replacement for it.
+**Only `main`**, no branches without explicit owner permission. More than
+50% ongoing development effort on the Linux kernel module's **C code**.
+All generated binaries/bytecode go in reused `~/swapz/build/`.
+Update one of the four standards with every implementation commit,
+preserve real test failures, and never reboot/touch active swap or physical
+media. README and VISION remain the project entry and acceptance criteria.

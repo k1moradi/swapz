@@ -1,46 +1,16 @@
-# Agent operating policy (current, mandatory)
+# CODEX_VALIDATION.md — historical validation archive
 
-**MANDATORY PER-PROMPT GATE (overrides archival instructions below):**
-At the beginning of EVERY task read `VISION.md`, `V3_GOALS.md`,
-`PRODUCTION_READINESS.md`, `AGENTS.md` and
-`docs/BUILD_AND_TEST_CONVENTIONS.md` on current `main`, state the
-correctness and measurable host-visible lower-I/O relevance, and use
-**one reused `~/swapz/build/` only** for compiled outputs. Prefer
-semantic reusable native C/C++ test modules in `tests/suites/` over
-version-labeled Python runners. At the end of **each implementation
-prompt**, update relevant docs in the same `main` commit and run
-goal-aligned automated tests. Historical branch/worktree/build and
-`/tmp` compilation directions below are archival and do not
-override this gate. Always preserve V2.2 as frozen control and V3
-null_blk-only safety boundary.
+**Every new Codex task must first read** [AGENTS.md](AGENTS.md),
+[README.md](README.md), [VISION.md](VISION.md), [coding_standards.md](coding_standards.md), [testing_standards.md](testing_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) on current `main`. The four current engineering standards
+have precedence over all dated content below. Work only on main;
+more than half of ongoing development work is production kernel C;
+only reuse `~/swapz/build/`; update standards on every implementation,
+and benchmark byte-identical off/V2.2/V3 data with safe owned null_blk.
 
-
-**All coding agents must read [AGENTS.md](AGENTS.md).** Work only on
-`main`. **Do not create or publish any new Git branch or pull request
-unless the owner explicitly asks.** Historical references below to deleted
-branches, PR branches or one-off checkouts are archival evidence, **not**
-instructions to restore or recreate them. Never discard a dirty checkout
-with `git reset --hard`, broad `git restore` or `git clean`.
-
-**Strict majority rule for ongoing development:** Spend **more than
-50% of focused engineering time developing the actual kernel module in C**:
-implementation, review, debugging, profiling and optimization of real
-BIO I/O, LZ4, authority, GC, lower request aggregation, completion and
-performance paths. Linux kernel modules are written in C; C++ may be
-used for separately compiled regression tests. Time building Python
-frameworks, orchestration, mock-only tests or writing reports **does not
-count as kernel module development**. Codex can complete explicitly
-assigned independent validation campaigns; when acting as a developer,
-it must default to improving and testing production kernel C rather than
-writing large new Python harnesses. Never weaken safety or tests to
-meet an artificial code-change quota.
-
-**Safety:** no reboot, active /dev/sdb1 or /swapfile, `swapoff`,
-`swapon`, physical/unowned block devices or forced teardown. Frozen V2.2
-remains the default build; experimental V3 is null_blk-only. Read the exact
-current `main` source, not a version label or a deleted branch name.
-The report below is **historical V2.2 provenance** and is subordinate to
-these current instructions.
+**Archive notice:** The V2.2 material below contains obsolete branch
+names, reset/reboot/build/physical media commands and dated tests.
+They are **historical provenance**, NOT current instructions or
+permission. No new branch or unsafe host action is authorized.
 
 ---
 
