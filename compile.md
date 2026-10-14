@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.18
+## One active module: V3.0.0-alpha.19
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -403,3 +403,25 @@ and may overlap. Perform W=1/W=2 kernel builds and
 `make verify`, then only owner-run `make run` and
 `make bench-pair-medium-unpaced` on fresh owned
 RAM/null_blk. High-QD loaded alpha.18 is NOT RUN.
+
+## Alpha.19 finite-quantum worker inline drain
+
+Active kernel and guards: `3.0.0-alpha.19`.
+The serialized `sv3_worker` preserves its
+single 64-BIO quantum **across** inline
+iterations, allowing newly arrived work to
+be processed in the same invocation while
+the budget remains positive. At zero budget
+it still requeues, while during shutdown it
+resets the quantum with `cond_resched`
+and drains all accepted work. No
+data format, on-media authority or FUA/GC
+change. Direct production-C helper tests,
+source contracts and W=1/W=2 compilation
+are required before opt-in owner-loaded
+`make run` and
+`make bench-pair-medium-unpaced` on
+unique owned RAM/null_blk. The new
+`worker_inline_drains` counter measures
+avoided requeue handoffs. Alpha.19 loaded
+MB/s remains **NOT RUN**.

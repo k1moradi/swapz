@@ -1060,3 +1060,80 @@ Preserve physical requests/bytes, write/read p95/p99,
 full byte oracle and quarantine protections. No CPU,
 GC/fault lifecycle or physical bandwidth ceiling has
 been qualified.
+
+## Alpha.18 first C phase-counter high-throughput replay (2026-10-14)
+
+Owner-loaded exact `88197bf4479eeb66db6bf52301a3cbd3d4c6a6e7`,
+kernel `7.0.0-38-generic`, module SHA256
+`aee943cd3023027a790fcdb1152510ea60cfa76581f39e289f97ae614226b6ef`.
+Owner-host rootless, W=1/W=2, default 128-page V3
+C smoke PASS with 9 zero-page elisions and 490
+lower READ/183 lower WRITE matched requests, full
+readback, original host swap unchanged and safe
+owned RAM teardown. Unpaced separate pair evidence:
+`build/benchmark/session.28oQ0qoy/`. Two independently
+owned RAM-backed null_blk devices, common immutable
+medium 2073B actual LZ4 page fixture, common
+16,384-operation QD32 zero-pacing trace, complete
+byte-exact 1024-page final oracle, separate lower
+I/O stats and ordinary teardown PASS.
+
+| Exact unpaced metric | Uncompressed | Alpha.18 retained V3 |
+|---|---:|---:|
+| Measured seconds | 1.653304465 | 2.042863864 |
+| Completed IOPS | 9,909.850 | 8,020.113 |
+| Logical WRITE MB/s | **30.475268** | **24.663854** |
+| Independent lower WRITE MB/s | 30.475268 | **14.672798** |
+| Logical READ MB/s | 10.115480 | 8.186531 |
+| Independent lower READ MB/s | 10.115480 | 8.186531 |
+| Lower WRITE bytes | 50,384,896 | **29,974,528** |
+| Lower WRITE requests | 12,301 | **2,062** |
+| Lower READ bytes / requests | 16,723,968 / 4,083 | 16,723,968 / 4,083 |
+| Sampled WRITE p99 | 2.023ms | **2.333ms** |
+| Sampled READ p99 | 3.015ms | 2.726ms |
+
+V3 saves **40.51% independent lower WRITE bytes**
+and **83.24% requests**, but completes **19.07%
+less useful logical throughput** than same-source
+off and needs 23.56% longer to finish the identical
+trace. Compared with the earlier alpha.15 trial,
+V3 absolute logical WRITE input fell slightly
+24.867 -> 24.664 MB/s (-0.8%); off also fell
+31.518 -> 30.475 MB/s (-3.3%). The V3/off
+ratio rose from 78.9% to 80.9%, a
+**non-significant cross-run observation**, NOT a
+verified improved peak throughput. No fixed
+backing bandwidth constraint was imposed, and
+all media were disposable RAM-backed null_blk.
+
+Alpha.18 cumulative target-since-create diagnostic
+wall-time counters: LZ4 **71.716ms**, decoder
+8.940ms, window sorting **0.949ms**, engine
+write commit **168.616ms**, synchronous lower
+WRITE **69.721ms**, lower READ **57.315ms**,
+GC **0ms**. They include prefill/warmup/readback
+and are **overlapping**: engine commit covers
+some lower WRITE time. They cannot be summed
+or directly subtracted from the replay's 2.043s,
+and they are not kernel CPU utilization.
+Cumulative window status: 3,126 windows,
+1,640 pack-ready, 1,486 deadline closes,
+9,007 skipped timer arms, zero GC victims,
+no target failures. These measurements
+suggest scheduler/retention/host queueing
+may matter more than the micro-cost of
+sorting, but do not establish causal
+attribution.
+
+**Alpha.19 experiment, NOT RUN loaded**: the
+production serialized C worker now handles
+queued arrivals within its ORIGINAL 64-BIO
+budget in the same worker invocation, while
+still requeueing at budget exhaustion and
+draining accepted BIOs after admission closes.
+New `worker_inline_drains` reports how often
+a workqueue handoff was skipped. Actual useful
+MB/s gains, overhead and read/write p99
+effects require fresh same-source RAM-only
+unpaced replay and full oracle; no physical
+storage or system swap is authorized.

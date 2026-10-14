@@ -147,27 +147,40 @@ Use `main` only and follow the device/host safety restrictions.
       Cumulative 836 hrtimer re-arm skips, 64 pack-ready
       and 1138 deadline closures, zero GC. **No unpaced
       QD32 trial was in that log**; speed gain unproven.
-- [ ] Owner alpha.18: run loaded `make run` for default
-      smoke and ordinary teardown, then explicitly
-      `make bench-pair-medium-unpaced` for 16,384
-      measured QD32 operations on newly owned RAM
-      null_blk. Collect useful input and independent
-      lower READ/WRITE MB/s and requests, achieved
-      IOPS, p95/p99, full oracle, GC and safe teardown.
-      Inspect `lz4_wall_ns`, `decode_wall_ns`,
-      `window_sort_wall_ns`, `window_commit_wall_ns`,
-      `lower_read_wall_ns`, `lower_write_wall_ns`
-      and `gc_wall_ns` as **cumulative, potentially
-      overlapping wall time**, not CPU or measurement-only
-      costs. Profile the expensive C path before another
-      speculative scheduling change. Compare to alpha.15's
-      unpaced V3 24.867 MB/s / off 31.518 MB/s
-      without calling RAM null_blk real disk saturation.
+- [x] Owner alpha.18 `88197bf4`: byte-exact loaded
+      default smoke and QD32/16,384 unpaced paired
+      replay on distinct owned RAM null_blk PASS.
+      Off logical WRITE 30.4753 MB/s, V3 retained
+      24.6639 MB/s (19.07% slower), V3 independent
+      lower WRITE 14.6728 MB/s. Lower WRITE bytes
+      29,974,528 versus 50,384,896 (40.51% saved);
+      WRITE requests 2,062 vs 12,301; READ lower
+      bytes 16,723,968 / 4,083 requests equal.
+      V3 WRITE p99 2.333ms vs off 2.023ms;
+      no GC victims. Cumulative timing includes
+      71.716ms LZ4, 168.616ms commit, 69.721ms
+      lower WRITE and 57.315ms lower READ;
+      overlapping and not measurement-window CPU.
+      V3 alpha.18 absolute useful MB/s did NOT
+      exceed alpha.15's 24.867 MB/s.
+- [ ] Owner alpha.19: after default `make run`
+      loaded correctness/safe teardown, execute
+      `make bench-pair-medium-unpaced` QD32 on
+      freshly owned RAM. Verify `worker_inline_drains`
+      counts and worker requeues, identical immutable
+      trace/readback, independent READ/WRITE bytes
+      and requests, completed logical MB/s, achieved
+      IOPS and p95/p99. Confirm that bounded
+      same-invocation queue draining improves useful
+      throughput without reduced lower WRITE savings,
+      stalled FUA, unfair scheduling or broken
+      suspend/drain. Report regressions and no gains,
+      and do NOT claim actual disk saturation.
 
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.18 behavior when their claims
+      documents and current V3.0.0-alpha.19 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

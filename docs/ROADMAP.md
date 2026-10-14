@@ -3,7 +3,7 @@
 **Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
 WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
 is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.18 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.19 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
@@ -329,3 +329,30 @@ same immutable medium bytes and valid lower-device
 READ/WRITE counters, upper p99 and full oracle before
 choosing the next C optimization. Lifecycle GC and
 fixed physical bandwidth remain unqualified.
+
+### Alpha.19 worker quantum reuse: C-first high-rate hypothesis
+
+At exact alpha.18 `88197bf4`, owner-loaded
+QD32 unpaced V3 still performed 19.07%
+fewer completed useful IOPS than the
+uncompressed owned-RAM baseline (24.664
+vs 30.475 MB/s logical WRITEs), despite
+40.51% lower WRITE byte savings and
+83.24% request savings. Byte-exact oracle
+and safe teardown passed; GC remained zero.
+Cumulative wall timers showed that LZ4
+(71.7ms), sorting (0.95ms) and lower dm_io
+(127ms combined) are insufficient by
+themselves to explain 2s of total replay
+time (overlapping, non-aligned intervals).
+Alpha.19 makes a real serialized-worker
+C scheduling change: process newly arrived
+BIOs inline within the **existing** 64-BIO
+quantum rather than requeue every mini-wave;
+force yield when the budget is spent and
+preserve shutdown drain/FIFO invariants.
+This is a performance hypothesis, NOT an
+owner-loaded victory. Recheck actual
+high-QD MB/s, requests/bytes, p99, GC,
+no starvation, full oracle and safe
+teardown before another algorithm change.

@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.18 experimental Device Mapper target
+# Current development: V3.0.0-alpha.19 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -279,3 +279,25 @@ commit includes lower I/O), and cumulative status
 also includes prefill and oracle operations. They
 are **not** CPU-time or per-measurement-interval
 metrics. Loaded alpha.18 is NOT RUN.
+
+## Alpha.19 bounded serialized-worker inline arrivals
+
+The active C worker now retains a single
+finite 64-BIO quantum across local queue
+snapshots. If more admitted BIOs arrive
+while its budget remains positive, it
+drains them inline without a redundant
+workqueue requeue. Any unfinished older
+BIOs are put back ahead of new arrivals.
+At zero budget it still yields through
+the original workqueue path. Once
+admission has closed for suspend/drain,
+the worker resets a quantum with
+`cond_resched` to finish all accepted
+upper BIOs and preserve shutdown
+completion. The counter
+`worker_inline_drains` measures
+same-invocation continuations, not
+physical IOPS. Format, physical ordering,
+GC and mapping authority remain unchanged.
+Loaded alpha.19 throughput is NOT RUN.
