@@ -470,3 +470,24 @@ device write completion time, and does not create a timer or defer
 writes. Next go/no-go remains measuring medium nonzero LZ4 pages
 and matched-load off/V3 device request/sector deltas. Alpha.10
 loaded qualification: **NOT RUN**.
+
+## Alpha.10 medium compressed-data pair — NOT RUN
+
+A separate `make bench-pair-medium` opt-in uses the original bounded
+off/V3 trace, two uniquely owned independent 64MiB RAM-backed null_blk
+devices and the same entire readback oracle, but changes the fixture
+to `--weights medium=100`. Each synthetic 4KiB page consists of
+2,040 deterministic high-entropy bytes followed by 2,056 zero bytes,
+yielding approximately **2,073 bytes** on locally measured liblz4.
+On the actual host, the benchmark **must verify** all 128 medium
+pages, all in the 2049..2200B accepted-compression range, no RAW,
+and no exact zeros from the fixture's measured liblz4 manifest
+before allowing any replay. Default fixtures are unchanged.
+
+The experiment answers whether a known poor two-per-4KiB packing
+case sees **actual** lower READ/WRITE byte/request savings, or
+disproves that hypothesis under QD8 and the current conservative
+worker. A negative result is valid and should precede Stage 3B.
+This is a single short synthetic run, **NOT** representative sustained
+Linux swap, CPU, GC, or statistically reliable cold-read p99.
+At this commit: rootless qualification pending CI; loaded NOT RUN.

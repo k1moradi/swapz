@@ -230,3 +230,15 @@ permitted. Alpha.10 adds window-age diagnostic fields to production
 C and a loaded smoke conservation assertion. Use `make verify`,
 W=1/W=2 Kbuild, then the already authorized `make run` only on
 freshly owned RAM null_blk. Alpha.10 loaded: **NOT RUN**.
+
+## Opt-in nonzero medium fixture
+
+`make bench-pair-medium` is deliberately **separate** from
+`make bench-pair`, default, `verify` and `make run`. It runs the
+same rootless and W=1/W=2 kernel build gates before explicitly
+launching two fresh owned RAM null_blk devices with
+`--run-owned-ram-pair --profile medium`. The default pilot's
+weight mix remains intact. Medium data are prechecked using measured
+liblz4 output to avoid false 2KiB compression assumptions.
+Results are preserved under `build/benchmark/session.*/`.
+Loaded result at creation: NOT RUN.

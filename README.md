@@ -114,6 +114,18 @@ from first admitted page to flush entry). It does not retain windows,
 bypass READs, change FUA or add format states. Loaded alpha.10
 qualification has **NOT RUN**.
 
+## Explicitly opt-in medium-compressibility loaded comparison
+
+`make bench-pair-medium` is a new separate two-owned-RAM-device
+experiment. It reuses the exact off/V3 immutable replay and
+ownership/teardown gates, but creates **only nonzero medium** pages
+targeting measured LZ4 payloads of **2049..2200 bytes**.
+This is an engineered compression control, not real swap sampling.
+The host liblz4 manifest must demonstrate actual sizes and zero RAW
+fallback before either arm's replay runs. Default `make run` and
+`make bench-pair` remain unchanged. The medium loaded trial
+has **NOT RUN**; do not infer a performance win.
+
 ## The active performance question
 
 **Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,

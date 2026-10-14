@@ -256,6 +256,36 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "revision mismatch"):
                 compare()
 
+    def test_nonzero_medium_pages_have_measured_lz4_in_2k_range(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "swapz_medium_fixture", SCRIPT.with_name("anon-page-fixture.py")
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            compressor = module.lz4_compressor()
+        except RuntimeError as error:
+            self.skipTest(str(error))
+        content, manifest = module.generate(
+            0x51A0A9, 128, module.parse_weights("medium=100"), compressor
+        )
+        self.assertEqual(len(content), 128 * PAGE)
+        self.assertEqual(manifest["profile_pages"], {"medium": 128})
+        self.assertEqual(manifest["lz4_size_buckets"], {"2049_3072": 128})
+        self.assertEqual(manifest["raw_pages"], 0)
+        for index in range(128):
+            chunk = content[index * PAGE:(index + 1) * PAGE]
+            self.assertNotEqual(chunk, bytes(PAGE))
+            actual = module.measure(compressor, chunk)
+            self.assertGreaterEqual(actual, 2049)
+            self.assertLessEqual(actual, 2200)
+        repeat, same_manifest = module.generate(
+            0x51A0A9, 128, module.parse_weights("medium=100"), compressor
+        )
+        self.assertEqual(content, repeat)
+        self.assertEqual(manifest, same_manifest)
+
     def test_owned_v3_uuid_matches_owned_pair_harness(self):
         self.assertIn('r"SWAPZ-TEST-[a-f0-9]{16}"', SCRIPT.read_text())
         script = SCRIPT.parents[3] / "tools/benchmark-owned-pair.sh"

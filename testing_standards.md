@@ -496,3 +496,22 @@ semantics are changed. The owned `make run` harness now checks
 `sum(age bucket deltas) == windows delta` as well as primary
 close-reason conservation. Unit/source and Kbuild W=1/W=2
 qualification are separate from the **NOT RUN alpha.10 loaded gate**.
+
+## Opt-in medium fixture and owned paired replay qualification
+
+The medium profile is an explicitly synthetic **nonzero**, deterministically
+seeded 4KiB page with 2040 high-entropy bytes and remaining zeros.
+On the evaluation host measure all 128 pages using actual liblz4
+`LZ4_compress_fast` (not an inferred ratio or fixture label);
+each must produce a payload between 2049 and 2200 bytes, no RAW
+fallback and no exact-zero pages. Its manifest must prove the range
+before using the two separate preflighted RAM-backed devices.
+A rootless regression confirms deterministic bytes, actual per-page
+lz4 sizes and unchanged default profile. Only the exact opt-in
+`--run-owned-ram-pair --profile medium` may select the alternative.
+The existing default pilot and `make run` must not change.
+
+Preserve matched offered/achieved rates, independent lower READ/WRITE
+request/byte delta, original immutable trace and complete final
+readback, and exact UUID ownership and ordinary/quarantined teardown.
+This is a feasibility pilot at QD8: host loaded **NOT RUN**.

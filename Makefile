@@ -77,3 +77,11 @@ bench-pair:
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
 	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair
+
+# Separate explicit RAM-only medium-compressibility experiment.
+.PHONY: bench-pair-medium
+bench-pair-medium:
+	@$(MAKE) --no-print-directory verify
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
+	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium

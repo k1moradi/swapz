@@ -17,7 +17,7 @@ from pathlib import Path
 
 PAGE = 4096
 CAP = 3568
-PROFILES = ("zero", "heap", "text", "cow", "raster", "mixed", "entropy")
+PROFILES = ("zero", "heap", "text", "cow", "raster", "mixed", "medium", "entropy")
 DEFAULT_WEIGHTS = "zero=8,heap=32,text=20,cow=12,raster=15,mixed=8,entropy=5"
 
 
@@ -73,6 +73,11 @@ def page_bytes(seed, index, profile):
         b[:prefix] = raw[:prefix]
         for pos in range(prefix, PAGE, 64):
             b[pos:min(pos + 16, PAGE)] = b"MEM:node:value:42"[:min(16, PAGE - pos)]
+    elif profile == "medium":
+        # Deliberately challenging synthetic ~2:1 compression target.
+        # liblz4 output is measured later, never inferred from this
+        # recipe; no implication that actual swap pages look like this.
+        b[:2040] = raw[:2040]
     else:
         raise ValueError(profile)
     return bytes(b)

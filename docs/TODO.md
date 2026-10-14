@@ -39,6 +39,11 @@ Use `main` only and follow the device/host safety restrictions.
       same-achieved-load **uncompressed off versus V3** loaded replay
       on *separately owned* RAM-backed `null_blk`; compare independent
       lower READ/WRITE bytes **and requests** and byte-exact readback.
+- [ ] Owner-run explicitly opt-in `make bench-pair-medium` on two
+      freshly owned RAM-backed null_blk devices; confirm measured
+      nonzero 2049..2200B LZ4 outputs, paired actual lower
+      READ/WRITE counts, matched load and full exact oracle.
+      This is not yet a sustained sample.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
