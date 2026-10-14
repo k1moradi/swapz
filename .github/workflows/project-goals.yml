@@ -28,6 +28,8 @@ jobs:
         run: |
           set -euo pipefail
           make -C tests test
+          make -C userspace all
+          test -x build/userspace/swapzctl
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
           test -x build/tests/model/swapz-model-tests
