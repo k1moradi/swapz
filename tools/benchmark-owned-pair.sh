@@ -46,7 +46,7 @@ done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
 [[ $(git branch --show-current) == main ]] || fail "main only"
 git diff --quiet && git diff --cached --quiet || fail "dirty tracked sources"
-[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.10 ]] ||
+[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.11 ]] ||
     fail "unexpected V3 revision"
 [[ -s $MODULE && $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
     fail "V3 module missing or running-kernel vermagic mismatch"

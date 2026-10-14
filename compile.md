@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.10
+## One active module: V3.0.0-alpha.11
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -26,7 +26,7 @@ All generated software artifacts belong under the **one persistent
 V3 source: `kernel/extent-v3/{dm-target,engine,authority,codec}.c`.
 Kbuild stages source in `build/kernel/experimental` (for older kernel
 header compatibility) and writes object/`*.ko` there. `dkms.conf`
-now identifies **V3 alpha.10** with **`AUTOINSTALL="no"`** to prevent
+now identifies **V3 alpha.11** with **`AUTOINSTALL="no"`** to prevent
 automatic installation of an experimental module. Even a manual DKMS
 build or a successful compile is **NOT permission** to enable system
 swap, bypass the null_blk-only guard, or load on physical media.
@@ -242,3 +242,15 @@ weight mix remains intact. Medium data are prechecked using measured
 liblz4 output to avoid false 2KiB compression assumptions.
 Results are preserved under `build/benchmark/session.*/`.
 Loaded result at creation: NOT RUN.
+
+## Alpha.11 opt-in serialized retention
+
+The kernel table accepts a final optional `retain_ms` 0..4 setting;
+`0` preserves alpha.10 scheduling by default. The experimental
+opt-in retains immutable prepared records across worker invocations
+until their original absolute first-admission deadline, with a timer
+even if no further BIO arrives. All existing RAM/null_blk-only
+admission, 64-page cap, barrier ordering, GC and fail-close remain.
+Every version gate (DKMS, source and two owner scripts) is alpha.11.
+Run rootless `make verify`, W=1/W=2 Kbuild and default `make run`
+before a separately opt-in retained policy; host alpha.11 NOT RUN.

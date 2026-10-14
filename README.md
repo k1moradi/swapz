@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.10, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.11, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -125,6 +125,23 @@ The host liblz4 manifest must demonstrate actual sizes and zero RAW
 fallback before either arm's replay runs. Default `make run` and
 `make bench-pair` remain unchanged. The medium loaded trial
 has **NOT RUN**; do not infer a performance win.
+
+## Alpha.11 opt-in bounded write-window retention
+
+The alpha.10 medium-page owner-loaded test showed **4KiB / 0.13%**
+lower-write-byte savings on 767 measured writes despite all pages
+compressing to 2,073 bytes. **1,957 of 1,961 cumulative windows**
+closed at worker idle; the existing planner scarcely received
+multiple pages together. The off/V3 comparison was byte-exact and
+matched-load, but is still short and synthetic.
+
+**Alpha.11 adds a nullable final Device Mapper constructor setting**
+`retain_ms 0..4`, default **0**, with timer-driven, worker-serialized
+retention until the first page's absolute deadline. This is a
+new experimental scheduler, not yet host-tested; it is **disabled
+by default** and does not bypass READs or FUA. Avoid claiming real
+lower-I/O wins until same-source control/candidate tests and read
+latency, CPU, GC, fault and teardown qualification pass.
 
 ## The active performance question
 

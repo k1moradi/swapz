@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.10 experimental Device Mapper target
+# Current development: V3.0.0-alpha.11 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -175,3 +175,15 @@ Codex's PR #39 fixture is useful but the direct-I/O helper must be bound to a
 verified test-owned DM UUID/device identity before reusable privileged use.
 See the review comment on PR #39 and PR #38's full independent validation
 report at issuecomment-6113710422.
+
+## Alpha.11 opt-in window retention
+
+The ninth optional numeric policy argument after the backing path
+(`retain_ms=0..4`) defaults to zero. This preserves all earlier
+worker-close behavior and the same volatile SWZ3 representation.
+When explicitly nonzero, the serialized worker may hold accepted
+immutable scratch and upper BIO references across work items,
+never extending the original absolute timer upon later admissions.
+Incoming nonwrites and flush barriers retain their conservative
+drain-before-observe semantics. This is a bounded experimental
+scheduling change with no loaded safety or performance claim yet.

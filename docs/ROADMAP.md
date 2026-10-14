@@ -1,7 +1,7 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
 **Status: ACTIVE; first bounded owner-loaded Stage 2 pilot PASS; alpha.9 Stage 3A FUA telemetry smoke PASS; alpha.10 age telemetry not loaded, 2026-10-14.**
-`swapz3` V3.0.0-alpha.10 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.11 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. This roadmap proposes a conservative, source-inspired
 **bounded dependency-aware write pipeline**; it does not report that the

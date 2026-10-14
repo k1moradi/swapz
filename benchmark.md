@@ -491,3 +491,35 @@ worker. A negative result is valid and should precede Stage 3B.
 This is a single short synthetic run, **NOT** representative sustained
 Linux swap, CPU, GC, or statistically reliable cold-read p99.
 At this commit: rootless qualification pending CI; loaded NOT RUN.
+
+## Alpha.10 matched medium-loaded result — small win, no practical aggregation (2026-10-14)
+
+The owner ran source `43be096ce03841ede4a72c9b7b1b28f8f98301a7`,
+Linux `7.0.0-38-generic`, module SHA-256
+`ee01e2a05c152df8382de4df44cf798d52ac4bf6b5bb85134fe517fcdc987235`
+in an opt-in bounded, separately owned RAM `null_blk` pair. Raw
+host-local session: `build/benchmark/session.10KnHOC9/session.log`
+and `{off,v3,pair}.json`. All 128 nonzero synthetic pages were
+**2,073B LZ4**, `raw_pages=0`; original immutable payload and
+full 1024-page image oracle matched both arms, target and independent
+lower devices were owned, and original active swap was unchanged.
+Achieved off 503.4781 and V3 503.4901 IOPS (<0.003% mismatch).
+
+| Independent lower interval | uncompressed off | V3 alpha.10 |
+| --- | ---: | ---: |
+| WRITE bytes / requests | 3,141,632 / 767 | 3,137,536 / 760 |
+| READ bytes / requests | 1,052,672 / 257 | 1,052,672 / 257 |
+
+V3 saved **4,096B (0.1304%)** and **7 WRITE requests (0.91%)**,
+with *no lower READ savings*. Sampled cold-read p99 was
+1,805,221ns off and 1,887,982ns V3; 257 READs are insufficient
+to claim a reliable p99 delta. Cumulative V3 stats (including
+prefill/warmup/postverify) showed `windows=1961`,
+`one_page_windows=1948`, `close_idle=1957`, 4 unrelated-read
+closures, no GC, and only 13 multirecord windows. 1,960
+windows were <=100us open and one in 101..1000us;
+`age_sum_ns=577,798`, `age_max_ns=102,958`.
+Do not confuse those cumulative counts with the measurement interval.
+**Result:** correctness+matched-load pilot PASS; sustained
+performance/benefit gate still open. This is source-grounded
+reason to test the opt-in Stage 3B retention, not proof it wins.

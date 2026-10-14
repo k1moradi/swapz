@@ -17,6 +17,7 @@
 #include <linux/dm-io.h>
 #include <linux/highmem.h>
 #include <linux/ioprio.h>
+#include <linux/jiffies.h>
 #include <linux/ktime.h>
 #include <linux/lz4.h>
 #include <linux/module.h>
@@ -35,9 +36,10 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.10"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.11"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
+#define SV3_MAX_RETAIN_MS 4U
 
 struct sv3_bio_ref {
 	struct list_head list;
@@ -67,6 +69,7 @@ enum sv3_window_close_reason {
 	SV3_CLOSE_PREFLUSH,
 	SV3_CLOSE_QUANTUM,
 	SV3_CLOSE_IDLE,
+	SV3_CLOSE_DEADLINE,
 	SV3_CLOSE_SHUTDOWN,
 	SV3_CLOSE_OTHER,
 	SV3_CLOSE_REASON_COUNT,
@@ -135,6 +138,11 @@ struct sv3_dm {
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
 	sv3_u8 coalesce_ms;
+	/* Explicitly opt-in, disabled at zero. Worker-owned finite window
+	 * retention only: never changes original physical publication gate. */
+	sv3_u8 retain_ms;
+	u64 retain_worker_passes;
+	u64 retain_timer_arms;
 	u64 coalesce_deferred;
 	u64 coalesce_urgent;
 	u64 window_records_total;
@@ -1194,6 +1202,17 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 		sv3_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
+	/* The absolute deadline cannot be moved by newly admitted writes,
+	 * reads, or worker rescheduling. Close older windows first. */
+	if (ctx->batch_count && ctx->retain_ms &&
+	    sv3_retention_expired(ctx)) {
+		ctx->next_window_close = SV3_CLOSE_DEADLINE;
+		error = sv3_flush_window(ctx);
+		if (error) {
+			sv3_complete(bio, error);
+			return;
+		}
+	}
 	/* Classification only: unrelated READs still drain pending writes.
 	 * This preserves all original FIFO, generation and flush ordering. */
 	if (op != REQ_OP_WRITE || (bio->bi_opf & REQ_PREFLUSH)) {
@@ -1263,6 +1282,37 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
  * may finish ALL previously accepted BIOs without building a potentially
  * unbounded chain of requeued delayed works during drain_workqueue().
  */
+/* The first staged record pins a finite absolute window deadline.
+ * Computing the remaining time on each rearm avoids extending it when
+ * additional incoming writes arrive before the next worker invocation.
+ * All calls are from the one serialized worker, never the ->map path. */
+static bool sv3_retention_expired(struct sv3_dm *ctx)
+{
+	u64 age, now;
+
+	if (!ctx->retain_ms || !ctx->window_first_ns)
+		return true;
+	now = ktime_get_ns();
+	age = now >= ctx->window_first_ns ?
+		now - ctx->window_first_ns : 0;
+	return age >= (u64)ctx->retain_ms * 1000000ULL;
+}
+
+static unsigned long sv3_retention_delay(struct sv3_dm *ctx)
+{
+	u64 now, age, budget;
+
+	if (sv3_retention_expired(ctx))
+		return 0;
+	now = ktime_get_ns();
+	age = now >= ctx->window_first_ns ?
+		now - ctx->window_first_ns : 0;
+	budget = (u64)ctx->retain_ms * 1000000ULL - age;
+	/* The delayed worker always wakes even without new upper BIOs.
+	 * A one-tick minimum avoids immediate spin at sub-tick granularity. */
+	return max_t(unsigned long, 1, nsecs_to_jiffies64(budget));
+}
+
 static void sv3_worker(struct work_struct *work)
 {
 	struct sv3_dm *ctx =
@@ -1287,20 +1337,53 @@ static void sv3_worker(struct work_struct *work)
 				break;
 		}
 		/*
-		 * Never carry a partially published upper write window
-		 * across work items; a later read/FUA could overtake it.
+		 * Opt-in 3B: a pending window retains worker-owned copies
+		 * and upper BIO ownership across quanta ONLY until the
+		 * pinned deadline. Nonwrites and barriers always flush in
+		 * sv3_process() before observing older write mappings.
 		 */
-		if (ctx->batch_count) {
-			ctx->next_window_close = !READ_ONCE(ctx->accepting) ?
-				SV3_CLOSE_SHUTDOWN : !remaining ?
-				SV3_CLOSE_QUANTUM : SV3_CLOSE_IDLE;
+		if (ctx->batch_count &&
+		    (!ctx->retain_ms || ctx->failed ||
+		     !READ_ONCE(ctx->accepting) ||
+		     ctx->batch_count >= ctx->max_window ||
+		     sv3_retention_expired(ctx))) {
+			if (!READ_ONCE(ctx->accepting))
+				ctx->next_window_close = SV3_CLOSE_SHUTDOWN;
+			else if (ctx->retain_ms &&
+				 ctx->batch_count >= ctx->max_window)
+				ctx->next_window_close = SV3_CLOSE_FULL;
+			else if (ctx->retain_ms &&
+				 sv3_retention_expired(ctx))
+				ctx->next_window_close = SV3_CLOSE_DEADLINE;
+			else
+				ctx->next_window_close = !remaining ?
+					SV3_CLOSE_QUANTUM : SV3_CLOSE_IDLE;
 			sv3_flush_window(ctx);
+		} else if (ctx->batch_count) {
+			ctx->retain_worker_passes++;
 		}
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
+			if (ctx->batch_count && ctx->retain_ms &&
+			    ctx->accepting && !ctx->failed) {
+				/* Under admission lock: an urgent new BIO
+				 * arriving later expedites this timer via
+				 * mod_delayed_work(..., 0) in sv3_map(). */
+				ctx->retain_timer_arms++;
+				mod_delayed_work(ctx->workqueue, &ctx->worker,
+						 sv3_retention_delay(ctx));
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				return;
+			}
+			if (ctx->batch_count && !ctx->accepting) {
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				ctx->next_window_close = SV3_CLOSE_SHUTDOWN;
+				sv3_flush_window(ctx);
+				return;
+			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			return;
 		}
@@ -1496,11 +1579,11 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	u64 logical, physical;
 	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
-	u32 lower_bulk = 1, write_fail_nth = 0;
+	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
 	int error;
 
-	if (argc < 1 || argc > 9 || ti->len % SV3_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535]";
+	if (argc < 1 || argc > 10 || ti->len % SV3_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4 experimental]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -1529,6 +1612,9 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 8 && (kstrtou32(argv[8], 10, &write_fail_nth) ||
 			 write_fail_nth > 65535U))
 		return -EINVAL;
+	if (argc > 9 && (kstrtou32(argv[9], 10, &retain) ||
+			 retain > SV3_MAX_RETAIN_MS))
+		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
@@ -1537,6 +1623,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->max_window = (sv3_u8)window;
 	ctx->gc_cost_policy = gc_policy;
 	ctx->coalesce_ms = coalesce;
+	ctx->retain_ms = retain;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->write_fault_nth = write_fail_nth;
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
@@ -1748,6 +1835,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_other=%llu window_gc_pressure=%llu "
 		       "age_le100us=%llu age_101_1000us=%llu "
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
+		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
+		       "close_deadline=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1811,15 +1900,19 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
 		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,
 		       ctx->window_age_max_ns,
+		       ctx->retain_ms, ctx->retain_worker_passes,
+		       ctx->retain_timer_arms,
+		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
 		       ctx->gc_cost_policy, ctx->coalesce_ms,
 		       ctx->flush_meter.fail_nth,
-		       ctx->engine.bulk_enabled, ctx->write_fault_nth);
+		       ctx->engine.bulk_enabled, ctx->write_fault_nth,
+		       ctx->retain_ms);
 		break;
 	case STATUSTYPE_IMA:
 	default:

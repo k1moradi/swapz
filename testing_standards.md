@@ -527,3 +527,34 @@ and **maximum <= 2200** before permitting replay. This is a
 fixture-integrity check, not loaded I/O evidence. The broad
 2,049..3,072 size-bin classification remains diagnostic, not
 sufficient for medium acceptance.
+
+## Alpha.11 opt-in serialized window retention (kernel C)
+
+The medium loaded pilot at alpha.10 exposes 1,957 / 1,961 idle
+closures and almost no real lower-write byte savings. To test
+whether idle closure is avoidable, the experimental target now
+accepts a **final optional** `retain_ms=0..4` DM table parameter,
+default **0** (the original flush behavior). Positive opt-in
+retains already staged immutable upper BIOs across worker invocations
+at most until the **absolute** first-record deadline, never resetting
+the timestamp when additional writes arrive. A delayed worker is
+armed under the same queue/admission lock and wakes even if no
+new BIO arrives. Expiry is checked before every newly processed
+BIO and at worker boundaries. A pending full window drains; a
+READ, duplicate, exact zero, FUA/PREFLUSH, discard or unsupported
+operation retains its original conservative flush/ordering behavior.
+Presuspend closes admission, expedites delayed work, drains every
+accepted BIO and issues the original lower flush; no new
+publication, GC ownership or on-media states are introduced.
+
+The timer is **bounded in jiffies and subject to kernel scheduler
+latency**: `retain_ms=2` is a nominal window budget, not a
+real-time upper-BIO service-level guarantee. A QD1 synchronous
+issuer may gain nothing and experience additional wait. Diagnostic
+`close_deadline` is one primary cause in conservation;
+`retain_passes`, `retain_timer_arms` are not closure counts.
+Rootless source-contract checks cover deadline, hard capacity,
+quiescent timer rearm, urgent admission and drain. This does not
+substitute for loaded dependent-read/overwrite/FUA/GC/suspend/fault
+tests or a same-source opt-in/control comparison. **Host alpha.11
+loaded: NOT RUN.** Keep `retain_ms=0` as default.

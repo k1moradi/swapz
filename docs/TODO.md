@@ -39,11 +39,16 @@ Use `main` only and follow the device/host safety restrictions.
       same-achieved-load **uncompressed off versus V3** loaded replay
       on *separately owned* RAM-backed `null_blk`; compare independent
       lower READ/WRITE bytes **and requests** and byte-exact readback.
-- [ ] Owner-run explicitly opt-in `make bench-pair-medium` on two
-      freshly owned RAM-backed null_blk devices; confirm measured
-      nonzero 2049..2200B LZ4 outputs, paired actual lower
-      READ/WRITE counts, matched load and full exact oracle.
-      This is not yet a sustained sample.
+- [x] Loaded opt-in alpha.10 `make bench-pair-medium` at `43be096c`:
+      128 nonzero 2,073B pages, identical byte-exact oracle, matched
+      503.48 IOPS, independent 4KiB/0.13% lower-write-byte savings,
+      0% lower-read savings, ordinary teardown PASS. No GC;
+      1,957/1,961 cumulative windows closed idle.
+- [ ] Establish alpha.11 same-source disabled (`retain_ms=0`)
+      versus explicitly enabled (`retain_ms=2`) on identical
+      medium trace and independently owned RAM lowers. Require
+      loaded byte-exact FUA/READ/GC/drain/fault and strict 5% IOPS
+      matching before any recommendation to enable retention.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
@@ -79,7 +84,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.10 behavior when their claims
+      documents and current V3.0.0-alpha.11 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,
