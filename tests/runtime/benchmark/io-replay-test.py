@@ -164,6 +164,98 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing"):
                 resolve()
 
+    def test_exact_v3_table_accepts_only_owned_nonfaulting_backing(self):
+        import importlib.util
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        spec = importlib.util.spec_from_file_location("swapz_replay_table", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        lower = "251:7"
+        name = "nullb-swapz-0123456789abcdef"
+        tokens = f"0 32768 swapz3 {lower} 0 64 0 2 0 0 1 0"
+        self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["window"], 64)
+        fake_block = SimpleNamespace(st_mode=__import__("stat").S_IFBLK,
+                                     st_rdev=os.makedev(251, 7))
+        with patch.object(module.Path, "stat", return_value=fake_block):
+            path_table = tokens.replace(lower, "/dev/" + name)
+            self.assertEqual(module.validate_v3_table(
+                path_table, 4096, lower, name
+            )["lower_bulk"], 1)
+        for broken in (
+            tokens.replace("251:7", "251:8"),
+            tokens.replace("251:7", "/dev/sda1"),
+            tokens.replace("32768", "32760"),
+            tokens.replace("swapz3", "linear"),
+            tokens + "\n" + tokens,
+            tokens + " 0",
+            tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 1 1 0"),
+            tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 0 1 1"),
+        ):
+            with self.subTest(table=broken), self.assertRaises(ValueError):
+                module.validate_v3_table(broken, 4096, lower, name)
+
+    def test_loaded_pair_qualification_requires_distinct_backing_and_rate(self):
+        import contextlib
+        import importlib.util
+        import io
+        from types import SimpleNamespace
+        spec = importlib.util.spec_from_file_location("swapz_replay_pair", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            base = {
+                "fixture_sha256": "a" * 64, "trace_sha256": "b" * 64,
+                "write_payload_stream_sha256": "c" * 64,
+                "prefill_sha256": "d" * 64, "expected_post_sha256": "e" * 64,
+                "manifest_sha256": "f" * 64, "qd": 4, "layout": "disjoint",
+                "seed": 77, "iops_requested": 200, "warmup_ops": 20,
+                "measure_ops": 100, "read_ops": 50, "write_ops": 50,
+                "verified_pages": 32, "verified_post_sha256": "e" * 64,
+                "verdict": "PASS", "source_sha": "1" * 40,
+                "lower_io": {
+                    "lower_read_requests": 50, "lower_read_bytes": 204800,
+                    "lower_write_requests": 50, "lower_write_bytes": 204800,
+                    "lower_flush_requests": 1,
+                },
+            }
+            off = {**base, "candidate": "off", "achieved_iops": 190.0,
+                   "device_identity": {"device": "251:0",
+                                       "owned_disk": "nullb0",
+                                       "lower_major_minor": "251:0",
+                                       "dm_uuid": None}}
+            v3 = {**base, "candidate": "v3", "achieved_iops": 188.0,
+                  "device_identity": {"device": "253:0",
+                                      "owned_disk": "nullb1",
+                                      "lower_major_minor": "251:1",
+                                      "dm_uuid": "SWZTEST-00001"}}
+            paths = [directory / "off.json", directory / "v3.json"]
+            def compare():
+                for location, report in zip(paths, (off, v3)):
+                    location.write_text(json.dumps(report))
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    module.compare(SimpleNamespace(reports=paths))
+                return json.loads(output.getvalue())
+            self.assertEqual(compare()["performance_qualification"],
+                             "MATCHED_LOAD_MEASUREMENT_ONLY")
+            v3["achieved_iops"] = 120
+            self.assertEqual(compare()["performance_qualification"],
+                             "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD")
+            v3["achieved_iops"] = 188
+            v3["device_identity"]["lower_major_minor"] = "251:0"
+            with self.assertRaisesRegex(ValueError, "not independent"):
+                compare()
+            v3["device_identity"]["lower_major_minor"] = "251:1"
+            v3["lower_io"] = None
+            with self.assertRaisesRegex(ValueError, "missing independent"):
+                compare()
+            v3["lower_io"] = base["lower_io"]
+            v3["source_sha"] = "2" * 40
+            with self.assertRaisesRegex(ValueError, "revision mismatch"):
+                compare()
+
     def test_protected_regular_file_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

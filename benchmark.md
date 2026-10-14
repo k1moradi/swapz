@@ -296,3 +296,29 @@ rootless-only security prerequisites. The first **loaded,
 same-fixture/same-trace uncompressed off versus V3** benchmark,
 CPU/read-p99/GC/fault qualification and real-device benefits remain
 unmeasured.
+
+## First paired-replay qualification contract (rootless, not loaded)
+
+The active off/V3 replay now accepts a V3 `dmsetup table` backing
+token as either the pinned lower `major:minor` or the *exact*
+`/dev/<owned disk>` path, and verifies the latter resolves to a block
+node with the pinned `st_rdev`. It refuses multi-extent tables,
+incorrect target geometry, unknown constructor settings and **any
+nonzero flush/write fault-injection configuration**. The supported
+kernel-C `STATUSTYPE_TABLE` contains eight numeric policy parameters
+after the backing argument. This check does not authorize a non-null_blk
+target or create devices.
+
+The `compare` command still proves exact immutable logical input
+and full readback first, but now separates `ROOTLESS_NOT_DEVICE_EVIDENCE`
+from a loaded two-device result. A loaded comparison must supply two
+distinct owned lowers, a common full source SHA, nonnegative independent
+read/write request and byte deltas plus flush counts, and finite
+positive achieved useful IOPS. A conservative **5% relative achieved
+IOPS difference** is the current predeclared qualification threshold;
+outside it the result is
+`INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD`, not a performance verdict.
+Within it, `MATCHED_LOAD_MEASUREMENT_ONLY` is still **not** a release
+win: CPU, read p99, GC, repeated trials and actual loaded evidence
+must still satisfy VISION. The new parser/comparison tests use no
+privileged device. First actual loaded off/V3 comparison: **NOT RUN**.

@@ -371,3 +371,25 @@ The test fixture now emits genuine newline-terminated index,
 memory_backed, power, devices, and disk-dev data; the source safety
 checks themselves were not weakened. Re-run both source contract and
 rootless replay tests at the final exact head.
+
+## V3 table and matched-load replay source contracts
+
+An owned replay must validate the *entire single* V3 DM table,
+including exact geometry, backed block identity, bounded read budget,
+window, GC/coalescing/bulk settings, and **zero diagnostic
+lower-write/flush fault injection**. The target's table format is
+`<start> <length> swapz3 <owned backing> <8 numeric settings>`.
+Its backing may be reported as pinned `major:minor` or the exact
+verified `/dev/<owned kernel disk>`. Reject arbitrary /dev paths,
+wrong block rdev, malformed/multiple tables and unsafe settings.
+The source uses `dm-target.c`'s existing emitted policy and does not
+change its runtime ABI.
+
+Pairing tests must prove identical operations and final oracle while
+also rejecting missing lower-device counters, mixed rootless/loaded
+arms, duplicate backing identities or source SHA mismatch.
+Record mismatched achieved rates explicitly as **INCONCLUSIVE**
+rather than treating exact logical bytes as a performance win.
+The current declared achieved-rate closeness is at most 5%.
+These are rootless CI acceptance gates, **not a completed loaded
+off/V3 experiment or new V3 production-kernel behavior**.

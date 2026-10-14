@@ -11,6 +11,7 @@ import concurrent.futures
 import hashlib
 import json
 import mmap
+import math
 import os
 import random
 import re
@@ -229,6 +230,44 @@ def resolve_owned_nullblk(name, expected_lower_dev,
     return disk.name, disk_dev
 
 
+def validate_v3_table(table, logical_pages, lower_dev, disk_name):
+    """Qualify exactly one V3 mapping on the pinned RAM null_blk.
+
+    The target emits the original backing token in STATUSTYPE_TABLE,
+    which may be either a major:minor or the exact owned /dev/<disk>.
+    Reject unexpected layouts and active diagnostic fault-injection.
+    """
+    rows = table.strip().splitlines()
+    if len(rows) != 1:
+        raise ValueError("expected exactly one V3 DM table extent")
+    fields = rows[0].split()
+    if len(fields) != 12 or fields[:3] != [
+        "0", str(logical_pages * PAGE // 512), "swapz3"
+    ]:
+        raise ValueError("unexpected V3 DM table geometry or arguments")
+    if fields[3] != lower_dev:
+        if fields[3] != f"/dev/{disk_name}":
+            raise ValueError("unowned V3 DM table backing path")
+        backing = Path(fields[3]).stat()
+        if not stat.S_ISBLK(backing.st_mode) or (
+            f"{os.major(backing.st_rdev)}:{os.minor(backing.st_rdev)}" != lower_dev
+        ):
+            raise ValueError("V3 DM table backing block identity changed")
+    if any(re.fullmatch(r"[0-9]+", value) is None for value in fields[4:]):
+        raise ValueError("non-numeric V3 configuration")
+    (read_budget, window, verify, gc_policy, coalesce_ms,
+     flush_fault, lower_bulk, write_fault) = map(int, fields[4:])
+    if not (0 <= read_budget <= 3 and 1 <= window <= 64 and
+            0 <= verify <= 1 and 0 <= gc_policy <= 2 and
+            0 <= coalesce_ms <= 4 and 0 <= lower_bulk <= 2):
+        raise ValueError("out-of-policy V3 benchmark geometry")
+    if flush_fault or write_fault:
+        raise ValueError("fault-injected V3 target is not a performance arm")
+    return {"read_budget": read_budget, "window": window,
+            "verify": verify, "gc_policy": gc_policy,
+            "coalesce_ms": coalesce_ms, "lower_bulk": lower_bulk}
+
+
 def check_owned_block(path, st, candidate, args, logical_pages):
     if not args.owned_nullblk_name or not args.expected_dev:
         raise ValueError("block I/O requires owned null_blk identity and exact major:minor")
@@ -260,14 +299,12 @@ def check_owned_block(path, st, candidate, args, logical_pages):
         if sectors * 512 != logical_pages * PAGE:
             raise ValueError("DM mapping size differs from exact workload")
         dm_name = (sysdev / "dm/name").read_text().strip()
-        got = subprocess.run(["dmsetup", "table", dm_name],
-                             check=True, capture_output=True, text=True,
-                             timeout=10).stdout.strip().split()
-        want_type = "swapz3"
-        if len(got) < 4 or got[:4] != [
-            "0", str(logical_pages * PAGE // 512), want_type, null_dev
-        ]:
-            raise ValueError("DM target type/length/backing differs from candidate")
+        table = subprocess.run(["dmsetup", "table", dm_name],
+                               check=True, capture_output=True, text=True,
+                               timeout=10).stdout
+        v3_config = validate_v3_table(
+            table, logical_pages, null_dev, disk_name
+        )
     for line in Path("/proc/swaps").read_text().splitlines()[1:]:
         item = line.split()[0]
         try:
@@ -285,7 +322,8 @@ def check_owned_block(path, st, candidate, args, logical_pages):
             raise ValueError("target or backing block device is mounted")
     return {"device": actual, "owned_nullblk": args.owned_nullblk_name,
             "owned_disk": disk_name, "lower_major_minor": null_dev,
-            "dm_uuid": args.expected_dm_uuid if candidate != "off" else None}
+            "dm_uuid": args.expected_dm_uuid if candidate != "off" else None,
+            "v3_config": v3_config if candidate == "v3" else None}
 
 
 def check_device(args, logical_pages):
@@ -331,7 +369,7 @@ def iostat_delta(before, after):
     if len(before) != len(after):
         raise ValueError("backing stat shape changed")
     delta = [end - start for start, end in zip(before, after)]
-    if any(x < 0 for x in (delta[0], delta[2], delta[4], delta[6])):
+    if any(delta[index] < 0 for index in (0, 2, 4, 6, 15)):
         raise ValueError("backing counter reset during measurement")
     return {"lower_read_requests": delta[0], "lower_read_bytes": delta[2] * 512,
             "lower_write_requests": delta[4], "lower_write_bytes": delta[6] * 512,
@@ -525,18 +563,60 @@ def compare(args):
             entry.get("verified_post_sha256") != entry.get("expected_post_sha256")
         ):
             raise ValueError("INVALID COMPARISON: failing oracle or unverified result")
-    normalized = sorted(entries, key=lambda x: CANDIDATES.index(x["candidate"]))
+    normalized = sorted(entries, key=lambda entry: CANDIDATES.index(entry["candidate"]))
+    first, second = normalized
+    identities = [entry.get("device_identity") for entry in normalized]
+    rootless = all(identity and "test_regular_file" in identity for identity in identities)
+    loaded = all(identity and "device" in identity for identity in identities)
+    if not (rootless or loaded):
+        raise ValueError("INVALID COMPARISON: mixed, missing or unowned arm identity")
     output = {"verdict": "PASS_IDENTICAL_LOGICAL_INPUT",
               "scope": ("exact same fixture, prefill, ordered independent-page "
                         "operation waves, logical reads, and final oracle; "
                         "NOT identical per-BIO kernel arrival timing"),
-              "fixture_sha256": entries[0]["fixture_sha256"],
-              "trace_sha256": entries[0]["trace_sha256"],
-              "write_payload_stream_sha256": entries[0]["write_payload_stream_sha256"],
-              "read_ops": entries[0]["read_ops"], "write_ops": entries[0]["write_ops"],
+              "fixture_sha256": first["fixture_sha256"],
+              "trace_sha256": first["trace_sha256"],
+              "write_payload_stream_sha256": first["write_payload_stream_sha256"],
+              "read_ops": first["read_ops"], "write_ops": first["write_ops"],
               "results": [{k: entry.get(k) for k in
                            ("candidate", "source_sha", "achieved_iops", "lower_io")}
                           for entry in normalized]}
+    if rootless:
+        output["performance_qualification"] = "ROOTLESS_NOT_DEVICE_EVIDENCE"
+    else:
+        if first.get("source_sha") != second.get("source_sha") or not re.fullmatch(
+            r"[a-f0-9]{40}", str(first.get("source_sha", ""))
+        ):
+            raise ValueError("INVALID COMPARISON: loaded source revision mismatch")
+        if (identities[0].get("owned_disk") == identities[1].get("owned_disk") or
+                identities[0].get("lower_major_minor") ==
+                identities[1].get("lower_major_minor") or
+                identities[0].get("dm_uuid") is not None or
+                not identities[1].get("dm_uuid")):
+            raise ValueError("INVALID COMPARISON: backing arms are not independent")
+        required = ("lower_read_requests", "lower_read_bytes",
+                    "lower_write_requests", "lower_write_bytes",
+                    "lower_flush_requests")
+        for entry in normalized:
+            lower_io = entry.get("lower_io")
+            if not isinstance(lower_io, dict) or any(
+                not isinstance(lower_io.get(key), int) or
+                lower_io[key] < 0 for key in required
+            ):
+                raise ValueError("INVALID COMPARISON: missing independent lower I/O")
+        achieved = [entry.get("achieved_iops") for entry in normalized]
+        if any(not isinstance(rate, (int, float)) or
+               not math.isfinite(rate) or rate <= 0 for rate in achieved):
+            raise ValueError("INVALID COMPARISON: invalid achieved IOPS")
+        # A conservative explicit comparison policy. This is a matching
+        # gate, never proof that matching rates imply matching BIO arrivals.
+        mismatch = abs(achieved[0] - achieved[1]) / max(achieved)
+        output["achieved_iops_difference_fraction"] = mismatch
+        output["allowed_iops_difference_fraction"] = 0.05
+        output["performance_qualification"] = (
+            "MATCHED_LOAD_MEASUREMENT_ONLY" if mismatch <= 0.05
+            else "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD"
+        )
     print(json.dumps(output, sort_keys=True))
 
 
