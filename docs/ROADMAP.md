@@ -1,11 +1,13 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
-**Status: ACTIVE; first bounded owner-loaded Stage 2 pilot PASS; alpha.9 Stage 3A FUA telemetry smoke PASS; alpha.10 age telemetry not loaded, 2026-10-14.**
+**Status: ACTIVE; alpha.10 loaded medium matched pilot PASS (only 0.13% WRITE byte savings); alpha.11 Stage 3B retention prototype is explicitly opt-in and NOT LOADED, 2026-10-14.**
 `swapz3` V3.0.0-alpha.11 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. This roadmap proposes a conservative, source-inspired
-**bounded dependency-aware write pipeline**; it does not report that the
-pipeline has been implemented, loaded, or shown to improve performance.
+**bounded dependency-aware write pipeline**. A first serialized
+window-retention prototype is implemented in alpha.11, **default
+disabled**. Neither loaded safety nor actual lower-I/O improvement
+with retention has been established.
 
 The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](../coding_standards.md),
@@ -140,6 +142,10 @@ is actually lost at avoidable closures. Otherwise investigate the
 measured lower layout, read cost or GC bottleneck instead.
 
 ### 3B. Retain **independent** pending writes across work quanta
+
+**Implementation checkpoint: alpha.11 opt-in prototype committed;
+loaded correctness, same-source controlled performance, fault and
+deadline qualification NOT RUN. No default policy change.**
 
 - Following the F2FS/Btrfs pattern, prototype one **bounded,
   opt-in** staging/commit policy rather than flushing at every

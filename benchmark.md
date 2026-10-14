@@ -540,3 +540,16 @@ Separate sessions are *not* a randomized order/crossover study.
 Record READ p99/CPU/GC and full resource teardown independently
 before any case for default activation; negative, blocking and
 unmatched results are first-class evidence.
+
+### Alpha.11 test status on current main
+
+Core CI at source `e305d0ab` passed native/policy, exact-source C,
+kernel compilation and one-revision policy. These are not runtime
+fault/drain/timer tests. The new default-off target emits
+`retain_ms`, `retain_passes`, `retain_timer_arms` and
+`close_deadline` for the candidate; no source-derived lower-I/O win
+is claimed. Before interpreting trial output, verify each session's
+actual V3 `retain_ms`, full immutable input hashes, lower-sector
+counters, achieved rates, complete oracle, status close conservation
+and ordinary owned teardown. A measured **negative** candidate is
+valid evidence, not a reason to hide or reset it.

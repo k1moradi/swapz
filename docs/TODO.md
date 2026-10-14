@@ -35,10 +35,11 @@ Use `main` only and follow the device/host safety restrictions.
       with 9.91% WRITE and 6.23% READ lower I/O reduction at
       matched 503 IOPS and byte-exact clean teardown. Short
       synthetic run only; sustained GC, CPU and p99 NOT qualified.
-- [ ] Perform the **first** immutable-fixture, same-operation,
-      same-achieved-load **uncompressed off versus V3** loaded replay
-      on *separately owned* RAM-backed `null_blk`; compare independent
-      lower READ/WRITE bytes **and requests** and byte-exact readback.
+- [x] First loaded identical-trace, matched-achieved-load uncompressed
+      off/V3 pilot at `cebc8bd6` (single synthetic short run);
+      additional nonzero-medium paired pilot at `43be096c` qualified
+      exact lower bytes/requests with negligible write savings.
+      Sustained and production-qualification tests remain open.
 - [x] Loaded opt-in alpha.10 `make bench-pair-medium` at `43be096c`:
       128 nonzero 2,073B pages, identical byte-exact oracle, matched
       503.48 IOPS, independent 4KiB/0.13% lower-write-byte savings,
