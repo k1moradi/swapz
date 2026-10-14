@@ -215,3 +215,134 @@ request. The read-byte check has **not yet been host-retested** at this
 source revision. This is still a null_blk-only development qualification,
 **not** production readiness or a matched off/V3 benchmark (see
 [benchmark.md](benchmark.md)).
+
+## Complete documentation directory
+
+Every tracked Markdown document is linked directly from this README.
+The six **authoritative** project documents are in the table at the top;
+the links below cover agent entry points, active references, component
+notes, and **historical/archived evidence**. Historical pages are
+preserved for provenance, **not** as instructions that override V3
+safety, build, testing, or benchmark policies.
+
+<!-- BEGIN COMPLETE DOCUMENTATION INDEX -->
+
+### AI agent entry points
+
+Current agent bootstraps; they point to the six governing documents above.
+
+- [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
+- [`AGENTS.md`](AGENTS.md)
+- [`CLAUDE.md`](CLAUDE.md)
+- [`CODEX_VALIDATION.md`](CODEX_VALIDATION.md)
+- [`agent.md`](agent.md)
+
+### Current plans and shared references
+
+The current V3 plan is in `docs/TODO.md` and `docs/ROADMAP.md`. The consolidation and legacy-conventions pages record older context.
+
+- [`docs/BUILD_AND_TEST_CONVENTIONS.md`](docs/BUILD_AND_TEST_CONVENTIONS.md)
+- [`docs/DEVICE_GEOMETRY.md`](docs/DEVICE_GEOMETRY.md)
+- [`docs/DOCUMENTATION_GUIDELINES.md`](docs/DOCUMENTATION_GUIDELINES.md)
+- [`docs/ONE_MAIN_BRANCH_CONSOLIDATION.md`](docs/ONE_MAIN_BRANCH_CONSOLIDATION.md)
+- [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)
+- [`docs/README.md`](docs/README.md)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- [`docs/TODO.md`](docs/TODO.md)
+
+### Kernel and test component documentation
+
+Component-specific instructions and experimental protocols; older V2.x material is historical, not host-test authorization.
+
+- [`kernel/BESTFIT4_TESTING.md`](kernel/BESTFIT4_TESTING.md)
+- [`kernel/extent-v3/ANON_COMPRESSIBILITY_QUALIFICATION.md`](kernel/extent-v3/ANON_COMPRESSIBILITY_QUALIFICATION.md)
+- [`kernel/extent-v3/LIVE_TEST_GATE.md`](kernel/extent-v3/LIVE_TEST_GATE.md)
+- [`kernel/extent-v3/LOWER_WRITE_AGGREGATION.md`](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md)
+- [`kernel/extent-v3/LOWER_WRITE_FAULT_QUALIFICATION.md`](kernel/extent-v3/LOWER_WRITE_FAULT_QUALIFICATION.md)
+- [`kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md`](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md)
+- [`kernel/extent-v3/ONLINE_IO_RETEST.md`](kernel/extent-v3/ONLINE_IO_RETEST.md)
+- [`kernel/extent-v3/README.md`](kernel/extent-v3/README.md)
+- [`kernel/extent-v3/THREE_WAY_IDENTICAL_REPLAY.md`](kernel/extent-v3/THREE_WAY_IDENTICAL_REPLAY.md)
+- [`tests/runtime/README.md`](tests/runtime/README.md)
+- [`tests/suites/README.md`](tests/suites/README.md)
+
+### Archived plans and validation history
+
+Preserved V2.x and dated V3 evidence. These documents do not override current policy or authorize old host commands.
+
+- [`docs/archive/README.md`](docs/archive/README.md)
+- [`docs/archive/v2.1/TESTING.md`](docs/archive/v2.1/TESTING.md)
+- [`docs/archive/v2.2/CODEX_VALIDATION.md`](docs/archive/v2.2/CODEX_VALIDATION.md)
+- [`docs/archive/v2.2/DESIGN.md`](docs/archive/v2.2/DESIGN.md)
+- [`docs/archive/v2.2/ROADMAP.md`](docs/archive/v2.2/ROADMAP.md)
+- [`docs/archive/v2.2/TODO.md`](docs/archive/v2.2/TODO.md)
+- [`docs/archive/v2.2/VALIDATION.md`](docs/archive/v2.2/VALIDATION.md)
+- [`docs/archive/v3/PERFORMANCE_DIAGNOSIS.md`](docs/archive/v3/PERFORMANCE_DIAGNOSIS.md)
+- [`docs/archive/v3/V3_GOALS.md`](docs/archive/v3/V3_GOALS.md)
+
+### Benchmark and validation reports
+
+Mostly historical test designs, source-only checks, or versioned results.
+
+- [`docs/benchmarks/v2.2-live-gc-latency.md`](docs/benchmarks/v2.2-live-gc-latency.md)
+- [`docs/benchmarks/v2.2-request-plateau-model.md`](docs/benchmarks/v2.2-request-plateau-model.md)
+- [`docs/benchmarks/v2.2-rootless-sweep-plan.md`](docs/benchmarks/v2.2-rootless-sweep-plan.md)
+- [`docs/benchmarks/v2.2-size-aware-nbd.md`](docs/benchmarks/v2.2-size-aware-nbd.md)
+- [`docs/streaming-benchmark-reporting.md`](docs/streaming-benchmark-reporting.md)
+- [`docs/validation/v2.1-runtime-report.md`](docs/validation/v2.1-runtime-report.md)
+- [`docs/virtual-smoke.md`](docs/virtual-smoke.md)
+
+### Recall, NBD, and process supervision records
+
+Versioned safety designs and qualification boundaries, not active V3 test instructions.
+
+- [`docs/gnu-coreutils-qualification.md`](docs/gnu-coreutils-qualification.md)
+- [`docs/nbd-pidfd-owned-rootless.md`](docs/nbd-pidfd-owned-rootless.md)
+- [`docs/pidfd-supervisor-design.md`](docs/pidfd-supervisor-design.md)
+- [`docs/recall-broker-2eab914-independent-review.md`](docs/recall-broker-2eab914-independent-review.md)
+- [`docs/recall-control-bridge.md`](docs/recall-control-bridge.md)
+- [`docs/recall-dd-allowlist.md`](docs/recall-dd-allowlist.md)
+- [`docs/recall-denial-telemetry-offline.md`](docs/recall-denial-telemetry-offline.md)
+- [`docs/recall-fixture-owner-and-drain-evidence.md`](docs/recall-fixture-owner-and-drain-evidence.md)
+- [`docs/recall-io-drain-mock-integration.md`](docs/recall-io-drain-mock-integration.md)
+- [`docs/recall-io-drain.md`](docs/recall-io-drain.md)
+- [`docs/recall-role-bridge.md`](docs/recall-role-bridge.md)
+- [`docs/recall-role-process-rootless.md`](docs/recall-role-process-rootless.md)
+
+### Independent reviews and CI evidence
+
+Dated review findings and rootless evidence inventories.
+
+- [`docs/codex-gnu-9-11-review-2026-10-09.md`](docs/codex-gnu-9-11-review-2026-10-09.md)
+- [`docs/codex-trust-bootstrap-review-2026-10-09.md`](docs/codex-trust-bootstrap-review-2026-10-09.md)
+- [`docs/main-developer-broker-review-2026-10-09.md`](docs/main-developer-broker-review-2026-10-09.md)
+- [`docs/main-developer-fixture-owner-review-2026-10-09.md`](docs/main-developer-fixture-owner-review-2026-10-09.md)
+- [`docs/rootless-ci-evidence-inventory.md`](docs/rootless-ci-evidence-inventory.md)
+
+### V2.2 implementation and evidence audits
+
+Historical defect reviews, source-based checks, and offline evidence; V2.2 remains retired.
+
+- [`docs/swapz-kernel-range-preflight-audit.md`](docs/swapz-kernel-range-preflight-audit.md)
+- [`docs/v22-async-reap-watchdog-audit.md`](docs/v22-async-reap-watchdog-audit.md)
+- [`docs/v22-compaction-container-validation-audit.md`](docs/v22-compaction-container-validation-audit.md)
+- [`docs/v22-drain-plateau-offline.md`](docs/v22-drain-plateau-offline.md)
+- [`docs/v22-evidence-bundle-offline.md`](docs/v22-evidence-bundle-offline.md)
+- [`docs/v22-evidence-bundle-v3.md`](docs/v22-evidence-bundle-v3.md)
+- [`docs/v22-exact-bio-identity-audit.md`](docs/v22-exact-bio-identity-audit.md)
+- [`docs/v22-flush-fua-durability-audit.md`](docs/v22-flush-fua-durability-audit.md)
+- [`docs/v22-gc-compressed-scratch-audit.md`](docs/v22-gc-compressed-scratch-audit.md)
+- [`docs/v22-gc-source-snapshot-audit.md`](docs/v22-gc-source-snapshot-audit.md)
+- [`docs/v22-generation-gc-transaction-audit.md`](docs/v22-generation-gc-transaction-audit.md)
+- [`docs/v22-generation-scan-pack-preflight-audit.md`](docs/v22-generation-scan-pack-preflight-audit.md)
+- [`docs/v22-independent-upper-bio-ownership-audit.md`](docs/v22-independent-upper-bio-ownership-audit.md)
+- [`docs/v22-inflight-finalize-preflight-audit.md`](docs/v22-inflight-finalize-preflight-audit.md)
+- [`docs/v22-latency-v3-sidecar.md`](docs/v22-latency-v3-sidecar.md)
+- [`docs/v22-mapping-replacement-accounting-audit.md`](docs/v22-mapping-replacement-accounting-audit.md)
+- [`docs/v22-pending-pack-ownership-audit.md`](docs/v22-pending-pack-ownership-audit.md)
+- [`docs/v22-published-mapping-read-bounds-audit.md`](docs/v22-published-mapping-read-bounds-audit.md)
+- [`docs/v22-staged-read-metadata-audit.md`](docs/v22-staged-read-metadata-audit.md)
+- [`docs/v22-stream-submit-bounds-audit.md`](docs/v22-stream-submit-bounds-audit.md)
+- [`docs/v22-virtual-benchmark-qualification.md`](docs/v22-virtual-benchmark-qualification.md)
+
+<!-- END COMPLETE DOCUMENTATION INDEX -->

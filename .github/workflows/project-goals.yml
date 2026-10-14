@@ -93,6 +93,14 @@ jobs:
           done
           grep -Fq 'docs/DOCUMENTATION_GUIDELINES.md' README.md
           grep -Fq 'docs/TODO.md' AGENTS.md
+          # Require a direct README link for every tracked Markdown document.
+          # This covers documentation under docs/, component READMEs and agent files.
+          while IFS= read -r -d '' documentation_path; do
+            if ! grep -Fq -- "]($documentation_path)" README.md; then
+              echo "FAIL: README.md missing link to $documentation_path"
+              exit 1
+            fi
+          done < <(git ls-files -z -- '*.md')
           echo "DOCUMENTATION_PLACEMENT_AND_AGENT_DISCOVERY_PASS"
       - name: Verify no project-local compilation outside build
         shell: bash

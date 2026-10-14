@@ -42,9 +42,11 @@ Use [docs/README.md](docs/README.md) for navigation,
 [docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md)
 for document creation, consolidation, archival and link review.
 Do not append dated evidence transcripts to TODO or revive archived
-V2.x instructions. Root Markdown locations are CI-governed; preserve
-the four engineering standards' co-change requirement for actual code,
-build, test and workflow changes.
+V2.x instructions. Root Markdown locations are CI-governed. The root README must provide
+one direct Markdown link to **every tracked Markdown file**, including
+archival reports and component notes; `project-goals` CI checks this
+inventory. Preserve the four engineering standards' co-change
+requirement for actual code, build, test and workflow changes.
 
 ## Absolute host safety
 

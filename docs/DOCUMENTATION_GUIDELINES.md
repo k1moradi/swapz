@@ -65,6 +65,13 @@
   inbound and outbound links in the same change. Recheck agent
   entry points, code/test readmes and workflow contracts. Never turn
   an old privileged example into a new permission to run it.
+- **README completeness:** every tracked Markdown file, including
+  root agent instructions, component-local documentation, archival
+  evidence, and `docs/README.md`, must have a **direct relative
+  Markdown link** in the root `README.md`. The complete directory is
+  grouped by status/topic; `docs/README.md` remains a curated index.
+  The `project-goals` workflow rejects missing README links when
+  documents are added, moved, or removed.
 - Review documentation as part of the existing `main`-only
   commit workflow: prefer small focused commits, report any
   blocked test honestly, and do not claim a run from a source edit.
