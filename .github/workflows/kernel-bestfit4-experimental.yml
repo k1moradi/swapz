@@ -1,14 +1,6 @@
-name: Default kernel C build and bestfit4 geometry
+name: Historical V2.2 kernel geometry (manual archival run)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'kernel/dm-swapz.c'
-      - 'kernel/Makefile'
-      - 'tests/runtime/kernel-bestfit4-geometry-test.py'
-      - 'dkms.conf'
-      - '.github/workflows/kernel-bestfit4-experimental.yml'
   workflow_dispatch:
 
 permissions:

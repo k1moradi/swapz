@@ -13,7 +13,7 @@ Our criterion is **fewer independently measured, host-visible lower-device READ 
 
 ## Implementation boundaries
 
-Default/frozen comparator: `kernel/dm-swapz.c`, V2.2 `SPWZ` format, root `Makefile`/`kernel/Makefile`/`dkms.conf`. Experimental non-production V3: `kernel/extent-v3/{dm-target,engine,authority,codec}.c`, incompatible `SWZ3` format and `swapz3` target. The two alternative modules share basename `dm-swapz.ko` and are **never loaded simultaneously**. Do not change the default module, physical format or V3's **null_blk-only** constructor admission without an explicit reviewed design and evidence; no in-place V2.2-to-V3 migration or hibernation support exists.
+**V3 is the only active source target on `main`:** `kernel/extent-v3/{dm-target,engine,authority,codec}.c`, `SWZ3` format, `swapz3` DM target. The root `Makefile` builds this V3 module by default, and `dkms.conf` packages it with `AUTOINSTALL="no"`. This is a **development build default, NOT production readiness**. V3 remains **null_blk-only** and no real swap/physical media may be used. Retired V2.2 `kernel/dm-swapz.c`/`SPWZ` is archival source, not an optimization target, default build or benchmark comparator. Never activate both modules together or interpret this change as an in-place format migration.
 
 ### Non-negotiable BIO contracts
 
@@ -26,7 +26,7 @@ Default/frozen comparator: `kernel/dm-swapz.c`, V2.2 `SPWZ` format, root `Makefi
 7. **Compression:** V3 already calls LZ4 for the 4096B foreground page and stores **whole-page RAW fallback** if compressed output does not fit `SV3_MAX_COMPRESSED=3568`. The DM layer cannot infer original filename/type. Avoid an unsupported entropy/type prefilter; it could turn compressible pages into larger RAW writes and cannot by itself solve singleton write windows.
 8. **Resource accounting:** distinguish compression **attempts** from committed windows/bytes, and front-end `dm_io` calls from actual lower-device requests; avoid unexplained counters.
 
-Alpha.8 opt-in disjoint READ bypass remains an **experimental historical branch variant**, not current default V3: independent QD8 matched-rate measurements did not show a lower-write win. Preserve the negative findings in [benchmark.md](benchmark.md).
+Historical alpha.8 disjoint-read bypass did not establish a matched-load lower-I/O gain and is not active by default. Prior comparisons are archival diagnostic evidence, not a requirement to benchmark V2.2.
 
 ## Change workflow and review gate
 
@@ -37,3 +37,13 @@ Start from a real production C defect/bottleneck. Add a discriminating **direct-
 ## Absolute host safety
 
 Never reboot, `swapoff` or `swapon`. Never touch `/dev/sdb1`, `/swapfile`, active swap, physical storage, unrelated DM targets or unowned null_blk. Host tests require exactly owned, uniquely identified **RAM-backed null_blk**, verified major/minor, table UUID and holders, safe ordinary teardown, and quarantine if unresolved I/O remains. Real media experiments are separate owner-authorized future work. Source CI and null_blk results are not physical wear evidence.
+
+## Current V3 development focus (after retirement of V2.2)
+
+Prioritize the **C-level singleton write-window bottleneck**, physical
+extent geometry, actual on-device write-byte/request reduction versus
+uncompressed direct I/O, correct GC accounting, and completion-safe
+read/write dependencies. Compression of a 4096B page to about 2048B
+must be validated by actual LZ4 output measurements; it is not proof
+of a 2048B lower-device write. Fail-closed publication and null_blk-only
+safety still precede any optimization.

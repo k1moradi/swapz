@@ -44,22 +44,22 @@ Any byte mismatch, double/lost completion, authority violation, unsafe GC reuse,
 
 - `.github/workflows/project-goals.yml` on `main` runs native C/C++ tests, userspace build, one-build-root and documentation governance.
 - `.github/workflows/extent-v3-codec.yml` runs actual-C and source gates and V3 W=1/W=2 kernel builds.
-- `.github/workflows/kernel-bestfit4-experimental.yml` compiles stable module and checks geometry; rootless combined/teardown/kernel-source workflows protect existing cases.
+- `.github/workflows/kernel-bestfit4-experimental.yml` and the old V2.2 combined-rootless workflow are **manual archival reproductions only**. Active required gates are V3 exact-source/native C, kernel compile and general teardown safety.
 - A code/build/test/CI change must update a **relevant one of the four current standards** in the same `main` commit; add `README.md`/`VISION.md` when their content changes. Document the failure before repair and rerun at the **final exact HEAD**.
 
 Do not infer green workflow status from the previous commit. A compiler-only success does not qualify a newly changed kernel target as loaded safe.
 
 ## Controlled loaded-kernel preflight (no exceptions)
 
-Capture `/proc/swaps`, mounts, lsblk/DM holders and exact module identity; only use a **newly owned, verified memory-backed `null_blk`** test instance. Ensure matching expected major/minor, DM UUID/table, no mounts/active swap. Load V2.2 and V3 **sequentially**, never together (same `dm-swapz.ko`). Do **not** touch `/dev/sdb1`, `/swapfile`, active swap, any physical/unowned device, unrelated DM or system swap/zswap; never reboot, `swapoff`/`swapon`, global failure inject or force teardown. If a hung BIO/holder cannot be safely removed, quarantine test ownership and mark BLOCKED.
+Capture `/proc/swaps`, mounts, lsblk/DM holders and exact module identity; only use a **newly owned, verified memory-backed `null_blk`** test instance. Ensure matching expected major/minor, DM UUID/table, no mounts/active swap. Load only the **V3** module for active qualification; the retired V2.2 target is not part of test/benchmark gates. Do **not** touch `/dev/sdb1`, `/swapfile`, active swap, any physical/unowned device, unrelated DM or system swap/zswap; never reboot, `swapoff`/`swapon`, global failure inject or force teardown. If a hung BIO/holder cannot be safely removed, quarantine test ownership and mark BLOCKED.
 
 ## Same workload and realistic source pages
 
-For benchmarking and comparative correctness, feed *identical* immutable 4KiB fixtures and logical trace (offsets, op ordering, read generations, warmup, QD, achieved work) to bare null_blk "off", frozen V2.2 and experimental V3, and verify **full final logical image**. Rootless scratch-file labels do not prove a V2.2/V3 kernel run. Report fixture/trace/write-stream hashes and actual measured LZ4 sizes. Make compressible **anonymous** heap/stack/COW/text-buffer/decoded-raster/zeros the primary synthetic hypothesis, moderate-entropy controls and incompressible cases separately. Clean file-backed ELF/source/image pages may never enter swap; synthetic weights are not measured real-world swap population. See [benchmark.md](benchmark.md).
+For benchmarking and comparative correctness, feed *identical* immutable 4KiB fixtures and logical trace (offsets, op ordering, read generations, warmup, QD, achieved work) to bare owned null_blk "off" and experimental V3, and verify **full final logical image**. Rootless scratch-file labels do not prove a loaded V3 kernel run. Report fixture/trace/write-stream hashes and actual measured LZ4 sizes. Make compressible **anonymous** heap/stack/COW/text-buffer/decoded-raster/zeros the primary synthetic hypothesis, moderate-entropy controls and incompressible cases separately. Clean file-backed ELF/source/image pages may never enter swap; synthetic weights are not measured real-world swap population. See [benchmark.md](benchmark.md).
 
 ## Known gaps (do not overclaim)
 
-As of consolidation, the **loaded three-way immutable-trace comparison has NOT been performed**. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Older reports, `PRODUCTION_READINESS.md` and historical `CODEX_VALIDATION.md` preserve detailed provenance, **not new test requirements**.
+As of consolidation, the **loaded off-versus-V3 immutable-trace comparison has NOT been performed**. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Older reports, `PRODUCTION_READINESS.md` and historical `CODEX_VALIDATION.md` preserve detailed provenance, **not new test requirements**.
 
 At the end of each implementation task, update this or another of the four standards with learned results, exact tests and PASS/FAIL/BLOCKED, while preserving separate versioned raw report evidence on `main`.
 
@@ -76,3 +76,13 @@ changes do not require a separate implementation commit. This is a
 mechanical check of **where the learning is recorded**, not a validator
 of semantic truth, tested runtime behavior or external agent prompt
 compliance.
+
+## Active V3-only default gates
+
+`make test` runs V3 native C suites without the retired C++ model; the
+latter is retained for explicit historical reproduction only.
+`python3 -B tests/runtime/io-replay-test.py -v` verifies the
+**two-arm** off/V3 oracle including bad-input rejection in safe rootless
+files. Benchmarks require an actual loaded V3 module before claiming
+performance. Regressions focus on 2:1-ish **measured** LZ4 inputs, raw
+fallback, 4KiB/8KiB/16KiB packing, GC and same-page read ordering.

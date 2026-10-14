@@ -137,9 +137,9 @@ correctness/geometry evidence, but are **not** lower-device measurements.
 For instance, the modeled 16 x 2,072 B example (65,536 B old layout versus
 40,960 B V3) is an encouraging hypothesis, **not an SD-card benchmark**.
 
-## 5. What makes a comparison trustworthy
+## 5. What makes an uncompressed-baseline versus V3 comparison trustworthy
 
-A qualified V2.2-versus-V3 benchmark must have:
+A qualified V3 performance comparison must use **bare, owned RAM-backed null_blk** (no compression) versus **V3 on an equivalent owned RAM-backed null_blk**, with:
 
 - **The exact same logical workload:** input pages, actual LZ4 compressed
   payload-size histogram, random seeds, logical capacity, read/write mix,
@@ -200,8 +200,11 @@ reduction is **not a win**.
 No universal “X% fewer I/Os” or guaranteed flash-endurance number is
 assumed in advance. Define the baseline and acceptable latency/CPU guardrails
 **before** seeing experimental results. Preserve the best Pareto-efficient
-policy for each verified device class, and retain V2.2 as the control until
-V3 conclusively earns replacement.
+policy for each verified device class. The active control is uncompressed,
+byte-identical logical I/O to a safely owned RAM-backed null_blk; V2.2
+is retired and does not enter new benchmark gates. Physical-media
+validation stays separately owner-authorized and out of scope for the
+current null_blk-only V3 source.
 
 ## 7. What this means for development priorities
 

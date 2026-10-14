@@ -5,8 +5,7 @@
 
 # Reusable native kernel-C regression suites
 
-From repository root use `make test` for the C++ model and native
-production-C suites, or `make test-codec`, `make test-mapping`,
+From repository root use `make test` for native V3 production-C suites, or `make test-codec`, `make test-mapping`,
 `make test-gc`, `make test-lower-io` for one concern. All native
 executables are compiled under **`build/tests/native/`** and reused
 on the next run. They link to **the actual**
@@ -33,3 +32,6 @@ or `null_blk` module loading. See
 [project vision](../../VISION.md),
 [build conventions](../../docs/BUILD_AND_TEST_CONVENTIONS.md)
 and [readiness ledger](../../PRODUCTION_READINESS.md).
+
+The historical C++ model is no longer a default V3 test gate; invoke
+`make -C tests legacy-model` only for archival reproduction.

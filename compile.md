@@ -1,65 +1,82 @@
-# Compile — Build and Workspace Standards
+# Compile — V3-only Active Build
 
-**Authoritative build policy.** Agents read [README](README.md), [VISION](VISION.md), [coding_standards.md](coding_standards.md), [testing_standards.md](testing_standards.md), and [benchmark.md](benchmark.md) **at the start of every task**.
+**Required per-task context:** [README.md](README.md), [VISION.md](VISION.md),
+[coding_standards.md](coding_standards.md),
+[testing_standards.md](testing_standards.md), [compile.md](compile.md),
+and [benchmark.md](benchmark.md). Work on **main only**.
 
-## Why Make/Kbuild, not CMake?
+## One active module: V3.0.0-alpha.7
 
-Linux external **kernel modules require Kbuild** to match the running/target kernel's module symbols, flags, compiler conventions and header tree. The normal interface is `make -C <kernel build> M=<external source/stage> modules`. CMake does not replace that and would add redundant orchestration/output directories. The existing thin Make wrappers also handle userspace C++ and test compilation. Do not introduce a parallel CMake build unless explicitly authorized. See [Linux Kbuild documentation](https://docs.kernel.org/kbuild/modules.html).
+`make` or `make v3` builds **only the V3 Device Mapper `swapz3`
+module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
+module compilation is controlled by the kernel's headers, compiler flags,
+symbol versions and module link process, so CMake cannot replace Kbuild.
 
-## Exactly one persistent generated-artifact folder
+All generated software artifacts belong under the **one persistent
+`~/swapz/build/` folder**, reused between tasks:
 
-The **only** compiled-output root is `~/swapz/build/`, or equivalently `$(git rev-parse --show-toplevel)/build/` when checkout path differs. Reuse it for every task. Categorized children are not additional build roots:
-
-| Build target | Relative compiled artifact |
+| Output | Location |
 |---|---|
-| Default/frozen V2.2 module | `build/kernel/stable/dm-swapz.ko` |
-| Experimental V3 Device Mapper | `build/kernel/experimental/dm-swapz.ko` |
-| Research/smoke V3 variant | `build/kernel/research/swapz_extent_v3.ko` |
-| Direct-production-C native tests | `build/tests/native/` |
-| C++ model test | `build/tests/model/swapz-model-tests` |
-| C++ userspace utility | `build/userspace/swapzctl` |
-| Optional Python bytecode | `build/python-cache/` |
+| Active/default V3 module | `build/kernel/experimental/dm-swapz.ko` |
+| V3 research smoke | `build/kernel/research/swapz_extent_v3.ko` |
+| Native kernel C test binaries | `build/tests/native/` |
+| Optional userspace test cache | `build/python-cache/` |
+| Archival V2.2 module (only if explicitly requested) | `build/kernel/stable/dm-swapz.ko` |
 
-Kbuild source files are refreshed/staged inside the matching `build/kernel/*` folder before compilation because some old kernel versions lack `MO=`. Never leave generated .o/.ko/module/link objects in the source directories, create `build-debug/`, `tests/build/`, `cmake-build-*`, or compile software under `/tmp`. Benchmark data/test-owned backing-file fixtures are **not compile outputs**; keep independently hashed evidence without deleting other agents' files.
+V3 source: `kernel/extent-v3/{dm-target,engine,authority,codec}.c`.
+Kbuild stages source in `build/kernel/experimental` (for older kernel
+header compatibility) and writes object/`*.ko` there. `dkms.conf`
+now identifies **V3 alpha.7** with **`AUTOINSTALL="no"`** to prevent
+automatic installation of an experimental module. Even a manual DKMS
+build or a successful compile is **NOT permission** to enable system
+swap, bypass the null_blk-only guard, or load on physical media.
 
-The root `Makefile` and `dkms.conf` select V2.2 by default, package version `0.2.2`, built module location `build/kernel/stable`. V3 is experimental and has incompatible SWZ3 format; both targets produce basename `dm-swapz.ko` and **must not be loaded concurrently**. The root `/build/` path is ignored by Git. `make clean` removes only defined generated artifacts, **not the whole build root**; never use blind `git clean`/hard reset.
+## Commands
 
-## Reproducible build commands
-
-~~~sh
+```sh
 cd ~/swapz
-git branch --show-current     # must be main; preserve dirty work
-git status --short
-mkdir -p build
-make KDIR="/lib/modules/$(uname -r)/build"          # stable module + userspace
-make experimental-kernel KDIR="/lib/modules/$(uname -r)/build"
-make -C kernel/extent-v3 KDIR="/lib/modules/$(uname -r)/build" SV3_BUILD_SMOKE=1
-make test                   # C++ model + 14 production-C native tests
+make KDIR="/lib/modules/$(uname -r)/build"
+make v3 KDIR="/lib/modules/$(uname -r)/build"
+make test                # V3 native production-C suites
 make test-codec
 make test-mapping
 make test-gc
 make test-lower-io
-~~~
+make v3-smoke KDIR="/lib/modules/$(uname -r)/build"
+```
 
-For the target kernel headers and compiler, run warnings and verify module provenance:
+For compile qualification:
 
-~~~sh
+```sh
 KDIR="/lib/modules/$(uname -r)/build"
-make -C kernel KDIR="$KDIR" W=1
 make -C kernel/extent-v3 KDIR="$KDIR" W=1
 make -C kernel/extent-v3 KDIR="$KDIR" W=2
-# Optional when kernel/toolchain supports LLVM:
-make -C kernel KDIR="$KDIR" W=1 LLVM=1
-sha256sum build/kernel/stable/dm-swapz.ko build/kernel/experimental/dm-swapz.ko
+sha256sum build/kernel/experimental/dm-swapz.ko
 modinfo build/kernel/experimental/dm-swapz.ko
-~~~
+```
 
-Build only against known matching headers/vermagic; a compiler success on one host is not evidence a module ran on a different kernel. Track exact `git rev-parse HEAD`, input production-C blob, compiler, KDIR, target source stage and binary SHA. Never mask W=1/W=2 failures by disabling checks. GCC/Clang sanitizer and exact-C qualification are separate from loaded tests.
+`make legacy-v22` and `make userspace-legacy` exist **only to preserve
+reproducibility of historical code**, not to validate current V3. The
+old system-`swapzctl` interface is not V3. No second build directory,
+`swapon`, `swapoff`, reboot, physical/unowned block access or forced
+teardown is permitted. `make clean` removes only known compiled targets.
 
-## CI and task hygiene
+## Automated build/qualification gates
 
-`.github/workflows/project-goals.yml` runs the reusable actual-C/C++ tests and userspace build, checks one-build-root output and documentation co-change. `.github/workflows/extent-v3-codec.yml` checks V3 actual-C/source and kernel W=1/W=2 build; `.github/workflows/kernel-bestfit4-experimental.yml` compiles stable kernel and checks source geometry. Existing rootless source/teardown workflows remain separate. All are scoped to `main`.
+`.github/workflows/extent-v3-codec.yml`: real V3 production-C
+source/sanitizer contracts and W=1/W=2 builds.
+`.github/workflows/project-goals.yml`: V3 native C and two-arm
+off/V3 fixture/oracle tests; same-commit standards updates and build
+hygiene. Old V2.2 CI workflows are manual-only archives. See
+[testing_standards.md](testing_standards.md) for actual loaded-kernel
+gates. Module build PASS ≠ loaded/physical performance.
 
-At the end of every implementation prompt: update at least one of the **four governing standards in the same commit**, include new build practices/warnings and verified results, update `README.md` if user-facing commands changed, `VISION.md` if success criteria changed, and report SHA and CI. CI cannot independently guarantee that prose is truthful.
+## Why retire the old default?
 
-**Legacy limitation:** several archival shell/Python test helpers still compile under source directories or `/tmp`; that history is not a license to violate this standard. Migrate those helpers only with test parity and safe review. Do not delete an entire shared build directory or unrelated outputs.
+The user has withdrawn V2.2 from active development because its
+compression behavior did not meet project requirements at roughly
+50% compressibility. This is a **product-priority decision**, not a
+new independently measured benchmark claim. Keep historical Git
+provenance without requiring V2.2 builds or fresh comparisons. Spend
+ongoing engineering effort on safe V3 kernel C and actual reduced
+lower bytes and requests.

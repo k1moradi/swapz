@@ -134,12 +134,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertGreater(info["lz4_accepted_payload_bytes"], 0)
         self.assertGreater(info["raw_pages"], 0)
 
-    def test_identical_three_way_replay_contract(self):
+    def test_identical_off_v3_replay_contract(self):
         # Rootless regular files exercise the immutable plan and full-image
-        # oracle. They do NOT claim loaded V2.2 or V3 module testing.
+        # oracle. They do NOT claim a loaded V3 module test.
         import subprocess
         import sys
-        script = ROOT / "tests/runtime/threeway-swap-replay-test.py"
+        script = ROOT / "tests/runtime/io-replay-test.py"
         result = subprocess.run([sys.executable, str(script)],
                                 capture_output=True, text=True, timeout=40)
         self.assertEqual(result.returncode, 0,

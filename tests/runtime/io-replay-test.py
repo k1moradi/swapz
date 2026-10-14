@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rootless proof that all three labels replay one exact immutable I/O plan.
+"""Rootless proof that both labels replay one exact immutable I/O plan.
 
-This does NOT load V2.2/V3 modules: same regular-file replay code tests only
-the trace contract, oracle, safety guard and fail-closed triplet comparator.
+This does NOT load V3 module: same regular-file replay code tests only
+the trace contract, oracle, safety guard and fail-closed pair comparator.
 """
 import json
 import os
@@ -14,10 +14,10 @@ import unittest
 from pathlib import Path
 
 PAGE = 4096
-SCRIPT = Path(__file__).with_name("threeway-swap-replay.py")
+SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
-class ThreeWayReplayContract(unittest.TestCase):
+class PairReplayContract(unittest.TestCase):
     def run_cmd(self, *args, success=True):
         run = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
                              capture_output=True, text=True, timeout=30)
@@ -27,7 +27,7 @@ class ThreeWayReplayContract(unittest.TestCase):
             self.assertNotEqual(run.returncode, 0, repr(args))
         return run
 
-    def test_threeway_exact_bytes_and_ordered_wave_oracle(self):
+    def test_pair_exact_bytes_and_ordered_wave_oracle(self):
         for layout in ("disjoint", "same-region"):
             with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temp:
                 root = Path(temp)
@@ -52,7 +52,7 @@ class ThreeWayReplayContract(unittest.TestCase):
                 self.assertEqual(manifest["fixture_pages"], 16)
                 self.assertEqual(manifest["measure_ops"], 128)
                 reports = []
-                for candidate in ("off", "v22", "v3"):
+                for candidate in ("off", "v3"):
                     path = root / f"swapz-replay-{candidate}.bin"
                     with path.open("wb") as handle:
                         handle.truncate(64 * PAGE)
@@ -71,7 +71,7 @@ class ThreeWayReplayContract(unittest.TestCase):
                 self.assertEqual(result["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT")
                 self.assertEqual(result["fixture_sha256"], manifest["fixture_sha256"])
                 self.assertEqual(result["trace_sha256"], manifest["trace_sha256"])
-                self.assertEqual(len(result["results"]), 3)
+                self.assertEqual(len(result["results"]), 2)
                 expected = manifest["expected_post_sha256"]
                 for report_path in reports:
                     record = json.loads(report_path.read_text())
@@ -80,7 +80,7 @@ class ThreeWayReplayContract(unittest.TestCase):
                     self.assertEqual(record["warmup_ops"], 32)
                     self.assertEqual(record["verified_pages"], 64)
                     self.assertEqual(record["verdict"], "PASS")
-                # Fail-closed: altered trace provenance makes triplet invalid.
+                # Fail-closed: altered trace provenance makes pair invalid.
                 tampered = json.loads(reports[0].read_text())
                 tampered["write_payload_stream_sha256"] = "0" * 64
                 reports[0].write_text(json.dumps(tampered) + "\n")

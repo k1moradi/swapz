@@ -28,11 +28,9 @@ jobs:
         run: |
           set -euo pipefail
           make -C tests test
-          make -C userspace all
-          test -x build/userspace/swapzctl
+          python3 -B tests/runtime/io-replay-test.py -v
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
-          test -x build/tests/model/swapz-model-tests
       - name: Require canonical standards and relevant same-commit learning
         shell: bash
         run: |
@@ -68,5 +66,5 @@ jobs:
           fi
           test -d build
           git diff --check
-          test -x build/userspace/swapzctl
-          echo "NATIVE_KERNEL_C_AND_CPP_ARTIFACTS_REUSED_UNDER_BUILD_PASS"
+          test -x build/tests/native/codec-roundtrip
+          echo "V3_KERNEL_C_AND_IO_REPLAY_BUILD_TIDINESS_PASS"

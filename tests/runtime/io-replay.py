@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Immutable trace preparation and owned-device replay for off/V2.2/V3.
+"""Immutable trace preparation and owned-device replay for off/V3.
 
 Synthetic BLOCK-PATH experiment, not Linux's actual swapon reclaim policy.
 Generation and rootless replay need no privilege. Block replay refuses unowned
 or physical storage and must be run only on preflighted RAM null_blk targets.
-All arms consume the identical fixture and ordered logical I/O trace.
+Both arms consume the identical fixture and ordered logical I/O trace.
 """
 import argparse
 import concurrent.futures
@@ -23,7 +23,7 @@ from pathlib import Path
 
 PAGE = 4096
 SCHEMA = 1
-CANDIDATES = ("off", "v22", "v3")
+CANDIDATES = ("off", "v3")
 
 
 def sha(data):
@@ -221,7 +221,7 @@ def check_owned_block(path, st, candidate, args, logical_pages):
         got = subprocess.run(["dmsetup", "table", dm_name],
                              check=True, capture_output=True, text=True,
                              timeout=10).stdout.strip().split()
-        want_type = "swapz" if candidate == "v22" else "swapz3"
+        want_type = "swapz3"
         if len(got) < 4 or got[:4] != [
             "0", str(logical_pages * PAGE // 512), want_type, null_dev
         ]:
@@ -454,8 +454,8 @@ def replay(args):
 
 def compare(args):
     entries = [safe_load(name) for name in args.reports]
-    if set(x["candidate"] for x in entries) != set(CANDIDATES) or len(entries) != 3:
-        raise ValueError("exactly one off, v22 and v3 result required")
+    if set(x["candidate"] for x in entries) != set(CANDIDATES) or len(entries) != 2:
+        raise ValueError("exactly one off and one v3 result required")
     immutable = ("fixture_sha256", "trace_sha256", "write_payload_stream_sha256",
                  "prefill_sha256", "expected_post_sha256", "manifest_sha256",
                  "qd", "layout", "seed", "iops_requested", "warmup_ops",
@@ -515,7 +515,7 @@ def main():
     run.add_argument("--expected-lower-dev")
     run.add_argument("--expected-dm-uuid")
     cmp = sub.add_parser("compare", help="fail closed unless all logical inputs match")
-    cmp.add_argument("--reports", nargs=3, required=True)
+    cmp.add_argument("--reports", nargs=2, required=True)
     args = ap.parse_args()
     try:
         if args.command == "prepare":

@@ -7,7 +7,7 @@ BUILD := $(ROOT)/build/tests/model
 MODEL := $(BUILD)/swapz-model-tests
 
 .PHONY: all test test-model test-native clean
-all: $(MODEL)
+all: test-native
 
 $(BUILD):
 	@mkdir -p "$@"
@@ -21,8 +21,11 @@ test-model: $(MODEL)
 test-native:
 	$(MAKE) -C suites test-all
 
-test: test-model test-native
+test: test-native
 
 clean:
 	@rm -f "$(MODEL)"
 	$(MAKE) -C suites clean
+
+# Explicit historical model reproduction only, not the V3 default test.
+legacy-model: test-model

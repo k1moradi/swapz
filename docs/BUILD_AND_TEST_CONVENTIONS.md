@@ -13,7 +13,7 @@ Build and test policy is now in `compile.md` and
 `testing_standards.md`: one `~/swapz/build/` reused for all compiled
 outputs; Kbuild/Make; rootless production-C suites, safe owned
 null_blk loaded validation; main-only development; exact equal-data
-off/V2.2/V3 comparisons and same-commit documentation updates.
+off/V3 comparisons and same-commit documentation updates.
 
 The previous detailed text remains retrievable in this file's Git
 history, but is **not a seventh current standards document**.

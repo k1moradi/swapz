@@ -10,7 +10,7 @@ It is a **bootstrap**, not a seventh independent source of engineering policy.
 3. [coding_standards.md](coding_standards.md) — Git, kernel C, invariants, safety
 4. [testing_standards.md](testing_standards.md) — qualification and test contracts
 5. [compile.md](compile.md) — Make/Kbuild, one reused `~/swapz/build/`
-6. [benchmark.md](benchmark.md) — identical three-way data and real measurements
+6. [benchmark.md](benchmark.md) — identical off/V3 data and real measurements
 
 **Only `main`:** no new branches, branch-backed worktrees or draft PRs
 unless the repository owner explicitly authorizes an exception. Never

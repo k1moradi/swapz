@@ -1,437 +1,95 @@
-# swapz — V2.2 default and experimental V3 kernel target
+# swapz — V3 kernel development on main
 
-> **Agent development policy:** [AGENTS.md](AGENTS.md) is mandatory
-> for ChatGPT, Codex, Copilot and other coding agents. **Only `main`**;
-> **no new branches or PR branches** without an explicit owner request.
-> **More than 50% of ongoing engineering time must be spent developing
-> the actual kernel module in C**, including implementation, debugging,
-> profiling and review. C++ native tests and small Python/shell helpers
-> support kernel development; they do not replace it. Preserve V2.2 as
-> default and respect all loaded-device/active-swap safety gates.
->
-> **Project vision:** the ultimate success criterion is **less measured
-> lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
-> swap workload**: independent read and write **BYTES and REQUEST COUNTS**,
-> including GC, with acceptable swap-in latency and CPU. **4KiB is our
-> current format unit, not the native I/O size of every 512n, 512e or 4Kn
-> device**. Green CI and simulated compression ratios do NOT prove a win.
+**V3 is the project's only active implementation target.** Its
+`swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
+4/8/16KiB extent packing to seek fewer **actual lower-device write/read
+bytes and requests** for useful, verified 4KiB swap-page I/O. Current
+revision: **3.0.0-alpha.7, experimental, NOT production-ready**.
+V3 deliberately rejects all backing devices except controlled `null_blk`
+until loaded correctness and resource-performance gates are satisfied.
 
-## Start here — six authoritative documents
+The former V2.2 implementation did not meet the project's compression
+expectations and has been **retired from active development, default
+builds, test suites, and benchmarks**. Its source, old tests, and
+measurements remain archived in Git history for provenance only.
+No V2.2 comparison is required before improving V3.
 
-At the beginning of **every agent task**, read all six on current `main`:
+## Start every agent task with these six authoritative documents
 
 | Document | Purpose |
 |---|---|
-| [README.md](README.md) | Project entry point, status, user-facing commands |
-| [VISION.md](VISION.md) | North-star goal and acceptance criterion |
-| [coding_standards.md](coding_standards.md) | Kernel-C-first engineering, Git and safety |
-| [testing_standards.md](testing_standards.md) | Native C test suites, CI and release gates |
-| [compile.md](compile.md) | Make/Kbuild and only one `~/swapz/build/` directory |
-| [benchmark.md](benchmark.md) | Identical 4KiB inputs; real lower requests/bytes |
+| [README.md](README.md) | Active V3 scope and commands |
+| [VISION.md](VISION.md) | Measured lower-I/O outcome and release criteria |
+| [coding_standards.md](coding_standards.md) | Kernel C, invariants, main-only collaboration |
+| [testing_standards.md](testing_standards.md) | Production-C test and fault coverage |
+| [compile.md](compile.md) | Kbuild/Make and only one reused `~/swapz/build/` |
+| [benchmark.md](benchmark.md) | Same-data **uncompressed baseline vs V3** evidence |
 
-The **four standards** are the ONLY current engineering-policy homes;
-historical reports retain evidence, not additional rules. Agents work
-only on `main`, spend more than half of ongoing development effort on
-actual kernel module C, use the one build root, and update a relevant
-standard **in the same commit** as each implementation. Update README
-for user-facing changes and VISION if goals change.
+**One Git branch: `main`**, no new branches unless expressly authorized.
+More than 50% of ongoing engineering effort belongs to the
+**production Linux kernel module's C**. At the end of each implementation,
+update the relevant standard in the same commit and run goal-aligned CI.
 
-**Production readiness is not established.** See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the exact loaded-kernel, FUA, GC, V2.2 control and physical-media release gates.
+## Build and test (rootless compilation only)
 
-Read [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) for Linux swap pages,
-512n/512e/4Kn sectors, swap partitions versus swap files, filesystem
-clusters and 512-byte block-stat accounting; read
-[PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md) to distinguish real
-packing improvements from singleton-window limits, GC write amplification,
-coding bugs and the missing physical-media benchmark.
-
-Read [VISION.md](VISION.md) for the detailed definition of real I/O savings,
-the difference between 4 KiB-equivalent transferred blocks and request
-counts, read/write/GC tradeoffs, evidence requirements, and go/no-go rules.
-[V3_GOALS.md](V3_GOALS.md) defines the active technical milestones and
-version decision.
-
-The **active implementation direction** is zsmalloc-inspired object-size
-classification, bounded reordering, 4 KiB-first packing, aligned 8/16 KiB
-extents when useful, and live-only size-classed compaction.
-
-**V3.0.0-alpha.6 lower-I/O aggregation experiment:** [main-developer PR #54](https://github.com/k1moradi/swapz/pull/54)
-addresses a **negative measured default-V3 result** in the independent
-[alpha.5 loaded V2.2 comparison](https://github.com/k1moradi/swapz/pull/53):
-V2.2 wrote 1,679,360 B in 26 write requests, while V3 default
-wrote 1,716,224 B in **419 engine submissions / 420 actual backing requests**
-for the same 1024 logical 4KiB writes. Thus alpha.5 had **2.2% MORE
-write bytes and ~16× MORE write requests**, not the project vision's
-required reduction. No sustained V2.2 win or SD-card improvement is
-established.
-
-The new exact kernel C batches independently CRC-valid 4/8/16KiB
-SWZ3 extents into up to **256KiB synchronous contiguous lower writes**,
-without publishing any mapping before complete lower I/O. The
-same-binary table option `lower_bulk=0` preserves the old per-extent
-control; **`lower_bulk=1` defaults to adjacent-only writes with
-ZERO extra padding bytes**, while `lower_bulk=2` explicitly allows
-measured padding bytes in exchange for possible request reduction.
-This also applies to GC-compressed writes; raw pages stay unchanged.
-Exact-C and kernel CI are safety evidence, NOT proof of actual block
-request reduction. See [LOWER_WRITE_AGGREGATION.md](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md)
-for mandatory source/bin hashes, fault/segment tests, **matched same-binary
-and real V2.2 loaded comparison**, latency, GC and lower sysfs I/O accounting.
-The constructor remains **null_blk-only**; no active SD card or system
-swap may be modified and no reboot is allowed.
-
-**Prior V3.0.0-alpha.5 correctness baseline:** [PR #52](https://github.com/k1moradi/swapz/pull/52)
-retains the real `dm-swapz.ko` online packing path from [PR #49](https://github.com/k1moradi/swapz/pull/49)
-and the verified rotating reserve GC from [PR #50](https://github.com/k1moradi/swapz/pull/50).
-The optional 0–4ms coalescing interval (default zero) can collect
-compatible write records before size-aware packing, while reads and
-flush/FUA barriers bypass the wait.
-
-After an independent loaded `null_blk` study found that choosing fewer
-compressed survivor bytes could DOUBLE GC read+write transfer volume,
-the collector now defaults to **`gc=2`**, an estimated lower read +
-relocation cost. `gc=0` (live record count) and `gc=1` (live bytes)
-remain for honest matched tests. The collector rejects victims whose
-authoritative survivor bytes cannot possibly leave usable free space.
-A valid standalone Linux upper cache-flush BIO is **empty
-`REQ_OP_WRITE|REQ_PREFLUSH`**, not `REQ_OP_FLUSH` (the latter is
-internal to the block request layer). All lower-flush calls and
-failure outcomes are metered, with default-off **null_blk-only alpha
-fault injection** to qualify upper completion and failure propagation.
-
-These are production-code experiments, **not** proven SD/SSD/HDD
-savings or permission to deploy as swap. See
-[kernel/extent-v3/ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
-and [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) before testing.
-
-A separate experimental Device Mapper target, `swapz3`
-(`kernel/extent-v3/dm-swapz.ko`, **not** the frozen V2.2 module in `kernel/`), is being developed for LZ4
-4 KiB logical pages, bounded size-compatible 4 KiB packing and aligned
-8/16 KiB extents to remove the uniform ~2,072-byte compression cliff.
-**Prior alpha.4 and alpha.5 GC rotations DID pass bounded
-independent null_blk loaded tests, but the new alpha.6 batching,
-failure behavior, sustained performance and physical-media savings
-are NOT validated. Do not use for system swap, SD-card benchmarking,
-or unattended activation.** The target deliberately accepts
-owned `null_blk` backing only. Rootless tests and kernel compilation do
-not establish loaded-target correctness or physical-media improvement.
-
-**V2.2 below is preserved as the matched control**, not the active algorithm
-roadmap. Its `dm-swapz.ko`, on-disk `SPWZ` and DKMS `0.2.2` identifiers
-remain distinct from V3 `SWZ3`. No in-place upgrade is supported.
-Persistent hibernation moves to a future separately qualified V4 milestone.
-
----
-
-# swapz V2.2 (streaming experiment)
-
-`swapz` is an experimental Device Mapper target for **dedicated swap partitions on slow storage**.  It targets old HDDs, USB flash drives, SD/eMMC media, and SATA SSDs where storage bandwidth and flash write endurance matter more than high queue-depth NVMe throughput.
-
-The V2.2 hypothesis is intentionally narrow:
-
-> LZ4-compress 4 KiB swap pages immediately, keep at most two bounded preallocated stream buffers, overlap compression/packing with one asynchronous lower write, and submit whatever is ready instead of sleeping to fill a batch. In staged mode, compressed upper writes may complete from the RAM buffer before disk submission so reclaim can release the original page sooner; swap-in can read directly from either filling or in-flight RAM buffer.
-
-This is a proof-of-concept, not production storage software. V2.1 is the last software-validated baseline. V2.2 is an unvalidated experiment for comparing immediate, opportunistic streaming, and staged streaming policies plus the throughput/latency batch-size plateau.
-
-## Project planning
-
-- [`ROADMAP.md`](ROADMAP.md) defines the version sequence, milestone boundaries, and exit criteria.
-- [`TODO.md`](TODO.md) is the actionable checklist for the current and future milestones.
-- [`VALIDATION.md`](VALIDATION.md) records completed evidence and validated baselines.
-- [`CODEX_VALIDATION.md`](CODEX_VALIDATION.md) is the active secondary-tester contract.
-
-Future roadmap entries are planning context, not authorization to start them early.
-## V2.2 scope
-
-- Linux Device Mapper target name: `swapz`
-- module: `dm-swapz.ko`
-- **4 KiB PAGE_SIZE only**
-- dedicated block partition/device only
-- LZ4 only
-- one serialized `WQ_MEM_RECLAIM` worker for upper mapping/state changes
-- two preallocated stream buffers; at most one asynchronous lower write is in flight while the other buffer can fill
-- selectable policies: `immediate`, `opportunistic`, and `staged`
-- configurable batch ceiling from 4 KiB through 1 MiB; the benchmark chooses the plateau rather than assuming a fixed sweet spot
-- volatile in-RAM mapping plus generation/staged-reference metadata; no persistent metadata
-- compressed records are packed into 4 KiB physical containers; filling buffers can repack live unsent records before submission
-- raw 4 KiB fallback for pages that do not save at least 512 bytes with LZ4
-- append-only 1 MiB segments rotated over the backing device
-- per-block live-record accounting plus low-live victim-segment garbage collection
-- one FREE segment is maintained as GC reserve
-- GC scans the compact logical map but relocates only mappings resident in the chosen victim segment
-- upper discard is consumed internally when available
-- lower discard is auto-detected, optional, and permanently disabled after a runtime failure
-- hibernation/resume is intentionally deferred for V2.x; it is a required final-version milestone after correctness, performance, deployment, and persistence design are stable
-- encryption and swap-file backing are out of scope
-- NVMe/high-concurrency tuning is out of scope; the lower stream intentionally keeps physical queue depth near one while overlapping CPU work with device latency
-
-## Why the physical partition is larger than logical swap
-
-V2 requires at least **25% of logical capacity plus two 1 MiB segments** as physical GC reserve.  Compression is never required for capacity.
-
-`swapzctl` intentionally keeps the more conservative default of logical swap equal to one third of the backing device.  On SD/USB media, extra physical space means more append distance before a host-LBA region is reused.
-
-Example:
-
-```text
-12 GiB dedicated partition -> default ~4 GiB logical swapz device
-128 GiB SD partition       -> 16-32 GiB logical swap remains a useful endurance-oriented choice
+```sh
+cd ~/swapz
+make                             # builds active V3 ONLY; does not load it
+make test                        # native C V3 codec/mapping/GC/lower-I/O
+make test-codec
+make test-mapping
+make test-gc
+make test-lower-io
 ```
 
-V2.1 can operate with much less overprovisioning than V1, but conservative sizing is still recommended until physical-media benchmarks establish the best endurance/performance tradeoff.
-
-## Storage layout
-
-```text
-Linux swap 4 KiB logical writes
-        |
-        v
-      swapz worker
-        |
-        +-- LZ4 compress immediately
-        +-- pack compressed records / raw fallback
-        |
-        +--> Buffer A: lower write IN_FLIGHT
-        |
-        \--> Buffer B: FILLING concurrently
-                 |
-                 +-- read may be satisfied directly from RAM
-                 +-- discard/overwrite may invalidate an unsent record
-                 +-- repack live records before submission
-        |
-        v
-one asynchronous sequential lower write
-(up to configured 4 KiB..1 MiB ceiling)
-        |
-        v
-append-only current segment
-        |
-        v
-backing partition
-
-segment 0 -> segment 1 -> ... -> segment N; low-live closed segments are cleaned and reused
-```
-
-When a segment fills, allocation advances to a FREE segment.  When the reserve is consumed, only the live mappings in one low-live CLOSED segment are copied into the current segment and that victim becomes FREE.  All mappings are RAM-only and a reboot starts with an empty target.
-
-## Build
-
-Kernel headers and Device Mapper/LZ4 kernel support are required.
-
-```bash
-make
-```
-
-Or explicitly:
-
-```bash
-make -C kernel KDIR=/lib/modules/$(uname -r)/build W=1
-make -C userspace
-make -C tests test
-```
-
-V2.1 passed Linux 7.0.0-34 validation including model/sanitizer tests, randomized block tests, live-GC stress, fault injection, lifecycle testing, and bounded real swap pressure. V2.2 has not yet passed that gate. Its purpose is to determine whether overlapping compression with asynchronous lower I/O and bounded staged completion improves reclaim speed and reaches the real throughput/latency plateau.
-
-## DKMS
-
-From a source tree installed under `/usr/src/swapz-0.2.1`:
-
-```bash
-dkms add -m swapz -v 0.2.1
-dkms build -m swapz -v 0.2.1
-dkms install -m swapz -v 0.2.1
-```
-
-## Manual activation
-
-**The backing partition is scratch storage and will be overwritten.**
-
-```bash
-sudo modprobe dm-swapz
-sudo swapzctl start /dev/disk/by-partuuid/YOUR-PARTUUID --size 4G
-```
-
-`swapzctl` performs:
-
-1. checks that the backing device is a block device, not mounted, and not already active swap;
-2. creates `/dev/mapper/swapz0`;
-3. runs `mkswap -f` on the mapper device;
-4. tries `swapon --discard=pages` so Linux can tell `swapz` which logical pages are dead;
-5. falls back to ordinary `swapon` if page-discard activation is unavailable.
-
-Status:
-
-```bash
-sudo swapzctl status
-sudo dmsetup status swapz0
-```
-
-Stop:
-
-```bash
-sudo swapzctl stop
-```
-
-## DISCARD behavior
-
-Upper and lower discard are independent.
-
-```text
-Linux swap --discard=pages
-          |
-          v
-       swapz              always safe to consume internally
-          |
-          +---- backing DISCARD supported? ---- yes -> use after victim cleaning / before segment reuse
-          |                                  \\-- no -> sequential overwrite
-```
-
-The lower device is probed using its block queue limits.  A lower discard error does **not** fail swap I/O; `swapz` logs it once, disables lower discard for the lifetime of that target, and continues with ordinary sequential segment overwrite.
-
-Correctness never depends on lower DISCARD.
-
-If upper discard is unavailable, stale logical mappings remain conservatively live until overwritten.  This can increase victim-GC traffic but does not change correctness.
-
-## systemd
-
-Copy and edit:
-
-```bash
-sudo install -Dm0644 systemd/swapz.service /etc/systemd/system/swapz.service
-sudo install -Dm0644 systemd/swapz.conf.example /etc/swapz.conf
-sudo systemctl daemon-reload
-sudo systemctl enable --now swapz.service
-```
-
-Use a stable `/dev/disk/by-partuuid/...` device path in `/etc/swapz.conf`.
-
-## Testing
-
-See [`TESTING.md`](TESTING.md).  At minimum:
-
-```bash
-make test
-sudo ./scripts/loop-smoke.sh
-```
-
-The loop smoke test requires a kernel built for the installed module and uses a temporary 1 GiB loop device; it does not touch a real disk.
-
-For a secondary Codex/test-agent handoff, use [`CODEX_VALIDATION.md`](CODEX_VALIDATION.md).
-It defines the current V2 invariants, destructive-test safety rules, feature-detection/fallback
-requirements, benchmark metrics, and the exact report expected back for primary-fixer
-review.  The tester is intentionally not authorized to redesign or push substantive
-kernel changes.
-
-## V2.2 strategy experiment
-
-Device Mapper table syntax accepts optional policy and batch ceiling:
-
-```text
-0 <sectors> swapz <backing> [immediate|opportunistic|staged] [batch_kib]
-```
-
-Examples:
-
-```text
-... swapz /dev/loop0 immediate 4
-... swapz /dev/loop0 opportunistic 256
-... swapz /dev/loop0 staged 512
-```
-
-`immediate` is the no-streaming control. `opportunistic` overlaps one asynchronous lower
-write with filling the second buffer but does not early-complete compressed upper writes.
-`staged` additionally lets a compressed page become authoritative in the bounded RAM
-buffer before lower submission. Reads can be served from either filling or in-flight
-buffers. A READ does not free the swap slot; cancellation/repacking happens only after
-DISCARD or overwrite makes that generation stale.
-
-Run the controlled strategy/batch sweep on a kernel with configurable `null_blk`:
-
-```bash
-sudo bash tests/runtime/streaming-benchmark.sh
-```
-
-The sweep reports both upper-completion throughput and end-to-end physical drain throughput,
-plus concurrent read p95/p99/max. It defines the batch plateau as >=97% of the best observed
-drain throughput, then chooses the smallest plateau point whose read p99 is within 10% of
-the best latency inside that plateau.
-
-The analytical command-latency model is:
-
-```bash
-python3 bench/request-plateau.py --bandwidth 20
-```
-
-It exists only to determine how far upward the real sweep must go; measured `null_blk` and
-physical-device results decide the actual sweet spot.
-
-The staged-buffer race/cancellation regression is:
-
-```bash
-sudo bash tests/runtime/buffer-recall.sh
-```
-
-It covers reads from the in-flight buffer while the second fills, reads from the filling
-buffer while the first is being written, simultaneous reads from both, and invalidation of
-an unsent record before lower submission.
-
-## Optional size-aware synthetic NBD backend
-
-An experimental, opt-in RAM-backed NBD simulator can model serialized
-lower requests with size-aware transfer time, including 512 KiB and 1 MiB
-requests at nominal 20 MiB/s without null_blk's fixed per-tick token ceiling.
-It is **not yet runtime-qualified**, and it is not physical-media evidence.
-
-See [`docs/benchmarks/v2.2-size-aware-nbd.md`](docs/benchmarks/v2.2-size-aware-nbd.md)
-for the source-only selftest, explicit unused `/dev/nbdN` requirement, safe teardown,
-and staged calibration process. Existing null_blk remains the default backend.
-
-## Benchmarking
-
-The key success metric is **lower-device sectors written**, not LZ4 ratio.
-
-On a disposable dedicated test partition:
-
-```bash
-sudo ./bench/block-benchmark.sh \
-    --backing /dev/sdX3 \
-    --size 1G \
-    --runtime 60 \
-    --iodepth 8 \
-    --destroy
-```
-
-The benchmark runs a raw-device baseline, the same compressible workload through `swapz`, and an incompressible control.  It samples `/sys/class/block/<device>/stat` before/after each run.
-
-For the first SD/USB tests, run both `--iodepth 1` and `--iodepth 8`.  swapz gets host-byte reduction by **packing concurrently queued compressed pages into one 4 KiB write**, so QD1 is an important negative/control case rather than something to hide.
-
-## Important limitations
-
-- Do not use current V2.x `swapz` for hibernation/resume. Resume/hibernate support is deferred, not abandoned: it is planned as a final-version milestone once the core design is stable.
-- Do not put a filesystem on the mapper device.
-- Power-loss persistence is deliberately not provided; swap is recreated each boot.
-- V2.2 keeps at most one lower write in flight but pipelines CPU compression/packing with that write. This is intended for slow serialized devices and is not an NVMe design.
-- FUA-specific persistence semantics are not a V2 goal; the target is only intended for disposable swap data.
-- Segment GC can still pause foreground progress while a live victim is cleaned; V2.2 must measure GC latency together with staged-read and stream-drain latency.
-- Host-sector reduction is an endurance proxy.  Actual NAND write amplification is controlled by the device FTL and must be measured with device telemetry where available.
-
-## Final-version roadmap
-
-Resume and hibernation are **not in scope for V2.x**, but they are part of the intended
-final version of `swapz`.
-
-They are deliberately deferred until the volatile swap path has completed:
-
-1. correctness validation;
-2. streaming/performance tuning;
-3. physical-media qualification;
-4. deployment and boot integration;
-5. final persistent-state/resume architecture.
-
-The current volatile RAM-only mapping cannot by itself support resume after power loss or a
-normal reboot. Final hibernation support will therefore require an explicitly designed and
-validated persistence/resume format and boot-time activation path rather than simply
-placing the current module in initramfs.
-
-Until that final milestone is implemented and validated, current releases must continue to
-reject any claim of hibernation/resume support.
+Compiled V3: `build/kernel/experimental/dm-swapz.ko`. This is the
+**active/default build artifact**, retained in the sole reusable
+`~/swapz/build/` tree. The executable module is still
+**experimental**: "default build" is not permission to load it as
+system swap. `dkms.conf` now packages the V3 alpha source and sets
+`AUTOINSTALL="no"`; an installation, module insertion or user
+`swapon` is NOT part of this build workflow.
+
+The existing userspace `swapzctl` from the old generation is not a
+V3 activation interface. Do not follow old physical-disk, manual
+activation, DKMS autoinstall, swapoff/swapon or reboot instructions.
+
+## The active performance question
+
+**Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,
+for the exact same logical pages and operations, including GC, without
+compromising read p99, CPU/memory, ordering or data integrity?**
+
+Use the immutable fixture and two-arm replay:
+`tests/runtime/anon-page-fixture.py`,
+`tests/runtime/io-replay.py`, and `tests/runtime/io-replay-test.py`.
+The *off* arm means **bare test-owned RAM-backed null_blk**, not
+disabling a host's actual swap. The V3 arm receives identical 4096B
+page payloads, addresses, operations and a full readback oracle.
+Prioritize plausibly compressible anonymous-memory-style pages, with
+**measured LZ4 size distributions**: especially approximately 2:1
+(2048B payload from a 4096B page), but retain fully incompressible
+RAW controls. Do not claim the synthetic distribution is a measured
+Linux swap population.
+
+The previously exercised V3 alpha code produced mostly **singleton
+write windows at matched load**. That can prevent compressed data from
+reducing physical write bytes even when its LZ4 ratio is good.
+**Production-C batching, completion, mapping authority, GC, actual
+lower I/O and kernel CPU are the development priorities**, not more
+version comparisons or speculative Python frameworks.
+
+Historical alpha.8 READ-bypass and alpha.7 reports, retained in
+[PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and prior commits,
+are *diagnostic evidence*, not required V2.2 benchmark controls.
+The new **off vs V3** loaded immutable-trace comparison has **not
+yet been performed**. Native tests and compiler success are not loaded
+performance measurements.
+
+## Non-negotiable test-host safety
+
+Never reboot, `swapon`, or `swapoff`. Do not access `/dev/sdb1`,
+`/swapfile`, active system swap, physical media, unowned DM mappings
+or unowned `null_blk`. Loaded tests, when authorized, must use new,
+uniquely owned **RAM-backed null_blk** and safe identity checks and
+teardown. V3's null_blk-only guard must not be relaxed for benchmarking.
