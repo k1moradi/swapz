@@ -143,9 +143,17 @@ volume**: the successful V3 lower WRITE bytes equaled the
 uncompressed 192 x 4096B writes. The 128 compressed windows were
 singletons, while the 64 RAW pages used their separate write path.
 The average accepted LZ4 payload among the 128 accepted pages was
-~549 B, yet writes still occupied 4096B lower blocks. This is a
-clear **kernel-C window/extent packing investigation target**, not a
-loaded off-versus-V3 matched-rate performance verdict. It used
+~549 B, yet writes still occupied 4096B lower blocks. **Important
+workload qualification:** the C smoke oracle opens its DM test mapping
+with `O_DIRECT | O_SYNC`, additionally calling `fsync` at phase
+boundaries. Synchronous per-page completion and flush requirements
+strongly limit legal cross-page batching; **128 singleton windows in
+this smoke are not, by themselves, proof of an algorithmic packing
+failure under asynchronous realistic swapping**. Separate sustained
+non-`O_SYNC` matched-rate data also found a high singleton fraction;
+that, rather than synchronous smoke alone, is the reason to investigate
+the kernel-C worker/extent packing path. This is **not** a loaded
+off-versus-V3 matched-rate performance verdict. It used
 verification mode (`verify=1`), which incurs additional lower
 READ work. It did not exercise GC rotations or true device fault
 recovery. No performance/speed/endurance win is claimed.
