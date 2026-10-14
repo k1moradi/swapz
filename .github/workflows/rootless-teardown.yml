@@ -67,13 +67,13 @@ on:
       - 'tests/runtime/rootless-workflow-contract-test.py'
       - 'tests/runtime/live-gc-latency-analyze-test.py'
       - 'tests/runtime/live-gc-latency-analyze.py'
-      - 'tests/runtime/v22-drain-plateau-analyze.py'
-      - 'tests/runtime/v22-drain-plateau-analyze-test.py'
-      - 'tests/runtime/v22-latency-v3-test.py'
-      - 'tests/runtime/v22-evidence-bundle-check.py'
-      - 'tests/runtime/v22-evidence-bundle-check-test.py'
-      - 'tests/runtime/v22-evidence-bundle-v3.py'
-      - 'tests/runtime/v22-evidence-bundle-v3-test.py'
+      - 'tests/runtime/legacy/drain-latency-analysis.py'
+      - 'tests/runtime/legacy/drain-latency-analysis-test.py'
+      - 'tests/runtime/legacy/latency-quantiles-test.py'
+      - 'tests/runtime/legacy/evidence-validation.py'
+      - 'tests/runtime/legacy/evidence-validation-test.py'
+      - 'tests/runtime/legacy/evidence-validation-v3.py'
+      - 'tests/runtime/legacy/evidence-validation-v3-test.py'
       - 'tests/runtime/swapz-kernel-range-contract-test.py'
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
@@ -93,8 +93,8 @@ on:
       - 'tests/runtime/streaming-benchmark-quarantine-test.py'
       - 'tests/runtime/streaming-benchmark-source-preflight.py'
       - 'tests/runtime/streaming-benchmark-source-preflight-test.py'
-      - 'tests/runtime/v22-fast-compare.py'
-      - 'tests/runtime/v22-fast-compare-test.py'
+      - 'tests/runtime/legacy/strategy-comparison.py'
+      - 'tests/runtime/legacy/strategy-comparison-test.py'
       - 'tests/runtime/streaming-benchmark-live-authorization.py'
       - 'tests/runtime/streaming-benchmark-live-authorization-test.py'
       - 'tests/runtime/streaming-benchmark-plan.py'
@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout 20s python3 -B tests/runtime/v22-fast-compare-test.py -v
+          timeout 20s python3 -B tests/runtime/legacy/strategy-comparison-test.py -v
       - name: Protected benchmark source and exact owned DM identity regression
         shell: bash
         run: |
@@ -500,26 +500,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tests/runtime/v22-drain-plateau-analyze.py tests/runtime/v22-drain-plateau-analyze-test.py
-          timeout 25s python3 -B tests/runtime/v22-drain-plateau-analyze-test.py -v
+          python3 -m py_compile tests/runtime/legacy/drain-latency-analysis.py tests/runtime/legacy/drain-latency-analysis-test.py
+          timeout 25s python3 -B tests/runtime/legacy/drain-latency-analysis-test.py -v
       - name: V3 lossless exact-latency sidecar adversarial regression
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tests/runtime/v22-drain-plateau-analyze.py tests/runtime/v22-latency-v3-test.py
-          timeout 35s python3 -B tests/runtime/v22-latency-v3-test.py -v
+          python3 -m py_compile tests/runtime/legacy/drain-latency-analysis.py tests/runtime/legacy/latency-quantiles-test.py
+          timeout 35s python3 -B tests/runtime/legacy/latency-quantiles-test.py -v
       - name: V3 sidecar-aware measurement bundle binding regression
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tests/runtime/v22-evidence-bundle-v3.py tests/runtime/v22-evidence-bundle-v3-test.py
-          timeout 35s python3 -B tests/runtime/v22-evidence-bundle-v3-test.py -v
+          python3 -m py_compile tests/runtime/legacy/evidence-validation-v3.py tests/runtime/legacy/evidence-validation-v3-test.py
+          timeout 35s python3 -B tests/runtime/legacy/evidence-validation-v3-test.py -v
       - name: Offline V2.2 evidence bundle identity and artifact integrity policy
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tests/runtime/v22-evidence-bundle-check.py tests/runtime/v22-evidence-bundle-check-test.py
-          timeout 35s python3 -B tests/runtime/v22-evidence-bundle-check-test.py -v
+          python3 -m py_compile tests/runtime/legacy/evidence-validation.py tests/runtime/legacy/evidence-validation-test.py
+          timeout 35s python3 -B tests/runtime/legacy/evidence-validation-test.py -v
           echo "V22_OFFLINE_BUNDLE_CONSISTENCY_ONLY: PASS (not authenticated, no device access)"
       - name: Offline GC latency analyzer regression
         run: python3 tests/runtime/live-gc-latency-analyze-test.py -v

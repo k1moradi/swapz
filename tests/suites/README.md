@@ -39,3 +39,7 @@ The historical C++ model is no longer a default V3 test gate; invoke
 Build definitions are now consolidated to one Make rule, not one
 copied compile command per test. All 14 C binaries and original
 assertions are retained; see `tests/runtime/README.md` for the tree.
+
+The independent `tests/runtime/legacy/` Python safety contracts are
+archived and remain in separate CI workflows; they are not included
+in `make test` for active V3 kernel-C development.

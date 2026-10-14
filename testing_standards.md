@@ -129,3 +129,19 @@ guard. The active two-arm manifest contract now resides at
 `tests/runtime/benchmark/io-replay.py`. The guard must check this
 path and reject the obsolete name. This failure was test-harness
 plumbing, **not** proof of a kernel runtime defect or a loaded win.
+
+### Behavior-named legacy isolation with CI parity
+
+Eleven previously root-level `v22-*` strategy/latency/evidence Python
+files were moved together into `tests/runtime/legacy/` and given
+meaningful names (strategy-screen/comparison, drain-latency-analysis,
+evidence-validation, latency-quantiles). Internal sibling imports
+continue to resolve within `legacy/`, and imports of general
+`streaming-benchmark-*` helpers use the parent runtime directory.
+Existing rootless push workflows and the strict
+`rootless-workflow-contract-test.py` mandatory execution/deadline
+checks have been rewritten for the new paths. Their original test
+assertions, negative cases and artifact schemas are retained. This
+relocation isolates retired V2.2 code from active V3 benchmarks; it
+**does not waive historical source-safety coverage**. Verify the
+rootless workflow, NBD and teardown checks at exact HEAD.

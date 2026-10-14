@@ -19,7 +19,7 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-SCRIPT = HERE / "v22-fast-screen.py"
+SCRIPT = HERE / "strategy-screen.py"
 SPEC = importlib.util.spec_from_file_location("swapz_fast_screen_test", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 mod = importlib.util.module_from_spec(SPEC)
@@ -282,10 +282,10 @@ class ThreeCaseScreenTests(unittest.TestCase):
     def test_rootless_mock_teardown_never_finalizes_failed_or_interrupted_run(self):
         # Extract only the Bash EXIT handler; all device cleanup commands are
         # replaced by the stub and must never reach the kernel in this test.
-        shell = (HERE / "streaming-benchmark.sh").read_text(encoding="utf-8")
+        shell = (HERE.parent / "streaming-benchmark.sh").read_text(encoding="utf-8")
         function = "cleanup() {" + shell.split("cleanup() {", 1)[1].split(
             "\n}\ntrap cleanup EXIT", 1)[0] + "\n}"
-        repo_root = HERE.parents[1]
+        repo_root = HERE.parents[2]
         def call(*, teardown_ok, report_ok, initial_ok, kept="1"):
             fixture = self.root / "rootless-cleanup-case"
             fixture.mkdir(exist_ok=True)

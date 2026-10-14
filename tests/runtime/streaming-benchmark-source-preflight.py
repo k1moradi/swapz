@@ -30,8 +30,8 @@ PATHS = (
     "tests/runtime/streaming-benchmark-writer-verify.py",
     "tests/runtime/streaming-benchmark-report.py",
     "tests/runtime/streaming-benchmark-finalize.py",
-    "tests/runtime/v22-drain-plateau-analyze.py",
-    "tests/runtime/v22-fast-screen.py",
+    "tests/runtime/legacy/drain-latency-analysis.py",
+    "tests/runtime/legacy/strategy-screen.py",
 )
 
 

@@ -17,7 +17,7 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
-    "swapz_v3_bundle_tests", HERE / "v22-evidence-bundle-v3.py",
+    "swapz_v3_bundle_tests", HERE / "evidence-validation-v3.py",
 )
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("offline V3 bundle verifier missing")
@@ -360,7 +360,7 @@ class V3BundleTests(unittest.TestCase):
 
     def test_cli_rootless_success_never_grants_cleanup(self):
         result = subprocess.run(
-            (sys.executable, "-B", str(HERE / "v22-evidence-bundle-v3.py"),
+            (sys.executable, "-B", str(HERE / "evidence-validation-v3.py"),
              "--observations", str(self.observations),
              "--manifest", str(self.manifest_file)),
             capture_output=True, text=True, timeout=8, check=False,
@@ -374,7 +374,7 @@ class V3BundleTests(unittest.TestCase):
         self.manifest["observations_sha256"] = "0" * 64
         self.write_manifest()
         result = subprocess.run(
-            (sys.executable, "-B", str(HERE / "v22-evidence-bundle-v3.py"),
+            (sys.executable, "-B", str(HERE / "evidence-validation-v3.py"),
              "--observations", str(self.observations),
              "--manifest", str(self.manifest_file)),
             capture_output=True, text=True, timeout=8, check=False,

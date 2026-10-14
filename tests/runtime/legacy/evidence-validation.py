@@ -21,7 +21,7 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
-    "swapz_v22_bundle_plateau", HERE / "v22-drain-plateau-analyze.py")
+    "swapz_v22_bundle_plateau", HERE / "drain-latency-analysis.py")
 assert _spec is not None and _spec.loader is not None
 plateau = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = plateau

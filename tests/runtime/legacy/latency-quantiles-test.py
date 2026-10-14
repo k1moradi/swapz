@@ -23,7 +23,7 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location(
-    "swapz_v22_sidecar_analyzer", HERE / "v22-drain-plateau-analyze.py",
+    "swapz_v22_sidecar_analyzer", HERE / "drain-latency-analysis.py",
 )
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("cannot load offline analyzer")
@@ -326,7 +326,7 @@ class ExactV3SidecarTests(unittest.TestCase):
     def test_cli_from_subprocess_succeeds_without_device_access(self):
         self._write_rows([self.row])
         result = subprocess.run(
-            [sys.executable, "-B", str(HERE / "v22-drain-plateau-analyze.py"),
+            [sys.executable, "-B", str(HERE / "drain-latency-analysis.py"),
              "--observations", str(self.input)],
             capture_output=True, text=True, timeout=8, check=False,
         )

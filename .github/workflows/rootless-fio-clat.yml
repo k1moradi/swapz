@@ -15,10 +15,10 @@ on:
       - 'tests/runtime/streaming-benchmark-module-preflight-test.py'
       - 'tests/runtime/streaming-benchmark-live-authorization.py'
       - 'tests/runtime/streaming-benchmark-live-authorization-test.py'
-      - 'tests/runtime/v22-fast-screen.py'
-      - 'tests/runtime/v22-fast-compare.py'
-      - 'tests/runtime/v22-fast-compare-test.py'
-      - 'tests/runtime/v22-fast-screen-test.py'
+      - 'tests/runtime/legacy/strategy-screen.py'
+      - 'tests/runtime/legacy/strategy-comparison.py'
+      - 'tests/runtime/legacy/strategy-comparison-test.py'
+      - 'tests/runtime/legacy/strategy-screen-test.py'
       - 'tests/runtime/streaming-benchmark.sh'
       - 'tests/runtime/streaming-benchmark-fio-cli-test.py'
       - '.github/workflows/rootless-fio-clat.yml'
@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          timeout 20s python3 -B tests/runtime/v22-fast-compare-test.py -v
+          timeout 20s python3 -B tests/runtime/legacy/strategy-comparison-test.py -v
       - name: Protected benchmark source and exact owned DM identity regression
         shell: bash
         run: |
@@ -62,9 +62,9 @@ jobs:
           timeout 20s python3 -B tests/runtime/streaming-benchmark-module-preflight-test.py -v
       - name: Rootless fast three-policy benchmark plan and artifact gate
         run: |
-          timeout 20s python3 -B tests/runtime/v22-fast-screen-test.py -v
-          timeout 5s python3 -B tests/runtime/v22-fast-screen.py --plan fast
-          timeout 5s python3 -B tests/runtime/v22-fast-screen.py --plan full
+          timeout 20s python3 -B tests/runtime/legacy/strategy-screen-test.py -v
+          timeout 5s python3 -B tests/runtime/legacy/strategy-screen.py --plan fast
+          timeout 5s python3 -B tests/runtime/legacy/strategy-screen.py --plan full
       - name: Real fio reader CLAT log and V3 conversion on ordinary file
         run: |
           # No root, /dev, null_blk, Device Mapper, NBD, loop, or swap.

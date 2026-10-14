@@ -33,10 +33,10 @@ MANDATORY_TESTS = (
     "recall-broker-external-contract-test.py",
     "rootless-ci-evidence-inventory-test.py",
     "recall-denial-telemetry-test.py",
-    "v22-drain-plateau-analyze-test.py",
-    "v22-latency-v3-test.py",
-    "v22-evidence-bundle-check-test.py",
-    "v22-evidence-bundle-v3-test.py",
+    "legacy/drain-latency-analysis-test.py",
+    "legacy/latency-quantiles-test.py",
+    "legacy/evidence-validation-test.py",
+    "legacy/evidence-validation-v3-test.py",
     "swapz-kernel-range-contract-test.py",
     "swapz-gc-source-contract-test.py",
     "swapz-gc-compressed-contract-test.py",
@@ -53,13 +53,13 @@ MANDATORY_TESTS = (
     "swapz-pending-pack-ownership-contract-test.py",
     "virtual-smoke-test.py",
     "streaming-benchmark-live-authorization-test.py",
-    "v22-fast-compare-test.py",
+    "legacy/strategy-comparison-test.py",
     "streaming-benchmark-source-preflight-test.py",
     "streaming-benchmark-quarantine-test.py",
     "streaming-benchmark-plan-test.py",
     "streaming-benchmark-read-latency-test.py",
 )
-RUNTIME_FILE = re.compile(r"tests/runtime/[A-Za-z0-9_.-]+\.(?:py|sh)\b")
+RUNTIME_FILE = re.compile(r"tests/runtime/(?:legacy/)?[A-Za-z0-9_.-]+\.(?:py|sh)\b")
 TRIGGER_ITEM = re.compile(r"^      - '([^']+)'$")
 STEP_LINE = re.compile(r"^      - name: (.+)$", re.MULTILINE)
 
@@ -393,7 +393,7 @@ class RootlessWorkflowContractTests(unittest.TestCase):
     def test_removed_v3_bundle_binding_execution_is_rejected(self):
         for name, source in self.sources.items():
             with self.subTest(workflow=name):
-                command = "timeout 35s python3 -B tests/runtime/v22-evidence-bundle-v3-test.py -v"
+                command = "timeout 35s python3 -B tests/runtime/legacy/evidence-validation-v3-test.py -v"
                 self.assertIn(command, source)
                 with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
                     check_workflow(name, source.replace(command, "echo 'V3 bundle not executed'", 1))
@@ -401,7 +401,7 @@ class RootlessWorkflowContractTests(unittest.TestCase):
     def test_removed_v3_latency_sidecar_execution_is_rejected(self):
         for name, source in self.sources.items():
             with self.subTest(workflow=name):
-                command = "timeout 35s python3 -B tests/runtime/v22-latency-v3-test.py -v"
+                command = "timeout 35s python3 -B tests/runtime/legacy/latency-quantiles-test.py -v"
                 self.assertIn(command, source)
                 with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
                     check_workflow(name, source.replace(command, "echo 'V3 not executed'", 1))

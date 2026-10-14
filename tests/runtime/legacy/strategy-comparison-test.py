@@ -22,8 +22,8 @@ def load(name, filename):
     return module
 
 
-compare = load("swapz_fast_comparison_tested", "v22-fast-compare.py")
-fixtures = load("swapz_fast_screen_mock_fixtures", "v22-fast-screen-test.py")
+compare = load("swapz_fast_comparison_tested", "strategy-comparison.py")
+fixtures = load("swapz_fast_screen_mock_fixtures", "strategy-screen-test.py")
 
 
 class ThreeCaseComparison(unittest.TestCase):
@@ -113,7 +113,7 @@ class ThreeCaseComparison(unittest.TestCase):
     def test_cli_markdown_and_json_are_unqualified_and_read_only(self):
         for format in ("json", "markdown"):
             process = subprocess.run([
-                sys.executable, "-B", str(HERE / "v22-fast-compare.py"),
+                sys.executable, "-B", str(HERE / "strategy-comparison.py"),
                 "--results", str(self.results), "--format", format,
             ], capture_output=True, text=True, timeout=5)
             self.assertEqual(process.returncode, 0, process.stderr)

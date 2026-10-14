@@ -19,7 +19,7 @@ import unittest
 
 
 HERE = Path(__file__).resolve().parent
-SCRIPT = HERE / "v22-evidence-bundle-check.py"
+SCRIPT = HERE / "evidence-validation.py"
 _spec = importlib.util.spec_from_file_location("swapz_v22_bundle_tests", SCRIPT)
 assert _spec is not None and _spec.loader is not None
 bundle = importlib.util.module_from_spec(_spec)

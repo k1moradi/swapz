@@ -20,7 +20,7 @@ SPEC.loader.exec_module(collector)
 
 
 V3_SPEC = importlib.util.spec_from_file_location(
-    "swapz_plateau_v3_reader", HERE / "v22-drain-plateau-analyze.py")
+    "swapz_plateau_v3_reader", HERE / "legacy/drain-latency-analysis.py")
 assert V3_SPEC is not None and V3_SPEC.loader is not None
 plateau = importlib.util.module_from_spec(V3_SPEC)
 V3_SPEC.loader.exec_module(plateau)

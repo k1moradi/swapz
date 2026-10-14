@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 
 
 def _load(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, HERE / filename)
+    spec = importlib.util.spec_from_file_location(name, (HERE.parent if filename.startswith("streaming-benchmark-") else HERE) / filename)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"required rootless source unavailable: {filename}")
     module = importlib.util.module_from_spec(spec)
@@ -28,7 +28,7 @@ def _load(name: str, filename: str):
 
 planner = _load("swapz_fast_screen_planner", "streaming-benchmark-plan.py")
 reporter = _load("swapz_fast_screen_reporter", "streaming-benchmark-report.py")
-plateau = _load("swapz_fast_screen_exact_sidecars", "v22-drain-plateau-analyze.py")
+plateau = _load("swapz_fast_screen_exact_sidecars", "drain-latency-analysis.py")
 finalizer = _load("swapz_fast_screen_finalization", "streaming-benchmark-finalize.py")
 
 FAST_CASES = (

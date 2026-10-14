@@ -29,15 +29,34 @@ never a host `swapoff`.
 
 ## Historical and general safety helpers
 
-The root-level `v22-*`, `streaming-benchmark-*`, `recall-*`,
+The `legacy/` strategy/evidence tests, root-level `streaming-benchmark-*`, `recall-*`,
 `pressure-*`, and other host scripts are historical or shared
 source-safety dependencies. Some remain automatically exercised by
 CI and use sibling-relative imports and literal workflow paths.
 They are **not active V3 performance benchmark requirements**.
-They should be moved separately only after complete dependency and
-source-safety-contract parity is established; never silently drop a
-failure gate during a tidy-up. The former V2.x README instructions
+The 11 tightly coupled former `v22-*` files were moved together and renamed
+by behavior into `legacy/` while preserving their old schema strings and
+source-safety workflow gates. Other broad host/recall helpers must still be
+migrated separately with dependency/coverage parity. Never drop a failure
+gate during a tidy-up. The former V2.x README instructions
 are available via Git history and are **not live-swap authorization**.
 
 Never reboot, `swapoff`, `swapon`, touch active `/dev/sdb1` or
 `/swapfile`, physical/unowned storage, or force remove a mapping.
+
+## Legacy module names (archived behavior, still tested)
+
+Under `legacy/`, these **renamed but retained** tools form three
+reusable historical groups:
+
+- `strategy-screen*.py` and `strategy-comparison*.py` — offline
+  bounded plan/counter comparison, no runtime device access
+- `drain-latency-analysis*.py` and `latency-quantiles-test.py` —
+  exact drain and read-tail measurement contracts
+- `evidence-validation*.py` — synthetic/validated evidence bundle
+  and hash/binding checks (the `-v3` suffix preserves source schema)
+
+Old `v22-*` root names are removed. The existing compatibility safety
+workflows still invoke the renamed tests with original deadlines and
+assertions. These are **archival/compatibility checks, not V3 performance
+benchmarks**. Do not rewrite schema tags or alter source provenance.

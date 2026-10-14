@@ -18,7 +18,7 @@ import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
-ANALYZER_PATH = HERE / "v22-drain-plateau-analyze.py"
+ANALYZER_PATH = HERE / "drain-latency-analysis.py"
 spec = importlib.util.spec_from_file_location("swapz_offline_drain_plateau", ANALYZER_PATH)
 assert spec is not None and spec.loader is not None
 analyzer = importlib.util.module_from_spec(spec)

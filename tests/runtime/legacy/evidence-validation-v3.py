@@ -20,7 +20,7 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 _SPEC = importlib.util.spec_from_file_location(
-    "swapz_v3_bundle_legacy", HERE / "v22-evidence-bundle-check.py",
+    "swapz_v3_bundle_legacy", HERE / "evidence-validation.py",
 )
 if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError("legacy bundle contract unavailable")

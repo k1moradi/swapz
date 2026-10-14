@@ -29,7 +29,7 @@ def load_module(module_name: str, path: str):
     return mod
 
 
-screen = load_module("swapz_fast_compare_screen", "v22-fast-screen.py")
+screen = load_module("swapz_fast_compare_screen", "strategy-screen.py")
 plateau = screen.plateau
 
 
