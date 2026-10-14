@@ -207,7 +207,11 @@ a **36 KiB (4.69%)** write-side reduction in this controlled,
 synchronous test. Independent lower-device write sectors agreed
 exactly. All remaining **119** nonzero compressed windows were
 singletons; no nonzero compressed-data packing win was established.
-The new `make run` deployment guard verifies the nine elisions
-and reconciles lower-write bytes automatically. This is still a
-null_blk-only development qualification, **not** production readiness
-or a matched off/V3 benchmark (see [benchmark.md](benchmark.md)).
+The `make run` deployment guard verifies the nine elisions
+and reconciles oracle-interval lower-write **and read** bytes using
+independent before/after null_blk sector counters. It reports request
+counts separately rather than assuming one dm_io call is one device
+request. The read-byte check has **not yet been host-retested** at this
+source revision. This is still a null_blk-only development qualification,
+**not** production readiness or a matched off/V3 benchmark (see
+[benchmark.md](benchmark.md)).

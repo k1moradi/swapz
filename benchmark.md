@@ -244,3 +244,24 @@ harness now checks its own 9 zero elisions against full readback,
 target lower-written bytes, and actual owned lower write-sector
 deltas; failure of this guard is **not** permission to alter active
 swap or move to physical devices.
+
+## Oracle-interval independent lower READ accounting gate
+
+The isolated `make run` harness now snapshots the **same newly owned
+null_blk** `/sys/block/<disk>/stat` before and after its byte-exact C
+oracle, checking 512-byte **read** sector deltas against the V3 target's
+`physical_read` delta, alongside the existing write-byte and nine-zero
+checks. It also reports completed lower read/write **request counts** on
+both sides, but does **not** require dm_io call counts to equal queue
+requests because the block layer may split or merge submissions.
+
+**Qualification at this source revision: NOT RUN on a loaded host.**
+`make verify` checks source/shell contracts only. Earlier cumulative
+lower-read excess (62 requests / 253,952 B at source `4c6e29b`) cannot
+be attributed to oracle work without a before/after read snapshot;
+other setup/device-probing reads may be included. A discrepancy in the
+new oracle-interval read **bytes** fails the isolated test rather than
+being silently labeled an I/O saving. The next owner-authorized
+`make run` should record both deltas and investigation evidence if they
+differ. This is still a synchronous verification-mode smoke, not the
+required matched achieved-load off/V3 performance comparison.

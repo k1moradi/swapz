@@ -214,8 +214,9 @@ for i in {1..50}; do
 done
 [[ -b "/dev/mapper/$DMNAME" ]] || fail "test-only DM device node absent"
 # Keep the test's independent backing counters from BEFORE the oracle.
-# Null_blk's sysfs stat write fields are requests [4] and 512B sectors [6].
-# Counter samples do not include configuration, prefill, or teardown work.
+# Null_blk stat arrays: read requests [0], 512B read sectors [2],
+# write requests [4], and 512B write sectors [6]. The samples bracket
+# only the oracle, excluding earlier device probing and setup I/O.
 status_before="$(dmsetup status "$DMNAME")"
 read -r -a lower_before < "/sys/block/$DISK/stat" ||
     fail "cannot snapshot owned lower before readback"
@@ -257,9 +258,15 @@ logical_writes="$(status_delta logical_write)"
 zero_writes="$(status_delta zero_elided)"
 target_write_bytes="$(status_delta physical_write)"
 target_write_reqs="$(status_delta physical_write_reqs)"
-(( lower_after[4] >= lower_before[4] &&
+target_read_bytes="$(status_delta physical_read)"
+target_read_reqs="$(status_delta physical_read_reqs)"
+(( lower_after[0] >= lower_before[0] &&
+   lower_after[2] >= lower_before[2] &&
+   lower_after[4] >= lower_before[4] &&
    lower_after[6] >= lower_before[6] )) ||
     fail "owned lower stat counters regressed"
+lower_read_reqs="$((lower_after[0] - lower_before[0]))"
+lower_read_bytes="$(((lower_after[2] - lower_before[2]) * 512))"
 lower_write_reqs="$((lower_after[4] - lower_before[4]))"
 lower_write_bytes="$(((lower_after[6] - lower_before[6]) * 512))"
 (( logical_writes == 192 * 4096 )) ||
@@ -270,6 +277,12 @@ lower_write_bytes="$(((lower_after[6] - lower_before[6]) * 512))"
     fail "zero elisions did not reduce completed lower bytes"
 (( lower_write_bytes == target_write_bytes )) ||
     fail "independent lower write sectors disagree with V3"
-(( target_write_reqs > 0 && lower_write_reqs > 0 )) ||
-    fail "nonzero-page lower write requests missing"
+(( lower_read_bytes == target_read_bytes )) ||
+    fail "independent lower read sectors disagree with V3"
+(( target_write_reqs > 0 && lower_write_reqs > 0 &&
+   target_read_reqs > 0 && lower_read_reqs > 0 )) ||
+    fail "expected oracle lower read/write requests missing"
+# Front-end dm_io calls need not equal lower queue requests after splits or
+# merges, so report each read/write request pair instead of assuming equality.
 note "PASS_ZERO_WRITE_LOWER_IO=logical_bytes:$logical_writes zero_pages:$zero_writes target_write_bytes:$target_write_bytes lower_write_bytes:$lower_write_bytes target_write_reqs:$target_write_reqs lower_write_reqs:$lower_write_reqs"
+note "PASS_ORACLE_LOWER_READ=target_read_bytes:$target_read_bytes lower_read_bytes:$lower_read_bytes target_read_reqs:$target_read_reqs lower_read_reqs:$lower_read_reqs"
