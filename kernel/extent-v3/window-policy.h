@@ -36,6 +36,42 @@ static inline int sv3_window_read_independent(
 }
 
 /*
+ * Alpha.13 early-commit: after eight independent compressed writes are
+ * staged, the LARGEST seven payloads plus the exact V3 header and seven
+ * record descriptors must fit a 16KiB extent; the eighth valid compressed
+ * page fits 4KiB. The byte-minimal planner can therefore use at most
+ * 20KiB instead of eight standalone 4KiB blocks (32KiB).
+ *
+ * This is only a geometry bound, not a lower-I/O request or p99 guarantee.
+ * It never acknowledges BIOs, stages extents, or publishes a mapping.
+ * Restricted-read, nonretained, RAW and invalid batches are excluded.
+ * The serialized caller has already fenced FUA, duplicate slots, and
+ * other dependencies.
+ */
+static inline int sv3_window_pack_ready(
+		const struct sv3_pending_bio *pending, sv3_u8 count,
+		sv3_u8 retain_ms, sv3_u8 read_budget)
+{
+	sv3_u32 largest_seven_bytes = sizeof(struct sv3_header) +
+		7U * sizeof(struct sv3_record);
+	sv3_u16 shortest = SV3_MAX_COMPRESSED;
+	sv3_u8 i;
+
+	if (!retain_ms || read_budget || count != 8U || !pending)
+		return 0;
+	for (i = 0; i < count; ++i) {
+		if (pending[i].raw || !pending[i].length ||
+		    pending[i].length > SV3_MAX_COMPRESSED)
+			return 0;
+		largest_seven_bytes += pending[i].length;
+		if (pending[i].length < shortest)
+			shortest = pending[i].length;
+	}
+	/* Worst-case seven remain valid after length-based reordering. */
+	return largest_seven_bytes - shortest <= SV3_MAX_EXTENT_BYTES;
+}
+
+/*
  * One clock sample decides expiry against the original first admission.
  * Compare elapsed time, never subtract it from an unsigned remaining
  * budget: a crossed deadline must expire instead of wrapping the delay.

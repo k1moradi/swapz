@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.12"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.13"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -64,6 +64,7 @@ enum sv3_window_close_reason {
 	SV3_CLOSE_QUANTUM,
 	SV3_CLOSE_IDLE,
 	SV3_CLOSE_DEADLINE,
+	SV3_CLOSE_PACK_READY,
 	SV3_CLOSE_SHUTDOWN,
 	SV3_CLOSE_OTHER,
 	SV3_CLOSE_REASON_COUNT,
@@ -140,6 +141,7 @@ struct sv3_dm {
 	u64 retain_worker_passes;
 	u64 retain_timer_arms;
 	u64 retained_read_bypasses;
+	u64 packed_early_commits;
 	u64 coalesce_deferred;
 	u64 coalesce_urgent;
 	u64 window_records_total;
@@ -1083,10 +1085,18 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		.length = (sv3_u16)length,
 	};
 	ctx->batch_count++;
-	/* FUA enforces an immediate drained window and is acknowledged only
-	 * after sv3_flush_window() issues the matching lower cache flush. */
+	/* FUA remains an immediate drained, lower-flushed fence. */
 	if (bio->bi_opf & REQ_FUA) {
 		ctx->next_window_close = SV3_CLOSE_FUA;
+		sv3_flush_window(ctx);
+	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
+					ctx->retain_ms,
+					ctx->engine.max_read_blocks_per_record)) {
+		/* All eight upper BIOs and immutable bytes are already
+		 * worker-owned. Only the existing physical-commit gate may
+		 * publish the chosen 16KiB+4KiB-or-better layout and ACK. */
+		ctx->next_window_close = SV3_CLOSE_PACK_READY;
+		ctx->packed_early_commits++;
 		sv3_flush_window(ctx);
 	}
 	return 0;
@@ -1893,6 +1903,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
+		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1960,6 +1971,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->retain_timer_arms,
 		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
 		       ctx->retained_read_bypasses,
+		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
+		       ctx->packed_early_commits,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

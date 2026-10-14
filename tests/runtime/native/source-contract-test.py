@@ -516,6 +516,27 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
+    def test_alpha13_pack_ready_only_after_compressed_admission(self):
+        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
+        writer = body("sv3_accept_write")
+        flush = body("sv3_flush_window")
+        status = body("sv3_status")
+        self.assertIn("sv3_window_pack_ready(", policy)
+        self.assertIn("largest_seven_bytes - shortest", policy)
+        self.assertIn("SV3_MAX_EXTENT_BYTES", policy)
+        self.assertIn("!retain_ms || read_budget || count != 8U", policy)
+        self.assertIn("pending[i].raw", policy)
+        self.assertLess(writer.index("ctx->batch_count++"),
+                        writer.index("sv3_window_pack_ready("))
+        self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
+                                     writer.index("ctx->batch_count++")),
+                        writer.index("sv3_window_pack_ready("))
+        self.assertIn("ctx->next_window_close = SV3_CLOSE_PACK_READY", writer)
+        self.assertIn("ctx->packed_early_commits++", writer)
+        self.assertIn("sv3_flush_window(ctx)", writer)
+        self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
+        self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
+
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
         expiry = body("sv3_retention_expired")
         wake = body("sv3_retention_wake")

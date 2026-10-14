@@ -33,7 +33,7 @@ done
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
 git diff --quiet && git diff --cached --quiet ||
 	fail "dirty tracked source: preserve and commit changes first"
-[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.12 ]] ||
+[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.13 ]] ||
 	fail "unexpected active V3 version"
 [[ -s "$MODULE" && -x "$ORACLE" ]] || fail "V3/oracle not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
@@ -305,7 +305,7 @@ close_total=0
 for close_reason in close_unknown close_full close_duplicate close_zero \
                     close_fua close_raw close_read_conflict \
                     close_read_unrelated close_discard close_preflush \
-                    close_quantum close_idle close_deadline close_shutdown close_other; do
+                    close_quantum close_idle close_deadline close_pack_ready close_shutdown close_other; do
     close_delta="$(status_delta "$close_reason")"
     (( close_total += close_delta )) || true
 done

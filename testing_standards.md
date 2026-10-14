@@ -651,3 +651,34 @@ exactly-once upper completion, suspend/drain and GC reserve exhaustion.
 Compare independent lower bytes/requests and achieved rate against
 retention off; keep retention disabled by default pending repeatable
 latency/CPU/GC qualification.
+
+## Alpha.13 C-first opt-in useful-packing early commit
+
+In `dm-target.c`, the only early-closure addition occurs after
+admitting the eighth **compressed** record into a retained window,
+when the actual production-C predicate proves all eight are
+non-RAW, bounded length, and the largest seven compressed payloads
+plus the existing 16B header and seven 16B descriptors fit 16KiB.
+The remaining valid compressed record fits an additional 4KiB.
+The existing byte-minimal engine can thus place the group in no more
+than 20KiB versus 32KiB of independent 4KiB writes. This is only a
+format geometry upper bound; physical lower request counts must be
+measured. The rule is strictly disabled when `retain_ms=0`,
+`read_budget>0`, or a batch has fewer/more than eight records,
+RAW, zero or invalid lengths. A FUA write takes its original fence
+before this possible early closure. The exact existing
+`sv3_flush_window()` performs all physical I/O, CRC and mapping
+publication and completes accepted BIO owners exactly once.
+The new `SV3_CLOSE_PACK_READY` belongs in window-closure
+conservation. The separate `packed_early_commits` counter reports
+attempted early closures, **not** successful lower I/O savings.
+
+The rootless native C test must exercise eight actual 2,073B lengths,
+retention default off, every read-budget restriction, short group,
+NULL, RAW, zero and overlarge payloads, overfilled seven, and the
+smallest-outlier case irrespective of arrival order. The source
+contract checks after-admission placement and FUA precedence.
+W=1/W=2, independent lower read/write-sector equality, byte-exact
+loaded oracle, repeated same-source control/candidate comparison,
+CPU and read/write p99 remain independent host gates.
+**Alpha.13 loaded testing: NOT RUN.**
