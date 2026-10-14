@@ -123,6 +123,18 @@ static inline int sv3_retention_timer_needs_arm(sv3_u8 retain_ms, int queued)
 }
 
 /*
+ * Report elapsed wall-time for a completed synchronous section. The Linux
+ * monotonic clock normally advances; a reversed sample is NOT elapsed work
+ * and must not underflow an unsigned counter. This does not measure CPU
+ * cycles, host device saturation, or upper BIO queueing/retention wait.
+ */
+static inline unsigned long long sv3_elapsed_ns(unsigned long long start_ns,
+						unsigned long long end_ns)
+{
+	return end_ns >= start_ns ? end_ns - start_ns : 0;
+}
+
+/*
  * One clock sample decides expiry against the original first admission.
  * Compare elapsed time, never subtract it from an unsigned remaining
  * budget: a crossed deadline must expire instead of wrapping the delay.

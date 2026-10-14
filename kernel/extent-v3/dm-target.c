@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.17"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.18"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -197,6 +197,15 @@ struct sv3_dm {
 	 * index 5: LZ4 did not fit SV3_MAX_COMPRESSED -> raw fallback.
 	 */
 	u64 lz4_attempts;
+	/* Cumulative monotonic wall-time diagnostics; includes warmup and
+	 * oracle, NOT CPU cycles and NOT a measurement-interval delta. */
+	u64 lz4_wall_ns;
+	u64 decode_wall_ns;
+	u64 window_sort_wall_ns;
+	u64 window_commit_wall_ns;
+	u64 gc_wall_ns;
+	u64 lower_read_wall_ns;
+	u64 lower_write_wall_ns;
 	u64 lz4_accepted_bytes;
 	u64 lz4_size_bins[6];
 	u64 discard_pages;
@@ -244,6 +253,7 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 		.client = ctx->io_client,
 	};
 	unsigned long bitmap = 0;
+	u64 section_start;
 	int error;
 
 	if (!blocks || block >= ctx->physical_blocks ||
@@ -269,7 +279,14 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 			(u64)blocks * SV3_BLOCK_BYTES;
 		ctx->lower_write_submitted_reqs++;
 	}
+	section_start = ktime_get_ns();
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
+	if (op == REQ_OP_READ)
+		ctx->lower_read_wall_ns +=
+			sv3_elapsed_ns(section_start, ktime_get_ns());
+	else
+		ctx->lower_write_wall_ns +=
+			sv3_elapsed_ns(section_start, ktime_get_ns());
 	if (error || bitmap)
 		return error ? error : -EIO;
 	if (op == REQ_OP_READ) {
@@ -832,7 +849,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
 	sv3_u8 gc_attempts = 0;
 	bool needs_fua = false;
-	u64 end_ns, open_age_ns;
+	u64 end_ns, open_age_ns, section_start;
 	int error = 0;
 
 	if (!count) {
@@ -873,16 +890,22 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 			sv3_complete(ctx->batch[index].bio, error);
 		goto accounted;
 	}
+	section_start = ktime_get_ns();
 	sv3_order_window(ctx);
+	ctx->window_sort_wall_ns +=
+		sv3_elapsed_ns(section_start, ktime_get_ns());
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
 	while (committed < count) {
 		sv3_u8 succeeded = 0;
 
+		section_start = ktime_get_ns();
 		error = sv3_engine_write_window_batched(&ctx->engine,
 				ctx->planned + committed,
 				count - committed, &succeeded);
+		ctx->window_commit_wall_ns +=
+			sv3_elapsed_ns(section_start, ktime_get_ns());
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -895,7 +918,10 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 			 * relocating one fully verified low-live segment.
 			 * Retry ONLY the remaining logical records afterwards.
 			 */
+			section_start = ktime_get_ns();
 			error = sv3_gc_compact_one(ctx);
+			ctx->gc_wall_ns +=
+				sv3_elapsed_ns(section_start, ktime_get_ns());
 			if (!error)
 				continue;
 		}
@@ -990,6 +1016,7 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 {
 	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
 	sv3_u8 i;
+	u64 section_start;
 	int length;
 	int error;
 
@@ -1011,11 +1038,13 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	error = sv3_copy_bio(bio, ctx->input_page, false);
 	if (error)
 		return error;
+	section_start = ktime_get_ns();
 	length = LZ4_compress_fast(ctx->input_page,
 			ctx->batch_bytes +
 				(size_t)ctx->batch_count * SV3_BLOCK_BYTES,
 			SV3_BLOCK_BYTES, SV3_MAX_COMPRESSED, 1,
 			ctx->lz4_workmem);
+	ctx->lz4_wall_ns += sv3_elapsed_ns(section_start, ktime_get_ns());
 	/* Account for compressibility as the kernel itself observes it.
 	 * A file extension or userspace fixture label is not the codec result;
 	 * raw fallback is already selected when the configured output cap
@@ -1130,6 +1159,7 @@ static int sv3_read(struct sv3_dm *ctx, struct bio *bio)
 	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
 	const struct sv3_map *map = &ctx->maps[logical];
 	sv3_u16 payload_bytes = 0;
+	u64 section_start;
 	int error, decompressed;
 
 	if (!map->valid) {
@@ -1150,10 +1180,13 @@ static int sv3_read(struct sv3_dm *ctx, struct bio *bio)
 				&payload_bytes);
 		if (error)
 			return error;
+		section_start = ktime_get_ns();
 		decompressed = LZ4_decompress_safe(ctx->read_compressed,
 						  ctx->read_page,
 						  payload_bytes,
 						  SV3_BLOCK_BYTES);
+		ctx->decode_wall_ns +=
+			sv3_elapsed_ns(section_start, ktime_get_ns());
 		if (decompressed != SV3_BLOCK_BYTES)
 			return -EBADMSG;
 	}
@@ -1936,6 +1969,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
 		       "retain_timer_arm_skips=%llu "
+		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
+		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
+		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
+		       "gc_wall_ns=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "failed=%u error=%d",
@@ -2003,6 +2040,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_age_max_ns,
 		       ctx->retain_ms, ctx->retain_worker_passes,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
+		       ctx->lz4_wall_ns, ctx->decode_wall_ns,
+		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
+		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
+		       ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],

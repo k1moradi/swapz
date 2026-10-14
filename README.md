@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.17, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.18, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -270,6 +270,31 @@ authority, completion and FUA/GC paths are unchanged.
 Hypothesis: reduce per-window worker CPU cost at high QD
 without giving up physical WRITE byte savings. Loaded
 alpha.17 throughput/latency remains **NOT RUN**.
+
+## Alpha.18: production-C phase timings for the unpaced bottleneck
+
+The owner-loaded alpha.17 default smoke and paced QD8
+medium off/V3 comparisons **PASS** byte-exact readback,
+independent lower-I/O reconciliation and safe teardown.
+Retained V3 again moved **1.5434 logical WRITE MB/s ->
+1.0061 lower WRITE MB/s**, 34.81% fewer actual backing
+WRITE bytes. Sampled WRITE p99 was **2.742ms** versus
+off **0.994ms**. Across wider cumulative status, 836
+retention timer re-arms were skipped; GC victims remained
+zero. **The owner's log did NOT run unpaced QD32.**
+
+Alpha.18 instruments actual production Linux kernel C
+sections: LZ4 compression/decompression wall nanoseconds,
+write-window ordering and engine-commit wall nanoseconds,
+synchronous lower dm_io READ/WRITE wall nanoseconds, and
+GC relocation wall nanoseconds. All are cumulative since
+target creation (including prefill/warmup/readback), not
+isolated benchmark interval deltas and **not CPU time**.
+They identify where the serialized worker waits or
+processes data before another speculative optimization.
+No on-disk format, scheduling, retained deadline,
+planner, mapping or upper-completion policy changes.
+Loaded alpha.18 high-QD throughput remains NOT RUN.
 
 ## The active performance question
 

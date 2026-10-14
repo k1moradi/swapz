@@ -895,3 +895,60 @@ intended. Loaded alpha.17 performance and sustained
 CPU/GC/fault gates: **NOT RUN**. Do not infer higher
 input MB/s from an algorithmic complexity improvement
 alone.
+
+## Alpha.18 production-C phase-wall-time instrumentation
+
+At exact owner-loaded alpha.17 source `90c0d5b9`,
+module SHA256
+`ae003b83a5e77f8f5888c9ab6477dace4efa91b88d5137603f5057d26e9b7efb`,
+the default 128-page owned-null_blk smoke and distinct
+medium QD8 500-IOPS off/V3 control and retained sessions
+passed immutable 4KiB byte-exact oracle, full lower
+READ/WRITE requests+sector reconciliation and ordinary
+teardown without changing system swap. The retained
+arm completed 767 logical WRITEs and 257 READs:
+1.54339 logical WRITE MB/s -> 1.00612 actual lower
+WRITE MB/s, versus off 1.54482 -> 1.54482.
+Lower WRITE bytes 2,048,000 V3 against 3,141,632 off
+(34.81% reduction), 158 vs 767 lower WRITE requests;
+lower READ bytes/requests identical at 1,052,672/257.
+Sampled WRITE p99 2.742ms vs 0.994ms off, not a
+stable tail claim. Cumulative `windows=1202`,
+`retain_timer_arms=1202`, `retain_timer_arm_skips=836`,
+`close_pack_ready=64`, `close_deadline=1138`,
+`gc_victims=0`; alpha.17 unpaced was **NOT RUN**.
+
+The alpha.18 real `dm-target.c` worker now collects
+**cumulative monotonic wall nanoseconds** for the
+already-existing synchronous sections: LZ4 compression
+attempts, LZ4 decompression, bounded window ordering,
+engine physical write commit (including dm_io and
+publication), synchronous lower dm_io READ/WRITE,
+and GC victim relocation on capacity pressure.
+These scopes overlap: engine commit includes lower
+write waits; GC includes nested lower operations.
+Do **not sum** overlapping times and do **not**
+label them CPU utilization. Timer retention wait,
+BIO queueing, prefill, warmup, oracle readback and
+reads outside the replay measurement interval may
+also affect reported totals. For interval comparison,
+take target-status counter differences at validated
+measurement boundaries; until then use only
+cumulative diagnostic ratios with explicit scope.
+
+The production-header `sv3_elapsed_ns` helper
+returns zero for a reversed timestamp rather than
+underflowing an unsigned accumulator. Native tests
+cover zero, forward, backward and boundary samples;
+source contracts require the new instrumentation
+directly around actual LZ4, lower dm_io, sorting,
+physical commit, read decode and GC sites, plus
+truthful status fields. The new timestamps add
+small but nonzero overhead, so a same-source
+benchmarked baseline and repeated owner-loaded
+QD32 comparisons are required before attributing
+performance changes. Loaded alpha.18 unpaced
+and sustained GC/CPU/fault qualifications:
+**NOT RUN**. All test IO must remain uniquely owned
+RAM-backed null_blk with byte-exact readback,
+independent lower sectors/requests and safe teardown.

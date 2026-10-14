@@ -211,6 +211,16 @@ static int test_timer_rearm_requires_retention_and_unqueued_timer(void)
 	return 0;
 }
 
+static int test_section_wall_ns_never_underflows(void)
+{
+	CHECK(sv3_elapsed_ns(100, 170) == 70ULL);
+	CHECK(sv3_elapsed_ns(100, 100) == 0ULL);
+	CHECK(sv3_elapsed_ns(170, 100) == 0ULL);
+	CHECK(sv3_elapsed_ns(0, ULLONG_MAX) == ULLONG_MAX);
+	CHECK(sv3_elapsed_ns(ULLONG_MAX, 0) == 0ULL);
+	return 0;
+}
+
 static int test_disabled_or_missing_timestamp_expires(void)
 {
 	CHECK(sv3_window_retention_expired(1000, 1000, 0));
@@ -290,6 +300,7 @@ int main(void)
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;
+	CHECK(test_section_wall_ns_never_underflows() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;
 	CHECK(test_exact_nanosecond_deadline() == 0); passed++;
 	CHECK(test_expiry_remains_pinned_after_later_arrivals() == 0); passed++;

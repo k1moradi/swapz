@@ -516,6 +516,34 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
+    def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
+        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
+        lower = body("sv3_lower")
+        accept = body("sv3_accept_write")
+        read = body("sv3_read")
+        flush = body("sv3_flush_window")
+        status = body("sv3_status")
+        self.assertIn("static inline unsigned long long sv3_elapsed_ns", policy)
+        self.assertIn("end_ns >= start_ns ? end_ns - start_ns : 0", policy)
+        self.assertIn("section_start = ktime_get_ns();", lower)
+        self.assertLess(lower.index("section_start = ktime_get_ns();"),
+                        lower.index("error = dm_io("))
+        self.assertIn("ctx->lower_read_wall_ns +=", lower)
+        self.assertIn("ctx->lower_write_wall_ns +=", lower)
+        self.assertIn("ctx->lz4_wall_ns += sv3_elapsed_ns", accept)
+        self.assertLess(accept.index("length = LZ4_compress_fast("),
+                        accept.index("ctx->lz4_wall_ns +="))
+        self.assertIn("ctx->decode_wall_ns +=", read)
+        self.assertIn("ctx->window_sort_wall_ns +=", flush)
+        self.assertIn("ctx->window_commit_wall_ns +=", flush)
+        self.assertIn("ctx->gc_wall_ns +=", flush)
+        for key in ("lz4_wall_ns", "decode_wall_ns", "window_sort_wall_ns",
+                    "window_commit_wall_ns", "lower_read_wall_ns",
+                    "lower_write_wall_ns", "gc_wall_ns"):
+            self.assertIn(key + "=%llu", status)
+            self.assertIn("ctx->" + key, status)
+        self.assertIn("sv3_engine_write_window_batched(", flush)
+
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         reorder = body("sv3_order_window")
