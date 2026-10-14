@@ -442,3 +442,16 @@ oracle, null_blk backing counter reconciliation and
 scheduling win from telemetry alone. Existing active behavior and
 alpha.8 negative unrelated-read bypass are unchanged.
 **Loaded alpha.9: NOT RUN.**
+
+### Alpha.9 deployed oracle must conserve close reasons
+
+The owned and unchanged `make run` C roundtrip oracle now takes
+**before/after** deltas for all 14 primary `close_*` counters,
+asserts their sum equals the `windows` delta, and prints
+`PASS_WINDOW_CLOSE_REASONS` together with the separate GC
+pressure delta. Zero-value causes are allowed; a missing status
+field, negative counter delta or missing closure fails this exact
+loaded gate. This validates telemetry accounting only; it does
+not authorize cross-worker retention or replace byte-exact,
+independent lower I/O acceptance. The source and shell contracts
+run in CI; alpha.9 loaded test remains **NOT RUN**.

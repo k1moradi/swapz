@@ -282,6 +282,21 @@ lower_write_bytes="$(((lower_after[6] - lower_before[6]) * 512))"
 (( target_write_reqs > 0 && lower_write_reqs > 0 &&
    target_read_reqs > 0 && lower_read_reqs > 0 )) ||
     fail "expected oracle lower read/write requests missing"
+# Alpha.9 diagnostic conservation: every *nonempty* V3 write window
+# increments exactly one primary closing reason. Never sum GC pressure
+# encounters or admission coalescing into this independent invariant.
+close_total=0
+for close_reason in close_unknown close_full close_duplicate close_zero \
+                    close_fua close_raw close_read_conflict \
+                    close_read_unrelated close_discard close_preflush \
+                    close_quantum close_idle close_shutdown close_other; do
+    close_delta="$(status_delta "$close_reason")"
+    (( close_total += close_delta )) || true
+done
+window_delta="$(status_delta windows)"
+(( close_total == window_delta )) ||
+    fail "window close reasons disagree with actual V3 windows: reasons=$close_total windows=$window_delta"
+note "PASS_WINDOW_CLOSE_REASONS=windows:$window_delta accounted:$close_total gc_pressure:$(status_delta window_gc_pressure)"
 # Front-end dm_io calls need not equal lower queue requests after splits or
 # merges, so report each read/write request pair instead of assuming equality.
 note "PASS_ZERO_WRITE_LOWER_IO=logical_bytes:$logical_writes zero_pages:$zero_writes target_write_bytes:$target_write_bytes lower_write_bytes:$lower_write_bytes target_write_reqs:$target_write_reqs lower_write_reqs:$lower_write_reqs"

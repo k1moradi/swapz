@@ -387,3 +387,13 @@ Alpha.9 is **instrumentation only**: no new buffered write ownership,
 independent READ bypass, scheduling or medium format. Rootless
 qualification and owner-loaded readback, closure conservation and
 independent lower accounting are separate steps before 3B.
+
+### Alpha.9 smoke telemetry acceptance check
+
+An owned `make run` now fails if the 14 primary window closure
+counter **deltas** do not sum to the actual `windows` delta
+over its synchronous byte-exact test interval. `window_gc_pressure`
+is reported separately and cannot mask missing close reasons.
+The conservation gate is a diagnostic integrity check, not a
+measurement of packing gains or improved device I/O.
+No alpha.9 loaded-host PASS has yet been reported.

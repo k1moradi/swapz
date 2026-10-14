@@ -40,6 +40,8 @@ verify: test
 	@grep -Fq -- 'lower_write_bytes == target_write_bytes' tools/deploy-nullblk.sh
 	@grep -Fq -- 'lower_read_bytes == target_read_bytes' tools/deploy-nullblk.sh
 	@grep -Fq -- 'PASS_ORACLE_LOWER_READ=' tools/deploy-nullblk.sh
+	@grep -Fq -- 'close_total == window_delta' tools/deploy-nullblk.sh
+	@grep -Fq -- 'PASS_WINDOW_CLOSE_REASONS=' tools/deploy-nullblk.sh
 	@printf 'PASS: V3 production C, replay, preflight shell contracts\n'
 
 build/tests/device-roundtrip: tools/device-roundtrip.c
