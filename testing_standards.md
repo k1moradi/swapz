@@ -408,3 +408,15 @@ module. Partial setup or changed ownership is quarantined instead
 of force-removed. A rootless opt-in regression checks that help and
 invalid/no flag execute without provisioning. No loaded-pair success
 or host I/O win is claimed until actual owner-host evidence arrives.
+
+### First exact-head owned-pair script repair
+
+CI at `e63ea33c` passed the exact production-C and kernel compile
+jobs, but failed `make verify`: the shell cleanup conditional split
+`!=` across a newline, which Bash rejects at execution. The fix keeps
+the full ownership predicate and adds a `READY_COUNT` to quarantine a
+two-device **partial** setup without dereferencing unset arrays under
+`set -u`. It checks the host's swap inventory **before** teardown,
+quarantining all resources if it changed, not afterward only.
+These guards are rootless source/syntax qualifications, not loaded
+device cleanup evidence. Preserve that failed CI run.

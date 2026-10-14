@@ -18,6 +18,7 @@ MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 CFGBASE=/sys/kernel/config/nullb
 declare -a NAMES=() CONFIGS=() DISKS=() INDEXES=() DEVS=() LOWERS=()
 COUNT=0
+READY_COUNT=0
 OWN_MODULE=0
 OWN_DM=0
 QUARANTINE=0
@@ -67,7 +68,13 @@ cleanup() {
     local result=$? i valid=1 end_swaps
     trap - EXIT HUP INT TERM
     set +e
-    if (( OWN_DM )); then
+    # An unexpected active-swap change forbids any teardown: the mapper
+    # or either backing device may have become a host-owned swap resource.
+    if [[ $(cat /proc/swaps) != "$SWAPS" ]]; then
+        QUARANTINE=1
+        note 'QUARANTINED: host swap changed during owned pair'
+    fi
+    if (( OWN_DM && !QUARANTINE )); then
         if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
                   tr -d '[:space:]') == "$DMUUID" ]] &&
             dmsetup remove "$DMNAME"; then
@@ -77,9 +84,9 @@ cleanup() {
             note 'QUARANTINED: DM UUID changed or mapping busy'
         fi
     fi
-    if (( COUNT == 1 )); then
+    if (( COUNT != READY_COUNT )); then
         QUARANTINE=1
-        note 'QUARANTINED: partial RAM setup'
+        note 'QUARANTINED: partially initialized RAM identity'
     elif (( COUNT == 2 && !OWN_DM && !QUARANTINE )); then
         for (( i=0; i<2; ++i )); do
             if [[ ! ${NAMES[i]} =~ ^nullb-swapz-[a-f0-9]{16}$ ||
@@ -88,8 +95,7 @@ cleanup() {
                   $(cat "${CONFIGS[i]}/power" 2>/dev/null) != 1 ||
                   $(cat "${CONFIGS[i]}/memory_backed" 2>/dev/null) != 1 ||
                   $(cat "/sys/block/${DISKS[i]}/dev" 2>/dev/null) != "${DEVS[i]}" ||
-                  $(readlink -f "/sys/dev/block/${DEVS[i]}") !=
-                  "$(readlink -f "/sys/block/${DISKS[i]}")" ||
+                  $(readlink -f "/sys/dev/block/${DEVS[i]}") != "$(readlink -f "/sys/block/${DISKS[i]}")" ||
                   $(devno "${LOWERS[i]}" 2>/dev/null) != "${DEVS[i]}" ||
                   ! -d /sys/block/${DISKS[i]}/holders ||
                   -n $(ls -A "/sys/block/${DISKS[i]}/holders" 2>/dev/null) ||
@@ -196,6 +202,7 @@ create_owned_ram() {
     INDEXES[COUNT-1]="$index"
     DEVS[COUNT-1]="$dev"
     LOWERS[COUNT-1]="$lower"
+    (( READY_COUNT += 1 ))
     note "OWNED_RAM[$((COUNT-1))]=$lower DEVICE=$dev"
 }
 create_owned_ram  # bare uncompressed

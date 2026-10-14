@@ -11,6 +11,7 @@ if bash "$SCRIPT" >/dev/null 2>&1 ||
     exit 1
 fi
 for contract in 'SWAPS=' 'nullb-swapz-' 'memory_backed' 'dmsetup remove' \
+                'READY_COUNT=0' 'COUNT != READY_COUNT' \
                 'QUARANTINE=0' '--expected-dm-uuid' 'timeout --signal=TERM'; do
     grep -Fq -- "$contract" "$SCRIPT" ||
         { echo "FAIL: missing owned-pair safety contract $contract" >&2; exit 1; }
