@@ -574,3 +574,18 @@ argument test to `argc<=10`, and accepts both the historical
 field is refused. The old table implies **retention off**.
 No loaded alpha.11 execution follows merely from source/CI green;
 first test the default on owned null_blk.
+
+## Alpha.11 separate opt-in pilot harness gate
+
+Do not change `make run`, default `make bench-pair` or
+`make bench-pair-medium` to enable retention. Only a separate
+explicit `make bench-pair-medium-retain` target is allowed to
+pass `--run-owned-ram-pair --profile medium --retain-ms 2`.
+All other retention flag forms must be rejected before any
+privileged device setup. The provisioned DM table and INFO status
+must confirm the intended policy before touching its upper device.
+The existing full-oracle, independent-device counter, unique
+major:minor, no-swap and quarantined-teardown checks remain.
+Source/rootless syntax gates are necessary but *not* a validated
+timed BIO/GC/drain/fault-path loaded result; keep `retain=0`
+default until an explicit controlled evaluation proves otherwise.

@@ -44,9 +44,11 @@ Use `main` only and follow the device/host safety restrictions.
       503.48 IOPS, independent 4KiB/0.13% lower-write-byte savings,
       0% lower-read savings, ordinary teardown PASS. No GC;
       1,957/1,961 cumulative windows closed idle.
-- [ ] Establish alpha.11 same-source disabled (`retain_ms=0`)
-      versus explicitly enabled (`retain_ms=2`) on identical
-      medium trace and independently owned RAM lowers. Require
+- [ ] Run separate exact-head `make bench-pair-medium` (control)
+      and `make bench-pair-medium-retain` (explicit candidate);
+      retain=0 is still the default. Validate both tables/status,
+      identical SHA fixture/trace, independent lower bytes/requests,
+      exact final readback and matching useful IOPS. Require
       loaded byte-exact FUA/READ/GC/drain/fault and strict 5% IOPS
       matching before any recommendation to enable retention.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,

@@ -254,3 +254,14 @@ admission, 64-page cap, barrier ordering, GC and fail-close remain.
 Every version gate (DKMS, source and two owner scripts) is alpha.11.
 Run rootless `make verify`, W=1/W=2 Kbuild and default `make run`
 before a separately opt-in retained policy; host alpha.11 NOT RUN.
+
+## Candidate-only medium retention entry point
+
+Only `make bench-pair-medium-retain` opts the new alpha.11
+`retain_ms=2` behavior into one newly owned RAM Device Mapper
+target. The existing `make bench-pair-medium` is unchanged
+conceptually, explicitly table-configured `retain_ms=0`; both
+rootless-test and W=1/W=2-compile first. Record both exact session
+logs and compare source/fixture/trace, lower I/O, achieved IOPS
+and read tails, treating separate runs cautiously. This is NOT
+part of any default/rootless command and has NOT RUN loaded.

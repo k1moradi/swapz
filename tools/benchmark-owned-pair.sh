@@ -4,15 +4,21 @@
 set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
-    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium]'
+    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2]'
     exit 0
 fi
 PROFILE=default
+RETAIN_MS=0
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
     :
 elif [[ $# == 3 && $1 == --run-owned-ram-pair &&
         $2 == --profile && $3 == medium ]]; then
     PROFILE=medium
+elif [[ $# == 5 && $1 == --run-owned-ram-pair &&
+        $2 == --profile && $3 == medium &&
+        $4 == --retain-ms && $5 == 2 ]]; then
+    PROFILE=medium
+    RETAIN_MS=2
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
     exit 2
@@ -63,7 +69,7 @@ exec > >(tee -a "$SESSION/session.log") 2>&1
 SWAPS="$(cat /proc/swaps)"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -227,8 +233,10 @@ DMUUID="SWAPZ-TEST-$token"
 [[ ! -e /dev/mapper/$DMNAME ]] || fail 'DM name collision'
 # 4MiB upper (1024 pages), verify=0, gc_policy=2, lower_bulk=1,
 # coalesce=0 and both diagnostic fault knobs disabled.
+# The explicit ninth policy field is 0 for default/control trials.
+# A retained session requires --profile medium --retain-ms 2.
 if ! dmsetup create "$DMNAME" --uuid "$DMUUID" \
-    --table "0 8192 swapz3 ${LOWERS[1]} 0 64 0 2 0 0 1 0"; then
+    --table "0 8192 swapz3 ${LOWERS[1]} 0 64 0 2 0 0 1 0 $RETAIN_MS"; then
     if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
              tr -d '[:space:]') == "$DMUUID" ]]; then
         OWN_DM=1
@@ -240,6 +248,8 @@ fi
 OWN_DM=1
 [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" |
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
+    fail 'unexpected V3 retained policy after owned DM creation'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do

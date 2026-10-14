@@ -523,3 +523,20 @@ Do not confuse those cumulative counts with the measurement interval.
 **Result:** correctness+matched-load pilot PASS; sustained
 performance/benefit gate still open. This is source-grounded
 reason to test the opt-in Stage 3B retention, not proof it wins.
+
+## Alpha.11 control vs retention candidate, separate owned-RAM sessions
+
+A same-source two-command experiment is now ready **but NOT RUN
+loaded**. Use the standard `make bench-pair-medium` as unretained
+`retain_ms=0` control and the separate explicit
+`make bench-pair-medium-retain` for the V3 `retain_ms=2`
+candidate. Both sessions independently compare against bare
+uncompressed RAM and retain immutable seed/fixture/trace hashes.
+The exact V3 table and status must prove the intended policy:
+`retain_ms=0` on control and `retain_ms=2` on candidate.
+Do not compare runs if achieved IOPS differ by more than the
+predeclared 5% tolerance or the input/source hashes differ.
+Separate sessions are *not* a randomized order/crossover study.
+Record READ p99/CPU/GC and full resource teardown independently
+before any case for default activation; negative, blocking and
+unmatched results are first-class evidence.

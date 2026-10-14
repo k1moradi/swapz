@@ -143,6 +143,18 @@ by default** and does not bypass READs or FUA. Avoid claiming real
 lower-I/O wins until same-source control/candidate tests and read
 latency, CPU, GC, fault and teardown qualification pass.
 
+## Separate alpha.11 retention candidate (disabled by default)
+
+`make bench-pair-medium` remains the owned medium-page control,
+with `retain_ms=0`. A **new, explicitly opt-in** experiment,
+`make bench-pair-medium-retain`, uses the identical fixed-seed
+fixture, trace, independent two-device off/V3 accounting and full
+readback, but opts the V3 target into `retain_ms=2`.
+The two are separate fresh-RAM sessions; matching achieved load
+and host/workload conditions must be verified across sessions
+before treating differences as a scheduling comparison. Normal
+`make run` remains non-retained. **Loaded alpha.11 not run**.
+
 ## The active performance question
 
 **Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,
