@@ -1,3 +1,11 @@
+> **Supplemental/historical evidence — not current engineering policy.**
+> Version-specific fixture and codec diagnostic record; benchmark.md governs claims.
+> The authoritative standards are [coding_standards.md](../../coding_standards.md),
+> [testing_standards.md](../../testing_standards.md),
+> [compile.md](../../compile.md), and
+> [benchmark.md](../../benchmark.md), alongside README.md and VISION.md.
+> Do not use dated branch/reset/active-swap instructions as new permission.
+
 # V3: actual swap-page compressibility, not file-extension heuristics
 
 **Experimental; source/CI qualification only until fresh owned-null_blk

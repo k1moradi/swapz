@@ -1,3 +1,11 @@
+> **Supplemental/historical evidence — not current engineering policy.**
+> Version-specific replay rationale; benchmark.md governs comparisons.
+> The authoritative standards are [coding_standards.md](../../coding_standards.md),
+> [testing_standards.md](../../testing_standards.md),
+> [compile.md](../../compile.md), and
+> [benchmark.md](../../benchmark.md), alongside README.md and VISION.md.
+> Do not use dated branch/reset/active-swap instructions as new permission.
+
 # Three-way swapz benchmark: identical logical data and operations
 
 **Stage: source/rootless contract; no loaded three-way run performed yet.**
