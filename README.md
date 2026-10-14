@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.11, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.12, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -84,88 +84,54 @@ The existing userspace `swapzctl` from the old generation is not a
 V3 activation interface. Do not follow old physical-disk, manual
 activation, DKMS autoinstall, swapoff/swapon or reboot instructions.
 
-## First loaded matched pilot; alpha.9 telemetry
+## Latest measured result and alpha.12 C implementation
 
-The owner ran the first identical-trace `make bench-pair` pilot at
-`cebc8bd6` on two separately owned RAM `null_blk` devices.
-At matched ~503 achieved IOPS, V3 saved **9.91% lower WRITE** and
-**6.23% lower READ** bytes/requests with byte-exact full readback and
-ordinary teardown. However, **1,788 of 1,802 V3 write windows were
-singletons** (cumulative status), the pages were synthetic and **no
-GC** occurred. This does not establish a sustained general win.
+The owner-loaded alpha.11 smoke and both medium-page trials at
+`0a10cbfab1b154d2d7a351209adf22503f9d15ac` passed exact readback
+and ordinary owned teardown. Every synthetic medium page compressed
+to **2,073 bytes**. At matched ~503 IOPS, retention off saved **0%**
+lower WRITE bytes; `retain_ms=2` saved **26.99% WRITE bytes** and
+**67.14% WRITE requests** against its own uncompressed arm. Measured
+READ bytes/requests were unchanged. Candidate write p99 increased
+from **1.081ms off to 6.365ms V3**. These short, synthetic trials
+had no GC/CPU qualification; see [benchmark.md](benchmark.md).
 
-The new alpha.9 adds diagnostic counters for **why** windows close,
-without changing completion/flush order, the storage format or
-worker scheduler. The earlier negative alpha.8 unrelated READ-bypass
-experiment is historical and is not re-enabled. Alpha.9 loaded
-host qualification: **NOT RUN**.
+**Alpha.12 fixes the production C retained pipeline:**
 
-## Alpha.10 development focus: actual open-window age
+- Prepare newly arriving ordinary writes immediately on the serialized
+  worker, so they can join an open window before its deadline.
+- Wake at the first admission's absolute CLOCK_MONOTONIC deadline
+  using an hrtimer, removing the unsigned remaining-time underflow
+  and explicit jiffy rounding. Scheduler/lower-I/O delays still apply.
+- Permit unrelated READs through an opt-in retained window only after
+  checking pending logical slots, barriers and transaction authority.
+  Same-page reads and ordering fences drain pending writes.
+- On a failed independent READ, abort retained WRITE owners without
+  publishing or submitting their pending data.
 
-The owner-loaded alpha.9 `make run` at `f9b9ec88` passed strict
-lower READ and WRITE byte/request equality, byte-exact oracle,
-119 FUA closure-reason counters and ordinary safe teardown.
-The previous 8KiB discrepancy did not recur but remains
-unattributed. The synchronous FUA smoke does **not** establish
-packing opportunities under a sustained medium-compressed workload.
+The existing LZ4 codec, 4/8/16KiB format/planner, mixed lower runs,
+64-page bound and null_blk-only admission are preserved. **Retention
+remains disabled by default (`retain_ms=0`).** A positive setting
+uses immediate preparation instead of admission coalescing;
+`retained_read_bypasses` reports completed independent reads.
 
-Alpha.10 adds **open-window age telemetry** in production C (time
-from first admitted page to flush entry). It does not retain windows,
-bypass READs, change FUA or add format states. Loaded alpha.10
-qualification has **NOT RUN**.
+**Alpha.12 has been reviewed as source only. Compilation, native/source
+tests and loaded tests were NOT RUN at the owner's request.**
+To compile, test and compare fresh owned-RAM control/candidate sessions:
 
-## Explicitly opt-in medium-compressibility loaded comparison
+```sh
+cd ~/swapz && git pull --ff-only origin main && make run && make bench-pair-medium && make bench-pair-medium-retain
+```
 
-`make bench-pair-medium` is a new separate two-owned-RAM-device
-experiment. It reuses the exact off/V3 immutable replay and
-ownership/teardown gates, but creates **only nonzero medium** pages
-targeting measured LZ4 payloads of **2049..2200 bytes**.
-This is an engineered compression control, not real swap sampling.
-The host liblz4 manifest must demonstrate actual sizes and zero RAW
-fallback before either arm's replay runs. Default `make run` and
-`make bench-pair` remain unchanged. The medium loaded trial
-has **NOT RUN**; do not infer a performance win.
-
-## Alpha.11 opt-in bounded write-window retention
-
-The alpha.10 medium-page owner-loaded test showed **4KiB / 0.13%**
-lower-write-byte savings on 767 measured writes despite all pages
-compressing to 2,073 bytes. **1,957 of 1,961 cumulative windows**
-closed at worker idle; the existing planner scarcely received
-multiple pages together. The off/V3 comparison was byte-exact and
-matched-load, but is still short and synthetic.
-
-**Alpha.11 adds a nullable final Device Mapper constructor setting**
-`retain_ms 0..4`, default **0**, with timer-driven, worker-serialized
-retention until the first page's absolute deadline. This is a
-new experimental scheduler, not yet host-tested; it is **disabled
-by default** and does not bypass READs or FUA. Avoid claiming real
-lower-I/O wins until same-source control/candidate tests and read
-latency, CPU, GC, fault and teardown qualification pass.
-
-## Separate alpha.11 retention candidate (disabled by default)
-
-`make bench-pair-medium` remains the owned medium-page control,
-with `retain_ms=0`. A **new, explicitly opt-in** experiment,
-`make bench-pair-medium-retain`, uses the identical fixed-seed
-fixture, trace, independent two-device off/V3 accounting and full
-readback, but opts the V3 target into `retain_ms=2`.
-The two are separate fresh-RAM sessions; matching achieved load
-and host/workload conditions must be verified across sessions
-before treating differences as a scheduling comparison. Normal
-`make run` remains non-retained. **Loaded alpha.11 not run**.
-
-## Alpha.11 host-swap audit qualification
-
-The owner-loaded default-off alpha.11 smoke satisfied byte-exact
-readback, V3/backing read/write reconciliation and 119 FUA
-closing-reason/open-age conservation, but `make run` **FAILED**
-when an unrelated system `/swapfile` Used counter dropped 4KiB.
-The rootless-tested safety check now verifies stable swap
-path/type/size/priority while still logging live Used values
-and quarantining on genuine configuration changes. A new
-owner-loaded PASS has **not** been reported; the opt-in
-`retain_ms=2` performance hypothesis remains untested.
+`make run` exercises the default policy. The medium control uses
+`retain_ms=0`; the explicit retained candidate uses `retain_ms=2`.
+Each benchmark first runs rootless tests and W=1/W=2 builds and checks
+actual fixture LZ4 sizes, immutable input, achieved load, full readback,
+independent lower counters and safe ownership/teardown. Compare read
+and write latency as well as bytes/requests; no alpha.12 performance
+win or sustained qualification is claimed. Prior alpha.7..11 results
+and failures remain in [benchmark.md](benchmark.md) and
+[testing_standards.md](testing_standards.md).
 
 ## The active performance question
 
@@ -195,9 +161,10 @@ version comparisons or speculative Python frameworks.
 Historical alpha.8 READ-bypass and alpha.7 reports, retained in
 [PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) and prior commits,
 are *diagnostic evidence*, not required V2.2 benchmark controls.
-The new **off vs V3** loaded immutable-trace comparison has **not
-yet been performed**. Native tests and compiler success are not loaded
-performance measurements.
+Owner-loaded **off vs V3** bounded immutable-trace pilots have passed;
+sustained GC, CPU, repeated-trial and tail-latency qualification remain
+open. Native tests and compiler success are not loaded performance
+measurements.
 
 ## Non-negotiable test-host safety
 
@@ -309,8 +276,8 @@ independent lower read/write sectors and requests, preserves reports
 under `build/benchmark/session.*/`, and ordinarily removes only the
 verified owned resources. Uncertain identities or busy resources are
 quarantined. No physical media, system swap activation or forced
-cleanup is permitted. **The loaded pair is NOT RUN at this revision**;
-the bounded pilot is not steady-state GC or release qualification.
+cleanup is permitted. **Owner-loaded alpha.11 pilots passed; alpha.12 is NOT RUN**.
+The bounded pilot is not steady-state GC or release qualification.
 
 ## Complete documentation directory
 

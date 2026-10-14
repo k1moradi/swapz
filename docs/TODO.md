@@ -29,11 +29,13 @@ Use `main` only and follow the device/host safety restrictions.
       lower-device reads and writes, including verification, GC and flush
       work. Preserve any unexplained differences.
 
-- [ ] Retest the alpha.11 default `make run` after rootless
-      swap-inventory canonicalization. The prior `b5d54fe9` run
-      passed all byte-exact and lower-I/O checks but FAILED
-      complete acceptance due to 4KiB of benign `/swapfile`
-      Used drift; a genuine configuration change still quarantines.
+- [x] Owner-loaded alpha.11 corrected default smoke at `0a10cbfa`
+      passed byte-exact I/O, lower READ/WRITE equality, FUA closure/age
+      conservation, stable swap audit and ordinary teardown.
+- [ ] Owner: qualify alpha.12 default and retained policy at exact main
+      HEAD. Compilation/tests are NOT RUN by owner request. Use the
+      one-liner in [compile.md](../compile.md), then exercise retained
+      same-page READ, READ failure, barriers, expiry and suspend/drain.
 
 ## Blocking performance evidence
 
@@ -51,13 +53,17 @@ Use `main` only and follow the device/host safety restrictions.
       503.48 IOPS, independent 4KiB/0.13% lower-write-byte savings,
       0% lower-read savings, ordinary teardown PASS. No GC;
       1,957/1,961 cumulative windows closed idle.
-- [ ] Run separate exact-head `make bench-pair-medium` (control)
-      and `make bench-pair-medium-retain` (explicit candidate);
-      retain=0 is still the default. Validate both tables/status,
-      identical SHA fixture/trace, independent lower bytes/requests,
-      exact final readback and matching useful IOPS. Require
-      loaded byte-exact FUA/READ/GC/drain/fault and strict 5% IOPS
-      matching before any recommendation to enable retention.
+- [x] Owner-loaded alpha.11 control/candidate at `0a10cbfa`:
+      matched immutable input and ~503 IOPS, full readback and teardown
+      PASS. Retain=2 reduced WRITE bytes 26.99% and requests 67.14%;
+      no READ saving, sampled WRITE p99 6.365ms versus off 1.081ms.
+      Single short synthetic trial; sustained/CPU/GC NOT qualified.
+- [ ] Owner: compare alpha.12 `make bench-pair-medium` (retain=0)
+      and `make bench-pair-medium-retain` (retain=2), retaining exact
+      source/module/fixture/trace identities, full readback, independent
+      lower bytes/requests, strict 5% achieved-rate matching and tails.
+      Assess whether timely preparation and independent reads preserve
+      write savings while reducing wait; keep default retention off.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
@@ -65,23 +71,19 @@ Use `main` only and follow the device/host safety restrictions.
       exact lower reads 490/2,007,040B and writes 183/749,568B,
       119/119 FUA closures, full readback, unchanged host swap
       and clean teardown. Previous 8KiB mismatch unproven.
-- [ ] Load alpha.10 on newly owned RAM null_blk and qualify
-      `sum(open-age bins)==windows` alongside all existing
-      byte-exact, reason and independent lower-I/O gates.
-      Next measure medium nonzero ~2KiB pages, not FUA smoke alone.
-- [ ] Profile why production-C windows close (worker quantum,
-      unrelated READ, conflicts, FUA/PREFLUSH, deadline, capacity), with
-      actual device-request/sector evidence on matched asynchronous load.
-      Follow [roadmap Stage 3A](ROADMAP.md#3a-diagnose-why-a-pending-window-closes).
-- [ ] If the telemetry shows avoidable singleton closures, prototype
-      bounded **opt-in write-window retention across worker quanta**;
-      preserve a hard timer deadline, exact completion/mapping authority,
-      GC/drain and barriers, and compare against same-source control.
-      See [roadmap Stage 3B](ROADMAP.md#3b-retain-independent-pending-writes-across-work-quanta).
-- [ ] Only if justified by measurements, independently test an unrelated
-      READ bypass (historical alpha.8 bypass had no matched-load win),
-      then investigate lower-run composition and GC fullness economics;
-      do not enable unqualified behavior by default.
+- [x] Alpha.11 owner smoke at `0a10cbfa` conserved all 119 window
+      reasons and age bins. Medium candidate reported 199 unrelated-read
+      closures and 1,086 deadline closures cumulatively.
+- [x] Implement alpha.12 production-C immediate WRITE preparation,
+      absolute hrtimer expiry, dependency-checked opt-in READ handling
+      and fail-closed retained-WRITE abort. Source review only.
+- [ ] Owner: qualify the exact production window-policy regression,
+      no-arrival timer wake, mixed RAW/compressed records, dependent
+      reads/overwrites, READ failure with pending writes, PREFLUSH/FUA
+      and suspend/drain. Source/header predicates alone are insufficient.
+- [ ] After matched loaded alpha.12 evidence, investigate lower-run
+      composition and GC fullness economics only if still limiting.
+      Historical alpha.8 READ bypass did not establish a matched win.
 - [ ] Measure completed GC read/write traffic, reserve rotations,
       kernel CPU and RAM, achieved IOPS, cold read p95/p99 and full
       lower-I/O drain. Repeat runs and preserve negative/inconclusive results.
@@ -93,7 +95,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.11 behavior when their claims
+      documents and current V3.0.0-alpha.12 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

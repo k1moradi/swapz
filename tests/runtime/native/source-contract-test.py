@@ -17,7 +17,7 @@ README = (ROOT / "README.md").read_text()
 
 
 def body(symbol: str) -> str:
-    match = re.search(r"static\s+(?:int|void|bool|unsigned\s+long)\s+" + re.escape(symbol) +
+    match = re.search(r"static\s+(?:int|void|bool|unsigned\s+long|enum\s+hrtimer_restart)\s+" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
         raise AssertionError(f"Missing production symbol {symbol}")
@@ -469,7 +469,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("gc_selected_live_bytes", body("sv3_gc_choose_victim"))
         self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("sv3_status"))
 
-    def test_worker_close_reasons_do_not_change_flush_boundaries(self):
+    def test_worker_close_reasons_cover_dependencies_and_control(self):
         flush = body("sv3_flush_window")
         write = body("sv3_accept_write")
         process = body("sv3_process")
@@ -516,9 +516,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
-    def test_alpha11_retention_has_absolute_deadline_and_drain(self):
+    def test_alpha12_retention_has_absolute_timer_and_drain(self):
         expiry = body("sv3_retention_expired")
-        delay = body("sv3_retention_delay")
+        wake = body("sv3_retention_wake")
         process = body("sv3_process")
         worker = body("sv3_worker")
         mapping = body("sv3_map")
@@ -526,18 +526,42 @@ class V3ProductionSourceQualification(unittest.TestCase):
         ctr = body("sv3_ctr")
         status = body("sv3_status")
         self.assertIn("ctx->window_first_ns", expiry)
-        self.assertIn("ctx->retain_ms * 1000000ULL", expiry)
-        self.assertIn("sv3_retention_expired(ctx)", delay)
-        self.assertIn("nsecs_to_jiffies64(budget)", delay)
+        self.assertIn("sv3_window_retention_expired", expiry)
+        self.assertIn("ktime_get_ns(), ctx->retain_ms", expiry)
+        self.assertNotIn("nsecs_to_jiffies64", DM)
+        self.assertNotIn("sv3_retention_delay", DM)
+        self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
+        self.assertIn("ctx->window_first_ns +", worker)
+        self.assertIn("ctx->retain_ms * 1000000ULL", worker)
+        self.assertIn("HRTIMER_MODE_ABS", worker)
+        self.assertIn("spin_lock_irqsave(&ctx->queue_lock", wake)
+        self.assertIn("if (ctx->accepting)", wake)
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", wake)
+        self.assertIn("return HRTIMER_NORESTART", wake)
+        for forbidden in ("sv3_flush_window(", "sv3_complete(", "sv3_lower(",
+                          "ctx->batch", "ctx->authority", "ctx->window_first_ns"):
+            self.assertNotIn(forbidden, wake)
         self.assertIn("SV3_CLOSE_DEADLINE", process)
         self.assertIn("sv3_flush_window(ctx)", process)
         self.assertIn("ctx->retain_worker_passes++", worker)
         self.assertIn("ctx->retain_timer_arms++", worker)
-        self.assertIn("sv3_retention_delay(ctx)", worker)
         self.assertIn("SV3_CLOSE_SHUTDOWN", worker)
         self.assertIn("ctx->batch_count >= ctx->max_window", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", mapping)
         self.assertIn("WRITE_ONCE(ctx->accepting, false)", drain)
+        self.assertLess(drain.index("WRITE_ONCE(ctx->accepting, false)"),
+                        drain.index("hrtimer_cancel(&ctx->retention_timer)"))
+        self.assertLess(drain.index("spin_unlock_irqrestore"),
+                        drain.index("hrtimer_cancel(&ctx->retention_timer)"))
+        self.assertLess(drain.index("hrtimer_cancel(&ctx->retention_timer)"),
+                        drain.index("flush_delayed_work(&ctx->worker)"))
+        freeing = body("sv3_free")
+        self.assertLess(freeing.index("hrtimer_cancel(&ctx->retention_timer)"),
+                        freeing.index("destroy_workqueue(ctx->workqueue)"))
+        self.assertLess(ctr.index("hrtimer_setup(&ctx->retention_timer"),
+                        ctr.index("error = dm_get_device("))
+        self.assertIn("KERNEL_VERSION(6, 13, 0)", ctr)
+        self.assertIn("hrtimer_init(&ctx->retention_timer", ctr)
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
         self.assertIn("argc > 10", ctr)
@@ -548,6 +572,45 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field, status)
         self.assertIn("SV3_CLOSE_DEADLINE", DM)
         self.assertIn("if (bio->bi_opf & REQ_FUA)", body("sv3_accept_write"))
+
+    def test_retained_writes_prepare_before_the_deadline(self):
+        mapping = body("sv3_map")
+        retained = mapping[mapping.index("} else if (ctx->retain_ms)"):
+                           mapping.index("} else if (queue_delayed_work")]
+        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", retained)
+        self.assertNotIn("queue_delayed_work", retained)
+        self.assertNotIn("window_first_ns", mapping)
+        self.assertNotIn("hrtimer_start", mapping)
+
+    def test_retained_reads_require_independence_and_abort_on_failure(self):
+        independent = body("sv3_read_is_independent")
+        process = body("sv3_process")
+        flush = body("sv3_flush_window")
+        for fence in ("!READ_ONCE(ctx->accepting)", "ctx->failed",
+                      "ctx->authority.in_flight", "ctx->authority.batch_pending",
+                      "REQ_PREFLUSH | REQ_FUA"):
+            self.assertIn(fence, independent)
+        self.assertIn("sv3_window_read_independent(ctx->batch, ctx->batch_count",
+                      independent)
+        self.assertIn("logical, ctx->retain_ms, blocked", independent)
+        bypass = process[process.index("if (op == REQ_OP_READ &&"):
+                         process.index("if (op != REQ_OP_WRITE ||")]
+        self.assertIn("sv3_read_is_independent(ctx, bio)", bypass)
+        self.assertLess(bypass.index("error = sv3_read(ctx, bio)"),
+                        bypass.index("sv3_fail(ctx, error)"))
+        self.assertLess(bypass.index("sv3_fail(ctx, error)"),
+                        bypass.index("sv3_flush_window(ctx)"))
+        self.assertIn("if (!error && sv3_retention_expired(ctx))", bypass)
+        self.assertLess(bypass.index("sv3_complete(bio, error)"),
+                        bypass.index("if (!error && sv3_retention_expired(ctx))"))
+        abort = flush[flush.index("if (ctx->failed)"):
+                      flush.index("sv3_order_window(ctx)")]
+        self.assertIn("sv3_complete(ctx->batch[index].bio, error)", abort)
+        self.assertIn("goto accounted;", abort)
+        self.assertNotIn("planned_to_batch", abort)
+        self.assertNotIn("sv3_engine_write", abort)
+        self.assertLess(flush.index("accounted:"), flush.index("ctx->batch_count = 0"))
+        self.assertIn("retained_read_bypasses=%llu", body("sv3_status"))
 
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("sv3_status"))

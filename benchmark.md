@@ -91,7 +91,8 @@ reboot, `swapon`, `swapoff`, touch active `/dev/sdb1`, `/swapfile`,
 physical/unowned devices or global fault injection. Quarantine
 uncertain holders instead of force teardown.
 
-The new **two-arm loaded off-versus-V3 replay has NOT RUN**.
+Owner-loaded **bounded two-arm off/V3 pilots have passed**, including
+the alpha.11 medium retained candidate; alpha.12 is NOT RUN.
 Rootless tests and kernel compile PASS do not prove lower-I/O savings.
 Report missing kernel CPU or true device faults as UNMEASURED/BLOCKED.
 Keep source, binary, trace, fixture and raw CSV/JSON evidence on
@@ -570,3 +571,60 @@ Both owned harnesses now use a canonical configuration identity
 rather than volatile swap usage, with genuine changes quarantined
 before any removal. No tolerance was added to lower-device READ
 or WRITE reconciliation. Corrected loaded retest NOT RUN.
+
+## Owner-reported alpha.11 medium retention result; alpha.12 hypothesis
+
+**Owner-loaded bounded correctness/matched-input PASS; sustained benefit
+INCONCLUSIVE.** The supplied host logs identify exact source
+`0a10cbfab1b154d2d7a351209adf22503f9d15ac`, Linux
+`7.0.0-38-generic`, module SHA256
+`f2f4cc0a92645960aa487728d061977d07a49d001b627bd0a2416c21c8893eca`.
+Corrected smoke `build/deploy/session.ZQd7l7B2/session.log` passed
+byte-exact I/O, lower reads 490/2,007,040B and writes 183/749,568B,
+119 FUA closure/age checks, swap configuration audit and teardown.
+These results are supplied by the owner, not independently reproduced.
+
+Both medium sessions used 128 nonzero 2,073B LZ4 pages, QD8, offered
+500 IOPS, 767 measured writes and 257 reads, no RAW/zero pages.
+Fixture SHA256 was `c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2`;
+trace SHA256 was `bc76f8eccf227eb29ed11ac7393caacd5d586063f1902f78e3ce4034c3081aa3`.
+Full 1024-page final oracle and original write-stream hashes matched.
+
+| Measured interval | Off / retain=0 V3 | Off / retain=2 V3 |
+| --- | ---: | ---: |
+| Lower WRITE bytes | 3,141,632 / 3,141,632 | 3,141,632 / 2,293,760 |
+| Lower WRITE requests | 767 / 762 | 767 / 252 |
+| Lower READ bytes | 1,052,672 / 1,052,672 | 1,052,672 / 1,052,672 |
+| Lower READ requests | 257 / 257 | 257 / 257 |
+| Achieved useful IOPS | 503.470 / 503.264 | 503.485 / 503.459 |
+| Sampled WRITE p99 | 0.994ms / 0.908ms | 1.081ms / 6.365ms |
+| Sampled READ p99 | 1.554ms / 1.837ms | 1.688ms / 1.808ms |
+
+Host-local session logs: `build/benchmark/session.fz9zUXyR/session.log`
+(control), `build/benchmark/session.Cpcl4se5/session.log` (candidate).
+Independent candidate write reduction was **26.99% bytes / 67.14%
+requests**, with no measured READ savings and approximately sixfold
+sampled WRITE p99 versus its own off arm. Cumulative candidate status
+(including prefill/warmup/full verification) reported 199 unrelated-read
+closures, 1,086 deadline closures and 4,812,940ns maximum open age.
+Both pairs passed the 5% achieved-rate gate and ordinary owned teardown
+with unchanged stable host swap configuration. No GC occurred; CPU,
+repeated trials and reliable tails remain unqualified. Separate sessions
+are not a counterbalanced scheduler comparison.
+
+**Engineering lesson:** measured LZ4 compression is useful, but when
+arriving writes remain queued behind the retention delayed-work timer,
+expiry can drain the old singleton before those writes are prepared.
+Alpha.11 also sampled expiry twice before unsigned budget subtraction,
+allowing underflow at a crossed deadline.
+
+**Alpha.12 production-C hypothesis:** immediate preparation, absolute
+hrtimer wake and dependency-checked unrelated reads will increase useful
+packing while reducing artificial scheduling wait. Compare retain=0 and
+retain=2 at the same final source/input and matched achieved rate; report
+READ/WRITE bytes, requests and tails independently. The candidate
+combines these C changes, so this comparison cannot attribute their
+individual contributions. Keep the default off. **Alpha.12 compilation,
+native/source and loaded tests: NOT RUN by explicit owner instruction.**
+Use the one-liner in [compile.md](compile.md); sustained CPU/GC/fault/drain
+qualification remains follow-up before any default-policy change.

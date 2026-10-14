@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.11
+## One active module: V3.0.0-alpha.12
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -26,7 +26,7 @@ All generated software artifacts belong under the **one persistent
 V3 source: `kernel/extent-v3/{dm-target,engine,authority,codec}.c`.
 Kbuild stages source in `build/kernel/experimental` (for older kernel
 header compatibility) and writes object/`*.ko` there. `dkms.conf`
-now identifies **V3 alpha.11** with **`AUTOINSTALL="no"`** to prevent
+now identifies **V3 alpha.12** with **`AUTOINSTALL="no"`** to prevent
 automatic installation of an experimental module. Even a manual DKMS
 build or a successful compile is **NOT permission** to enable system
 swap, bypass the null_blk-only guard, or load on physical media.
@@ -94,7 +94,7 @@ history without being part of required builds.
 
 ## Reusable native source-tree layout
 
-The 15 current kernel-C tests are grouped under
+The 16 current kernel-C tests are grouped under
 `tests/runtime/native/{codec,mapping,gc,io}/`; only
 `tests/suites/Makefile` contains the declarative test-to-production-C
 link map. Its one `BUILD_NATIVE` recipe writes test binaries to
@@ -251,17 +251,42 @@ opt-in retains immutable prepared records across worker invocations
 until their original absolute first-admission deadline, with a timer
 even if no further BIO arrives. All existing RAM/null_blk-only
 admission, 64-page cap, barrier ordering, GC and fail-close remain.
-Every version gate (DKMS, source and two owner scripts) is alpha.11.
+At introduction, every version gate (DKMS, source and both owner scripts)
+identified alpha.11; current gates identify alpha.12.
 Run rootless `make verify`, W=1/W=2 Kbuild and default `make run`
-before a separately opt-in retained policy; host alpha.11 NOT RUN.
+before a separately opt-in retained policy. Subsequent owner-loaded
+alpha.11 results are recorded in [benchmark.md](benchmark.md).
 
 ## Candidate-only medium retention entry point
 
-Only `make bench-pair-medium-retain` opts the new alpha.11
+Introduced for alpha.11, `make bench-pair-medium-retain` opts
 `retain_ms=2` behavior into one newly owned RAM Device Mapper
 target. The existing `make bench-pair-medium` is unchanged
 conceptually, explicitly table-configured `retain_ms=0`; both
 rootless-test and W=1/W=2-compile first. Record both exact session
 logs and compare source/fixture/trace, lower I/O, achieved IOPS
 and read tails, treating separate runs cautiously. This is NOT
-part of any default/rootless command and has NOT RUN loaded.
+part of any default/rootless command. Its owner-loaded alpha.11 result
+is recorded in [benchmark.md](benchmark.md); alpha.12 is NOT RUN.
+
+## Alpha.12 retained pipeline qualification handoff
+
+Active source, status, DKMS and both owned-host guards identify alpha.12.
+Positive `retain_ms` now prepares arriving writes immediately, uses an
+absolute CLOCK_MONOTONIC hrtimer, and permits dependency-checked disjoint
+reads. Retention remains off by default. Timer initialization supports
+`hrtimer_setup` on Linux >=6.13 and `hrtimer_init` on older headers;
+matching-host W=1/W=2 builds are still required. The header policy
+regression builds only into `build/tests/native/window-policy`.
+
+**At owner request, alpha.12 compilation and tests were NOT RUN during
+implementation.** On the final clean main HEAD, the owner can run:
+
+```sh
+cd ~/swapz && git pull --ff-only origin main && make run && make bench-pair-medium && make bench-pair-medium-retain
+```
+
+Each loaded phase retains the existing owned RAM-null_blk admission,
+exact source/module identification, full readback, independent counters
+and ordinary teardown. This bounded sequence cannot qualify sustained
+GC, CPU, real-device performance or every BIO/timer failure permutation.

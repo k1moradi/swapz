@@ -9,8 +9,9 @@ From repository root use `make test` for native V3 production-C suites, or `make
 `make test-gc`, `make test-lower-io` for one concern. All native
 executables are compiled under **`build/tests/native/`** and reused
 on the next run. They link to **the actual**
-`kernel/extent-v3/{codec,authority,engine}.c`, rather than
-reimplementing the tested algorithms. Linux-host module compile and
+`kernel/extent-v3/{codec,authority,engine}.c` or execute the exact
+production header predicates, rather than reimplementing algorithms.
+Linux-host module compile and
 loaded BIO behavior remain independent release gates.
 
 | Semantic suite | Existing C fixtures | What it validates |
@@ -18,7 +19,7 @@ loaded BIO behavior remain independent release gates.
 | codec | codec-roundtrip | compressed/raw 4096B format and CRC |
 | mapping | mapping-authority, transaction-publication, write-verification, dead-segment-reclamation, raw-discard, online-packing, randomized-authority | mapping generations, authority, window transactions, raw fallback |
 | gc | gc-forbidden-victim, gc-cost-accounting, gc-rotation, gc-engine-rotation | liveness, bounded safe relocation, request costs |
-| lower-io | flush-ordering, lower-write-aggregation | flush/FUA and actual-C bulk planning contracts |
+| lower-io | flush-ordering, lower-write-aggregation, window-policy | flush/FUA, actual-C bulk planning and retained dependency/deadline predicates |
 
 The above are semantic executable names; the original
 `tests/runtime/extent-v3-*.c` filename interfaces are preserved.
@@ -37,7 +38,7 @@ The historical C++ model is no longer a default V3 test gate; invoke
 `make -C tests legacy-model` only for archival reproduction.
 
 Build definitions are now consolidated to one Make rule, not one
-copied compile command per test. All 14 C binaries and original
+copied compile command per test. The native C binaries and original
 assertions are retained; see `tests/runtime/README.md` for the tree.
 
 The independent `tests/runtime/legacy/` Python safety contracts are

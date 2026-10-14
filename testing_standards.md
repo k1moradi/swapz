@@ -31,7 +31,7 @@ make test-lower-io         # flush/FUA, lower write aggregation
 make -C tests/suites test-all
 ~~~
 
-There are **15 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`; `zero-write-elision`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
+There are **16 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`; `zero-write-elision`; `window-policy`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
 
 ## Minimum correctness matrix
 
@@ -63,7 +63,7 @@ For benchmarking and comparative correctness, feed *identical* immutable 4KiB fi
 
 ## Known gaps (do not overclaim)
 
-As of consolidation, the **loaded off-versus-V3 immutable-trace comparison has NOT been performed**. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Older reports, `PRODUCTION_READINESS.md` and historical `CODEX_VALIDATION.md` preserve detailed provenance, **not new test requirements**.
+Owner-loaded bounded off/V3 pilots, including alpha.11 retention at `0a10cbfa`, have passed exact logical-input and readback gates; sustained GC/CPU/tail qualification remains open. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Older reports, `PRODUCTION_READINESS.md` and historical `CODEX_VALIDATION.md` preserve detailed provenance, **not new test requirements**.
 
 At the end of each implementation task, update this or another of the four standards with learned results, exact tests and PASS/FAIL/BLOCKED, while preserving separate versioned raw report evidence on `main`.
 
@@ -613,3 +613,41 @@ duplicate or missing swap rows. Rootless fake-/proc/swaps tests
 cover benign usage drift plus adversarial changes. These snapshots
 do not monitor every intervening moment. This correction changes
 no production C or alpha version. **Loaded retest NOT RUN.**
+
+## Alpha.12 dependency-aware retention and failure contracts
+
+Positive `retain_ms` prepares every arriving ordinary WRITE immediately
+on the existing worker. Admission coalescing applies only when retention
+is off. A CLOCK_MONOTONIC absolute hrtimer wakes the worker at the
+first record's original deadline; later arrivals cannot extend it. This
+removes alpha.11's two-sample unsigned remaining-time underflow and
+explicit jiffy rounding. Timer callback code only schedules work under
+the admission lock; cancel outside that lock before window closure,
+suspend/drain and destruction. Dispatch and synchronous lower I/O can
+still exceed the nominal 1..4ms budget.
+
+A READ may pass an opt-in retained window only when it addresses no
+pending slot, has no PREFLUSH/FUA, admission remains open, the target
+is healthy, and no authority transaction is active. The serialized READ
+uses separate scratch and committed mappings. Same-slot reads, duplicate
+writes, zero writes, discard and barriers drain as before.
+`retained_read_bypasses` counts successfully completed independent reads;
+it is not a closure count. A failed bypass READ fails the target and
+error-completes every original pending WRITE without staging, lower
+submission, publication or successful logical-write accounting. An
+aborted nonempty window still conserves window, reason and age counts.
+
+The new native `window-policy` regression executes the exact production
+header predicates for compressed/RAW dependencies, caller fences and
+nanosecond deadline edges. Source contracts inspect IRQ callback bounds,
+immediate admission, cancellation order and the failed-window abort.
+These cannot establish loaded timer/BIO behavior. **Alpha.12 native/source
+tests, W=1/W=2 and loaded tests: NOT RUN, explicitly deferred by owner.**
+
+Owner follow-up: run the command in [compile.md](compile.md), then extend
+loaded coverage to same-page/independent READs, mixed RAW writes,
+PREFLUSH/FUA, no-arrival expiry, READ failure with a retained window,
+exactly-once upper completion, suspend/drain and GC reserve exhaustion.
+Compare independent lower bytes/requests and achieved rate against
+retention off; keep retention disabled by default pending repeatable
+latency/CPU/GC qualification.

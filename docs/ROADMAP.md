@@ -1,13 +1,13 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
-**Status: ACTIVE; alpha.10 loaded medium matched pilot PASS (only 0.13% WRITE byte savings); alpha.11 Stage 3B retention prototype is explicitly opt-in and NOT LOADED, 2026-10-14.**
-`swapz3` V3.0.0-alpha.11 remains experimental and **NOT
+**Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
+WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
+is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
+`swapz3` V3.0.0-alpha.12 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
-benchmarks. This roadmap proposes a conservative, source-inspired
-**bounded dependency-aware write pipeline**. A first serialized
-window-retention prototype is implemented in alpha.11, **default
-disabled**. Neither loaded safety nor actual lower-I/O improvement
-with retention has been established.
+benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
+The latest alpha.11 bounded result establishes useful packing on synthetic
+medium pages; sustained GC/CPU/latency qualification remains open.
 
 The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](../coding_standards.md),
@@ -30,8 +30,10 @@ Prior sustained V3 evidence found frequent **single-page write
 windows**, so a ~2KiB LZ4 payload could still produce a full aligned
 4KiB backing write. In the current production-C
 [`dm-target.c`](../kernel/extent-v3/dm-target.c), `sv3_process()`
-flushes the pending window for **every non-write** and
-`sv3_worker()` flushes at each worker quantum. Its synchronous
+with retention off, flushes the pending window for **every non-write**
+and at each worker quantum. Alpha.12 positive retention prepares new
+writes promptly and permits only dependency-checked independent reads
+until the original absolute hrtimer deadline. Its synchronous
 `dm_io` runs can further limit opportunities to accumulate writes.
 Not every such flush is unnecessary: ordering, synchronous writers,
 bounded latency and safety are real constraints.
@@ -143,9 +145,11 @@ measured lower layout, read cost or GC bottleneck instead.
 
 ### 3B. Retain **independent** pending writes across work quanta
 
-**Implementation checkpoint: alpha.11 opt-in prototype committed;
-loaded correctness, same-source controlled performance, fault and
-deadline qualification NOT RUN. No default policy change.**
+**Implementation checkpoint: alpha.11 owner pilot at `0a10cbfa` saved
+26.99% WRITE bytes / 67.14% requests at matched load, with 6.365ms
+sampled write p99. Alpha.12 repairs immediate preparation and absolute
+timer scheduling; compilation, tests and loaded qualification NOT RUN
+by owner request. Default retention remains disabled.**
 
 - Following the F2FS/Btrfs pattern, prototype one **bounded,
   opt-in** staging/commit policy rather than flushing at every
@@ -171,9 +175,18 @@ actual lower I/O without unacceptable cold-read p99, CPU/memory or
 safety regressions; report QD1/`O_SYNC` cases where no gain is
 possible.
 
-### 3C. Consider dependency-aware unrelated READ handling **only if needed**
+### 3C. Qualify dependency-aware unrelated READ handling
 
-- After 3B, measure how often unrelated reads force early closure.
+**Alpha.12 checkpoint:** alpha.11's owner-reported 199 cumulative
+unrelated-read closures justify an opt-in dependency-aware read path.
+It shares the positive retention gate and serialized worker, checks
+slot/flags/authority, completes valid independent reads before unrelated
+write drain, and aborts pending writes without lower submission if the
+READ fails. New native policy/source regressions are authored, NOT RUN.
+Loaded lifecycle and performance qualification remain open; the combined
+candidate does not separately attribute each scheduling change.
+
+- Continue measuring how often unrelated reads force early closure.
   An already-published mapping for an unrelated slot *may* be
   readable while other writes remain unpublished **only if** strict
   original order, barriers, read dependencies and lifetime safety

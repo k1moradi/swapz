@@ -12,13 +12,13 @@ Use **one** reusable `~/swapz/build/` for all compilation.
 | `native/codec/` | Format, CRC, 4KiB RAW and LZ4 payload | `make test-codec` |
 | `native/mapping/` | Authority, transaction commit, rollback, overwrites | `make test-mapping` |
 | `native/gc/` | Victim exclusion, live relocation, accounting, rotations | `make test-gc` |
-| `native/io/` | FUA/flush ordering and lower-write aggregation | `make test-lower-io` |
+| `native/io/` | FUA/flush, lower-write aggregation, retained slot/deadline policy | `make test-lower-io` |
 | `native/source-contract-test.py` | Real DM target, fault/ownership and constructor source contracts | `python3 -B tests/runtime/native/source-contract-test.py -v` |
 | `benchmark/` | Synthetic anonymous-page fixture and immutable off/V3 replay | `python3 -B tests/runtime/benchmark/io-replay-test.py -v` |
 
 `make test` executes the four C groups; each retains its original C
 test functions and assertions. `tests/suites/Makefile` shares **one
-compile recipe** across all 15 native C executables, linking the exact
+compile recipe** across all 16 native C executables, linking the exact
 kernel `codec.c`, `authority.c`, and `engine.c` where applicable.
 **No executable is built in source folders.**
 

@@ -90,7 +90,7 @@ bench-pair-medium:
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
 	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium
 
-# Separate explicit alpha.11 candidate. Original medium experiment remains
+# Separate explicit alpha.12 candidate. Original medium experiment remains
 # retain_ms=0; never run this target from default, verify, run or CI.
 .PHONY: bench-pair-medium-retain
 bench-pair-medium-retain:
