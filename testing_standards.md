@@ -360,3 +360,14 @@ acceptance and rejection on ambiguity, wrong major/minor, unsafe
 naming, non-RAM config and index aliases. No loaded paired
 off/V3 replay, actual physical-media improvement or release
 readiness is claimed.
+
+### Rootless fixture notation is part of the admission gate
+
+The first exact-head CI run at `e72d72a7` failed before exercising
+the new owned-nullblk identity checks: its temporary fake sysfs
+attributes contained literal backslash-n instead of newline
+terminators. Native production-C suites passed independently.
+The test fixture now emits genuine newline-terminated index,
+memory_backed, power, devices, and disk-dev data; the source safety
+checks themselves were not weakened. Re-run both source contract and
+rootless replay tests at the final exact head.

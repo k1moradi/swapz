@@ -117,14 +117,14 @@ class PairReplayContract(unittest.TestCase):
             sysdev_root.mkdir()
             for name, value in (("index", "7"), ("memory_backed", "1"),
                                 ("power", "1")):
-                (conf / name).write_text(value + "\\n")
+                (conf / name).write_text(value + "\n")
             proc = root / "devices"
-            proc.write_text("Character devices:\\n1 mem\\nBlock devices:\\n251 nullb\\n")
+            proc.write_text("Character devices:\n1 mem\nBlock devices:\n251 nullb\n")
             modern = block_root / config_name
             legacy = block_root / "nullb7"
             modern.mkdir(parents=True)
             legacy.mkdir(parents=True)
-            (modern / "dev").write_text("251:7\\n")
+            (modern / "dev").write_text("251:7\n")
             marker = sysdev_root / "251:7"
             marker.symlink_to(modern, target_is_directory=True)
 
@@ -134,7 +134,7 @@ class PairReplayContract(unittest.TestCase):
                 )
 
             self.assertEqual(resolve(), (config_name, "251:7"))
-            (legacy / "dev").write_text("251:7\\n")
+            (legacy / "dev").write_text("251:7\n")
             with self.assertRaisesRegex(ValueError, "ambiguous"):
                 resolve()
             (modern / "dev").unlink()
@@ -145,18 +145,18 @@ class PairReplayContract(unittest.TestCase):
                 resolve(name="nullb_swapz_old")
             with self.assertRaisesRegex(ValueError, "mismatch"):
                 resolve(dev="251:8")
-            (legacy / "dev").write_text("252:7\\n")
+            (legacy / "dev").write_text("252:7\n")
             with self.assertRaisesRegex(ValueError, "mismatch"):
                 resolve()
-            (legacy / "dev").write_text("251:7\\n")
-            (conf / "memory_backed").write_text("0\\n")
+            (legacy / "dev").write_text("251:7\n")
+            (conf / "memory_backed").write_text("0\n")
             with self.assertRaisesRegex(ValueError, "RAM-backed"):
                 resolve()
-            (conf / "memory_backed").write_text("1\\n")
-            (conf / "index").write_text("07\\n")
+            (conf / "memory_backed").write_text("1\n")
+            (conf / "index").write_text("07\n")
             with self.assertRaisesRegex(ValueError, "index"):
                 resolve()
-            (conf / "index").write_text("7\\n")
+            (conf / "index").write_text("7\n")
             marker.unlink()
             with self.assertRaises((ValueError, FileNotFoundError)):
                 resolve()
