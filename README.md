@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.7, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.9, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -83,6 +83,22 @@ system swap. `dkms.conf` now packages the V3 alpha source and sets
 The existing userspace `swapzctl` from the old generation is not a
 V3 activation interface. Do not follow old physical-disk, manual
 activation, DKMS autoinstall, swapoff/swapon or reboot instructions.
+
+## First loaded matched pilot; alpha.9 telemetry
+
+The owner ran the first identical-trace `make bench-pair` pilot at
+`cebc8bd6` on two separately owned RAM `null_blk` devices.
+At matched ~503 achieved IOPS, V3 saved **9.91% lower WRITE** and
+**6.23% lower READ** bytes/requests with byte-exact full readback and
+ordinary teardown. However, **1,788 of 1,802 V3 write windows were
+singletons** (cumulative status), the pages were synthetic and **no
+GC** occurred. This does not establish a sustained general win.
+
+The new alpha.9 adds diagnostic counters for **why** windows close,
+without changing completion/flush order, the storage format or
+worker scheduler. The earlier negative alpha.8 unrelated READ-bypass
+experiment is historical and is not re-enabled. Alpha.9 loaded
+host qualification: **NOT RUN**.
 
 ## The active performance question
 

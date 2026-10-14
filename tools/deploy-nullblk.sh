@@ -31,7 +31,7 @@ done
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
 git diff --quiet && git diff --cached --quiet ||
 	fail "dirty tracked source: preserve and commit changes first"
-[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.7 ]] ||
+[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.9 ]] ||
 	fail "unexpected active V3 version"
 [[ -s "$MODULE" && -x "$ORACLE" ]] || fail "V3/oracle not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||

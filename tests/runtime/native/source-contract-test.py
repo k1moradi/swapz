@@ -469,6 +469,33 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("gc_selected_live_bytes", body("sv3_gc_choose_victim"))
         self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("sv3_status"))
 
+    def test_worker_close_reasons_do_not_change_flush_boundaries(self):
+        flush = body("sv3_flush_window")
+        write = body("sv3_accept_write")
+        process = body("sv3_process")
+        worker = body("sv3_worker")
+        status = body("sv3_status")
+        self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
+        self.assertIn("ctx->next_window_close = SV3_CLOSE_UNKNOWN", flush)
+        self.assertLess(flush.index("if (!count)"),
+                        flush.index("ctx->window_close_reasons[ctx->next_window_close]++"))
+        self.assertIn("ctx->window_gc_pressure++", flush)
+        for cause in ("FULL", "DUPLICATE", "ZERO", "FUA", "RAW"):
+            self.assertIn("SV3_CLOSE_" + cause, write)
+        for cause in ("PREFLUSH", "READ_CONFLICT", "READ_UNRELATED", "DISCARD"):
+            self.assertIn("SV3_CLOSE_" + cause, process)
+        for cause in ("QUANTUM", "IDLE", "SHUTDOWN"):
+            self.assertIn("SV3_CLOSE_" + cause, worker)
+        for status_key in ("close_unknown", "close_full", "close_duplicate",
+                           "close_zero", "close_fua", "close_raw",
+                           "close_read_conflict", "close_read_unrelated",
+                           "close_discard", "close_preflush", "close_quantum",
+                           "close_idle", "close_shutdown", "close_other",
+                           "window_gc_pressure"):
+            self.assertIn(status_key + "=%llu", status)
+        self.assertIn("sv3_flush_window(ctx)", process)
+        self.assertIn("sv3_flush_window(ctx)", worker)
+
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("sv3_status"))
         self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))

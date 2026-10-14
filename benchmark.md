@@ -338,3 +338,52 @@ altered; unexpected state is quarantined without forced removal.
 generic `SWZ*` mapping. The source/opt-in checks are rootless only;
 **actual loaded two-arm performance is NOT RUN** and GC, CPU, RAM,
 repeated load and statistically reliable read p99 remain unresolved.
+
+## First loaded off/V3 owner pilot, alpha.7 (2026-10-14)
+
+**Measured PASS, limited to a short, synthetic, owned RAM null_blk pilot.**
+Source `cebc8bd686cd1075313591c123910c302f9eee00`, host kernel
+`7.0.0-38-generic`, module SHA-256
+`42d64bb0cde4eec578f136c00aae129ca051fc0e6dbcc6c91807da4d969e015e`.
+Host-local evidence: `build/benchmark/session.DV6KeUbd/session.log`,
+`off.json`, `v3.json`, `pair.json`. Two separately owned RAM-backed
+64MiB lowers (251:0 and 251:1), same immutable trace, achieved ~503 IOPS
+for both arms (0.0514% mismatch), full 1024-page byte-exact SHA-256
+readback and ordinary teardown with unchanged system swaps: PASS.
+
+| Interval independent lower-device metric | Uncompressed off | V3 alpha.7 | V3 reduction |
+|---|---:|---:|---:|
+| WRITE bytes | 3,141,632 | 2,830,336 | 9.91% |
+| WRITE requests | 767 | 691 | 9.91% |
+| READ bytes | 1,052,672 | 987,136 | 6.23% |
+| READ requests | 257 | 241 | 6.23% |
+
+The measurement window contains 767 writes / 257 reads, offered
+500 IOPS, QD8, 25% target reads. **Cumulative** V3 end status (which
+also includes prefill/warmup) reports 1,802 windows, 1,788 singleton
+windows (99.22%), 14 two-record windows, 159 zero elisions and
+**zero GC victims**. Do not attribute cumulative counts to the
+measurement interval alone. The synthetic profile includes very
+small compressible pages; it does not prove sustained ~2KiB-page
+packing, CPU efficiency, reliable read-tail latency or GC behavior.
+A single 257-read p99 (off 1,680,486ns; V3 1,663,756ns) is
+insufficient to establish a stable tail result; write p99 was
+952,458ns off vs 1,076,038ns V3. Preserve this narrow positive
+result alongside prior negative and unmatched experiments.
+
+## Alpha.9 closure-cause diagnostic, NOT YET LOADED
+
+Production `dm-target.c` now counts one primary reason per
+**nonempty** actual window flush: full, duplicate logical WRITE,
+exact-zero fence, FUA, isolated RAW fallback, same-page READ, unrelated
+READ, DISCARD, PREFLUSH, worker quantum/idle, shutdown, unknown/other.
+Sum of all `close_*` fields must equal cumulative `windows` in
+a quiescent status sample. GC `-ENOSPC` encounters are separately
+reported by `window_gc_pressure`: they may occur within a window
+and are not a primary closure cause. The existing pre-admission
+coalescing timer does **not** mean a cross-worker window deadline
+exists; no fabricated `close_deadline` is emitted.
+Alpha.9 is **instrumentation only**: no new buffered write ownership,
+independent READ bypass, scheduling or medium format. Rootless
+qualification and owner-loaded readback, closure conservation and
+independent lower accounting are separate steps before 3B.

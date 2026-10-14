@@ -420,3 +420,25 @@ two-device **partial** setup without dereferencing unset arrays under
 quarantining all resources if it changed, not afterward only.
 These guards are rootless source/syntax qualifications, not loaded
 device cleanup evidence. Preserve that failed CI run.
+
+## Alpha.9 exact close-reason telemetry and semantics
+
+Count one primary closing cause per **nonempty**
+`sv3_flush_window()`, including a failed physical commit. An empty
+flush increments neither `windows` nor close counts and clears any
+stale provisional reason. The serialized worker assigns capacity,
+duplicate logical WRITE, zero-write fence, FUA, nonbulk RAW fallback,
+READ conflict/independent, DISCARD, PREFLUSH, worker quantum/idle,
+shutdown, unknown/other. `window_gc_pressure` separately counts
+ENOSPC retry encounters, and must **not** be summed with closure
+causes. Status fields are cumulative worker-written diagnostic
+counters; sample quiescent targets for conservation.
+
+Rootless source regression must assert actual flush remains present
+at nonwrite and worker boundaries, and check all close assignments
+and status fields. Kernel W=1/W=2 and loaded owner-host exact byte
+oracle, null_blk backing counter reconciliation and
+`sum(close_*) == windows` remain mandatory. Do not infer any
+scheduling win from telemetry alone. Existing active behavior and
+alpha.8 negative unrelated-read bypass are unchanged.
+**Loaded alpha.9: NOT RUN.**

@@ -31,9 +31,10 @@ Use `main` only and follow the device/host safety restrictions.
 
 ## Blocking performance evidence
 
-- [ ] Run the explicit `make bench-pair` owned-RAM pilot, confirm
-      correct teardown and independent counters. Loaded status: NOT RUN.
-      The bounded pilot does not qualify sustained GC or read p99.
+- [x] Owner-loaded `make bench-pair` pilot PASS at `cebc8bd6`,
+      with 9.91% WRITE and 6.23% READ lower I/O reduction at
+      matched 503 IOPS and byte-exact clean teardown. Short
+      synthetic run only; sustained GC, CPU and p99 NOT qualified.
 - [ ] Perform the **first** immutable-fixture, same-operation,
       same-achieved-load **uncompressed off versus V3** loaded replay
       on *separately owned* RAM-backed `null_blk`; compare independent
@@ -41,6 +42,9 @@ Use `main` only and follow the device/host safety restrictions.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
+- [ ] Run alpha.9 on newly owned RAM null_blk and verify quiescent
+      `sum(close_*) == windows`; correlate reasons with independent
+      lower sectors and ~2KiB LZ4 fixture before Stage 3B.
 - [ ] Profile why production-C windows close (worker quantum,
       unrelated READ, conflicts, FUA/PREFLUSH, deadline, capacity), with
       actual device-request/sector evidence on matched asynchronous load.
@@ -65,7 +69,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.7 behavior when their claims
+      documents and current V3.0.0-alpha.9 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

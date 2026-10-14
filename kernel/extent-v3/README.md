@@ -1,4 +1,9 @@
-# Current development: V3.0.0-alpha.6 experimental Device Mapper target (PR #54)
+# Current development: V3.0.0-alpha.9 experimental Device Mapper target
+
+**Alpha.9 adds observational window-closing reasons only**, without
+changing flush ordering, the on-media format, or read-bypass policy.
+The following alpha.6 lower-run aggregation design notes are historical
+provenance from PR #54.
 
 **V3.0.0-alpha.6 adds physical request aggregation, not another
 compression-size heuristic.** The independent alpha.5 loaded test

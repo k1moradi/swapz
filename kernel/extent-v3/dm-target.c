@@ -34,7 +34,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.7"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.9"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 
@@ -49,6 +49,26 @@ struct sv3_pending_bio {
 	sv3_u16 length;
 	/* True only for the full 4KiB incompressible fallback. */
 	sv3_u8 raw;
+};
+
+/* The worker attributes exactly one primary reason to each real window.
+ * Historical alpha.8 read bypass is intentionally NOT re-enabled. */
+enum sv3_window_close_reason {
+	SV3_CLOSE_UNKNOWN,
+	SV3_CLOSE_FULL,
+	SV3_CLOSE_DUPLICATE,
+	SV3_CLOSE_ZERO,
+	SV3_CLOSE_FUA,
+	SV3_CLOSE_RAW,
+	SV3_CLOSE_READ_CONFLICT,
+	SV3_CLOSE_READ_UNRELATED,
+	SV3_CLOSE_DISCARD,
+	SV3_CLOSE_PREFLUSH,
+	SV3_CLOSE_QUANTUM,
+	SV3_CLOSE_IDLE,
+	SV3_CLOSE_SHUTDOWN,
+	SV3_CLOSE_OTHER,
+	SV3_CLOSE_REASON_COUNT,
 };
 
 struct sv3_dm {
@@ -117,6 +137,10 @@ struct sv3_dm {
 	u64 coalesce_deferred;
 	u64 coalesce_urgent;
 	u64 window_records_total;
+	/* Worker-owned telemetry only; status is a diagnostic snapshot. */
+	enum sv3_window_close_reason next_window_close;
+	u64 window_close_reasons[SV3_CLOSE_REASON_COUNT];
+	u64 window_gc_pressure;
 	u64 window_size_counts[SV3_MAX_RECORDS + 1];
 	u64 window_bins[6]; /* 1,2,3-4,5-8,9-16,17-64 */
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
@@ -771,8 +795,12 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	bool needs_fua = false;
 	int error = 0;
 
-	if (!count)
+	if (!count) {
+		ctx->next_window_close = SV3_CLOSE_UNKNOWN;
 		return 0;
+	}
+	ctx->window_close_reasons[ctx->next_window_close]++;
+	ctx->next_window_close = SV3_CLOSE_UNKNOWN;
 	sv3_order_window(ctx);
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
@@ -786,6 +814,8 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		committed += succeeded;
 		if (!error)
 			continue;
+		if (error == -ENOSPC)
+			ctx->window_gc_pressure++;
 		if (error == -ENOSPC && gc_attempts++ < 4) {
 			/*
 			 * The engine committed only the explicitly returned
@@ -892,12 +922,14 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 
 	for (i = 0; i < ctx->batch_count; ++i)
 		if (ctx->batch[i].logical == logical) {
+			ctx->next_window_close = SV3_CLOSE_DUPLICATE;
 			error = sv3_flush_window(ctx);
 			if (error)
 				return error;
 			break;
 		}
 	if (ctx->batch_count == ctx->max_window) {
+		ctx->next_window_close = SV3_CLOSE_FULL;
 		error = sv3_flush_window(ctx);
 		if (error)
 			return error;
@@ -946,6 +978,7 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	 */
 	if (length > 0 && length <= 64 &&
 	    sv3_page_is_zero(ctx->input_page)) {
+		ctx->next_window_close = SV3_CLOSE_ZERO;
 		error = sv3_flush_window(ctx);
 		if (!error)
 			error = sv3_discard_page(&ctx->authority, logical);
@@ -974,11 +1007,14 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 			.length = SV3_BLOCK_BYTES,
 			.raw = 1,
 		};
-		if (bio->bi_opf & REQ_FUA)
+		if (bio->bi_opf & REQ_FUA) {
+			ctx->next_window_close = SV3_CLOSE_FUA;
 			sv3_flush_window(ctx);
+		}
 		return 0;
 	}
 	if (length <= 0) {
+		ctx->next_window_close = SV3_CLOSE_RAW;
 		error = sv3_flush_window(ctx);
 		if (error)
 			return error;
@@ -999,8 +1035,10 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	ctx->batch_count++;
 	/* FUA enforces an immediate drained window and is acknowledged only
 	 * after sv3_flush_window() issues the matching lower cache flush. */
-	if (bio->bi_opf & REQ_FUA)
+	if (bio->bi_opf & REQ_FUA) {
+		ctx->next_window_close = SV3_CLOSE_FUA;
 		sv3_flush_window(ctx);
+	}
 	return 0;
 }
 
@@ -1123,8 +1161,28 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 		sv3_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
-	/* All nonwrites, preflushes and barriers must drain older writes. */
+	/* Classification only: unrelated READs still drain pending writes.
+	 * This preserves all original FIFO, generation and flush ordering. */
 	if (op != REQ_OP_WRITE || (bio->bi_opf & REQ_PREFLUSH)) {
+		if (bio->bi_opf & REQ_PREFLUSH) {
+			ctx->next_window_close = SV3_CLOSE_PREFLUSH;
+		} else if (op == REQ_OP_READ) {
+			sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector /
+						      SV3_SECTORS);
+			sv3_u8 index;
+
+			ctx->next_window_close = SV3_CLOSE_READ_UNRELATED;
+			for (index = 0; index < ctx->batch_count; ++index) {
+				if (ctx->batch[index].logical == logical) {
+					ctx->next_window_close = SV3_CLOSE_READ_CONFLICT;
+					break;
+				}
+			}
+		} else if (op == REQ_OP_DISCARD) {
+			ctx->next_window_close = SV3_CLOSE_DISCARD;
+		} else {
+			ctx->next_window_close = SV3_CLOSE_OTHER;
+		}
 		error = sv3_flush_window(ctx);
 		if (error) {
 			sv3_complete(bio, error);
@@ -1199,8 +1257,12 @@ static void sv3_worker(struct work_struct *work)
 		 * Never carry a partially published upper write window
 		 * across work items; a later read/FUA could overtake it.
 		 */
-		if (ctx->batch_count)
+		if (ctx->batch_count) {
+			ctx->next_window_close = !READ_ONCE(ctx->accepting) ?
+				SV3_CLOSE_SHUTDOWN : !remaining ?
+				SV3_CLOSE_QUANTUM : SV3_CLOSE_IDLE;
 			sv3_flush_window(ctx);
+		}
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (!list_empty(&local))
@@ -1645,6 +1707,12 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
 		       "win9_16=%llu win17_64=%llu "
 		       "coalesce_deferred=%llu coalesce_urgent=%llu "
+		       "close_unknown=%llu close_full=%llu close_duplicate=%llu "
+		       "close_zero=%llu close_fua=%llu close_raw=%llu "
+		       "close_read_conflict=%llu close_read_unrelated=%llu "
+		       "close_discard=%llu close_preflush=%llu "
+		       "close_quantum=%llu close_idle=%llu close_shutdown=%llu "
+		       "close_other=%llu window_gc_pressure=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -1690,6 +1758,21 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_bins[2], ctx->window_bins[3],
 		       ctx->window_bins[4], ctx->window_bins[5],
 		       ctx->coalesce_deferred, ctx->coalesce_urgent,
+		       ctx->window_close_reasons[SV3_CLOSE_UNKNOWN],
+		       ctx->window_close_reasons[SV3_CLOSE_FULL],
+		       ctx->window_close_reasons[SV3_CLOSE_DUPLICATE],
+		       ctx->window_close_reasons[SV3_CLOSE_ZERO],
+		       ctx->window_close_reasons[SV3_CLOSE_FUA],
+		       ctx->window_close_reasons[SV3_CLOSE_RAW],
+		       ctx->window_close_reasons[SV3_CLOSE_READ_CONFLICT],
+		       ctx->window_close_reasons[SV3_CLOSE_READ_UNRELATED],
+		       ctx->window_close_reasons[SV3_CLOSE_DISCARD],
+		       ctx->window_close_reasons[SV3_CLOSE_PREFLUSH],
+		       ctx->window_close_reasons[SV3_CLOSE_QUANTUM],
+		       ctx->window_close_reasons[SV3_CLOSE_IDLE],
+		       ctx->window_close_reasons[SV3_CLOSE_SHUTDOWN],
+		       ctx->window_close_reasons[SV3_CLOSE_OTHER],
+		       ctx->window_gc_pressure,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

@@ -1,7 +1,7 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
-**Status: ACTIVE PLAN / NOT YET IMPLEMENTED, 2026-10-14.**
-`swapz3` V3.0.0-alpha.7 remains experimental and **NOT
+**Status: ACTIVE; first bounded owner-loaded Stage 2 pilot PASS; alpha.9 Stage 3A telemetry not host-qualified, 2026-10-14.**
+`swapz3` V3.0.0-alpha.9 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. This roadmap proposes a conservative, source-inspired
 **bounded dependency-aware write pipeline**; it does not report that the
@@ -85,10 +85,11 @@ are reported, not hidden. This is not a release or performance gate.
 
 ## Stage 2 — first real off-versus-V3 benchmark, before optimization
 
-- Run the new **opt-in** `make bench-pair` pilot if the owner has an
-  authorized Linux host and exact owned-device checks pass. Its
-  **loaded result is NOT RUN** at roadmap update time. A bounded
-  pilot is not a sustained performance qualification.
+- First owner-loaded opt-in `make bench-pair` pilot at `cebc8bd6`:
+  2 owned RAM lowers, byte-exact common trace, matched achieved rate,
+  independent V3 lower WRITE savings **9.91%** and READ savings
+  **6.23%**, ordinary teardown PASS. This short synthetic
+  single trial is not sustained performance qualification.
 - Compare the same immutable logical pages, operation trace,
   prefill, completed work and full byte-exact readback on **two
   distinct owned RAM-backed `null_blk` lower devices**: uncompressed
