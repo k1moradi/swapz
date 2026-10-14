@@ -67,8 +67,9 @@ cleanup() {
 	if (( OWN_NULL )); then
 		if (( OWN_DM || QUARANTINE )); then
 			note "QUARANTINED: preserving RAM lower for investigation"
-		elif [[ -d "$CONFIG" && "$(cat "$CONFIG/memory_backed" 2>/dev/null)" == 1 &&
-		        -z "$(ls -A "/sys/block/${LOWER##*/}/holders" 2>/dev/null)" ]]; then
+		elif [[ -n "$LOWER" && -d "$CONFIG" && -d "/sys/block/${LOWER##*/}/holders" ]] &&
+		     [[ "$(cat "$CONFIG/memory_backed" 2>/dev/null)" == 1 ]] &&
+		     [[ -z "$(ls -A "/sys/block/${LOWER##*/}/holders" 2>/dev/null)" ]]; then
 			echo 0 > "$CONFIG/power" && rmdir "$CONFIG" ||
 				{ note "QUARANTINED: cannot safely delete owned null_blk"; QUARANTINE=1; }
 		else
@@ -124,8 +125,8 @@ echo 64 > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"
 echo 1 > "$CONFIG/memory_backed"
 echo 1 > "$CONFIG/power"
-[[ "$(cat "$CONFIG/memory_backed")" == 1 &&
-   "$(cat "$CONFIG/power")" == 1 ]] || fail "RAM backing not active"
+[[ "$(cat "$CONFIG/memory_backed")" == 1 ]] && [[ "$(cat "$CONFIG/power")" == 1 ]] ||
+	fail "RAM backing not active"
 INDEX="$(cat "$CONFIG/index")"
 [[ "$INDEX" =~ ^[0-9]+$ ]] || fail "invalid owned null_blk index"
 LOWER="/dev/nullb$INDEX"
@@ -135,8 +136,7 @@ for i in {1..50}; do
 done
 [[ -b "$LOWER" ]] || fail "owned lower block node did not appear"
 DEVNO="$(cat "/sys/block/nullb$INDEX/dev")"
-[[ "$(readlink -f "/sys/dev/block/$DEVNO")" ==
-   "$(readlink -f "/sys/block/nullb$INDEX")" ]] ||
+[[ "$(readlink -f "/sys/dev/block/$DEVNO")" == "$(readlink -f "/sys/block/nullb$INDEX")" ]] ||
 	fail "lower devno does not match configfs index"
 [[ "$(blockdev --getsize64 "$LOWER")" == 67108864 ]] ||
 	fail "RAM lower is not exactly 64MiB"
@@ -147,6 +147,7 @@ if awk -v d="$LOWER" 'NR>1 && $1==d {f=1} END{exit !f}' /proc/swaps; then
 	fail "new RAM lower already active as swap"
 fi
 note "OWNED_RAM_LOWER=$LOWER DEVICE=$DEVNO UUID=$UUID"
+modprobe dm_mod || fail "device mapper core unavailable"
 insmod "$MODULE" || fail "V3 kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz3[[:space:]]' ||

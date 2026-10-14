@@ -181,3 +181,14 @@ BLOCKED on hosts without null_blk/configfs/module-signing access.
 It is not equivalent to real workload performance qualification:
 kernel CPU, sustained GC and matched-rate independent lower-I/O
 gates in [benchmark.md](benchmark.md) remain open.
+
+### Deployment-helper syntax gate
+
+On commit `62ad212`, the initial rootless CI correctly rejected a
+Bash conditional split across a newline in the privileged deployment
+helper **before** any module/device deployment. The source was amended
+to keep comparisons syntactically complete, and lower teardown now
+requires a known lower device and real `holders` sysfs directory
+before powering it off. `make verify` always runs `bash -n`; a
+compilation PASS alone cannot certify this privileged script, and the
+loaded deployment remains **NOT RUN by GitHub Actions**.
