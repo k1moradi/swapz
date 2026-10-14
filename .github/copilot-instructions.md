@@ -13,3 +13,8 @@ actual production kernel **C**. Build only in `~/swapz/build/`; use
 real C tests, byte-identical inputs and independent lower-I/O counters.
 No reboot, active swap/physical media or unsafe teardown. Update the
 relevant current standard(s) in the same code commit and test exact HEAD.
+
+Before creating or moving documentation, consult
+[docs/README.md](../docs/README.md) and
+[documentation guidelines](../docs/DOCUMENTATION_GUIDELINES.md).
+Use the active [V3 TODO](../docs/TODO.md) instead of historical tasks.

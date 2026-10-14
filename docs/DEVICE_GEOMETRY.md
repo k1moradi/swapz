@@ -111,5 +111,5 @@ needed for any genuine NAND wear or internal program-erase claims.
 - [Linux block stat accounting, including 512-byte sector units](https://www.kernel.org/doc/html/latest/block/stat.html)
 - [swapon(8) swap-file restrictions](https://man7.org/linux/man-pages/man8/swapon.8.html)
 
-This document defines the *measurement semantics*; [VISION.md](VISION.md)
-defines success and [V3_GOALS.md](V3_GOALS.md) defines algorithmic priorities.
+This document defines the *measurement semantics*; [VISION.md](../VISION.md)
+defines success and [V3_GOALS.md](ROADMAP.md) defines algorithmic priorities.

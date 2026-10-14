@@ -1,9 +1,9 @@
 > **Supplemental/historical evidence — not current engineering policy.**
 > An implementation and algorithm roadmap, not a conflicting test or coding policy.
-> The authoritative standards are [coding_standards.md](coding_standards.md),
-> [testing_standards.md](testing_standards.md),
-> [compile.md](compile.md), and
-> [benchmark.md](benchmark.md), alongside README.md and VISION.md.
+> The authoritative standards are [coding_standards.md](../../../coding_standards.md),
+> [testing_standards.md](../../../testing_standards.md),
+> [compile.md](../../../compile.md), and
+> [benchmark.md](../../../benchmark.md), alongside README.md and VISION.md.
 > Do not use dated branch/reset/active-swap instructions as new permission.
 
 # swapz V3 — active project goals (supersedes the old V2.x sequencing)
@@ -17,8 +17,8 @@
 > The existing 4KiB layout is an implementation choice, NOT a universal
 > device physical-sector or operation size.**
 
-Read the normative [VISION.md](VISION.md), device-size/sector/partition/
-swap-file distinctions in [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and the
+Read the normative [VISION.md](../../../VISION.md), device-size/sector/partition/
+swap-file distinctions in [DEVICE_GEOMETRY.md](../../DEVICE_GEOMETRY.md) and the
 measured algorithm-vs-implementation diagnosis in
 [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Together they govern
 feature priority, design, performance evidence and release decisions.
@@ -80,7 +80,7 @@ previously independent raw writes in the matched test. It reuses
 alpha.6's bounded deferred-publication authority protocol and preserves
 the same-binary `lower_bulk=0` and verification controls. This is an
 **unqualified candidate**, not an independently loaded request-count win;
-see [the mixed lower-write gate](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md).
+see [the mixed lower-write gate](../../../kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md).
 Do not relax the `null_blk`-only guard or extrapolate to active storage.
 
 **Priority ordering:** byte-exact and FUA/fault safety first;
@@ -168,7 +168,7 @@ could potentially address smaller sectors.
   until crash-consistent durable metadata, boot/resume and power-loss tests
   are independently qualified.
 
-The current release-blocking qualification checklist is [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md), not a claimed alpha.2 production approval.
+The current release-blocking qualification checklist is [PRODUCTION_READINESS.md](../../PRODUCTION_READINESS.md), not a claimed alpha.2 production approval.
 
 ## Hard exit gates (do not imply success merely from CI)
 
@@ -221,4 +221,4 @@ fault/pressure conditions and **materially improves measured lower-device
 read/write bytes AND request-count/latency tradeoffs including GC**, under
 matched achieved load, sector geometry and flush/drain rules, without
 unacceptable swap-in p99, CPU or memory regressions. The detailed go/no-go and inconclusive
-criteria are mandatory in [VISION.md](VISION.md).
+criteria are mandatory in [VISION.md](../../../VISION.md).

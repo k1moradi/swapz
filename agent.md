@@ -9,3 +9,8 @@ one reused `~/swapz/build/`; never touch active swap or physical devices.
 After each implementation, update a relevant one of the four standards
 in the **same commit**, run automated goal-aligned tests, and report
 exact SHA and remaining gaps. Do not invent additional policies here.
+
+Use [docs/README.md](docs/README.md) and
+[docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md)
+for documentation routing; keep the current task queue in
+[docs/TODO.md](docs/TODO.md), not in archival logs.

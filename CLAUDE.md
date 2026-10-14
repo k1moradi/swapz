@@ -9,3 +9,7 @@ All generated binaries/bytecode go in reused `~/swapz/build/`.
 Update one of the four standards with every implementation commit,
 preserve real test failures, and never reboot/touch active swap or physical
 media. README and VISION remain the project entry and acceptance criteria.
+
+Document placement, archiving and active tasks: [docs/README.md](docs/README.md),
+[docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md),
+and [docs/TODO.md](docs/TODO.md). Agent files must not duplicate policy.

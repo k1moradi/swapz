@@ -31,7 +31,7 @@ Tests run rootlessly. No reboot, actual swap mutation, physical media,
 or `null_blk` module loading. See
 [project vision](../../VISION.md),
 [build conventions](../../docs/BUILD_AND_TEST_CONVENTIONS.md)
-and [readiness ledger](../../PRODUCTION_READINESS.md).
+and [readiness ledger](../../docs/PRODUCTION_READINESS.md).
 
 The historical C++ model is no longer a default V3 test gate; invoke
 `make -C tests legacy-model` only for archival reproduction.

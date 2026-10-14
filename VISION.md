@@ -18,9 +18,9 @@ VISION governs success criteria. Only `main` is used and all builds
 reuse `~/swapz/build/`. Historical reports are evidence, not policy.
 
 This is the project's **north star and acceptance standard** for V3 and all
-later versions. Read [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) for 512n, 512e,
+later versions. Read [DEVICE_GEOMETRY.md](docs/DEVICE_GEOMETRY.md) for 512n, 512e,
 4Kn, filesystem cluster sizes, swap partitions/files and precise block-layer
-stat units. [V3_GOALS.md](V3_GOALS.md) is the algorithm roadmap; this
+stat units. [V3_GOALS.md](docs/ROADMAP.md) is the algorithm roadmap; this
 document defines *what we are optimizing* and *what evidence counts*.
 
 ## 1. Start with the device, not the compressor

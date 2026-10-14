@@ -2,7 +2,7 @@
 
 **This file describes a TEST CANDIDATE, not a release.** All work must pass
 the existing [LIVE_TEST_GATE.md](LIVE_TEST_GATE.md) and
-[PRODUCTION_READINESS.md](../../PRODUCTION_READINESS.md) requirements.
+[PRODUCTION_READINESS.md](../../docs/PRODUCTION_READINESS.md) requirements.
 Only an independently owned RAM-backed `null_blk` is permitted by the
 kernel constructor. **Do not remove this guard. Never reboot. Do not modify
 active swap, the protected SD partition or other device mappings.**

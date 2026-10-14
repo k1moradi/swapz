@@ -2,6 +2,10 @@
 
 **Current testing policy.** Read [README](README.md), [VISION](VISION.md), [coding_standards.md](coding_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) at the **start of every agent task**. Tests must prove correctness on actual source, expose false completions and regressions, and ultimately support the project's **real lower-I/O** objective—not maximize test counts.
 
+Current actionable V3 gaps belong in [docs/TODO.md](docs/TODO.md);
+historical validation transcripts belong in the archive indexed by
+[docs/README.md](docs/README.md), not in the standards or task list.
+
 ## Qualification ladder (do not confuse evidence levels)
 
 | Gate | Shows | Cannot claim |
@@ -19,7 +23,7 @@ Report **PASS, FAIL, MIXED, INCONCLUSIVE, BLOCKED, NOT RUN** with exact Git sour
 **Only one reusable compiled-output tree:** `~/swapz/build/`. Native tests link to **actual** `kernel/extent-v3/{codec,authority,engine}.c` and use semantic names, not newly duplicated version-number frameworks. From checkout root:
 
 ~~~sh
-make test                  # C++ model + all native C suites
+make test                  # all active V3 native production-C suites
 make test-codec            # codec-roundtrip
 make test-mapping          # mapping authority, transactions, overwrites, raw/discard
 make test-gc               # liveness, forbidden victim, rotation, cost
@@ -27,7 +31,7 @@ make test-lower-io         # flush/FUA, lower write aggregation
 make -C tests/suites test-all
 ~~~
 
-There are **15 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
+There are **15 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`; `zero-write-elision`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
 
 ## Minimum correctness matrix
 

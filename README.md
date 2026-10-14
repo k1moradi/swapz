@@ -26,6 +26,16 @@ rootless safety checks remain automated to avoid losing safety coverage.
 | [compile.md](compile.md) | Kbuild/Make and only one reused `~/swapz/build/` |
 | [benchmark.md](benchmark.md) | Same-data **uncompressed baseline vs V3** evidence |
 
+## Documentation and current work
+
+The concise [current V3 TODO](docs/TODO.md) and
+[active V3 roadmap](docs/ROADMAP.md) are under
+[the documentation index](docs/README.md). Follow
+[documentation guidelines](docs/DOCUMENTATION_GUIDELINES.md) before
+adding a document or moving a report. V2.x plans and validation logs
+are archived for provenance, not active requirements.
+Root agent entry points stay at their expected locations.
+
 **One Git branch: `main`**, no new branches unless expressly authorized.
 More than 50% of ongoing engineering effort belongs to the
 **production Linux kernel module's C**. At the end of each implementation,
@@ -100,7 +110,7 @@ lower I/O and kernel CPU are the development priorities**, not more
 version comparisons or speculative Python frameworks.
 
 Historical alpha.8 READ-bypass and alpha.7 reports, retained in
-[PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) and prior commits,
+[PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) and prior commits,
 are *diagnostic evidence*, not required V2.2 benchmark controls.
 The new **off vs V3** loaded immutable-trace comparison has **not
 yet been performed**. Native tests and compiler success are not loaded

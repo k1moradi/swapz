@@ -1,23 +1,35 @@
 > **Supplemental/historical evidence — not current engineering policy.**
 > A dated production evidence ledger, not another source of engineering rules or a release sign-off.
-> The authoritative standards are [coding_standards.md](coding_standards.md),
-> [testing_standards.md](testing_standards.md),
-> [compile.md](compile.md), and
-> [benchmark.md](benchmark.md), alongside README.md and VISION.md.
+> The authoritative standards are [coding_standards.md](../coding_standards.md),
+> [testing_standards.md](../testing_standards.md),
+> [compile.md](../compile.md), and
+> [benchmark.md](../benchmark.md), alongside README.md and VISION.md.
 > Do not use dated branch/reset/active-swap instructions as new permission.
 
 # swapz V3 — production readiness ledger
 
 **Status: NOT READY — V3.0.0-alpha.7 (draft mixed lower-write candidate).** This is an evidence gate, not a
-marketing release label. See [VISION.md](VISION.md),
+marketing release label. See [VISION.md](../VISION.md),
 [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) and
-[PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Primary success
+[PERFORMANCE_DIAGNOSIS.md](archive/v3/PERFORMANCE_DIAGNOSIS.md). Primary success
 means verified, workload-matched reductions in **host-visible lower
 read/write BYTES and REQUEST COUNTS**, accounting for all GC and
 flush operations and the device's actual logical/physical sector and
 preferred I/O sizes, with acceptable swap-in p99 and CPU. 4KiB
 equivalents are a normalization, not physical operation counts.
 Correctness tests are mandatory but do not establish this outcome.
+
+## Latest bounded zero-elision evidence — October 14, 2026
+
+At source `4c6e29b` on owned RAM-backed `null_blk`, a user-run
+loaded smoke verified 9 exactly-zero writes elided from 192 logical
+writes, with 183 physical writes / 749,568 bytes confirmed by
+independent backing sectors and clean readback/teardown. This is
+a **bounded synchronous correctness and write-counter result**, not
+a controlled off-versus-V3 achieved-load benchmark or a general
+nonzero-compression win. The newer lower-sector assertion in
+`make run` has only rootless source-guard coverage so far.
+See [benchmark.md](../benchmark.md) for the full scoped evidence.
 
 ## Alpha.7: independent loaded bounded-burst win; sustained gate STILL OPEN
 
@@ -68,7 +80,7 @@ publication, varied realistic-size input, matched achieved IOPS,
 read/write request+byte accounting including GC, CPU, p95/p99,
 and repeated counterbalanced V2.2 comparison; no active swap or
 physical storage tests. See
-[alpha.7 design](kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md)
+[alpha.7 design](../kernel/extent-v3/MIXED_LOWER_WRITE_AGGREGATION.md)
 and [fault qualification gate](
 kernel/extent-v3/LOWER_WRITE_FAULT_QUALIFICATION.md).
 
@@ -92,7 +104,7 @@ campaign is not a measured Linux anonymous swap population.
 The existing alpha.7 production path **already** attempts LZ4 then
 falls back to an uncompressed 4KiB raw record if the output cannot
 fit 3,568 bytes. The primary next gate is the
-[anonymous-page compression qualification](kernel/extent-v3/ANON_COMPRESSIBILITY_QUALIFICATION.md).
+[anonymous-page compression qualification](../kernel/extent-v3/ANON_COMPRESSIBILITY_QUALIFICATION.md).
 This observational branch adds true kernel codec-input size bins
 without changing this raw/compressed decision. Its counters measure
 attempts, **not acknowledged operations**, unique pages or real
@@ -182,7 +194,7 @@ They do not validate the renamed/rebuilt alpha.2 `dm-swapz.ko`.
   benchmark. This is an **unproven release benefit**, not a
   demonstrated failure of zsmalloc-style size classes.
 
-See [PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md) for
+See [PERFORMANCE_DIAGNOSIS.md](archive/v3/PERFORMANCE_DIAGNOSIS.md) for
 sourced numbers and the concrete engineering response.
 
 ## Main-developer alpha.3: the online-I/O performance candidate
@@ -218,7 +230,7 @@ sourced numbers and the concrete engineering response.
   captured anew. The alpha.1 and alpha.2 evidence cannot certify it.
 
 The precise independent actual-kernel workload and safety instructions
-are in [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md).
+are in [ONLINE_IO_RETEST.md](../kernel/extent-v3/ONLINE_IO_RETEST.md).
 **The release gates below remain unchecked until new host evidence
 exists.** No SD/HDD/SSD I/O or active swap manipulation is authorized
 by this source update; the `null_blk` constructor guard remains.
@@ -250,7 +262,7 @@ relocation, and eight rotations on the exact 32MiB geometry.
 **Current experimental development version: 3.0.0-alpha.7.**
 
 This is **source implementation evidence**, NOT a loaded-kernel
-approval. [ONLINE_IO_RETEST.md](kernel/extent-v3/ONLINE_IO_RETEST.md)
+approval. [ONLINE_IO_RETEST.md](../kernel/extent-v3/ONLINE_IO_RETEST.md)
 makes the exact original workload and ≥8 GC rotations the **first
 host gate**. No physical SD/HDD/SSD test or relaxing the null_blk
 safety restriction until this and later independent gates pass.
@@ -389,7 +401,7 @@ lower error/short completion and prefix preservation, live GC,
 upper FUA/PREFLUSH/suspend, and real V2.2 sustained, matched-achieved
 IOPS tests. **Do not count this as a win before lower READ and WRITE
 bytes AND request counts, CPU and p99 improve without damaging
-correctness.** See the [dedicated alpha.6 gate](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md).
+correctness.** See the [dedicated alpha.6 gate](../kernel/extent-v3/LOWER_WRITE_AGGREGATION.md).
 The constructor remains null_blk-only; no active /dev/sdb1, physical
 disk, /swapfile or reboot is authorized.
 

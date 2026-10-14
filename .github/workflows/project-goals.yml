@@ -74,6 +74,26 @@ jobs:
           fi
           test -s tests/suites/Makefile
           echo "SIX_DOCUMENT_ROUTING_AND_FOUR_STANDARDS_COCHANGE_PASS"
+      - name: Enforce documentation locations and discoverability
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in docs/README.md docs/DOCUMENTATION_GUIDELINES.md \
+                      docs/TODO.md docs/ROADMAP.md docs/DEVICE_GEOMETRY.md \
+                      docs/PRODUCTION_READINESS.md \
+                      docs/archive/v2.2/CODEX_VALIDATION.md; do
+            test -s "$file" || { echo "FAIL: required documentation missing: $file"; exit 1; }
+          done
+          shopt -s nullglob
+          for file in *.md; do
+            case "$file" in
+              README.md|VISION.md|AGENTS.md|CLAUDE.md|agent.md|CODEX_VALIDATION.md|coding_standards.md|testing_standards.md|compile.md|benchmark.md) ;;
+              *) echo "FAIL: move root documentation into docs/: $file"; exit 1 ;;
+            esac
+          done
+          grep -Fq 'docs/DOCUMENTATION_GUIDELINES.md' README.md
+          grep -Fq 'docs/TODO.md' AGENTS.md
+          echo "DOCUMENTATION_PLACEMENT_AND_AGENT_DISCOVERY_PASS"
       - name: Verify no project-local compilation outside build
         shell: bash
         run: |

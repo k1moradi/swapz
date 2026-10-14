@@ -1,6 +1,6 @@
 ## NOW: V3.0.0-alpha.1 — physical 4 KiB I/O density
 
-Authoritative scope: [V3_GOALS.md](V3_GOALS.md). The older V2.x task list
+Authoritative scope: [V3_GOALS.md](../../ROADMAP.md). The older V2.x task list
 below is preserved for comparison/maintenance, **not the active milestone**.
 
 - [x] Implement versioned 4/8/16 KiB SWZ3 extent codec with CRC32C.

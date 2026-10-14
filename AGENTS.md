@@ -12,6 +12,13 @@ It is a **bootstrap**, not a seventh independent source of engineering policy.
 5. [compile.md](compile.md) — Make/Kbuild, one reused `~/swapz/build/`
 6. [benchmark.md](benchmark.md) — identical off/V3 data and real measurements
 
+**Documentation:** Keep new plans and reports under
+[docs/](docs/README.md); follow
+[documentation guidelines](docs/DOCUMENTATION_GUIDELINES.md)
+and track the active V3 work in [docs/TODO.md](docs/TODO.md).
+Root agent instructions are pointers, not additional policy.
+Historic unchecked V2.2 tasks are not current V3 requirements.
+
 **Only `main`:** no new branches, branch-backed worktrees or draft PRs
 unless the repository owner explicitly authorizes an exception. Never
 discard another agent's work with reset --hard, broad restore, clean or
@@ -35,8 +42,11 @@ README for user-facing changes and VISION if acceptance criteria change.
 `/dev/sdb1` or `/swapfile`, physical/unowned storage, or unrelated DM.
 V3 is the active default *development* build, but stays experimental and null_blk-only; V2.2 is retired from active benchmarks.
 
-`CODEX_VALIDATION.md`, `TESTING.md`, `PRODUCTION_READINESS.md`,
-`V3_GOALS.md`, archived scripts, old PRs and
-`docs/BUILD_AND_TEST_CONVENTIONS.md` provide historical details, **not
-competing current policy**. Follow these six documents if old instructions
+The [archived Codex worklog](docs/archive/v2.2/CODEX_VALIDATION.md),
+[legacy V2.1 testing plan](docs/archive/v2.1/TESTING.md),
+[dated production readiness ledger](docs/PRODUCTION_READINESS.md),
+[active V3 roadmap](docs/ROADMAP.md), archived scripts and old PRs
+provide versioned details, **not competing current policy**.
+The root `CODEX_VALIDATION.md` is a current agent bootstrap,
+not the former historical worklog. Follow these six documents if old instructions
 conflict about branches, build output, testing, or safety.
