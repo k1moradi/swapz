@@ -1,178 +1,62 @@
-name: Experimental V3 aligned extent codec
+name: Experimental V3 production C qualification
 
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths:
       - 'kernel/extent-v3/**'
-      - 'tests/runtime/extent-v3-codec-test.c'
-      - 'tests/runtime/extent-v3-authority-test.c'
-      - 'tests/runtime/extent-v3-tx-snapshot-test.c'
-      - 'tests/runtime/extent-v3-write-verify-test.c'
-      - 'tests/runtime/extent-v3-dead-segment-test.c'
-      - 'tests/runtime/extent-v3-raw-discard-test.c'
+      - 'tests/suites/**'
+      - 'tests/runtime/extent-v3-*.c'
       - 'tests/runtime/extent-v3-production-source-test.py'
+      - 'Makefile'
       - 'V3_GOALS.md'
-      - 'tests/runtime/extent-v3-engine-test.c'
-      - 'tests/runtime/extent-v3-randomized-engine-test.c'
-      - 'tests/runtime/extent-v3-gc-forbidden-test.c'
-      - 'tests/runtime/extent-v3-gc-cost-test.c'
-      - 'tests/runtime/extent-v3-flush-test.c'
-      - 'tests/runtime/extent-v3-gc-rotation-test.c'
-      - 'tests/runtime/extent-v3-gc-engine-rotation-test.c'
-      - 'tests/runtime/extent-v3-bulk-io-test.c'
       - '.github/workflows/extent-v3-codec.yml'
-  push:
-    branches:
-      - feat/kernel-v3-aligned-extent-codec
+  workflow_dispatch:
 
 permissions:
   contents: read
+env:
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
 
 jobs:
   exact-c:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - name: Compile and execute exact V3 kernel codec C with sanitizers
+      - name: Reuse one build directory for native production-C tests
         shell: bash
         run: |
           set -euo pipefail
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-codec-test.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-codec-test"
-          "$RUNNER_TEMP/sv3-codec-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-authority-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-authority-test"
-          "$RUNNER_TEMP/sv3-authority-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-tx-snapshot-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-tx-snapshot-test"
-          "$RUNNER_TEMP/sv3-tx-snapshot-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-write-verify-test.c \
-            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
-            kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-write-verify-test"
-          "$RUNNER_TEMP/sv3-write-verify-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-dead-segment-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-dead-segment-test"
-          "$RUNNER_TEMP/sv3-dead-segment-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-raw-discard-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-raw-discard-test"
-          "$RUNNER_TEMP/sv3-raw-discard-test"
+          make -C tests/suites SANITIZE=1 test-all
           python3 -B tests/runtime/extent-v3-production-source-test.py -v
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-engine-test.c \
-            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
-            kernel/extent-v3/codec.c -o "$RUNNER_TEMP/sv3-engine-test"
-          "$RUNNER_TEMP/sv3-engine-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-randomized-engine-test.c \
-            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
-            kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-randomized-engine-test"
-          "$RUNNER_TEMP/sv3-randomized-engine-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-gc-forbidden-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-gc-forbidden-test"
-          "$RUNNER_TEMP/sv3-gc-forbidden-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-gc-cost-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-gc-cost-test"
-          "$RUNNER_TEMP/sv3-gc-cost-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-flush-test.c \
-            -o "$RUNNER_TEMP/sv3-flush-test"
-          "$RUNNER_TEMP/sv3-flush-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-gc-rotation-test.c \
-            kernel/extent-v3/authority.c kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-gc-rotation-test"
-          "$RUNNER_TEMP/sv3-gc-rotation-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-gc-engine-rotation-test.c \
-            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
-            kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-gc-engine-rotation-test"
-          "$RUNNER_TEMP/sv3-gc-engine-rotation-test"
-          cc -std=c11 -O1 -g -Wall -Wextra -Werror \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I kernel/extent-v3 \
-            tests/runtime/extent-v3-bulk-io-test.c \
-            kernel/extent-v3/engine.c kernel/extent-v3/authority.c \
-            kernel/extent-v3/codec.c \
-            -o "$RUNNER_TEMP/sv3-bulk-io-test"
-          "$RUNNER_TEMP/sv3-bulk-io-test"
           git diff --check
-
   compile-only:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Install distribution headers without loading anything
+      - name: Install kernel header prerequisites, no module loading
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            build-essential linux-headers-generic-hwe-24.04
-      - name: Compile production dm-swapz W=1/W=2 and isolated research smoke
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential linux-headers-generic-hwe-24.04
+      - name: Compile V3 W=1, isolated research smoke W=1, production W=2
         shell: bash
         run: |
           set -euo pipefail
           KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
           test -n "$KDIR"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
-          echo "CODEC_BLOB=$(git rev-parse HEAD:kernel/extent-v3/codec.c)"
-          # The normal kernel build produces ONLY the actual V3 DM target.
+          echo "TARGET_BLOB=$(git rev-parse HEAD:kernel/extent-v3/dm-target.c)"
           make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
-          test -s kernel/extent-v3/dm-swapz.ko
-          sha256sum kernel/extent-v3/dm-swapz.ko
-          # Research smoke is separately built from the same source, never
-          # linked in the same Kbuild invocation as dm-swapz.
-          make -C kernel/extent-v3 KDIR="$KDIR" clean
+          test -s build/kernel/experimental/dm-swapz.ko
+          sha256sum build/kernel/experimental/dm-swapz.ko
           make -C kernel/extent-v3 KDIR="$KDIR" SV3_BUILD_SMOKE=1 W=1 -j2 all
-          test -s kernel/extent-v3/swapz_extent_v3.ko
-          sha256sum kernel/extent-v3/swapz_extent_v3.ko
-          # Separate W=2 production module compile, never load any module.
-          make -C kernel/extent-v3 KDIR="$KDIR" clean
+          test -s build/kernel/research/swapz_extent_v3.ko
+          sha256sum build/kernel/research/swapz_extent_v3.ko
           make -C kernel/extent-v3 KDIR="$KDIR" W=2 -j2 all
-          test -s kernel/extent-v3/dm-swapz.ko
-          sha256sum kernel/extent-v3/dm-swapz.ko
-          echo "COMPILE_ONLY; NO MODULE LOAD"
+          test -s build/kernel/experimental/dm-swapz.ko
+          sha256sum build/kernel/experimental/dm-swapz.ko
+          echo "COMPILE_ONLY_NO_MODULE_INSERTION"

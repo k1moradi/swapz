@@ -16,6 +16,17 @@
 > current format unit, not the native I/O size of every 512n, 512e or 4Kn
 > device**. Green CI and simulated compression ratios do NOT prove a win.
 
+**Development/build/test rule:** Agents must reread
+[project vision](VISION.md), [active technical goals](V3_GOALS.md),
+[production readiness](PRODUCTION_READINESS.md) and the
+[build/test conventions](docs/BUILD_AND_TEST_CONVENTIONS.md) for
+**every task**. Use **one reused `~/swapz/build/` directory**, native
+Kbuild/Make, and reusable meaningful test-suite names; do not
+create branches. Changes to code/tests/build/CI require a meaningful
+documentation update in the same commit. Goal-aligned native tests
+run automatically on every `main` push. Python remains thin
+supporting glue; most engineering time belongs to kernel C.
+
 **Production readiness is not established.** See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for the exact loaded-kernel, FUA, GC, V2.2 control and physical-media release gates.
 
 Read [DEVICE_GEOMETRY.md](DEVICE_GEOMETRY.md) for Linux swap pages,

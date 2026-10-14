@@ -1,3 +1,9 @@
+> **Current entry point:** use [behavior-named native test suites](../suites/README.md)
+> and [one-build-root conventions](../../docs/BUILD_AND_TEST_CONVENTIONS.md).
+> Historical version-prefixed scripts below are retained for compatibility,
+> not a reason to duplicate test frameworks. All new compiled test binaries
+> belong inside the same reusable `~/swapz/build/` directory.
+>
 # swapz runtime validation helpers
 
 These scripts preserve the disposable Linux runtime checks used for the V2.1

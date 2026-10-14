@@ -28,3 +28,14 @@ report measured backing bytes and request counts and correct readback.
 
 Historical branch names in old reports are provenance only and must
 not be recreated. AGENTS.md takes precedence over older instructions.
+
+**EVERY TASK:** Read current-main `VISION.md`, `V3_GOALS.md`,
+`PRODUCTION_READINESS.md`, and `docs/BUILD_AND_TEST_CONVENTIONS.md`
+at the start, and formulate the relevant project-goal correctness /
+lower-I/O hypothesis. Reuse **only `~/swapz/build/`** for all compiled
+artifacts and bytecode. Prefer reusable, behavior-named native-C test
+suites; do not proliferate version-labeled test runners. After **every
+implementation prompt** update relevant Markdown documentation in the
+same commit, execute automated project-goal tests and report their
+result. This is mandatory alongside the main-only / majority kernel C
+rule, not a replacement for it.

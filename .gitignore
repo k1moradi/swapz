@@ -9,3 +9,8 @@
 userspace/swapzctl
 tests/swapz-model-tests
 tests/swapz-model-tests-asan
+
+# The only reusable build-output tree (all native and staged Kbuild artifacts).
+/build/
+__pycache__/
+*.pyc

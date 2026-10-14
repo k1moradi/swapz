@@ -1,0 +1,59 @@
+name: Native kernel-C project-goal regressions
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: project-goals-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
+jobs:
+  native-test-and-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Configure the reusable build root
+        run: mkdir -p build/tests/native build/tests/model build/python-cache
+      - name: Install native test prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq             build-essential liblz4-dev
+      - name: Build and execute real production C/C++ modular tests
+        run: |
+          set -euo pipefail
+          make -C tests test
+          test -x build/tests/native/lower-write-aggregation
+          test -x build/tests/native/mapping-authority
+          test -x build/tests/model/swapz-model-tests
+      - name: Require project-goal doc updates alongside code
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          if printf '%s\n' "$changed" | grep -Eq '^(kernel/.*\.(c|h)|tests/.*\.(c|cpp|h|py|sh)|userspace/.*\.cpp|Makefile$|dkms\.conf$|.github/workflows/.*\.yml$)'; then
+            printf '%s\n' "$changed" | grep -Eq '\.md$' || { echo 'FAIL: implementation requires same-commit documentation update'; exit 1; }
+          fi
+          for file in AGENTS.md agent.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md; do
+            grep -qi 'VISION.md' "$file" || { echo "Missing per-prompt vision link: $file"; exit 1; }
+            grep -qi 'build/' "$file" || { echo "Missing single-build convention: $file"; exit 1; }
+          done
+          test "$(git branch --show-current)" = main
+          test -f docs/BUILD_AND_TEST_CONVENTIONS.md
+          test -f tests/suites/Makefile
+          echo 'GOAL_AND_DOCUMENTATION_GATES_PASS'
+      - name: Verify no project-local compilation outside build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find kernel userspace tests -type f \( -name '*.ko' -o -name '*.o' -o -name '*.mod.o' \) | grep -q .; then
+            echo 'FAIL: generated native output outside reusable build/'; exit 1
+          fi
+          test -d build
+          git diff --check
+          echo "NATIVE_MODULE_TESTS_AND_BUILD_TIDINESS_PASS"

@@ -81,6 +81,66 @@ This is a **priority**, not a ban on Python: high-value, reproducible,
 bounded test tooling remains acceptable when it materially advances C/C++
 correctness or a fair benchmark.
 
+## Per-prompt project vision, build tidiness and delivery contract
+
+**At the START of EVERY agent prompt/task**, re-read `AGENTS.md`, `VISION.md`,
+`V3_GOALS.md`, `PRODUCTION_READINESS.md`, and
+`docs/BUILD_AND_TEST_CONVENTIONS.md` **from current `main`**. Before
+changing code, state the relevant measurable vision hypothesis:
+**identical verified 4KiB useful work, fewer real lower READ and WRITE
+bytes and requests including GC, acceptable read p95/p99, CPU and RAM,
+and uncompromised BIO authority, ordering and error handling**.
+If a task is purely maintenance, state the safety/traceability benefit,
+not a fabricated performance win. Do not mistake synthetic null_blk
+for physical storage. These documents are mandatory task context,
+not optional background reading.
+
+**One persistent build directory:** `~/swapz/build/` (equivalently
+`$(git rev-parse --show-toplevel)/build/`). Reuse it for each task.
+Subdirectories such as `build/kernel/stable/`,
+`build/kernel/experimental/`, `build/kernel/research/`,
+`build/tests/native/`, `build/tests/model/`,
+`build/userspace/`, and `build/python-cache/` are categories **inside
+that single build root**, not new build folders. All generated .o,
+.ko, .mod, test executables, C++ utilities, temporary compile copies,
+logs intended as build outputs and Python bytecode must stay inside
+`build/`. Use `PYTHONPYCACHEPREFIX="$PWD/build/python-cache"`
+where bytecode is needed. Do not create `cmake-build-*`,
+`build-debug/`, `tests/build/`, `/tmp/swapz-build*`, or
+additional source-tree binary output directories. Workflows may use
+temporary *test-owned storage fixtures* as necessary, but must not
+build software outside the single checkout's `build/`. Never delete
+the entire build directory or unrelated artifacts without explicit
+approval. Older kernels can be built from **source copies staged
+inside build/** with Kbuild; do not silently emit .ko into sources.
+
+**Reusable test modules, semantic names:** Prefer the
+`tests/suites/Makefile` entry points `test-codec`,
+`test-mapping`, `test-gc`, `test-lower-io`, and `test-all`
+over reimplementing individual invocations. Names describe function
+(e.g. `mapping-authority`, `gc-rotation`,
+`lower-write-aggregation`) rather than calling everything `v22` or
+`v3`. Keep provenance labels for truly version-specific baselines
+and retain historical filenames as compatibility interfaces until
+all consumers are migrated. Test actual C code and native C++ first.
+
+**Mandatory at the END of EVERY implementation prompt:** update the
+relevant Markdown documentation **in the same `main` commit** to
+reflect what actually changed, exact commands, source/CI results,
+limitations, and next verification gates. At least one meaningful
+`.md` change must accompany changes to production code, builds,
+testing or CI. Re-run automated goal-aligned tests; mark
+PASS/FAIL/BLOCKED honestly. No docs-only prose can substitute for
+kernel C engineering. The CI documentation-cochange gate enforces
+part of this; individual prompt context is an agent responsibility.
+
+**Make versus CMake:** external Linux kernel modules must use Linux
+Kbuild for matching kernel compilation and module linking; the
+project uses Make as the thin native Kbuild wrapper, with C++ tests
+and userspace utilities built by the same reusable Make interface.
+Do not add a parallel CMake output tree without explicit approval.
+See `docs/BUILD_AND_TEST_CONVENTIONS.md`.
+
 ## 3. Evidence and benchmark requirements
 
 - All three comparison arms (no-swapz bare *owned RAM-backed null_blk*,

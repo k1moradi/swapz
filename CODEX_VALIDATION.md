@@ -1,5 +1,20 @@
 # Agent operating policy (current, mandatory)
 
+**MANDATORY PER-PROMPT GATE (overrides archival instructions below):**
+At the beginning of EVERY task read `VISION.md`, `V3_GOALS.md`,
+`PRODUCTION_READINESS.md`, `AGENTS.md` and
+`docs/BUILD_AND_TEST_CONVENTIONS.md` on current `main`, state the
+correctness and measurable host-visible lower-I/O relevance, and use
+**one reused `~/swapz/build/` only** for compiled outputs. Prefer
+semantic reusable native C/C++ test modules in `tests/suites/` over
+version-labeled Python runners. At the end of **each implementation
+prompt**, update relevant docs in the same `main` commit and run
+goal-aligned automated tests. Historical branch/worktree/build and
+`/tmp` compilation directions below are archival and do not
+override this gate. Always preserve V2.2 as frozen control and V3
+null_blk-only safety boundary.
+
+
 **All coding agents must read [AGENTS.md](AGENTS.md).** Work only on
 `main`. **Do not create or publish any new Git branch or pull request
 unless the owner explicitly asks.** Historical references below to deleted

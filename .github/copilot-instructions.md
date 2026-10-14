@@ -30,3 +30,14 @@ The repository has **one branch only: `main`**.
 
 Old branch-oriented PR descriptions and historic validation instructions
 are read-only provenance. `AGENTS.md` takes precedence.
+
+**EVERY TASK:** Read current-main `VISION.md`, `V3_GOALS.md`,
+`PRODUCTION_READINESS.md`, and `docs/BUILD_AND_TEST_CONVENTIONS.md`
+at the start, and formulate the relevant project-goal correctness /
+lower-I/O hypothesis. Reuse **only `~/swapz/build/`** for all compiled
+artifacts and bytecode. Prefer reusable, behavior-named native-C test
+suites; do not proliferate version-labeled test runners. After **every
+implementation prompt** update relevant Markdown documentation in the
+same commit, execute automated project-goal tests and report their
+result. This is mandatory alongside the main-only / majority kernel C
+rule, not a replacement for it.
