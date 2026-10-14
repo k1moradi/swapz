@@ -163,24 +163,40 @@ Use `main` only and follow the device/host safety restrictions.
       overlapping and not measurement-window CPU.
       V3 alpha.18 absolute useful MB/s did NOT
       exceed alpha.15's 24.867 MB/s.
-- [ ] Owner alpha.19: after default `make run`
-      loaded correctness/safe teardown, execute
-      `make bench-pair-medium-unpaced` QD32 on
-      freshly owned RAM. Verify `worker_inline_drains`
-      counts and worker requeues, identical immutable
-      trace/readback, independent READ/WRITE bytes
-      and requests, completed logical MB/s, achieved
-      IOPS and p95/p99. Confirm that bounded
-      same-invocation queue draining improves useful
-      throughput without reduced lower WRITE savings,
-      stalled FUA, unfair scheduling or broken
-      suspend/drain. Report regressions and no gains,
-      and do NOT claim actual disk saturation.
+- [x] Owner alpha.19 `841f5517` loaded smoke and
+      QD32 unpaced retained/off pair PASSED correctness
+      and clean owned-RAM teardown but FAILED to
+      demonstrate a performance improvement:
+      off 32.490 logical WRITE MB/s versus V3
+      23.650 logical WRITE MB/s (27.21% deficit),
+      with V3 lower WRITE 14.077 MB/s (40.48%
+      fewer bytes, 83.21% fewer requests). WRITE
+      p99 V3 2.594ms vs off 1.813ms. The real C
+      experiment was exercised with 3,153 inline
+      worker drains and zero requeues, but saved
+      handoffs did not help useful throughput.
+- [x] Alpha.20 `ba05c894` restores the prior alpha.18
+      bounded C workqueue handoff, preserving FIFO,
+      exact BIO authority and shutdown drain. This
+      withdrawal is based on negative alpha.19
+      evidence; direct source-policy check added.
+- [ ] Owner alpha.20: only after rootless and kernel
+      build pass, run `make run` followed by
+      `make bench-pair-medium-unpaced` with newly
+      owned RAM/null_blk and unchanged active swaps.
+      Record logical WRITE/READ MB/s, independent
+      lower READ/WRITE bytes and request counts,
+      worker_requeues, GC, p95/p99, full oracle
+      and clean teardown. Compare against exact
+      alpha.18 and alpha.19 pilots. A repeated
+      counterbalanced trial is needed to establish
+      statistical confidence; no result yet proves
+      higher maximum V3 input MB/s.
 
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.19 behavior when their claims
+      documents and current V3.0.0-alpha.20 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

@@ -3,7 +3,7 @@
 **Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
 WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
 is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.19 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.20 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
@@ -356,3 +356,27 @@ owner-loaded victory. Recheck actual
 high-QD MB/s, requests/bytes, p99, GC,
 no starvation, full oracle and safe
 teardown before another algorithm change.
+
+### Alpha.20 evidence-based return to finite quantum handoff
+
+Alpha.19 `841f5517` passed exact bytes and
+owned RAM I/O reconciliation at unpaced QD32,
+but V3 retained input reached only **23.650
+logical WRITE MB/s**, compared with **32.490
+MB/s** off on the same source/trace. Physical
+lower WRITE savings remained **40.48%**,
+but write p99 rose to 2.594ms (off 1.813ms).
+The proposed inline worker continuation
+ran 3,153 times with zero requeues, without
+a useful throughput benefit. Alpha.20
+withdraws this hot-path candidate from
+production C, restoring alpha.18's bounded
+handoff/FIFO/drain policy. This is evidence-
+driven regression correction, not a claimed
+performance win. Owner-loaded alpha.20
+is NOT RUN. Future C optimizations should
+be guided by repeated, counterbalanced
+same-source throughput measurements and
+actual CPU/queueing attribution, not isolated
+micro-optimizations. GC/CPU and fixed
+physical disk-bandwidth remain open.

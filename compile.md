@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.19
+## One active module: V3.0.0-alpha.20
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -425,3 +425,21 @@ unique owned RAM/null_blk. The new
 `worker_inline_drains` counter measures
 avoided requeue handoffs. Alpha.19 loaded
 MB/s remains **NOT RUN**.
+
+## Alpha.20 restore finite-worker handoff after negative high-QD result
+
+Active `3.0.0-alpha.20` production C restores
+the alpha.18 worker snapshot and bounded
+workqueue requeue behavior, withdrawing the
+alpha.19 inline continuation because it failed
+to improve loaded useful WRITE MB/s. Rejected
+code, telemetry and native predicate were removed;
+source regression guards FIFO/backlog requeue
+and shutdown drain. The module still uses
+the same null_blk-only physical-admission guard,
+engine, LZ4, CRC, FUA, GC and mapping publication.
+Run W=1/W=2 kernel builds, `make verify`, then
+a safe owner-loaded default `make run` followed
+by the explicit unpaced 2-device owned-RAM
+`make bench-pair-medium-unpaced`. Alpha.20
+loaded speed and resource limits are NOT RUN.

@@ -1137,3 +1137,68 @@ MB/s gains, overhead and read/write p99
 effects require fresh same-source RAM-only
 unpaced replay and full oracle; no physical
 storage or system swap is authorized.
+
+## Alpha.19 owner unpaced: inline handoff optimization failed; alpha.20 rollback
+
+At exact `841f5517798fb8ce12ae5699b0729dc15a69b36a`
+(alpha.19), module SHA-256
+`9ed69e810aa99df66598fd24e81fc42632e9f487db8b8a2cf0fa9d0b4b4c55a9`,
+owner ran default `make run` and unpaced
+`make bench-pair-medium-unpaced` on Linux
+`7.0.0-38-generic`. Rootless and W=1/W=2 builds,
+full byte-exact 128-page smoke and QD32 16,384-operation
+paired replay passed. Session evidence:
+`build/benchmark/session.HTYijeec/`.
+The immutable medium fixture (128 pages each actually
+LZ4-compressing to 2073B), trace and full 1024-page
+final oracle matched. Off and V3 had separately
+owned/verified disposable RAM-backed null_blk
+lower devices. System swap remained unchanged,
+and both devices were safely torn down.
+
+| Unpaced measurement | Uncompressed off | V3 alpha.19 retain=2 |
+|---|---:|---:|
+| Same measured operation count | 16,384 | 16,384 |
+| Completed IOPS | 10,564.904 | 7,690.293 |
+| Logical WRITE MB/s | **32.489722** | **23.649572** |
+| Independent lower WRITE MB/s | 32.489722 | **14.077081** |
+| Logical READ MB/s | 10.784126 | 7.849866 |
+| Lower WRITE bytes | 50,384,896 | **29,990,912** |
+| Lower WRITE requests | 12,301 | **2,065** |
+| Lower READ bytes / requests | 16,723,968 / 4,083 | 16,723,968 / 4,083 |
+| Sampled WRITE p99 | 1.813ms | **2.594ms** |
+| Sampled READ p99 | 2.681ms | **3.591ms** |
+
+V3 still reduced lower WRITE bytes **40.48%**
+and WRITE requests **83.21%**, but completed
+**27.21% fewer logical IOPS and MB/s** than
+its same-source off arm. Alpha.19's experimental
+inline-worker path was exercised
+(`worker_inline_drains=3153`,
+`worker_requeues=0` cumulative),
+and retained physical byte savings and the exact
+oracle, yet its useful throughput was **not
+better**: 23.650 MB/s versus separate alpha.18
+24.664 MB/s. Simultaneously the off baseline
+rose from 30.475 to 32.490 MB/s in separate runs.
+Thus an apparent 4.1% V3 regression and 8.1
+percentage-point larger normalized deficit
+should not be treated as statistically proven
+without counterbalanced repeated trials, but
+the result warrants withdrawing the change.
+There were no GC victims, CPU/memory profile,
+sustained read p99 or physical-device bandwidth
+ceiling. `null_blk` is RAM-only.
+
+**Alpha.20 actual kernel C rollback on main:**
+restore alpha.18's bounded worker handoff behavior;
+remove `worker_inline_drains` helper/telemetry.
+The previous FIFO, synchronous physical success
+gate, flush/FUA ordering, GC rules and
+presuspend-drain semantics are unchanged.
+This is not itself a demonstrated throughput
+increase. Loaded alpha.20 qualification remains
+**NOT RUN**; require same-source QD32 off/V3
+and, ideally, repeated alternated-arm trials
+before claiming a restored or improved maximum
+logical MB/s.

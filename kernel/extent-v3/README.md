@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.19 experimental Device Mapper target
+# Current development: V3.0.0-alpha.20 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -301,3 +301,21 @@ same-invocation continuations, not
 physical IOPS. Format, physical ordering,
 GC and mapping authority remain unchanged.
 Loaded alpha.19 throughput is NOT RUN.
+
+## Alpha.20 withdraws unpaced inline worker drain
+
+The alpha.19 QD32 pilot exercised more than
+3,000 same-invocation queue continuations but
+achieved only 23.650 useful logical WRITE MB/s
+against an uncompressed 32.490 MB/s, without
+a safe performance advantage. Alpha.20 restores
+the alpha.18 `sv3_worker` implementation:
+normal backlogs yield through a workqueue
+handoff after FIFO-splicing unfinished
+older entries, with finite 64-BIO snapshots;
+closed admission still completes every
+accepted BIO through the shutdown drain.
+The unused alpha.19 helper and status counter
+were removed. No media format, authority,
+FUA/GC, read or timer change was made.
+Loaded alpha.20 MB/s remains NOT RUN.
