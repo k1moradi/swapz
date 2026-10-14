@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.11 experimental Device Mapper target
+# Current development: V3.0.0-alpha.13 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -187,3 +187,16 @@ never extending the original absolute timer upon later admissions.
 Incoming nonwrites and flush barriers retain their conservative
 drain-before-observe semantics. This is a bounded experimental
 scheduling change with no loaded safety or performance claim yet.
+
+## Alpha.13 production early-commit experiment
+
+A retained compressed window containing exactly eight staged pages
+may be committed immediately when the **seven largest actual LZ4
+payloads** plus the exact 16B SWZ3 header and 7x16B record
+descriptors fit a 16KiB extent; the remaining valid compressed
+page fits 4KiB. Only `retain_ms>0` with unrestricted read budget
+is eligible. The byte-minimal planner, CRC/generation authority,
+FUA/drain protocol and hrtimer remain authoritative. Default
+`retain_ms=0` unchanged. The geometric bound of at most 20KiB
+is NOT proof of physical request counts or lower latency;
+the loaded alpha.13 test is NOT RUN.

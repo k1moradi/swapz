@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.12, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.13, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -132,6 +132,24 @@ and write latency as well as bytes/requests; no alpha.12 performance
 win or sustained qualification is claimed. Prior alpha.7..11 results
 and failures remain in [benchmark.md](benchmark.md) and
 [testing_standards.md](testing_standards.md).
+
+## Alpha.13: opt-in early commit for proven packed batches
+
+At exact alpha.12 source `2a3c872b`, the owner ran the default
+loaded smoke and two separately owned medium-compressibility off/V3
+pilots. Full readback and teardown passed. Opt-in V3 retention saved
+**34.8%** lower WRITE bytes and **79.4%** lower WRITE requests
+at matched ~503 IOPS, but sampled WRITE p99 was **2.933ms**,
+versus **1.015ms** for that session's uncompressed baseline.
+This is a short synthetic trial without GC or CPU qualification.
+
+Alpha.13 changes **production Linux kernel C**: an explicitly retained
+write window closes immediately when eight already staged compressed
+pages provably fit in at most one 16KiB plus one 4KiB SWZ3 extent.
+Default `retain_ms=0`, RAW or read-budget-restricted windows, FUA,
+the hrtimer, read-dependency handling and publication safety are
+otherwise unchanged. The goal is to reduce WRITE p99 without losing
+lower-I/O savings; **the loaded alpha.13 outcome is NOT RUN**.
 
 ## The active performance question
 

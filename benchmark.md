@@ -628,3 +628,55 @@ individual contributions. Keep the default off. **Alpha.12 compilation,
 native/source and loaded tests: NOT RUN by explicit owner instruction.**
 Use the one-liner in [compile.md](compile.md); sustained CPU/GC/fault/drain
 qualification remains follow-up before any default-policy change.
+
+## Alpha.12 controlled loaded result and alpha.13 packing-ready hypothesis (2026-10-14)
+
+Owner-loaded source `2a3c872b0ffcae8df28edc606d1540275038fb39`,
+Linux `7.0.0-38-generic`, production module SHA-256
+`c34087f31f2162dd224b57fd10f89a0b08560104a88228194173eb412266e547`.
+The 128-page exact direct-I/O smoke passed with V3 and independent
+lower matching **183 / 749,568B WRITEs**, **490 / 2,007,040B
+READs**, 119/119 FUA closures and window-age bins, unchanged
+system swap and ordinary teardown. Pilot sessions:
+`build/benchmark/session.cE1Roejk` (medium control) and
+`build/benchmark/session.zwE2wsHa` (medium retention candidate).
+Both used 128 exactly **2,073B-LZ4 nonzero pages** with fixture
+SHA-256 `c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2`
+and trace SHA-256 `bc76f8eccf227eb29ed11ac7393caacd5d586063f1902f78e3ce4034c3081aa3`.
+All 1024 final logical pages verified byte-exact with matching hashes.
+Separate independently owned RAM-backed null_blk devices and DM UUID
+were verified. Achieved IOPS for each arm were ~503, within
+the predeclared 5% tolerance.
+
+| Independent measurement | Off control | V3 retain=0 | V3 retain=2 |
+|---|---:|---:|---:|
+| Lower WRITE bytes | 3,141,632 | 3,141,632 | **2,048,000** |
+| Lower WRITE requests | 767 | 763 | **158** |
+| Lower READ bytes | 1,052,672 | 1,052,672 | 1,052,672 |
+| Lower READ requests | 257 | 257 | 257 |
+| Sampled WRITE p99 | ~0.92–1.02ms | 0.999ms | **2.933ms** |
+
+The retained candidate saved **34.8% lower WRITE bytes**, **79.4%
+WRITE requests**, and **0% lower READ bytes/requests** against off.
+Its sampled WRITE p99 was about **2.9 times** its own off baseline,
+not an acceptable unconditional improvement. A p99 of 2.933ms means
+about 99% of the 767 measured writes completed within that
+threshold (roughly eight are in the slowest 1%); it is NOT
+the maximum or a statistically stable long-run tail. No GC
+occurred; CPU/RAM and sustained device behavior were not tested.
+Across separate sources and sessions, do not claim significance
+for small latency differences.
+
+**Alpha.13 NOT RUN loaded:** when the first eight already
+staged independent compressed records form a provably packed
+16KiB+4KiB layout, a retained worker now commits immediately
+rather than keeping those completed-in-memory upper BIOs waiting
+for the remaining 2ms timer. The proof requires **the seven largest
+payloads** plus exact SWZ3 metadata to fit 16KiB, so any length
+reordering remains safe. RAW, limited read-budget, FUA and default
+nonretained paths do not use it. This geometry proof is
+not a lower-device measurement or a guarantee of improved p99.
+Next qualification needs the default-off smoke and same-source
+medium control+candidate, actual read/write IOPS and p95/p99,
+independent lower bytes and requests, full readback, CPU, GC,
+fault and suspend/drain follow-up. Preserve negative results.

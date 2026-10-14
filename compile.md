@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.12
+## One active module: V3.0.0-alpha.13
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -290,3 +290,18 @@ Each loaded phase retains the existing owned RAM-null_blk admission,
 exact source/module identification, full readback, independent counters
 and ordinary teardown. This bounded sequence cannot qualify sustained
 GC, CPU, real-device performance or every BIO/timer failure permutation.
+
+## Alpha.13 packed-window early commit
+
+The active source, DKMS, CI project-goals gate and both owned
+null_blk harness version checks are `3.0.0-alpha.13`. Production
+`dm-target.c` invokes a directly tested C geometry predicate
+after staging the eighth compressed page in an explicitly retained
+window; a provable 16KiB+4KiB batch commits without waiting for
+the nominal hrtimer. This does not alter codec format, default
+retention setting, FUA/READ fences or completion ownership.
+Run `make verify`, W=1/W=2, owner-host `make run` and then
+separately opt-in `make bench-pair-medium` and
+`make bench-pair-medium-retain` only on freshly owned RAM
+null_blk devices with exact preflight and ordinary teardown.
+Loaded alpha.13 qualification: **NOT RUN**.

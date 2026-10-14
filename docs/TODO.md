@@ -32,10 +32,12 @@ Use `main` only and follow the device/host safety restrictions.
 - [x] Owner-loaded alpha.11 corrected default smoke at `0a10cbfa`
       passed byte-exact I/O, lower READ/WRITE equality, FUA closure/age
       conservation, stable swap audit and ordinary teardown.
-- [ ] Owner: qualify alpha.12 default and retained policy at exact main
-      HEAD. Compilation/tests are NOT RUN by owner request. Use the
-      one-liner in [compile.md](../compile.md), then exercise retained
-      same-page READ, READ failure, barriers, expiry and suspend/drain.
+- [x] Owner alpha.12 `make run` on `2a3c872b` passed byte-exact,
+      183/749,568B lower WRITE and 490/2,007,040B lower READ
+      reconciliation, 119/119 FUA+age conservation and safe teardown.
+- [ ] Qualify loaded alpha.13 `make run` and independent retained
+      dependency/read-failure, FUA/PREFLUSH, expiry and suspend/drain
+      paths. Header predicates and CI are not sufficient.
 
 ## Blocking performance evidence
 
@@ -58,12 +60,17 @@ Use `main` only and follow the device/host safety restrictions.
       PASS. Retain=2 reduced WRITE bytes 26.99% and requests 67.14%;
       no READ saving, sampled WRITE p99 6.365ms versus off 1.081ms.
       Single short synthetic trial; sustained/CPU/GC NOT qualified.
-- [ ] Owner: compare alpha.12 `make bench-pair-medium` (retain=0)
-      and `make bench-pair-medium-retain` (retain=2), retaining exact
-      source/module/fixture/trace identities, full readback, independent
-      lower bytes/requests, strict 5% achieved-rate matching and tails.
-      Assess whether timely preparation and independent reads preserve
-      write savings while reducing wait; keep default retention off.
+- [x] Alpha.12 owner-loaded medium off/retain=0/retain=2 at
+      `2a3c872b` passed byte-exact, matched ~503 IOPS,
+      separate owned backing counters and teardown. Retain=2
+      reduced WRITE bytes **34.8%** and WRITE requests **79.4%**
+      versus off, with unchanged READ I/O; sampled WRITE p99
+      **2.933ms** versus off **1.015ms** (unqualified tail).
+- [ ] Run the opt-in alpha.13 geometry-ready early-commit
+      candidate against the identical measured medium pages at
+      matched achieved load. Confirm `close_pack_ready` sums
+      within primary closure conservation and that real lower
+      WRITE savings survive any WRITE p99 reduction.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
@@ -95,7 +102,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.12 behavior when their claims
+      documents and current V3.0.0-alpha.13 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,
