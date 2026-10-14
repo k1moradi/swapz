@@ -146,6 +146,8 @@ struct sv3_dm {
 	u64 one_page_windows;
 	u64 compressed_pages;
 	u64 raw_pages;
+	/* Successfully acknowledged all-zero logical writes needing no data I/O. */
+	u64 zero_elided_pages;
 	/*
 	 * Attempt-side histogram, NOT acknowledged logical writes or media
 	 * occupancy. Only user-supplied foreground 4KiB WRITE pages enter
@@ -930,6 +932,34 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		else
 			ctx->lz4_size_bins[4]++;
 	}
+	/*
+	 * Zero is a first-class logical value: an invalid authoritative
+	 * mapping already reads as an exact 4KiB zero page. Only inspect
+	 * complete input for zero when LZ4 reported an exceptionally tiny
+	 * payload; never mistake ordinary compressible data for zero.
+	 *
+	 * Any earlier accepted upper writes must be physically committed
+	 * before invalidating this mapping. sv3_discard_page advances its
+	 * generation and releases prior liveness without a lower WRITE.
+	 * PREFLUSH was already honored in sv3_process(); FUA still requires
+	 * the lower flush before this upper BIO completes.
+	 */
+	if (length > 0 && length <= 64 &&
+	    sv3_page_is_zero(ctx->input_page)) {
+		error = sv3_flush_window(ctx);
+		if (!error)
+			error = sv3_discard_page(&ctx->authority, logical);
+		if (!error && (bio->bi_opf & REQ_FUA))
+			error = sv3_issue_flush(ctx);
+		if (error) {
+			sv3_fail(ctx, error);
+		} else {
+			ctx->logical_write_bytes += SV3_BLOCK_BYTES;
+			ctx->zero_elided_pages++;
+		}
+		sv3_complete(bio, error);
+		return 0;
+	}
 	if (length <= 0 && ctx->engine.bulk_enabled &&
 	    !ctx->engine.verify_after_write) {
 		/* Preserve the complete original 4KiB page in worker-owned
@@ -1590,7 +1620,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		DMEMIT("version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
 		       "physical_write=%llu physical_write_reqs=%llu "
 		       "physical_read=%llu physical_read_reqs=%llu "
-		       "compressed=%llu raw=%llu discarded=%llu "
+		       "compressed=%llu raw=%llu zero_elided=%llu discarded=%llu "
 		       "lz4_attempts=%llu lz4_accepted_bytes=%llu "
 		       "lz4_size_le256=%llu lz4_size_257_1024=%llu "
 		       "lz4_size_1025_2048=%llu lz4_size_2049_3072=%llu "
@@ -1620,7 +1650,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
 		       ctx->physical_read_reqs, ctx->compressed_pages,
-		       ctx->raw_pages, ctx->discard_pages,
+		       ctx->raw_pages, ctx->zero_elided_pages,
+		       ctx->discard_pages,
 		       ctx->lz4_attempts, ctx->lz4_accepted_bytes,
 		       ctx->lz4_size_bins[0], ctx->lz4_size_bins[1],
 		       ctx->lz4_size_bins[2], ctx->lz4_size_bins[3],

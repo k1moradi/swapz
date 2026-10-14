@@ -15,6 +15,24 @@ static int sv3_page_valid(const struct sv3_compressed_page *page)
 		page->length <= SV3_MAX_COMPRESSED;
 }
 
+/*
+ * Check a complete logical page only after the caller's cheap LZ4 size
+ * admission (<64B). A merely compressible/patterned page is NOT zero;
+ * missing even a single nonzero byte would corrupt authoritative data.
+ * No temporary allocation, no lower I/O, no unaligned word loads.
+ */
+int sv3_page_is_zero(const sv3_u8 *page)
+{
+	sv3_u32 i;
+
+	if (!page)
+		return 0;
+	for (i = 0; i < SV3_BLOCK_BYTES; ++i)
+		if (page[i])
+			return 0;
+	return 1;
+}
+
 /* How many *ordered* records fit the size class, without duplicate slots. */
 static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
 			   sv3_u8 count, sv3_u8 start, sv3_u8 blocks,

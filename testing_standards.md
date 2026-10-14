@@ -27,7 +27,7 @@ make test-lower-io         # flush/FUA, lower write aggregation
 make -C tests/suites test-all
 ~~~
 
-There are **14 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
+There are **15 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
 
 ## Minimum correctness matrix
 
@@ -242,3 +242,25 @@ attributes, driver identity, sysfs major/minor, active swap,
 mounts, holders and DM dependencies; if identity remains uncertain,
 **quarantine** and do not force-remove. A succeeding new run cannot
 retroactively repair an earlier teardown.
+
+## Exact-zero write-path regression (2026-10-14)
+
+The V3 `make test-mapping` group now includes the native
+`zero-write-elision` executable compiling the **actual engine and
+authority C**. It verifies full-byte zero recognition, nonzero at
+start/middle/end, RAW-to-zero-to-nonzero generation transitions,
+physical liveness retirement, in-flight refusal and overflow fail
+closed. An additional source contract checks that the production
+`dm-target.c` path drains prior writes, invalidates via
+`sv3_discard_page`, maintains FUA flushing and counts only
+successfully acknowledged elisions. The host's C roundtrip oracle
+will additionally overwrite multiple pages with exact zero to
+validate loaded readback and O_SYNC/flush behavior.
+
+**Qualification status:** the native test and kernel W=1/W=2 builds
+must pass at the new SHA. An actual loaded post-change run and a
+matched off-versus-V3 two-arm trace with real lower counters remain
+**NOT RUN** until the owner runs the safe isolated host command.
+A zero-write optimization cannot be credited as a generic 50% LZ4
+packing win; incompressible/random and nonzero compressible pages
+remain unchanged.

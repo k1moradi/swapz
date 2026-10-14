@@ -79,6 +79,28 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->lz4_size_bins[5]", status)
         self.assertNotIn("LZ4_compress_fast(", body("sv3_gc_compact_one"))
 
+    def test_exact_zero_write_elides_lower_io_without_losing_ordering(self):
+        accept = body("sv3_accept_write")
+        read = body("sv3_read")
+        status = body("sv3_status")
+        self.assertIn("length > 0 && length <= 64", accept)
+        self.assertIn("sv3_page_is_zero(ctx->input_page)", accept)
+        self.assertIn("sv3_flush_window(ctx)", accept)
+        self.assertIn("sv3_discard_page(&ctx->authority, logical)", accept)
+        self.assertIn("ctx->logical_write_bytes += SV3_BLOCK_BYTES", accept)
+        self.assertIn("ctx->zero_elided_pages++", accept)
+        self.assertIn("sv3_complete(bio, error)", accept)
+        self.assertIn("sv3_issue_flush(ctx)", accept)
+        self.assertLess(accept.index("sv3_flush_window(ctx);",
+                                    accept.index("sv3_page_is_zero")),
+                        accept.index("sv3_discard_page(&ctx->authority"))
+        self.assertIn("if (!map->valid)", read)
+        self.assertIn("memset(ctx->read_page, 0, SV3_BLOCK_BYTES)", read)
+        self.assertIn("zero_elided=%llu", status)
+        # The predicate itself is exercised by an actual-C native test.
+        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
+        self.assertIn("int sv3_page_is_zero(", engine)
+
     def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
         import importlib.util
         path = ROOT / "tests/runtime/benchmark/anon-page-fixture.py"

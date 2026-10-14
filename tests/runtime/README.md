@@ -18,7 +18,7 @@ Use **one** reusable `~/swapz/build/` for all compilation.
 
 `make test` executes the four C groups; each retains its original C
 test functions and assertions. `tests/suites/Makefile` shares **one
-compile recipe** across all 14 native C executables, linking the exact
+compile recipe** across all 15 native C executables, linking the exact
 kernel `codec.c`, `authority.c`, and `engine.c` where applicable.
 **No executable is built in source folders.**
 
@@ -60,3 +60,8 @@ Old `v22-*` root names are removed. The existing compatibility safety
 workflows still invoke the renamed tests with original deadlines and
 assertions. These are **archival/compatibility checks, not V3 performance
 benchmarks**. Do not rewrite schema tags or alter source provenance.
+
+The `native/mapping/zero-write.c` regression builds as
+`build/tests/native/zero-write-elision` and tests actual-C all-zero
+recognition and generational mapping retirement. It belongs to
+`make test-mapping`. No separate Python zero-page mock is used.

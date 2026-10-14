@@ -4,6 +4,9 @@
 #include "authority.h"
 #define SV3_BULK_BLOCKS 64U
 
+/* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
+int sv3_page_is_zero(const sv3_u8 *page);
+
 /*
  * Experimental synchronous lower-I/O boundary for an ORDERED worker.
  * It is NOT a Device Mapper callback yet. All memory is preallocated by

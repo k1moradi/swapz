@@ -14,9 +14,10 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io clean
-PROGRAMS := codec-roundtrip mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation
+PROGRAMS := codec-roundtrip zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation
 
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
+zero-write-elision_SRC := $(NATIVE)/mapping/zero-write.c $(ENGINE) $(AUTH) $(CODEC)
 mapping-authority_SRC := $(NATIVE)/mapping/authority.c $(AUTH) $(CODEC)
 transaction-publication_SRC := $(NATIVE)/mapping/transaction-publication.c $(AUTH) $(CODEC)
 write-verification_SRC := $(NATIVE)/mapping/write-verification.c $(ENGINE) $(AUTH) $(CODEC)
@@ -44,8 +45,8 @@ $(foreach name,$(PROGRAMS),$(eval $(call BUILD_NATIVE,$(name))))
 test-codec: $(OUT)/codec-roundtrip
 	@set -e; "$(OUT)/codec-roundtrip"
 
-test-mapping: $(OUT)/mapping-authority $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
-	@set -e; "$(OUT)/mapping-authority"; "$(OUT)/transaction-publication"; "$(OUT)/write-verification"; "$(OUT)/dead-segment-reclamation"; "$(OUT)/raw-discard"; "$(OUT)/online-packing"; "$(OUT)/randomized-authority"
+test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
+	@set -e; "$(OUT)/zero-write-elision"; "$(OUT)/mapping-authority"; "$(OUT)/transaction-publication"; "$(OUT)/write-verification"; "$(OUT)/dead-segment-reclamation"; "$(OUT)/raw-discard"; "$(OUT)/online-packing"; "$(OUT)/randomized-authority"
 
 test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-rotation $(OUT)/gc-engine-rotation
 	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"

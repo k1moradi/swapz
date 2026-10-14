@@ -166,3 +166,23 @@ runs **on your host only when you execute `make deploy`**.
 
 
 **Linux null_blk naming note:** the isolated deployment now recognizes both configfs disk names and legacy nullbN names, with driver/index/rdev verification. Older quarantined test groups are not automatically removed. See compile.md before rerunning after a prior incomplete deployment.
+
+## Production-C zero-page write elision (under rootless qualification)
+
+V3 now recognizes an **exactly all-zero 4096B logical WRITE** after a
+small LZ4 result (at most 64B) and safely replaces that slot's mapping
+with the implicit-zero representation rather than writing a 4KiB
+compressed container. Old pending writes drain first; logical page
+generation/liveness advance and FUA still flushes before completion.
+This can reduce lower WRITE bytes for zero-filled anonymous pages but
+does **not** fix general ~2KiB-page packing. The target INFO counter
+`zero_elided` reports successfully acknowledged zero writes.
+
+The native production-C `zero-write-elision` regression tests the
+full-page predicate, nonzero false-positive controls, old mapping
+liveness, overwrite generation and failure on in-flight/overflow.
+The isolated `make run` C readback oracle also writes fully zero
+pages during overwrites to exercise the loaded path when run on an
+authorized owned null_blk. Rootless CI builds/tests are not loaded
+performance evidence; no lower-I/O win is asserted until an actual
+post-change loaded run supplies device counters.

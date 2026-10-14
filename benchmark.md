@@ -166,3 +166,28 @@ kernel-worker CPU, read p99, and exact GC traffic before optimizing
 observed in the host's **preceding** inventory is NOT proven removed
 by this successful new run; it requires separate read-only owner/
 holder validation before any cleanup.
+
+## Kernel-C zero-page write elimination — candidate, not measured win
+
+V3 now attempts to avoid a complete 4096B lower write when a source
+page is **exactly all-zero**: the compressed result must first be
+<=64B and a byte-exact full logical 4096B equality-to-zero scan must
+succeed. The write worker must drain earlier writes, advance mapping
+generation via the existing authority discard contract, honor
+PREFLUSH/FUA and complete only after success. The `zero_elided`
+INFO counter reports successfully acknowledged logical zero writes;
+`lz4_attempts` remains an attempt-side metric. This can avoid a
+4KiB lower WRITE **only for exact-zero logical writes**, while leaving
+other compressible and RAW pages unchanged.
+
+**Performance hypothesis (not yet validated on loaded hardware):**
+for N qualifying zero page writes, up to N 4KiB allocated lower
+write requests can be eliminated, subject to actual queued-work
+interactions and verification mode. Do **not** equate the counter
+with measured saved device requests. Confirm it with independent
+pre/post null_blk lower-sector/request deltas for **identical off/V3
+fixture and trace**. Include zero and 2:1 compressed controls
+separately, plus RAW. This change does not solve singleton-window
+packing of ~2048B nonzero data. A loaded owner-run `make run`
+readback/flush check is a necessary correctness gate; the accepted
+performance claim still requires a matched off/V3 measurement.

@@ -22,6 +22,11 @@ static void pattern(unsigned char *p, unsigned int page, unsigned int round)
 	uint32_t s = 0x71f12345U ^ (page * 1640531527U) ^ (round * 2246822519U);
 	unsigned int i;
 	memset(p, 0, PAGE);
+	/* Exercise successful replacement of a previously nonzero mapping
+	 * with the exact all-zero page, including O_SYNC/FUA semantics.
+	 * The phase-two readback uses this very same deterministic oracle. */
+	if (round == 1 && page % 16U == 0)
+		return;
 	switch (page % 4U) {
 	case 0: /* fully sparse */
 		break;

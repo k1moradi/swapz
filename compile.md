@@ -94,7 +94,7 @@ history without being part of required builds.
 
 ## Reusable native source-tree layout
 
-The 14 current kernel-C tests are grouped under
+The 15 current kernel-C tests are grouped under
 `tests/runtime/native/{codec,mapping,gc,io}/`; only
 `tests/suites/Makefile` contains the declarative test-to-production-C
 link map. Its one `BUILD_NATIVE` recipe writes test binaries to
@@ -176,3 +176,14 @@ or sudo must report BLOCKED rather than work around isolation.
 ## 2026-10-14 null_blk configfs naming fix
 
 The first user-loaded Linux 7.0 test passed all C tests and module builds but stopped before V3 insertion because configfs devices may use the configfs name, not /dev/nullbN. V3 kernel admission also requires a nullb-prefixed disk name. The ephemeral harness now creates nullb-swapz-<token>, accepts only its own configfs disk name or the legacy nullb<index> disk, and verifies the registered null_blk driver major, configfs index/minor, sysfs identity, block node rdev, size, mounts, holders and active-swap aliases before module insertion. On failed recognition it logs the config directory and quarantines rather than touching another device. The prior unnamed swapz<token> quarantined config is not automatically deleted; it requires read-only identity and holder inspection. Loaded success on the user's host remains NOT RETESTED.
+
+## Incremental production C build scope — zero page elision
+
+The active V3 `engine.c/engine.h` exports the bit-exact, allocation-free
+`sv3_page_is_zero` predicate used by `dm-target.c` for a proven
+zero-write mapping transition. `make test-mapping` builds the new
+`build/tests/native/zero-write-elision` directly against unchanged
+production engine/authority/codec C; `make verify` includes this
+regression and the source-path contract. The loaded host oracle stays
+at `build/tests/device-roundtrip` and now overwrites exact zero
+pages. There is still **one** reused `~/swapz/build/` output tree.

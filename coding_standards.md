@@ -60,3 +60,25 @@ support physical devices or automatically use active Linux swap.
 No global module removal, force deletion, reboot or partitioning.
 The workflow may report BLOCKED if an incompatible module already
 exists, and must preserve the host's other mappings and swap state.
+
+## Exact-zero logical write representation
+
+V3 may elide a **truly all-zero, full 4096-byte page** by treating it
+as the same mapping state as an authoritative discarded/never-written
+page. This is legitimate because a read of an invalid map returns
+exactly 4096 zero bytes; **not** because compressible data are
+interchangeable with zero. The kernel first attempts LZ4 as before;
+only if the output is at most 64 bytes does it scan **every input byte**
+with production-C `sv3_page_is_zero`. Nonzero values must use the
+normal LZ4/RAW path, however small the compressed output is.
+
+**Ordering rule:** drain all pending accepted upper writes, then
+`sv3_discard_page` advances generation and releases old liveness;
+only then acknowledge the logical zero write. PREFLUSH preceding the
+BIO is honored by the worker; for REQ_FUA an actual successful lower
+flush is still required before completion. A failed flush/discard
+fails closed; no successful zero counter or logical-write accounting
+may occur on error. The path does not invoke lower WRITE or invent
+on-media persistence for this volatile alpha. The `zero_elided`
+status key counts **successful logical write elisions**, not all
+LZ4-attempted pages and not observed lower-media erase operations.
