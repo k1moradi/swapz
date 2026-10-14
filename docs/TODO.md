@@ -123,22 +123,33 @@ Use `main` only and follow the device/host safety restrictions.
       requests matched the same trace; write p99 was
       2.333ms V3 versus 1.879ms off. Byte-exact final
       oracle and safe teardown PASS; no GC or CPU profile.
-- [ ] Owner alpha.16 on fresh RAM-only devices: run
-      default loaded `make run` then the same
-      `make bench-pair-medium-unpaced`. Check physical
-      lower READ/WRITE requests/bytes, useful logical
-      MB/s and achieved IOPS, p95/p99, full readback and
-      clean teardown. Compare cumulative
-      `retain_timer_arms` and new
-      `retain_timer_arm_skips` to alpha.15's 12,228
-      arms/3,124 windows. Reject throughput regressions
-      and report negative results; do not infer physical
-      disk saturation.
+- [x] Owner alpha.16 `59acee35` default smoke and paced
+      medium `retain=0` / `retain=2` comparisons PASS:
+      independent READ/WRITE counters, byte-exact oracle,
+      host swap unchanged and ordinary owned RAM teardown.
+      Retained: 1.54353 useful WRITE MB/s -> 1.00621
+      lower WRITE MB/s, 34.81% fewer bytes, 158 vs 767
+      lower WRITE requests, sampled p99 2.688ms vs off
+      1.104ms. The worker avoided 844 duplicate hrtimer
+      arms but still armed 1,202 timers across 1,202
+      cumulative windows. The owner's attached log
+      contains NO unpaced alpha.16 trial, so no high-QD
+      throughput improvement was verified.
+- [ ] Owner alpha.17: after loaded default-off smoke and
+      safe teardown, run the QD32 / 16,384-operation
+      `make bench-pair-medium-unpaced` on newly owned RAM
+      devices. Record completed logical WRITE MB/s, lower
+      READ/WRITE bytes AND requests, achieved IOPS, p95/p99,
+      GC, complete image and safe cleanup. Contrast
+      alpha.15's 31.518 MB/s off vs 24.867 MB/s retained
+      V3 and 40.52% lower WRITE bytes; test whether uniform
+      ordering fast path improves throughput without
+      sacrificing storage I/O. Do not claim saturation.
 
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.16 behavior when their claims
+      documents and current V3.0.0-alpha.17 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

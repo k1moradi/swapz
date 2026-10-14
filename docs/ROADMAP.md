@@ -3,7 +3,7 @@
 **Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
 WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
 is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.16 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.17 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
@@ -288,3 +288,22 @@ at the same QD32 unpaced workload with the
 same complete readback; a benefit has NOT been
 proven. GC/CPU and stable swap-in p99 remain
 open qualification milestones.
+
+### Alpha.17 C-first stable-equal-length packing shortcut
+
+Owner-loaded alpha.16 `59acee35` passed the default
+smoke and two separately owned, paced medium-replay
+sessions. Its retained candidate avoided 844
+redundant timer arms while moving 34.81% fewer
+physical lower WRITE bytes at matched 503 IOPS,
+but alpha.16 **unpaced** speed remains unknown.
+The 128-page medium fixture has exactly equal
+2073B compressed lengths, so alpha.17 avoids
+the quadratic greedy permutation for a window
+whose result is provably unchanged. The next
+loaded qualification is the identical QD32,
+16,384-operation **unpaced** comparison,
+read/write bytes and requests, useful MB/s,
+read/write p99, final oracle and safe teardown.
+This fast path is not a substitute for sustained
+GC, CPU profile or fixed-bandwidth validation.

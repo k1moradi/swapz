@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.16
+## One active module: V3.0.0-alpha.17
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -370,3 +370,19 @@ host, compile W=1/W=2 and run `make run` before
 the separately opt-in `make bench-pair-medium-unpaced`
 with freshly owned RAM-only devices. Alpha.16
 loaded correctness/throughput is **NOT RUN**.
+
+## Alpha.17 equal-compressed-length kernel order fast path
+
+The active alpha build is `3.0.0-alpha.17`;
+source, DKMS, workflow version check and both owned
+RAM test guards advance together. The real worker's
+`sv3_order_window` uses a linear identity permutation
+for valid uniform LZ4 payload lengths. Mixed,
+invalid or RAW windows still use the original greedy
+reorder; engine extent planning, lower I/O, mapping
+and upper completion remain unchanged. Direct
+production-C policy tests and source qualification
+must pass W=1/W=2 compile before owner-safe
+`make run` and the opt-in
+`make bench-pair-medium-unpaced`.
+Alpha.17 loaded throughput is **NOT RUN**.

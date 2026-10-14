@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.16 experimental Device Mapper target
+# Current development: V3.0.0-alpha.17 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -248,3 +248,18 @@ restarts. All existing synchronous cancellation
 and shutdown/drain safety paths remain intact.
 Default-off retention is unchanged and the
 alpha.16 loaded throughput outcome is NOT RUN.
+
+## Alpha.17 compressed-uniform window ordering fast path
+
+A serialized write window of equal-sized non-RAW LZ4
+records sorts identically under the original
+largest-plus-best-complement greedy rule: the earliest
+remaining record is always chosen next and, when a
+4KiB pair exists, its earliest remaining partner
+immediately follows. The worker now emits that
+identity permutation in O(n), preserving all original
+physical planner and mapping publication semantics.
+Mixed or RAW windows still run the exact original
+greedy implementation. The synthetic 2,073B
+medium fixture exercises this branch, but useful
+higher-QD MB/s remains NOT RUN for alpha.17.

@@ -938,3 +938,60 @@ not established outcomes. Run exactly the same
 owner-loaded unpaced trace and report a negative
 or neutral result without adjusting acceptance
 criteria after seeing the data.
+
+## Alpha.16 owner-loaded paced timer-rearm result and alpha.17 C hypothesis
+
+At exact source `59acee3534fd46fbcaabb51a1f30a366098ed1fd`
+on Linux `7.0.0-38-generic`, owner-loaded module SHA-256
+`c3de8af49a0d1ba7961ee77df38e25bc6ee9bc9fc9275a0e908768b704cc205b`.
+The isolated 128-page C byte-exact smoke passed the
+183/749,568B lower WRITE and 490/2,007,040B lower READ
+reconciliation, nine exact-zero write elisions, 119
+FUA closures/age bins, and safe teardown. The owner also
+ran the medium 500-IOPS control session
+`build/benchmark/session.Zc39DHna/` and retained
+candidate session `build/benchmark/session.RzrEnr5E/`.
+Each used 767 logical 4KiB WRITEs and 257 READs,
+identical liblz4 measured 2073B pages and immutable
+trace, independent equal capacity owned RAM lower
+devices, identical byte-exact 1024-page final image,
+matched ~503 achieved IOPS and ordinary teardown.
+
+| Paced QD8 arm | Logical WRITE MB/s | Lower WRITE MB/s | Lower WRITE requests | Sampled WRITE p99 |
+|---|---:|---:|---:|---:|
+| Uncompressed, retained trial | 1.54478 | 1.54478 | 767 | 1.104ms |
+| V3 alpha.16 retain=0 | 1.54454 | 1.54454 | 761 | 1.062ms |
+| V3 alpha.16 retain=2 | **1.54353** | **1.00621** | **158** | **2.688ms** |
+
+Retained V3 moved 2,048,000 vs off 3,141,632 actual
+lower WRITE bytes (**34.81% fewer**); physical READs
+were identically 1,052,672B/257 requests per measured
+arm, without GC. Wider cumulative V3 counters showed
+`retain_timer_arms=1202`,
+`retain_timer_arm_skips=844`,
+`close_pack_ready=64`, `close_deadline=1138`,
+`windows=1202`, `gc_victims=0`, `failed=0`.
+This directly proves the guarded alpha.16 worker
+**skipped** redundant timer operations, not that
+useful throughput improved. No alpha.16 **unpaced**
+QD32 run appears in the owner's uploaded log.
+
+Alpha.17 changes the actual C write-window size-ordering
+hot path: when all preaccepted records are valid,
+non-RAW and **equal compressed length**, the proven
+greedy permutation equals arrival order. The worker
+uses a single linear index pass instead of repeated
+O(n^2) size scans; unchanged mixed/RAW fallback and
+same engine commit preserve physical byte, request
+and completion semantics. It is a **performance
+hypothesis only**. Benchmark alpha.17 on newly owned
+RAM null_blk with the same unpaced 16,384-operation
+QD32 fixture, independently measured lower
+READ/WRITE counts/bytes, achieved useful input MB/s,
+read/write p99, final oracle and safe teardown.
+Retained alpha.15 unpaced reference: 24.867 useful
+WRITE MB/s vs uncompressed 31.518 MB/s, with
+40.52% fewer lower WRITE bytes. The previous
+rate-500 alpha.16 result cannot establish higher
+maximum input MB/s, and no physical disk bandwidth
+ceiling or sustained GC qualification exists.
