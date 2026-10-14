@@ -7,12 +7,18 @@ branches, PR branches or one-off checkouts are archival evidence, **not**
 instructions to restore or recreate them. Never discard a dirty checkout
 with `git reset --hard`, broad `git restore` or `git clean`.
 
-**Spend most development effort on kernel C/C++ code and C/C++ tests**:
-real BIO I/O, LZ4, authority, GC, lower request aggregation, correct
-completion and performance. Codex's independent validation role does not
-mean writing large new Python harnesses by default; prefer small helpers
-only when they directly test a C/C++ source/binary. Do not trade production
-C/C++ work for documentation-only or Python-only activity.
+**Strict majority rule for ongoing development:** Spend **more than
+50% of focused engineering time developing the actual kernel module in C**:
+implementation, review, debugging, profiling and optimization of real
+BIO I/O, LZ4, authority, GC, lower request aggregation, completion and
+performance paths. Linux kernel modules are written in C; C++ may be
+used for separately compiled regression tests. Time building Python
+frameworks, orchestration, mock-only tests or writing reports **does not
+count as kernel module development**. Codex can complete explicitly
+assigned independent validation campaigns; when acting as a developer,
+it must default to improving and testing production kernel C rather than
+writing large new Python harnesses. Never weaken safety or tests to
+meet an artificial code-change quota.
 
 **Safety:** no reboot, active /dev/sdb1 or /swapfile, `swapoff`,
 `swapon`, physical/unowned block devices or forced teardown. Frozen V2.2
