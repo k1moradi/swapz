@@ -62,6 +62,7 @@ no independent CMake output hierarchy. Reference:
 ## Automated, goal-aligned tests
 
 The `main`-push project-goal CI verifies:
+- the userspace C++ executable is built and reused under `build/userspace/`, without creating `userspace/swapzctl`;
 - canonical agent documents reference vision, tidy build and
   documented results;
 - production compiled tests run the **actual kernel C logic**;

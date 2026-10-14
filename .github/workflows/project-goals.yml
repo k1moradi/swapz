@@ -58,4 +58,5 @@ jobs:
           fi
           test -d build
           git diff --check
-          echo "NATIVE_MODULE_TESTS_AND_BUILD_TIDINESS_PASS"
+          test -x build/userspace/swapzctl
+          echo "NATIVE_KERNEL_C_AND_CPP_ARTIFACTS_REUSED_UNDER_BUILD_PASS"
