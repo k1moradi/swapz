@@ -72,6 +72,12 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(result["fixture_sha256"], manifest["fixture_sha256"])
                 self.assertEqual(result["trace_sha256"], manifest["trace_sha256"])
                 self.assertEqual(len(result["results"]), 2)
+                self.assertEqual(result["performance_qualification"],
+                                 "ROOTLESS_NOT_DEVICE_EVIDENCE")
+                self.assertTrue(all(
+                    entry["throughput_mbps"]["lower_write_mbps"] is None
+                    for entry in result["results"]
+                ))
                 expected = manifest["expected_post_sha256"]
                 for report_path in reports:
                     record = json.loads(report_path.read_text())
@@ -80,6 +86,10 @@ class PairReplayContract(unittest.TestCase):
                     self.assertEqual(record["warmup_ops"], 32)
                     self.assertEqual(record["verified_pages"], 64)
                     self.assertEqual(record["verdict"], "PASS")
+                    rates = record["throughput_mbps"]
+                    self.assertGreater(rates["logical_total_mbps"], 0)
+                    self.assertIsNone(rates["lower_write_mbps"])
+                    self.assertIsNone(rates["write_input_per_lower_byte"])
                 # Fail-closed: altered trace provenance makes pair invalid.
                 tampered = json.loads(reports[0].read_text())
                 tampered["write_payload_stream_sha256"] = "0" * 64
@@ -218,6 +228,7 @@ class PairReplayContract(unittest.TestCase):
                 "manifest_sha256": "f" * 64, "qd": 4, "layout": "disjoint",
                 "seed": 77, "iops_requested": 200, "warmup_ops": 20,
                 "measure_ops": 100, "read_ops": 50, "write_ops": 50,
+                "seconds": 1.0,
                 "verified_pages": 32, "verified_post_sha256": "e" * 64,
                 "verdict": "PASS", "source_sha": "1" * 40,
                 "lower_io": {
@@ -244,8 +255,30 @@ class PairReplayContract(unittest.TestCase):
                 with contextlib.redirect_stdout(output):
                     module.compare(SimpleNamespace(reports=paths))
                 return json.loads(output.getvalue())
-            self.assertEqual(compare()["performance_qualification"],
+            output = compare()
+            self.assertEqual(output["performance_qualification"],
                              "MATCHED_LOAD_MEASUREMENT_ONLY")
+            self.assertEqual(output["lower_write_bytes_saved_fraction"], 0)
+            for entry in output["results"]:
+                rates = entry["throughput_mbps"]
+                self.assertAlmostEqual(rates["logical_write_mbps"], 0.2048)
+                self.assertAlmostEqual(rates["logical_read_mbps"], 0.2048)
+                self.assertAlmostEqual(rates["lower_write_mbps"], 0.2048)
+                self.assertAlmostEqual(rates["lower_read_mbps"], 0.2048)
+                self.assertEqual(rates["write_input_per_lower_byte"], 1.0)
+            v3["lower_io"] = {**base["lower_io"],
+                              "lower_write_bytes": 102400}
+            candidate = compare()
+            self.assertAlmostEqual(
+                candidate["results"][1]["throughput_mbps"]["lower_write_mbps"],
+                0.1024
+            )
+            self.assertAlmostEqual(
+                candidate["results"][1]["throughput_mbps"]["write_input_per_lower_byte"],
+                2.0
+            )
+            self.assertAlmostEqual(candidate["lower_write_bytes_saved_fraction"], 0.5)
+            v3["lower_io"] = base["lower_io"]
             v3["achieved_iops"] = 120
             self.assertEqual(compare()["performance_qualification"],
                              "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD")
@@ -261,6 +294,44 @@ class PairReplayContract(unittest.TestCase):
             v3["source_sha"] = "2" * 40
             with self.assertRaisesRegex(ValueError, "revision mismatch"):
                 compare()
+
+    def test_throughput_invalid_times_counts_and_lower_sectors_fail_closed(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("swapz_replay_rates", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        report = {
+            "seconds": 2.0, "write_ops": 10, "read_ops": 2,
+            "measure_ops": 12, "lower_io": {
+                "lower_write_bytes": 20480, "lower_read_bytes": 8192,
+            },
+        }
+        rates = module.measured_throughput(report, require_lower=True)
+        self.assertAlmostEqual(rates["logical_write_mbps"], 0.02048)
+        self.assertAlmostEqual(rates["lower_write_mbps"], 0.01024)
+        self.assertAlmostEqual(rates["write_input_per_lower_byte"], 2)
+        for seconds in (0, -1, float("nan"), float("inf"), None, True):
+            with self.subTest(seconds=seconds):
+                with self.assertRaisesRegex(ValueError, "elapsed time"):
+                    module.measured_throughput({**report, "seconds": seconds})
+        for count in (-1, 1.5, True, None):
+            with self.subTest(count=count):
+                with self.assertRaisesRegex(ValueError, "logical operations"):
+                    module.measured_throughput({**report, "write_ops": count})
+        for lower_bytes in (-512, 513, True, None):
+            with self.subTest(lower_bytes=lower_bytes):
+                with self.assertRaisesRegex(ValueError, "lower sector bytes"):
+                    module.measured_throughput({
+                        **report, "lower_io": {**report["lower_io"],
+                                               "lower_write_bytes": lower_bytes}
+                    })
+        with self.assertRaisesRegex(ValueError, "independent lower I/O"):
+            module.measured_throughput({**report, "lower_io": None},
+                                       require_lower=True)
+        zero = module.measured_throughput({
+            **report, "lower_io": {**report["lower_io"], "lower_write_bytes": 0}
+        })
+        self.assertIsNone(zero["write_input_per_lower_byte"])
 
     def test_nonzero_medium_pages_have_measured_lz4_in_2k_range(self):
         import importlib.util

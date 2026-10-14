@@ -680,3 +680,59 @@ Next qualification needs the default-off smoke and same-source
 medium control+candidate, actual read/write IOPS and p95/p99,
 independent lower bytes and requests, full readback, CPU, GC,
 fault and suspend/drain follow-up. Preserve negative results.
+
+## Actual measured MB/s: owner-loaded V3.0.0-alpha.13 (2026-10-14)
+
+Owner-host original log: `Pasted text(20261014-174644).txt`, exact
+source `6ec5eae5cb300a5a9fb35d7be0e866a6a5f7f52c`;
+Linux `7.0.0-38-generic`; built V3 module SHA-256
+`f4559cb4e0d067dea48e51ee42c881b2a43fff3680747e9177104a9875e60ee7`.
+The distinct owned-RAM medium-pair sessions are
+`build/benchmark/session.ZD1Podid/` (retain=0) and
+`build/benchmark/session.lf9CkQnd/` (retain=2). The original
+uncompressed arm, the retained arm, and the default-off arm each
+completed 767 WRITE and 257 READ operations on a 4KiB page, with
+the same immutable fixture, trace and full logical readback.
+Independent sysfs backing read/write sector/request deltas and
+ordinary RAM-only teardown were verified. Decimal units:
+`MB/s = completed bytes / measured seconds / 1,000,000`.
+These are **measurement-only** intervals, excluding prefill/warmup
+and final-image readback.
+
+| Source/load arm | Seconds | Logical WRITE input MB/s | Independent lower WRITE MB/s | Logical READ MB/s | Independent lower READ MB/s | Logical / lower WRITE bytes |
+|---|---:|---:|---:|---:|---:|---:|
+| Uncompressed, retain=2 session | 2.033645204 | 1.544828 | 1.544828 | 0.517628 | 0.517628 | 1.000x |
+| V3 retain=0 | 2.033811723 | 1.544701 | 1.544701 | 0.517586 | 0.517586 | 1.000x |
+| **V3 retain=2** | 2.035168464 | **1.543672** | **1.006305** | 0.517241 | 0.517241 | **1.534x** |
+
+The retained arm's independent lower WRITE bytes were
+**2,048,000**, compared with uncompressed **3,141,632**,
+i.e. **34.81%** lower actual write bytes at matched input IOPS.
+The retained arm recorded **17 packed-ready early closures**
+(`close_pack_ready=17`), 1,168 deadline closures and no GC
+on a *cumulative* target status including setup/warmup/oracle.
+Sampled WRITE p99 retained V3 was **2.824ms**, versus
+**0.962ms** for its uncompressed arm; the short trial cannot
+establish reliable sustained p99. Device READ I/O was unchanged.
+
+**Important qualification:** this is a FIXED OFFERED INPUT
+experiment (~500 IOPS), **not** a disk-budget-saturated experiment.
+The ratio 1.534x is a measured *logical bytes per backing WRITE
+byte*, NOT a measured increase in maximum useful input MB/s.
+RAM-backed `null_blk` does not impose a genuine physical disk
+bandwidth limit. Achieving the user's desired "logical input MB/s
+increases while disk write MB/s stays unchanged" requires safe,
+explicitly bandwidth-limited RAM-only testing, saturation,
+repeated matched trials, CPU/GC/read and latency qualification.
+No physical disk is approved. Do not extrapolate to 153% of
+physical disk throughput without that evidence.
+
+The existing `io-replay.py` now reports `throughput_mbps`
+per replay and per compared arm: logical WRITE, READ and combined
+MB/s, independent lower WRITE, READ and combined MB/s, and
+logical-write/lower-write byte efficiency. Rootless regular-file
+replays mark independent disk bandwidth as **null**, not as
+a fake device metric. Invalid elapsed time, count mismatches and
+invalid lower-sector bytes fail closed. This is reporting and
+qualification work, not a new kernel C optimization; active
+alpha remains 3.0.0-alpha.13.

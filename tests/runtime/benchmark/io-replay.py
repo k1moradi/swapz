@@ -379,6 +379,57 @@ def iostat_delta(before, after):
             "lower_flush_requests": delta[15]}
 
 
+def measured_throughput(report, require_lower=False):
+    """Completed logical bytes/s against independent backing sectors/s.
+
+    MB is decimal 1,000,000B. Only the replay measurement interval counts:
+    exclude prefill, warmup and whole-device final readback. A rootless
+    regular-file replay has NO independently evidenced disk bandwidth.
+    Never infer saturation or extrapolate a maximum input MB/s here.
+    """
+    seconds = report.get("seconds")
+    if (not isinstance(seconds, (int, float)) or isinstance(seconds, bool)
+            or not math.isfinite(seconds) or seconds <= 0):
+        raise ValueError("INVALID THROUGHPUT: nonpositive/nonfinite elapsed time")
+    counts = [report.get(key) for key in ("write_ops", "read_ops", "measure_ops")]
+    if any(type(n) is not int or n < 0 for n in counts) or sum(counts[:2]) != counts[2]:
+        raise ValueError("INVALID THROUGHPUT: measured logical operations mismatch")
+    logical_write = counts[0] * PAGE
+    logical_read = counts[1] * PAGE
+    result = {
+        "unit": "decimal_MB_per_second", "seconds": seconds,
+        "logical_write_bytes": logical_write, "logical_read_bytes": logical_read,
+        "logical_write_mbps": logical_write / seconds / 1_000_000,
+        "logical_read_mbps": logical_read / seconds / 1_000_000,
+        "logical_total_mbps": (logical_write + logical_read) / seconds / 1_000_000,
+        "lower_write_mbps": None, "lower_read_mbps": None,
+        "lower_total_mbps": None, "write_input_per_lower_byte": None,
+        "lower_read_per_logical_read_byte": None,
+    }
+    lower = report.get("lower_io")
+    if lower is None:
+        if require_lower:
+            raise ValueError("INVALID THROUGHPUT: missing independent lower I/O")
+        return result
+    for key in ("lower_write_bytes", "lower_read_bytes"):
+        if type(lower.get(key)) is not int or lower[key] < 0 or lower[key] % 512:
+            raise ValueError("INVALID THROUGHPUT: invalid lower sector bytes")
+    lower_write = lower["lower_write_bytes"]
+    lower_read = lower["lower_read_bytes"]
+    result.update({
+        "lower_write_mbps": lower_write / seconds / 1_000_000,
+        "lower_read_mbps": lower_read / seconds / 1_000_000,
+        "lower_total_mbps": (lower_write + lower_read) / seconds / 1_000_000,
+        "write_input_per_lower_byte": (
+            logical_write / lower_write if lower_write else None
+        ),
+        "lower_read_per_logical_read_byte": (
+            lower_read / logical_read if logical_read else None
+        ),
+    })
+    return result
+
+
 def full_write(fd, page, buf):
     n = os.pwritev(fd, [buf], page * PAGE)
     if n != PAGE:
@@ -541,6 +592,9 @@ def replay(args):
         "write_p95_ns": percentile(samples["W"], .95),
         "write_p99_ns": percentile(samples["W"], .99),
     }
+    report["throughput_mbps"] = measured_throughput(
+        report, require_lower=bool(identity.get("owned_disk"))
+    )
     result_path = Path(args.result)
     if result_path.exists():
         raise ValueError("refusing to overwrite a prior trial result")
@@ -584,6 +638,15 @@ def compare(args):
               "results": [{k: entry.get(k) for k in
                            ("candidate", "source_sha", "achieved_iops", "lower_io")}
                           for entry in normalized]}
+    throughput = [measured_throughput(entry, require_lower=loaded)
+                  for entry in normalized]
+    for entry, rates in zip(output["results"], throughput):
+        entry["throughput_mbps"] = rates
+    output["bandwidth_scope"] = (
+        "actual completed logical 4KiB IO / measurement seconds versus "
+        "independent backing-sector deltas / each arm's measurement seconds; "
+        "NOT a fixed-disk-budget or saturation throughput qualification"
+    )
     if rootless:
         output["performance_qualification"] = "ROOTLESS_NOT_DEVICE_EVIDENCE"
     else:
@@ -607,6 +670,16 @@ def compare(args):
                 lower_io[key] < 0 for key in required
             ):
                 raise ValueError("INVALID COMPARISON: missing independent lower I/O")
+        off_bytes = first["lower_io"]["lower_write_bytes"]
+        v3_bytes = second["lower_io"]["lower_write_bytes"]
+        output["lower_write_bytes_saved_fraction"] = (
+            (off_bytes - v3_bytes) / off_bytes if off_bytes else None
+        )
+        # These are same-work, paced interval measurements. Do NOT claim
+        # higher input throughput at equal disk bandwidth from this factor.
+        output["write_input_per_lower_byte_v3"] = (
+            throughput[1]["write_input_per_lower_byte"]
+        )
         achieved = [entry.get("achieved_iops") for entry in normalized]
         if any(not isinstance(rate, (int, float)) or
                not math.isfinite(rate) or rate <= 0 for rate in achieved):

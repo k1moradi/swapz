@@ -151,6 +151,21 @@ the hrtimer, read-dependency handling and publication safety are
 otherwise unchanged. The goal is to reduce WRITE p99 without losing
 lower-I/O savings; **the loaded alpha.13 outcome is NOT RUN**.
 
+## Actual input MB/s → backing MB/s (alpha.13 owner pilot)
+
+The measured medium 4KiB WRITE input was about **1.544 MB/s**
+for retained V3, while independent RAM-backed lower writes were
+about **1.006 MB/s** (uncompressed **1.545 → 1.545 MB/s**).
+The ratio is **1.534 useful logical WRITE bytes per lower WRITE
+byte** on this one 500-IOPS experiment. The source is
+`6ec5eae5`, with 17 cumulative pack-ready early closures
+and no GC. The paired replay now prints logical READ/WRITE/total
+MB/s and independent lower READ/WRITE/total MB/s, with explicit
+null fields for rootless runs; see `benchmark.md`.
+This is a **fixed-input byte saving**, NOT higher demonstrated
+maximum input throughput under an identical saturated disk budget.
+A sustained RAM-only controlled-bandwidth experiment is still open.
+
 ## The active performance question
 
 **Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,

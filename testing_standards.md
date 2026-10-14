@@ -682,3 +682,25 @@ W=1/W=2, independent lower read/write-sector equality, byte-exact
 loaded oracle, repeated same-source control/candidate comparison,
 CPU and read/write p99 remain independent host gates.
 **Alpha.13 loaded testing: NOT RUN.**
+
+## Throughput units and measured input-to-backing evidence
+
+Every matched loaded `io-replay.py` result must explicitly
+report decimal **MB/s** for completed logical WRITE/read bytes
+and independently observed backing WRITE/read bytes using the
+same single-arm measured elapsed seconds. Include total MB/s
+(READ+WRITE) for context and a dimensionless logical-write /
+lower-write byte-efficiency factor when lower bytes are positive.
+The logical input is the completed 4096B WRITE payload stream,
+**not** `lz4_accepted_bytes`, prefill, warmup or final readback.
+Backing bandwidth derives from independently owned `/sys/block`
+READ/WRITE sector deltas, NOT compressor sizes or target-only
+physical-I/O counters. Preserve two separate arms, same immutable
+trace/source/readback, 5% matched achieved IOPS, READ requests/bytes,
+p95/p99 and exact teardown. Report rootless lower bandwidth as
+`null`, and reject NaN/zero/negative times, malformed logical
+counts and negative/misaligned lower sector byte values. A
+WRITE byte ratio does NOT prove a higher maximum logical input
+MB/s at a fixed disk bandwidth limit. This requires a separately
+qualified, explicitly controlled and saturated bandwidth ceiling;
+RAM-only `null_blk` cannot be treated as physical SSD evidence.
