@@ -736,3 +736,45 @@ a fake device metric. Invalid elapsed time, count mismatches and
 invalid lower-sector bytes fail closed. This is reporting and
 qualification work, not a new kernel C optimization; active
 alpha remains 3.0.0-alpha.13.
+
+## Owner alpha.13 second exact-head paired MB/s replay (2026-10-14)
+
+The owner ran at exact `0a443ca412516faf354ef30d26fdc373b7f9882a`
+on Linux `7.0.0-38-generic`, module SHA-256
+`f4559cb4e0d067dea48e51ee42c881b2a43fff3680747e9177104a9875e60ee7`.
+Freshly owned RAM-backed `null_blk` sessions:
+`build/benchmark/session.zMK2sNCZ/` for V3 `retain=0`,
+`build/benchmark/session.eAzj51EF/` for `retain=2`.
+Both showed matched ~503 achieved IOPS, identical
+128-page medium fixture (2,073B LZ4 payloads),
+unaltered immutable trace and full 1024-page byte-exact
+oracle; independent lower sector/request deltas and
+ordinary owned-resource teardown PASS.
+
+| Arm | Logical WRITE MB/s | Lower WRITE MB/s | Lower WRITE requests | WRITE p99 (sample) |
+|---|---:|---:|---:|---:|
+| Off, retained session | 1.54464 | 1.54464 | 767 | 0.984ms |
+| V3 retain=0 | 1.54473 | 1.54473 | 764 | 1.017ms |
+| V3 retain=2 | **1.54350** | **1.00619** | **158** | **2.788ms** |
+
+READ lower bytes/requests were unchanged: 1,052,672B
+and 257 requests per measured arm. Retained candidate:
+**34.81% less WRITE bytes** and **79.4% fewer WRITE requests**
+on the synthetic QD8 paced 500 IOPS plan. Wider cumulative
+V3 status included **1,185 windows**, of which **17** closed
+at pack-ready and **1,168** at deadline; no GC occurred.
+This did NOT saturate a backing disk bandwidth budget, does
+NOT prove higher maximum input MB/s, and the 767 WRITE
+samples do NOT qualify stable p99 or CPU cost.
+
+## Alpha.14: seven-compressed-record early-commit trial — NOT RUN
+
+Production C now considers an early commit at **seven**
+accepted compressed records rather than eight. The existing
+16KiB SWZ3 extent geometry accepts seven 2073B records plus
+the real 128B metadata; an 8th record is not needed to
+obtain 12KiB savings versus seven standalone 4KiB units.
+This may reduce WRITE wait/p99 or hurt packing/reuse on
+some workloads. Only an opt-in same-source loaded trial
+can settle that trade-off. No alpha.14 loaded claim, no
+physical-disk saturation result and no GC lifecycle result.

@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.13
+## One active module: V3.0.0-alpha.14
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -305,3 +305,20 @@ separately opt-in `make bench-pair-medium` and
 `make bench-pair-medium-retain` only on freshly owned RAM
 null_blk devices with exact preflight and ordinary teardown.
 Loaded alpha.13 qualification: **NOT RUN**.
+
+## Alpha.14 seven-record early window commit
+
+Active source, DKMS, module status, Makefile and both owned
+null_blk deployment guards now identify `3.0.0-alpha.14`.
+The production C retained/zero-read-budget packing rule
+checks seven staged compressed lengths plus exact SWZ3
+header and seven descriptors against one 16KiB extent.
+Default `retain_ms=0`, FUA/READ ordering, hrtimer and
+lower authority are unchanged. Run rootless `make verify`
+and W=1/W=2 kernel compilation before the owner-loaded
+isolated RAM `make run`. After safe teardown use separate
+`make bench-pair-medium` and
+`make bench-pair-medium-retain` to test physical bytes,
+write p99, matching achieved IOPS, and full readback.
+Do not use existing host swap, physical or unowned devices.
+The alpha.14 loaded result is NOT RUN.

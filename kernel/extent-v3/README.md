@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.13 experimental Device Mapper target
+# Current development: V3.0.0-alpha.14 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -200,3 +200,20 @@ FUA/drain protocol and hrtimer remain authoritative. Default
 `retain_ms=0` unchanged. The geometric bound of at most 20KiB
 is NOT proof of physical request counts or lower latency;
 the loaded alpha.13 test is NOT RUN.
+
+## Alpha.14 seven-record pack-ready experiment
+
+Alpha.14 changes the existing serialized worker's
+experimental `retain_ms>0` early-close predicate: a batch
+of exactly **seven** accepted non-RAW LZ4 pages may commit
+before the eighth arrival or the pinned 2ms deadline if
+all seven actual lengths and the exact header/descriptors
+fit one 16KiB SWZ3 extent. Seven 2073B pages + 128B
+metadata = 14639B, leaving a valid single-extent plan
+instead of 28KiB of separate 4KiB writes. This is only
+a *geometry proof*, not a guarantee about lower device
+requests or write-tail latency. The existing planner and
+CRC/generation authority still decide the physical
+submission, publication and completion; default-off
+retention and null_blk-only admission are unchanged.
+Loaded alpha.14 is NOT RUN.

@@ -66,11 +66,23 @@ Use `main` only and follow the device/host safety restrictions.
       reduced WRITE bytes **34.8%** and WRITE requests **79.4%**
       versus off, with unchanged READ I/O; sampled WRITE p99
       **2.933ms** versus off **1.015ms** (unqualified tail).
-- [ ] Run the opt-in alpha.13 geometry-ready early-commit
-      candidate against the identical measured medium pages at
-      matched achieved load. Confirm `close_pack_ready` sums
-      within primary closure conservation and that real lower
-      WRITE savings survive any WRITE p99 reduction.
+- [x] Owner alpha.13 source `0a443ca4` loaded standard smoke
+      and opt-in medium retain=0/retain=2 replay: byte-exact,
+      matched ~503 IOPS, owned RAM safety and clean teardown.
+      Retain=2: **1.5435 logical WRITE MB/s -> 1.0062 lower
+      WRITE MB/s**, 34.81% fewer lower WRITE bytes and
+      79.4% fewer WRITE requests than off. Sampled WRITE p99
+      **2.788ms** vs off **0.984ms**; 17 cumulative early
+      pack-ready and 1,168 deadline closures, no GC.
+- [ ] Owner alpha.14: qualify default-off `make run` first,
+      then compare `make bench-pair-medium` and explicit
+      `make bench-pair-medium-retain` on fresh owned RAM
+      devices. Check new seven-record close reason, WRITE
+      p95/p99, independent lower WRITE/READ bytes/requests,
+      matched achieved IOPS and input-to-lower MB/s,
+      byte-exact final readback and safe teardown. A
+      latency regression or loss of I/O savings is a
+      valid negative result.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
@@ -102,7 +114,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.13 behavior when their claims
+      documents and current V3.0.0-alpha.14 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,
