@@ -47,3 +47,16 @@ read/write dependencies. Compression of a 4096B page to about 2048B
 must be validated by actual LZ4 output measurements; it is not proof
 of a 2048B lower-device write. Fail-closed publication and null_blk-only
 safety still precede any optimization.
+
+## Safe module deployment for development
+
+`tools/device-roundtrip.c` is the minimal **compiled C** loaded-I/O
+oracle for an exact V3 mapping, not a new userspace swap controller.
+It does direct aligned byte-exact reads/writes, overwrites and flushes.
+`tools/deploy-nullblk.sh` is the thin privileged provisioning and
+teardown guard. Only owned RAM-backed configfs null_blk and matching
+DM UUID/major:minor are eligible; never make a deployment helper
+support physical devices or automatically use active Linux swap.
+No global module removal, force deletion, reboot or partitioning.
+The workflow may report BLOCKED if an incompatible module already
+exists, and must preserve the host's other mappings and swap state.

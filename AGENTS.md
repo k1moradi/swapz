@@ -33,7 +33,7 @@ README for user-facing changes and VISION if acceptance criteria change.
 
 **Host safety:** never reboot, `swapoff`, `swapon`, touch active
 `/dev/sdb1` or `/swapfile`, physical/unowned storage, or unrelated DM.
-Experimental V3 stays null_blk-only; frozen V2.2 is the default build.
+V3 is the active default *development* build, but stays experimental and null_blk-only; V2.2 is retired from active benchmarks.
 
 `CODEX_VALIDATION.md`, `TESTING.md`, `PRODUCTION_READINESS.md`,
 `V3_GOALS.md`, archived scripts, old PRs and

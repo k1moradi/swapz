@@ -104,3 +104,43 @@ anonymous-page fixture and immutable replay are in
 `tests/runtime/benchmark/`. The four native test targets and actual
 production-C compilation semantics are unchanged. Historical host
 helpers remain separate to preserve safety coverage.
+
+## Automated compile, test, and isolated deployment
+
+From an **existing clone** (no new branches, no recloning), run:
+
+```sh
+cd ~/swapz && git pull --ff-only origin main && make deploy
+```
+
+The one command uses the **current main source**, executes the native
+kernel-C tests, V3 source contract tests and deterministic off/V3
+rootless I/O replay, compiles the **exact V3** `dm-swapz.ko` against
+**the running kernel**, compiles a small C direct-I/O oracle, and uses
+`sudo` to provision one **new unique RAM-backed null_blk** + V3
+`swapz3` Device Mapper test target. It performs bounded direct
+4KiB reads/writes, compressible/RAW and overwrite verification and
+flushes, emits source/module/target evidence in
+`build/deploy/session.*/session.log`, and **normally removes
+the owned test mapping and backing device** afterward.
+
+This is an **ephemeral development deployment, NOT installation as
+system swap**, and it never invokes `swapon`, `swapoff`, formats,
+mounts a test filesystem or touches physical disks. If safe teardown
+cannot be proven, the script stops and **quarantines the owned test
+resources instead of force-removing them**. Do not manually remove
+quarantined mappings while I/O is outstanding.
+
+Requires Linux, matching running-kernel headers, gcc/cc, make,
+`dmsetup`, `kmod` (modprobe/insmod/rmmod/modinfo), `null_blk`
+with configfs, `sudo` privileges and other standard Linux tools.
+The script reports missing prerequisites or a conflicting loaded
+`dm_swapz` module without touching existing active swap. For
+rootless compilation/tests only, use `make verify`; for compilation
+without deployment use `make`.
+
+GitHub Actions additionally runs rootless and W=1/W=2 builds on
+`main` and publishes an **experimental compile-only** module artifact
+with SHA/vermagic. CI-hosted builds are not asserted to be loadable
+on your different running kernel. The isolated loaded deployment
+runs **on your host only when you execute `make deploy`**.

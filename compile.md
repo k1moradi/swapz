@@ -102,3 +102,39 @@ link map. Its one `BUILD_NATIVE` recipe writes test binaries to
 remain stable. The production source files and test assertions were
 not altered by this organization pass. Use `make test` to verify
 source path resolution and avoid compilation in `tests/runtime/`.
+
+## Automated V3 build/test/deployment interface
+
+Use `make verify` for rootless native kernel-C suites, exact V3
+source contracts, and deterministic byte-exact off/V3 replay.
+Use `make` to build V3 (still **not** loaded). Use **`make deploy`**
+for the complete flow: verify, compile the exact V3 module for
+`/lib/modules/$(uname -r)/build`, compile the C direct-I/O test
+oracle into `build/tests/device-roundtrip`, then provision a new
+strictly-owned RAM-backed null_blk and swapz3 DM target with
+`sudo bash tools/deploy-nullblk.sh`. The host session is **ephemeral**:
+it executes 128 4KiB page writes, reads, controlled overwrites and
+flushes, then ordinarily removes only that mapping and the owned RAM
+device. A busy/changed device is **quarantined**, never force-deleted.
+
+From a clone on `main`:
+
+```sh
+cd ~/swapz && git pull --ff-only origin main && make deploy
+```
+
+The script checks clean tracked sources, exact staged C/headers,
+vermagic=running kernel, unique random configfs/DM UUID, RAM-backed
+null_blk size (64MiB), DM dependency, unattached/non-swap status,
+and refuses to replace an already loaded `dm_swapz`. It never
+installs a default system module, activates swap, or uses physical
+storage. Logs remain in the **one build root** at
+`build/deploy/session.*/session.log`. Configfs may remain mounted
+because it can be shared by other tools. A missing header, configfs,
+module-signing permission, root privilege or safe admission is **BLOCKED**,
+not a reason to relax the null_blk-only kernel guard.
+
+CI builds W=1/W=2 without loading the module and publishes only the
+compile-time `.ko` plus source/version/vermagic/SHA manifest as a
+short-lived GitHub Actions artifact. Module artifacts are kernel
+version-specific: for actual host deployment, always rebuild locally.

@@ -27,8 +27,9 @@ jobs:
       - name: Build and execute real production C/C++ modular tests
         run: |
           set -euo pipefail
-          make -C tests test
-          python3 -B tests/runtime/benchmark/io-replay-test.py -v
+          make verify
+          make build/tests/device-roundtrip
+          test -x build/tests/device-roundtrip
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
       - name: Enforce V3-only active defaults and two-arm benchmark

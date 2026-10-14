@@ -157,3 +157,27 @@ and on explicit dispatch, using a `build/python-cache` bytecode root.
 This ensures behavior-renamed legacy scripts receive executable
 contract validation without creating a branch or requiring physical
 or active-swap access. Report synthetic evidence only as synthetic.
+
+## Automated local deploy-and-verify gate
+
+`make verify` invokes the 14 production-C native tests, the exact
+V3 constructor/source contracts, the safe off/V3 **regular-file**
+replay oracle and shell deployment source checks. CI additionally
+compiles `tools/device-roundtrip.c` with `-Wall -Wextra -Werror`.
+`make deploy` compiles V3 against the **running kernel**, then loads
+the exact built module solely against a **fresh, unique memory-backed
+null_blk**. The ephemeral mapper has its own test UUID, 16MiB logical
+capacity and 64MiB RAM physical capacity. The C oracle writes 128
+4096-byte pages in compressible, mixed 2:1-ish and RAW patterns,
+performs full byte-exact readback, overwrites half the pages and
+verifies the full image again, with ordered flush operations.
+
+The owning script checks `/proc/swaps` and exact DM/major:minor
+provenance, and attempts normal teardown of only resources it made.
+If outstanding holders prevent removal, **quarantine** the owned
+resource; never use `dmsetup remove -f`, `rmmod -f`, host
+`swapoff`, or unowned devices. The local loaded test may be
+BLOCKED on hosts without null_blk/configfs/module-signing access.
+It is not equivalent to real workload performance qualification:
+kernel CPU, sustained GC and matched-rate independent lower-I/O
+gates in [benchmark.md](benchmark.md) remain open.

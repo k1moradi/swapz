@@ -9,6 +9,7 @@ on:
       - 'tests/runtime/native/**'
       - 'tests/runtime/benchmark/**'
       - 'Makefile'
+      - 'tools/**'
       - 'V3_GOALS.md'
       - '.github/workflows/extent-v3-codec.yml'
   workflow_dispatch:
@@ -60,3 +61,20 @@ jobs:
           test -s build/kernel/experimental/dm-swapz.ko
           sha256sum build/kernel/experimental/dm-swapz.ko
           echo "COMPILE_ONLY_NO_MODULE_INSERTION"
+          mkdir -p build/deploy
+          {
+            echo "git_head=$(git rev-parse HEAD)"
+            echo "kernel_headers=$KDIR"
+            echo "version=$(cat kernel/extent-v3/VERSION)"
+            sha256sum build/kernel/experimental/dm-swapz.ko
+            modinfo -F vermagic build/kernel/experimental/dm-swapz.ko
+          } > build/deploy/compiled-module-manifest.txt
+      - name: Publish experimental V3 compile-only artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: swapz-v3-module-${{ github.sha }}
+          path: |
+            build/kernel/experimental/dm-swapz.ko
+            build/deploy/compiled-module-manifest.txt
+          if-no-files-found: error
+          retention-days: 7
