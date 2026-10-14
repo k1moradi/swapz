@@ -68,6 +68,18 @@ static inline int sv3_window_pack_ready(
 }
 
 /*
+ * The retention hrtimer is armed ONLY for nonzero retain_ms. A nonretained
+ * window never schedules a timer; skipping its synchronous cancellation
+ * avoids an unnecessary timer operation in the single-window write path.
+ * The drain/free path must still unconditionally cancel to handle any
+ * previously armed callback during teardown and avoid use-after-free.
+ */
+static inline int sv3_window_timer_enabled(sv3_u8 retain_ms)
+{
+	return retain_ms != 0;
+}
+
+/*
  * One clock sample decides expiry against the original first admission.
  * Compare elapsed time, never subtract it from an unsigned remaining
  * budget: a crossed deadline must expire instead of wrapping the delay.

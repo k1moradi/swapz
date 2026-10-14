@@ -140,6 +140,16 @@ static int test_pack_ready_rejects_raw_and_unfittable(void)
 	return 0;
 }
 
+static int test_timer_cancel_only_for_enabled_retention(void)
+{
+	unsigned int retain;
+
+	CHECK(!sv3_window_timer_enabled(0));
+	for (retain = 1; retain <= 4; ++retain)
+		CHECK(sv3_window_timer_enabled((sv3_u8)retain));
+	return 0;
+}
+
 static int test_disabled_or_missing_timestamp_expires(void)
 {
 	CHECK(sv3_window_retention_expired(1000, 1000, 0));
@@ -216,6 +226,7 @@ int main(void)
 	CHECK(test_caller_fences_override_independence() == 0); passed++;
 	CHECK(test_pack_ready_seven_medium_pages() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
+	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;
 	CHECK(test_exact_nanosecond_deadline() == 0); passed++;
 	CHECK(test_expiry_remains_pinned_after_later_arrivals() == 0); passed++;

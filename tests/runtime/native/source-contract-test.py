@@ -516,6 +516,25 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
+    def test_alpha15_nonretained_hot_path_skips_unarmed_timer_cancel(self):
+        window = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
+        flush = body("sv3_flush_window")
+        worker = body("sv3_worker")
+        drain = body("sv3_drain")
+        free = body("sv3_free")
+        self.assertIn("static inline int sv3_window_timer_enabled", window)
+        self.assertIn("return retain_ms != 0;", window)
+        self.assertIn("if (sv3_window_timer_enabled(ctx->retain_ms))", flush)
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer);", flush)
+        self.assertLess(
+            flush.index("if (sv3_window_timer_enabled(ctx->retain_ms))"),
+            flush.index("hrtimer_cancel(&ctx->retention_timer);"))
+        self.assertIn("sv3_window_timer_enabled(ctx->retain_ms)", worker)
+        self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
+        # Drain and free always cancel, even if admission was disabled.
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer);", drain)
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer);", free)
+
     def test_alpha14_pack_ready_only_after_seven_compressed_admissions(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         writer = body("sv3_accept_write")

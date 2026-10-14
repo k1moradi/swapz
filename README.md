@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.14, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.15, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -199,6 +199,26 @@ It reports completed logical WRITE/READ MB/s and lower
 WRITE/READ MB/s, plus V3/off logical-throughput ratio.
 The unpaced loaded result is **NOT RUN**; it is not a
 fixed-bandwidth/saturated physical-drive measurement.
+
+## Alpha.15: skip unarmed retention-timer cancellation in production C
+
+The owner-loaded alpha.14 default-off smoke passed; the paced
+medium-payload off/V3 comparison also passed byte-exact oracle,
+independent read/write accounting and ordinary teardown. It
+measured ~**1.5436 logical WRITE MB/s → 1.0063 lower WRITE
+MB/s** with opt-in retention (34.81% fewer WRITE bytes),
+but the benchmark still requested only 500 IOPS and **did not
+run the new unpaced probe**.
+
+Alpha.15 performs one low-risk kernel-C hot-path optimization:
+default-off write windows never arm the retention hrtimer,
+so their repeated synchronous `hrtimer_cancel()` is now
+skipped. Retained windows continue to cancel synchronously;
+drain and free still unconditionally cancel for safety.
+The kernel's compression, on-media format, ordering and
+BIO publication are unchanged. No unpaced speed improvement
+is claimed without the owner-loaded
+`make bench-pair-medium-unpaced` result.
 
 ## The active performance question
 

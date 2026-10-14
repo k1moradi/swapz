@@ -758,3 +758,37 @@ has **no defined disk bandwidth ceiling** and this
 does NOT prove increased throughput at equal saturated
 physical disk MB/s. Source/kernel alpha stays alpha.14,
 as no production-C scheduling behavior changes.
+
+## Alpha.15 C-first nonretained hot-path timer optimization
+
+At exact alpha.14 owner source `a3c0a1ae`, the default
+smoke and a separate paced medium off/retained comparison
+passed: 767 completed 4KiB WRITEs per arm, immutable
+final image, both independently owned RAM devices,
+lower WRITE 3,141,632B off versus 2,048,000B V3,
+lower READ 1,052,672B per arm and ordinary teardown.
+Retained V3 sampled WRITE p99 2.696ms (off 1.120ms),
+with 64 cumulative pack-ready early closures, no GC.
+These were **500 IOPS paced** results. The explicit
+new `make bench-pair-medium-unpaced` was **NOT RUN**.
+
+Production `sv3_flush_window` now avoids calling the
+synchronous `hrtimer_cancel()` for `retain_ms=0`,
+because the only worker timer arming branch is gated
+on `sv3_window_timer_enabled(retain_ms)` and returns
+false when disabled. The nonretained singleton/quantum
+hot path therefore skips an unnecessary timer operation
+at every window closure. When retention is enabled
+(`retain_ms=1..4`), the call remains synchronous,
+outside `queue_lock` where the timer callback also
+takes that lock. Drain and free must **always** cancel
+regardless of configuration to prevent teardown races.
+The direct native production-header test checks 0 vs
+1..4, and the source contract checks guarded flush,
+gated arming and unconditional drain/free. No change
+to storage format, completion, outstanding work or GC
+is intended. W=1/W=2 kernel build and rootless CI are
+necessary; actual loaded throughput and timer-race
+qualification of alpha.15 remain **NOT RUN**. High MB/s
+must be measured with 16384-operation QD32 unpaced
+pilot, not extrapolated from 500 IOPS.

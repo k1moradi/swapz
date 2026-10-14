@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.14"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.15"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -825,8 +825,14 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	}
 	/* Measure BEFORE any dm_io, GC, verification or lower FUA. */
 	end_ns = ktime_get_ns();
-	/* Never cancel while holding queue_lock: the callback takes it. */
-	hrtimer_cancel(&ctx->retention_timer);
+	/* The timer can only be armed by opted-in retained windows.
+	 * Nonretained singleton windows have no callback to synchronize,
+	 * so avoid a needless hrtimer_cancel() on every physical WRITE.
+	 * With retention enabled, cancellation remains synchronous and
+	 * outside queue_lock because the callback takes that lock.
+	 * Shutdown/free retain unconditional cancellation. */
+	if (sv3_window_timer_enabled(ctx->retain_ms))
+		hrtimer_cancel(&ctx->retention_timer);
 	open_age_ns = ctx->window_first_ns && end_ns >= ctx->window_first_ns ?
 		end_ns - ctx->window_first_ns : 0;
 	ctx->window_first_ns = 0;
@@ -1414,7 +1420,8 @@ static void sv3_worker(struct work_struct *work)
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
-			if (ctx->batch_count && ctx->retain_ms &&
+			if (ctx->batch_count &&
+			    sv3_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
 				/* Admission and timer arming share this lock.
 				 * Newly arriving writes prepare immediately;
