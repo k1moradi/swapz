@@ -866,3 +866,75 @@ null_blk, with full readback, independent lower-device
 counters, GC, write/read p99 and ordinary safe teardown.
 Neither null_blk nor the unpaced result imposes or
 demonstrates a fixed saturated physical disk bandwidth.
+
+## First owner-loaded unpaced input-to-backing throughput: alpha.15 (2026-10-14)
+
+Owner exact source `75d96be0e6ec5a575811748038366d2e2d069ccf`,
+Linux `7.0.0-38-generic`, module SHA-256
+`df24ece353e7a51e144aed10bbff5eb9989e0651e149dbb99821f3ea184f9594`.
+The default-loaded `make run` 128-page byte-exact smoke,
+9 exact-zero elisions, lower WRITE 183/749,568B and
+READ 490/2,007,040B, 119/119 FUA/age accounting,
+unchanged existing system swap and clean owned RAM
+teardown **PASS**.
+
+The separate `make bench-pair-medium-unpaced` owner run:
+`build/benchmark/session.F5KSovQL/`. It used 2 freshly
+owned RAM-backed null_blk lower devices, identical
+immutable fixture SHA-256
+`c717dc1313d910bc75bf07f48c12008366860671e44d13e6738c5a56fa19e4a2`,
+trace SHA-256
+`28b30607d40136ce2c15642c33869ddf7d6a4e77f4d9988239ec4ec3227c6245`,
+exact final 1024-page oracle SHA-256
+`4c033b51c4ad7efaaf3252793525a2497996865d0a7d3036d73afe3ac785cfd6`.
+Both arms completed 12,301 4KiB logical WRITEs,
+4,083 READs; 1,024 warmup, 16,384 measured operations,
+QD32 and unlimited requested IOPS. Byte-exact oracle,
+independently verified owned lower bytes/requests and
+ordinary teardown **PASS**.
+
+| Measured metric | Bare owned lower | V3 alpha.15 retain_ms=2 |
+|---|---:|---:|
+| Seconds for same measured trace | 1.598607 | 2.026141 |
+| Achieved IOPS | 10,248.923 | 8,086.307 |
+| Logical WRITE input MB/s | **31.518** | **24.867** |
+| Lower WRITE output MB/s | 31.518 | **14.792** |
+| Lower WRITE bytes | 50,384,896 | **29,970,432** |
+| Lower WRITE requests | 12,301 | **2,061** |
+| Logical READ input MB/s | 10.462 | 8.254 |
+| Lower READ output MB/s | 10.462 | 8.254 |
+| Lower READ bytes / requests | 16,723,968 / 4,083 | 16,723,968 / 4,083 |
+| Sampled WRITE p99 | 1.879ms | 2.333ms |
+| Sampled READ p99 | 2.852ms | 2.736ms |
+
+**Negative throughput result:** V3 completed 21.10%
+fewer logical IOPS/MB/s despite reducing lower WRITE
+bytes 40.52% and requests 83.25%. It handled the same
+useful work in 26.74% longer time, with worse WRITE p99
+and unchanged lower READ bytes/requests. Read MB/s was
+lower merely because it took longer; no read efficiency
+savings were shown. Cumulative target status (includes
+prefill, warmup and final readback): `windows=3124`,
+`retain_timer_arms=12228`, `close_deadline=1483`,
+`close_pack_ready=1641`, `retained_read_bypasses=3675`,
+`gc_victims=0`, `failed=0`.
+The owner remained in the safe RAM/null_blk-only scope.
+This is a single short synthetic independent-page replay;
+CPU/memory, GC cycle and real physical-media constraints
+are not qualified. In particular **no fixed backing
+bandwidth was imposed**; this is not proof of a
+saturated physical-device result.
+
+**Alpha.16 optimization, NOT RUN loaded:** the real C
+worker no longer calls `hrtimer_start()` when the
+first-record deadline is already in the hrtimer queue.
+The unchanged deadline and error/barrier/authority
+semantics preserve previous safety contracts.
+The new status counter `retain_timer_arm_skips`
+allows measuring whether repeated timer restarts
+actually disappear. An increase in logical WRITE
+MB/s and reduction in write p99 are hypotheses,
+not established outcomes. Run exactly the same
+owner-loaded unpaced trace and report a negative
+or neutral result without adjusting acceptance
+criteria after seeing the data.

@@ -3,7 +3,7 @@
 **Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
 WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
 is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.15 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.16 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
@@ -267,3 +267,24 @@ V3 mappings are volatile. Hibernation/resume persistence is potential
 
 Historical [V3 goals and V2.2-era comparisons](archive/v3/V3_GOALS.md)
 remain provenance, not active engineering or benchmark requirements.
+
+### Alpha.16 high-QD throughput checkpoint — not loaded yet
+
+At exact alpha.15 `75d96be0`, the first unpaced
+QD32 immutable 16,384-operation replay found a
+strong lower WRITE cost improvement **but lower
+useful throughput**: off 31.518 logical WRITE
+MB/s, V3 retained 24.867 logical WRITE MB/s
+(-21.10%), while lower WRITE output was 14.792
+MB/s in V3 and 31.518 MB/s off. The target
+reported 12,228 retention timer arms for 3,124
+write windows. Alpha.16's C-first experiment
+skips a timer restart when the same pinned
+absolute expiration is already queued. It adds
+the `retain_timer_arm_skips` diagnostic but
+does not alter independent-page mapping, FUA,
+GC or completion. This should be benchmarked
+at the same QD32 unpaced workload with the
+same complete readback; a benefit has NOT been
+proven. GC/CPU and stable swap-in p99 remain
+open qualification milestones.

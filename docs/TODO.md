@@ -111,19 +111,34 @@ Use `main` only and follow the device/host safety restrictions.
       [readiness ledger](PRODUCTION_READINESS.md);
       V3 remains experimental and null_blk-only.
 
-- [ ] Owner alpha.15: first `make run` default-off
-      loaded safety and full oracle on new owned RAM,
-      then the separate `make bench-pair-medium-unpaced`
-      QD32/16,384-operation benchmark. Record completed
-      logical input WRITE/READ MB/s, independent lower
-      WRITE/READ MB/s and requests, GC, CPU, p95/p99,
-      exact source/module hashes and teardown/quarantine.
-      No unpaced result appears in the latest uploaded log.
+- [x] Owner alpha.15 `75d96be0` default loaded smoke
+      and QD32/16,384-operation unpaced medium off/V3
+      pair PASS on separately owned RAM devices. Off:
+      **31.518 logical -> 31.518 lower WRITE MB/s** at
+      10,248.9 achieved IOPS. V3 retained: **24.867
+      logical -> 14.792 lower WRITE MB/s** at 8,086.3
+      achieved IOPS. V3 completed 21.10% fewer IOPS,
+      despite 40.52% fewer lower WRITE bytes and 83.25%
+      fewer lower WRITE requests. READ lower bytes and
+      requests matched the same trace; write p99 was
+      2.333ms V3 versus 1.879ms off. Byte-exact final
+      oracle and safe teardown PASS; no GC or CPU profile.
+- [ ] Owner alpha.16 on fresh RAM-only devices: run
+      default loaded `make run` then the same
+      `make bench-pair-medium-unpaced`. Check physical
+      lower READ/WRITE requests/bytes, useful logical
+      MB/s and achieved IOPS, p95/p99, full readback and
+      clean teardown. Compare cumulative
+      `retain_timer_arms` and new
+      `retain_timer_arm_skips` to alpha.15's 12,228
+      arms/3,124 windows. Reject throughput regressions
+      and report negative results; do not infer physical
+      disk saturation.
 
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.15 behavior when their claims
+      documents and current V3.0.0-alpha.16 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,

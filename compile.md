@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.15
+## One active module: V3.0.0-alpha.16
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -351,3 +351,22 @@ and source paths, compile W=1/W=2, then owner-only fresh RAM
 `make run` and `make bench-pair-medium-unpaced` after
 passing safety preflight. An increased completed MB/s is
 unproven until measured.
+
+## Alpha.16 high-QD retention timer suppression
+
+The active source, DKMS, project-goals version gate
+and both owned-null_blk harnesses are
+`3.0.0-alpha.16`. `sv3_worker` now inspects
+`hrtimer_is_queued()` under its existing
+`queue_lock`; for an already enqueued absolute
+first-record expiry it does not restart the timer,
+while an unqueued timer still arms with the
+original deadline. No change to serialized worker
+ownership, hrtimer callback, synchronous flush,
+GC or shutdown/free cancellation. Direct native C
+and source-contract tests cover the predicate and
+no-extension invariants. On the authorized Linux
+host, compile W=1/W=2 and run `make run` before
+the separately opt-in `make bench-pair-medium-unpaced`
+with freshly owned RAM-only devices. Alpha.16
+loaded correctness/throughput is **NOT RUN**.

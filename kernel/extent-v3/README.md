@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.15 experimental Device Mapper target
+# Current development: V3.0.0-alpha.16 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -229,3 +229,22 @@ windows and unconditional in drain/free. No format,
 on-device I/O, GC, FUA or completion rule changes.
 Potential faster nonretained upper IOPS is a hypothesis;
 the owner-loaded QD32 unpaced result is not yet available.
+
+## Alpha.16 queued-retention timer reuse
+
+In the serialized worker, the retention hrtimer
+was restarted at the same immutable first-write
+deadline every time incoming BIOs temporarily
+drained. Alpha.15 unpaced QD32 host evidence
+showed 12,228 timer arms across 3,124 windows.
+The production C worker now skips `hrtimer_start`
+if `hrtimer_is_queued` reports the same window's
+existing queued expiration. If a timer callback
+has dequeued it, the worker may re-arm at the
+ORIGINAL absolute deadline, never prolonging
+retention. The new diagnostic
+`retain_timer_arm_skips` measures skipped
+restarts. All existing synchronous cancellation
+and shutdown/drain safety paths remain intact.
+Default-off retention is unchanged and the
+alpha.16 loaded throughput outcome is NOT RUN.
