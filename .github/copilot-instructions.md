@@ -7,12 +7,16 @@ The repository has **one branch only: `main`**.
    unless the user explicitly asks for an exception. Work directly on
    `main` with small, tested commits. Do not force-push, reset --hard,
    restore the entire worktree, or discard other agents' changes.
-2. **C/C++ first:** Spend most engineering effort on production
-   `kernel/dm-swapz.c`, `kernel/extent-v3/*.c` and directly executing
-   C/C++ regression tests. Diagnose and fix concrete kernel I/O, LZ4,
-   mapping-authority, GC, concurrency, completion and request-economics
-   problems. Avoid replacing that work with new Python mock frameworks
-   or extensive report-only changes.
+2. **Strict majority on the kernel module itself:** Spend **more
+   than 50% of ongoing focused engineering time** developing, reviewing,
+   debugging and profiling the actual production **kernel C** module:
+   `kernel/dm-swapz.c`, `kernel/extent-v3/*.c`. Focus on BIO I/O,
+   LZ4, GC, authority, concurrency, completion and lower-device request
+   economics. C++ is appropriate for separately built native tests;
+   it is not a Linux kernel module language. Do not count Python
+   harness-building, documentation, or C++ test-only work as the kernel
+   module development majority. Follow focused safety/correctness
+   qualification even when it requires supporting tools.
 3. Python/shell is allowed only when a thin, bounded, reproducible
    testing/fixture/CI script materially improves actual C/C++ validation.
 4. Keep frozen V2.2 as the default build, V3 isolated and experimental;
