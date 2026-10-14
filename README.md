@@ -1,5 +1,14 @@
 # swapz: V3.0.0-alpha.6 development
 
+> **Agent development policy:** [AGENTS.md](AGENTS.md) is mandatory
+> for ChatGPT, Codex, Copilot and other coding agents. **Only `main`**;
+> **no new branches or PR branches** without an explicit owner request.
+> **More than 50% of ongoing engineering time must be spent developing
+> the actual kernel module in C**, including implementation, debugging,
+> profiling and review. C++ native tests and small Python/shell helpers
+> support kernel development; they do not replace it. Preserve V2.2 as
+> default and respect all loaded-device/active-swap safety gates.
+>
 > **Project vision:** the ultimate success criterion is **less measured
 > lower-device I/O** on SD cards, SSDs and HDDs **under the same verified
 > swap workload**: independent read and write **BYTES and REQUEST COUNTS**,
