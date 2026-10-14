@@ -34,11 +34,26 @@ More specific testing documents cannot relax these restrictions.
 - See `docs/ONE_MAIN_BRANCH_CONSOLIDATION.md` for the original branch
   inventory and preserved historical commit IDs.
 
-## 2. PRIMARY ACTIVITY: C / C++ DEVELOPMENT
+## 2. MAJORITY OF ENGINEERING TIME: KERNEL MODULE DEVELOPMENT IN C/C++
 
-**Spend the majority of actual engineering time implementing, reviewing,
-debugging, profiling and improving production C/C++**, not continually
-building new Python frameworks, orchestration layers, or Markdown reports.
+**Mandatory time-allocation rule:** Across ongoing development work,
+**strictly more than 50% of focused engineering time MUST be devoted to
+the actual swapz kernel module**: understanding, designing, editing,
+reviewing, debugging, profiling and optimizing its production C source
+and kernel behavior. **Kernel module development—not Python, shell,
+benchmarks, documentation, test-framework construction, or project
+administration—is the majority activity.**
+
+Linux kernel modules are implemented in **C**, not compiled as C++.
+Use C for production kernel paths and C/C++ for direct native regression
+tests or appropriately separate supporting components. C++ test work
+is useful but **does not substitute for majority time on the kernel
+module itself**. In a development task, identify the concrete kernel
+code path and expected C-level change before proposing additional
+infrastructure. A user-requested independent validation-only task can
+focus on testing, but it does not authorize default Python-first
+development. Never produce unsafe or unjustified code churn merely
+to meet the time allocation; necessary testing remains a release gate.
 
 Priority order:
 
