@@ -80,6 +80,20 @@ static inline int sv3_window_timer_enabled(sv3_u8 retain_ms)
 }
 
 /*
+ * An existing queued hrtimer already carries the immutable first-record
+ * absolute deadline. Starting the same timer again on every empty-queue
+ * worker pass buys no additional wakeup, and adds timer-base overhead.
+ * The queued snapshot is taken while the serialized worker holds
+ * queue_lock. If a callback has already dequeued the timer, a rearm
+ * remains permitted; that callback may also schedule another worker.
+ * Never skip the FIRST timer arm of a new retained window.
+ */
+static inline int sv3_retention_timer_needs_arm(sv3_u8 retain_ms, int queued)
+{
+	return sv3_window_timer_enabled(retain_ms) && !queued;
+}
+
+/*
  * One clock sample decides expiry against the original first admission.
  * Compare elapsed time, never subtract it from an unsigned remaining
  * budget: a crossed deadline must expire instead of wrapping the delay.

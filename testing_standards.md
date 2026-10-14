@@ -792,3 +792,59 @@ necessary; actual loaded throughput and timer-race
 qualification of alpha.15 remain **NOT RUN**. High MB/s
 must be measured with 16384-operation QD32 unpaced
 pilot, not extrapolated from 500 IOPS.
+
+## Alpha.16 retention hrtimer rearm suppression (C-first)
+
+The owner's exact alpha.15 source `75d96be0` first
+passed a loaded 128-page default-off C oracle, full
+lower read/write reconciliation, FUA conservation and
+owned RAM teardown. The owner then ran the explicitly
+unpaced QD32 / 16384-operation medium pair at source
+`75d96be0`, Linux `7.0.0-38-generic`, module SHA256
+`df24ece353e7a51e144aed10bbff5eb9989e0651e149dbb99821f3ea184f9594`
+with identical verified fixture and trace and safe teardown.
+Uncompressed achieved 10,248.923 IOPS; V3 retained
+8,086.307 IOPS (-21.10%). Off logical WRITE
+31.518 MB/s / lower WRITE 31.518 MB/s, V3 logical
+WRITE 24.867 MB/s / lower WRITE 14.792 MB/s.
+Actual V3 WRITE bytes were 29,970,432 versus
+50,384,896 off (40.52% fewer); lower requests
+2,061 versus 12,301 (83.25% fewer). READ lower
+bytes 16,723,968 and READ requests 4,083 for
+BOTH arms, with unequal READ MB/s due to completion
+time difference. Sampled WRITE p99 off 1.879ms,
+V3 2.333ms, not statistically qualified. No
+GC victims. The unpaced verdict was correctly
+`UNPACED_THROUGHPUT_MEASUREMENT_ONLY`, NOT
+matched achieved throughput or device saturation.
+
+The retained V3 cumulative status reported
+`windows=3124`, `retain_timer_arms=12228`,
+`close_deadline=1483`, `close_pack_ready=1641`,
+indicating avoidable repeated hrtimer starts at
+one pinned absolute deadline while the worker
+processes subsequent admitted BIO waves. The
+production C worker now checks
+`hrtimer_is_queued(&ctx->retention_timer)`
+while holding its existing `queue_lock`, and
+calls `hrtimer_start` only if the timer is
+**not** currently enqueued and retention is
+enabled. An already queued timer retains the
+original first-record expiry. A concurrently
+dequeued/expired timer can be armed to the SAME
+absolute first-record deadline, never extending
+the window. No cancellation is weakened; existing
+retained flush, unconditional drain and free still
+use synchronous `hrtimer_cancel()` outside
+`queue_lock`. `retain_timer_arm_skips` is
+an observational count of skipped arming attempts,
+not a measured lower-I/O/CPU saving. Direct
+production-header native C tests check retain=0
+and 1..4 with queued and dequeued states, and
+source qualification verifies the guard precedes
+arming, status and teardown. This is a small
+hot-path experiment; time savings, throughput,
+fault/suspend races and GC on loaded alpha.16
+are **NOT RUN**. The exact medium fixture is
+synthetic and null_blk-only; no physical device
+claim is permitted.

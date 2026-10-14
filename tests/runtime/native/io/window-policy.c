@@ -150,6 +150,22 @@ static int test_timer_cancel_only_for_enabled_retention(void)
 	return 0;
 }
 
+static int test_timer_rearm_requires_retention_and_unqueued_timer(void)
+{
+	unsigned int retain;
+
+	CHECK(!sv3_retention_timer_needs_arm(0, 0));
+	CHECK(!sv3_retention_timer_needs_arm(0, 1));
+	for (retain = 1; retain <= 4; ++retain) {
+		CHECK(sv3_retention_timer_needs_arm((sv3_u8)retain, 0));
+		CHECK(!sv3_retention_timer_needs_arm((sv3_u8)retain, 1));
+	}
+	/* A dequeued/expired timer may be rearmed to the SAME original
+	 * deadline; it will promptly dispatch the worker if overdue. */
+	CHECK(sv3_retention_timer_needs_arm(2, 0));
+	return 0;
+}
+
 static int test_disabled_or_missing_timestamp_expires(void)
 {
 	CHECK(sv3_window_retention_expired(1000, 1000, 0));
@@ -227,6 +243,7 @@ int main(void)
 	CHECK(test_pack_ready_seven_medium_pages() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
+	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;
 	CHECK(test_exact_nanosecond_deadline() == 0); passed++;
 	CHECK(test_expiry_remains_pinned_after_later_arrivals() == 0); passed++;

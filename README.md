@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.15, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.16, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -219,6 +219,33 @@ The kernel's compression, on-media format, ordering and
 BIO publication are unchanged. No unpaced speed improvement
 is claimed without the owner-loaded
 `make bench-pair-medium-unpaced` result.
+
+## Alpha.16: avoid redundant retention timer rearming at high QD
+
+The first **unpaced QD32** owner-loaded alpha.15 run completed
+identical 16,384-operation medium-payload traces with full
+byte-exact oracle and clean two-owned-RAM-device teardown.
+Off achieved **31.518 logical WRITE MB/s → 31.518 lower
+WRITE MB/s**, versus V3 retained **24.867 logical WRITE
+MB/s → 14.792 lower WRITE MB/s**. V3 saved 40.52%
+independently measured backing WRITE bytes and 83.25% of
+WRITE requests but was **21.10% slower in useful logical
+throughput**. READ bytes per fixed trace were unchanged;
+write p99 rose from 1.879 to 2.333ms. No GC occurred.
+This is a real negative throughput result, NOT an SSD
+saturation test or a candidate promotion.
+
+Cumulative V3 status recorded **12,228 retention timer
+arms for 3,124 windows**, indicating repeated rearming of
+the same pinned absolute deadline. Alpha.16 changes the
+actual production C worker to **skip rearming a timer
+already queued**. It still arms when dequeued, cancels
+on retained-window close and during drain/free, and
+preserves read/FUA/GC/completion invariants. New
+`retain_timer_arm_skips` reports avoided attempts.
+The purpose is to improve useful high-QD MB/s
+without sacrificing lower write savings; **alpha.16
+loaded results are NOT RUN**.
 
 ## The active performance question
 

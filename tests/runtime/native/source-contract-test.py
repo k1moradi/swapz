@@ -516,6 +516,25 @@ class V3ProductionSourceQualification(unittest.TestCase):
             self.assertIn(field + "=%llu", status)
         self.assertIn("#include <linux/ktime.h>", DM)
 
+    def test_alpha16_no_rearm_of_already_queued_retention_timer(self):
+        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
+        worker = body("sv3_worker")
+        status = body("sv3_status")
+        self.assertIn("sv3_retention_timer_needs_arm(", policy)
+        self.assertIn("sv3_window_timer_enabled(retain_ms) && !queued", policy)
+        self.assertIn("hrtimer_is_queued(&ctx->retention_timer)", worker)
+        self.assertIn("sv3_retention_timer_needs_arm(ctx->retain_ms", worker)
+        self.assertLess(worker.index("hrtimer_is_queued(&ctx->retention_timer)"),
+                        worker.index("hrtimer_start(&ctx->retention_timer"))
+        self.assertIn("ctx->retain_timer_arms++", worker)
+        self.assertIn("ctx->retain_timer_arm_skips++", worker)
+        self.assertIn("ctx->window_first_ns +", worker)
+        self.assertIn("HRTIMER_MODE_ABS", worker)
+        self.assertIn("retain_timer_arm_skips=%llu", status)
+        self.assertIn("ctx->retain_timer_arm_skips", status)
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("sv3_drain"))
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("sv3_free"))
+
     def test_alpha15_nonretained_hot_path_skips_unarmed_timer_cancel(self):
         window = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         flush = body("sv3_flush_window")

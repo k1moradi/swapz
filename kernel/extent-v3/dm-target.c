@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.15"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.16"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -140,6 +140,7 @@ struct sv3_dm {
 	sv3_u8 retain_ms;
 	u64 retain_worker_passes;
 	u64 retain_timer_arms;
+	u64 retain_timer_arm_skips;
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
 	u64 coalesce_deferred;
@@ -1423,14 +1424,23 @@ static void sv3_worker(struct work_struct *work)
 			if (ctx->batch_count &&
 			    sv3_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
-				/* Admission and timer arming share this lock.
-				 * Newly arriving writes prepare immediately;
-				 * rearming never moves the first-record deadline. */
-				ctx->retain_timer_arms++;
-				hrtimer_start(&ctx->retention_timer,
-					ns_to_ktime(ctx->window_first_ns +
-						    (u64)ctx->retain_ms * 1000000ULL),
-					HRTIMER_MODE_ABS);
+				/* The first record pins the deadline. A queued
+				 * timer already carries that identical expiry;
+				 * avoid hrtimer_start() when later BIOs cause
+				 * another empty-queue worker pass. The callback
+				 * may have dequeued; in that case safely rearm
+				 * at the SAME pinned deadline. All decisions
+				 * here are under admission queue_lock. */
+				if (sv3_retention_timer_needs_arm(ctx->retain_ms,
+					hrtimer_is_queued(&ctx->retention_timer))) {
+					ctx->retain_timer_arms++;
+					hrtimer_start(&ctx->retention_timer,
+						ns_to_ktime(ctx->window_first_ns +
+							(u64)ctx->retain_ms * 1000000ULL),
+						HRTIMER_MODE_ABS);
+				} else {
+					ctx->retain_timer_arm_skips++;
+				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				return;
 			}
@@ -1909,6 +1919,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "age_le100us=%llu age_101_1000us=%llu "
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
+		       "retain_timer_arm_skips=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "failed=%u error=%d",
@@ -1975,7 +1986,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,
 		       ctx->window_age_max_ns,
 		       ctx->retain_ms, ctx->retain_worker_passes,
-		       ctx->retain_timer_arms,
+		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
 		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
