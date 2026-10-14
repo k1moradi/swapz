@@ -35,6 +35,8 @@ verify: test
 	@grep -Fq -- 'memory_backed' tools/deploy-nullblk.sh
 	@grep -Fq -- 'dmsetup remove' tools/deploy-nullblk.sh
 	@grep -Fq -- 'PASS_ZERO_WRITE_LOWER_IO=' tools/deploy-nullblk.sh
+	@grep -Fq -- 'zero_writes == 9' tools/deploy-nullblk.sh
+	@grep -Fq -- 'lower_write_bytes == target_write_bytes' tools/deploy-nullblk.sh
 	@printf 'PASS: V3 production C, replay, preflight shell contracts\n'
 
 build/tests/device-roundtrip: tools/device-roundtrip.c

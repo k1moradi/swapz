@@ -304,3 +304,20 @@ but Make consumed a single-dollar variable reference before `grep`.
 This was an **automation assertion defect**, not a kernel failure.
 The source-guard pattern was corrected without weakening owned
 device cleanup, byte-exact readback or nine-zero-write validation.
+
+### Exact-head regression guard and same-commit policy repair
+
+At `73a440c4`, the rootless `make verify` checks passed, including
+the updated literal `dmsetup remove` source check, but the repository's
+**same-commit standards co-change gate** correctly rejected the
+Makefile-only fix. The static source gate uses a literal teardown
+command substring (no Make-dollar interpolation) while the **runtime**
+privileged harness still verifies exact owned UUID, major:minor, holder,
+mount, swap and module identity before ordinary teardown. The V3
+deployment preflight now also statically checks that the loaded test
+requires exactly **nine** zero-page elisions and that the independent
+lower WRITE-sector delta equals V3's completed lower-write bytes.
+The actual numerical check is **not executed in hosted CI**, which does
+not create/load null_blk mappings. This note and Makefile additions
+restore same-commit policy compliance without relaxing safety or
+claiming a new performance win.
