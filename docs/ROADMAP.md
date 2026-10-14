@@ -16,9 +16,10 @@ The short [action queue](TODO.md) is the place to track open work.
 - Preserve the verified post-zero-elision loaded smoke at source
   `4c6e29b`: nine skipped zero-page lower writes, byte-exact
   readback and clean teardown on an owned RAM-backed `null_blk`.
-  Re-run the **newly strengthened** nine-elision/lower-sector guard
-  on the exact current HEAD before treating that guard as host-tested.
-  Report BLOCKED if host prerequisites or ownership proof is absent.
+  The strengthened nine-elision/lower-sector guard PASSED on the
+  user's owned host at `2e21fac5`, including exact lower read/write
+  deltas and safe teardown. Retest following production C changes;
+  report BLOCKED if ownership or prerequisites cannot be proven.
 - Expand real lower-read/write/flush failure qualification and GC
   callback/drain ownership without misrepresenting pre-submission
   synthetic failures as device-originated events.

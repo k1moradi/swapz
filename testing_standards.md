@@ -340,3 +340,23 @@ running even when the independently compiled native C suites pass.
 This regression was exposed by exact-C and project-goals runs at
 `57ad2c78`; its remedy is a source/test routing correction, not a
 change to validated kernel behavior or a claim of loaded qualification.
+
+## Replaying only on exactly owned modern/legacy null_blk
+
+The off/V3 immutable replay's `--owned-nullblk-name` is the owned
+`nullb-swapz-<16 lowercase hexadecimal>` **configfs** name.
+The kernel disk may have that name or legacy `nullb<index>`; the
+replayer must independently resolve **exactly one**, then check the
+configfs memory/power/index, registered nullb major, lower major:minor,
+canonical sysfs/dev/block identity, exclusive DM dependency, mapping
+UUID, mounts and swap exclusions. Reject missing/ambiguous identities.
+Report lower I/O using the *resolved disk*, not an assumed configfs
+pathname. Revalidate the actual opened file descriptor before writes
+to guard against node replacement after pathname preflight.
+
+This is a safety-gate repair for Stage 2, not a kernel data-path
+optimization. The rootless mock-sysfs test exercises modern/legacy
+acceptance and rejection on ambiguity, wrong major/minor, unsafe
+naming, non-RAM config and index aliases. No loaded paired
+off/V3 replay, actual physical-media improvement or release
+readiness is claimed.

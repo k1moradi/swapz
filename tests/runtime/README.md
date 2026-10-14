@@ -22,8 +22,10 @@ compile recipe** across all 15 native C executables, linking the exact
 kernel `codec.c`, `authority.c`, and `engine.c` where applicable.
 **No executable is built in source folders.**
 
-The benchmark test uses isolated scratch files to validate the replay
-oracle and **does not claim a loaded V3 target**. The off arm in
+The benchmark test uses isolated scratch files and fake sysfs to
+validate the replay oracle plus modern/legacy owned-null_blk naming,
+driver/index and major:minor exclusion. It **does not claim a
+loaded V3 benchmark**. The off arm in
 separately authorized loaded tests is bare **owned RAM-backed null_blk**,
 never a host `swapoff`.
 

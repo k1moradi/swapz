@@ -265,3 +265,34 @@ being silently labeled an I/O saving. The next owner-authorized
 `make run` should record both deltas and investigation evidence if they
 differ. This is still a synchronous verification-mode smoke, not the
 required matched achieved-load off/V3 performance comparison.
+
+## October 14, 2026 — owner-loaded independent READ/WRITE confirmation
+
+**PASS: isolated smoke correctness and counter accounting. Stage 2
+paired performance is NOT RUN.** User's `make run` log identifies
+source `2e21fac5d93ea123044c1f4cb3e7e6862ee5d793`, kernel
+`7.0.0-38-generic`, and `dm-swapz.ko` SHA-256
+`42d64bb0cde4eec578f136c00aae129ca051fc0e6dbcc6c91807da4d969e015e`.
+The owned 64MiB RAM-backed lower was
+`nullb-swapz-ac383f3cb3ace2dc` (251:0) with UUID
+`SWAPZ-TEST-ac383f3cb3ace2dc`; host-local evidence:
+`build/deploy/session.AMFV8jds/session.log`.
+Byte-exact 128-page C I/O, 192 logical writes, flush, overwrite,
+9 zero elisions, and ordinary owned teardown passed. Active swap
+inventory remained unchanged.
+
+| Oracle-interval metric | V3 completed | Independent owned null_blk |
+|---|---:|---:|
+| Writes | 183 requests / 749,568 bytes | 183 requests / 1,464 sectors x 512 |
+| Reads | 431 requests / 1,765,376 bytes | 434-3=431 requests / (3,472-24) sectors x 512 |
+
+The earlier 62-extra-read cumulative observation was **outside**
+this correctly bracketed oracle interval; the current PASS does
+not establish its precise source. Verification mode and synchronous
+`O_DIRECT|O_SYNC` prevent extrapolating to a sustained workload or
+nonzero-page aggregation. The newly corrected benchmark replay's
+modern/legacy configfs admission and post-open descriptor check are
+rootless-only security prerequisites. The first **loaded,
+same-fixture/same-trace uncompressed off versus V3** benchmark,
+CPU/read-p99/GC/fault qualification and real-device benefits remain
+unmeasured.

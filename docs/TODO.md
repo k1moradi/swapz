@@ -15,10 +15,12 @@ Use `main` only and follow the device/host safety restrictions.
       writes were elided, and 183 writes / 1,464 lower 512B sectors
       agreed independently (see [benchmark](../benchmark.md)).
       This is not a matched off-versus-V3 benchmark.
-- [ ] Re-run the strengthened nine-zero-elision and independent
-      lower-sector **automated acceptance guard** at the *current*
-      exact HEAD on an owner-authorized RAM-backed `null_blk`.
-      Rootless CI checks the guard's source, not its loaded execution.
+- [x] Owner-loaded strengthened zero-elision and independent
+      lower READ/WRITE sector guard PASSED at `2e21fac5`:
+      9 elisions, 183 writes/749,568 B and 431 reads/1,765,376 B
+      matched the owned null_blk counters; byte-exact oracle,
+      flush, unchanged active swap and safe teardown passed.
+      This is a synchronous smoke, not a paired comparison.
 - [ ] Extend trustworthy loaded tests for mapping publication, upper BIO
       completion ownership, GC live-object relocation, reserve exhaustion,
       suspend/drain, and actual lower read/write/flush failure paths.

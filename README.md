@@ -211,8 +211,8 @@ The `make run` deployment guard verifies the nine elisions
 and reconciles oracle-interval lower-write **and read** bytes using
 independent before/after null_blk sector counters. It reports request
 counts separately rather than assuming one dm_io call is one device
-request. The read-byte check has **not yet been host-retested** at this
-source revision. This is still a null_blk-only development qualification,
+request. The read-byte check **PASSED** on the user's owned Linux
+7.0.0-38 RAM-backed host at `2e21fac5`. This is still a null_blk-only development qualification,
 **not** production readiness or a matched off/V3 benchmark (see
 [benchmark.md](benchmark.md)).
 

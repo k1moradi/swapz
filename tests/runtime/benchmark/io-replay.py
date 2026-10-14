@@ -180,19 +180,61 @@ def check_plan(trace_path, manifest, fixture_pages):
     return rows, latest
 
 
+def resolve_owned_nullblk(name, expected_lower_dev,
+                          config_root=Path("/sys/kernel/config/nullb"),
+                          block_root=Path("/sys/block"),
+                          sysdev_root=Path("/sys/dev/block"),
+                          devices_file=Path("/proc/devices")):
+    """Bind an exact owned configfs device to its modern/legacy kernel disk.
+
+    A configfs name is NOT necessarily the disk name on older kernels.
+    Both present, neither present, or any mismatched identity fail closed.
+    """
+    if not re.fullmatch(r"nullb-swapz-[a-f0-9]{16}", name):
+        raise ValueError("non-owned null_blk configfs name")
+    if not re.fullmatch(r"[0-9]+:[0-9]+", expected_lower_dev or ""):
+        raise ValueError("invalid pinned lower major:minor")
+    config = config_root / name
+    if ((config / "memory_backed").read_text().strip() != "1" or
+            (config / "power").read_text().strip() != "1"):
+        raise ValueError("null_blk must be powered and RAM-backed")
+    index_text = (config / "index").read_text().strip()
+    if not re.fullmatch(r"(0|[1-9][0-9]*)", index_text):
+        raise ValueError("invalid configfs index")
+    index = int(index_text)
+    driver_major = None
+    block_section = False
+    for line in devices_file.read_text().splitlines():
+        if line.strip() == "Block devices:":
+            block_section = True
+            continue
+        fields = line.split()
+        if block_section and len(fields) == 2 and fields[1] == "nullb":
+            driver_major = int(fields[0])
+            break
+    if driver_major is None:
+        raise ValueError("registered null_blk driver major unavailable")
+    choices = (name, f"nullb{index}")
+    disks = [block_root / disk for disk in choices
+             if (block_root / disk / "dev").is_file()]
+    if len(disks) != 1:
+        raise ValueError("owned null_blk disk missing or ambiguous")
+    disk = disks[0]
+    disk_dev = (disk / "dev").read_text().strip()
+    if (disk_dev != expected_lower_dev or
+            disk_dev != f"{driver_major}:{index}" or
+            (sysdev_root / disk_dev).resolve(strict=True) !=
+            disk.resolve(strict=True)):
+        raise ValueError("owned null_blk driver/index/sysfs identity mismatch")
+    return disk.name, disk_dev
+
+
 def check_owned_block(path, st, candidate, args, logical_pages):
     if not args.owned_nullblk_name or not args.expected_dev:
         raise ValueError("block I/O requires owned null_blk identity and exact major:minor")
-    name = args.owned_nullblk_name
-    if not re.fullmatch(r"nullb_swapz_[A-Za-z0-9_-]{4,70}", name):
-        raise ValueError("rejecting backing name without unique swapz null_blk prefix")
-    conf = Path("/sys/kernel/config/nullb") / name
-    disk = Path("/sys/block") / name
-    if (conf / "memory_backed").read_text().strip() != "1" or (
-        conf / "power"
-    ).read_text().strip() != "1":
-        raise ValueError("null_blk is not powered on and memory-backed")
-    null_dev = (disk / "dev").read_text().strip()
+    disk_name, null_dev = resolve_owned_nullblk(
+        args.owned_nullblk_name, args.expected_lower_dev
+    )
     actual = f"{os.major(st.st_rdev)}:{os.minor(st.st_rdev)}"
     if actual != args.expected_dev or null_dev != args.expected_lower_dev:
         raise ValueError("major/minor mismatch against independently pinned owned device")
@@ -202,7 +244,7 @@ def check_owned_block(path, st, candidate, args, logical_pages):
     if candidate == "off":
         if sectors * 512 < logical_pages * PAGE:
             raise ValueError("owned null_blk is smaller than logical working range")
-        if args.expected_dm_uuid or actual != null_dev or actual_name != name:
+        if args.expected_dm_uuid or actual != null_dev or actual_name != disk_name:
             raise ValueError("off control must use the bare exact owned null_blk")
     else:
         if not args.expected_dm_uuid or not re.fullmatch(
@@ -213,7 +255,7 @@ def check_owned_block(path, st, candidate, args, logical_pages):
             sysdev / "dm/uuid"
         ).read_text().strip() != args.expected_dm_uuid:
             raise ValueError("DM UUID and exact mapped block device differ")
-        if {entry.name for entry in (sysdev / "slaves").iterdir()} != {name}:
+        if {entry.name for entry in (sysdev / "slaves").iterdir()} != {disk_name}:
             raise ValueError("DM target does not depend exclusively on owned null_blk")
         if sectors * 512 != logical_pages * PAGE:
             raise ValueError("DM mapping size differs from exact workload")
@@ -241,7 +283,8 @@ def check_owned_block(path, st, candidate, args, logical_pages):
         fields = line.split()
         if len(fields) > 3 and fields[2] in protected:
             raise ValueError("target or backing block device is mounted")
-    return {"device": actual, "owned_nullblk": name, "lower_major_minor": null_dev,
+    return {"device": actual, "owned_nullblk": args.owned_nullblk_name,
+            "owned_disk": disk_name, "lower_major_minor": null_dev,
             "dm_uuid": args.expected_dm_uuid if candidate != "off" else None}
 
 
@@ -336,6 +379,19 @@ def replay(args):
             raise ValueError("write bytes differ from manifest's canonical stream")
         fd = os.open(path, flags)
         try:
+            # Trust the opened descriptor, not just the preflight pathname.
+            # A replaced device node or symlink cannot redirect benchmark I/O.
+            opened = os.fstat(fd)
+            if "device" in identity:
+                device_number = f"{os.major(opened.st_rdev)}:{os.minor(opened.st_rdev)}"
+                if not stat.S_ISBLK(opened.st_mode) or device_number != identity["device"]:
+                    raise ValueError("opened block device differs from preflight")
+            else:
+                current = path.stat()
+                if not stat.S_ISREG(opened.st_mode) or (
+                    opened.st_dev, opened.st_ino
+                ) != (current.st_dev, current.st_ino):
+                    raise ValueError("opened rootless fixture differs from preflight")
             bufmap = mmap.mmap(-1, PAGE)
             scratch = memoryview(bufmap)
             try:
@@ -377,7 +433,7 @@ def replay(args):
                 for first in range(0, len(trace), mf["qd"]):
                     wave = trace[first:first + mf["qd"]]
                     if wave[0]["phase"] == "measure" and measured_start_ns is None:
-                        before = lower_stat(args.owned_nullblk_name)
+                        before = lower_stat(identity.get("owned_disk"))
                         measured_start_ns = time.monotonic_ns()
                     if wave[0]["phase"] == "warmup":
                         warmup_ns = time.monotonic_ns()
@@ -396,7 +452,7 @@ def replay(args):
                             samples[item["op"]].append(elapsed)
                 os.fsync(fd)
                 measured_end_ns = time.monotonic_ns()
-                after = lower_stat(args.owned_nullblk_name)
+                after = lower_stat(identity.get("owned_disk"))
             post_hash = hashlib.sha256()
             buffer = mmap.mmap(-1, PAGE)
             scratch = memoryview(buffer)
