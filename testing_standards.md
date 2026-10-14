@@ -292,3 +292,15 @@ request merging/splitting; actual write **requests are still recorded
 separately**. These checks are test-scope-specific, not generic
 hardware endurance claims. Rootless CI validates script syntax and
 source contracts; host rerun of this tighter gate is **NOT RUN**.
+
+### New regression guard CI wiring
+
+The first zero-write lower-sector regression guard commit
+`54e09ebe` passed native C, V3 W=1/W=2 compilation and source
+qualifications but failed `make verify` because a new Makefile
+literal-variable source check used `$DMNAME` rather than escaped
+`$$DMNAME` in the Make recipe. The check expected a shell variable,
+but Make consumed a single-dollar variable reference before `grep`.
+This was an **automation assertion defect**, not a kernel failure.
+The source-guard pattern was corrected without weakening owned
+device cleanup, byte-exact readback or nine-zero-write validation.
