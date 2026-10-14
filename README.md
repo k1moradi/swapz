@@ -185,6 +185,21 @@ Default `retain_ms=0`, read/FUA barriers, physical authority
 and null_blk-only admission are unchanged. Loaded alpha.14
 safety and performance have **NOT RUN**.
 
+## No 500-IOPS cap: explicit maximum-input experiment
+
+The previous ~1.545 MB/s input rate came from a fixed
+`--iops 500` artificial offering schedule. It was never
+swapz's demonstrated throughput ceiling. The new
+`make bench-pair-medium-unpaced` removes the IOPS sleep
+on a separate, explicitly opt-in 16,384-operation QD32
+off/V3 comparison, using two newly owned RAM-only null_blk
+devices and the original medium fixture, exact readback,
+independent lower I/O, timeout and guarded teardown.
+It reports completed logical WRITE/READ MB/s and lower
+WRITE/READ MB/s, plus V3/off logical-throughput ratio.
+The unpaced loaded result is **NOT RUN**; it is not a
+fixed-bandwidth/saturated physical-drive measurement.
+
 ## The active performance question
 
 **Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,

@@ -322,3 +322,19 @@ isolated RAM `make run`. After safe teardown use separate
 write p99, matching achieved IOPS, and full readback.
 Do not use existing host swap, physical or unowned devices.
 The alpha.14 loaded result is NOT RUN.
+
+## Unpaced QD32 high-throughput RAM-only comparison
+
+After rootless `make verify` and a clean `make run`,
+the explicit `make bench-pair-medium-unpaced` probes
+completed useful I/O MB/s with no 500 IOPS offer cap.
+This only adds a supported opt-in benchmark: QD32,
+1024 warmup and 16384 measured 4KiB operations
+using the already approved two newly owned RAM null_blk
+lower devices, medium liblz4 fixture, full oracle,
+independent lower stats, original module build/safety
+preflight, timeouts and conservative cleanup.
+Unpaced achieved-rate differences are results, not
+matched-load disqualifications. Rootless checks and
+kernel version remain alpha.14; **no loaded unpaced
+throughput result has been reported**.

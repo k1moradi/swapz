@@ -778,3 +778,53 @@ This may reduce WRITE wait/p99 or hurt packing/reuse on
 some workloads. Only an opt-in same-source loaded trial
 can settle that trade-off. No alpha.14 loaded claim, no
 physical-disk saturation result and no GC lifecycle result.
+
+## Alpha.14 owner-loaded medium pilot — real MB/s, capped offered load (2026-10-14)
+
+Owner source `89c32842546f953b46d0a1f2117036109f8222e4`,
+module SHA256 `7cf9f3e92e84864633c6d2d662a28d74b12ac109dbf3883c9661085b6d4aa488`,
+Linux `7.0.0-38-generic`. The default 128-page C smoke passed
+full byte oracle, nine exact-zero write elisions, lower write
+749568B/183 requests and lower read 2007040B/490 requests,
+119/119 FUA closure and window-age conservation, unchanged
+host swap identity and ordinary teardown.
+Medium-pair evidence: `build/benchmark/session.MEhFyU5Z/`
+(default-off) and `build/benchmark/session.BuIh5VUg/`
+(retained). All 128 measured fixture pages had exactly 2073B
+host-liblz4 payloads; read/write fixture/trace SHA, final 1024
+logical page image and separately owned device identities
+matched; achieved off/V3 ~503 IOPS and correct teardown.
+
+| Measurement | Off (retained session) | V3 alpha.14 retain=2 |
+|---|---:|---:|
+| Completed logical WRITE MB/s | 1.54422 | **1.54359** |
+| Independent lower WRITE MB/s | 1.54422 | **1.00625** |
+| Lower WRITE bytes | 3,141,632 | **2,048,000** |
+| Lower WRITE requests | 767 | **158** |
+| Lower READ bytes/requests | 1,052,672 / 257 | 1,052,672 / 257 |
+| Sampled WRITE p99 | 1.053 ms | 2.651 ms |
+
+The overall medium control retain=0 also passed and moved
+1.54479 logical WRITE MB/s -> 1.54479 lower WRITE MB/s.
+The candidate achieved **34.81% write-byte savings** and
+**79.4% fewer write requests** at fixed offer, not a
+throughput ceiling. Wider cumulative V3 state included
+`windows=1202`, `close_pack_ready=64` (vs alpha.13's
+17 in a separate trial), `close_deadline=1138`,
+`retained_read_bypasses=274`, and **0 GC victims**.
+Do NOT attribute all timing differences to seven-page
+early-close: the runs are not repeated counterbalanced
+samples, and the 767-write p99 is not statistically
+qualified sustained latency.
+
+The 1.545 MB/s figure was *deliberately set* by 500 IOPS
+times approximately 75% 4096B writes. It should not be
+used to extrapolate maximum logical throughput or claim
+that the physical device was saturated. The new separately
+opt-in `make bench-pair-medium-unpaced` (QD32,
+iops=0, 16384 measured operations) is now available but
+**NOT RUN loaded**. Its `UNPACED_THROUGHPUT_MEASUREMENT_ONLY`
+qualification preserves observed useful MB/s differences
+rather than applying the paced 5% achieved-rate gate.
+Physical drive saturation, steady-state GC and CPU cost
+remain independent unfinished gates.

@@ -74,15 +74,15 @@ Use `main` only and follow the device/host safety restrictions.
       79.4% fewer WRITE requests than off. Sampled WRITE p99
       **2.788ms** vs off **0.984ms**; 17 cumulative early
       pack-ready and 1,168 deadline closures, no GC.
-- [ ] Owner alpha.14: qualify default-off `make run` first,
-      then compare `make bench-pair-medium` and explicit
-      `make bench-pair-medium-retain` on fresh owned RAM
-      devices. Check new seven-record close reason, WRITE
-      p95/p99, independent lower WRITE/READ bytes/requests,
-      matched achieved IOPS and input-to-lower MB/s,
-      byte-exact final readback and safe teardown. A
-      latency regression or loss of I/O savings is a
-      valid negative result.
+- [x] Owner alpha.14 `89c32842` default smoke and paced
+      medium control/retained pilots PASS on independent,
+      owned RAM null_blk. Retained: 1.54359 logical WRITE
+      MB/s -> 1.00625 lower WRITE MB/s, 2,048,000 lower
+      WRITE bytes/158 requests, zero GC, complete oracle,
+      and ordinary teardown. Cumulative `close_pack_ready=64`;
+      sampled WRITE p99 2.651ms (off 1.053ms).
+      The **500 IOPS cap**, not the kernel maximum,
+      set the low logical MB/s. Sustained CPU/p99 still open.
 - [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
       compressible small objects and incompressible RAW controls.
       Verify actual compressed-size histograms, not assumed ratios.
