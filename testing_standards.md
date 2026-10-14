@@ -952,3 +952,66 @@ and sustained GC/CPU/fault qualifications:
 **NOT RUN**. All test IO must remain uniquely owned
 RAM-backed null_blk with byte-exact readback,
 independent lower sectors/requests and safe teardown.
+
+## Alpha.19 bounded same-invocation worker queue continuation
+
+Owner's exact alpha.18 source
+`88197bf4479eeb66db6bf52301a3cbd3d4c6a6e7`,
+module SHA-256
+`aee943cd3023027a790fcdb1152510ea60cfa76581f39e289f97ae614226b6ef`,
+passed the default 128-page byte-exact loaded smoke
+and isolated `make bench-pair-medium-unpaced` on two
+uniquely owned RAM-backed null_blk devices at QD32,
+16,384 measured operations and no IOPS pacing.
+Identical immutable source/fixture/trace/final image
+and independent lower counters were verified;
+existing host swap remained unchanged and cleanup
+was ordinary. Uncompressed attained **9,909.850
+IOPS, 30.4753 logical WRITE MB/s -> 30.4753 lower
+WRITE MB/s**. V3 retained attained **8,020.113
+IOPS, 24.6639 logical WRITE MB/s -> 14.6728 lower
+WRITE MB/s**, 19.07% fewer completed logical IOPS.
+Actual lower WRITE bytes 29,974,528 vs off
+50,384,896 (40.51% saved), requests 2,062 vs
+12,301 (83.24% saved). Physical READ bytes/requests
+were equal: 16,723,968B and 4,083. Sampled WRITE
+p99 was 2.333ms V3 vs 2.023ms off, and READ
+p99 2.726ms V3 vs 3.015ms off; no GC occurred.
+Alpha.18's C cumulative wall timings include
+71.716ms LZ4 attempts, 0.949ms ordering, 168.616ms
+window commit, 69.721ms lower WRITE and 57.315ms
+lower READ, plus setup/warmup/oracle, with overlapping
+sections. Do NOT sum these or label them CPU cost
+or a direct accounting of the 2.043s replay interval.
+
+Alpha.19 changes only **actual Linux kernel
+`sv3_worker` scheduling**. Previously the worker
+requeued any newly arrived BIOs, even if its
+current finite 64-BIO work quantum was not spent.
+It now keeps the remaining quantum across inline
+snapshots and directly loops to drain newly queued
+BIOs, but ONLY while `ctx->accepting` and
+`remaining > 0`. The worker still splices
+unfinished older BIOs to the head of incoming
+before considering this branch (strict FIFO);
+on `remaining=0`, it uses the SAME
+`mod_delayed_work` yield path. When admission
+is closed for suspend/drain, it resets a fresh
+64-BIO budget AFTER releasing `queue_lock`,
+calls `cond_resched()`, and keeps processing
+all previously accepted BIOs to completion.
+No new async lower I/O, compression format or
+publication/GC/FUA/read fence is introduced.
+`worker_inline_drains` is only a count of
+skipped workqueue handoffs, not proof of higher
+MB/s. Direct C policy tests check zero/nonzero
+budgets and closed admission, and source tests
+require FIFO splice before continuation, 64-BIO
+bound, fallback requeue, shutdown drain, and
+status telemetry. Exact-head rootless compilation
+and tests are necessary; owner-loaded alpha.19
+default-off smoke, no-starvation tests and
+unpaced useful WRITE/READ throughput remain
+**NOT RUN**. Same-source RAM-only comparison,
+full image oracle, independent sectors and
+bounded teardown are mandatory before claims.

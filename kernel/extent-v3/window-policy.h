@@ -97,6 +97,24 @@ static inline int sv3_window_uniform_compressed(
 }
 
 /*
+ * A serialized worker may consume BIOs which arrived mid-quantum in its
+ * current invocation, without a redundant workqueue handoff. ONLY when
+ * the original finite quantum has remaining budget AND admission is open.
+ * When the budget is exhausted it must requeue to preserve fairness;
+ * during presuspend/shutdown it instead drains all accepted BIOs and
+ * resets a finite quantum after cond_resched().
+ *
+ * The caller holds queue_lock while deciding; older unprocessed entries
+ * were spliced back ahead of newer arrivals, so continuation keeps FIFO.
+ * This never completes, reorders, or publishes an upper BIO itself.
+ */
+static inline int sv3_worker_can_inline_drain(unsigned int remaining,
+					     int accepting)
+{
+	return accepting && remaining != 0;
+}
+
+/*
  * The retention hrtimer is armed ONLY for nonzero retain_ms. A nonretained
  * window never schedules a timer; skipping its synchronous cancellation
  * avoids an unnecessary timer operation in the single-window write path.

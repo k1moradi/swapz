@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.18, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.19, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -295,6 +295,37 @@ processes data before another speculative optimization.
 No on-disk format, scheduling, retained deadline,
 planner, mapping or upper-completion policy changes.
 Loaded alpha.18 high-QD throughput remains NOT RUN.
+
+## Alpha.19: bounded same-invocation kernel worker BIO draining
+
+The first owner-loaded **alpha.18 unpaced QD32** medium
+comparison passed all byte-exact and independent lower
+I/O gates. Off achieved **30.475 MB/s useful logical
+WRITEs**; retained V3 achieved **24.664 MB/s useful
+WRITEs** while moving only **14.673 MB/s lower WRITEs**,
+40.51% fewer lower WRITE bytes and 83.24% fewer WRITE
+requests. V3 was still **19.07% slower** than off;
+alpha.15's older 24.867 MB/s V3 value was slightly
+higher. Sampled WRITE p99 V3 was 2.333ms vs off
+2.023ms, with **no GC**. This is NOT an increase
+in V3 absolute MB/s or a physical disk saturation
+result. Measured cumulative C wall times also
+indicated that LZ4 and synchronous dm_io alone
+did not account for most of the elapsed replay;
+interval attribution/CPU profiling remain open.
+
+Alpha.19 changes **production serialized kernel C**
+`sv3_worker`: when arrivals remain queued and the
+original **64-BIO quantum** is not exhausted, it
+continues draining the queue in the same invocation
+instead of always scheduling a new workqueue pass.
+At budget exhaustion it retains the original FIFO
+requeue/fairness behavior. On shutdown it resets
+the quantum after `cond_resched` and drains all
+accepted BIOs, with all FUA/read/GC/completion
+gates unchanged. `worker_inline_drains` is a new
+cumulative diagnostic, not a throughput guarantee.
+Loaded alpha.19 performance is **NOT RUN**.
 
 ## The active performance question
 
