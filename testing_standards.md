@@ -62,3 +62,17 @@ For benchmarking and comparative correctness, feed *identical* immutable 4KiB fi
 As of consolidation, the **loaded three-way immutable-trace comparison has NOT been performed**. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Older reports, `PRODUCTION_READINESS.md` and historical `CODEX_VALIDATION.md` preserve detailed provenance, **not new test requirements**.
 
 At the end of each implementation task, update this or another of the four standards with learned results, exact tests and PASS/FAIL/BLOCKED, while preserving separate versioned raw report evidence on `main`.
+
+## Automated governance for the four standards
+
+The `main` project-goal workflow checks that `AGENTS.md`,
+`agent.md`, `CLAUDE.md`, Copilot instructions, `CODEX_VALIDATION.md`,
+`README.md` and `VISION.md` all reference the four governing standards.
+A same-commit change to kernel, tests, userspace, Make/DKMS or CI workflow
+paths must also modify at least one of `coding_standards.md`,
+`testing_standards.md`, `compile.md` or `benchmark.md`. An unrelated
+archival Markdown update cannot satisfy this gate. Documentation-only
+changes do not require a separate implementation commit. This is a
+mechanical check of **where the learning is recorded**, not a validator
+of semantic truth, tested runtime behavior or external agent prompt
+compliance.

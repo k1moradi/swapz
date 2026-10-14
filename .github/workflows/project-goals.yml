@@ -33,22 +33,32 @@ jobs:
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
           test -x build/tests/model/swapz-model-tests
-      - name: Require project-goal doc updates alongside code
+      - name: Require canonical standards and relevant same-commit learning
         shell: bash
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only HEAD^ HEAD)"
-          if printf '%s\n' "$changed" | grep -Eq '^(kernel/.*\.(c|h)|tests/.*\.(c|cpp|h|py|sh)|userspace/.*\.cpp|Makefile$|dkms\.conf$|.github/workflows/.*\.yml$)'; then
-            printf '%s\n' "$changed" | grep -Eq '\.md$' || { echo 'FAIL: implementation requires same-commit documentation update'; exit 1; }
-          fi
-          for file in AGENTS.md agent.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md; do
-            grep -qi 'VISION.md' "$file" || { echo "Missing per-prompt vision link: $file"; exit 1; }
-            grep -qi 'build/' "$file" || { echo "Missing single-build convention: $file"; exit 1; }
+          standards=(coding_standards.md testing_standards.md compile.md benchmark.md)
+          entrypoints=(AGENTS.md agent.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md VISION.md)
+          for doc in "${standards[@]}"; do
+            test -s "$doc" || { echo "FAIL: missing canonical standard $doc"; exit 1; }
+            grep -Fq 'VISION.md' "$doc" || { echo "FAIL: standard $doc must cite VISION"; exit 1; }
+          done
+          for file in "${entrypoints[@]}"; do
+            test -s "$file" || { echo "FAIL: missing agent entry $file"; exit 1; }
+            for doc in "${standards[@]}"; do
+              grep -Fq "$doc" "$file" || { echo "FAIL: $file missing link to $doc"; exit 1; }
+            done
           done
           test "$(git branch --show-current)" = main
-          test -f docs/BUILD_AND_TEST_CONVENTIONS.md
-          test -f tests/suites/Makefile
-          echo 'GOAL_AND_DOCUMENTATION_GATES_PASS'
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          if printf '%s\n' "$changed" | grep -Eq '^(kernel/|tests/|userspace/|\.github/workflows/|Makefile$|dkms\.conf$)'; then
+            if ! printf '%s\n' "$changed" | grep -Eq '^(coding_standards|testing_standards|compile|benchmark)\.md$'; then
+              echo 'FAIL: implementation must update one of four canonical standards in the same commit'
+              exit 1
+            fi
+          fi
+          test -s tests/suites/Makefile
+          echo "SIX_DOCUMENT_ROUTING_AND_FOUR_STANDARDS_COCHANGE_PASS"
       - name: Verify no project-local compilation outside build
         shell: bash
         run: |
