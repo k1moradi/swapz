@@ -38,7 +38,7 @@ jobs:
           grep -Fxq 'all: v3' Makefile
           grep -Fxq 'AUTOINSTALL="no"' dkms.conf
           grep -Fxq 'PACKAGE_VERSION="3.0.0-alpha.7"' dkms.conf
-          grep -Fq 'CANDIDATES = ("off", "v3")' tests/runtime/io-replay.py
+          grep -Fq 'CANDIDATES = ("off", "v3")' tests/runtime/benchmark/io-replay.py
           test ! -e tests/runtime/threeway-swap-replay.py
           test ! -e tests/runtime/threeway-swap-replay-test.py
           echo "ACTIVE_V3_ONLY_AND_OFF_V3_BENCHMARK_CONTRACT_PASS"

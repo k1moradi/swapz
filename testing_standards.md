@@ -119,3 +119,13 @@ references are audited. Their safety CI is **not waived or replaced by
 inert stubs**. Subsequent legacy relocation requires explicit test
 parity; this is not a claim that all historical duplicate Python
 utilities have been eliminated.
+
+### CI relocation fix
+
+On the first test-layout commit `020bec7e`, all 14 native C tests, the
+benchmark oracle and the V3 kernel build passed, but project-goals CI
+still referenced the removed root-level `io-replay.py` in its policy
+guard. The active two-arm manifest contract now resides at
+`tests/runtime/benchmark/io-replay.py`. The guard must check this
+path and reject the obsolete name. This failure was test-harness
+plumbing, **not** proof of a kernel runtime defect or a loaded win.
