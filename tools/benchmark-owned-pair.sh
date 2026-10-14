@@ -4,11 +4,16 @@
 set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
-    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2]'
+    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced]'
     exit 0
 fi
 PROFILE=default
 RETAIN_MS=0
+RATE_MODE=paced
+QD=8
+WARMUP_OPS=256
+MEASURE_OPS=1024
+IOPS=500
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
     :
 elif [[ $# == 3 && $1 == --run-owned-ram-pair &&
@@ -19,6 +24,17 @@ elif [[ $# == 5 && $1 == --run-owned-ram-pair &&
         $4 == --retain-ms && $5 == 2 ]]; then
     PROFILE=medium
     RETAIN_MS=2
+elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
+        $2 == --profile && $3 == medium &&
+        $4 == --retain-ms && $5 == 2 && $6 == --unpaced ]]; then
+    # Separate unpaced ceiling probe. No physical disk and no host swap.
+    PROFILE=medium
+    RETAIN_MS=2
+    RATE_MODE=unpaced
+    QD=32
+    WARMUP_OPS=1024
+    MEASURE_OPS=16384
+    IOPS=0
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
     exit 2
@@ -74,7 +90,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS RATE_MODE=$RATE_MODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -295,8 +311,8 @@ fi
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-    --reader-pages 256 --qd 8 --read-pct 25 \
-    --warmup-ops 256 --measure-ops 1024 --iops 500
+    --reader-pages 256 --qd "$QD" --read-pct 25 \
+    --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 note "V3_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 timeout --signal=TERM --kill-after=5s 120s python3 -B \
     tests/runtime/benchmark/io-replay.py run \

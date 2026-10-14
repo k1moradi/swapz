@@ -645,7 +645,8 @@ def compare(args):
     output["bandwidth_scope"] = (
         "actual completed logical 4KiB IO / measurement seconds versus "
         "independent backing-sector deltas / each arm's measurement seconds; "
-        "NOT a fixed-disk-budget or saturation throughput qualification"
+        "no matched physical disk bandwidth budget; unpaced means no "
+        "artificial offered-rate sleep, not proven SSD saturation"
     )
     if rootless:
         output["performance_qualification"] = "ROOTLESS_NOT_DEVICE_EVIDENCE"
@@ -675,8 +676,8 @@ def compare(args):
         output["lower_write_bytes_saved_fraction"] = (
             (off_bytes - v3_bytes) / off_bytes if off_bytes else None
         )
-        # These are same-work, paced interval measurements. Do NOT claim
-        # higher input throughput at equal disk bandwidth from this factor.
+        # Same useful completed work; may be paced or unpaced.
+        # No inference about a fixed physical-disk bandwidth budget.
         output["write_input_per_lower_byte_v3"] = (
             throughput[1]["write_input_per_lower_byte"]
         )
@@ -688,11 +689,27 @@ def compare(args):
         # gate, never proof that matching rates imply matching BIO arrivals.
         mismatch = abs(achieved[0] - achieved[1]) / max(achieved)
         output["achieved_iops_difference_fraction"] = mismatch
-        output["allowed_iops_difference_fraction"] = 0.05
-        output["performance_qualification"] = (
-            "MATCHED_LOAD_MEASUREMENT_ONLY" if mismatch <= 0.05
-            else "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD"
+        output["logical_write_mbps_ratio_v3_to_off"] = (
+            throughput[1]["logical_write_mbps"] / throughput[0]["logical_write_mbps"]
+            if throughput[0]["logical_write_mbps"] > 0 else None
         )
+        output["lower_write_mbps_ratio_v3_to_off"] = (
+            throughput[1]["lower_write_mbps"] / throughput[0]["lower_write_mbps"]
+            if throughput[0]["lower_write_mbps"] > 0 else None
+        )
+        if first["iops_requested"] == 0:
+            # Differing achieved throughput is the observation, not a
+            # violation of the paced 5% offered-work matching contract.
+            output["rate_mode"] = "unpaced"
+            output["allowed_iops_difference_fraction"] = None
+            output["performance_qualification"] = "UNPACED_THROUGHPUT_MEASUREMENT_ONLY"
+        else:
+            output["rate_mode"] = "paced"
+            output["allowed_iops_difference_fraction"] = 0.05
+            output["performance_qualification"] = (
+                "MATCHED_LOAD_MEASUREMENT_ONLY" if mismatch <= 0.05
+                else "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD"
+            )
     print(json.dumps(output, sort_keys=True))
 
 

@@ -732,3 +732,29 @@ timer expiry, GC, exact status close-reason conservation,
 no physical-device access and safe quarantine. Alpha.14
 loaded tests and higher input MB/s at fixed disk MB/s
 are **NOT RUN**; the kernel revision remains experimental.
+
+## Unpaced input-MB/s RAM-only ceiling probe
+
+The 500-IOPS medium control/candidate is unchanged. A separate
+explicit opt-in `make bench-pair-medium-unpaced` uses two
+newly owned RAM-backed null_blk devices, the same immutable
+medium 4KiB fixture, QD32, 1024 warmup and **16384**
+measured operations with 25% READ and `iops=0`.
+The identical trace is replayed for uncompressed and
+`retain_ms=2` V3. No unowned/physical device, host swap
+configuration or destructive teardown is allowed. Retain
+lower READ/WRITE byte/request deltas, full-image oracle,
+timeout/quarantine and provenance checks.
+
+Unpaced comparisons **do not** impose the 5% equality rule
+because differing completed MB/s/IOPS is the metric
+under test. Mark `UNPACED_THROUGHPUT_MEASUREMENT_ONLY`,
+report each completed logical READ/WRITE MB/s and independent
+lower READ/WRITE MB/s, the achieved-rate difference and
+logical/lower throughput ratios. Only the original paced
+comparisons may be labeled matched load after the 5%
+check. Loaded unpaced evidence: NOT RUN. RAM null_blk
+has **no defined disk bandwidth ceiling** and this
+does NOT prove increased throughput at equal saturated
+physical disk MB/s. Source/kernel alpha stays alpha.14,
+as no production-C scheduling behavior changes.

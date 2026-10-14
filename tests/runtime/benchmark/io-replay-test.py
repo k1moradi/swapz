@@ -279,6 +279,20 @@ class PairReplayContract(unittest.TestCase):
             )
             self.assertAlmostEqual(candidate["lower_write_bytes_saved_fraction"], 0.5)
             v3["lower_io"] = base["lower_io"]
+            off["iops_requested"] = v3["iops_requested"] = 0
+            v3["achieved_iops"] = 250
+            v3["seconds"] = 0.4
+            unpaced = compare()
+            self.assertEqual(unpaced["rate_mode"], "unpaced")
+            self.assertEqual(unpaced["performance_qualification"],
+                             "UNPACED_THROUGHPUT_MEASUREMENT_ONLY")
+            self.assertIsNone(unpaced["allowed_iops_difference_fraction"])
+            self.assertAlmostEqual(
+                unpaced["logical_write_mbps_ratio_v3_to_off"], 2.5)
+            self.assertAlmostEqual(
+                unpaced["lower_write_mbps_ratio_v3_to_off"], 2.5)
+            off["iops_requested"] = v3["iops_requested"] = 500
+            v3["seconds"] = 1.0
             v3["achieved_iops"] = 120
             self.assertEqual(compare()["performance_qualification"],
                              "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD")

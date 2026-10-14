@@ -98,3 +98,12 @@ bench-pair-medium-retain:
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
 	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2
+
+# Owner-only actual input-MB/s probe with no 500-IOPS cap.
+# Distinct owned RAM lowers, 32 concurrent requests and immutable oracle.
+.PHONY: bench-pair-medium-unpaced
+bench-pair-medium-unpaced:
+	@$(MAKE) --no-print-directory verify
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
+	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
