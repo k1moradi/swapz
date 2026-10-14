@@ -553,3 +553,20 @@ actual V3 `retain_ms`, full immutable input hashes, lower-sector
 counters, achieved rates, complete oracle, status close conservation
 and ordinary owned teardown. A measured **negative** candidate is
 valid evidence, not a reason to hide or reset it.
+
+### Alpha.11 loaded default-off correctness passed; full smoke failed inventory check
+
+The owner ran `make run` at `b5d54fe9`: oracle readback,
+all 119 FUA window reasons and open-age bins, 9 exact-zero
+elisions, V3/null_blk lower writes 183/749,568B and reads
+490/2,007,040B all matched. The command **FAILED** at its
+final swap audit when the preexisting `/swapfile` Used fell
+by 4KiB, 1,624→1,620KiB, despite unchanged swap device
+identity/configuration. This is a test-harness false negative
+for inventory stability, *not* proof of a new kernel bug.
+`retain_ms=0` and the opt-in candidate remained NOT RUN.
+
+Both owned harnesses now use a canonical configuration identity
+rather than volatile swap usage, with genuine changes quarantined
+before any removal. No tolerance was added to lower-device READ
+or WRITE reconciliation. Corrected loaded retest NOT RUN.

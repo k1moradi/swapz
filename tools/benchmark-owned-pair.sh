@@ -25,6 +25,7 @@ else
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$ROOT/tools/nullblk-identity.sh"
+source "$ROOT/tools/swap-inventory.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 CFGBASE=/sys/kernel/config/nullb
@@ -46,7 +47,7 @@ devno() {
 }
 for program in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
                findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
-               mkdir rmdir stat tee cat ls sleep python3; do
+               mkdir rmdir stat tee cat ls sleep python3 sort; do
     command -v "$program" >/dev/null || fail "missing command $program"
 done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
@@ -67,6 +68,10 @@ mkdir -p "$ROOT/build/benchmark"
 SESSION="$(mktemp -d "$ROOT/build/benchmark/session.XXXXXXXX")"
 exec > >(tee -a "$SESSION/session.log") 2>&1
 SWAPS="$(cat /proc/swaps)"
+SWAPS_ID="$(printf '%s
+' "$SWAPS" |
+    swapz_swap_inventory_identity /dev/stdin)" ||
+    fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
 note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS"
@@ -78,12 +83,13 @@ note "EVIDENCE_DIR=$SESSION"
 # Never force removal: first close the exact DM UUID, then prove every RAM
 # config/index/rdev/holder is still ours. Partial setup is quarantined.
 cleanup() {
-    local result=$? i valid=1 end_swaps
+    local result=$? i valid=1 end_swaps current_id
     trap - EXIT HUP INT TERM
     set +e
-    # An unexpected active-swap change forbids any teardown: the mapper
-    # or either backing device may have become a host-owned swap resource.
-    if [[ $(cat /proc/swaps) != "$SWAPS" ]]; then
+    # Genuine inventory changes forbid teardown. Ignore ONLY volatile
+    # swap Used; path/type/size/priority must remain exactly the same.
+    if ! current_id="$(swapz_swap_inventory_identity /proc/swaps)" ||
+       [[ "$current_id" != "$SWAPS_ID" ]]; then
         QUARANTINE=1
         note 'QUARANTINED: host swap changed during owned pair'
     fi
@@ -136,9 +142,13 @@ cleanup() {
     end_swaps="$(cat /proc/swaps)"
     note "HOST_SWAPS_AFTER:"
     note "$end_swaps"
-    if [[ $end_swaps != "$SWAPS" ]]; then
+    if ! current_id="$(printf '%s
+' "$end_swaps" |
+            swapz_swap_inventory_identity /dev/stdin)" ||
+       [[ "$current_id" != "$SWAPS_ID" ]]; then
         result=1
-        note 'FAIL: system swap inventory changed'
+        QUARANTINE=1
+        note 'FAIL: system swap identity changed'
     fi
     if (( QUARANTINE )); then
         result=1

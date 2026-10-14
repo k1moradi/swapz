@@ -29,6 +29,12 @@ Use `main` only and follow the device/host safety restrictions.
       lower-device reads and writes, including verification, GC and flush
       work. Preserve any unexplained differences.
 
+- [ ] Retest the alpha.11 default `make run` after rootless
+      swap-inventory canonicalization. The prior `b5d54fe9` run
+      passed all byte-exact and lower-I/O checks but FAILED
+      complete acceptance due to 4KiB of benign `/swapfile`
+      Used drift; a genuine configuration change still quarantines.
+
 ## Blocking performance evidence
 
 - [x] Owner-loaded `make bench-pair` pilot PASS at `cebc8bd6`,

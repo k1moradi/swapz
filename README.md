@@ -155,6 +155,18 @@ and host/workload conditions must be verified across sessions
 before treating differences as a scheduling comparison. Normal
 `make run` remains non-retained. **Loaded alpha.11 not run**.
 
+## Alpha.11 host-swap audit qualification
+
+The owner-loaded default-off alpha.11 smoke satisfied byte-exact
+readback, V3/backing read/write reconciliation and 119 FUA
+closing-reason/open-age conservation, but `make run` **FAILED**
+when an unrelated system `/swapfile` Used counter dropped 4KiB.
+The rootless-tested safety check now verifies stable swap
+path/type/size/priority while still logging live Used values
+and quarantining on genuine configuration changes. A new
+owner-loaded PASS has **not** been reported; the opt-in
+`retain_ms=2` performance hypothesis remains untested.
+
 ## The active performance question
 
 **Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,

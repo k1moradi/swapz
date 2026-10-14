@@ -6,6 +6,7 @@ umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$ROOT/tools/nullblk-identity.sh"
 source "$ROOT/tools/quiet-lower-io.sh"
+source "$ROOT/tools/swap-inventory.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
@@ -25,7 +26,7 @@ fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
            findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
-           tee mktemp ls sleep cat id rmdir stat; do
+           tee mktemp ls sleep cat id rmdir stat sort; do
 	command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
@@ -52,13 +53,24 @@ note "SOURCE_HEAD=$(git rev-parse HEAD)"
 note "RUNNING_KERNEL=$(uname -r)"
 note "MODULE_SHA256=$(sha256sum "$MODULE")"
 SWAPS_BEFORE="$(cat /proc/swaps)"
+SWAPS_ID_BEFORE="$(printf '%s
+' "$SWAPS_BEFORE" |
+    swapz_swap_inventory_identity /dev/stdin)" ||
+    fail "cannot parse initial host swap identity"
 note "HOST_SWAPS_BEFORE:"
 printf '%s\n' "$SWAPS_BEFORE"
 cleanup() {
-	local rc=$?
+	local rc=$? current_id
 	trap - EXIT HUP INT TERM
 	set +e
-	if (( OWN_DM )); then
+	# Inventory changes could make the owned mapper/lower host swap.
+	# Quarantine BEFORE teardown; ordinary Used fluctuations are safe.
+	if ! current_id="$(swapz_swap_inventory_identity /proc/swaps)" ||
+	   [[ "$current_id" != "$SWAPS_ID_BEFORE" ]]; then
+		QUARANTINE=1
+		note "QUARANTINED: host swap identity changed before teardown"
+	fi
+	if (( OWN_DM && !QUARANTINE )); then
 		if [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null | tr -d '[:space:]')" == "$UUID" ]]; then
 			dmsetup remove "$DMNAME"
 			if [[ $? == 0 ]]; then
@@ -102,9 +114,13 @@ cleanup() {
 	local swaps_after
 	swaps_after="$(cat /proc/swaps)"
 	printf '%s\n' "$swaps_after"
-	if [[ "$swaps_after" != "$SWAPS_BEFORE" ]]; then
-		note "FAIL: system swap inventory changed during isolated run"
+	if ! current_id="$(printf '%s
+' "$swaps_after" |
+	        swapz_swap_inventory_identity /dev/stdin)" ||
+	   [[ "$current_id" != "$SWAPS_ID_BEFORE" ]]; then
+		note "FAIL: system swap identity changed during isolated run"
 		rc=1
+		QUARANTINE=1
 	fi
 	if (( QUARANTINE )); then
 		note "BLOCKED: resource retained, never forced; log $SESSION/session.log"

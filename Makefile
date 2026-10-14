@@ -29,12 +29,16 @@ CC ?= cc
 verify: test
 	python3 -B tests/runtime/native/source-contract-test.py -v
 	python3 -B tests/runtime/benchmark/io-replay-test.py -v
-	bash -n tools/deploy-nullblk.sh tools/quiet-lower-io.sh tools/benchmark-owned-pair.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh tests/runtime/native/quiet-lower-io-test.sh tests/runtime/benchmark/owned-pair-preflight-test.sh
+	bash -n tools/deploy-nullblk.sh tools/swap-inventory.sh tools/quiet-lower-io.sh tools/benchmark-owned-pair.sh tools/nullblk-identity.sh tests/runtime/native/nullblk-identity-test.sh tests/runtime/native/quiet-lower-io-test.sh tests/runtime/native/swap-inventory-test.sh tests/runtime/benchmark/owned-pair-preflight-test.sh
 	bash tests/runtime/native/nullblk-identity-test.sh
 	bash tests/runtime/native/quiet-lower-io-test.sh
+	bash tests/runtime/native/swap-inventory-test.sh
 	bash tests/runtime/benchmark/owned-pair-preflight-test.sh
 	@grep -Fq -- 'dmsetup create "$$DMNAME" --uuid "$$UUID"' tools/deploy-nullblk.sh
 	@grep -Fq -- 'memory_backed' tools/deploy-nullblk.sh
+	@grep -Fq -- 'SWAPS_ID_BEFORE' tools/deploy-nullblk.sh
+	@grep -Fq -- 'SWAPS_ID' tools/benchmark-owned-pair.sh
+	@grep -Fq -- 'QUARANTINED: host swap identity changed' tools/deploy-nullblk.sh
 	@grep -Fq -- 'dmsetup remove' tools/deploy-nullblk.sh
 	@grep -Fq -- 'PASS_ZERO_WRITE_LOWER_IO=' tools/deploy-nullblk.sh
 	@grep -Fq -- 'zero_writes == 9' tools/deploy-nullblk.sh

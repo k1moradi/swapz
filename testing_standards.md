@@ -589,3 +589,27 @@ major:minor, no-swap and quarantined-teardown checks remain.
 Source/rootless syntax gates are necessary but *not* a validated
 timed BIO/GC/drain/fault-path loaded result; keep `retain=0`
 default until an explicit controlled evaluation proves otherwise.
+
+## Alpha.11 loaded smoke: volatile host Used caused harness failure (2026-10-14)
+
+At source `b5d54fe9aa0a9e0cfd24e03da473fc6516fe508e`,
+Linux `7.0.0-38-generic`, host-local
+`build/deploy/session.TTeZUSq8/session.log`, the exact C oracle,
+nine zero elisions, independent lower WRITE 183/749,568B,
+READ 490/2,007,040B and all 119 FUA closure/age counts **passed**.
+The **complete** `make run` nonetheless **FAILED** at cleanup:
+the existing system `/swapfile` Used changed 1,624→1,620KiB.
+Its Filename, Type, Size, Priority and the second active swap
+entry were unchanged. This is a volatile consumption metric, not
+an inventory identity change or evidence that swapz touched
+system swap. The retained candidate was NOT enabled (`retain_ms=0`).
+
+The owned smoke and owned pair now canonicalize the active swap
+inventory's **path/type/size/priority** (sorted) before/after,
+ignoring only Used. Continue logging exact raw snapshots, and
+quarantine resources **before teardown** on an actual entry
+addition/removal or path/type/size/priority change. Reject malformed,
+duplicate or missing swap rows. Rootless fake-/proc/swaps tests
+cover benign usage drift plus adversarial changes. These snapshots
+do not monitor every intervening moment. This correction changes
+no production C or alpha version. **Loaded retest NOT RUN.**
