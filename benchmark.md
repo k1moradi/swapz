@@ -162,10 +162,13 @@ recovery. No performance/speed/endurance win is claimed.
 immutable-trace benchmark with paired lower-device snapshots, equal
 achieved work and realistic ~2KiB compressed output controls. Record
 kernel-worker CPU, read p99, and exact GC traffic before optimizing
-`dm-target.c`/worker/extent layout. The older 64MiB configfs device
-observed in the host's **preceding** inventory is NOT proven removed
-by this successful new run; it requires separate read-only owner/
-holder validation before any cleanup.
+`dm-target.c`/worker/extent layout. A separate older 64MiB quarantined RAM-backed configfs
+device was **later verified and removed by the user** using exact
+index/configuration and major:minor checks, empty holders,
+no DM mappings, mount/swap/open-user checks and an ordinary
+power-off/configfs removal. The active swap inventory remained
+unchanged. It was **not** automatically removed by the successful
+new V3 session, and no general force-cleanup permission follows.
 
 ## Kernel-C zero-page write elimination — candidate, not measured win
 
