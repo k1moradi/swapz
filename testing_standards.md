@@ -145,3 +145,15 @@ assertions, negative cases and artifact schemas are retained. This
 relocation isolates retired V2.2 code from active V3 benchmarks; it
 **does not waive historical source-safety coverage**. Verify the
 rootless workflow, NBD and teardown checks at exact HEAD.
+
+### Rootless fio compatibility automation on main
+
+The archived strategy-screen/comparison fixtures remain useful as
+**rootless safety and evidence-schema checks**, not active V3 performance
+benchmarks. The rootless fio/CLAT compatibility workflow previously
+ran only for pull requests, which no longer fits the **single-main**
+repository. It now runs on `main` pushes affecting those test paths
+and on explicit dispatch, using a `build/python-cache` bytecode root.
+This ensures behavior-renamed legacy scripts receive executable
+contract validation without creating a branch or requiring physical
+or active-swap access. Report synthetic evidence only as synthetic.

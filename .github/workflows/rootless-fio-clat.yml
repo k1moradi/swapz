@@ -1,7 +1,8 @@
 name: Rootless real fio CLAT compatibility
 
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths:
       - 'tests/runtime/streaming-benchmark-read-latency.py'
       - 'tests/runtime/streaming-benchmark-writer-verify.py'
@@ -26,6 +27,8 @@ on:
 
 permissions:
   contents: read
+env:
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/build/python-cache
 
 jobs:
   ordinary-file-only:
