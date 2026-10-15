@@ -1267,3 +1267,37 @@ WRITE bytes/requests, READ p99, GC, or correct
 completion become unacceptable. Results on
 RAM null_blk do not prove a fixed saturated
 SD/SSD/HDD bandwidth effect.
+
+## Alpha.21 smaller useful packed writes — unmeasured loaded hypothesis
+
+The verified alpha.20 unpaced QD32 retained 2ms
+owner run delivered **24.971397 MB/s useful logical
+WRITEs -> 14.853728 MB/s independent lower
+WRITEs**, while its own off arm achieved **32.255877
+MB/s**. The V3 exact byte oracle and separately
+owned RAM teardown passed, with 40.517% fewer
+lower WRITE bytes and 83.245% fewer requests.
+The target closed 1,642 windows on the
+seven-record pack-ready predicate and 1,482
+at deadline (cumulative). Its write p99 was
+2.340ms versus off 1.843ms; GC was zero.
+
+In **alpha.21 real kernel C**, an opted-in retained
+window may commit *earlier* if exact header,
+per-record descriptors and two accepted LZ4
+payloads fit one 4KiB extent, or three accepted
+payloads fit one 8KiB extent. Seven in 16KiB
+remains admissible. For measured 2073B records,
+two exceed 4KiB (4194B), while three fit 8KiB
+(6283B). The three-page case saves 4096B over
+three separate 4KiB writes, but can give up
+density compared with a later seven-page
+16KiB write. The policy does not bypass the
+existing engine/lower-success/authority/FUA
+publication path. A same-source loaded alpha.21
+`make run` and `make bench-pair-medium-unpaced`
+must qualify correctness, useful input MB/s,
+independent lower WRITE and READ bytes/requests,
+p95/p99, GC, and safe teardown. A speedup
+with unacceptable extra lower I/O is NOT a
+performance win. No loaded alpha.21 result.

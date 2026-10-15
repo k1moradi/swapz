@@ -196,7 +196,7 @@ Use `main` only and follow the device/host safety restrictions.
 ## Maintenance
 
 - [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
-      documents and current V3.0.0-alpha.20 behavior when their claims
+      documents and current V3.0.0-alpha.21 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
       commit/test reference, update the owning standard with lessons,
@@ -234,3 +234,26 @@ unchecked entries there are **not active V3 tasks**.
       or latency; no new kernel alpha version for
       unchanged production C. Repeat in alternating
       order before claiming significant gains.
+
+- [ ] Owner alpha.21 production-C short packed window
+      qualification: run rootless verify and `make run`
+      first. After clean teardown, run unchanged
+      `make bench-pair-medium-unpaced` at QD32,
+      retain_ms=2, 16384 measured operations.
+      Require the exact full-image oracle, independent
+      owned lower-device READ/WRITE bytes and requests,
+      FUA/GC/suspend invariants, useful WRITE/READ
+      MB/s, p95/p99 and clean teardown.
+      Contrast with alpha.20's 24.971 logical input,
+      14.854 lower WRITE MB/s and 40.52% byte saving.
+      Do not promote early 3-record closure if request,
+      read, latency or GC costs negate the input benefit.
+      Repeat paired/counterbalanced tests before claims.
+- [ ] Treat any alpha.20 1ms vs 2ms retention comparison
+      as **version-specific**. Alpha.21 changed the
+      kernel's early closure eligibility, so the
+      previously planned 1ms trial is NOT a clean
+      alpha.20-only configuration comparison once
+      sources are updated. Compare experiments by
+      exact source SHA and module hash, never mix
+      C policy changes into a pure knob A/B claim.

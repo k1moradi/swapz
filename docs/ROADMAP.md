@@ -3,7 +3,7 @@
 **Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
 WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
 is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.20 remains experimental and **NOT
+`swapz3` V3.0.0-alpha.21 remains experimental and **NOT
 production-ready**. V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
@@ -402,3 +402,23 @@ lower WRITE bytes/requests, lower READ cost
 and read/write p99; collect counterbalanced
 repeats before an actual C scheduling
 revision. The 1ms trial remains NOT RUN.
+
+### Alpha.21: useful early packing at 2/3-record geometry
+
+This is the first explicit production C modification
+after the alpha.20 rollback and 1ms-test-only
+increment. Under QD32, seven 2073B records can fit
+16KiB, but a window of three has already earned
+a real 4KiB WRITE-byte saving in one 8KiB extent.
+The opt-in worker now allows that earlier commit,
+plus a 2-record 4KiB case for sufficiently small
+LZ4 pages. It does NOT alter mapping authority,
+engine physical-success gates, FUA, GC or default
+retention off. Its cost is a possible physical
+WRITE-byte/request increase from fragmented
+3+3+1 placements versus seven in 16KiB. Only
+loaded, same-source null_blk lower counters and
+upper useful MB/s/p99 can validate this trade-off;
+alpha.21 remains NOT RUN. If byte efficiency
+collapses or useful throughput does not improve,
+revert the policy rather than add more wrappers.

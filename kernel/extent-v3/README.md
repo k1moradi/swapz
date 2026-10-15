@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.20 experimental Device Mapper target
+# Current development: V3.0.0-alpha.21 experimental Device Mapper target
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -319,3 +319,20 @@ The unused alpha.19 helper and status counter
 were removed. No media format, authority,
 FUA/GC, read or timer change was made.
 Loaded alpha.20 MB/s remains NOT RUN.
+
+## Alpha.21: short-window useful packing in actual C
+
+For enabled retention and unrestricted read
+budget, the worker's format-accurate early-close
+predicate now recognizes exactly 2 accepted
+compressed records fitting one 4KiB extent,
+3 fitting one 8KiB extent, or 7 fitting 16KiB.
+Actual LZ4 lengths and all SWZ3 metadata are
+counted; RAW/invalid records and default
+retain_ms=0 cannot activate the shortcut.
+The existing synchronous engine lower commit,
+mapping publication and FUA completion semantics
+remain authoritative. This is a latency/throughput
+hypothesis with a measurable possible loss of
+seven-record packing density; alpha.21 loaded
+result is NOT RUN.

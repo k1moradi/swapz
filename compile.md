@@ -5,7 +5,7 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.
 
-## One active module: V3.0.0-alpha.20
+## One active module: V3.0.0-alpha.21
 
 `make` or `make v3` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
@@ -443,3 +443,19 @@ a safe owner-loaded default `make run` followed
 by the explicit unpaced 2-device owned-RAM
 `make bench-pair-medium-unpaced`. Alpha.20
 loaded speed and resource limits are NOT RUN.
+
+## Alpha.21 real V3 write-window policy change
+
+The active module is now `3.0.0-alpha.21`. Its
+production header permits opt-in retained LZ4 writes
+to close when two pages fit one 4KiB extent or three
+pages fit one 8KiB extent, with exact SWZ3 metadata.
+The seven-record 16KiB condition remains. Kernel
+code still enforces read/duplicate/FUA dependencies,
+publication after successful synchronous lower I/O,
+GC reserve and the null_blk-only admission guard.
+This is a CHANGE to the C commit schedule and
+must be W=1/W=2 built and rootless-tested before
+isolated owner-loaded `make run`, then unpaced
+`make bench-pair-medium-unpaced`. A speed benefit
+is unmeasured and not presumed.
