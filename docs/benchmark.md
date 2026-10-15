@@ -89,6 +89,16 @@ measurements, **not** independent block-layer request counts, exclusive
 kernel-worker CPU time, or flash-media measurements. Continue to use
 independent lower `stat` deltas for actual submitted device traffic.
 Counters fail closed on missing fields, reset or impossible request counts.
+
+**Rootless mock qualification after schema changes:** The unprivileged
+Make/Kbuild orchestration fixture must emit the same required *shape* of
+loaded V3 read counters as the runner consumes. Its fabricated numbers
+are only a parser/incremental-build regression; they cannot be published
+as real lower-I/O or kernel timing measurements. The first diagnostic
+commit passed production C compilation but exposed this stale rootless
+fixture, so the fixture was updated without relaxing measured counters
+or the loaded device requirements. The full loaded test remains NOT RUN
+for this revision.
 Rootless checks and full loaded `make test` at the new code HEAD are
 **NOT RUN** in this development environment; the owner's aacf8cc PASS
 belongs only to that earlier source revision.

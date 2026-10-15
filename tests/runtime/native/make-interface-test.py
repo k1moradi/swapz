@@ -173,7 +173,16 @@ class PublicMakeContract(unittest.TestCase):
                                 "lower_io": {
                                     "lower_read_bytes": 4194304,
                                     "lower_read_requests": 1024,
-                                }
+                                },
+                                # Mirror the loaded schema; rootless only
+                                # fabricates counters for runner plumbing.
+                                "kernel_read_path": ({
+                                    "read_meta_reqs": 1024,
+                                    "read_payload_reqs": 512,
+                                    "read_payload_blocks": 512,
+                                    "lower_read_wall_ns": 120000000,
+                                    "decode_wall_ns": 20000000,
+                                } if is_v3 else None),
                             }
                             for key in ("sequential", "seeded_random")
                         },
