@@ -130,6 +130,13 @@ asynchronous/synchronous, so overlap counters are required only for
 the middle two async runs; never demand async overlap from either
 synchronous control run.
 
+**Shell/Python heredoc boundary:** When wrapping the benchmark's fixture
+validator inside a Bash `if`/`else`, leave the `PY` terminator
+at column zero and keep the embedded Python script's top-level
+statements unindented. Adding a shared-fixture path must not silently
+break the legacy standalone internal fallback; private rootless Bash
+syntax/preflight checks still cover both branches.
+
 **Regression maintenance note:** After moving the serial test-phase
 commands into `tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile

@@ -360,35 +360,35 @@ if [[ -n $SHARED_PLAN ]]; then
     cp -- "$SHARED_PLAN/plan/manifest.json" "$SESSION/plan/manifest.json"
     note 'IMMUTABLE_PLAN_REUSED=1'
 else
-    if [[ $PROFILE == medium ]]; then
-        python3 -B tests/runtime/benchmark/anon-page-fixture.py \
-            --output-prefix "$SESSION/fixture" --pages 128 \
-            --seed 0x51a0a9 --weights medium=100
-        # Reject the fixture before any replay unless actual host liblz4
-        # outputs meet the predeclared medium nonzero-page size range.
-        python3 -B - "$SESSION/fixture.json" <<'PY'
-    import json
-    import sys
-    from pathlib import Path
-    manifest = json.loads(Path(sys.argv[1]).read_text())
-    assert manifest["pages"] == 128
-    assert manifest["profile_pages"] == {"medium": 128}
-    assert manifest["lz4_size_buckets"] == {"2049_3072": 128}
-    assert manifest["raw_pages"] == 0
-    assert 2049 <= manifest["lz4_min_accepted_payload_bytes"] <= manifest["lz4_max_accepted_payload_bytes"] <= 2200
-    assert 128 * 2049 <= manifest["lz4_accepted_payload_bytes"] <= 128 * 2200
-    print("MEDIUM_FIXTURE_MEASURED_LZ4_BYTES=" +
-          str(manifest["lz4_accepted_payload_bytes"]))
-    PY
-    else
-        python3 -B tests/runtime/benchmark/anon-page-fixture.py \
-            --output-prefix "$SESSION/fixture" --pages 128 --seed 0x51a0a9
-    fi
-    python3 -B tests/runtime/benchmark/io-replay.py prepare \
-        --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
-        --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-        --reader-pages 256 --qd "$QD" --read-pct 25 \
-        --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
+if [[ $PROFILE == medium ]]; then
+    python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+        --output-prefix "$SESSION/fixture" --pages 128 \
+        --seed 0x51a0a9 --weights medium=100
+    # Reject the fixture before any replay unless actual host liblz4
+    # outputs meet the predeclared medium nonzero-page size range.
+    python3 -B - "$SESSION/fixture.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+manifest = json.loads(Path(sys.argv[1]).read_text())
+assert manifest["pages"] == 128
+assert manifest["profile_pages"] == {"medium": 128}
+assert manifest["lz4_size_buckets"] == {"2049_3072": 128}
+assert manifest["raw_pages"] == 0
+assert 2049 <= manifest["lz4_min_accepted_payload_bytes"] <= manifest["lz4_max_accepted_payload_bytes"] <= 2200
+assert 128 * 2049 <= manifest["lz4_accepted_payload_bytes"] <= 128 * 2200
+print("MEDIUM_FIXTURE_MEASURED_LZ4_BYTES=" +
+      str(manifest["lz4_accepted_payload_bytes"]))
+PY
+else
+    python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+        --output-prefix "$SESSION/fixture" --pages 128 --seed 0x51a0a9
+fi
+python3 -B tests/runtime/benchmark/io-replay.py prepare \
+    --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
+    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+    --reader-pages 256 --qd "$QD" --read-pct 25 \
+    --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 fi
 note "V3_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 replay_off() {
