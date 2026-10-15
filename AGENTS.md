@@ -71,9 +71,9 @@ README for user-facing changes and VISION if acceptance criteria change.
 `/dev/sdb1` or `/swapfile`, physical/unowned storage, or unrelated DM.
 V3 is the active default *development* build, but stays experimental and null_blk-only; V2.2 is retired from active benchmarks.
 
-The [archived Codex worklog](docs/archive/v2.2/CODEX_VALIDATION.md),
+The [historical Codex worklog](https://github.com/k1moradi/swapz/blob/abbdbce277938f3678a640af93ef066394b44606/docs/archive/v2.2/CODEX_VALIDATION.md),
 [legacy V2.1 testing plan](docs/archive/v2.1/TESTING.md),
-[dated production readiness ledger](docs/PRODUCTION_READINESS.md),
+[current testing and release gates](docs/testing_standards.md),
 [active V3 roadmap](docs/ROADMAP.md), archived scripts and old PRs
 provide versioned details, **not competing current policy**.
 The root `CODEX_VALIDATION.md` is a current agent bootstrap,

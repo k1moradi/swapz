@@ -1,51 +1,38 @@
 # swapz documentation index
 
-Start at the repository [README](../README.md) and
-[AGENTS.md](../AGENTS.md). The six authoritative project documents are the two root entry points
-and four engineering standards maintained under `docs/`:
+Start with the project's six authoritative documents:
 [README](../README.md), [VISION](../VISION.md),
-[coding standards](coding_standards.md),
-[testing standards](testing_standards.md),
-[compile](compile.md), [benchmark](benchmark.md).
-The root AI-agent entry points are [AGENTS.md](../AGENTS.md),
-[CLAUDE.md](../CLAUDE.md), [agent.md](../agent.md),
-[CODEX_VALIDATION.md](../CODEX_VALIDATION.md) and
-[Copilot instructions](../.github/copilot-instructions.md).
+[coding standards](coding_standards.md), [testing standards](testing_standards.md),
+[compile](compile.md) and [benchmark](benchmark.md). Root agent
+entry points remain [AGENTS](../AGENTS.md), [CLAUDE](../CLAUDE.md),
+[Codex validation bootstrap](../CODEX_VALIDATION.md), [agent](../agent.md)
+and [Copilot](../.github/copilot-instructions.md).
 
-## Active plans and references
+## Active owner documents
 
-| Document | Ownership |
-| --- | --- |
-| [Documentation guidelines](DOCUMENTATION_GUIDELINES.md) | Required placement, consolidation, maintenance, and archival rules |
-| [Active V3 tasks](TODO.md) | Short, current, prioritized unchecked work |
-| [V3 roadmap / goals](ROADMAP.md) | Algorithm direction and milestones; VISION controls acceptance |
-| [Device geometry](DEVICE_GEOMETRY.md) | Sector, allocation, filesystem and lower-stat meanings |
-| [Production readiness ledger](PRODUCTION_READINESS.md) | Version-specific results and open qualification gaps, not release approval |
-| [Kernel V3 README](../kernel/extent-v3/README.md) | Component-local implementation and experimental notes |
-| [Runtime tests](../tests/runtime/README.md) | Active V3 test and oracle navigation |
-| [Native suites](../tests/suites/README.md) | Test inventory and build targets |
+| Document | Purpose |
+|---|---|
+| [Documentation governance](DOCUMENTATION_GUIDELINES.md) | Canonical locations, ownership, maintenance |
+| [V3 TODO](TODO.md) | Active, prioritized tasks only |
+| [V3 roadmap](ROADMAP.md) | Design direction, open correctness/performance gates |
+| [Device geometry](DEVICE_GEOMETRY.md) | Allocation, sector and real lower-I/O accounting |
+| [V3 component README](../kernel/extent-v3/README.md) | Source-specific scope and layout |
+| [V3 loaded test gate](../kernel/extent-v3/LIVE_TEST_GATE.md) | Safety preconditions and reproducibility |
+| [Runtime test README](../tests/runtime/README.md) | Test and oracle navigation |
+| [Native suites](../tests/suites/README.md) | Current compiled-C tests |
 
-## Versioned evidence, not policy
+## Historical plans and technical specifications
 
-The historical [Codex validation worklog](archive/v2.2/CODEX_VALIDATION.md),
-[long V2.2 checklist](archive/v2.2/TODO.md),
-[V2.x validation history](archive/v2.2/VALIDATION.md),
-[old V2.2 roadmap](archive/v2.2/ROADMAP.md),
-[old V2.2 design](archive/v2.2/DESIGN.md), and
-[V2.1 testing plan](archive/v2.1/TESTING.md) preserve provenance, not
-current commands. The [historical V3 goals](archive/v3/V3_GOALS.md) and
-[performance diagnosis](archive/v3/PERFORMANCE_DIAGNOSIS.md)
-likewise records a dated experiment; read the active
-[benchmark standard](benchmark.md) before drawing conclusions.
+[Archive index](archive/README.md) covers retained older designs and plans.
+The `docs/recall-*`, `docs/nbd-*` and `docs/pidfd-*` documents describe
+specific prototype interfaces, ownership and safe failure boundaries.
+Component-local Markdown may define test protocols; it is not itself
+a claim of a successfully loaded or physically tested implementation.
 
-Existing subject-specific reports under [benchmarks](benchmarks),
-[validation](validation), and the `docs/v22-*`, `docs/recall-*`,
-`docs/nbd-*`, `docs/codex-*` and `docs/main-developer-*`
-families are retained as **historical, scope-limited evidence**.
-Many document only rootless models or independent reviews; do not
-interpret them as enabled V3 features or measured device improvements.
-Component-local test protocols remain with the component where needed.
-
-Do not create a second source of policy or a separate unindexed
-worklog. For a new topic, first update an existing owner document
-and link immutable supporting evidence there.
+Standalone test **reports**, dated reviews, V2.2 audit documents and offline
+qualification records were removed from the tracked tree. Their exact text,
+including failures, observations and revision labels, remains in
+[the pre-cleanup Git revision](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606).
+Do not treat historical rootless evidence as qualification of current V3.
+New evidence belongs in the owning active standard, existing TODO/roadmap
+or test artifacts, with precise outcome and source revision.

@@ -1308,7 +1308,7 @@ The V2.2 rootless plateau analyzer, exact-latency V3 observation sidecar,
 bundle-integrity checkers and virtual-device qualification checklist remain
 historical **offline models**, not independent collector authentication,
 physical drain, sustained throughput or a winner selection. See
-[streaming benchmark reporting](streaming-benchmark-reporting.md) for the
+historical offline benchmark-reporting findings in Git history for the
 consolidated constraints and [archived V2.2 reports](archive/README.md)
 for original schemas and test provenance. No old V2.2 strategy or batch
 winner is a prerequisite for the V3 same-input off/V3 benchmark.

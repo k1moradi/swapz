@@ -93,7 +93,7 @@ For benchmarking and comparative correctness, feed *identical* immutable 4KiB fi
 
 ## Known gaps (do not overclaim)
 
-Owner-loaded bounded off/V3 pilots, including alpha.11 retention at `0a10cbfa`, have passed exact logical-input and readback gates; sustained GC/CPU/tail qualification remains open. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Older reports, `PRODUCTION_READINESS.md` and historical `CODEX_VALIDATION.md` preserve detailed provenance, **not new test requirements**.
+Owner-loaded bounded off/V3 pilots, including alpha.11 retention at `0a10cbfa`, have passed exact logical-input and readback gates; sustained GC/CPU/tail qualification remains open. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Historical validation and review reports at [the preserved source revision](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606/docs) retain provenance, **not new test requirements**.
 
 At the end of each implementation task, update this or another of the four standards with learned results, exact tests and PASS/FAIL/BLOCKED, while preserving separate versioned raw report evidence on `main`.
 
@@ -1220,8 +1220,7 @@ classes: upper-BIO identity and pending-pack ownership, callback lifetime
 after timeouts, fail-closed bounds for published mappings and lower extents,
 generation-scoped publication, GC scratch isolation, and FUA/flush completion
 ordering. The findings and links to all 15 safety audits are consolidated in
-[production readiness](PRODUCTION_READINESS.md); full dated reports are under
-[the V2.2 audit archive](archive/README.md). They **do not** qualify current
+[the historical V2.2 audit evidence](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606/docs/archive/v2.2/audits); all dated reports remain retrievable in Git history. They **do not** qualify current
 V3 behavior or establish loaded, physical-device, or production readiness.
 Re-test a relevant invariant against *current V3 production C* instead of
 counting retired V2.2 rootless PASS results as V3 evidence.

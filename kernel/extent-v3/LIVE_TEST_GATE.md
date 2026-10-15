@@ -119,7 +119,7 @@ REBOOT.
 - Cold read p50/p95/p99 only if achieved read load matches baseline.
   Low-QD contention, GC, and test storage service-rate must be comparable.
 
-The active release gate ledger is [PRODUCTION_READINESS.md](../../docs/PRODUCTION_READINESS.md). The renamed alpha.5 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz3 module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
+The active release gate ledger is [active testing standards](../../docs/testing_standards.md). The renamed alpha.5 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz3 module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
 
 ## Independent correctness blockers that prohibit SD / system swap
 
@@ -156,7 +156,7 @@ request counts must be recorded separately. Host counters do not prove
 flash NAND program/erase counts or physical SD endurance.
 
 See [DEVICE_GEOMETRY.md](../../docs/DEVICE_GEOMETRY.md) and
-[PERFORMANCE_DIAGNOSIS.md](../../docs/archive/v3/PERFORMANCE_DIAGNOSIS.md).
+[current benchmark criteria](../../docs/benchmark.md).
 The current `null_blk`-only target admission remains mandatory.
 
 ## Mandatory physical-I/O success metrics

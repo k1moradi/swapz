@@ -15,7 +15,7 @@ The authoritative acceptance and engineering rules are
 [compile](compile.md), and [benchmark](benchmark.md).
 Track short, actionable work in [the V3 TODO](TODO.md); preserve exact
 results and outstanding release gates in
-[the production-readiness ledger](PRODUCTION_READINESS.md).
+[current testing and release gates](testing_standards.md).
 Only `main` is used unless the owner explicitly authorizes otherwise.
 
 ## The measured problem, and the existing foundation
@@ -244,7 +244,7 @@ not satisfy the gate. Re-run Stage 2 against uncompressed `off`.
 with correct data and acceptable read latency/CPU/memory, or an
 explicitly documented negative result and next measured bottleneck.
 Readiness still depends on
-[the full production gates](PRODUCTION_READINESS.md).
+[full qualification gates](testing_standards.md).
 
 ## Stage 5 — release review, separate from experimental benchmarks
 

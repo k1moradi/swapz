@@ -20,7 +20,7 @@
 Read the normative [VISION.md](../../../VISION.md), device-size/sector/partition/
 swap-file distinctions in [DEVICE_GEOMETRY.md](../../DEVICE_GEOMETRY.md) and the
 measured algorithm-vs-implementation diagnosis in
-[PERFORMANCE_DIAGNOSIS.md](PERFORMANCE_DIAGNOSIS.md). Together they govern
+[current benchmark methodology](../../benchmark.md). Together they govern
 feature priority, design, performance evidence and release decisions.
 
 - **Correctness first:** full 4 KiB logical data readback, safe upper/lower
@@ -168,7 +168,7 @@ could potentially address smaller sectors.
   until crash-consistent durable metadata, boot/resume and power-loss tests
   are independently qualified.
 
-The current release-blocking qualification checklist is [PRODUCTION_READINESS.md](../../PRODUCTION_READINESS.md), not a claimed alpha.2 production approval.
+The current release-blocking qualification checklist is [active qualification criteria](../../testing_standards.md), not a claimed alpha.2 production approval.
 
 ## Hard exit gates (do not imply success merely from CI)
 

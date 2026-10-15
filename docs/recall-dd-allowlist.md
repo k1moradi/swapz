@@ -60,8 +60,8 @@ manifest. GNU release announcements publish source archives, detached GPG
 signatures, checksums, and the release-signing key fingerprint. The separate
 qualification procedure verifies the 9.11 source archive and records its
 static build recipe, toolchain, output binary, and worker-boundary run; see
-[`gnu-coreutils-qualification.md`](gnu-coreutils-qualification.md) and the
-machine-readable [`9.11 qualification record`](gnu-coreutils-9.11-qualification.json).
+the historical GNU coreutils qualification record available in Git history.
+That offline evidence does not authorize production worker admission.
 The two clean builds are same-host repeatability evidence, not independent
 builder reproduction. The Ed25519 application public key must still be
 provisioned through a separate trusted administrator/package channel, with its

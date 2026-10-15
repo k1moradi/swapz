@@ -108,7 +108,7 @@ Use `main` only and follow the device/host safety restrictions.
       lower-I/O drain. Repeat runs and preserve negative/inconclusive results.
 - [ ] Decide release readiness only from the gates in
       [VISION.md](../VISION.md) and the
-      [readiness ledger](PRODUCTION_READINESS.md);
+      [readiness ledger](testing_standards.md);
       V3 remains experimental and null_blk-only.
 
 - [x] Owner alpha.15 `75d96be0` default loaded smoke
@@ -206,7 +206,7 @@ Use `main` only and follow the device/host safety restrictions.
 
 **Retired work:** The 2026-10-08 to 2026-10-10 V2.x task history,
 including legacy checkboxes, is retained *unchanged* in
-[archive/v2.2/TODO.md](archive/v2.2/TODO.md) for provenance;
+[retired V2.2 task log](https://github.com/k1moradi/swapz/blob/abbdbce277938f3678a640af93ef066394b44606/docs/archive/v2.2/TODO.md) for provenance;
 unchecked entries there are **not active V3 tasks**.
 
 - [x] Owner alpha.20 exact `faf17bc2` default

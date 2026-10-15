@@ -84,8 +84,8 @@ jobs:
           set -euo pipefail
           for file in docs/INDEX.md docs/DOCUMENTATION_GUIDELINES.md \
                       docs/TODO.md docs/ROADMAP.md docs/DEVICE_GEOMETRY.md \
-                      docs/PRODUCTION_READINESS.md \
-                      docs/archive/v2.2/CODEX_VALIDATION.md; do
+                      docs/testing_standards.md \
+                      docs/benchmark.md; do
             test -s "$file" || { echo "FAIL: required documentation missing: $file"; exit 1; }
           done
           shopt -s nullglob

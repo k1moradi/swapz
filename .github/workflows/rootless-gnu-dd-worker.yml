@@ -13,7 +13,6 @@ on:
       - 'tests/runtime/test-child-supervisor.py'
       - 'tests/runtime/test-child-supervisor-service.py'
       - 'tests/runtime/recall-fixture-owner.py'
-      - 'docs/gnu-coreutils-qualification.md'
       - 'docs/recall-dd-allowlist.md'
   pull_request:
     paths:
@@ -26,7 +25,6 @@ on:
       - 'tests/runtime/test-child-supervisor.py'
       - 'tests/runtime/test-child-supervisor-service.py'
       - 'tests/runtime/recall-fixture-owner.py'
-      - 'docs/gnu-coreutils-qualification.md'
       - 'docs/recall-dd-allowlist.md'
   workflow_dispatch:
 

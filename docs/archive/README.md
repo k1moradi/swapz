@@ -1,23 +1,17 @@
-# Historical documentation
+# Historical design and task plans
 
-Files here are retained as **dated evidence and superseded plans**.
-They are *not* current permission to reboot, use system swap,
-operate physical/unowned devices, create Git branches, or require
-obsolete V2.2 benchmarking. Begin with [AGENTS.md](../../AGENTS.md),
-[the documentation index](../INDEX.md) and
-[the governance rules](../DOCUMENTATION_GUIDELINES.md).
+This directory retains earlier version **plans, designs and documentation**,
+not current V3 policy, a report archive or authorization for live operations.
+Start with the [root README](../../README.md), [documentation index](../INDEX.md),
+[testing standards](../testing_standards.md), and [benchmark standard](../benchmark.md).
 
-The `v2.1/` and `v2.2/` directories contain retired
-test plans, task logs, Codex instructions, version roadmaps and
-validation evidence. `v3/` contains dated V3 performance diagnosis;
-newer measurements and current limits belong in
-[production readiness](../PRODUCTION_READINESS.md).
+Retained historical documents include V2.1 testing design, V2.2 design/roadmap
+and the older V3 goals. Dated validation transcripts, Codex worklogs,
+individual V2.2 audits and V3 retrospective reports have been removed from
+the working tree after their applicable lessons were consolidated into current
+project standards.
 
-## Retired V2.2 audit collection
-
-All 20 individual `v22-*.md` reports were moved without discarding their
-revision-specific safety findings, negative tests or source-only limitations
-to [the V2.2 audits directory](v2.2/audits/v22-async-reap-watchdog-audit.md).
-See [the consolidated safety synopsis](../PRODUCTION_READINESS.md#retired-v22-audits-consolidated-safety-findings-not-v3-evidence)
-and [offline benchmark constraints](../streaming-benchmark-reporting.md#retired-v22-offline-qualification-consolidated-reference).
-The original reports remain historical and confer no new V3 or live-device authorization.
+Original documents can be retrieved at the immutable
+[pre-cleanup revision](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606/docs/archive).
+Their test results are only valid for the stated source and scope; they
+do not override current safety, branch, build or benchmark requirements.

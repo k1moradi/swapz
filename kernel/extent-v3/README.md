@@ -50,7 +50,7 @@ victims before wasting 1MiB of lower GC traffic.
 **Do not** use active swap, `/dev/sdb1`, unrelated physical backing,
 or bypass null_blk-only admission. NEVER reboot. Read the authoritative
 [alpha.5 retest protocol](ONLINE_IO_RETEST.md) and
-[readiness ledger](../../docs/PRODUCTION_READINESS.md).
+[qualification criteria](../../docs/testing_standards.md).
 
 The older sections below document the initial memory-only codec research
 milestone, which remains available as `SV3_BUILD_SMOKE=1`. They are

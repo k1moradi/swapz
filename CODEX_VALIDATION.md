@@ -13,7 +13,7 @@ drawing conclusions. Rootless success is not a loaded-kernel benchmark.
 A code change must update the relevant governing standard in that commit.
 
 **Historical Codex/V2.2 tester instructions and evidence** are preserved in
-[docs/archive/v2.2/CODEX_VALIDATION.md](docs/archive/v2.2/CODEX_VALIDATION.md).
+[the original historical worklog](https://github.com/k1moradi/swapz/blob/abbdbce277938f3678a640af93ef066394b44606/docs/archive/v2.2/CODEX_VALIDATION.md).
 They are NOT current authorization, testing requirements, or a three-arm
 V2.2 performance mandate. The only active comparison is off versus V3
 under [benchmark.md](docs/benchmark.md). See [documentation guidelines](docs/DOCUMENTATION_GUIDELINES.md).
