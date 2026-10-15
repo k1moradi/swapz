@@ -111,7 +111,8 @@ class PairReplayContract(unittest.TestCase):
         # A high reuse rate may make metadata requests fewer than payload
         # requests; this is valid as long as lower payload blocks match.
         self.assertEqual(module.kernel_read_delta(
-            before, dict(after, read_meta_reqs=11))["read_meta_reqs"], 1)
+            before, dict(after, read_meta_reqs=11,
+                         read_full_extent_reqs=1))["read_meta_reqs"], 1)
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_read_delta(after, before)
         with self.assertRaisesRegex(ValueError, "inconsistent"):

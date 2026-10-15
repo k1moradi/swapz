@@ -349,7 +349,14 @@ commit caught that the test's *first* 16-page cold count still reused
 data and therefore violated its original lower-bound assertion.
 The cold setup now covers both loops, while the separate warm production-C
 test preserves proof of optimized reuse. This first revision is NOT
-qualified by those failing CI workflows. The full owned-RAM matrix
+qualified by those failing CI workflows.
+A subsequent CI failure showed a synthetic telemetry assertion that
+lowered the metadata request count but left its dependent full-fetch
+count impossible; the parser correctly rejected it. The revised test
+also adjusts full-fetch count to zero for that fixture, keeping the
+intended fewer-metadata-than-payload invariant while preserving the
+strict real-result consistency gate. Neither mock correction proves
+loaded performance at the new SHA. The full owned-RAM matrix
 must run at the **new exact SHA** before asserting a result; any
 increased read amplification or WRITE/p99 regression remains a
 negative outcome.
