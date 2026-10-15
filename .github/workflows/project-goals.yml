@@ -52,7 +52,12 @@ jobs:
           set -euo pipefail
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq 'AUTOINSTALL="no"' dkms.conf
-          grep -Fxq 'PACKAGE_VERSION="3.0.0-alpha.21"' dkms.conf
+          # Resolve DKMS version from its canonical source, not a hand-edited literal.
+          test -s kernel/extent-v3/VERSION
+          bash -c 'source "$1"; test "$PACKAGE_VERSION" = "$2"' \
+            _ "$PWD/dkms.conf" "$(cat kernel/extent-v3/VERSION)"
+          grep -Fq 'MODULE_VERSION(SV3_ALPHA_VERSION)' kernel/extent-v3/dm-target.c
+          grep -Fq 'swapz-version.h' kernel/extent-v3/Makefile
           grep -Fq 'CANDIDATES = ("off", "v3")' tests/runtime/benchmark/io-replay.py
           test ! -e tests/runtime/threeway-swap-replay.py
           test ! -e tests/runtime/threeway-swap-replay-test.py

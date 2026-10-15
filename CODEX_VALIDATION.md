@@ -19,7 +19,7 @@ V2.2 performance mandate. The only active comparison is off versus V3
 under [benchmark.md](docs/benchmark.md). See [coding and documentation rules](docs/coding_standards.md).
 
 **Mandatory Make interface (CI enforced):** The only public
-root commands are `make -j2`, `make install`,
+root commands are `make`, `make install`,
 `make uninstall`, and `make test`. Never introduce
 aliases or an additional Make target. Install/cleanup
 is DKMS-version-owned; it must never activate swap,

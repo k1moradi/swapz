@@ -16,7 +16,7 @@ for documentation routing; keep the current task queue in
 [docs/ROADMAP.md](docs/ROADMAP.md), not in archival logs.
 
 **Mandatory Make interface (CI enforced):** The only public
-root commands are `make -j2`, `make install`,
+root commands are `make`, `make install`,
 `make uninstall`, and `make test`. Never introduce
 aliases or an additional Make target. Install/cleanup
 is DKMS-version-owned; it must never activate swap,

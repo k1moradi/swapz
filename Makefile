@@ -4,7 +4,7 @@
 # Disallow explicitly specifying it or combining supported goals.
 ifneq ($(strip $(MAKECMDGOALS)),)
 ifeq ($(filter $(MAKECMDGOALS),install uninstall test),)
-$(error Only make -j2, make install, make uninstall, make test are supported)
+$(error Only make, make install, make uninstall, make test are supported)
 endif
 ifneq ($(words $(MAKECMDGOALS)),1)
 $(error Specify exactly one supported Make command)

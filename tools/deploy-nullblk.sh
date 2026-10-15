@@ -33,8 +33,13 @@ done
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
 git diff --quiet && git diff --cached --quiet ||
 	fail "dirty tracked source: preserve and commit changes first"
-[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.21 ]] ||
-	fail "unexpected active V3 version"
+version="$(cat kernel/extent-v3/VERSION)"
+[[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
+    fail "malformed canonical V3 version"
+grep -Fxq "#define SV3_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
+    fail "staged kernel version header does not match canonical VERSION"
+[[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
+    fail "built V3 module version does not match canonical VERSION"
 [[ -s "$MODULE" && -x "$ORACLE" ]] || fail "V3/oracle not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
 	fail "V3 vermagic does not match running kernel"

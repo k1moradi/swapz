@@ -1,6 +1,6 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
-**Status: ACTIVE — V3.0.0-alpha.21 experimental and NOT production-ready.** V2.2 is retired from active builds and required
+**Status: ACTIVE — V3 experimental and NOT production-ready (read the current version from [VERSION](../kernel/extent-v3/VERSION)).** V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
 medium pages; sustained GC/CPU/latency qualification remains open.
@@ -255,6 +255,27 @@ Readiness still depends on
   explicitly owner-authorized and reviewed project**. No reboot,
   `swapon`, `swapoff`, active swap or physical/unowned device access
   is authorized here.
+
+## Future owner-authorized physical trial — `/dev/sdb1` (BLOCKED)
+
+The objective is eventually to measure real lower WRITE bytes/requests,
+READ latency, GC behavior and sustained work on a dedicated physical
+device, potentially `/dev/sdb1`. **This is a planned milestone, not
+current authorization.** No code or test may bypass the existing
+`null_blk`-only constructor admission before an independently reviewed,
+separately approved source and host procedure exists.
+
+Prerequisites: exact module/source hash and matching kernel, repeated
+owned-RAM correctness and fault/drain/teardown qualification, full
+byte-exact oracle and independent lower counters; positive verification
+of device identity, capacity, holders, mounts, active-swap aliases and
+filesystem/partition ownership; a host backup and data-loss/recovery
+plan; explicit fresh owner approval naming that device and precisely
+which destructive operations are permitted; a fail-closed ordinary
+teardown/quarantine procedure with no force, reboot, or unrelated
+system-swap changes. Confirm controller/queue geometry and compare
+same-input off/V3 under repeatable achieved loads. If any condition is
+unknown, report **BLOCKED**, not a physical benchmark PASS.
 
 ## Deferred scope
 

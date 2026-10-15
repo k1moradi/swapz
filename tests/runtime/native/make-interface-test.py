@@ -19,6 +19,8 @@ class PublicMakeContract(unittest.TestCase):
                 targets.add(m.group(1))
         self.assertEqual(targets, {"all", "install", "uninstall", "test"})
         self.assertIn(".DEFAULT_GOAL := all", MAKE)
+        self.assertIn("Only make, make install, make uninstall, make test", MAKE)
+        self.assertNotIn("Only make -j2,", MAKE)
         self.assertIn(".PHONY: all install uninstall test", MAKE)
         self.assertNotIn(".NOTPARALLEL: test", MAKE)
         self.assertIn(".PHONY: build/kernel/experimental/dm-swapz.ko", MAKE)
@@ -98,7 +100,7 @@ class PublicMakeContract(unittest.TestCase):
             (fixture / "kernel/extent-v3/Makefile").write_text(
                 (ROOT / "kernel/extent-v3/Makefile").read_text())
             (fixture / "kernel/extent-v3/VERSION").write_text(
-                "3.0.0-alpha.21\n")
+                (ROOT / "kernel/extent-v3/VERSION").read_text())
             kernel_source = fixture / "kernel/extent-v3/dm-target.c"
             kernel_source.write_text("int fake_kernel_source = 1;\n")
             (fixture / "kernel/extent-v3/dummy.h").write_text(
@@ -114,8 +116,10 @@ class PublicMakeContract(unittest.TestCase):
                 ".PHONY: modules\n"
                 "modules:\n"
                 "\t@printf 'kbuild:%s\\n' '$(W)' >> '$(M)/../../order.log'\n"
-                "\t@if ! cmp -s '$(M)/dm-target.c' '$(M)/dm-swapz.ko'; "
-                "then cp '$(M)/dm-target.c' '$(M)/dm-swapz.ko'; fi\n")
+                "\t@cat '$(M)/dm-target.c' '$(M)/swapz-version.h' > '$(M)/.module-candidate'\n"
+                "\t@if ! cmp -s '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; "
+                "then cp '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; fi\n"
+                "\t@rm -f '$(M)/.module-candidate'\n")
             (fixture / "tools/test-rootless.sh").write_text(
                 "#!/bin/bash\n"
                 "set -eu\n"
@@ -184,6 +188,27 @@ class PublicMakeContract(unittest.TestCase):
                 self.assertGreater(p.stat().st_mtime_ns, second[p])
             for p in (staged_make, device, cli_out):
                 self.assertEqual(second[p], p.stat().st_mtime_ns, str(p))
+
+            # Changing only canonical VERSION must regenerate every kernel
+            # staging header and dependent module, without editing Kbuild or C.
+            from_version = fixture / "kernel/extent-v3/VERSION"
+            to_version = "3.0.0-alpha.99\n"
+            if from_version.read_text() == to_version:
+                to_version = "3.0.0-alpha.100\n"
+            headers = [fixture / "build/kernel" / kind / "swapz-version.h"
+                       for kind in ("experimental", "w1", "w2")]
+            before_version = [p.stat().st_mtime_ns for p in headers]
+            before_module = [p.stat().st_mtime_ns
+                             for p in (module, w1_module, w2_module)]
+            time.sleep(0.03)
+            from_version.write_text(to_version)
+            execute()
+            for p, old_mtime in zip(headers, before_version):
+                self.assertGreater(p.stat().st_mtime_ns, old_mtime)
+                self.assertIn(to_version.strip(), p.read_text())
+            for p, old_mtime in zip(
+                    (module, w1_module, w2_module), before_module):
+                self.assertGreater(p.stat().st_mtime_ns, old_mtime)
 
     def test_packaging_and_loaded_tests_are_bounded(self):
         self.assertIn("tools/package-dkms.sh install", MAKE)

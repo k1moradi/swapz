@@ -20,7 +20,7 @@ It is a **bootstrap**, not a seventh independent source of engineering policy.
 ## Non-negotiable owner Make API
 
 **Exactly four public root Make commands, with no exceptions or aliases:**
-`make -j2` builds the V3 kernel module and supported safe binary in
+`make` builds the V3 kernel module and supported safe binary in
 parallel; `make install` installs its versioned DKMS package and binary
 to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
@@ -100,4 +100,4 @@ conflict about branches, build output, testing, or safety.
 
 The owner will not execute `make install` or `make uninstall` before production-safety qualification. Keep their package semantics correct through rootless fake-DKMS lifecycle tests, but never run privileged installation, unloading, swap activation or uninstall on the owner's host without explicit future authorization. Install the read-only V3 `swapz3ctl`, not the V2 `swapzctl`; keep AUTOINSTALL disabled and preserve the exact four-command Make API. CI's mock package success is not a claim of system DKMS compatibility or production safety.
 
-The root Makefile must reject explicitly invoked `make all` and multiple goals, even though `all` is the internal default recipe used by `make -j2`. Enforce this alongside the exact four-command policy in rootless tests and CI.
+The root Makefile must reject explicitly invoked `make all` and multiple goals, even though `all` is the internal default recipe used by `make`. Enforce this alongside the exact four-command policy in rootless tests and CI.

@@ -12,9 +12,12 @@ action="$1"; prefix="$2"
 }
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
-version="$(sed -n 's/^PACKAGE_VERSION="\([^"]*\)"$/\1/p' dkms.conf)"
+version="$(cat kernel/extent-v3/VERSION)"
+# DKMS must resolve the same version from its own installed source tree.
+grep -Fqx 'PACKAGE_VERSION="$(cat "$(dirname "${BASH_SOURCE[0]}")/kernel/extent-v3/VERSION")"' dkms.conf || {
+  echo "BLOCKED: DKMS config no longer follows canonical VERSION" >&2; exit 1;
+}
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] &&
-  [[ "$(cat kernel/extent-v3/VERSION)" == "$version" ]] &&
   grep -Fxq 'AUTOINSTALL="no"' dkms.conf || {
   echo "BLOCKED: unrecognized DKMS version/autoinstall state" >&2; exit 1;
 }
@@ -69,7 +72,7 @@ cleanup_owned() {
   for file in kernel/extent-v3/Makefile kernel/extent-v3/*.c kernel/extent-v3/*.h; do
     rm -f -- "$src/kernel/extent-v3/$(basename "$file")"
   done
-  rm -f -- "$src/dkms.conf" "$src/$marker" \
+  rm -f -- "$src/dkms.conf" "$src/kernel/extent-v3/VERSION" "$src/$marker" \
     "$src/.swapz-v3-sources.sha256" "$src/.swapz-v3-binaries.sha256"
   rmdir -- "$src/kernel/extent-v3" "$src/kernel" "$src"
 }
@@ -85,7 +88,7 @@ if [[ "$action" == uninstall ]]; then
   exit 0
 fi
 [[ -x build/userspace/swapz3ctl && -x build/tests/device-roundtrip ]] || {
-  echo "BLOCKED: run make -j2 before packaging" >&2; exit 1;
+  echo "BLOCKED: run make before packaging" >&2; exit 1;
 }
 if [[ -z "$test_root" ]]; then
   [[ -f build/kernel/experimental/dm-swapz.ko ]] || {
@@ -99,13 +102,14 @@ fi
 }
 install -d -m0755 "$src/kernel/extent-v3" "$cli_dir" "$helper_dir"
 install -m0644 dkms.conf "$src/dkms.conf"
+install -m0644 kernel/extent-v3/VERSION "$src/kernel/extent-v3/VERSION"
 for file in kernel/extent-v3/Makefile kernel/extent-v3/*.c kernel/extent-v3/*.h; do
   install -m0644 "$file" "$src/kernel/extent-v3/$(basename "$file")"
 done
 install -m0755 build/userspace/swapz3ctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
 printf 'swapz-v3:%s\n' "$version" > "$src/$marker"
-(cd "$src" && sha256sum dkms.conf kernel/extent-v3/Makefile \
+(cd "$src" && sha256sum dkms.conf kernel/extent-v3/VERSION kernel/extent-v3/Makefile \
   kernel/extent-v3/*.c kernel/extent-v3/*.h) > "$src/.swapz-v3-sources.sha256"
 sha256sum "$cli" "$helper" > "$src/.swapz-v3-binaries.sha256"
 rollback() {

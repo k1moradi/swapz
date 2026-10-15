@@ -14,7 +14,9 @@ utility does not rename the project or module.
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
 
 
-**V3.0.0-alpha.21 is experimental, not production-ready.**
+**V3 remains experimental, not production-ready.** The active release
+version is read from [`kernel/extent-v3/VERSION`](kernel/extent-v3/VERSION),
+the single source of truth for the kernel, DKMS, CLI, CI and test helpers.
 The active `swapz` kernel C implementation uses LZ4, raw fallback,
 and 4/8/16 KiB physical extents to reduce independently measured lower-device
 I/O for byte-exact 4 KiB logical swap pages. It admits controlled RAM-backed
@@ -37,7 +39,7 @@ or invoke internal build targets directly as public goals.
 
 | Command | Meaning |
 |---|---|
-| `make -j2` | Parallel V3 build without loading a module |
+| `make` | Build V3 without loading a module (parallel Make flags remain optional) |
 | `make install` | Install version-owned V3 DKMS and safe helper without activation |
 | `make uninstall` | Remove only that version-owned installation |
 | `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired 20 MiB/s sync/async benchmarks; no interactive sudo |
@@ -91,6 +93,20 @@ The new `prep_lower_write_overlap_starts` status value measures LZ4
 starts observed during a lower write; it is not a useful-MB/s win.
 **Loaded async correctness, bounded-bandwidth performance and endurance:
 NOT RUN.** Experimental null_blk-only admission remains enforced.
+
+## Future physical-device gate (not currently authorized)
+
+Testing on `/dev/sdb1` is a **future qualification milestone**, not
+permission to touch it today. The current target remains restricted to
+uniquely owned RAM-backed `null_blk`. Before any physical trial, the
+owner must explicitly authorize the exact device and the proposed
+destructive operations, and independent checks must confirm its stable
+identity, inactive swap/mount state, unrelated storage isolation, safe
+fallback/recovery plan, byte-exact data and flush/GC correctness and
+ordinary error/teardown behavior. Past documents claiming approval do
+**not** authorize present access. See
+[the roadmap](docs/ROADMAP.md) and
+[testing standards](docs/testing_standards.md).
 
 ## Current work and documentation
 

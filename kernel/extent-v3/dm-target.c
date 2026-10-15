@@ -42,7 +42,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.21"
+#include "swapz-version.h" /* generated from kernel/extent-v3/VERSION */
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -2320,3 +2320,4 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("swapz main developer");
 MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC");
 MODULE_ALIAS("dm-swapz");
+MODULE_VERSION(SV3_ALPHA_VERSION);

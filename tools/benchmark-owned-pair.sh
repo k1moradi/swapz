@@ -91,8 +91,13 @@ done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
 [[ $(git branch --show-current) == main ]] || fail "main only"
 git diff --quiet && git diff --cached --quiet || fail "dirty tracked sources"
-[[ $(cat kernel/extent-v3/VERSION) == 3.0.0-alpha.21 ]] ||
-    fail "unexpected V3 revision"
+version="$(cat kernel/extent-v3/VERSION)"
+[[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
+    fail "malformed canonical V3 version"
+grep -Fxq "#define SV3_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
+    fail "staged kernel version header does not match canonical VERSION"
+[[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
+    fail "built V3 module version does not match canonical VERSION"
 [[ -s $MODULE && $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
     fail "V3 module missing or running-kernel vermagic mismatch"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \

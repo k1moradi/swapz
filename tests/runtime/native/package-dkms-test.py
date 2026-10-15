@@ -58,6 +58,13 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         version = subprocess.run([binary, "version"], capture_output=True, text=True)
         self.assertIn(VERSION, version.stdout)
         self.assertEqual(subprocess.run([binary, "status"], capture_output=True).returncode, 0)
+        installed_source = self.home / "usr/src" / ("swapz-" + VERSION)
+        self.assertEqual((installed_source / "kernel/extent-v3/VERSION").read_text().strip(), VERSION)
+        version_from_dkms = subprocess.run(
+            ["bash", "-c", 'source "$1"; printf "%s" "$PACKAGE_VERSION"',
+             "_", str(installed_source / "dkms.conf")],
+            cwd=self.home, capture_output=True, text=True, check=True)
+        self.assertEqual(version_from_dkms.stdout, VERSION)
         self.assertEqual(subprocess.run([binary, "start", "/dev/sda"],
                          capture_output=True).returncode, 2)
         self.assertNotEqual(self.invoke("install").returncode, 0)
@@ -68,6 +75,19 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         self.assertEqual(self.log.read_text().splitlines(),
                          ["add", "build", "install", "status", "remove"])
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
+
+    def test_dkms_config_tracks_changed_canonical_version(self):
+        # A future release updates VERSION only: DKMS must read that new
+        # value without a matching hand-edit to dkms.conf or package code.
+        other = self.home / "synthetic-release"
+        (other / "kernel/extent-v3").mkdir(parents=True)
+        (other / "dkms.conf").write_bytes((ROOT / "dkms.conf").read_bytes())
+        (other / "kernel/extent-v3/VERSION").write_text("3.0.0-alpha.99\n")
+        run = subprocess.run(
+            ["bash", "-c", 'source "$1"; printf "%s" "$PACKAGE_VERSION"',
+             "_", str(other / "dkms.conf")],
+            cwd=self.home, capture_output=True, text=True, check=True)
+        self.assertEqual(run.stdout, "3.0.0-alpha.99")
 
     def test_tamper_and_dkms_failure_keep_owned_files(self):
         self.assertEqual(self.invoke("install").returncode, 0)

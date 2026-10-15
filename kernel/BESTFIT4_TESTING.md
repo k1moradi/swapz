@@ -1,4 +1,11 @@
-# Experimental V2.2 bestfit4 kernel mode — benchmark preparation
+# Historical V2.2 bestfit4 benchmark preparation
+
+**ARCHIVED PROCEDURE — DO NOT EXECUTE ON CURRENT MAIN.**
+This V2.2 protocol and its live-device CLI are no longer supported
+operator commands. Use the active `make test` pipeline only on
+newly owned RAM-backed fixtures; a physical `/dev/sdb1` trial
+requires separate explicit authorization and further readiness review.
+The rest of this file is retained solely as source-specific history.
 
 This is the **first kernel implementation step** of a size-aware allocator, not
 the new 8/16 KiB physical-extent format. The driver remains on the existing

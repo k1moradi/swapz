@@ -15,7 +15,7 @@ Document placement, archiving and active tasks: [docs/ROADMAP.md](docs/ROADMAP.m
 and [docs/ROADMAP.md](docs/ROADMAP.md). Agent files must not duplicate policy.
 
 **Mandatory Make interface (CI enforced):** The only public
-root commands are `make -j2`, `make install`,
+root commands are `make`, `make install`,
 `make uninstall`, and `make test`. Never introduce
 aliases or an additional Make target. Install/cleanup
 is DKMS-version-owned; it must never activate swap,

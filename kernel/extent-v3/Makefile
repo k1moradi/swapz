@@ -27,6 +27,13 @@ all:
 		dst="$(SWAPZ_STAGE)/$${src##*/}"; \
 		if ! cmp -s "$$src" "$$dst"; then cp -f "$$src" "$$dst"; fi; \
 	done
+	@set -e; version="$$(cat "$(CURDIR)/VERSION")"; \
+	  printf '%s\n' "$$version" | grep -Eq '^3[.]0[.]0-alpha[.][0-9]+$$' || \
+	    { echo "BLOCKED: invalid canonical VERSION" >&2; exit 1; }; \
+	  header="$(SWAPZ_STAGE)/swapz-version.h"; \
+	  if ! printf '#define SV3_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
+	    printf '#define SV3_ALPHA_VERSION "%s"\n' "$$version" > "$$header"; \
+	  fi
 	$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" SV3_BUILD_SMOKE="$(SV3_BUILD_SMOKE)" modules
 
 clean:

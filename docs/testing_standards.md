@@ -17,7 +17,7 @@ utility does not rename the project or module.
 ## Non-negotiable owner Make API
 
 **Exactly four public root Make commands, with no exceptions or aliases:**
-`make -j2` builds the V3 kernel module and supported safe binary in
+`make` builds the V3 kernel module and supported safe binary in
 parallel; `make install` installs its versioned DKMS package and binary
 to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
@@ -51,6 +51,22 @@ not permit activation, physical devices or existing system swap.
 Current actionable V3 gaps belong in [the roadmap's open work queue](ROADMAP.md);
 historical validation transcripts belong in the archive indexed by
 [coding/documentation governance](coding_standards.md), not in the standards or task list.
+
+## Future physical `/dev/sdb1` trial (blocked pending new authorization)
+
+A dedicated physical-device trial is a legitimate **later release gate**,
+not an operation authorized by historic documents. V3's current
+`null_blk`-only guard must stay in place. Before changing it,
+require an independently reviewed source/host procedure, an exact new
+device identity and ownership check (major/minor, all aliases,
+active-swap/mount/holder state), full backups and explicit acceptance
+of destructive data loss, separate owner authorization for the exact
+device and operations, bounded fault/flush/suspend/GC testing,
+byte-exact readback and true lower READ/WRITE request/byte metrics,
+safe normal teardown and resource quarantine on ambiguity.
+Do **not** attempt system swap activation, force-removal, reboot or
+physical-device I/O as a substitute for missing owned-RAM evidence.
+Until all gates pass: **PHYSICAL TEST BLOCKED**.
 
 ## Qualification ladder (do not confuse evidence levels)
 
@@ -268,6 +284,16 @@ and on explicit dispatch, using a `build/python-cache` bytecode root.
 This ensures behavior-renamed legacy scripts receive executable
 contract validation without creating a branch or requiring physical
 or active-swap access. Report synthetic evidence only as synthetic.
+
+## Historical per-alpha deployment notes — NOT current commands
+
+The original source-specific examples below refer to retired
+`make verify`, `make deploy`, `make run` and `make bench-*`
+commands. **They are not executable instructions on current main.**
+The supported user command today is `make test`, which runs
+rootless source/kernel checks and then requires explicit
+noninteractive authorization for isolated owned-RAM work.
+Historical test records remain in Git history.
 
 ## Automated local deploy-and-verify gate
 

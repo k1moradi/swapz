@@ -20,7 +20,7 @@ Before creating or moving documentation, consult
 Use the active [V3 TODO](../docs/ROADMAP.md) instead of historical tasks.
 
 **Mandatory Make interface (CI enforced):** The only public
-root commands are `make -j2`, `make install`,
+root commands are `make`, `make install`,
 `make uninstall`, and `make test`. Never introduce
 aliases or an additional Make target. Install/cleanup
 is DKMS-version-owned; it must never activate swap,

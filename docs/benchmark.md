@@ -168,6 +168,18 @@ Keep source, binary, trace, fixture and raw CSV/JSON evidence on
 `main` with PASS/FAIL/BLOCKED, and update this standard in the
 same commit as every new benchmark protocol or verified finding.
  
+## Historical alpha-series measurements (retired command names)
+
+The dated measurements below describe exact older source revisions.
+Their former `make verify`, `make run`, `make deploy` and
+`make bench-*` commands are **no longer supported** and must not be
+run against current `main`. Their recorded PASS/FAIL/NOT RUN labels
+remain version-scoped evidence, not authorization for privileged or
+physical-device tests. Today the sole public testing/benchmark command
+is `make test`; its loaded phase is limited to approved owned-RAM
+`null_blk`. Always obtain the current version from
+[`kernel/extent-v3/VERSION`](../kernel/extent-v3/VERSION).
+
 ## First confirmed isolated V3 loaded run: October 14, 2026
 
 **CORRECTNESS PASS; PERFORMANCE ADVANTAGE NOT ESTABLISHED.**

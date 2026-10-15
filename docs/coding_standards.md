@@ -17,7 +17,7 @@ utility does not rename the project or module.
 ## Non-negotiable owner Make API
 
 **Exactly four public root Make commands, with no exceptions or aliases:**
-`make -j2` builds the V3 kernel module and supported safe binary in
+`make` builds the V3 kernel module and supported safe binary in
 parallel; `make install` installs its versioned DKMS package and binary
 to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
@@ -79,6 +79,15 @@ Historical alpha.8 disjoint-read bypass did not establish a matched-load lower-I
 Start from a real production C defect/bottleneck. Add a discriminating **direct-production-C** regression where possible, implement the smallest safe patch, compile with W=1/W=2 and tests from [compile.md](compile.md) and [testing_standards.md](testing_standards.md), then benchmark only according to [benchmark.md](benchmark.md). Never weaken assertion, verification or null_blk admission to manufacture PASS. Preserve failing logs; attribute helper defects separately from kernel faults.
 
 **Mandatory end of EVERY implementation task:** update the **relevant one or more of these four governing standards in the same `main` commit**, documenting new behavior, lesson, invariant, reproducible test and remaining limits. Update `README.md` for user-facing changes, and `VISION.md` if project acceptance criteria change. CI can enforce a standards-file co-change, but it cannot prove factual accuracy. Keep [current qualification gates](testing_standards.md), older `CODEX_VALIDATION.md` and previous PRs as **archival evidence**, not independent active policy.
+
+## Canonical project version
+
+`kernel/extent-v3/VERSION` is the only manually edited project version.
+The kernel build generates its version header; `dm-swapz.ko`
+exports `MODULE_VERSION`, DKMS sources the installed VERSION file,
+`swapz3ctl` uses the same string, and CI/loaded safety gates must
+verify consistency. Never pin independent alpha literals in production
+C, `dkms.conf`, helper scripts, Make rules or CI assertions.
 
 ## Documentation ownership and consolidated standards
 

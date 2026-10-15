@@ -1,12 +1,19 @@
-# swapz V3.0.0-alpha.6 — loaded-kernel admission gate for Codex
+# Historical alpha.6 loaded-kernel gate — NOT current authorization
 
-**THIS IS NOT AN AUTHORIZATION TO RUN V3 ON A PHYSICAL DISK OR AS SYSTEM SWAP.**
+**Historical source protocol only; never treat its alpha.6 tests or old
+host descriptions as approval to run current V3.** The active version is
+defined by [VERSION](VERSION); supported operator testing is covered by
+[testing standards](../../docs/testing_standards.md) and the
+[roadmap](../../docs/ROADMAP.md).
 
-The project's testing user has already authorized privileged operations on a
-dedicated physical development host and the specific SD partition /dev/sdb1
-after safety checks. **But the V3 target currently refuses non-null_blk
-backing in its constructor**. This restriction is intentional and may not
-be bypassed by the test harness. **ABSOLUTELY NO REBOOT.**
+**A future `/dev/sdb1` test is anticipated but NOT currently authorized.**
+The present V3 constructor continues to refuse non-`null_blk` backing.
+Explicit fresh authorization must identify the exact physical device,
+prove it is unused by mounts/system swap and approve the exact operations
+after independent RAM-only qualification and a safe rollback plan.
+Never bypass the backing guard, activate system swap, force teardown
+or reboot. Everything below describes the retired alpha.6 source only,
+not an approved runbook for the current module.
 
 ## Alpha.6 NEW first gate — actual lower request aggregation
 

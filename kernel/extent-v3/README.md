@@ -1,4 +1,4 @@
-# Current development: V3.0.0-alpha.21 experimental Device Mapper target
+# Current development: experimental V3 Device Mapper target (see VERSION)
 
 **Alpha.10 measures time from first accepted window record to
 flush entry**, without changing worker scheduling, FUA handling,
@@ -158,12 +158,14 @@ against Ubuntu kernel headers **without inserting it or altering the machine**.
 - full host-owned `null_blk` and dedicated `/dev/sdb1` validation with
   matching achieved reader load, fio CRC32C, physical counters and cold p99.
 
-The user authorized physical-host `sudo` and verified SD-card experiments,
-but **explicitly prohibited ANY reboot**. None of the code here makes a
+The former source narrative is historical, **not permission** for
+physical-device operations. A future separately authorized test may
+include `/dev/sdb1` only after the active owned-RAM release gates,
+positive device identity/isolation checks and explicit fresh owner consent. None of the code here makes a
 module/device load into swap safe, and no privileged test has been executed
 from this branch.
 
-## Why this branch exists
+## Historical research motivation (not active branch guidance)
 
 Codex independently qualified the opt-in **4KiB bestfit4** implementation in
 PR #38, showing **12→8** on a single clustered 2200/1600-byte mixed window,
