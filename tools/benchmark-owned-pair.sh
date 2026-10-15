@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
-    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced [--async-prepare]'
+    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced [--lower-mbps 20] [--async-prepare]'
     exit 0
 fi
 PROFILE=default
@@ -15,11 +15,17 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
+LOWER_MBPS=0
 # Explicitly permit asynchronous preparation on the QD32 medium experiment.
 # Nothing about an arbitrary extra flag may authorize RAM device creation.
 if [[ $# -gt 1 && ${!#} == --async-prepare ]]; then
     ASYNC_PREPARE=1
     set -- "${@:1:$(( $# - 1 ))}"
+fi
+# Only an exact 20 MiB/s cap on both owned null_blk devices is allowed.
+if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps && ${!#} == 20 ]]; then
+    LOWER_MBPS=20
+    set -- "${@:1:$(( $# - 2 ))}"
 fi
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
     :
@@ -49,8 +55,9 @@ else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
     exit 2
 fi
-if (( ASYNC_PREPARE )) && [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
-    echo 'BLOCKED: async preparation requires owned medium unpaced QD32' >&2
+if (( ASYNC_PREPARE || LOWER_MBPS )) &&
+   [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
+    echo 'BLOCKED: async/rate-cap trials require owned medium unpaced QD32' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -104,7 +111,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE RATE_MODE=$RATE_MODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -222,9 +229,21 @@ create_owned_ram() {
     echo 64 > "$config/size"
     echo 4096 > "$config/blocksize"
     echo 1 > "$config/memory_backed"
+    if (( LOWER_MBPS )); then
+        [[ -e "$config/mbps" ]] ||
+            fail 'owned null_blk does not expose a per-device mbps limit'
+        echo "$LOWER_MBPS" > "$config/mbps" ||
+            fail 'owned null_blk rejected bandwidth limit'
+        [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
+            fail 'owned null_blk bandwidth limit did not match'
+    fi
     echo 1 > "$config/power"
     [[ $(cat "$config/memory_backed") == 1 && $(cat "$config/power") == 1 ]] ||
         fail 'RAM backing is not active'
+    if (( LOWER_MBPS )); then
+        [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
+            fail 'owned null_blk powered bandwidth cap mismatch'
+    fi
     index="$(cat "$config/index")"
     [[ $index =~ ^(0|[1-9][0-9]*)$ ]] || fail 'configfs index invalid'
     for (( n=0; n<50; ++n )); do

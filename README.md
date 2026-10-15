@@ -54,6 +54,10 @@ After a rootless `make test` pass, **separate explicit owner authorization**
 is required for the owned-RAM-only QD32 comparison:
 `sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced --async-prepare`.
 The same command without `--async-prepare` is the same-source control.
+Append `--lower-mbps 20` immediately before `--async-prepare` in the
+candidate, and to the end of the control, to configure and verify **both**
+owned null_blk lowers at 20 MiB/s before powering them on.
+This is only a simulated lower-rate limit, not actual flash evidence.
 The new `prep_lower_write_overlap_starts` status value measures LZ4
 starts observed during a lower write; it is not a useful-MB/s win.
 **Loaded async correctness, bounded-bandwidth performance and endurance:

@@ -808,6 +808,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
                       benchmark)
         self.assertIn("--async-prepare", benchmark)
         self.assertIn("RATE_MODE != unpaced", benchmark)
+        self.assertIn("LOWER_MBPS=20", benchmark)
+        self.assertIn('"$config/mbps"', benchmark)
+        self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
 
     def test_map_and_teardown_are_owned(self):
         admitted = body("sv3_map")

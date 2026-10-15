@@ -36,6 +36,16 @@ amplification. A measured upper throughput boost must be sustained
 without a correctness or unacceptable read-tail cost. This is still
 **NOT RUN** on a loaded kernel, and all V3 devices remain null_blk-only.
 
+The owner-only QD32 benchmark also supports the exact opt-in suffix
+`--lower-mbps 20` before optional `--async-prepare`. When selected,
+it checks the null_blk per-device `mbps` configfs attribute, writes
+20 **MiB/s** to **both** newly owned memory-backed devices while they
+are powered off, verifies each configured rate both before and after
+power-on, and refuses absent/mismatching attributes. Record achieved
+lower bytes/elapsed wall time independently: the presence of a
+configured cap is not evidence of saturation or a write-endurance win.
+Neither cap nor asynchronous option runs from `make test`.
+
 The owner-only benchmark supports `--async-prepare` as a suffix
 to the explicitly authorized `--run-owned-ram-pair --profile medium
 --retain-ms {1|2} --unpaced` experiment. It records the module

@@ -133,6 +133,13 @@ recycles its buffer and completes the accepted upper BIO. A reserved
 64-buffer mempool plus semaphore caps resident preparation memory.
 The unchanged default is `async_prepare=0`.
 
+Rootless preflight also rejects unsupported cap values, improper suffixes
+and use of the experimental `--lower-mbps 20` on any profile other than
+the explicitly authorized medium unpaced QD32 owned-RAM pair. On those
+two owned null_blk instances, the harness validates the configfs
+`mbps` attribute before activation and again after power-on. This
+configuration alone is not independently measured saturation.
+
 Run rootless contracts and W=1/W=2 builds first. Before promotion,
 loaded RAM-only qualification must cover 65+ queued BIOs, same-page
 overwrites, raw/zero/compressed mixes, independent/conflicting reads,
