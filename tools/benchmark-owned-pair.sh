@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced [--lower-mbps 20] [--async-prepare]'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|20|80] [--completion-nsec 150000|1000000] [--async-prepare] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -17,6 +17,8 @@ MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
 LOWER_MBPS=0
+COMPLETION_NSEC=0
+IRQMODE=1
 REPLAY_V3_FIRST=0
 # The final internal suffix controls safe replay order only.
 if [[ $# -gt 1 && ${!#} == --v3-first ]]; then
@@ -35,11 +37,23 @@ if [[ $# -gt 1 && ${!#} == --async-prepare ]]; then
     ASYNC_PREPARE=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
-# Only an exact 20 MiB/s cap on both owned null_blk devices is allowed.
-if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps && ${!#} == 20 ]]; then
-    LOWER_MBPS=20
+# Exact internal device-model suffixes. Never permit arbitrary device
+# settings to authorize privileged block creation.
+if [[ $# -ge 3 && ${@: -2:1} == --completion-nsec &&
+      ( ${!#} == 150000 || ${!#} == 1000000 ) ]]; then
+    COMPLETION_NSEC="${!#}"
+    IRQMODE=2
     set -- "${@:1:$(( $# - 2 ))}"
 fi
+if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps &&
+      ( ${!#} == 10 || ${!#} == 20 || ${!#} == 80 ) ]]; then
+    LOWER_MBPS="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+case "$LOWER_MBPS:$COMPLETION_NSEC" in
+    0:0|20:0|10:1000000|80:150000) ;;
+    *) echo 'BLOCKED: unsupported owned-RAM model/cap/latency tuple' >&2; exit 2 ;;
+esac
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
     :
 elif [[ $# == 3 && $1 == --run-owned-ram-pair &&
@@ -73,7 +87,7 @@ if (( REPLAY_V3_FIRST )) &&
     echo 'BLOCKED: V3-first requires owned medium QD32' >&2
     exit 2
 fi
-if (( ASYNC_PREPARE || LOWER_MBPS )) &&
+if (( ASYNC_PREPARE || LOWER_MBPS || COMPLETION_NSEC )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
     echo 'BLOCKED: async/rate-cap trials require owned medium unpaced QD32' >&2
     exit 2
@@ -134,7 +148,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -252,17 +266,30 @@ create_owned_ram() {
     echo 64 > "$config/size"
     echo 4096 > "$config/blocksize"
     echo 1 > "$config/memory_backed"
-    [[ -e "$config/mbps" ]] ||
-        fail 'owned RAM lacks verifiable mbps config'
+    # All model parameters are applied to the newly owned RAM instance
+    # BEFORE power=1, and reread afterwards. A host without timer mode
+    # is BLOCKED, never silently degraded into uncapped low-latency RAM.
+    for attr in mbps irqmode completion_nsec; do
+        [[ -e "$config/$attr" ]] ||
+            fail "owned RAM lacks verifiable $attr config"
+    done
     echo "$LOWER_MBPS" > "$config/mbps" ||
-        fail 'owned RAM rejected cap (0 means uncapped)'
-    [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
-        fail 'owned RAM cap mismatch'
+        fail 'owned RAM rejected bandwidth cap'
+    echo "$COMPLETION_NSEC" > "$config/completion_nsec" ||
+        fail 'owned RAM rejected completion delay'
+    echo "$IRQMODE" > "$config/irqmode" ||
+        fail 'owned RAM rejected completion mode'
+    [[ $(cat "$config/mbps") == "$LOWER_MBPS" &&
+       $(cat "$config/completion_nsec") == "$COMPLETION_NSEC" &&
+       $(cat "$config/irqmode") == "$IRQMODE" ]] ||
+        fail 'owned RAM storage-model settings differ from request'
     echo 1 > "$config/power"
     [[ $(cat "$config/memory_backed") == 1 && $(cat "$config/power") == 1 ]] ||
         fail 'RAM backing is not active'
-    [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
-        fail 'owned RAM powered cap mismatch'
+    [[ $(cat "$config/mbps") == "$LOWER_MBPS" &&
+       $(cat "$config/completion_nsec") == "$COMPLETION_NSEC" &&
+       $(cat "$config/irqmode") == "$IRQMODE" ]] ||
+        fail 'owned RAM powered model settings mismatch'
     index="$(cat "$config/index")"
     [[ $index =~ ^(0|[1-9][0-9]*)$ ]] || fail 'configfs index invalid'
     for (( n=0; n<50; ++n )); do
@@ -299,6 +326,7 @@ create_owned_ram() {
 create_owned_ram  # bare uncompressed
 create_owned_ram  # V3 backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
+note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE"
 modprobe dm_mod
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
     fail 'V3 module insertion rejected'

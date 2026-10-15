@@ -21,15 +21,56 @@ and [benchmark.md](benchmark.md).
 
 ## Three-axis qualification specification
 
-**Status: first bounded matrix implemented after alpha.22's capped-only
-owner run.** The official `make test` now includes capped and uncapped
-**mixed** QD32 trials, verified 4MiB packed-population sequential and
-random READ timings, and replay-process CPU use. It does **not** yet
+**Status: modeled RAM-only matrix.** The official `make test` now
+includes four QD32 mixed regimes: (1) 20MiB/s bandwidth-only reference
+(`irqmode=1`); (2) **synthetic slow-device model** (10MiB/s,
+`irqmode=2`, `completion_nsec=1000000`); (3) **synthetic
+higher-bandwidth model** (80MiB/s, timer completion delay 150000ns);
+and (4) **uncapped `mbps=0` RAM as a software-overhead diagnostic**.
+Each regime has four ABBA sync/async and ABAB raw/V3-order pairs.
+The suite also runs byte-verified 4MiB packed-populated sequential and
+random READs and records replay-process CPU. It does **not** yet
 include independent write-only saturation, a 100MiB distinct working set,
 attributed kernel worker CPU, cold-device cache behavior, or sustained
 live GC. A correctness PASS must never imply those are qualified.
 The full matrix still needs the owner's loaded run at the new source
 commit; rootless CI cannot provide real device evidence.
+
+### Interpreting synthetic bandwidth and completion delays
+
+`null_blk` with `memory_backed=1` remains RAM storage even when it
+enforces `mbps` bandwidth and timer-driven completion delays.
+Linux `irqmode=2` and `completion_nsec` delay individual block
+request completions; the fixed 1ms and 0.15ms values are **illustrative
+model settings, not measured SD/SSD characteristics**. Different
+devices vary greatly by operation, queue depth, flush/fence,
+sequential/random transfer, controller cache and medium condition.
+The write/read bandwidth cap is a shared byte budget, not a
+latency-inclusive physical-device model. All new attributes must exist
+and match on BOTH owner-allocated `null_blk` devices before/after
+power=1, otherwise loaded qualification is **BLOCKED**. Verify the
+exact model tuple in the sanitized report. No model result proves
+SD wear reduction, NAND-write amplification, real swap reclaim
+performance or physical media safety.
+
+**Interpretation policy:** The `uncapped` row is
+`DIAGNOSTIC_ONLY_NO_PRODUCT_PERFORMANCE_VERDICT`; a slower compressed
+RAM path measures software overhead, not an expected outcome on SD.
+The bandwidth-only control is a reference, and the two timer-delayed
+profiles are explicitly `SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA`.
+Report all positive and negative per-regime results without a fabricated
+cross-device product PASS. Separate performance verdicts from bounded
+device-safety/correctness PASS. Configured `null_blk` timer delays may
+affect both reference and compressed paths differently because each
+submits different lower request counts.
+
+**Operator safety:** neither a model run nor the experimental V3
+module is approved for an SD card formatted as swap. Do not activate
+swap, format a partition, mount/write a real device, manipulate
+another mapper or clear host caches. A genuine media exercise needs
+separate explicit, destructive approval plus a dedicated safe recovery
+plan, extensive suspend, failure, flush, GC and memory-pressure
+qualification, and objective evidence from actual isolated media.
 
 ### Quantities and endpoints
 

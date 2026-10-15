@@ -75,9 +75,13 @@ not host swap/device paths or credentials.
 
 A PASS means the defined tests completed, **not** that asynchronous
 preparation improves throughput or that real flash lifetime is proven.
-The matrix now runs **four 20MiB/s capped and four uncapped mixed-load
-QD32 pairs** with the same source, fixture and logical trace. It shows
-(1) capped versus uncapped useful WRITE MB/s, (2) independently measured
+The matrix now runs **sixteen owned-RAM mixed-load QD32 pairs**:
+four bandwidth-only controls (20MiB/s), four low-bandwidth/high-delay
+RAM models (10MiB/s, 1ms per-request completion), four
+higher-bandwidth/lower-delay RAM models (80MiB/s, 0.15ms), and four
+uncapped-RAM **software-overhead diagnostics**. All share the same
+source, fixture and logical trace. It shows
+(1) separately labeled regime-specific useful WRITE MB/s, (2) independently measured
 lower WRITE byte/request savings, and (3) actual timed, verified
 **4MiB** sequential and seeded-random reads *after* concurrently
 populating compressed pages. This is not a 100MB cold SSD swap-in.
@@ -107,6 +111,22 @@ scoped replay-process CPU. Independent write-only saturation, 100MiB
 distinct-page SSD reads, kernel-worker CPU attribution, and sustained
 live GC are still separate future qualification work.
 
+## SD-card / existing swap partition safety boundary
+
+**NOT READY for a real SD-card swap partition.** `make test` never
+writes to physical storage or any active system swap; it verifies distinct
+fresh RAM-backed `null_blk` ownership and safe teardown. The new models
+simulate configured block completion delay and shared bandwidth, not
+your SD card's firmware, wear leveling, erase blocks, cache, durability,
+actual reclaim/page-fault latency, suspend/resume, failure and live-GC
+behavior. Do not use `swapon`, `swapoff`, partition formatting or
+`dmsetup` on an existing SD-card swap partition for this project.
+Even if the partition is currently inactive, the experiment is not a
+qualified data-safe physical-device deployment. Dedicated media testing
+must be a separately designed, explicit destructive opt-in with verified
+device identity and written rollback/recovery plan; no such public
+operation has been authorized or implemented.
+
 ## Supported root Make interface
 
 There are **exactly four supported root commands**. Do not add aliases
@@ -117,7 +137,7 @@ or invoke internal build targets directly as public goals.
 | `make` | Build V3 without loading a module (parallel Make flags remain optional) |
 | `make install` | Install version-owned V3 DKMS and safe helper without activation |
 | `make uninstall` | Remove only that version-owned installation |
-| `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired capped and uncapped sync/async benchmarks; no interactive sudo |
+| `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired capped, timer-delayed and uncapped-diagnostic sync/async benchmarks; no interactive sudo |
 
 **Parallel, incremental compilation:** `make test -j2` is the same
 single official test command with two compilation jobs. The Device Mapper
@@ -126,14 +146,14 @@ independent Make prerequisites; unchanged userspace outputs are reused.
 Kernel source is staged only when its bytes change, and normal,
 `W=1`, and `W=2` builds keep separate cached outputs under
 `build/kernel/{experimental,w1,w2}/`. Native production-C suites inherit
-the Make jobserver. Loaded `null_blk` correctness and the eight
+the Make jobserver. Loaded `null_blk` correctness and the sixteen
 counterbalanced benchmark sessions **remain strictly sequential**.
 Missing noninteractive privilege still yields BLOCKED, not a partial PASS.
 
 **Owner hold:** do not execute privileged installation or unowned-device
 testing. Full `make test` now executes rootless native/source checks,
 W=1/W=2 kernel compilation, an actual newly owned RAM/null_blk module
-readback smoke, then eight owned-RAM benchmark sessions (four capped, four uncapped) in
+readback smoke, then sixteen owned-RAM benchmark sessions (four in each of four synthetic regimes) in
 sync/async/async/sync order. Each off/V3 comparison uses the same
 immutable logical replay, reports measured lower bytes/requests, and
 checks correct readback. The loaded phase requires root or previously

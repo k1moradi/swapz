@@ -99,7 +99,9 @@ make test
 ~~~
 
 It owns all native suites, source and safety contracts, both warning-level
-kernel builds, loaded owned-RAM oracle and eight paired benchmark trials (four capped, four uncapped).
+kernel builds, loaded owned-RAM oracle and sixteen paired RAM-backed
+benchmark trials (four per regime: capped bandwidth-only, synthetic
+slow/high-delay, synthetic fast/low-delay, uncapped diagnostics).
 There are no supported per-suite test commands or separate benchmark
 entry points. Internal native Make rules remain private implementations.
 
@@ -111,7 +113,7 @@ The `make test -j2` variant of the *same official test command* may run
 independent production-C, userspace and Kbuild compile jobs in parallel,
 but its rootless, W=1, W=2 and loaded-device phases must be strictly
 ordered and fail fast. Loaded smoke must finish before any benchmark,
-and eight counterbalanced benchmark sessions must not overlap. The
+and sixteen counterbalanced benchmark sessions must not overlap. The
 kernel Makefile stages source only when content changes, and W=1/W=2
 use independent `build/kernel/w1/` and `build/kernel/w2/` outputs,
 never overwriting the default module eligible for loaded testing.
@@ -141,6 +143,40 @@ syntax/preflight checks still cover both branches.
 commands into `tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile
 continues to expose only the public `make test` entry point.
+
+## Explicit RAM-backed storage-delay models, not SD deployment
+
+The single official `make test` now measures sixteen owner-isolated
+RAM-backed off/V3 pairs across `capped`, `sd_emulated`,
+`ssd_emulated` and `uncapped`. For each distinct owned null_blk
+instance, configure and read back the exact `mbps`, `irqmode`,
+and `completion_nsec` values **before** power=1 and verify them
+again **after** power=1, rejecting missing configfs features rather
+than silently disabling the model. Model tuples allowed for internal
+helpers are exactly `(20,1,0)`, `(10,2,1000000)`,
+`(80,2,150000)` and `(0,1,0)` (cap MiB/s, irqmode, delay ns).
+Any other tuple must be BLOCKED before touching kernel configfs.
+Each freshly owned pair must emit a sanitized measured-model marker
+so the summary can refuse forged/inconsistent regimes.
+
+All sixteen runs use the same immutable fixture and manifest,
+counterbalanced sync/async and off/V3 order, strictly sequential
+owned-device allocation/removal, exact source identification and
+byte-verified oracles. Uncapped RAM is an **overhead diagnostic**
+rather than a product-performance gate; other rows are **synthetic
+storage-delay scenarios only**. Their device labels are not
+measurements of an actual SD card or SSD. Report on both throughput
+and packed-read amplification without hiding losses. The 5% gain
+threshold remains exploratory, not statistically significant.
+
+**The code and tests remain ineligible for any real SD-card swap
+partition.** No test may accept a physical device path, activate
+`swapon`, disable or modify host swap, or treat existing SD swap as
+owned by the harness. Real-media evaluation needs separately
+authorized destructive testing and additional sustained GC,
+flush/failure, reclaim/page-in, suspend, authority, CPU/memory,
+and controlled recovery qualification. Never reinterpret an
+owner's request to model SD latency as permission to write to SD.
 
 ## Capped/uncapped matrix and fixed-volume packed-read contract
 

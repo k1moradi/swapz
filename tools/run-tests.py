@@ -16,6 +16,20 @@ REPORT = ROOT / "build/test_results.json.xz"
 GIT_RESULT = "test_results.json.xz"
 REPO = "k1moradi/swapz"
 COLUMNS = ("off", "sync", "async")
+# Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
+# Labels describe SYNTHETIC profiles, never a real SD/SSD device.
+MODEL_SPECS = {
+    "capped": {"cap_mib_s": 20, "completion_nsec": 0, "irqmode": 1,
+               "purpose": "BANDWIDTH_ONLY_REFERENCE"},
+    "sd_emulated": {"cap_mib_s": 10, "completion_nsec": 1000000, "irqmode": 2,
+                    "purpose": "SYNTHETIC_LOW_BANDWIDTH_HIGH_DELAY"},
+    "ssd_emulated": {"cap_mib_s": 80, "completion_nsec": 150000, "irqmode": 2,
+                     "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY"},
+    "uncapped": {"cap_mib_s": 0, "completion_nsec": 0, "irqmode": 1,
+                 "purpose": "OVERHEAD_DIAGNOSTIC_ONLY"},
+}
+MODEL_ORDER = tuple(MODEL_SPECS)
+
 
 
 def git_sha():
@@ -82,9 +96,9 @@ def failure_context(output):
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             pair_number += 1
             mode = "async" if line.rstrip().endswith("=1") else "sync"
-            phase = f"owned RAM comparison {pair_number}/4 ({mode})"
+            phase = f"owned RAM comparison {pair_number}/16 ({mode})"
         elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
-            phase = f"after completed owned RAM comparison {pair_number}/4"
+            phase = f"after completed owned RAM comparison {pair_number}/16"
 
     if "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
@@ -169,10 +183,20 @@ def parse_sessions(output):
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current = {"async_prepare": int(line.rsplit("=", 1)[-1]),
                        "regime": regime, "status": "INCOMPLETE", "arms": {},
-                       "order": "unknown"}
+                       "order": "unknown", "device_model": None}
             sessions.append(current)
         elif current is not None and line.startswith("REPLAY_ORDER="):
             current["order"] = line.partition("=")[2].strip()
+        elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            match = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+)",
+                line)
+            if match:
+                current["device_model"] = {
+                    "cap_mib_s": int(match.group(1)),
+                    "completion_nsec": int(match.group(2)),
+                    "irqmode": int(match.group(3)),
+                }
         elif current is not None and line.startswith(("V3_STATUS_BEFORE=", "V3_STATUS_AFTER=")):
             name = "before" if line.startswith("V3_STATUS_BEFORE=") else "after"
             status_text = line.partition("=")[2]
@@ -265,7 +289,7 @@ def mean(items, key):
 def benchmark_verdicts(sessions):
     """Validate 8 loaded sessions; keep capped/uncapped conclusions separate."""
     regimes = {}
-    for regime in ("capped", "uncapped"):
+    for regime in MODEL_ORDER:
         rows = [s for s in sessions if s.get("regime") == regime]
         if len(rows) != 4 or [s.get("async_prepare") for s in rows] != [0, 1, 1, 0] \
                 or any(s.get("status") != "PASS" or
@@ -274,10 +298,18 @@ def benchmark_verdicts(sessions):
                        for i, s in enumerate(rows)):
             return {"overall": "INCOMPLETE",
                     "reason": f"{regime}: four valid ABBA/ABAB pairs required"}
+        expected = MODEL_SPECS[regime]
+        for row in rows:
+            actual = row.get("device_model")
+            if not isinstance(actual, dict) or any(
+                    actual.get(key) != expected[key]
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode")):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: exact owned-RAM bandwidth/timer model was not verified"}
         regimes[regime] = rows
-    if len(sessions) != 8:
-        return {"overall": "INCOMPLETE", "reason": "exactly eight owned pairs required"}
-    all_rows = regimes["capped"] + regimes["uncapped"]
+    if len(sessions) != len(MODEL_ORDER) * 4:
+        return {"overall": "INCOMPLETE", "reason": "exactly sixteen owned pairs required"}
+    all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
         status = row.get("kernel_status", {})
         for field in ("burst_tail_flushes", "packed_early_commits",
@@ -379,9 +411,10 @@ def benchmark_verdicts(sessions):
         }
         verdicts[regime] = {
             "columns": columns, "criteria": criteria,
-            "configured_cap_mib_s": 20 if regime == "capped" else 0,
-            "measurement": "20MiB/s shared read/write budget" if regime == "capped"
-                           else "unthrottled RAM backing, NOT physical SSD",
+            "device_model": MODEL_SPECS[regime],
+            "interpretation": ("DIAGNOSTIC_ONLY_NO_PRODUCT_PERFORMANCE_VERDICT"
+                               if regime == "uncapped" else
+                               "SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA"),
             "alpha22_kernel_counters": {
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
@@ -398,6 +431,7 @@ def benchmark_verdicts(sessions):
         "cpu_scope": "replay userspace process and threads; kernel DM workers NOT ATTRIBUTED",
         "physical_media": "NOT_TESTED",
         "statistical_confidence": "EXPLORATORY: two pairs per mode/regime, materiality 5%, no CI",
+        "real_swap_device": "NOT_AUTHORIZED_NOT_TESTED",
     }
 
 
@@ -407,10 +441,15 @@ def print_bench(result):
         print("  Benchmark matrix: NOT QUALIFIED "
               f"({verdict.get('reason', verdict.get('overall', 'NOT_RUN'))})")
         return
-    for regime in ("capped", "uncapped"):
+    for regime in MODEL_ORDER:
         data = verdict["regimes"][regime]
         columns = data["columns"]
+        cfg = data["device_model"]
         print(f"\n  {regime.upper()} QD32 — raw vs sync vs async (two pairs/mode)")
+        print(f"  MODEL: RAM null_blk cap={cfg['cap_mib_s']} MiB/s, "
+              f"irqmode={cfg['irqmode']}, "
+              f"completion delay={cfg['completion_nsec']} ns")
+        print(f"  SCOPE: {data['interpretation']}")
         print(f"  {'Metric':<33} {'Raw off':>12} {'swapz sync':>12} {'swapz async':>12}")
         print("  " + "-" * 73)
         for title, key, unit in [
@@ -447,7 +486,8 @@ def print_bench(result):
               f"pack closes={kc['close_pack_ready']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
               f"GC victims={kc['gc_victims']:.1f}")
-    print("\n  LIMITATIONS: two pairs per mode; no significance claim; replay CPU"
+    print("\n  LIMITATIONS: unthrottled RAM is diagnostic only; every modeled profile is synthetic. "
+          "Two pairs per mode, no confidence interval; replay CPU"
           " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
           "live GC NOT EXERCISED.")
 
@@ -621,7 +661,7 @@ def main():
                                  f"KDIR={args.kdir}", "W=1", "all"]),
         ("Kernel warnings W=2", ["make", "-C", "kernel/extent-v3",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
-        ("Owned RAM smoke and 8 pairs", ["bash", "tools/test-loaded.sh"])
+        ("Owned RAM smoke and 16 pairs", ["bash", "tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):

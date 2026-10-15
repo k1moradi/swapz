@@ -123,6 +123,17 @@ branch or changing remote HEAD cause clearly reported SKIPPED/FAILED
 Git sync, independently of test PASS/FAIL/BLOCKED. No force push,
 interactive login, additional public Make goal or user-file staging.
 
+## Owned storage-model requirements
+
+`make test` requires `null_blk` configfs controls for `mbps`,
+`irqmode`, and `completion_nsec` on each newly owned RAM device.
+Exact 20/10/80/0 cap configurations are read back with their matching
+mode/timer values before and after power-on. If unsupported, the
+loaded phase fails visibly as BLOCKED and no physical device is
+substituted. Only `make test -j2` is the supported public interface.
+An existing SD swap partition is **never** a test target. All
+modeled measurements remain RAM-only and non-production evidence.
+
 ## Only supported root Make commands (owner policy)
 
 ```sh
@@ -136,7 +147,7 @@ make test        # rootless checks, W=1/W=2, then owned-RAM smoke and paired ben
 native-suite make goals are not a public user interface. Missing kernel
 headers fail the build/test. `make test` runs the rootless gates then
 `tools/test-loaded.sh`, which executes actual owned-RAM kernel smoke and
-eight off/V3 runs: four 20 MiB/s capped and four uncapped (each sync/async/async/sync). The
+sixteen off/V3 runs: four each at 20 MiB/s bandwidth-only, 10 MiB/s plus 1ms completion delay, 80 MiB/s plus 0.15ms completion delay, and uncapped RAM diagnostic (each sync/async/async/sync). The
 loaded phase requires root or previously authorized `sudo -n`; it
 **never prompts**, changes host swap or installs DKMS. In each pair the replay also performs actual 4MiB verified READ-only
 sequential and random passes of a concurrently written dataset; it

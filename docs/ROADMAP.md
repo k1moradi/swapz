@@ -24,9 +24,11 @@ Only `main` is used unless the owner explicitly authorizes otherwise.
 
 The [three-axis specification](benchmark.md#three-axis-qualification-specification)
 develops the owner's swap-out speed, lower-write/endurance proxy and
-data-ready swap-in goals. An **exploratory capped/uncapped mixed matrix**
-and verified 4MiB packed-populated read passes are now implemented as
-private phases of the single official `make test`. A full write-only
+data-ready swap-in goals. An **exploratory four-regime RAM-only matrix** (20MiB/s bandwidth-only,
+10MiB/s plus 1ms completion, 80MiB/s plus 0.15ms completion and
+uncapped RAM overhead diagnostic) and verified 4MiB
+packed-populated read passes are now implemented as private phases of
+the single official `make test`. A full write-only
 saturation matrix, actual cold-device reads and live-GC profiling
 are still planned.
 
@@ -38,12 +40,17 @@ are still planned.
       useful throughput, lower WRITE bytes/requests, READ tails,
       `burst_tail_flushes`, closure conservation and safe teardown.
       Current capped results cannot establish uncapped improvement.
-- [x] Add capped AND uncapped **mixed-QD32** owned-RAM trials
-      as private stages with per-regime paired controls and a 5% exploratory
-      materiality threshold; a negative uncapped result stays visible.
+- [x] Add four synthetic/diagnostic **mixed-QD32** owned-RAM regimes
+      as private stages with same-trace paired controls and a 5%
+      exploratory materiality threshold; a negative uncapped result
+      stays visible as *software overhead only*. Physical SD/SSD
+      behavior is NOT qualified.
 - [x] Add timed actual **4MiB** fixed-volume sequential/random reads of
       datasets populated through packed concurrent writes; verify every
       returned page, keep distinct working set and RAM/cache limitations.
+- [ ] Obtain separate authorization and a rollback/recovery plan before
+      any destructive SD-card testing; do not touch swap partitions with
+      the current experimental module or tests.
 - [ ] Expand to separately measured write-only saturation (QD1/4/8/32)
       with at least five pairs per regime and confidence intervals.
 - [ ] Extend packed reads to a larger distinct working set with realistic

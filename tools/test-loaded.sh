@@ -67,18 +67,25 @@ assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
 
-# Capped and uncapped are separate, fully identical logical work.
-# ABBA sync/async and alternating off/V3 replay order within each regime.
-# Every child retains its own fresh, identity-checked RAM-only pair.
-for regime in capped uncapped; do
+# The uncapped RAM baseline is an overhead diagnostic, not a modeled
+# SD/SSD verdict. The capped-only control remains for longitudinal trends.
+# Two explicit, fixed bandwidth+request-delay models help expose where
+# compression beats a slow device; they are NOT physical SD/SSD proxies.
+# All sixteen pairs remain separately owned RAM devices, with exact
+# cap/irqmode/timer settings verified before and after power-on.
+for regime in capped sd_emulated ssd_emulated uncapped; do
     printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
     index=0
     for async_prepare in 0 1 1 0; do
         arguments=(--run-owned-ram-pair --profile medium
                    --retain-ms 2 --unpaced)
-        if [[ $regime == capped ]]; then
-            arguments+=(--lower-mbps 20)
-        fi
+        case "$regime" in
+            capped) arguments+=(--lower-mbps 20) ;;
+            sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
+            ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
+            uncapped) ;;
+            *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
+        esac
         if (( async_prepare )); then
             arguments+=(--async-prepare)
         fi
@@ -95,5 +102,5 @@ for regime in capped uncapped; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, four capped and four uncapped pairs completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke and sixteen RAM-only benchmark pairs across four regimes completed.' \
     'PERFORMANCE_WIN=UNDETERMINED: review independent MB/s, p95/p99 and read/write request results.'

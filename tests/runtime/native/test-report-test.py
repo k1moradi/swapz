@@ -78,11 +78,13 @@ def arm(candidate, *, mode, regime):
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39, "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
-    for regime in ("capped", "uncapped"):
+    for regime in runner.MODEL_ORDER:
+        spec = runner.MODEL_SPECS[regime]
         out.append(f"START_OWNED_RAM_REGIME={regime}")
         for i, mode in enumerate((0, 1, 1, 0)):
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
+            out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
             out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
             out.append("V3_STATUS_AFTER=close_pack_ready=32 burst_tail_flushes=7 packed_early_commits=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
             for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
@@ -95,20 +97,56 @@ def synthetic_log():
 
 
 class ReportContract(unittest.TestCase):
+    def test_unsupported_owned_storage_delay_tuples_fail_before_privilege(self):
+        """Reject arbitrary timer or cap input BEFORE touching host devices."""
+        import subprocess
+        script = ROOT / "tools/benchmark-owned-pair.sh"
+        common = ["bash", str(script), "--run-owned-ram-pair",
+                  "--profile", "medium", "--retain-ms", "2", "--unpaced"]
+        forbidden = (
+            ("--lower-mbps", "80", "--completion-nsec", "1000000"),
+            ("--lower-mbps", "10", "--completion-nsec", "150000"),
+            ("--lower-mbps", "80", "--completion-nsec", "5"),
+            ("--lower-mbps", "999", "--completion-nsec", "150000"),
+            ("--completion-nsec", "1000000"),
+            ("--lower-mbps", "12"),
+        )
+        for option in forbidden:
+            with self.subTest(option=option):
+                run = subprocess.run(common + list(option), text=True,
+                                     capture_output=True, timeout=4)
+                self.assertEqual(run.returncode, 2, run.stderr)
+                self.assertIn("BLOCKED", run.stderr)
+        source = script.read_text()
+        for key in ('"$config/mbps"', '"$config/irqmode"',
+                    '"$config/completion_nsec"', '"$config/memory_backed"'):
+            self.assertIn(key, source)
+        self.assertIn('PASS_RAM_MODEL_LOWER_MBPS=', source)
+        loaded = (ROOT / "tools/test-loaded.sh").read_text()
+        self.assertIn("for regime in capped sd_emulated ssd_emulated uncapped",
+                      loaded)
+        self.assertNotIn("swapon ", loaded)
+        self.assertNotIn("swapoff ", loaded)
+        self.assertNotIn("/dev/sdb", loaded)
+
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
-        self.assertEqual(len(sessions), 8)
+        self.assertEqual(len(sessions), 16)
         self.assertEqual([s["async_prepare"] for s in sessions],
-                         [0, 1, 1, 0, 0, 1, 1, 0])
+                         [0, 1, 1, 0] * 4)
         self.assertEqual([s["regime"] for s in sessions],
-                         ["capped"] * 4 + ["uncapped"] * 4)
+                         [regime for regime in runner.MODEL_ORDER for _ in range(4)])
         self.assertEqual([s["order"] for s in sessions],
-                         ["off-first", "v3-first"] * 4)
+                         ["off-first", "v3-first"] * 8)
         self.assertTrue(all(s["status"] == "PASS" for s in sessions))
-        for j in (1, 2, 5, 6):
-            self.assertEqual(sessions[j]["overlap_starts"], 42)
-        for j in (0, 3, 4, 7):
-            self.assertNotIn("overlap_starts", sessions[j])
+        for j, session in enumerate(sessions):
+            self.assertEqual(session["device_model"],
+                             {k: runner.MODEL_SPECS[session["regime"]][k]
+                              for k in ("cap_mib_s", "completion_nsec", "irqmode")})
+            if j % 4 in (1, 2):
+                self.assertEqual(session["overlap_starts"], 42)
+            else:
+                self.assertNotIn("overlap_starts", session)
         self.assertNotIn("device_identity", json.dumps(sessions))
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
 
@@ -121,6 +159,12 @@ class ReportContract(unittest.TestCase):
                          "MATERIAL_GAIN_PRELIMINARY")
         self.assertEqual(uncapped["criteria"]["sync"]["throughput_vs_raw"],
                          "MATERIAL_LOSS_PRELIMINARY")
+        self.assertEqual(uncapped["interpretation"],
+                         "DIAGNOSTIC_ONLY_NO_PRODUCT_PERFORMANCE_VERDICT")
+        self.assertEqual(data["regimes"]["sd_emulated"]["device_model"]["completion_nsec"],
+                         1000000)
+        self.assertEqual(data["regimes"]["ssd_emulated"]["device_model"]["cap_mib_s"],
+                         80)
         self.assertAlmostEqual(
             capped["criteria"]["sync"]["lower_write_saved_fraction"], .375)
         self.assertEqual(
@@ -145,12 +189,21 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCONCLUSIVE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[6]["arms"]["v3"]["packed_read"]["packed_close_delta"] = 0
+        sessions[10]["arms"]["v3"]["packed_read"]["packed_close_delta"] = 0
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[6]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+        sessions[10]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
             "logical_bytes"] = 0
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[5]["device_model"]["completion_nsec"] = 1234
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions.pop()
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
