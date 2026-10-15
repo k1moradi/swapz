@@ -64,7 +64,9 @@ class ReportContract(unittest.TestCase):
                          ["off-first", "v3-first", "off-first", "v3-first"])
         self.assertTrue(all(s["status"] == "PASS" for s in sessions))
         self.assertEqual(sessions[1]["overlap_starts"], 42)
-        self.assertEqual(sessions[3]["overlap_starts"], 42)
+        self.assertEqual(sessions[2]["overlap_starts"], 42)
+        self.assertNotIn("overlap_starts", sessions[0])
+        self.assertNotIn("overlap_starts", sessions[3])
         self.assertNotIn("device_identity", json.dumps(sessions))
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
 

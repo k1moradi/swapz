@@ -125,6 +125,11 @@ restaging/rebuild after a kernel-only edit. This proves build graph
 and mock orchestration only: no module is loaded and no throughput is
 measured by that test. CI must label its result rootless/partial.
 
+The counterbalanced run schedule is synchronous/asynchronous/
+asynchronous/synchronous, so overlap counters are required only for
+the middle two async runs; never demand async overlap from either
+synchronous control run.
+
 **Regression maintenance note:** After moving the serial test-phase
 commands into `tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile
