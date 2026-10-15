@@ -169,8 +169,10 @@ static int test_full_window_and_selective_reads(void)
 	reads = disk.read_blocks;
 	CHECK(reads == engine.physical_read_blocks);
 	CHECK(reads >= 16 && reads <= 48);
-	/* Selective reads must fetch exactly the block count required by the
-	 * REAL chosen extent classes, not by a presumed tie-breaking layout. */
+	/* Preserve the original exact cold-read/physical-block contract.
+	 * The new one-extent metadata cache is tested separately using the
+	 * actual C engine. Explicit invalidation prevents a warm hit from
+	 * making the existing cold-I/O assertion incorrectly fail. */
 	for (index = 0; index < 16; ++index) {
 		const struct sv3_map *m = &maps[index];
 		int expected;
@@ -181,6 +183,7 @@ static int test_full_window_and_selective_reads(void)
 				 m->record_index, &decoded, &stored) == 0);
 		expected = sv3_record_read_blocks(&decoded);
 		CHECK(expected >= 1 && expected <= 3);
+		sv3_engine_invalidate_read_cache(&engine);
 		disk.read_blocks = 0;
 		CHECK(sv3_engine_read_page(&engine, index,
 					   output, sizeof(output), &length) == 0);

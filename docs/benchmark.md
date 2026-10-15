@@ -287,6 +287,18 @@ harming write speed or p99; the full eight-pair `make test` at the
 **new source SHA** is still NOT RUN. Rootless native-C tests and
 kernel compilation must also pass before a new loaded claim.
 
+**First new-revision CI result:** `3f46669e` compiled successfully
+at W=1/W=2, but native-C qualification FAILED at
+`mapping/online-packing.c`: its legacy per-page *cold selective-read*
+assertion included a metadata read for every call and now observed a
+legitimate same-extent hit. The cold-read test now explicitly invalidates
+between samples to preserve its original expected lower-block contract;
+the added native write-verification test independently exercises warm
+metadata reuse, overwrite, read error and cache invalidation. This is a
+test-scope separation, **not** a waiver of real I/O or fault checks.
+The amended exact HEAD still needs CI and owner-loaded qualification.
+
+
 ### Alpha.22 C change and qualification handoff
 
 The finite QD-wave replay waits for every operation before its next
