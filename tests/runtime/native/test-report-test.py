@@ -303,6 +303,7 @@ class ReportContract(unittest.TestCase):
                     current = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
                     (checkout / "source.c").write_text("unsaved owner change\n")
                     runner.write_report({"source_sha": current,
+                                         "tested_commit_sha": current,
                                          "overall": "FAIL"})
                     self.assertIn("not clean", runner.publish(current))
                     self.assertEqual(
@@ -322,6 +323,9 @@ class ReportContract(unittest.TestCase):
                 runner.write_report({"source_sha": "unknown",
                                      "overall": "BLOCKED"})
                 self.assertIn("unavailable", runner.publish("unknown"))
+                runner.write_report({"source_sha": "a" * 40,
+                                     "tested_commit_sha": "a" * 40,
+                                     "overall": "BLOCKED"})
                 self.assertIn("checkout", runner.publish("a" * 40))
             finally:
                 runner.ROOT, runner.REPORT = previous_root, previous_report

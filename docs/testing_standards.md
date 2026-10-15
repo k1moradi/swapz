@@ -196,6 +196,12 @@ each prior version in history, whereas the current file is always the
 latest report. Git push/SSH credentials are reused; **no `gh`, GitHub
 API token, force push, new branch or release asset** is required.
 
+The Git exporter validates that both `tested_commit_sha` and
+`source_sha` inside the compressed report equal the expected tested
+parent commit **before** modifying any Git object. Synthetic negative
+tests must supply matching IDs to exercise later guards (dirty tree,
+wrong checkout), not bypass this provenance assertion.
+
 The JSON records full `tested_commit_sha` and `source_sha` values for
 the exact HEAD before loaded tests, and `code_commit_sha` for the latest
 source-changing commit excluding only `test_results.json.xz`. Because
