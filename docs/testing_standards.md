@@ -68,6 +68,16 @@ Do **not** attempt system swap activation, force-removal, reboot or
 physical-device I/O as a substitute for missing owned-RAM evidence.
 Until all gates pass: **PHYSICAL TEST BLOCKED**.
 
+## Exact release-version qualification
+
+The rootless source-contract regression requires the README to link to
+`kernel/extent-v3/VERSION` rather than duplicate an alpha literal.
+Additional tests prove the generated kernel version header and module
+change when VERSION changes, DKMS resolves its installed VERSION,
+and both privileged owned-RAM helpers compare `modinfo -F version`
+to the canonical source before any device access. This is a version
+consistency gate, **not** permission to load onto physical media.
+
 ## Qualification ladder (do not confuse evidence levels)
 
 | Gate | Shows | Cannot claim |

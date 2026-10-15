@@ -79,9 +79,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
                               document)
                 self.assertIn("module alias is `dm-swapz`", document)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertTrue(f"revision: **{version}" in README or
-                        f"V{version} is experimental" in README,
-                        "README must identify the exact active V3 alpha")
+        # A public README must link to the single version source rather
+        # than becoming a second, manually edited alpha-number string.
+        self.assertIn(
+            "[`kernel/extent-v3/VERSION`](kernel/extent-v3/VERSION)", README)
+        self.assertIn("single source of truth", README)
 
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
         accept = body("sv3_accept_write")
