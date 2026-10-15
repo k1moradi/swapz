@@ -161,6 +161,12 @@ int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 				      extent_count);
 }
 
+void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
+{
+	if (engine)
+		engine->read_cache_valid = 0;
+}
+
 int sv3_engine_write_window(struct sv3_engine *engine,
 			    const struct sv3_compressed_page *pages,
 			    sv3_u8 count, sv3_u8 *committed_pages)
@@ -173,6 +179,8 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 	    !engine->io.write_extent || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
+	/* Even a failed/torn write must never leave reusable old metadata. */
+	sv3_engine_invalidate_read_cache(engine);
 	/*
 	 * Never stage or submit a potentially destructive extent if the
 	 * requested read-after-write guard cannot run with isolated scratch.
@@ -390,6 +398,7 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 	if (!e || !e->authority || !committed_pages)
 		return -EINVAL;
 	*committed_pages = 0;
+	sv3_engine_invalidate_read_cache(e);
 	if (!pages || !count || count > SV3_MAX_RECORDS)
 		return -EINVAL;
 	/* Validate every record BEFORE reserving any physical blocks. The
@@ -571,6 +580,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	const sv3_u8 *stored;
 	sv3_u32 bytes, first, last, start, count;
 	int error;
+	int cached_metadata;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
 	    !engine->io.read_blocks || !payload || !payload_length ||
@@ -585,14 +595,28 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			engine->authority->physical_blocks - observed.start_block)
 		return -ESTALE;
 	bytes = (sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES;
-	memset(engine->read_scratch, 0, bytes);
-	error = engine->io.read_blocks(engine->io.opaque,
-				       observed.start_block, 1,
-				       engine->read_scratch);
-	if (error)
-		return error;
-	engine->physical_read_blocks++;
-	engine->read_metadata_requests++;
+	/* The ordered owner leaves only a verified header in read_scratch.
+	 * Reuse it solely for the same immutable extent, never a new mapping
+	 * or a write/discard/GC transition. Clear all non-header scratch on
+	 * a hit, so no payload bytes can leak from a previous record. */
+	cached_metadata = engine->read_cache_valid &&
+		engine->read_cached_start_block == observed.start_block &&
+		engine->read_cached_extent_blocks == observed.extent_blocks;
+	engine->read_cache_valid = 0;
+	if (cached_metadata) {
+		if (bytes > SV3_BLOCK_BYTES)
+			memset(engine->read_scratch + SV3_BLOCK_BYTES, 0,
+			       bytes - SV3_BLOCK_BYTES);
+	} else {
+		memset(engine->read_scratch, 0, bytes);
+		error = engine->io.read_blocks(engine->io.opaque,
+					       observed.start_block, 1,
+					       engine->read_scratch);
+		if (error)
+			return error;
+		engine->physical_read_blocks++;
+		engine->read_metadata_requests++;
+	}
 	error = sv3_peek(engine->read_scratch, bytes,
 			 observed.record_index, &peek);
 	if (error)
@@ -628,5 +652,12 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		return -ENOSPC;
 	memcpy(payload, stored, decoded.payload_length);
 	*payload_length = decoded.payload_length;
+	/* Publish a reusable header only after successful authority, generation
+	 * and payload-CRC validation. Any error path leaves the cache invalid. */
+	engine->read_cached_start_block = observed.start_block;
+	engine->read_cached_extent_blocks = observed.extent_blocks;
+	engine->read_cache_valid = 1;
+	if (cached_metadata)
+		engine->read_metadata_cache_hits++;
 	return 0;
 }

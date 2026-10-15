@@ -140,6 +140,15 @@ class V3ProductionSourceQualification(unittest.TestCase):
             engine.index("engine->read_metadata_requests++"))
         self.assertIn("read_meta_reqs=%u read_payload_reqs=%u", status)
         self.assertIn("read_payload_blocks=%u", status)
+        self.assertIn("read_meta_cache_hits=%u", status)
+        self.assertIn("engine->read_metadata_cache_hits++", engine)
+        self.assertIn("engine->read_cache_valid = 0", engine)
+        self.assertIn("sv3_engine_invalidate_read_cache(engine)", engine)
+        self.assertIn("sv3_engine_invalidate_read_cache(e)", engine)
+        self.assertIn("sv3_engine_invalidate_read_cache(&ctx->engine)",
+                      body("sv3_lower"))
+        self.assertIn("sv3_engine_invalidate_read_cache(&ctx->engine)",
+                      body("sv3_process"))
 
     def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
         import importlib.util

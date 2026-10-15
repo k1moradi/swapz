@@ -329,6 +329,10 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 		ctx->write_fault_injected++;
 		return -EIO;
 	}
+	/* Cover direct RAW writes and GC relocation as well as engine writes.
+	 * The synchronous lower worker exclusively owns read_scratch. */
+	if (op == REQ_OP_WRITE)
+		sv3_engine_invalidate_read_cache(&ctx->engine);
 	if (op == REQ_OP_READ) {
 		ctx->lower_read_submitted_bytes +=
 			(u64)blocks * SV3_BLOCK_BYTES;
@@ -1462,6 +1466,10 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 	int error = 0;
 	const enum req_op op = bio_op(bio);
 
+	/* Invalidate even when a discard/flush changes authority without
+	 * writing any lower blocks. READ-only runs may reuse one metadata page. */
+	if (op != REQ_OP_READ || (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
+		sv3_engine_invalidate_read_cache(&ctx->engine);
 	if (ctx->failed) {
 		sv3_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
@@ -2233,7 +2241,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
-		       "read_payload_blocks=%u "
+		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -2312,6 +2320,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,
 		       ctx->engine.read_payload_blocks,
+		       ctx->engine.read_metadata_cache_hits,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

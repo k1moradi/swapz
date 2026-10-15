@@ -90,12 +90,20 @@ Each mode/regime has only two repetitions: performance differences are
 0.05% async change as a gain. Replay-process CPU times are measured,
 but kernel DM worker CPU, memory pressure, live GC and real SSD/SD
 endurance remain unqualified.
-The next diagnostic-only read-path revision adds per-4MiB-pass V3 metadata
-and payload lower-callback counters plus lower-read/decode wall-time deltas
-in the sanitized report. These snapshots exclude benchmark setup and do
-not measure kernel-worker CPU or real flash requests. Owner-loaded tests
-for the new revision remain **NOT RUN**; the aacf8cc results above must
-not be carried forward as a new PASS.
+**Owner-qualified read diagnosis:** `933ff984f8f603a3fa6d79dcde7a522d491e9502`
+passed all five stages and eight pairs on RAM-only models (report
+`18bf37313e4c`). Each fixed 4MiB packed read triggered 1,024 metadata
+reads and about 632–640 additional payload reads; the SD-emulated
+sequential trial took about 1.83s versus 0.40s raw. These are
+successful lower-callback counts, not physical flash commands.
+
+**New C experiment, NOT YET LOADED:** one verified metadata block may be
+reused for consecutive reads from the same immutable SWZ3 extent on the
+serialized worker. It uses existing scratch storage, invalidates on
+writes/GC/discards/barriers/read failure, and still validates each
+record's generation/CRC. The read benchmark now reports reuse hits
+alongside independently measured lower READ bytes/requests. No new
+performance win or device-endurance result has been demonstrated.
 
 ## Current C performance work and qualification plan
 

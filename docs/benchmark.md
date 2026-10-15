@@ -256,12 +256,36 @@ passes of exactly 4,194,304 bytes (QD32). A V3 packed-close counter must
 rise during population. The sequential pass precedes the random pass:
 they are not interchangeable cold-cache observations. This remains
 RAM-only, not cold SSD/SD or a larger distinct working set.
-The current compressed reader always fetches metadata block0, then
-needed payload blocks, and has no extent cache. Cold medium packed
-reads can therefore transfer more than the 4KiB raw page despite LZ4
-compression. Future C work should address measured read reuse or
-aggregation with authority/CRC/GC correctness, and qualify the actual
-packed dataset before claiming faster decoded swap-in.
+**Loaded finding at `933ff984`:** Each 4MiB packed read executed
+1,024 successful metadata-block reads and 632–640 additional payload
+read callbacks. SD-model sequential decoding took ~1.83s versus
+~0.40s raw; SSD-model also lost. This is a request-amplification
+hypothesis, not yet a causal attribution of worker CPU, firmware
+latency or actual flash I/O.
+
+**Next production-C experiment (NOT YET LOADED):** The serialized
+engine keeps the last successfully verified SWZ3 header block in its
+already allocated `read_scratch`, with its start block and extent class.
+Consecutive reads of another record in that exact extent may reuse
+only the header bytes. The remaining scratch is cleared and needed
+payload blocks are still physically fetched. Each read still validates
+the authoritative generation, descriptor and payload CRC, and any
+failed read discards the reusable header. The engine invalidates on
+both normal/batched writes, and the Device Mapper owner invalidates
+on raw/GC writes and every discard/flush/barrier, even if no bytes
+are written. No worker other than the serialized consumer accesses
+this cache; asynchronous LZ4 preparation never touches it. No new
+allocations, sector layout changes or reduced correctness oracle.
+A one-extent metadata cache is NOT equivalent to a global extent
+cache, and random reads may see no reuse.
+
+The independent lower read byte/request counters remain the
+authoritative I/O measure; `read_meta_cache_hits` is only a C
+diagnostic. A successful experiment must save measured lower READ
+requests/bytes and improve timed decoded READ without materially
+harming write speed or p99; the full eight-pair `make test` at the
+**new source SHA** is still NOT RUN. Rootless native-C tests and
+kernel compilation must also pass before a new loaded claim.
 
 ### Alpha.22 C change and qualification handoff
 

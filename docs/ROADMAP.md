@@ -13,9 +13,16 @@ sanitized result was published as report-only `e221e053e052`.
 SD useful WRITE remained 7.85 MB/s raw versus 4.61 sync/4.66 async;
 SSD was 19.67 MB/s raw versus 17.57 sync/19.01 async. Both models
 reduced backing WRITE traffic but the packed 4MiB reads remained
-slower. This PASS does not qualify the next code revision.
+slower. The owner subsequently qualified read diagnosis at exact source
+`933ff984f8f603a3fa6d79dcde7a522d491e9502`: all five stages
+PASSED; eight pairs took 205.17s loaded, reported at `18bf37313e4c`.
+For SD-model packed 4MiB reads, the serialized C path made exactly
+1,024 metadata requests and 640 extra payload requests per pass,
+returning decoded data in ~1.83s versus ~0.40s raw. SSD-model
+payload requests averaged 635 sync / 632 async and packed passes
+remained slower than raw. These are not cold flash reads.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
-remain open.
+remain open. The next metadata-reuse C experiment is NOT YET LOADED.
 
 The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](coding_standards.md),
@@ -74,10 +81,17 @@ are still planned.
       A diagnostic-only read-path change now distinguishes metadata from
       payload lower callback requests and snapshots C read/decode wall
       counters across each timed 4MiB read pass, without new workloads.
-      This new source is **NOT RUN / NOT LOADED**; the owner must qualify
-      it at its own exact HEAD before using the counters for optimization.
-      Investigate bounded authority-safe read reuse/aggregation only
-      against the packed-read bottleneck demonstrated by that evidence.
+      These counters were owner-loaded at exact `933ff984` and expose
+      1,024 metadata plus ~632–640 payload callbacks per packed 4MiB
+      read, with severe SD-model tail latency. A new one-extent
+      **metadata-only** scratch reuse path is now implemented in
+      production C and exercised by a native mock lower-I/O test:
+      last successful verified block-zero is reused only on the same
+      immutable physical extent; mutation/fault invalidates immediately,
+      with no allocations or relaxed authority/CRC checks. The new
+      optimization remains **NOT LOADED / NOT PERFORMANCE QUALIFIED**
+      until the owner runs the exact-HEAD full qualification; metadata
+      hit count and lower bytes/requests will establish any actual gain.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

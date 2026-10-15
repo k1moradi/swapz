@@ -213,6 +213,68 @@ static int test_failed_overwrite_keeps_prior_generation(void)
 	return 0;
 }
 
+/*
+ * Reuse only one already verified SWZ3 metadata block; never cache payload
+ * from another page. A direct engine write, discarded cache, or failed
+ * targeted read must cause a fresh lower metadata read.
+ */
+static int test_same_extent_read_cache_reuse_and_fail_closed(void)
+{
+	sv3_u8 committed = 0;
+	sv3_u8 result[2072];
+	sv3_u16 size = 0;
+	sv3_u32 old_start;
+	unsigned int index;
+
+	CHECK(setup() == 0);
+	CHECK(sv3_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(committed == 3);
+	old_start = map[0].start_block;
+	CHECK(map[1].start_block == old_start &&
+	      map[2].start_block == old_start);
+	for (index = 0; index < 3; ++index) {
+		CHECK(sv3_engine_read_page(&engine, index, result,
+					   sizeof(result), &size) == 0);
+		CHECK(size == sizeof(result) &&
+		      !memcmp(result, payloads[index], size));
+	}
+	CHECK(engine.read_metadata_requests == 1);
+	CHECK(engine.read_metadata_cache_hits == 2);
+	CHECK(engine.read_cache_valid);
+
+	/* A caller-owned DISCARD/barrier invalidates even without a WRITE. */
+	sv3_engine_invalidate_read_cache(&engine);
+	CHECK(sv3_engine_read_page(&engine, 1, result,
+					   sizeof(result), &size) == 0);
+	CHECK(engine.read_metadata_requests == 2);
+	CHECK(engine.read_metadata_cache_hits == 2);
+
+	/* Record zero's 2072-byte payload needs the second lower block.
+	 * On a failed payload request, the header must no longer be cached. */
+	fail_read = 1;
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == -EIO);
+	CHECK(!engine.read_cache_valid && size == 0);
+	fail_read = 0;
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == 0);
+	CHECK(engine.read_metadata_requests == 3);
+	CHECK(size == sizeof(result) &&
+	      !memcmp(result, payloads[0], size));
+
+	/* A new authoritative generation cannot reuse old metadata. */
+	memset(payloads[0], 0x5a, sizeof(payloads[0]));
+	CHECK(sv3_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(committed == 3 && !engine.read_cache_valid);
+	CHECK(map[0].start_block != old_start && map[0].generation == 2);
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == 0);
+	CHECK(engine.read_metadata_requests == 4);
+	CHECK(size == sizeof(result) &&
+	      !memcmp(result, payloads[0], size));
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -224,6 +286,7 @@ int main(void)
 	CHECK(test_impossible_completion_never_fakes_write_or_readback() == 0); passed++;
 	CHECK(test_preflight_requires_distinct_readback_buffers() == 0); passed++;
 	CHECK(test_failed_overwrite_keeps_prior_generation() == 0); passed++;
+	CHECK(test_same_extent_read_cache_reuse_and_fail_closed() == 0); passed++;
 	printf("SV3_VERIFY_AFTER_WRITE_TESTS_PASS=%d\n", passed);
 	return 0;
 }

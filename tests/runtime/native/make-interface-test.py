@@ -182,6 +182,7 @@ class PublicMakeContract(unittest.TestCase):
                                     "read_payload_blocks": 512,
                                     "lower_read_wall_ns": 120000000,
                                     "decode_wall_ns": 20000000,
+                                    "read_meta_cache_hits": 128,
                                 } if is_v3 else None),
                             }
                             for key in ("sequential", "seeded_random")

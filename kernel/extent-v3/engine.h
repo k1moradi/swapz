@@ -89,6 +89,12 @@ struct sv3_engine {
 	sv3_u32 read_metadata_requests;
 	sv3_u32 read_payload_requests;
 	sv3_u32 read_payload_blocks;
+	/* One verified block-zero metadata cache, held in read_scratch.
+	 * The caller serializes reads and invalidates before mutation. */
+	sv3_u32 read_cached_start_block;
+	sv3_u8 read_cached_extent_blocks;
+	sv3_u8 read_cache_valid;
+	sv3_u32 read_metadata_cache_hits;
 };
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */
@@ -116,6 +122,9 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 int sv3_engine_write_window_batched(struct sv3_engine *engine,
 				   const struct sv3_compressed_page *pages,
 				   sv3_u8 count, sv3_u8 *committed_pages);
+/* Caller-owned and serialized: invalidate before writes, discards and barriers.
+ * Never invalidate from a concurrent preparation producer. */
+void sv3_engine_invalidate_read_cache(struct sv3_engine *engine);
 /* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
 int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			 sv3_u8 *payload, sv3_u16 payload_capacity,
