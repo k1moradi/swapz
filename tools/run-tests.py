@@ -67,6 +67,67 @@ def jobserver_fds():
     return fds
 
 
+def failure_context(output):
+    """Sanitized and specific; never publish raw privileged host logs.
+
+    The diagnostic states the last completed/started *named* phase,
+    plus a vetted failure category or scrubbed BLOCKED/FAIL reason.
+    Synthetic output and inaccessible paths are never echoed verbatim.
+    """
+    phase = "preflight / administrator authorization"
+    pair_number = 0
+    for line in output.splitlines():
+        if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
+            phase = "owned RAM kernel smoke"
+        elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
+            phase = "shared fixture allocation and workload generation"
+        elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
+            pair_number += 1
+            mode = "async" if line.rstrip().endswith("=1") else "sync"
+            phase = f"owned RAM comparison {pair_number}/4 ({mode})"
+        elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
+            phase = f"after completed owned RAM comparison {pair_number}/4"
+
+    if "BLOCKED_LOADED_QUALIFICATION" in output:
+        reason = "Noninteractive root/sudo authorization is unavailable"
+    elif "QUARANTINED:" in output:
+        reason = "Safety quarantine: owned device or swap identity could not be safely released"
+    elif any("mktemp:" in line and "Permission denied" in line
+             for line in output.splitlines()):
+        reason = ("Cannot allocate the shared fixture: directory is not writable "
+                  "(check build/tests permissions)")
+    else:
+        # A deliberately small allowlist preserves actionable errors without
+        # exposing paths, UUIDs, usernames, raw JSON or system swap entries.
+        reason = None
+        for line in reversed(output.splitlines()):
+            candidate = line.strip()
+            if candidate.startswith(("BLOCKED: ", "FAIL: ")):
+                msg = candidate.partition(": ")[2]
+                msg = re.sub(r"/[^\s'\"<>]+", "[path]", msg)
+                msg = re.sub(r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
+                             "[id]", msg, flags=re.I)
+                msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=\-\[\]]", "?", msg)
+                reason = f"{candidate.split(':', 1)[0]}: {msg[:155]}"
+                break
+            if "PermissionError:" in candidate or "Permission denied" in candidate:
+                reason = "Filesystem permissions rejected the operation"
+                break
+            if "FileNotFoundError:" in candidate:
+                reason = "A required generated file or helper was not found"
+                break
+            if "AssertionError" in candidate:
+                reason = "A fixture, manifest or correctness assertion failed"
+                break
+            if "TimeoutExpired" in candidate or "timed out" in candidate:
+                reason = "Operation exceeded its bounded timeout"
+                break
+        if reason is None:
+            reason = ("Child returned nonzero; inspect the latest local owned-device "
+                      "diagnostic session under build/")
+    return phase, reason
+
+
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
     try:
@@ -86,10 +147,7 @@ def run_stage(title, command, result, *, parse_bench=False):
         # The report is optionally published on a public GitHub Release.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
-        record["diagnostic"] = (
-            "Noninteractive privilege unavailable" if
-            "BLOCKED_LOADED_QUALIFICATION" in output else
-            "Private stage failed; review the local diagnostic session logs")
+        record["failed_phase"], record["diagnostic"] = failure_context(output)
     result["stages"].append(record)
     if parse_bench:
         result["benchmarks"]["sessions"] = parse_sessions(output)
@@ -98,7 +156,8 @@ def run_stage(title, command, result, *, parse_bench=False):
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if rc and "diagnostic" in record:
-        print(f"        {record['diagnostic']}", flush=True)
+        print(f"        Failed during: {record['failed_phase']}", flush=True)
+        print(f"        Reason: {record['diagnostic']}", flush=True)
     write_report(result)
     return rc
 
@@ -279,11 +338,17 @@ def publish():
             branch.stdout.strip() != "main":
         return "SKIPPED: not the canonical main checkout (sandbox protected)"
     if not shutil.which("gh"):
-        return "SKIPPED: GitHub CLI not installed (no API authorization found)"
-    auth = subprocess.run(["gh", "auth", "status"],
-                          cwd=ROOT, capture_output=True, text=True, timeout=12)
+        return ("SKIPPED_UPLOAD: git is available, but GitHub CLI 'gh' is missing. "
+                "Release upload requires GitHub API authorization; install gh "
+                "and run 'gh auth login' once. Git SSH authentication alone "
+                "cannot upload Release assets.")
+    try:
+        auth = subprocess.run(["gh", "auth", "status"],
+                              cwd=ROOT, capture_output=True, text=True, timeout=12)
+    except (OSError, subprocess.TimeoutExpired):
+        return "SKIPPED_UPLOAD: GitHub API authorization check unavailable"
     if auth.returncode:
-        return "SKIPPED: no authenticated GitHub API session"
+        return "SKIPPED_UPLOAD: gh is installed but not logged in; run 'gh auth login'"
     env = os.environ.copy()
     env["GH_PROMPT_DISABLED"] = "1"
     common = ["--repo", REPO]

@@ -94,7 +94,12 @@ loaded-device smoke and paired benchmarks. GNU Make jobserver tokens
 are passed to internal child builds rather than disabling compilation
 parallelism. The runner captures verbose output and shows CTest-style
 stage results, preserving return codes, fail-fast ordering and
-noninteractive privilege checks.
+noninteractive privilege checks. If the loaded stage fails, it names
+the subphase and sanitizes a real cause (for example a root-owned
+benchmark-evidence directory rejecting an unprivileged `mktemp`).
+Shared fixture creation uses `build/tests/` rather than the
+root-owned `build/benchmark/`; each privileged test retains its own
+private session there without changing its permissions.
 
 One stable user-facing compressed file is atomically replaced at
 `build/test_results.json.xz`, whether the run PASSES, FAILS or is

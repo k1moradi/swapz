@@ -345,7 +345,7 @@ done
 [[ -b /dev/mapper/$DMNAME ]] || fail 'owned DM block node missing'
 DMDEV="$(devno "/dev/mapper/$DMNAME")"
 if [[ -n $SHARED_PLAN ]]; then
-    [[ $SHARED_PLAN == "$ROOT/build/benchmark/shared."* &&
+    [[ $SHARED_PLAN == "$ROOT/build/tests/benchmark-plan."* &&
        -d $SHARED_PLAN && ! -L $SHARED_PLAN &&
        -f $SHARED_PLAN/fixture.bin && ! -L $SHARED_PLAN/fixture.bin &&
        -f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json &&

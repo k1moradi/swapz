@@ -154,6 +154,25 @@ including on nonzero FAIL/BLOCKED. A failure aborts remaining stages
 without silently claiming loaded success. The root Make API remains
 exactly four goals; no new public runner is added.
 
+**2026-10-15 loaded phase diagnostic/ownership regression:** The
+privileged benchmark helper deliberately creates `build/benchmark/`
+as root under `umask 077`, so it is **not writable by the unprivileged
+runner**. Never allocate the shared fixture there. Allocate under
+`build/tests/benchmark-plan.XXXXXXXX` (where rootless native test
+outputs already belong), then have each privileged child copy the
+verified immutable fixture into its own isolated and access-checked
+session. Do not chmod or delete the root-owned benchmark directory,
+or bypass safe device teardown, to work around EACCES. A rootless
+regression protects the distinct ownership boundaries.
+
+On nonzero stage exits the single report and terminal MUST include
+a sanitized, concrete **failed subphase** (smoke, shared fixture
+allocation, numbered pair) and a vetted actionable error category,
+including missing permissions or the original `BLOCKED:` reason.
+Never substitute "private stage failed" for a diagnosable known
+failure, and never disclose full private paths, device names,
+secrets or raw host swap inventories through the report.
+
 The human terminal displays numbered PASS/FAIL/BLOCKED stage statuses
 and a table of raw-off, synchronous and asynchronous useful WRITE
 throughput, backing WRITE rate, input/backing WRITE-byte ratio,

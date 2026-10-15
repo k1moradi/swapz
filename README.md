@@ -46,6 +46,14 @@ host swap inventory, authentication material or complete raw logs.
 Privileged per-session diagnostic evidence may still remain privately
 under `build/deploy/` and `build/benchmark/` to support safe failures.
 
+The uploader requires GitHub CLI **`gh`**, not just the regular
+`git` executable. SSH authentication that permits `git pull` and
+`git push` does not by itself authorize GitHub Release API calls.
+When `gh` is installed, its own API login must be completed once
+(`gh auth login`). The test output distinguishes **missing `gh`**
+from **missing API authorization**. This publishing step is separate
+from the loaded-device test verdict and is never its failure cause.
+
 When a GitHub CLI (`gh`) API login is detected **on the actual main
 checkout**, the same command replaces the stable `test_results.json.xz`
 asset in this repository's

@@ -30,11 +30,16 @@ printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 # comparisons. Safe user-space preparation happens before any new device.
 # Children copy this verified plan into their own owned-device session.
 umask 077
-mkdir -p "$ROOT/build/benchmark"
-shared_plan="$(mktemp -d "$ROOT/build/benchmark/shared.XXXXXXXX")"
+# The benchmark session directory is root-owned (umask 077) from older
+# privileged runs. Never allocate a user-owned fixture there: mktemp
+# would fail with EACCES after the loaded smoke already passed.
+# The rootless/native build owns build/tests; keep the immutable fixture
+# there, and let each privileged child COPY it to its own private session.
+mkdir -p "$ROOT/build/tests"
+shared_plan="$(mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX")"
 cleanup_shared_plan() {
     # Remove only exactly named files from this freshly allocated directory.
-    [[ $shared_plan == "$ROOT/build/benchmark/shared."* &&
+    [[ $shared_plan == "$ROOT/build/tests/benchmark-plan."* &&
        -d $shared_plan && ! -L $shared_plan ]] || return
     rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
         "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json"

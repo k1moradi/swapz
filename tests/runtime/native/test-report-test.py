@@ -126,6 +126,67 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
+    def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
+        # This was a real regression: privileged benchmarks created
+        # build/benchmark/ (mode 0700), then a non-root user attempted
+        # mktemp in the same root-owned directory.
+        log = ("START_LOADED_OWNED_NULLBLK_SMOKE\n"
+               "PASS_LOADED_OWNED_NULLBLK_SMOKE\n"
+               "mktemp: failed to create directory via template "
+               "'/home/secret/swapz/build/benchmark/shared.XXXXXXXX': "
+               "Permission denied\n")
+        phase, reason = runner.failure_context(log)
+        self.assertIn("shared fixture", phase)
+        self.assertIn("not writable", reason)
+        self.assertNotIn("/home/secret", reason)
+
+        blocked = ("START_LOADED_OWNED_NULLBLK_SMOKE\n"
+                   "BLOCKED: backing mismatch: "
+                   "/home/private/dev/nullb-swapz-abcdef0123456789\n")
+        phase, reason = runner.failure_context(blocked)
+        self.assertIn("owned RAM kernel smoke", phase)
+        self.assertIn("BLOCKED:", reason)
+        self.assertNotIn("/home/private", reason)
+        self.assertNotIn("abcdef0123456789", reason)
+
+        pair = ("PASS_LOADED_OWNED_NULLBLK_SMOKE\n"
+                "START_OWNED_RAM_PAIR_ASYNC_PREPARE=0\n"
+                "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=0\n"
+                "START_OWNED_RAM_PAIR_ASYNC_PREPARE=1\n"
+                "FAIL: independent backing lower I/O mismatch\n")
+        phase, reason = runner.failure_context(pair)
+        self.assertIn("comparison 2/4 (async)", phase)
+        self.assertIn("backing lower I/O mismatch", reason)
+
+    def test_non_root_fixture_never_uses_privileged_evidence_directory(self):
+        loaded = (ROOT / "tools/test-loaded.sh").read_text()
+        private = (ROOT / "tools/benchmark-owned-pair.sh").read_text()
+        self.assertIn('mkdir -p "$ROOT/build/tests"', loaded)
+        self.assertIn('mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX"', loaded)
+        self.assertIn('"$ROOT/build/tests/benchmark-plan."*', loaded)
+        self.assertIn('"$ROOT/build/tests/benchmark-plan."*', private)
+        self.assertNotIn('mktemp -d "$ROOT/build/benchmark/', loaded)
+        # Simulate the historical mode-0700 benchmark log directory without
+        # any privilege or actual device. A fixture can still be created.
+        import os
+        with tempfile.TemporaryDirectory(prefix="fixture-permissions-",
+                                         dir=ROOT / "build/tests") as folder:
+            root = Path(folder)
+            evidence = root / "benchmark"
+            evidence.mkdir()
+            evidence.chmod(0o500)
+            scratch = root / "tests"
+            scratch.mkdir()
+            try:
+                import tempfile as temporary
+                owned = Path(temporary.mkdtemp(prefix="benchmark-plan.",
+                                              dir=scratch))
+                self.assertTrue(owned.is_dir())
+                (owned / "fixture.bin").write_bytes(b"safe")
+                self.assertEqual((owned / "fixture.bin").read_bytes(), b"safe")
+            finally:
+                evidence.chmod(0o700)
+
     def test_no_auto_upload_from_fake_root(self):
         with tempfile.TemporaryDirectory(prefix="publish-", dir=ROOT / "build/tests") as name:
             previous_root = runner.ROOT
