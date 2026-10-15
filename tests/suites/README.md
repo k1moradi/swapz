@@ -5,8 +5,10 @@
 
 # Reusable native kernel-C regression suites
 
-From repository root use `make test` for native V3 production-C suites, or `make test-codec`, `make test-mapping`,
-`make test-gc`, `make test-lower-io` for one concern. All native
+From the repository root, **`make test` is the only official test command**.
+It includes the native V3 production-C suites, warning-level kernel
+builds and (when the safe privileged preconditions pass) loaded RAM-only
+correctness and paired benchmarks. No per-suite public test goals exist. All native
 executables are compiled under **`build/tests/native/`** and reused
 on the next run. They link to **the actual**
 `kernel/extent-v3/{codec,authority,engine}.c` or execute the exact
@@ -28,14 +30,15 @@ reproducibility and will be incrementally mapped into reusable named
 modules after direct regression parity is established. No rename is
 permitted to obscure a test's actual V2.2/V3 source provenance.
 
-Tests run rootlessly. No reboot, actual swap mutation, physical media,
-or `null_blk` module loading. See
+The native suites run rootlessly as an internal stage of `make test`.
+The later loaded stage uses only newly owned RAM-backed `null_blk`;
+no reboot, swap activation or physical media is permitted. See
 [project vision](../../VISION.md),
 [build contract](../../docs/compile.md)
 and [release qualification gates](../../docs/testing_standards.md).
 
-The historical C++ model is no longer a default V3 test gate; invoke
-`make -C tests legacy-model` only for archival reproduction.
+The historical C++ model is no longer a default V3 test gate;
+its internal legacy reproduction is not an official test entry point.
 
 Build definitions are now consolidated to one Make rule, not one
 copied compile command per test. The native C binaries and original

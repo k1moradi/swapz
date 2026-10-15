@@ -4,7 +4,8 @@
 set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
-    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced [--lower-mbps 20] [--async-prepare]'
+    echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
+    echo 'Internal flags: --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced [--lower-mbps 20] [--async-prepare]'
     exit 0
 fi
 PROFILE=default

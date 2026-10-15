@@ -11,6 +11,8 @@ release metadata and source paths, not the project/module/target name. Keep
 `SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
 utility does not rename the project or module.
 
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
+
 
 **V3.0.0-alpha.21 is experimental, not production-ready.**
 The active `swapz` kernel C implementation uses LZ4, raw fallback,
@@ -67,14 +69,12 @@ consumer waits for each FIFO completion and preserves the original
 SWZ3 authority, read/overwrite/flush/FUA, GC, and shutdown rules.
 The on-disk format and the default `async_prepare=0` do not change.
 
-The normal `make test` pipeline includes this experiment after
-successfully passing rootless and loaded-smoke gates. An isolated
-manual QD32 comparison, when separately authorized, is:
-`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced --async-prepare`.
-The same command without `--async-prepare` is the same-source control.
-Append `--lower-mbps 20` immediately before `--async-prepare` in the
-candidate, and to the end of the control, to configure and verify **both**
-owned null_blk lowers at 20 MiB/s before powering them on.
+The **only official way to execute** the controlled QD32 comparison is
+`make test`. Its private harness runs same-source synchronous and
+`async_prepare=1` loaded-device arms in counterbalanced order using a
+verified 20 MiB/s rate limit on two independently owned RAM-backed
+`null_blk` lower devices. There is no supported manual benchmark entry
+point or separate privileged smoke-test command.
 This is only a simulated lower-rate limit, not actual flash evidence.
 The new `prep_lower_write_overlap_starts` status value measures LZ4
 starts observed during a lower write; it is not a useful-MB/s win.

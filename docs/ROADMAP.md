@@ -428,13 +428,17 @@ Completed historic alpha.9–alpha.20 trial transcripts are summarized in
 **Source/version priority:** alpha.21 and concurrent-preparation gates are
 current; any alpha.12/13/20-specific experiment must be reproduced against
 an explicitly pinned corresponding source and module before interpreting its
-result. Do not invoke retired root Make goals: `make test` is rootless;
-loaded owned-RAM scripts require independent owner authorization.
+result. The **only official test/benchmark invocation is `make test`** from
+repository root. It includes rootless checks plus loaded owned-RAM
+smoke and paired benchmarks, and reports BLOCKED nonzero without
+preauthorized noninteractive privileges. No direct script or other
+Make goal is an official alternative.
 
 ### Experimental concurrent-preparation gate
 
-- [ ] Run rootless native/source contracts and W=1/W=2 Kbuild at the
-      exact async source SHA. Loaded correctness is separate.
+- [ ] Run the full `make test` pipeline at the exact async source SHA,
+      including its rootless checks, W=1/W=2 Kbuild, loaded oracle and
+      paired benchmark, or record BLOCKED if safe privilege is unavailable.
 - [ ] Verify full owned-RAM/null_blk FIFO readback for over 64 queued
       WRITEs, repeated same-page writes, READ/FLUSH/FUA/DISCARD ordering,
       lower WRITE injection, ENOSPC/GC and suspend/teardown; require no
@@ -515,11 +519,10 @@ loaded owned-RAM scripts require independent owner authorization.
       or latency; no new kernel alpha version for
       unchanged production C. Repeat in alternating
       order before claiming significant gains.
-- [ ] Owner alpha.21 production-C short packed window
-      qualification: run rootless `make test` and a separately authorized owned-RAM V3 smoke
-      first. After clean teardown, run unchanged
-      a separately authorized QD32 unpaced owned-RAM off/V3 paired trial at QD32,
-      retain_ms=2, 16384 measured operations.
+- [ ] Owner alpha.21 production-C short packed window qualification:
+      run `make test` once; its internal stages cover rootless tests,
+      owned-RAM V3 smoke and counterbalanced unpaced QD32 off/V3
+      comparisons (retain_ms=2, 16384 measured operations).
       Require the exact full-image oracle, independent
       owned lower-device READ/WRITE bytes and requests,
       FUA/GC/suspend invariants, useful WRITE/READ

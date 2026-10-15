@@ -11,6 +11,8 @@ release metadata and source paths, not the project/module/target name. Keep
 `SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
 utility does not rename the project or module.
 
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
+
 
 > **Our ultimate success criterion is less *measured, host-visible lower-device
 > I/O* under an identical, verified swap workload on the actual SD card, SSD

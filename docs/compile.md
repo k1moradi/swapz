@@ -11,6 +11,8 @@ release metadata and source paths, not the project/module/target name. Keep
 `SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
 utility does not rename the project or module.
 
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
+
 
 **Required per-task context:** [README.md](../README.md), [VISION.md](../VISION.md),
 [coding_standards.md](coding_standards.md),
@@ -61,10 +63,9 @@ loaded phase requires root or previously authorized `sudo -n`; it
 **never prompts**, changes host swap or installs DKMS. If privilege,
 null_blk features, identity checks, oracle or rate caps are unavailable,
 `make test` exits nonzero BLOCKED/FAIL rather than reporting a complete
-PASS. CI uses only the separate rootless script. Separately invoked
-`sudo bash tools/deploy-nullblk.sh` or
-`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair`
-still require explicit owner authorization and successful rootless gates. The current V3 binary
+PASS. CI executes only internal rootless checks, not the complete
+operator qualification. Standalone loaded-device scripts are private
+implementation details, **not alternate test entry points**. The current V3 binary
 `device-roundtrip` installs to `/usr/local/libexec/swapz/` by
 default. The retired V2 `swapzctl` is NOT installed because it
 invokes swapon/swapoff. The V3 DKMS install does not load or activate
@@ -109,80 +110,46 @@ The 16 current kernel-C tests are grouped under
 `tests/runtime/native/{codec,mapping,gc,io}/`; only
 `tests/suites/Makefile` contains the declarative test-to-production-C
 link map. Its one `BUILD_NATIVE` recipe writes test binaries to
-`build/tests/native/`. All four semantic `make test-*` interfaces
-remain stable. The production source files and test assertions were
-not altered by this organization pass. Use `make test` to verify
+`build/tests/native/`. The old per-suite `make test-*` interfaces are retired and unsupported
+at repository root. The internal native-suite build rule remains private.
+Use `make test` to verify
 source path resolution and avoid compilation in `tests/runtime/`.
 
-## Automated V3 build/test/deployment interface
+## One official compile → test → loaded RAM benchmark interface
 
-Use `make verify` for rootless native kernel-C suites, exact V3
-source contracts, and deterministic byte-exact off/V3 replay.
-Use `make` to build V3 (still **not** loaded). Use **`make deploy`**
-for the complete flow: verify, compile the exact V3 module for
-`/lib/modules/$(uname -r)/build`, compile the C direct-I/O test
-oracle into `build/tests/device-roundtrip`, then provision a new
-strictly-owned RAM-backed null_blk and swapz3 DM target with
-`sudo bash tools/deploy-nullblk.sh`. The host session is **ephemeral**:
-it executes 128 4KiB page writes, reads, controlled overwrites and
-flushes, then ordinarily removes only that mapping and the owned RAM
-device. A busy/changed device is **quarantined**, never force-deleted.
-
-From a clone on `main`:
+From a clean checkout on `main`:
 
 ```sh
-cd ~/swapz && git pull --ff-only origin main && make deploy
+cd ~/swapz && git pull --ff-only origin main && make test
 ```
 
-The script checks clean tracked sources, exact staged C/headers,
-vermagic=running kernel, unique random configfs/DM UUID, RAM-backed
-null_blk size (64MiB), DM dependency, unattached/non-swap status,
-and refuses to replace an already loaded `dm_swapz`. It never
-installs a default system module, activates swap, or uses physical
-storage. Logs remain in the **one build root** at
-`build/deploy/session.*/session.log`. Configfs may remain mounted
-because it can be shared by other tools. A missing header, configfs,
-module-signing permission, root privilege or safe admission is **BLOCKED**,
-not a reason to relax the null_blk-only kernel guard.
+This one supported test invocation first builds the current V3 kernel
+module and userspace oracle, executes production-C, replay/source/safety
+checks and W=1/W=2 builds, then runs an isolated loaded-kernel smoke
+followed by four 20 MiB/s rate-limited off/V3 benchmark pairs
+(sync/async/async/sync). No separate `make verify`, `make run`,
+`make deploy`, suite-specific Make goal or direct helper invocation is an
+official testing alternative.
 
-CI builds W=1/W=2 without loading the module and publishes only the
-compile-time `.ko` plus source/version/vermagic/SHA manifest as a
-short-lived GitHub Actions artifact. Module artifacts are kernel
-version-specific: for actual host deployment, always rebuild locally.
+Private implementations enforce clean source, same-kernel vermagic,
+a matching staged binary and exact owned RAM-backed `null_blk`
+identities, swap/mount/holder checks, and unique DM UUIDs. A busy or
+ownership-mismatched device is quarantined rather than force-deleted.
+The command never installs or activates system swap, touches real media,
+performs a reboot or adds DKMS installation. For full qualification,
+root or *already authorized noninteractive* `sudo -n` is required;
+otherwise `make test` exits BLOCKED without opening a password prompt.
+Logs are retained beneath `build/`. CI's internal rootless subset is
+not a full `make test` PASS and does not qualify loaded performance.
 
-## One-command compile → test → ephemeral isolated deployment
+## Historical implementation notes — not executable instructions
 
-Use `cd ~/swapz && git pull --ff-only origin main && make run` on a
-Linux development host with matching kernel headers and installed
-`make`, C compiler, Device Mapper tools, `null_blk` configfs support,
-and `sudo` privileges. The `main`-only source guard blocks a mismatched
-branch, dirty tracked sources, wrong kernel vermagic or nonidentical
-staged kernel source. `make run` is a strictly ordered pipeline:
-
-1. `make verify` executes all 14 production-C tests, V3 source
-   contracts, the off/V3 rootless replay oracle and deployment-shell
-   syntax/safety contract checks. **No kernel module is loaded yet.**
-2. Build V3 with `W=1` and `W=2` against the *running* kernel's
-   `KDIR`; compile the standalone C device roundtrip oracle. All
-   outputs stay under the reused `build/` root.
-3. **Only after all prior steps succeed**, `sudo` invokes
-   `tools/deploy-nullblk.sh` to create a unique 64MiB RAM-backed
-   `null_blk`, insert the exact V3 module, make a unique 16MiB DM
-   mapping, write/overwrite/read back 128 deterministic 4KiB pages,
-   exercise flushes, print target status and lower counters, and
-   perform ordinary ownership-verified teardown.
-4. Save logs under `build/deploy/session.*`, report PASS/FAIL/BLOCKED,
-   and quarantine unexpected resource ownership or busy holders
-   instead of force removal. The script checks the system swap
-   inventory before and after and fails if it changes.
-
-`make deploy` remains an alias for this same **ordered** pipeline;
-`make check` and `make verify` provide nonprivileged checks only.
-The default `make` merely compiles V3. **No permanent deployment,
-DKMS installation, system swap enablement, reboot or physical-disk
-I/O is authorized.** An environment lacking supported safe `null_blk`
-or sudo must report BLOCKED rather than work around isolation.
-
+The dated alpha-series entries below preserve how previous experiments
+were qualified at their original commits. Any earlier testing Make goals,
+per-suite commands or standalone script invocations mentioned in that
+history have been retired as public interfaces. **Use only `make test`
+for all current testing and benchmarking.** It contains the formerly
+separate native, loaded-smoke and off/V3 benchmark stages.
 
 ## 2026-10-14 null_blk configfs naming fix
 
@@ -192,16 +159,16 @@ The first user-loaded Linux 7.0 test passed all C tests and module builds but st
 
 The active V3 `engine.c/engine.h` exports the bit-exact, allocation-free
 `sv3_page_is_zero` predicate used by `dm-target.c` for a proven
-zero-write mapping transition. `make test-mapping` builds the new
-`build/tests/native/zero-write-elision` directly against unchanged
-production engine/authority/codec C; `make verify` includes this
-regression and the source-path contract. The loaded host oracle stays
+zero-write mapping transition. `make test` runs the private native `zero-write-elision` executable
+built directly against production engine/authority/codec C, as well
+as the source-path contract. The loaded host oracle stays
 at `build/tests/device-roundtrip` and now overwrites exact zero
 pages. There is still **one** reused `~/swapz/build/` output tree.
 
 ## Isolated deployment write-stat acceptance check
 
-`make run` uses the compiled 128-page `device-roundtrip` C oracle
+The loaded phase of `make test` uses the compiled 128-page
+`device-roundtrip` C oracle
 on newly verified RAM-backed `null_blk`. The deployment shell now
 captures the **before/after** V3 and backing-device write snapshots,
 requires the expected nine all-zero logical page elisions in its fixed
@@ -212,15 +179,15 @@ performance benchmark. If it fails, the harness attempts only its
 existing ordinary identity-verified teardown or quarantines resources;
 never changes active swap. Build artifacts remain under `build/`.
 
-## Opt-in two-arm RAM benchmark
+## Owned-RAM benchmark (included in make test)
 
-`make bench-pair` is not called by `make`, `verify`, `run` or CI
-privileged steps. It completes rootless checks and exact kernel Kbuild
-W=1/W=2, then explicitly invokes
-`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair`
-on a consenting host. Evidence stays in `build/benchmark/session.*/`.
-The test uses only new owned RAM-backed devices and normal teardown,
-or quarantines failed ownership checks. Loaded test: **NOT RUN**.
+The full `make test` invocation includes the off/V3 replay after
+successful rootless contracts, kernel builds and loaded device oracle.
+It creates newly owned RAM-backed devices, verifies the independent
+lower I/O counters and readback, then performs safe teardown or
+quarantines failed ownership checks. Evidence stays in
+`build/benchmark/session.*/`. Loaded throughput on the user's current
+kernel: **NOT RUN** as of this documentation revision.
 
 ## Alpha.9 observational stage-3A version
 
@@ -467,8 +434,8 @@ publication after successful synchronous lower I/O,
 GC reserve and the null_blk-only admission guard.
 This is a CHANGE to the C commit schedule and
 must be W=1/W=2 built and rootless-tested before
-isolated owner-loaded `make run`, then unpaced
-`make bench-pair-medium-unpaced`. A speed benefit
+the owned-RAM qualification and unpaced benchmark phases of
+`make test`. A speed benefit
 is unmeasured and not presumed.
 
 ## Mandatory Make API regression gate

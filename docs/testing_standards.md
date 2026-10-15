@@ -11,6 +11,8 @@ release metadata and source paths, not the project/module/target name. Keep
 `SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
 utility does not rename the project or module.
 
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
+
 
 ## Non-negotiable owner Make API
 
@@ -64,16 +66,16 @@ Report **PASS, FAIL, MIXED, INCONCLUSIVE, BLOCKED, NOT RUN** with exact Git sour
 
 ## Reusable native C tests: mandatory first choice
 
-**Only one reusable compiled-output tree:** `~/swapz/build/`. Native tests link to **actual** `kernel/extent-v3/{codec,authority,engine}.c` and use semantic names, not newly duplicated version-number frameworks. From checkout root:
+**Only one reusable compiled-output tree:** `~/swapz/build/`. Native tests link to **actual** `kernel/extent-v3/{codec,authority,engine}.c` and use semantic names, not newly duplicated version-number frameworks. From the checkout root the **only official test invocation** is:
 
 ~~~sh
-make test                  # all active V3 native production-C suites
-make test-codec            # codec-roundtrip
-make test-mapping          # mapping authority, transactions, overwrites, raw/discard
-make test-gc               # liveness, forbidden victim, rotation, cost
-make test-lower-io         # flush/FUA, lower write aggregation
-make -C tests/suites test-all
+make test
 ~~~
+
+It owns all native suites, source and safety contracts, both warning-level
+kernel builds, loaded owned-RAM oracle and four paired benchmark trials.
+There are no supported per-suite test commands or separate benchmark
+entry points. Internal native Make rules remain private implementations.
 
 There are **16 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`; `zero-write-elision`; `window-policy`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
 
@@ -166,14 +168,14 @@ status overlap count as proof of useful throughput or media wear.
 ## Active V3-only default gates
 
 `make test` runs V3 native C suites, source/fixture/safety contracts,
-and W=1/W=2 builds **without sudo or loading a module**.
-The retired C++ model is retained for explicit historical reproduction.
-Loaded owned-RAM correctness and paired performance are separate
-opt-in owner-authorized tests; rootless PASS does not satisfy them.
-`python3 -B tests/runtime/benchmark/io-replay-test.py -v` verifies the
-**two-arm** off/V3 oracle including bad-input rejection in safe rootless
-files. Benchmarks require an actual loaded V3 module before claiming
-performance. Regressions focus on 2:1-ish **measured** LZ4 inputs, raw
+W=1/W=2 builds, then loaded owned-RAM correctness and off/V3 paired
+performance in that order. Its private Python replay oracle includes
+bad-input rejection in safe rootless files. Benchmarks require an actual
+loaded V3 module before claiming performance. Without noninteractive
+privilege or safe owned `null_blk`, the full command exits BLOCKED (nonzero),
+not PASS. Rootless CI uses only the internal rootless subset and must
+report its result as partial; it is **not a competing public test command**.
+The retired C++ model is retained for historical source inspection. Regressions focus on 2:1-ish **measured** LZ4 inputs, raw
 fallback, 4KiB/8KiB/16KiB packing, GC and same-page read ordering.
 
 ### Retained rootless compatibility safety checks
@@ -199,8 +201,8 @@ Moved the three active anonymous-page/immutable-replay scripts to
 contract test to `tests/runtime/native/source-contract-test.py`.
 Updated source-relative includes/import paths and active workflow
 references. Deleted old root-level names; historical Git commits
-retain the exact original files. Run `make test`, direct source
-contracts and the off/V3 replay test at **final HEAD**.
+retain the exact original files. Run the official `make test` pipeline at **final HEAD**; its internal
+stages perform both source contracts and off/V3 replay tests.
 
 The remaining V2.2/pressure/recall and old-host helpers remain at
 `tests/runtime/` while their sibling imports and literal workflow
@@ -335,7 +337,7 @@ holders and active-swap checks before any future device teardown.
 
 ## Exact-zero write-path regression (2026-10-14)
 
-The V3 `make test-mapping` group now includes the native
+The native suite exercised by `make test` now includes the
 `zero-write-elision` executable compiling the **actual engine and
 authority C**. It verifies full-byte zero recognition, nonzero at
 start/middle/end, RAW-to-zero-to-nonzero generation transitions,

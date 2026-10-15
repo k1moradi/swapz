@@ -31,6 +31,37 @@ class PublicMakeContract(unittest.TestCase):
                                cwd=ROOT, capture_output=True, text=True, timeout=5)
             self.assertNotEqual(p.returncode, 0, forbidden)
 
+    def test_make_test_is_only_official_documented_test_command(self):
+        canonical = ("AGENTS.md", "README.md", "VISION.md",
+                     "docs/coding_standards.md", "docs/testing_standards.md",
+                     "docs/compile.md", "docs/benchmark.md")
+        policy = "**Single official test command (read before every prompt):**"
+        for document in canonical:
+            with self.subTest(canonical=document):
+                content = (ROOT / document).read_text()
+                self.assertIn(policy, content)
+                self.assertIn("Run `make test` at the repository root", content)
+                self.assertIn("report BLOCKED (nonzero)", content)
+                self.assertIn("Do not create, publish, recommend, or document "
+                              "alternative test commands", content)
+
+        testing = (ROOT / "docs/testing_standards.md").read_text()
+        self.assertIn("~~~sh\nmake test\n~~~", testing)
+        operator_docs = ("README.md", "docs/testing_standards.md",
+                         "tests/runtime/README.md", "tests/suites/README.md")
+        for document in operator_docs:
+            with self.subTest(official=document):
+                content = (ROOT / document).read_text()
+                for forbidden in ("make test-codec", "make test-mapping",
+                                  "make test-gc", "make test-lower-io",
+                                  "make -C tests/suites test-all",
+                                  "sudo bash tools/deploy-nullblk.sh",
+                                  "sudo bash tools/benchmark-owned-pair.sh"):
+                    self.assertNotIn(forbidden, content,
+                                     f"Nonofficial test instruction in {document}")
+        self.assertIn("tools/test-rootless.sh", MAKE)
+        self.assertIn("tools/test-loaded.sh", MAKE)
+
     def test_packaging_and_loaded_tests_are_bounded(self):
         self.assertIn("tools/package-dkms.sh install", MAKE)
         self.assertIn("tools/package-dkms.sh uninstall", MAKE)

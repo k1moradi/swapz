@@ -5,34 +5,31 @@
 [README.md](../../README.md), [VISION.md](../../VISION.md).
 Use **one** reusable `~/swapz/build/` for all compilation.
 
-## Production C first
+## One public test entry point
 
-| Directory | Coverage | Entry point |
-|---|---|---|
-| `native/codec/` | Format, CRC, 4KiB RAW and LZ4 payload | `make test-codec` |
-| `native/mapping/` | Authority, transaction commit, rollback, overwrites | `make test-mapping` |
-| `native/gc/` | Victim exclusion, live relocation, accounting, rotations | `make test-gc` |
-| `native/io/` | FUA/flush, lower-write aggregation, retained slot/deadline policy | `make test-lower-io` |
-| `native/source-contract-test.py` | Real DM target, fault/ownership and constructor source contracts | `python3 -B tests/runtime/native/source-contract-test.py -v` |
-| `benchmark/` | Synthetic anonymous-page fixture and immutable off/V3 replay | `python3 -B tests/runtime/benchmark/io-replay-test.py -v` |
+From repository root, `make test` is **the only official way** to run
+any supported V3 test or benchmark. It orchestrates all private
+production-C suites, source/fixture/safety contracts, warning-level
+module builds, loaded owned-RAM correctness and counterbalanced
+off/V3 performance trials. Do not invoke per-suite Make goals,
+Python test files or shell smoke/benchmark helpers as alternate
+operator commands. The helper paths below describe internal
+implementation only.
 
-`make test` executes the four C groups; each retains its original C
-test functions and assertions. `tests/suites/Makefile` shares **one
-compile recipe** across all 16 native C executables, linking the exact
-kernel `codec.c`, `authority.c`, and `engine.c` where applicable.
-**No executable is built in source folders.**
+| Internal source group | Coverage |
+|---|---|
+| `native/codec/` | Format, CRC, 4KiB RAW and LZ4 payload |
+| `native/mapping/` | Authority, transactions, rollback, overwrite |
+| `native/gc/` | Victim exclusion, relocation, accounting, rotation |
+| `native/io/` | Flush/FUA, aggregation, retained-slot policy |
+| `native/source-contract-test.py` | Production target, fault/ownership constraints |
+| `benchmark/` | Immutable off/V3 fixture and replay oracles |
 
-The benchmark test uses isolated scratch files and fake sysfs to
-validate the replay oracle plus modern/legacy owned-null_blk naming,
-driver/index and major:minor exclusion. It **does not claim a
-loaded V3 benchmark**. The off arm in
-separately authorized loaded tests is bare **owned RAM-backed null_blk**,
-never a host `swapoff`.
-
-The loaded smoke counter helper is exercised rootlessly with fake
-target and block-stat changes via
-`bash tests/runtime/native/quiet-lower-io-test.sh`; it does not
-claim device exclusivity or privileged read-accounting evidence.
+All compiled tests stay in `build/tests/native/` and link actual kernel
+`codec.c`, `authority.c`, and `engine.c` where applicable. The rootless
+stage alone cannot qualify loaded behavior or achieved throughput. If
+noninteractive privileges or safe isolated RAM devices are unavailable,
+full `make test` reports BLOCKED, never a false successful qualification.
 
 ## Historical and general safety helpers
 
@@ -70,5 +67,5 @@ benchmarks**. Do not rewrite schema tags or alter source provenance.
 
 The `native/mapping/zero-write.c` regression builds as
 `build/tests/native/zero-write-elision` and tests actual-C all-zero
-recognition and generational mapping retirement. It belongs to
-`make test-mapping`. No separate Python zero-page mock is used.
+recognition and generational mapping retirement. It is included in the native stage of `make test`.
+No separate Python zero-page mock is used.
