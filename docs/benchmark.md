@@ -1,6 +1,6 @@
 # Benchmark — V3 Lower-I/O Evidence Only
 
-**Mandatory task context:** [README.md](README.md), [VISION.md](VISION.md),
+**Mandatory task context:** [README.md](../README.md), [VISION.md](../VISION.md),
 [coding_standards.md](coding_standards.md),
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md).
@@ -1301,3 +1301,14 @@ independent lower WRITE and READ bytes/requests,
 p95/p99, GC, and safe teardown. A speedup
 with unacceptable extra lower I/O is NOT a
 performance win. No loaded alpha.21 result.
+
+## Retired V2.2 offline evidence — no qualified performance winner
+
+The V2.2 rootless plateau analyzer, exact-latency V3 observation sidecar,
+bundle-integrity checkers and virtual-device qualification checklist remain
+historical **offline models**, not independent collector authentication,
+physical drain, sustained throughput or a winner selection. See
+[streaming benchmark reporting](streaming-benchmark-reporting.md) for the
+consolidated constraints and [archived V2.2 reports](archive/README.md)
+for original schemas and test provenance. No old V2.2 strategy or batch
+winner is a prerequisite for the V3 same-input off/V3 benchmark.

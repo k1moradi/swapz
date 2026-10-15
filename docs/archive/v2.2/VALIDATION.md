@@ -2379,7 +2379,7 @@ production `buffer-recall.sh`, run a real Bash bridge against device I/O,
 or measure staged swap performance. No actual DM/loop/NBD attachment,
 swap/module/pressure fixture, fio/device operation or benchmark was run.
 See `docs/recall-role-process-rootless.md` and
-`docs/v22-virtual-benchmark-qualification.md`. The next stage must
+`docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md`. The next stage must
 combine Codex's trusted executable/mapper policy and independently
 reviewed I/O-drain evidence before operator-authorized virtual tests.
 
@@ -2441,8 +2441,8 @@ and the full suite rerun at the exact passing revision above.
 No real dmsetup, loop, NBD attachment, swap, module load, pressure
 fixture, fio/device benchmark, physical storage I/O or reboot occurred.
 The actual V2.2 winning strategy and batch remain **UNDETERMINED**.
-See `docs/v22-drain-plateau-offline.md` and
-`docs/v22-virtual-benchmark-qualification.md`.
+See `docs/archive/v2.2/audits/v22-drain-plateau-offline.md` and
+`docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md`.
 
 ## 2026-10-09 — No false V2.2 streaming benchmark winner from one-run data
 
@@ -2506,7 +2506,7 @@ actual kernel physical drain, controlled backend isolation,
 10,000+ reads/run, repeated nine-size saturation, read-p99
 confidence, live production recall migration, or any V2.2 strategy/
 batch winner. See `docs/streaming-benchmark-reporting.md` and
-`docs/v22-drain-plateau-offline.md`.
+`docs/archive/v2.2/audits/v22-drain-plateau-offline.md`.
 
 No real DM, loop, NBD attach, swap, kernel module, live pressure
 fixture, fio benchmark, device write or reboot was performed.
@@ -2794,7 +2794,7 @@ No DM/loop/NBD attachment, swap, module, pressure fixture,
 fio/device benchmark, real lower-device throughput measurement,
 physical I/O or reboot was performed. The V2.2 batch/strategy
 winner remains **UNDETERMINED**. See
-`docs/v22-drain-plateau-offline.md`.
+`docs/archive/v2.2/audits/v22-drain-plateau-offline.md`.
 
 ## 2026-10-09 — Primary-developer GNU review, recall ordering, and signed drain-model CI
 
@@ -3169,7 +3169,7 @@ collector/session/device field. Its output always reports
 `physical_selection_authorized=false` and
 `backing_release_authorized=false`. Verified *consistency*
 does not prove actual lower-device drain or real swap-in
-latency. See `docs/v22-evidence-bundle-offline.md`.
+latency. See `docs/archive/v2.2/audits/v22-evidence-bundle-offline.md`.
 
 Both combined and teardown workflow logs show
 `Ran 20 tests` and
@@ -3492,7 +3492,7 @@ The main developer independently implemented:
   run/session/collector/device assertions, duplicate sidecar or run
   identities, input traversal, symlink/hardlink/FIFO, schema mismatch,
   false p99/count, manifest tampering, and negative authorization.
-- `docs/v22-evidence-bundle-v3.md` includes the exact
+- `docs/archive/v2.2/audits/v22-evidence-bundle-v3.md` includes the exact
   schema and scope. Both joint workflows run the new 35-second bounded
   gate, while static contract tests now number 16. The old JSONL-only
   bundle verifier remains unchanged and denies V3 claims.
@@ -3785,7 +3785,7 @@ until lower completion; lower FUA and preflush durability still
 requires authorized real-device fault injection. No real swap, DM,
 loop, NBD, module, pressure, physical-device manipulation,
 reboot or cleanup occurred. See
-`docs/v22-flush-fua-durability-audit.md`.
+`docs/archive/v2.2/audits/v22-flush-fua-durability-audit.md`.
 Strategy/batch winner: **UNDETERMINED**.
 
 ## 2026-10-10 — Production-C mapping replacement live-reference preservation
@@ -3879,7 +3879,7 @@ At executable SHA
 
 Additional draft-PR documentation-only commits after this executable
 SHA are **not** silently assigned these prior run conclusions.
-See `docs/v22-compaction-container-validation-audit.md` for exact
+See `docs/archive/v2.2/audits/v22-compaction-container-validation-audit.md` for exact
 fault classes, mutation evidence and scope limits.
 
 **Not authorized/qualified:** production installation, privileged
@@ -3943,7 +3943,7 @@ durability, host pressure and on-device performance are **not**
 qualified by this work. The V2.2 strategy/batch winner remains
 **UNDETERMINED**.
 
-See `docs/v22-staged-read-metadata-audit.md`.
+See `docs/archive/v2.2/audits/v22-staged-read-metadata-audit.md`.
 
 ## October 10, 2026 — Independent lower-device read/write range audits
 
@@ -3996,8 +3996,8 @@ to either new merge commit.
 
 V2.2 strategy and batch winner remain **UNDETERMINED**.
 
-See `docs/v22-published-mapping-read-bounds-audit.md` and
-`docs/v22-stream-submit-bounds-audit.md`.
+See `docs/archive/v2.2/audits/v22-published-mapping-read-bounds-audit.md` and
+`docs/archive/v2.2/audits/v22-stream-submit-bounds-audit.md`.
 
 ## October 10, 2026 — Finalization preflight and post-merge qualification
 
@@ -4037,7 +4037,7 @@ No kernel module was loaded, no privileged or real DM/swap/device tests ran,
 and no real durability or performance claim follows from this source-only
 qualification. V2.2 strategy/batch winner remains **UNDETERMINED**.
 
-See `docs/v22-inflight-finalize-preflight-audit.md`.
+See `docs/archive/v2.2/audits/v22-inflight-finalize-preflight-audit.md`.
 
 ## October 10, 2026 — Independent upper-BIO ownership recovery
 
@@ -4086,7 +4086,7 @@ older `4704995c`; it cannot be attributed to PR #8.
 No real DM, swap, loop/NBD, module loading, privileged or device/fault
 work was performed. V2.2 strategy/batch winner remains **UNDETERMINED**.
 
-See `docs/v22-independent-upper-bio-ownership-audit.md`.
+See `docs/archive/v2.2/audits/v22-independent-upper-bio-ownership-audit.md`.
 
 ## October 10, 2026 — Native PR #8 closeout, exact BIO identity and checkpoint race
 
@@ -4179,7 +4179,7 @@ DM, swap, NBD, loop, or physical-device stack exercised.
 Native build of PR #9 remains to be independently qualified.
 V2.2 performance/policy winner remains **UNDETERMINED**.
 
-See `docs/v22-exact-bio-identity-audit.md`.
+See `docs/archive/v2.2/audits/v22-exact-bio-identity-audit.md`.
 
 ## October 10, 2026 — Pending-pack BIO ownership independence (PR #12)
 
@@ -4242,7 +4242,7 @@ PR #12 kernel source.** No loaded module, real DM/swap/loop/NBD/device,
 privileged operations or physical fault workloads were performed.
 V2.2 strategy and batch-size winner remain **UNDETERMINED**.
 
-See `docs/v22-pending-pack-ownership-audit.md`.
+See `docs/archive/v2.2/audits/v22-pending-pack-ownership-audit.md`.
 
 ## October 10, 2026 — PR #13 generation scan pending-pack preflight
 
@@ -4317,7 +4317,7 @@ rewrite; performance has not been measured. The conservative
 indefinite teardown callback wait remains. V2.2 strategy/batch
 winner remains **UNDETERMINED**.
 
-See `docs/v22-generation-scan-pack-preflight-audit.md`.
+See `docs/archive/v2.2/audits/v22-generation-scan-pack-preflight-audit.md`.
 
 ## October 10, 2026 — PR #14 rootless benchmark planner and pre-device safety gate
 

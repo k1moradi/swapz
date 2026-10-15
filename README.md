@@ -10,8 +10,8 @@ until loaded correctness and resource-performance gates are satisfied.
 
 The former V2.2 implementation did not meet the project's compression
 expectations and has been **retired from active development, default
-builds, default test suites, and required benchmark comparisons**. Its source, old tests, and
-measurements remain archived in Git history for provenance only.
+builds, default test suites, and required benchmark comparisons**. Its retired source and tests remain in Git history; exact historical
+V2.2 audit evidence is preserved under `docs/archive/v2.2/audits/`.
 No V2.2 comparison is required before improving V3. Some historical
 rootless safety checks remain automated to avoid losing safety coverage.
 
@@ -21,20 +21,25 @@ rootless safety checks remain automated to avoid losing safety coverage.
 |---|---|
 | [README.md](README.md) | Active V3 scope and commands |
 | [VISION.md](VISION.md) | Measured lower-I/O outcome and release criteria |
-| [coding_standards.md](coding_standards.md) | Kernel C, invariants, main-only collaboration |
-| [testing_standards.md](testing_standards.md) | Production-C test and fault coverage |
-| [compile.md](compile.md) | Kbuild/Make and only one reused `~/swapz/build/` |
-| [benchmark.md](benchmark.md) | Same-data **uncompressed baseline vs V3** evidence |
+| [coding_standards.md](docs/coding_standards.md) | Kernel C, invariants, main-only collaboration |
+| [testing_standards.md](docs/testing_standards.md) | Production-C test and fault coverage |
+| [compile.md](docs/compile.md) | Kbuild/Make and only one reused `~/swapz/build/` |
+| [benchmark.md](docs/benchmark.md) | Same-data **uncompressed baseline vs V3** evidence |
 
 ## Documentation and current work
 
 The concise [current V3 TODO](docs/TODO.md) and
 [active V3 roadmap](docs/ROADMAP.md) are under
-[the documentation index](docs/README.md). Follow
+[the documentation index](docs/INDEX.md). Follow
 [documentation guidelines](docs/DOCUMENTATION_GUIDELINES.md) before
 adding a document or moving a report. V2.x plans and validation logs
 are archived for provenance, not active requirements.
-Root agent entry points stay at their expected locations.
+Root agent entry points stay at their expected locations. The four
+engineering standards now live under `docs/`, with their canonical links
+in the six-document table above. Historical V2.2 source-audit lessons
+are summarized in [production readiness](docs/PRODUCTION_READINESS.md);
+offline V2.2 measurement limits are collected in
+[streaming benchmark reporting](docs/streaming-benchmark-reporting.md).
 
 **One Git branch: `main`**, no new branches unless expressly authorized.
 More than 50% of ongoing engineering effort belongs to the
@@ -57,8 +62,8 @@ with `W=1`/`W=2`, then runs an **ephemeral** owned RAM-backed
 or use physical media. Results go into `build/deploy/session.*`;
 missing headers/sudo/null_blk block the loaded phase. Use
 `make verify` if you want the rootless-only checks; `make` compiles
-V3 without loading it. See [compile.md](compile.md) and
-[testing_standards.md](testing_standards.md) for gates and limits.
+V3 without loading it. See [compile.md](docs/compile.md) and
+[testing_standards.md](docs/testing_standards.md) for gates and limits.
 
 ## Build and test (rootless compilation only)
 
@@ -94,7 +99,7 @@ lower WRITE bytes; `retain_ms=2` saved **26.99% WRITE bytes** and
 **67.14% WRITE requests** against its own uncompressed arm. Measured
 READ bytes/requests were unchanged. Candidate write p99 increased
 from **1.081ms off to 6.365ms V3**. These short, synthetic trials
-had no GC/CPU qualification; see [benchmark.md](benchmark.md).
+had no GC/CPU qualification; see [benchmark.md](docs/benchmark.md).
 
 **Alpha.12 fixes the production C retained pipeline:**
 
@@ -130,8 +135,8 @@ actual fixture LZ4 sizes, immutable input, achieved load, full readback,
 independent lower counters and safe ownership/teardown. Compare read
 and write latency as well as bytes/requests; no alpha.12 performance
 win or sustained qualification is claimed. Prior alpha.7..11 results
-and failures remain in [benchmark.md](benchmark.md) and
-[testing_standards.md](testing_standards.md).
+and failures remain in [benchmark.md](docs/benchmark.md) and
+[testing_standards.md](docs/testing_standards.md).
 
 ## Alpha.13: opt-in early commit for proven packed batches
 
@@ -538,7 +543,7 @@ counts separately rather than assuming one dm_io call is one device
 request. The read-byte check **PASSED** on the user's owned Linux
 7.0.0-38 RAM-backed host at `2e21fac5`. This is still a null_blk-only development qualification,
 **not** production readiness or a matched off/V3 benchmark (see
-[benchmark.md](benchmark.md)).
+[benchmark.md](docs/benchmark.md)).
 
 ## Opt-in owned-RAM off/V3 pilot
 
@@ -583,7 +588,7 @@ The current V3 plan is in `docs/TODO.md` and `docs/ROADMAP.md`. The consolidatio
 - [`docs/DOCUMENTATION_GUIDELINES.md`](docs/DOCUMENTATION_GUIDELINES.md)
 - [`docs/ONE_MAIN_BRANCH_CONSOLIDATION.md`](docs/ONE_MAIN_BRANCH_CONSOLIDATION.md)
 - [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)
-- [`docs/README.md`](docs/README.md)
+- [`docs/INDEX.md`](docs/INDEX.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TODO.md`](docs/TODO.md)
 
@@ -661,25 +666,25 @@ Dated review findings and rootless evidence inventories.
 Historical defect reviews, source-based checks, and offline evidence; V2.2 remains retired.
 
 - [`docs/swapz-kernel-range-preflight-audit.md`](docs/swapz-kernel-range-preflight-audit.md)
-- [`docs/v22-async-reap-watchdog-audit.md`](docs/v22-async-reap-watchdog-audit.md)
-- [`docs/v22-compaction-container-validation-audit.md`](docs/v22-compaction-container-validation-audit.md)
-- [`docs/v22-drain-plateau-offline.md`](docs/v22-drain-plateau-offline.md)
-- [`docs/v22-evidence-bundle-offline.md`](docs/v22-evidence-bundle-offline.md)
-- [`docs/v22-evidence-bundle-v3.md`](docs/v22-evidence-bundle-v3.md)
-- [`docs/v22-exact-bio-identity-audit.md`](docs/v22-exact-bio-identity-audit.md)
-- [`docs/v22-flush-fua-durability-audit.md`](docs/v22-flush-fua-durability-audit.md)
-- [`docs/v22-gc-compressed-scratch-audit.md`](docs/v22-gc-compressed-scratch-audit.md)
-- [`docs/v22-gc-source-snapshot-audit.md`](docs/v22-gc-source-snapshot-audit.md)
-- [`docs/v22-generation-gc-transaction-audit.md`](docs/v22-generation-gc-transaction-audit.md)
-- [`docs/v22-generation-scan-pack-preflight-audit.md`](docs/v22-generation-scan-pack-preflight-audit.md)
-- [`docs/v22-independent-upper-bio-ownership-audit.md`](docs/v22-independent-upper-bio-ownership-audit.md)
-- [`docs/v22-inflight-finalize-preflight-audit.md`](docs/v22-inflight-finalize-preflight-audit.md)
-- [`docs/v22-latency-v3-sidecar.md`](docs/v22-latency-v3-sidecar.md)
-- [`docs/v22-mapping-replacement-accounting-audit.md`](docs/v22-mapping-replacement-accounting-audit.md)
-- [`docs/v22-pending-pack-ownership-audit.md`](docs/v22-pending-pack-ownership-audit.md)
-- [`docs/v22-published-mapping-read-bounds-audit.md`](docs/v22-published-mapping-read-bounds-audit.md)
-- [`docs/v22-staged-read-metadata-audit.md`](docs/v22-staged-read-metadata-audit.md)
-- [`docs/v22-stream-submit-bounds-audit.md`](docs/v22-stream-submit-bounds-audit.md)
-- [`docs/v22-virtual-benchmark-qualification.md`](docs/v22-virtual-benchmark-qualification.md)
+- [`docs/archive/v2.2/audits/v22-async-reap-watchdog-audit.md`](docs/archive/v2.2/audits/v22-async-reap-watchdog-audit.md)
+- [`docs/archive/v2.2/audits/v22-compaction-container-validation-audit.md`](docs/archive/v2.2/audits/v22-compaction-container-validation-audit.md)
+- [`docs/archive/v2.2/audits/v22-drain-plateau-offline.md`](docs/archive/v2.2/audits/v22-drain-plateau-offline.md)
+- [`docs/archive/v2.2/audits/v22-evidence-bundle-offline.md`](docs/archive/v2.2/audits/v22-evidence-bundle-offline.md)
+- [`docs/archive/v2.2/audits/v22-evidence-bundle-v3.md`](docs/archive/v2.2/audits/v22-evidence-bundle-v3.md)
+- [`docs/archive/v2.2/audits/v22-exact-bio-identity-audit.md`](docs/archive/v2.2/audits/v22-exact-bio-identity-audit.md)
+- [`docs/archive/v2.2/audits/v22-flush-fua-durability-audit.md`](docs/archive/v2.2/audits/v22-flush-fua-durability-audit.md)
+- [`docs/archive/v2.2/audits/v22-gc-compressed-scratch-audit.md`](docs/archive/v2.2/audits/v22-gc-compressed-scratch-audit.md)
+- [`docs/archive/v2.2/audits/v22-gc-source-snapshot-audit.md`](docs/archive/v2.2/audits/v22-gc-source-snapshot-audit.md)
+- [`docs/archive/v2.2/audits/v22-generation-gc-transaction-audit.md`](docs/archive/v2.2/audits/v22-generation-gc-transaction-audit.md)
+- [`docs/archive/v2.2/audits/v22-generation-scan-pack-preflight-audit.md`](docs/archive/v2.2/audits/v22-generation-scan-pack-preflight-audit.md)
+- [`docs/archive/v2.2/audits/v22-independent-upper-bio-ownership-audit.md`](docs/archive/v2.2/audits/v22-independent-upper-bio-ownership-audit.md)
+- [`docs/archive/v2.2/audits/v22-inflight-finalize-preflight-audit.md`](docs/archive/v2.2/audits/v22-inflight-finalize-preflight-audit.md)
+- [`docs/archive/v2.2/audits/v22-latency-v3-sidecar.md`](docs/archive/v2.2/audits/v22-latency-v3-sidecar.md)
+- [`docs/archive/v2.2/audits/v22-mapping-replacement-accounting-audit.md`](docs/archive/v2.2/audits/v22-mapping-replacement-accounting-audit.md)
+- [`docs/archive/v2.2/audits/v22-pending-pack-ownership-audit.md`](docs/archive/v2.2/audits/v22-pending-pack-ownership-audit.md)
+- [`docs/archive/v2.2/audits/v22-published-mapping-read-bounds-audit.md`](docs/archive/v2.2/audits/v22-published-mapping-read-bounds-audit.md)
+- [`docs/archive/v2.2/audits/v22-staged-read-metadata-audit.md`](docs/archive/v2.2/audits/v22-staged-read-metadata-audit.md)
+- [`docs/archive/v2.2/audits/v22-stream-submit-bounds-audit.md`](docs/archive/v2.2/audits/v22-stream-submit-bounds-audit.md)
+- [`docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md`](docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md)
 
 <!-- END COMPLETE DOCUMENTATION INDEX -->

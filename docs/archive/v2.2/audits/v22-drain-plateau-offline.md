@@ -19,7 +19,7 @@ flush-inclusive elapsed interval) and `lower_counter_window_mib_s`
 (the lower sysfs sector delta divided by that interval). Its separate
 `streaming-benchmark-report.py` explicitly prints `NO QUALIFIED WINNER`
 and `PLATEAU NOT REACHED`, never a one-shot optimizer verdict.
-See [`streaming-benchmark-reporting.md`](streaming-benchmark-reporting.md).
+See [`streaming-benchmark-reporting.md`](../../../streaming-benchmark-reporting.md).
 
 This stricter analyzer requires **lower-device sector deltas** for its
 numerator, plus independent repeats and sufficient raw read samples.
@@ -80,7 +80,7 @@ and conservative for bounded 2 MiB JSONL input. Real workloads may
 produce thousands of distinct raw nanosecond values and therefore
 **cannot be represented exactly** in V2. Do not silently round, truncate
 or discard reads to fit. **V3** adds a binary, lossless exact-RLE
-sidecar; see `docs/v22-latency-v3-sidecar.md`. Neither V1, V2 nor
+sidecar; see `docs/archive/v2.2/audits/v22-latency-v3-sidecar.md`. Neither V1, V2 nor
 V3 authenticates the collector, independently proves a sample
 happened, or establishes real kernel I/O drain.
 

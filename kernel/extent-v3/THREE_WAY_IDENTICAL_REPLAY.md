@@ -2,9 +2,9 @@
 
 **Not an active testing protocol.** V2.2 has been retired as a performance
 comparison and V3 is now the only active kernel development target on
-`main`. See [benchmark.md](../../benchmark.md) for the binding
+`main`. See [benchmark.md](../../docs/benchmark.md) for the binding
 **two-arm off versus V3** benchmark and
-[testing_standards.md](../../testing_standards.md) for source and host
+[testing_standards.md](../../docs/testing_standards.md) for source and host
 safety gates.
 
 Use `tests/runtime/io-replay.py`, not deleted

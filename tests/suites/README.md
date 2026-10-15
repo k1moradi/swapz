@@ -1,6 +1,6 @@
 > This is an inventory of existing native C test suites, not a separate
-> policy. Follow [testing_standards.md](../../testing_standards.md),
-> [compile.md](../../compile.md) and [VISION.md](../../VISION.md).
+> policy. Follow [testing_standards.md](../../docs/testing_standards.md),
+> [compile.md](../../docs/compile.md) and [VISION.md](../../VISION.md).
 > All compiled outputs reuse the one `~/swapz/build/`.
 
 # Reusable native kernel-C regression suites

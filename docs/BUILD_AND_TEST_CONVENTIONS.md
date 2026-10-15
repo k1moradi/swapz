@@ -4,9 +4,9 @@
 
 The current **six authoritative documents** are
 [README.md](../README.md), [VISION.md](../VISION.md),
-[coding_standards.md](../coding_standards.md),
-[testing_standards.md](../testing_standards.md),
-[compile.md](../compile.md), and [benchmark.md](../benchmark.md).
+[coding_standards.md](coding_standards.md),
+[testing_standards.md](testing_standards.md),
+[compile.md](compile.md), and [benchmark.md](benchmark.md).
 Agents must read all six **before every task**.
 
 Build and test policy is now in `compile.md` and

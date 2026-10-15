@@ -116,7 +116,7 @@ a monotonic elapsed interval. Its read-only reporter always states
 an independently attested lower-device I/O drain; the script does
 not yet emit independently reviewed quiescence attestations for this
 strict schema. See
-[`streaming-benchmark-reporting.md`](streaming-benchmark-reporting.md).
+[`streaming-benchmark-reporting.md`](../../../streaming-benchmark-reporting.md).
 
 The offline validator requires the full batch sweep (except the immediate
 single-batch baseline), three repeats per configuration, 10,000+ actual

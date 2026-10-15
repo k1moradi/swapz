@@ -1,10 +1,10 @@
 # Testing Standards
 
-**Current testing policy.** Read [README](README.md), [VISION](VISION.md), [coding_standards.md](coding_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) at the **start of every agent task**. Tests must prove correctness on actual source, expose false completions and regressions, and ultimately support the project's **real lower-I/O** objective—not maximize test counts.
+**Current testing policy.** Read [README](../README.md), [VISION](../VISION.md), [coding_standards.md](coding_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) at the **start of every agent task**. Tests must prove correctness on actual source, expose false completions and regressions, and ultimately support the project's **real lower-I/O** objective—not maximize test counts.
 
-Current actionable V3 gaps belong in [docs/TODO.md](docs/TODO.md);
+Current actionable V3 gaps belong in [docs/TODO.md](TODO.md);
 historical validation transcripts belong in the archive indexed by
-[docs/README.md](docs/README.md), not in the standards or task list.
+[docs/INDEX.md](INDEX.md), not in the standards or task list.
 
 ## Qualification ladder (do not confuse evidence levels)
 
@@ -1179,3 +1179,16 @@ and independent lower sector/request counters,
 then compare to alpha.20 under repeated
 counterbalanced conditions. Default retention
 remains off; alpha.21 loaded result: NOT RUN.
+
+## Retired V2.2 audit lessons — not a V3 test result
+
+Historical exact-production-C and rootless audits exposed important failure
+classes: upper-BIO identity and pending-pack ownership, callback lifetime
+after timeouts, fail-closed bounds for published mappings and lower extents,
+generation-scoped publication, GC scratch isolation, and FUA/flush completion
+ordering. The findings and links to all 15 safety audits are consolidated in
+[production readiness](PRODUCTION_READINESS.md); full dated reports are under
+[the V2.2 audit archive](archive/README.md). They **do not** qualify current
+V3 behavior or establish loaded, physical-device, or production readiness.
+Re-test a relevant invariant against *current V3 production C* instead of
+counting retired V2.2 rootless PASS results as V3 evidence.

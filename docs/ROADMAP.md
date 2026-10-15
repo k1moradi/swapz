@@ -10,9 +10,9 @@ The latest alpha.11 bounded result establishes useful packing on synthetic
 medium pages; sustained GC/CPU/latency qualification remains open.
 
 The authoritative acceptance and engineering rules are
-[vision](../VISION.md), [coding standards](../coding_standards.md),
-[testing standards](../testing_standards.md),
-[compile](../compile.md), and [benchmark](../benchmark.md).
+[vision](../VISION.md), [coding standards](coding_standards.md),
+[testing standards](testing_standards.md),
+[compile](compile.md), and [benchmark](benchmark.md).
 Track short, actionable work in [the V3 TODO](TODO.md); preserve exact
 results and outstanding release gates in
 [the production-readiness ledger](PRODUCTION_READINESS.md).
@@ -102,7 +102,7 @@ are reported, not hidden. This is not a release or performance gate.
   actual requests, flushes, GC bytes and requests, full drain,
   achieved useful IOPS, kernel CPU/RAM and cold READ p95/p99.
   Explain any target/device counter mismatch. Per the current
-  [benchmark contract](../benchmark.md), a pair outside the
+  [benchmark contract](benchmark.md), a pair outside the
   predeclared **5% achieved-IOPS matching threshold** is inconclusive.
 - Include measured-LZ4 nonzero ~2:1 (especially ~2,072B),
   exact-zero, tiny compressible, mixed and incompressible RAW inputs;

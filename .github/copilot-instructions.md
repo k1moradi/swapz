@@ -2,9 +2,9 @@
 
 Read [AGENTS.md](../AGENTS.md) and the six authoritative files
 [README.md](../README.md), [VISION.md](../VISION.md),
-[coding_standards.md](../coding_standards.md),
-[testing_standards.md](../testing_standards.md),
-[compile.md](../compile.md), [benchmark.md](../benchmark.md) at the
+[coding_standards.md](../docs/coding_standards.md),
+[testing_standards.md](../docs/testing_standards.md),
+[compile.md](../docs/compile.md), [benchmark.md](../docs/benchmark.md) at the
 start of **every task**. Do not create alternative policies.
 
 Work only on `main`, no branch unless owner explicitly asks. Spend
@@ -15,6 +15,6 @@ No reboot, active swap/physical media or unsafe teardown. Update the
 relevant current standard(s) in the same code commit and test exact HEAD.
 
 Before creating or moving documentation, consult
-[docs/README.md](../docs/README.md) and
+[docs/INDEX.md](../docs/INDEX.md) and
 [documentation guidelines](../docs/DOCUMENTATION_GUIDELINES.md).
 Use the active [V3 TODO](../docs/TODO.md) instead of historical tasks.

@@ -1,6 +1,6 @@
 # Compile — V3-only Active Build
 
-**Required per-task context:** [README.md](README.md), [VISION.md](VISION.md),
+**Required per-task context:** [README.md](../README.md), [VISION.md](../VISION.md),
 [coding_standards.md](coding_standards.md),
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md). Work on **main only**.

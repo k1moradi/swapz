@@ -1,13 +1,12 @@
 # swapz documentation index
 
 Start at the repository [README](../README.md) and
-[AGENTS.md](../AGENTS.md). The six authoritative project documents
-remain at the repository root because current agent entry points and
-CI governance explicitly require those paths:
+[AGENTS.md](../AGENTS.md). The six authoritative project documents are the two root entry points
+and four engineering standards maintained under `docs/`:
 [README](../README.md), [VISION](../VISION.md),
-[coding standards](../coding_standards.md),
-[testing standards](../testing_standards.md),
-[compile](../compile.md), [benchmark](../benchmark.md).
+[coding standards](coding_standards.md),
+[testing standards](testing_standards.md),
+[compile](compile.md), [benchmark](benchmark.md).
 The root AI-agent entry points are [AGENTS.md](../AGENTS.md),
 [CLAUDE.md](../CLAUDE.md), [agent.md](../agent.md),
 [CODEX_VALIDATION.md](../CODEX_VALIDATION.md) and
@@ -37,10 +36,10 @@ The historical [Codex validation worklog](archive/v2.2/CODEX_VALIDATION.md),
 current commands. The [historical V3 goals](archive/v3/V3_GOALS.md) and
 [performance diagnosis](archive/v3/PERFORMANCE_DIAGNOSIS.md)
 likewise records a dated experiment; read the active
-[benchmark standard](../benchmark.md) before drawing conclusions.
+[benchmark standard](benchmark.md) before drawing conclusions.
 
-Existing subject-specific reports under [benchmarks](benchmarks/),
-[validation](validation/), and the `docs/v22-*`, `docs/recall-*`,
+Existing subject-specific reports under [benchmarks](benchmarks),
+[validation](validation), and the `docs/v22-*`, `docs/recall-*`,
 `docs/nbd-*`, `docs/codex-*` and `docs/main-developer-*`
 families are retained as **historical, scope-limited evidence**.
 Many document only rootless models or independent reviews; do not

@@ -7,13 +7,13 @@ It is a **bootstrap**, not a seventh independent source of engineering policy.
 
 1. [README.md](README.md) — project entry point and status
 2. [VISION.md](VISION.md) — actual lower-I/O success criterion
-3. [coding_standards.md](coding_standards.md) — Git, kernel C, invariants, safety
-4. [testing_standards.md](testing_standards.md) — qualification and test contracts
-5. [compile.md](compile.md) — Make/Kbuild, one reused `~/swapz/build/`
-6. [benchmark.md](benchmark.md) — identical off/V3 data and real measurements
+3. [coding_standards.md](docs/coding_standards.md) — Git, kernel C, invariants, safety
+4. [testing_standards.md](docs/testing_standards.md) — qualification and test contracts
+5. [compile.md](docs/compile.md) — Make/Kbuild, one reused `~/swapz/build/`
+6. [benchmark.md](docs/benchmark.md) — identical off/V3 data and real measurements
 
 **Documentation:** Keep new plans and reports under
-[docs/](docs/README.md); follow
+[docs/](docs/INDEX.md); follow
 [documentation guidelines](docs/DOCUMENTATION_GUIDELINES.md)
 and track the active V3 work in [docs/TODO.md](docs/TODO.md).
 Root agent instructions are pointers, not additional policy.

@@ -84,4 +84,4 @@ best-effort and cannot retroactively authorize backing teardown.
   quiescence or permission to remove backing after an abnormal failure.
 
 For benchmark prerequisites and the separate authorization rules, see
-`docs/v22-virtual-benchmark-qualification.md`.
+`docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md`.

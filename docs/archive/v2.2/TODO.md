@@ -728,7 +728,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       `f1e07734b44ea88ebcb2f956773b92bd51cdc6ea`:
       https://github.com/k1moradi/swapz/actions/runs/37878408360
       https://github.com/k1moradi/swapz/actions/runs/37878408375
-- [x] Draft `docs/v22-virtual-benchmark-qualification.md` (NOT measured
+- [x] Draft `docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md` (NOT measured
       results) with drain, GC/swap-in p99, 4..1024 KiB sweep and exact
       approval gates.
 - [ ] Review/integrate Codex's independently trusted GNU executable
@@ -1156,7 +1156,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
       Reject unauthenticated measured V1 p99. This is NOT
       cryptographic provenance, physical device proof or a
       production selection decision. See
-      `docs/v22-evidence-bundle-offline.md`.
+      `docs/archive/v2.2/audits/v22-evidence-bundle-offline.md`.
 - [ ] Obtain independently **authenticated collector provenance**
       and root-controlled production trust for actual measurements;
       reconcile original measurement artifacts with trusted Git
@@ -1486,7 +1486,7 @@ See `docs/benchmarks/v2.2-live-gc-latency.md`.
 - [ ] Reserve real kernel fault injection and physical backing release for a
       separately authorized disposable fixture and independently trusted owner.
 
-See `docs/v22-compaction-container-validation-audit.md`.
+See `docs/archive/v2.2/audits/v22-compaction-container-validation-audit.md`.
 
 ### 2026-10-10 — Staged-read and loaded mapping decoder hardening (PR #4)
 
@@ -1517,7 +1517,7 @@ See `docs/v22-compaction-container-validation-audit.md`.
 - [ ] Measure any compactor metadata-scan cost before selecting V2.2
       strategy and batch size; winner remains UNDETERMINED.
 
-See `docs/v22-staged-read-metadata-audit.md`.
+See `docs/archive/v2.2/audits/v22-staged-read-metadata-audit.md`.
 
 ### 2026-10-10 — Independently audited lower-I/O physical extent boundaries
 
@@ -1552,8 +1552,8 @@ See `docs/v22-staged-read-metadata-audit.md`.
 - [ ] Benchmark physical streaming/compactor overhead before
       selecting V2.2 policy/batch winner: **UNDETERMINED**.
 
-See `docs/v22-published-mapping-read-bounds-audit.md` and
-`docs/v22-stream-submit-bounds-audit.md`.
+See `docs/archive/v2.2/audits/v22-published-mapping-read-bounds-audit.md` and
+`docs/archive/v2.2/audits/v22-stream-submit-bounds-audit.md`.
 
 ### 2026-10-10 — In-flight completed-batch metadata admission (PR #7)
 
@@ -1566,7 +1566,7 @@ See `docs/v22-published-mapping-read-bounds-audit.md` and
 - [ ] Preserve the separate explicit authorization requirement for real module/DM/swap/NBD/loop/device, privileged, pressure and backing-release tests.
 - [ ] Benchmark finalization scan overhead before any V2.2 batch or policy decision; winner remains **UNDETERMINED**.
 
-See `docs/v22-inflight-finalize-preflight-audit.md`.
+See `docs/archive/v2.2/audits/v22-inflight-finalize-preflight-audit.md`.
 
 ### 2026-10-10 — Independent upper-BIO ownership ledger (PR #8)
 
@@ -1581,7 +1581,7 @@ See `docs/v22-inflight-finalize-preflight-audit.md`.
 - [ ] No privileged or real module/DM/loop/NBD/swap/physical-device/pressure/fault qualification without separate explicit authorization.
 - [ ] Measure ledger/census overhead, GC amplification, and stream strategy/batch performance before choosing a V2.2 winner: **UNDETERMINED**.
 
-See `docs/v22-independent-upper-bio-ownership-audit.md`.
+See `docs/archive/v2.2/audits/v22-independent-upper-bio-ownership-audit.md`.
 
 ### 2026-10-10 — Exact upper-BIO identity and rootless checkpoint safety
 
@@ -1607,7 +1607,7 @@ See `docs/v22-independent-upper-bio-ownership-audit.md`.
 - [ ] Retain conservative indefinite async-callback teardown wait unless a documented lower-I/O cancellation / lifetime-revocation guarantee is established. Do not free callback-owned memory merely after a watchdog timeout.
 - [ ] Loaded module, actual DM/swap/loop/NBD/device, pressure and destructive fault qualification require separate explicit authorization. V2.2 strategy/batch winner remains **UNDETERMINED**.
 
-See `docs/v22-pending-pack-ownership-audit.md`.
+See `docs/archive/v2.2/audits/v22-pending-pack-ownership-audit.md`.
 
 ### 2026-10-10 — Fail-closed prior-generation pending-pack scan (PR #13)
 
@@ -1621,7 +1621,7 @@ See `docs/v22-pending-pack-ownership-audit.md`.
 - [ ] Benchmark additional bounded pending-pack and generation-scan preflights under an authorized loaded module before selecting V2.2 policy/batch winner. Still **UNDETERMINED**.
 - [ ] Retain safe async callback ownership wait on teardown absent proven dm-io cancellation; no blind freeing on timeouts or device operations without explicit authorization.
 
-See `docs/v22-generation-scan-pack-preflight-audit.md`.
+See `docs/archive/v2.2/audits/v22-generation-scan-pack-preflight-audit.md`.
 
 ### 2026-10-10 — End-user strategy selection and governor-style policy
 

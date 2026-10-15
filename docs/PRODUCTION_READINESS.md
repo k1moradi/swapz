@@ -1,9 +1,9 @@
 > **Supplemental/historical evidence — not current engineering policy.**
 > A dated production evidence ledger, not another source of engineering rules or a release sign-off.
-> The authoritative standards are [coding_standards.md](../coding_standards.md),
-> [testing_standards.md](../testing_standards.md),
-> [compile.md](../compile.md), and
-> [benchmark.md](../benchmark.md), alongside README.md and VISION.md.
+> The authoritative standards are [coding_standards.md](coding_standards.md),
+> [testing_standards.md](testing_standards.md),
+> [compile.md](compile.md), and
+> [benchmark.md](benchmark.md), alongside README.md and VISION.md.
 > Do not use dated branch/reset/active-swap instructions as new permission.
 
 # swapz V3 — production readiness ledger
@@ -29,7 +29,7 @@ a **bounded synchronous correctness and write-counter result**, not
 a controlled off-versus-V3 achieved-load benchmark or a general
 nonzero-compression win. The newer lower-sector assertion in
 `make run` has only rootless source-guard coverage so far.
-See [benchmark.md](../benchmark.md) for the full scoped evidence.
+See [benchmark.md](benchmark.md) for the full scoped evidence.
 
 ## Alpha.7: independent loaded bounded-burst win; sustained gate STILL OPEN
 
@@ -480,3 +480,46 @@ kernel fixes; Codex is the independent loaded-host and measurement tester.
 Review findings and source changes are stacked in draft PRs. The currently
 strict `null_blk` device restriction is deliberate and is **not** to be
 waived merely to produce an SSD/HDD/SD benchmark.
+
+## Retired V2.2 audits: consolidated safety findings (not V3 evidence)
+
+The 15 historical V2.2 production-C audits formerly scattered across
+`docs/v22-*.md` are now preserved in
+[the V2.2 audit archive](archive/README.md). They document scoped source
+invariants, adversarial/rootless regressions and revision-specific outcomes,
+**not** loaded validation of the current V3 module. In particular:
+
+- **Upper BIO ownership and async teardown:** upper completions must have
+  independent, exact pointer/identity accounting, including pending packs;
+  a watchdog timeout cannot free buffers still accessible to a late dm-io
+  callback. See [independent ownership](archive/v2.2/audits/v22-independent-upper-bio-ownership-audit.md),
+  [exact identity](archive/v2.2/audits/v22-exact-bio-identity-audit.md),
+  [pending-pack ownership](archive/v2.2/audits/v22-pending-pack-ownership-audit.md)
+  and [async watchdog/reaper](archive/v2.2/audits/v22-async-reap-watchdog-audit.md).
+- **Metadata and lower-extent preflight:** reject malformed staged/loaded
+  metadata, count/identity or out-of-extent mapping and batch coordinates
+  before lower I/O or live-accounting mutation; failures must leave old
+  authority intact or fail closed. See [staged read](archive/v2.2/audits/v22-staged-read-metadata-audit.md),
+  [published mapping reads](archive/v2.2/audits/v22-published-mapping-read-bounds-audit.md),
+  [lower write admission](archive/v2.2/audits/v22-stream-submit-bounds-audit.md),
+  [in-flight finalize](archive/v2.2/audits/v22-inflight-finalize-preflight-audit.md),
+  [mapping replacement](archive/v2.2/audits/v22-mapping-replacement-accounting-audit.md)
+  and [generation/pack scan](archive/v2.2/audits/v22-generation-scan-pack-preflight-audit.md).
+- **GC, compaction and generation isolation:** preserve victim snapshots
+  and as-yet-unstaged compressed payloads across nested compaction, validate
+  resident container records, and roll back failed foreground generation
+  transitions without invalidating the old published mapping. See
+  [GC source snapshot](archive/v2.2/audits/v22-gc-source-snapshot-audit.md),
+  [GC compressed scratch](archive/v2.2/audits/v22-gc-compressed-scratch-audit.md),
+  [container validation](archive/v2.2/audits/v22-compaction-container-validation-audit.md)
+  and [generation/GC transactions](archive/v2.2/audits/v22-generation-gc-transaction-audit.md).
+- **Durability:** staged RAM acknowledgments are not device persistence;
+  preflush and FUA must retain lower ordering and upper completion
+  authority, including failure propagation. See
+  [the flush/FUA audit](archive/v2.2/audits/v22-flush-fua-durability-audit.md).
+
+Historical CI or native-rootless PASS applies only to its exact old
+revision and test scope. The retired V2.2 implementation has **no
+qualified winning batch/strategy** and supplies no current V3
+production, loaded-kernel, GC or physical-media sign-off. Retest the
+applicable invariants against current V3 C and its own owned-RAM gates.

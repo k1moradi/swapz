@@ -3,8 +3,8 @@
 **Status: ACTIVE — 2026-10-14.** This is the *current* prioritized
 checklist, not the dated V2.2 work log. Read
 [the project vision](../VISION.md), [V3 roadmap](ROADMAP.md),
-[testing standard](../testing_standards.md), and
-[benchmark standard](../benchmark.md) for the acceptance criteria.
+[testing standard](testing_standards.md), and
+[benchmark standard](benchmark.md) for the acceptance criteria.
 Use `main` only and follow the device/host safety restrictions.
 
 ## Blocking correctness and loaded qualification
@@ -13,7 +13,7 @@ Use `main` only and follow the device/host safety restrictions.
       RAM-backed `null_blk` at source `4c6e29b`: the 128-page
       write/overwrite/readback and flush smoke passed, 9 exact-zero
       writes were elided, and 183 writes / 1,464 lower 512B sectors
-      agreed independently (see [benchmark](../benchmark.md)).
+      agreed independently (see [benchmark](benchmark.md)).
       This is not a matched off-versus-V3 benchmark.
 - [x] Owner-loaded strengthened zero-elision and independent
       lower READ/WRITE sector guard PASSED at `2e21fac5`:

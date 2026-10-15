@@ -1,6 +1,6 @@
 # Coding Standards
 
-**Authoritative current policy.** At the start of **every task** read [README](README.md), [VISION](VISION.md), [Coding Standards](coding_standards.md), [Testing Standards](testing_standards.md), [Compile](compile.md), and [Benchmark](benchmark.md) from the latest `main`. Agent-specific files are entry-point pointers, not different policy sources.
+**Authoritative current policy.** At the start of **every task** read [README](../README.md), [VISION](../VISION.md), [Coding Standards](coding_standards.md), [Testing Standards](testing_standards.md), [Compile](compile.md), and [Benchmark](benchmark.md) from the latest `main`. Agent-specific files are entry-point pointers, not different policy sources.
 
 ## North star, Git and engineering priorities
 
@@ -32,14 +32,14 @@ Historical alpha.8 disjoint-read bypass did not establish a matched-load lower-I
 
 Start from a real production C defect/bottleneck. Add a discriminating **direct-production-C** regression where possible, implement the smallest safe patch, compile with W=1/W=2 and tests from [compile.md](compile.md) and [testing_standards.md](testing_standards.md), then benchmark only according to [benchmark.md](benchmark.md). Never weaken assertion, verification or null_blk admission to manufacture PASS. Preserve failing logs; attribute helper defects separately from kernel faults.
 
-**Mandatory end of EVERY implementation task:** update the **relevant one or more of these four governing standards in the same `main` commit**, documenting new behavior, lesson, invariant, reproducible test and remaining limits. Update `README.md` for user-facing changes, and `VISION.md` if project acceptance criteria change. CI can enforce a standards-file co-change, but it cannot prove factual accuracy. Keep [PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md), older `CODEX_VALIDATION.md` and previous PRs as **archival evidence**, not independent active policy.
+**Mandatory end of EVERY implementation task:** update the **relevant one or more of these four governing standards in the same `main` commit**, documenting new behavior, lesson, invariant, reproducible test and remaining limits. Update `README.md` for user-facing changes, and `VISION.md` if project acceptance criteria change. CI can enforce a standards-file co-change, but it cannot prove factual accuracy. Keep [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md), older `CODEX_VALIDATION.md` and previous PRs as **archival evidence**, not independent active policy.
 
 ## Documentation ownership
 
 Keep policies in the six canonical documents and agent prompts as pointers.
-Use [docs/README.md](docs/README.md) for navigation,
-[docs/TODO.md](docs/TODO.md) for current V3 work, and
-[docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md)
+Use [docs/INDEX.md](INDEX.md) for navigation,
+[docs/TODO.md](TODO.md) for current V3 work, and
+[docs/DOCUMENTATION_GUIDELINES.md](DOCUMENTATION_GUIDELINES.md)
 for document creation, consolidation, archival and link review.
 Do not append dated evidence transcripts to TODO or revive archived
 V2.x instructions. Root Markdown locations are CI-governed. The root README must provide

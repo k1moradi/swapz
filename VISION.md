@@ -9,9 +9,9 @@
 > or achieving a higher simulated compression ratio is not a performance win.**
 
 **Current engineering policies:** [README.md](README.md),
-[coding_standards.md](coding_standards.md),
-[testing_standards.md](testing_standards.md), [compile.md](compile.md),
-and [benchmark.md](benchmark.md) are the mandatory six documents read
+[coding_standards.md](docs/coding_standards.md),
+[testing_standards.md](docs/testing_standards.md), [compile.md](docs/compile.md),
+and [benchmark.md](docs/benchmark.md) are the mandatory six documents read
 at the start of **every agent task**. New lessons and policies belong in
 the four standards; README communicates user-facing changes, while this
 VISION governs success criteria. Only `main` is used and all builds

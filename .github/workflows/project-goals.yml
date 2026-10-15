@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          standards=(coding_standards.md testing_standards.md compile.md benchmark.md)
+          standards=(docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
           entrypoints=(AGENTS.md agent.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md VISION.md)
           for doc in "${standards[@]}"; do
             test -s "$doc" || { echo "FAIL: missing canonical standard $doc"; exit 1; }
@@ -67,7 +67,7 @@ jobs:
           test "$(git branch --show-current)" = main
           changed="$(git diff --name-only HEAD^ HEAD)"
           if printf '%s\n' "$changed" | grep -Eq '^(kernel/|tests/|userspace/|\.github/workflows/|Makefile$|dkms\.conf$)'; then
-            if ! printf '%s\n' "$changed" | grep -Eq '^(coding_standards|testing_standards|compile|benchmark)\.md$'; then
+            if ! printf '%s\n' "$changed" | grep -Eq '^docs/(coding_standards|testing_standards|compile|benchmark)\.md$'; then
               echo 'FAIL: implementation must update one of four canonical standards in the same commit'
               exit 1
             fi
@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in docs/README.md docs/DOCUMENTATION_GUIDELINES.md \
+          for file in docs/INDEX.md docs/DOCUMENTATION_GUIDELINES.md \
                       docs/TODO.md docs/ROADMAP.md docs/DEVICE_GEOMETRY.md \
                       docs/PRODUCTION_READINESS.md \
                       docs/archive/v2.2/CODEX_VALIDATION.md; do
@@ -87,7 +87,7 @@ jobs:
           shopt -s nullglob
           for file in *.md; do
             case "$file" in
-              README.md|VISION.md|AGENTS.md|CLAUDE.md|agent.md|CODEX_VALIDATION.md|coding_standards.md|testing_standards.md|compile.md|benchmark.md) ;;
+              README.md|VISION.md|AGENTS.md|CLAUDE.md|agent.md|CODEX_VALIDATION.md) ;;
               *) echo "FAIL: move root documentation into docs/: $file"; exit 1 ;;
             esac
           done

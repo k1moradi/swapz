@@ -1,9 +1,9 @@
 > **Supplemental/historical evidence — not current engineering policy.**
 > V2.1-era test examples are historical; unsafe old host commands are not standing authorization.
-> The authoritative standards are [coding_standards.md](../../../coding_standards.md),
-> [testing_standards.md](../../../testing_standards.md),
-> [compile.md](../../../compile.md), and
-> [benchmark.md](../../../benchmark.md), alongside README.md and VISION.md.
+> The authoritative standards are [coding_standards.md](../../coding_standards.md),
+> [testing_standards.md](../../testing_standards.md),
+> [compile.md](../../compile.md), and
+> [benchmark.md](../../benchmark.md), alongside README.md and VISION.md.
 > Do not use dated branch/reset/active-swap instructions as new permission.
 
 # swapz V2.1 testing plan

@@ -1,7 +1,7 @@
 # CODEX_VALIDATION.md — historical validation archive
 
 **Every new Codex task must first read** [AGENTS.md](../../../AGENTS.md),
-[README.md](../../../README.md), [VISION.md](../../../VISION.md), [coding_standards.md](../../../coding_standards.md), [testing_standards.md](../../../testing_standards.md), [compile.md](../../../compile.md), and [benchmark.md](../../../benchmark.md) on current `main`. The four current engineering standards
+[README.md](../../../README.md), [VISION.md](../../../VISION.md), [coding_standards.md](../../coding_standards.md), [testing_standards.md](../../testing_standards.md), [compile.md](../../compile.md), and [benchmark.md](../../benchmark.md) on current `main`. The four current engineering standards
 have precedence over all dated content below. Work only on main;
 more than half of ongoing development work is production kernel C;
 only reuse `~/swapz/build/`; update standards on every implementation,

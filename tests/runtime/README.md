@@ -1,7 +1,7 @@
 # Runtime tests — active V3 navigation
 
-**Authoritative policies:** [testing_standards.md](../../testing_standards.md),
-[compile.md](../../compile.md), [benchmark.md](../../benchmark.md),
+**Authoritative policies:** [testing_standards.md](../../docs/testing_standards.md),
+[compile.md](../../docs/compile.md), [benchmark.md](../../docs/benchmark.md),
 [README.md](../../README.md), [VISION.md](../../VISION.md).
 Use **one** reusable `~/swapz/build/` for all compilation.
 

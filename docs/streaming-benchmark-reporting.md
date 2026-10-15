@@ -79,3 +79,35 @@ benchmark may collect genuine new evidence. Physical-device benchmarking
 requires its own explicit approval. Codex owns independently trusted GNU
 `dd`, mapper lifecycle identity and drain/quiescence admission; the
 changes here do not modify that work.
+
+## Retired V2.2 offline qualification — consolidated reference
+
+The five former `docs/v22-*.md` measurement/qualification reports are
+retained as [dated audit evidence](archive/README.md). They do not add
+active V3 kernel benchmarks or authorize any privileged operation.
+
+- [Offline drain/plateau analyzer](archive/v2.2/audits/v22-drain-plateau-offline.md):
+  separate logical fio rates from lower-sector counter-window rates;
+  repeated independent, adequately sampled and attributable
+  observations are needed before identifying a plateau. A one-sweep
+  97%-frontier value is **not** a winning batch.
+- [Bundle v1 consistency gate](archive/v2.2/audits/v22-evidence-bundle-offline.md)
+  and [sidecar-aware bundle v2 gate](archive/v2.2/audits/v22-evidence-bundle-v3.md):
+  strict offline JSONL/manifest hashes, identities, quotas, file ownership
+  and fail-closed schemas protect against contradictory input, **not**
+  against untrusted collectors or false device claims.
+- [Exact-latency observation V3 sidecar](archive/v2.2/audits/v22-latency-v3-sidecar.md):
+  `swapz-drain-observation-v3` can encode lossless exact-nanosecond
+  sample distributions; this is an *observation schema version*, not
+  evidence for the current V3 Device Mapper kernel. Do not round V2
+  timestamps to avoid its distinct-value limit or silently accept a V3
+  sidecar with the V1 bundle checker.
+- [Virtual/physical qualification checklist](archive/v2.2/audits/v22-virtual-benchmark-qualification.md):
+  unexecuted authorization and measurement gates. Owned virtual-device
+  correctness and independently approved physical-device work remain
+  **NOT RUN**, and the V2.2 strategy/batch winner remains **UNDETERMINED**.
+
+Current performance claims must still follow [the active benchmark
+standard](benchmark.md): identical verified off/V3 workload, separately
+measured lower bytes and requests, GC/flush accounting, useful throughput,
+CPU and tail-latency constraints. Archival rootless tests do not meet it.
