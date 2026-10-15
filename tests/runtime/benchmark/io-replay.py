@@ -586,6 +586,7 @@ def replay(args):
                 h.update(chunks[item["fixture"]])
         if h.hexdigest() != mf["write_payload_stream_sha256"]:
             raise ValueError("write bytes differ from manifest's canonical stream")
+        print(f"BENCH_IO_PHASE={args.candidate}:prefill", file=sys.stderr, flush=True)
         fd = os.open(path, flags)
         try:
             # Trust the opened descriptor, not just the preflight pathname.
@@ -618,6 +619,7 @@ def replay(args):
                 scratch.release()
                 bufmap.close()
 
+            print(f"BENCH_IO_PHASE={args.candidate}:mixed", file=sys.stderr, flush=True)
             # Allocate reusable QD-slot read buffers before warmup and
             # measurement. The old hot path did mmap/free for EVERY read.
             # The throughput clock covers exactly the measured I/O waves,
@@ -700,6 +702,9 @@ def replay(args):
                 buffer.close()
             if post_hash.hexdigest() != mf["expected_post_sha256"]:
                 raise ValueError("final image SHA differs from trace oracle")
+            if args.packed_read:
+                print(f"BENCH_IO_PHASE={args.candidate}:packed_read",
+                      file=sys.stderr, flush=True)
             packed_read = (measure_packed_swapin(
                 fd, path, identity, chunks, mf["logical_pages"], mf["qd"])
                 if args.packed_read else None)

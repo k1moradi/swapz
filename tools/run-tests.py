@@ -84,15 +84,24 @@ def failure_context(output):
     """
     phase = "preflight / administrator authorization"
     pair_number = 0
+    regime = None
     for line in output.splitlines():
         if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
             phase = "owned RAM kernel smoke"
         elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
             phase = "shared fixture allocation and workload generation"
+        elif line.startswith("START_OWNED_RAM_REGIME="):
+            label = line.partition("=")[2]
+            if label in MODEL_ORDER:
+                regime = label
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             pair_number += 1
             mode = "async" if line.rstrip().endswith("=1") else "sync"
-            phase = f"owned RAM comparison {pair_number}/8 ({mode})"
+            where = (regime + " " if regime else "")
+            phase = f"owned RAM {where}comparison {pair_number}/8 ({mode})"
+        elif (match := re.fullmatch(
+                r"BENCH_IO_PHASE=(off|v3):(prefill|mixed|packed_read)", line)):
+            phase += f" [{match.group(1)} {match.group(2)}]"
         elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             phase = f"after completed owned RAM comparison {pair_number}/8"
 

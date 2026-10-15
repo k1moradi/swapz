@@ -200,6 +200,13 @@ remain prohibited.
   endurance time; avoid claiming otherwise. Tested data remain
   a 4MiB RAM-backed working set, not a 100MiB cold read.
 
+**Failure localization:** The private replay emits only static
+`BENCH_IO_PHASE={off|v3}:{prefill|mixed|packed_read}` markers, not
+private paths or device IDs. The host test runner reports the
+modeled regime, indexed pair and last active read/write subphase
+when an owned-device replay aborts. These markers are diagnostic
+metadata, never I/O workload or timed operations.
+
 **Test structure:** Preserve separate functional components for
 production-C native oracles, Make/Kbuild/API source contracts,
 rootless paired-result/report contracts, and safely loaded devices.

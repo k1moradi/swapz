@@ -48,13 +48,16 @@ class PairReplayContract(unittest.TestCase):
                 with device.open("wb") as fd:
                     fd.truncate(1024 * PAGE)
                 result = root / f"{candidate}.json"
-                self.run_cmd("run", "--fixture", fixture,
-                             "--trace", plan / "trace.jsonl",
-                             "--manifest", plan / "manifest.json",
-                             "--device", device, "--candidate", candidate,
-                             "--source-sha", "rootless-no-module",
-                             "--regular-file-test", "--packed-read",
-                             "--result", result)
+                run = self.run_cmd("run", "--fixture", fixture,
+                                   "--trace", plan / "trace.jsonl",
+                                   "--manifest", plan / "manifest.json",
+                                   "--device", device, "--candidate", candidate,
+                                   "--source-sha", "rootless-no-module",
+                                   "--regular-file-test", "--packed-read",
+                                   "--result", result)
+                for subphase in ("prefill", "mixed", "packed_read"):
+                    self.assertIn(f"BENCH_IO_PHASE={candidate}:{subphase}",
+                                  run.stderr)
                 record = json.loads(result.read_text())
                 read = record["packed_read"]
                 self.assertIn("executor startup", record["mixed_timed_scope"])
