@@ -147,6 +147,10 @@ continues to expose only the public `make test` entry point.
 
 ## Paired modeled RAM I/O: qualification and timing
 
+The rootless fail-context test must use the current global pair
+denominator, eight; a stale denominator is a regression test failure,
+not evidence that any loaded device test failed.
+
 The single official `make test` runs **eight owned-RAM pairs**:
 four `sd_emulated` at 10 MiB/s / 1 ms completion and four
 `ssd_emulated` at 80 MiB/s / 0.15 ms completion. These are synthetic
