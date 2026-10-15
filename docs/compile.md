@@ -103,13 +103,25 @@ private session there without changing its permissions.
 
 One stable user-facing compressed file is atomically replaced at
 `build/test_results.json.xz`, whether the run PASSES, FAILS or is
-BLOCKED. Summary JSON never includes host swap inventory or identifying
-device paths. When `gh` is installed and already authorized for
-`k1moradi/swapz`, the runner uses the fixed GitHub Release tag
-`test-results` and `gh release upload --clobber` to replace the
-`test_results.json.xz` asset; it never writes to source `main`.
-No API authentication means a clearly printed SKIPPED publication,
-not a test FAIL. The release asset is publicly readable once created.
+BLOCKED. The report records exact Git `tested_commit_sha` /
+`source_sha` of the checkout which ran, plus `code_commit_sha`
+that ignores prior result-only commits. The sanitized report excludes
+host swap inventory and identifying device paths.
+
+After every run, if the current checkout is clean and on main, the Git
+push remote is precisely `k1moradi/swapz`, and remote main equals the
+tested parent commit, the runner uses **ordinary Git only** (no `gh`)
+to create a new report-only commit with one root-level
+`test_results.json.xz` and fast-forward push to origin/main. This
+single tracked root report is a deliberate exception to the rule
+that generated *build products* live only in `build/`. Older versions
+remain in Git history; the filename stays fixed without date/version.
+The report-only commit is tagged `[skip ci]`, and the local HEAD/index
+is untouched. A later normal `git pull --ff-only` brings the published
+result into the user's checkout. Failed authentication, protected
+branch or changing remote HEAD cause clearly reported SKIPPED/FAILED
+Git sync, independently of test PASS/FAIL/BLOCKED. No force push,
+interactive login, additional public Make goal or user-file staging.
 
 ## Only supported root Make commands (owner policy)
 

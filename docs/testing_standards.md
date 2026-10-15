@@ -185,17 +185,42 @@ device paths, host swap inventories and authentication details stay
 out of terminal and the publishable summary. Existing private evidence
 logs remain under `build/` to permit safe audit.
 
-The stable GitHub Release `test-results` publishes only
-`test_results.json.xz` via detected noninteractive `gh` API login
-on `main`. Overwriting that asset does **not** modify Git source
-history or require force-pushing a results branch. A release/tag can
-still have GitHub metadata; old raw evidence within `build/` is not
-automatically purged because failure quarantine may require it.
-Lacking GitHub API credentials or network must visibly show SKIPPED or
-UPLOAD_FAILED, with local correctness status unchanged. The
-`make-interface-test.py` fake Kbuild and `test-report-test.py`
-regressions verify no sandbox upload, incremental reuse, finite
-compression, exact four-pair summarization and absent raw JSON stdout.
+**Git report provenance and history:** The local runner atomically
+replaces `build/test_results.json.xz` on every run, including blocked
+and failed runs. Only after completing all test stages does it attempt
+to publish a sanitized copy as the single root-level tracked file
+`test_results.json.xz` on `origin/main`. This one report is an explicit
+exception to the `build/`-only generated-artifact convention; no
+compiled binary escapes `build/`. A report-only Git commit preserves
+each prior version in history, whereas the current file is always the
+latest report. Git push/SSH credentials are reused; **no `gh`, GitHub
+API token, force push, new branch or release asset** is required.
+
+The JSON records full `tested_commit_sha` and `source_sha` values for
+the exact HEAD before loaded tests, and `code_commit_sha` for the latest
+source-changing commit excluding only `test_results.json.xz`. Because
+the report-only commit is created *after* the run, it is not falsely
+labelled as the tested commit; its parent is the tested HEAD. The
+publisher assembles the one-file commit with Git object plumbing and
+fast-forward pushes it only when the checked-out branch is main,
+the working tree/index is clean, origin is the expected GitHub repo,
+and remote main still equals tested HEAD. It does **not** move local
+HEAD/index or write into the checkout. The next normal fast-forward
+pull catches up; if main has moved, Git syncing is skipped while the
+local report remains intact. A report-only commit carries `[skip ci]`
+to avoid repeatedly rerunning rootless CI. No interactive credential
+request is allowed. No private logs, host swap identities, device
+paths, authentication secrets or unsafe error text are committed.
+
+Tests in `test-report-test.py` exercise actual nonforce Git operations
+against a local bare remote (the configured GitHub push-URL safety
+check alone is mocked); they verify two report-only commits, the full
+tested SHA, unchanged code, Git history, clean-checkout gating and
+stale-head rejection without contacting GitHub. Fake Kbuild and
+contract tests still prove rootless incremental builds, finite
+compression, correct four-pair summarization and absent raw JSON
+stdout. Git publication failure must never change the loaded test
+PASS/FAIL/BLOCKED status or touch hardware.
 Loaded RAM results, actual swap behavior and real physical endurance
 are separate qualification levels; a mixed or negative performance
 verdict is not a false correctness failure.

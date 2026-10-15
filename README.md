@@ -46,24 +46,32 @@ host swap inventory, authentication material or complete raw logs.
 Privileged per-session diagnostic evidence may still remain privately
 under `build/deploy/` and `build/benchmark/` to support safe failures.
 
-The uploader requires GitHub CLI **`gh`**, not just the regular
-`git` executable. SSH authentication that permits `git pull` and
-`git push` does not by itself authorize GitHub Release API calls.
-When `gh` is installed, its own API login must be completed once
-(`gh auth login`). The test output distinguishes **missing `gh`**
-from **missing API authorization**. This publishing step is separate
-from the loaded-device test verdict and is never its failure cause.
+**Git-only publishing; no `gh` installation required.** After testing
+completes (PASS, FAIL or BLOCKED), the runner tries to publish the same
+sanitized file as the single
+[latest tracked `test_results.json.xz`](https://github.com/k1moradi/swapz/blob/main/test_results.json.xz)
+at the **repository root on GitHub**. This is an exception for one
+published report, not an extra compilation directory. The local,
+atomically replaced working report remains
+`build/test_results.json.xz`. Ordinary Git SSH credentials with
+**push** permission are sufficient. If `origin/main` changed, credentials
+cannot push, or the tracked checkout is dirty, publication is visibly
+SKIPPED/FAILED without hiding the actual test verdict. The runner never
+forces a push or commits unrelated files.
 
-When a GitHub CLI (`gh`) API login is detected **on the actual main
-checkout**, the same command replaces the stable `test_results.json.xz`
-asset in this repository's
-[latest test-results Release](https://github.com/k1moradi/swapz/releases/tag/test-results).
-The published asset is always named `test_results.json.xz`; no date,
-release version or run number appears in its filename. GitHub publishing
-is best-effort and does not modify `main`; absent or rejected API
-authorization is prominently reported as SKIPPED / UPLOAD_FAILED without
-turning a successful kernel test into a failure. The release asset is
-**public**, so only non-identifying summaries are included.
+Each JSON includes the full `tested_commit_sha` (the exact local Git HEAD
+that ran), the existing `source_sha`, and `code_commit_sha` (the latest
+commit changing project code/docs rather than a previous report). The
+new report-only commit has the **tested HEAD as its parent**; it cannot
+put its own not-yet-existing commit hash in the JSON. Git history retains
+earlier reports even though the filename has no version or date. Each
+report-only Git commit is marked to skip CI. The publication does not
+move the local branch, index or working tree during testing; the next
+normal fast-forward Git pull receives the report-only commit. Published
+results can be reviewed in
+[the report's Git history](https://github.com/k1moradi/swapz/commits/main/test_results.json.xz).
+The tracked report is public: it contains only redacted measurements,
+not host swap/device paths or credentials.
 
 A PASS means the defined tests completed, **not** that asynchronous
 preparation improves throughput or that real flash lifetime is proven.

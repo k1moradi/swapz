@@ -82,11 +82,16 @@ success/failure stage list plus a readable benchmark table. Raw stdout
 JSON from fixture preparation, replay and lower-device status is
 captured, validated and summarized, not dumped to the terminal. The
 public report excludes exact device IDs, host swap paths, kernel module
-load paths and user credentials. The optional uploaded copy overwrites
-a **single fixed GitHub Release asset** (`test_results.json.xz` on
-release tag `test-results`) without modifying source `main`. GitHub
-API authentication via `gh` must already be present; unavailable
-authorization leads to SKIPPED_UPLOAD, not a misreported test failure.
+load paths and user credentials. The optional Git sync publishes the latest sanitized copy as the
+single root-level `test_results.json.xz` tracked on `main` (with earlier
+versions visible in Git history). The JSON includes full exact
+`tested_commit_sha`, `source_sha` and `code_commit_sha` so the
+measured module source can be identified even when subsequent commits
+only publish results. Report commits follow the tested commit, cannot
+be mistaken for a run of the newly created commit, and contain no
+host paths or raw diagnostic text. Ordinary noninteractive Git push
+authorization is sufficient; failed publishing is separate from
+loaded device or benchmark PASS/FAIL.
 
 **Criterion 1, useful swap-out throughput:** use completed 4 KiB
 logical swap WRITE bytes divided by measurement seconds, in decimal
