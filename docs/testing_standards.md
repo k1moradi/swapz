@@ -206,6 +206,9 @@ private paths or device IDs. The host test runner reports the
 modeled regime, indexed pair and last active read/write subphase
 when an owned-device replay aborts. These markers are diagnostic
 metadata, never I/O workload or timed operations.
+The rootless replay-contract test executes those code paths and checks
+that the diagnostic helper has its required imports; a marker must
+never prevent the actual byte-exact replay from running.
 
 **Test structure:** Preserve separate functional components for
 production-C native oracles, Make/Kbuild/API source contracts,

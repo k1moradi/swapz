@@ -19,6 +19,7 @@ import re
 import stat
 import subprocess
 import struct
+import sys
 import tempfile
 import threading
 import time
