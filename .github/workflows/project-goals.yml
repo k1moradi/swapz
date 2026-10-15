@@ -27,21 +27,22 @@ jobs:
       - name: Build and execute real production C/C++ modular tests
         run: |
           set -euo pipefail
-          make verify
-          # The privileged phase is intentionally not run by GitHub Actions.
-          grep -Fq 'run:' Makefile
-          grep -Fq 'deploy: run' Makefile
-          grep -Fq 'sudo bash tools/deploy-nullblk.sh' Makefile
-          grep -Fq 'SWAPS_BEFORE=' tools/deploy-nullblk.sh
-          make build/tests/device-roundtrip
-          test -x build/tests/device-roundtrip
+          bash tools/test-rootless.sh
+          # Privileged loaded tests are only run by an owner with make test.
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
+      - name: Enforce the four-command Make API
+        run: |
+          python3 -B tests/runtime/native/make-interface-test.py -v
+          grep -Fxq '.DEFAULT_GOAL := all' Makefile
+          grep -Fxq '.PHONY: all install uninstall test' Makefile
+          grep -Fq 'sudo bash tools/deploy-nullblk.sh' Makefile
+          grep -Fq 'sudo bash tools/benchmark-owned-pair.sh' Makefile
       - name: Enforce V3-only active defaults and two-arm benchmark
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fxq 'all: v3' Makefile
+          grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq 'AUTOINSTALL="no"' dkms.conf
           grep -Fxq 'PACKAGE_VERSION="3.0.0-alpha.21"' dkms.conf
           grep -Fq 'CANDIDATES = ("off", "v3")' tests/runtime/benchmark/io-replay.py

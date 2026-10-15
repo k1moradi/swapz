@@ -7,7 +7,7 @@ and [benchmark.md](benchmark.md). Work on **main only**.
 
 ## One active module: V3.0.0-alpha.21
 
-`make` or `make v3` builds **only the V3 Device Mapper `swapz3`
+`make -j2` builds **only the V3 Device Mapper `swapz3`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
 module compilation is controlled by the kernel's headers, compiler flags,
 symbol versions and module link process, so CMake cannot replace Kbuild.
@@ -31,35 +31,25 @@ automatic installation of an experimental module. Even a manual DKMS
 build or a successful compile is **NOT permission** to enable system
 swap, bypass the null_blk-only guard, or load on physical media.
 
-## Commands
+## Only supported root Make commands (owner policy)
 
 ```sh
-cd ~/swapz
-make KDIR="/lib/modules/$(uname -r)/build"
-make v3 KDIR="/lib/modules/$(uname -r)/build"
-make test                # V3 native production-C suites
-make test-codec
-make test-mapping
-make test-gc
-make test-lower-io
-make v3-smoke KDIR="/lib/modules/$(uname -r)/build"
+make -j2         # build experimental V3 module and owned-device helper
+make install     # install versioned V3 DKMS package + safe helper
+make uninstall   # uninstall only matching owned DKMS package + helper
+make test        # ALL rootless tests, loaded owned-RAM smoke and benchmarks
 ```
 
-For compile qualification:
-
-```sh
-KDIR="/lib/modules/$(uname -r)/build"
-make -C kernel/extent-v3 KDIR="$KDIR" W=1
-make -C kernel/extent-v3 KDIR="$KDIR" W=2
-sha256sum build/kernel/experimental/dm-swapz.ko
-modinfo build/kernel/experimental/dm-swapz.ko
-```
-
-`make legacy-v22` and `make userspace-legacy` exist **only to preserve
-reproducibility of historical code**, not to validate current V3. The
-old system-`swapzctl` interface is not V3. No second build directory,
-`swapon`, `swapoff`, reboot, physical/unowned block access or forced
-teardown is permitted. `make clean` removes only known compiled targets.
+**No other root Make goals or aliases are allowed.** Internal Kbuild and
+native-suite make goals are not a public user interface. Missing kernel
+headers, sudo or exclusively owned RAM null_blk blocks the privileged
+test phase rather than counting it as PASS. The current V3 binary
+`device-roundtrip` installs to `/usr/local/libexec/swapz/` by
+default. The retired V2 `swapzctl` is NOT installed because it
+invokes swapon/swapoff. The V3 DKMS install does not load or activate
+the kernel module, and AUTOINSTALL stays disabled. Uninstall refuses
+loaded modules, foreign files, and ownership mismatch. CI runs the
+internal rootless test script without privileged device access.
 
 ## Automated build/qualification gates
 
@@ -459,3 +449,7 @@ must be W=1/W=2 built and rootless-tested before
 isolated owner-loaded `make run`, then unpaced
 `make bench-pair-medium-unpaced`. A speed benefit
 is unmeasured and not presumed.
+
+## Mandatory Make API regression gate
+
+Only `make -j2`, `make install`, `make uninstall` and `make test` are permitted at repository root. All agents MUST reject additional root targets; `tests/runtime/native/make-interface-test.py` is run in the rootless harness and CI to enforce this, including removal of former `verify`, `run`, `deploy` and `bench-*` goals. The privileged part of `make test` must never silently skip its byte-exact owned-RAM smoke or benchmarks. Documentation citing removed commands is historic, not an active instruction.
