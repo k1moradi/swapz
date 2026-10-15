@@ -78,8 +78,8 @@ class PublicMakeContract(unittest.TestCase):
                                   "sudo bash tools/benchmark-owned-pair.sh"):
                     self.assertNotIn(forbidden, content,
                                      f"Nonofficial test instruction in {document}")
-        self.assertIn("tools/test-rootless.sh", MAKE)
-        self.assertIn("tools/test-loaded.sh", MAKE)
+        self.assertIn("tools/test-rootless.sh", (ROOT / "tools/run-tests.py").read_text())
+        self.assertIn("tools/test-loaded.sh", (ROOT / "tools/run-tests.py").read_text())
 
     def test_parallel_build_is_incremental_and_test_stages_stay_ordered(self):
         """Run the REAL root/extent Makefiles using a fake, unprivileged Kbuild.
@@ -258,7 +258,7 @@ class PublicMakeContract(unittest.TestCase):
     def test_packaging_and_loaded_tests_are_bounded(self):
         self.assertIn("tools/package-dkms.sh install", MAKE)
         self.assertIn("tools/package-dkms.sh uninstall", MAKE)
-        self.assertIn("tools/test-rootless.sh", MAKE)
+        self.assertIn("tools/test-rootless.sh", (ROOT / "tools/run-tests.py").read_text())
         rootless_test_recipe = MAKE.split("\ntest:\n", 1)[1]
         self.assertIn("tools/run-tests.py", rootless_test_recipe)
         reporter = (ROOT / "tools/run-tests.py").read_text()
