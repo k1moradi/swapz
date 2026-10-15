@@ -3,6 +3,30 @@
 This file applies to ChatGPT, Codex, Claude, Copilot and all coding agents.
 It is a **bootstrap**, not a seventh independent source of engineering policy.
 
+## Non-negotiable owner Make API
+
+**Exactly four public root Make commands, with no exceptions or aliases:**
+`make -j2` builds the V3 kernel module and supported safe binary in
+parallel; `make install` installs its versioned DKMS package and binary
+to appropriate system locations, without loading or activating swap;
+`make uninstall` reverses only that owned installation; and
+`make test` runs the full native, contract, loaded owned-RAM safety and
+paired benchmark pipeline. All previously exposed root targets such as
+`verify`, `run`, `deploy`, `v3`, `clean`, `bench-*`
+and `test-*` are **removed and must not be reintroduced**.
+Internal Kbuild/native-suite targets do not count as public root commands.
+Tests that need privileges must block rather than silently skip them.
+
+**Enforcement:** `tests/runtime/native/make-interface-test.py`
+runs in the internal rootless script and in GitHub CI, checks the exact
+four-target allowlist and safety boundaries, and rejects new aliases.
+All AI agents must uphold that check and update this owner contract
+whenever touching the build, installation, test or CI paths.
+The obsolete V2 `swapzctl` must not be installed: it can call
+`swapon` and `swapoff` on a backing device. V3 remains
+experimental, DKMS `AUTOINSTALL="no"`, and installation does
+not permit activation, physical devices or existing system swap.
+
 ## Read these six documents before EVERY task, from current `main`
 
 1. [README.md](README.md) — project entry point and status

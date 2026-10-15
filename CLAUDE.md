@@ -13,3 +13,14 @@ media. README and VISION remain the project entry and acceptance criteria.
 Document placement, archiving and active tasks: [docs/INDEX.md](docs/INDEX.md),
 [docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md),
 and [docs/TODO.md](docs/TODO.md). Agent files must not duplicate policy.
+
+**Mandatory Make interface (CI enforced):** The only public
+root commands are `make -j2`, `make install`,
+`make uninstall`, and `make test`. Never introduce
+aliases or an additional Make target. Install/cleanup
+is DKMS-version-owned; it must never activate swap,
+load the module or ship retired V2 `swapzctl`.
+`make test` performs all native and safe owned-RAM
+loaded benchmarks, failing closed without sudo or
+freshly owned RAM-backed null_blk. See
+[AGENTS.md](AGENTS.md) and [compile.md](docs/compile.md).

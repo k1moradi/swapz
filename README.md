@@ -46,48 +46,54 @@ More than 50% of ongoing engineering effort belongs to the
 **production Linux kernel module's C**. At the end of each implementation,
 update the relevant standard in the same commit and run goal-aligned CI.
 
-## One-command compile, test and isolated deployment
+## Build, install, uninstall, test — the entire supported Make interface
 
-On a Linux developer host with matching kernel headers and sudo, in
-your existing clone:
-
-```sh
-cd ~/swapz && git pull --ff-only origin main && make run
-```
-
-This first runs all safe rootless V3 tests, then builds the kernel module
-with `W=1`/`W=2`, then runs an **ephemeral** owned RAM-backed
-`null_blk` deployment with deterministic C write/readback and cleanup.
-**It does NOT install V3 as system swap**, reboot, touch existing swap
-or use physical media. Results go into `build/deploy/session.*`;
-missing headers/sudo/null_blk block the loaded phase. Use
-`make verify` if you want the rootless-only checks; `make` compiles
-V3 without loading it. See [compile.md](docs/compile.md) and
-[testing_standards.md](docs/testing_standards.md) for gates and limits.
-
-## Build and test (rootless compilation only)
+These are the **only four allowed public root Make commands**, per
+the owner's explicit policy. The default goal is the build; no other
+target names or aliases may be added.
 
 ```sh
 cd ~/swapz
-make                             # builds active V3 ONLY; does not load it
-make test                        # native C V3 codec/mapping/GC/lower-I/O
-make test-codec
-make test-mapping
-make test-gc
-make test-lower-io
+make -j2         # build V3 in parallel; never load it
+make install     # install current V3 DKMS and safe helper; no activation
+make uninstall   # reverse this version-owned installation
+make test        # all native tests, owned-RAM loaded smoke and benchmarks
 ```
 
-Compiled V3: `build/kernel/experimental/dm-swapz.ko`. This is the
-**active/default build artifact**, retained in the sole reusable
-`~/swapz/build/` tree. The executable module is still
-**experimental**: "default build" is not permission to load it as
-system swap. `dkms.conf` now packages the V3 alpha source and sets
-`AUTOINSTALL="no"`; an installation, module insertion or user
-`swapon` is NOT part of this build workflow.
+`make install` stages versioned sources in
+`/usr/src/swapz-3.0.0-alpha.21/` for DKMS, installs the module
+under DKMS's normal `/lib/modules/<kernel>/updates/dkms/`,
+and installs the V3 owned-device test binary to
+`/usr/local/libexec/swapz/device-roundtrip` (or
+`PREFIX/libexec/swapz/`). It **does not** autoload a
+module, enable system swap or touch physical devices;
+`AUTOINSTALL="no"`. The legacy V2 `swapzctl`
+is deliberately excluded because its activation
+interface calls `swapon` and `swapoff`.
+`make uninstall` refuses to delete unowned resources
+or remove a loaded module. It does not touch active swap.
 
-The existing userspace `swapzctl` from the old generation is not a
-V3 activation interface. Do not follow old physical-disk, manual
-activation, DKMS autoinstall, swapoff/swapon or reboot instructions.
+`make test` first executes all native production-C tests,
+source contracts and RAM-device safety preflights without
+root. It then builds the current kernel with W=1/W=2,
+requires sudo, runs the ephemeral owned-RAM `null_blk`
+correctness smoke, and runs all supported off/V3
+comparisons, including unpaced QD32 retention.
+These phases are ordered, byte-exact and bounded,
+with independent lower READ/WRITE statistics and
+safe teardown/quarantine. **Missing kernel headers,
+sudo or a safely owned RAM device is a failure/blocker,
+not a silently skipped test**. The rootless-only CI
+runs its private script rather than invoking loaded tests.
+
+**Automatic enforcement:** The rootless
+`tests/runtime/native/make-interface-test.py` and
+`.github/workflows/project-goals.yml` reject any
+fifth public Make target. All AI coding agents are
+also bound by [AGENTS.md](AGENTS.md) and its
+canonical build and test standards. Any old Make
+invocations later in this historical project record
+are superseded and must not be used as instructions.
 
 ## Latest measured result and alpha.12 C implementation
 
