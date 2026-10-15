@@ -15,9 +15,9 @@ No reboot, active swap/physical media or unsafe teardown. Update the
 relevant current standard(s) in the same code commit and test exact HEAD.
 
 Before creating or moving documentation, consult
-[docs/INDEX.md](../docs/INDEX.md) and
-[documentation guidelines](../docs/DOCUMENTATION_GUIDELINES.md).
-Use the active [V3 TODO](../docs/TODO.md) instead of historical tasks.
+[docs/ROADMAP.md](../docs/ROADMAP.md) and
+[coding and documentation rules](../docs/coding_standards.md).
+Use the active [V3 TODO](../docs/ROADMAP.md) instead of historical tasks.
 
 **Mandatory Make interface (CI enforced):** The only public
 root commands are `make -j2`, `make install`,

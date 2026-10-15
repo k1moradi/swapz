@@ -87,12 +87,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for file in docs/INDEX.md docs/DOCUMENTATION_GUIDELINES.md \
-                      docs/TODO.md docs/ROADMAP.md docs/DEVICE_GEOMETRY.md \
-                      docs/testing_standards.md \
-                      docs/benchmark.md; do
+          allowed=(docs/ROADMAP.md docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
+          for file in "${allowed[@]}"; do
             test -s "$file" || { echo "FAIL: required documentation missing: $file"; exit 1; }
           done
+          while IFS= read -r file; do
+            case " ${allowed[*]} " in
+              *" $file "*) ;;
+              *) echo "FAIL: redundant documentation under docs/: $file"; exit 1 ;;
+            esac
+          done < <(find docs -type f | sort)
           shopt -s nullglob
           for file in *.md; do
             case "$file" in
@@ -100,8 +104,8 @@ jobs:
               *) echo "FAIL: move root documentation into docs/: $file"; exit 1 ;;
             esac
           done
-          grep -Fq 'docs/DOCUMENTATION_GUIDELINES.md' README.md
-          grep -Fq 'docs/TODO.md' AGENTS.md
+          grep -Fq 'docs/coding_standards.md' README.md
+          grep -Fq 'docs/ROADMAP.md' AGENTS.md
           # Require a direct README link for every tracked Markdown document.
           # This covers documentation under docs/, component READMEs and agent files.
           while IFS= read -r -d '' documentation_path; do

@@ -44,9 +44,9 @@ not permit activation, physical devices or existing system swap.
 6. [benchmark.md](docs/benchmark.md) — identical off/V3 data and real measurements
 
 **Documentation:** Keep new plans and reports under
-[docs/](docs/INDEX.md); follow
-[documentation guidelines](docs/DOCUMENTATION_GUIDELINES.md)
-and track the active V3 work in [docs/TODO.md](docs/TODO.md).
+[active V3 roadmap](docs/ROADMAP.md); follow
+[documentation guidelines](docs/coding_standards.md)
+and track the active V3 work in [docs/ROADMAP.md](docs/ROADMAP.md).
 Root agent instructions are pointers, not additional policy.
 Historic unchecked V2.2 tasks are not current V3 requirements.
 
@@ -74,7 +74,7 @@ README for user-facing changes and VISION if acceptance criteria change.
 V3 is the active default *development* build, but stays experimental and null_blk-only; V2.2 is retired from active benchmarks.
 
 The [historical Codex worklog](https://github.com/k1moradi/swapz/blob/abbdbce277938f3678a640af93ef066394b44606/docs/archive/v2.2/CODEX_VALIDATION.md),
-[legacy V2.1 testing plan](docs/archive/v2.1/TESTING.md),
+[legacy V2.1 testing plan](https://github.com/k1moradi/swapz/blob/efc6a8b34c26f46419996578100b54841aa5c84c/docs/archive/v2.1/TESTING.md),
 [current testing and release gates](docs/testing_standards.md),
 [active V3 roadmap](docs/ROADMAP.md), archived scripts and old PRs
 provide versioned details, **not competing current policy**.

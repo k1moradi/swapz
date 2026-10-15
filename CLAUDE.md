@@ -10,9 +10,9 @@ Update one of the four standards with every implementation commit,
 preserve real test failures, and never reboot/touch active swap or physical
 media. README and VISION remain the project entry and acceptance criteria.
 
-Document placement, archiving and active tasks: [docs/INDEX.md](docs/INDEX.md),
-[docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md),
-and [docs/TODO.md](docs/TODO.md). Agent files must not duplicate policy.
+Document placement, archiving and active tasks: [docs/ROADMAP.md](docs/ROADMAP.md),
+[docs/coding_standards.md](docs/coding_standards.md),
+and [docs/ROADMAP.md](docs/ROADMAP.md). Agent files must not duplicate policy.
 
 **Mandatory Make interface (CI enforced):** The only public
 root commands are `make -j2`, `make install`,

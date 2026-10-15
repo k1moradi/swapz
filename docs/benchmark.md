@@ -1364,6 +1364,61 @@ bundle-integrity checkers and virtual-device qualification checklist remain
 historical **offline models**, not independent collector authentication,
 physical drain, sustained throughput or a winner selection. See
 historical offline benchmark-reporting findings in Git history for the
-consolidated constraints and [archived V2.2 reports](archive/README.md)
+consolidated constraints and historical V2.2 reports retained in Git history
 for original schemas and test provenance. No old V2.2 strategy or batch
 winner is a prerequisite for the V3 same-input off/V3 benchmark.
+
+## Normative lower-device geometry and I/O accounting (merged specification)
+
+Do not conflate Linux swap **page size**, device **logical block size**,
+device **physical block size**, preferred/minimum/optimal I/O size,
+filesystem block/cluster, and opaque controller/media program/erase units.
+V3 currently supports only `PAGE_SIZE=4096` with 4/8/16 KiB aligned SWZ3
+extents, and admits test-owned `null_blk`. A real backing device whose
+logical block size does not divide 4096 or exceeds 4096 is unsupported;
+larger physical sectors, alignment offsets and preferred I/O may create
+read/modify/write even when the host requests are logically aligned.
+
+**512n** devices often have 512 B logical/physical sectors;
+**512e** has 512 B logical but typically 4096 B physical (misaligned
+sub-4KiB writes may trigger internal RMW); **4Kn** requires ordinary
+4KiB-aligned I/O. A filesystem's 64KiB cluster is *not* a sector.
+Swap partitions have no filesystem cluster; swap files require stable
+supported extents and filesystem rules, and **are not a backing mode
+implemented by this V3 target**.
+
+Linux `/sys/block/<device>/stat` READ and WRITE sector fields are
+always in **512-byte accounting sectors**, regardless of actual device
+logical/physical block. For independent before/after deltas:
+
+```text
+lower_read_bytes  = delta_read_sectors  * 512
+lower_write_bytes = delta_write_sectors * 512
+read_4k_equiv     = delta_read_sectors  / 8
+write_4k_equiv    = delta_write_sectors / 8
+```
+
+A single aligned 16KiB lower WRITE is **one host WRITE request**,
+16KiB transferred, and *four normalized 4KiB equivalents*; it is not
+four hardware commands or known NAND program operations. Keep completed
+lower I/O **request counts and bytes** separately, plus attempted/failed
+BIOs, merges, flush/FUA, DISCARD, GC reads/writes, queue occupancy,
+achieved IOPS, CPU, RAM and read p95/p99. Errors, caches, controller
+remapping and internal media RMW mean a software sector counter alone
+does not attest true NAND wear, physical durability or closed drain.
+
+Device-specific qualification must inventory `logical_block_size`,
+`physical_block_size`, `minimum_io_size`, `optimal_io_size`,
+`alignment_offset`, `max_sectors_kb`, queue depth, partition offset,
+cache/write/FUA guarantees, DISCARD geometry and zone/rotational
+properties. Compare the same byte-exact logical trace, LZ4-size histogram,
+achieved work and lower read/write requests/bytes (including GC and
+flush), then judge the read/WRITE/CPU/p99 Pareto tradeoff rather than
+silently summing read and write savings. Actual HDD, SD/eMMC or SSD
+validation needs independent, explicit owner approval; RAM-backed
+`null_blk` alone cannot support endurance or production claims.
+
+Sources: [Linux block accounting](https://www.kernel.org/doc/html/latest/block/stat.html),
+[block queue ABI](https://www.kernel.org/doc/html/latest/admin-guide/abi-stable.html),
+and [swap-file restrictions](https://man7.org/linux/man-pages/man8/swapon.8.html).
+

@@ -71,24 +71,27 @@ NOT RUN.** Experimental null_blk-only admission remains enforced.
 
 ## Current work and documentation
 
-The active [V3 roadmap](docs/ROADMAP.md) and [TODO](docs/TODO.md)
-control engineering priorities. See [documentation governance](docs/DOCUMENTATION_GUIDELINES.md)
-and [the curated docs index](docs/INDEX.md).
-Keep root agent bootstraps in their existing paths and work on `main`;
-never overwrite concurrent commits. Update the relevant engineering standard
-with implementation changes in the same commit.
+The active V3 milestones, outstanding tasks and experiment source constraints
+are maintained together in [ROADMAP](docs/ROADMAP.md).
+[Testing standards](docs/testing_standards.md) own safety, test oracles,
+privileged loaded-test admission, recall and teardown qualifications;
+[benchmark standards](docs/benchmark.md) define device geometry,
+I/O-accounting and measured evidence. [Coding standards](docs/coding_standards.md)
+control ownership, documentation policy and current C development;
+[compile](docs/compile.md) owns build and packaging.
 
-Dated reports, audits, review notes and obsolete evidence snapshots were
-removed from the working tree. Their original content remains recoverable
-from [the immutable pre-cleanup revision](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606).
-The historical evidence does not qualify current V3 correctness or throughput.
-The `docs/branch-consolidation-2026-10-13.json` manifest remains because
-branch-pruning code reads its exact content.
+The `docs/` directory has only these five maintained Markdown files,
+not a second TODO, status ledger, review worklog or JSON manifest.
+Historical originals, including the one-time branch-consolidation JSON,
+are recoverable from [the immutable pre-consolidation commit](https://github.com/k1moradi/swapz/tree/e09fcf3a8acea78355ee2a5ab1d7cd8a9017b517).
+Only `main` remains; the one-time branch-pruning script and workflow
+were retired along with the consumed manifest. None of the historical
+results constitutes current V3 production approval.
 
 ## Complete tracked Markdown directory
 
-Every remaining tracked Markdown file has a direct relative link here.
-Descriptions and authoritative routing are in [docs/INDEX.md](docs/INDEX.md).
+All remaining tracked Markdown files are directly linked here.
+Component-local specs are subordinate to the six authoritative entry points.
 
 - [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 - [`AGENTS.md`](AGENTS.md)
@@ -97,30 +100,11 @@ Descriptions and authoritative routing are in [docs/INDEX.md](docs/INDEX.md).
 - [`README.md`](README.md)
 - [`VISION.md`](VISION.md)
 - [`agent.md`](agent.md)
-- [`docs/DEVICE_GEOMETRY.md`](docs/DEVICE_GEOMETRY.md)
-- [`docs/DOCUMENTATION_GUIDELINES.md`](docs/DOCUMENTATION_GUIDELINES.md)
-- [`docs/INDEX.md`](docs/INDEX.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
-- [`docs/TODO.md`](docs/TODO.md)
-- [`docs/archive/README.md`](docs/archive/README.md)
-- [`docs/archive/v2.1/TESTING.md`](docs/archive/v2.1/TESTING.md)
-- [`docs/archive/v2.2/DESIGN.md`](docs/archive/v2.2/DESIGN.md)
-- [`docs/archive/v2.2/ROADMAP.md`](docs/archive/v2.2/ROADMAP.md)
-- [`docs/archive/v3/V3_GOALS.md`](docs/archive/v3/V3_GOALS.md)
 - [`docs/benchmark.md`](docs/benchmark.md)
 - [`docs/coding_standards.md`](docs/coding_standards.md)
 - [`docs/compile.md`](docs/compile.md)
-- [`docs/nbd-pidfd-owned-rootless.md`](docs/nbd-pidfd-owned-rootless.md)
-- [`docs/pidfd-supervisor-design.md`](docs/pidfd-supervisor-design.md)
-- [`docs/recall-control-bridge.md`](docs/recall-control-bridge.md)
-- [`docs/recall-dd-allowlist.md`](docs/recall-dd-allowlist.md)
-- [`docs/recall-denial-telemetry-offline.md`](docs/recall-denial-telemetry-offline.md)
-- [`docs/recall-fixture-owner-and-drain-evidence.md`](docs/recall-fixture-owner-and-drain-evidence.md)
-- [`docs/recall-io-drain.md`](docs/recall-io-drain.md)
-- [`docs/recall-role-bridge.md`](docs/recall-role-bridge.md)
-- [`docs/recall-role-process-rootless.md`](docs/recall-role-process-rootless.md)
 - [`docs/testing_standards.md`](docs/testing_standards.md)
-- [`docs/virtual-smoke.md`](docs/virtual-smoke.md)
 - [`kernel/BESTFIT4_TESTING.md`](kernel/BESTFIT4_TESTING.md)
 - [`kernel/extent-v3/LIVE_TEST_GATE.md`](kernel/extent-v3/LIVE_TEST_GATE.md)
 - [`kernel/extent-v3/LOWER_WRITE_AGGREGATION.md`](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md)

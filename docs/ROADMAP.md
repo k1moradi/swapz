@@ -1,10 +1,6 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
-**Status: ACTIVE; alpha.11 owner medium retention pilot saved 26.99%
-WRITE bytes but increased sampled WRITE p99; alpha.12 C implementation
-is source-reviewed, compilation/tests NOT RUN by owner request, 2026-10-14.**
-`swapz3` V3.0.0-alpha.21 remains experimental and **NOT
-production-ready**. V2.2 is retired from active builds and required
+**Status: ACTIVE — V3.0.0-alpha.21 experimental and NOT production-ready.** V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 The latest alpha.11 bounded result establishes useful packing on synthetic
 medium pages; sustained GC/CPU/latency qualification remains open.
@@ -13,7 +9,7 @@ The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](coding_standards.md),
 [testing standards](testing_standards.md),
 [compile](compile.md), and [benchmark](benchmark.md).
-Track short, actionable work in [the V3 TODO](TODO.md); preserve exact
+Track short, actionable work in the active work queue below; preserve exact
 results and outstanding release gates in
 [current testing and release gates](testing_standards.md).
 Only `main` is used unless the owner explicitly authorizes otherwise.
@@ -265,7 +261,7 @@ Readiness still depends on
 V3 mappings are volatile. Hibernation/resume persistence is potential
 **V4** work requiring its own recovery format and kernel/boot review.
 
-Historical [V3 goals and V2.2-era comparisons](archive/v3/V3_GOALS.md)
+Historical [V3 goals and V2.2-era comparisons](https://github.com/k1moradi/swapz/blob/efc6a8b34c26f46419996578100b54841aa5c84c/docs/archive/v3/V3_GOALS.md)
 remain provenance, not active engineering or benchmark requirements.
 
 ### Alpha.16 high-QD throughput checkpoint — not loaded yet
@@ -422,3 +418,122 @@ upper useful MB/s/p99 can validate this trade-off;
 alpha.21 remains NOT RUN. If byte efficiency
 collapses or useful throughput does not improve,
 revert the policy rather than add more wrappers.
+
+
+## Current unresolved V3 work — merged TODO checklist
+
+The 18 unfinished items below were moved from the former active TODO file.
+Completed historic alpha.9–alpha.20 trial transcripts are summarized in
+[benchmark](benchmark.md); the old TODO remains recoverable in Git history.
+**Source/version priority:** alpha.21 and concurrent-preparation gates are
+current; any alpha.12/13/20-specific experiment must be reproduced against
+an explicitly pinned corresponding source and module before interpreting its
+result. Do not invoke retired root Make goals: `make test` is rootless;
+loaded owned-RAM scripts require independent owner authorization.
+
+### Experimental concurrent-preparation gate
+
+- [ ] Run rootless native/source contracts and W=1/W=2 Kbuild at the
+      exact async source SHA. Loaded correctness is separate.
+- [ ] Verify full owned-RAM/null_blk FIFO readback for over 64 queued
+      WRITEs, repeated same-page writes, READ/FLUSH/FUA/DISCARD ordering,
+      lower WRITE injection, ENOSPC/GC and suspend/teardown; require no
+      leaked or double-completed BIO.
+- [ ] Counterbalanced medium QD32 off, synchronous V3 and
+      `--async-prepare` V3 same-source runs at verified fixed
+      ~20 MB/s independent lower WRITE cap. Measure input/lower
+      READ/WRITE MB/s, requests, read p95/p99, CPU, memory,
+      overlap starts, GC, integrity and teardown. Physical devices
+      remain prohibited. **Loaded async outcome: NOT RUN**.
+
+### Blocking correctness and loaded qualification
+
+- [ ] Extend trustworthy loaded tests for mapping publication, upper BIO
+      completion ownership, GC live-object relocation, reserve exhaustion,
+      suspend/drain, and actual lower read/write/flush failure paths.
+      Distinguish synthetic pre-submission EIO from real device failures.
+- [ ] Reconcile V3 driver counters with independently measured
+      lower-device reads and writes, including verification, GC and flush
+      work. Preserve any unexplained differences.
+- [ ] Qualify loaded alpha.13 a separately authorized owned-RAM V3 smoke and independent retained
+      dependency/read-failure, FUA/PREFLUSH, expiry and suspend/drain
+      paths. Header predicates and CI are not sufficient.
+
+### Blocking performance evidence
+
+- [ ] Measure realistic ~2:1 nonzero LZ4 pages as well as exact zeros,
+      compressible small objects and incompressible RAW controls.
+      Verify actual compressed-size histograms, not assumed ratios.
+- [ ] Owner: qualify the exact production window-policy regression,
+      no-arrival timer wake, mixed RAW/compressed records, dependent
+      reads/overwrites, READ failure with pending writes, PREFLUSH/FUA
+      and suspend/drain. Source/header predicates alone are insufficient.
+- [ ] After matched loaded alpha.12 evidence, investigate lower-run
+      composition and GC fullness economics only if still limiting.
+      Historical alpha.8 READ bypass did not establish a matched win.
+- [ ] Measure completed GC read/write traffic, reserve rotations,
+      kernel CPU and RAM, achieved IOPS, cold read p95/p99 and full
+      lower-I/O drain. Repeat runs and preserve negative/inconclusive results.
+- [ ] Decide release readiness only from the gates in
+      [VISION.md](../VISION.md) and the
+      [readiness ledger](testing_standards.md);
+      V3 remains experimental and null_blk-only.
+- [ ] Owner alpha.20: only after rootless and kernel
+      build pass, run a separately authorized owned-RAM V3 smoke followed by
+      a separately authorized QD32 unpaced owned-RAM off/V3 paired trial with newly
+      owned RAM/null_blk and unchanged active swaps.
+      Record logical WRITE/READ MB/s, independent
+      lower READ/WRITE bytes and request counts,
+      worker_requeues, GC, p95/p99, full oracle
+      and clean teardown. Compare against exact
+      alpha.18 and alpha.19 pilots. A repeated
+      counterbalanced trial is needed to establish
+      statistical confidence; no result yet proves
+      higher maximum V3 input MB/s.
+
+### Maintenance
+
+- [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
+      documents and current V3.0.0-alpha.21 behavior when their claims
+      are revisited; do not silently apply superseded host commands.
+- [ ] Keep this checklist short: close verified items with an exact
+      commit/test reference, update the owning standard with lessons,
+      and retain detailed transcripts in immutable Git history or test artifacts.
+- [ ] Track documentation location and links using
+      the documentation ownership rules in [coding standards](coding_standards.md).
+- [ ] On the SAME alpha.20 source/module, run
+      a separately authorized same-source 1ms owned-RAM paired trial
+      as a distinctly owned, opt-in RAM-only trial
+      of the existing 1ms retention knob, and
+      compare with the unchanged 2ms unpaced
+      medium benchmark. Preserve equal immutable
+      logical work and lower READ/WRITE bytes and
+      requests, exact final oracle, p95/p99,
+      achieved useful IOPS/MB/s, pack-ready/
+      deadline closure reasons and safe teardown.
+      Reject trade-offs that sacrifice I/O savings
+      or latency; no new kernel alpha version for
+      unchanged production C. Repeat in alternating
+      order before claiming significant gains.
+- [ ] Owner alpha.21 production-C short packed window
+      qualification: run rootless `make test` and a separately authorized owned-RAM V3 smoke
+      first. After clean teardown, run unchanged
+      a separately authorized QD32 unpaced owned-RAM off/V3 paired trial at QD32,
+      retain_ms=2, 16384 measured operations.
+      Require the exact full-image oracle, independent
+      owned lower-device READ/WRITE bytes and requests,
+      FUA/GC/suspend invariants, useful WRITE/READ
+      MB/s, p95/p99 and clean teardown.
+      Contrast with alpha.20's 24.971 logical input,
+      14.854 lower WRITE MB/s and 40.52% byte saving.
+      Do not promote early 3-record closure if request,
+      read, latency or GC costs negate the input benefit.
+      Repeat paired/counterbalanced tests before claims.
+- [ ] Treat any alpha.20 1ms vs 2ms retention comparison
+      as **version-specific**. Alpha.21 changed the
+      kernel's early closure eligibility, so the
+      previously planned 1ms trial is NOT a clean
+      alpha.20-only configuration comparison once
+      sources are updated. Compare experiments by
+      exact source SHA and module hash, never mix
+      C policy changes into a pure knob A/B claim.

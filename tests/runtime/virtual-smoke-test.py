@@ -571,7 +571,7 @@ class VirtualSmokeContracts(unittest.TestCase):
         self.assertNotIn("bounded_window", source)
 
     def test_operator_handoff_names_privileged_prerequisites_and_capacity(self):
-        handoff = (ROOT / "docs/virtual-smoke.md").read_text(encoding="utf-8")
+        handoff = (ROOT / "docs/testing_standards.md").read_text(encoding="utf-8")
         self.assertIn("modprobe dm-delay", handoff)
         self.assertIn("separate authorized operation", handoff)
         self.assertIn("65,536 sectors", handoff)

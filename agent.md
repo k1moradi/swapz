@@ -10,10 +10,10 @@ After each implementation, update a relevant one of the four standards
 in the **same commit**, run automated goal-aligned tests, and report
 exact SHA and remaining gaps. Do not invent additional policies here.
 
-Use [docs/INDEX.md](docs/INDEX.md) and
-[docs/DOCUMENTATION_GUIDELINES.md](docs/DOCUMENTATION_GUIDELINES.md)
+Use [docs/ROADMAP.md](docs/ROADMAP.md) and
+[docs/coding_standards.md](docs/coding_standards.md)
 for documentation routing; keep the current task queue in
-[docs/TODO.md](docs/TODO.md), not in archival logs.
+[docs/ROADMAP.md](docs/ROADMAP.md), not in archival logs.
 
 **Mandatory Make interface (CI enforced):** The only public
 root commands are `make -j2`, `make install`,

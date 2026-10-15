@@ -66,19 +66,32 @@ Start from a real production C defect/bottleneck. Add a discriminating **direct-
 
 **Mandatory end of EVERY implementation task:** update the **relevant one or more of these four governing standards in the same `main` commit**, documenting new behavior, lesson, invariant, reproducible test and remaining limits. Update `README.md` for user-facing changes, and `VISION.md` if project acceptance criteria change. CI can enforce a standards-file co-change, but it cannot prove factual accuracy. Keep [current qualification gates](testing_standards.md), older `CODEX_VALIDATION.md` and previous PRs as **archival evidence**, not independent active policy.
 
-## Documentation ownership
+## Documentation ownership and consolidated standards
 
-Keep policies in the six canonical documents and agent prompts as pointers.
-Use [docs/INDEX.md](INDEX.md) for navigation,
-[docs/TODO.md](TODO.md) for current V3 work, and
-[docs/DOCUMENTATION_GUIDELINES.md](DOCUMENTATION_GUIDELINES.md)
-for document creation, consolidation, archival and link review.
-Do not append dated evidence transcripts to TODO or revive archived
-V2.x instructions. Root Markdown locations are CI-governed. The root README must provide
-one direct Markdown link to **every tracked Markdown file**, including
-archival reports and component notes; `project-goals` CI checks this
-inventory. Preserve the four engineering standards' co-change
-requirement for actual code, build, test and workflow changes.
+The only Markdown documents directly under `docs/` are
+`coding_standards.md`, `testing_standards.md`, `compile.md`,
+`benchmark.md` and `ROADMAP.md`. Root `README.md` and `VISION.md`
+complete the authoritative entry points; agent instructions are short
+pointers. The roadmap owns **current unchecked V3 tasks and milestones**.
+The testing standard owns reproducible test oracles, rootless limitations,
+owner-authorized virtual-device work, pidfd/recall and teardown safety.
+Benchmarking owns evidence scope and device geometry. Compile owns the
+exact four-command Make interface and reused build tree.
+
+Do not create standalone dated audit, review, test-report, JSON-evidence,
+agent transcript or obsolete version-plan documents. Condense relevant
+correctness and negative findings into the owning core document, label
+exact source and actual PASS/FAIL/BLOCKED/NOT RUN scope, and preserve raw
+records in test artifacts or immutable Git history. Never promote old
+V2.2 scripts or source-only model PASS as current V3 evidence.
+
+For any deletion or move, check code/test and CI hard-coded paths,
+change all incoming relative Markdown links, keep the root README
+linked to **every tracked Markdown document**, and preserve required
+workflow checks. Implementation changes must update the relevant
+canonical standard in the same main-branch commit. The old single-main
+branch-consolidation manifest was a one-time cleanup input; do not
+reintroduce a branch-prune workflow after main is the sole branch.
 
 ## Absolute host safety
 

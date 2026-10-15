@@ -155,7 +155,7 @@ equivalents* but is NOT four physical I/O operations. Read and write
 request counts must be recorded separately. Host counters do not prove
 flash NAND program/erase counts or physical SD endurance.
 
-See [DEVICE_GEOMETRY.md](../../docs/DEVICE_GEOMETRY.md) and
+See [device geometry and benchmark standards](../../docs/benchmark.md) and
 [current benchmark criteria](../../docs/benchmark.md).
 The current `null_blk`-only target admission remains mandatory.
 

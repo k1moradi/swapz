@@ -18,7 +18,7 @@ VISION governs success criteria. Only `main` is used and all builds
 reuse `~/swapz/build/`. Historical reports are evidence, not policy.
 
 This is the project's **north star and acceptance standard** for V3 and all
-later versions. Read [DEVICE_GEOMETRY.md](docs/DEVICE_GEOMETRY.md) for 512n, 512e,
+later versions. Read [device geometry and benchmark standards](docs/benchmark.md) for 512n, 512e,
 4Kn, filesystem cluster sizes, swap partitions/files and precise block-layer
 stat units. [V3_GOALS.md](docs/ROADMAP.md) is the algorithm roadmap; this
 document defines *what we are optimizing* and *what evidence counts*.

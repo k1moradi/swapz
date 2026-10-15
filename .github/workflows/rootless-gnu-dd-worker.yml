@@ -13,7 +13,7 @@ on:
       - 'tests/runtime/test-child-supervisor.py'
       - 'tests/runtime/test-child-supervisor-service.py'
       - 'tests/runtime/recall-fixture-owner.py'
-      - 'docs/recall-dd-allowlist.md'
+      - 'docs/testing_standards.md'
   pull_request:
     paths:
       - '.github/workflows/rootless-gnu-dd-worker.yml'
@@ -25,7 +25,7 @@ on:
       - 'tests/runtime/test-child-supervisor.py'
       - 'tests/runtime/test-child-supervisor-service.py'
       - 'tests/runtime/recall-fixture-owner.py'
-      - 'docs/recall-dd-allowlist.md'
+      - 'docs/testing_standards.md'
   workflow_dispatch:
 
 permissions:

@@ -34,9 +34,9 @@ not permit activation, physical devices or existing system swap.
 
 **Current testing policy.** Read [README](../README.md), [VISION](../VISION.md), [coding_standards.md](coding_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) at the **start of every agent task**. Tests must prove correctness on actual source, expose false completions and regressions, and ultimately support the project's **real lower-I/O** objective—not maximize test counts.
 
-Current actionable V3 gaps belong in [docs/TODO.md](TODO.md);
+Current actionable V3 gaps belong in [the roadmap's open work queue](ROADMAP.md);
 historical validation transcripts belong in the archive indexed by
-[docs/INDEX.md](INDEX.md), not in the standards or task list.
+[coding/documentation governance](coding_standards.md), not in the standards or task list.
 
 ## Qualification ladder (do not confuse evidence levels)
 
@@ -121,7 +121,7 @@ dated operator document was removed during documentation cleanup while
 the rootless `virtual-smoke-test.py` still requires its authorization,
 32 MiB capacity, exact two-read and safe-teardown invariants. Restore
 a concise **non-executable safety handoff** at
-[virtual-smoke.md](virtual-smoke.md) rather than dropping assertions.
+the historical V2.2 smoke compatibility handoff retained below rather than dropping assertions.
 README alpha-version tests permit either the concise current V3 heading
 or the older revision-heading phrase; both must match VERSION exactly.
 
@@ -1270,3 +1270,120 @@ counting retired V2.2 rootless PASS results as V3 evidence.
 Do not ask the owner to run `make install` or `make uninstall` before V3's production safety gates are accepted. Rootless fake-DKMS tests must run under `build/tests/package-sandbox` and exercise the actual installer, including versioned source installation, the read-only `swapz3ctl` binary, refused activation arguments, ownership checks, double-install prevention, exact uninstall, modified binary refusal, failed DKMS removal quarantine and install rollback. Root execution must reject test-mode overrides. These test results are **not** loaded module correctness, real DKMS compatibility or production readiness. No root Make commands may be added beyond the four owner-approved commands.
 
 The V3 DKMS script resolves a controlled executable path and invokes `"$dkms_bin" add/build/install/remove`. Policy checks must match those **validated calls**, not a hardcoded bare `dkms add` string; behavioral rootless fake-DKMS tests remain the decisive packaging gate.
+
+## Consolidated recall, pidfd, NBD and backing-release safety specifications
+
+**Status: ROOTLESS MODELS ONLY; direct production mapper recall is DISABLED.**
+The former separate `docs/recall-*`, `docs/pidfd-*` and `docs/nbd-*`
+specifications are retired. Their exact state machines, adversarial cases,
+source versions and negative evidence remain in immutable Git history.
+The reusable safety acceptance contract is:
+
+1. **Worker identity and ownership.** Each direct child receives a stable
+   opaque handle; retain its exact pidfd and owning process/descriptor through
+   gated start, stop, wait and reap. Do not fall back to numeric PID signalling
+   or infer a stopped process from a reused PID. Use a one-use start gate,
+   bounded READY handshake and fixed worker program. Account independently
+   for registered and early-unconfirmed children, service exit, descendant
+   containment and all role descriptors. A pidfd reap is **not** a kernel
+   I/O-completion or durability barrier.
+2. **Worker and executable admission.** Direct recall accepts exactly the
+   fixed `writer`, `a`, `b`, `a2`, `b2` roles with no caller-controlled
+   argv, executable path, environment, PIDs, mapper name, backing path or
+   identity. The writer precedes reads; require both concurrent reads READY
+   behind gates before group release. Pinned file descriptors and exact
+   post-write identity checks prevent readback aliasing. The ordinary test
+   CLI still admits only fixed short-lived test workers, not production
+   `dd` or live Device Mapper work.
+3. **GNU worker trust bootstrap.** Authenticate source and a separately
+   reviewed static GNU `dd` build before trust admission. A root-controlled
+   path and a matching SHA alone are insufficient. The fixed app Ed25519
+   signing key must be provisioned independently of the signed manifest;
+   the GNU GPG source key is a different trust chain. Open directories/files
+   descriptor-relatively without symlink following; reject changed, revoked,
+   unexpected, unowned or writable entries. Pin and verify the OpenSSL
+   verifier/executable and its host dynamic-library trust assumptions.
+   Require supported ELF/architecture, sealed executable memfd, minimal
+   descriptor set, no-new-privileges, sandboxed seccomp and parent-death
+   containment. An ordinary rootless successful five-role run, even with
+   same-host reproducible builds, **does not install a production trust key
+   or qualify privileged mapper ownership**.
+4. **Exact mapper lifecycle.** Acquire an exclusive fixture-specific
+   lifecycle owner *before creation*, bind the mapper name, UUID,
+   major/minor, table fingerprint and descriptor, and re-inventory each
+   before every role. Deny arbitrary table reload or worker-owned DM
+   commands. Close role admission, reconcile authenticated session-bound
+   complete worker/error/descriptor/service inventories, and independently
+   establish any test swap inactive. Ordinary upper-to-lower DM suspend
+   without `--noflush` and positively observed kernel pending-I/O drain
+   must precede normal removal. Close exact owner descriptors and require
+   complete zero open-count and empty holder inventories; use neither force
+   nor deferred removal. Independently prove each exact mapping absent
+   after removal, then normal loop/NBD disconnect/absence before even
+   considering backing release.
+5. **Backing release is separate from mapper release.** Mapping disappearance
+   or an `all_reaped` receipt cannot authorize image deletion. Use a
+   strictly session-bound, sequence-checked, authenticated evidence record
+   whose producer is a trusted owner directly observing state. Reject stale,
+   duplicate, forged, out-of-order, missing or contradictory evidence.
+   Any crash, changed identity, timeout, failed suspend, unobservable
+   holder/open count, failed disconnect or ambiguous finalization requires
+   **preserve backing and logs**, not forced teardown.
+6. **NBD/live admission remains closed.** The old pidfd-owned NBD server,
+   control bridge and telemetry models operate on synthetic files only;
+   they neither connect a kernel NBD server nor qualify DM drain.
+   Do not enable the legacy NBD benchmark backend, real swap, physical
+   media or privileged operations because rootless mocks pass. A future
+   separately authorized, bounded owned-RAM test needs real server
+   process-tree ownership, verified kernel NBD disconnect, exact mapper
+   suspend/removal, byte-exact readback and complete independent observations.
+
+**Test oracle:** the rootless regressions for pidfd, supervisor, IPC,
+five-role recall, trusted GNU worker, broker ownership, session/HMAC drain,
+NBD crash behavior and telemetry check their *own synthetic failure models*.
+Preserve negative outcomes and quarantine. These rules are not certification
+of deployed V3 or physical-media readiness.
+
+
+# Legacy V2.2 virtual smoke — safety compatibility handoff
+
+This retained note exists because rootless compatibility tests verify that
+the archived V2.2 virtual smoke contract continues to state every relevant
+authorization and cleanup constraint. It is **not** an active V3 benchmark,
+permission to load a V2 module or authorization to test the owner's PC.
+All privileged V2.2 work requires a separate authorized operation. V3
+remains experimental and null_blk-only. There is no implicit sudo step in
+`make test`; no physical swap, mount, swapoff/swapon, or host reboot is
+permitted by this document.
+
+## Historical disposable-VM prerequisites
+
+The operator must independently confirm disposable VM ownership, the
+matching exact source/module digests, and kernel support for
+`modprobe dm-delay`. The former harness used only a newly owned
+32 MiB tmpfs image, not an existing block device. Its 32 MiB image
+is **65,536 sectors** (512-byte accounting sectors), or
+**32 complete 1 MiB segments**. The reserve bound was
+the larger of 25% of the one-page logical size or two segments.
+Only the swapz logical table is one page (`0 8` sectors).
+A one-page V2.2 target is NOT a 32 MiB logical data volume.
+
+The operator-supplied VM label is an untrusted string: the test
+cannot authenticate the operator-supplied VM label. Explicit authorization
+must match the VM label and immutable exact source and module SHA-256.
+The former runtime relied on two separate aligned 4 KiB reads:
+the first while the lower write is outstanding, the second
+after ordinary suspend/resume drain. Tests must verify byte identity
+and the one-owner completion invariant. Unexpected holders or incomplete
+lower callbacks make ordinary cleanup unsafe: forensic cleanup or VM reset needs a new operator decision and must not be automated.
+
+This literal authorization template is retained only for the source
+contract; do not execute it on an owner's machine:
+
+```bash
+AUTH="I AUTHORIZE swapz V2.2 smoke only on disposable VM $VM_ID with source $SOURCE_SHA and module SHA-256 $MODULE_SHA256; permitted operations are one /dev/shm-backed loop device, one dm-delay target, one swapz target, one aligned 4 KiB write, two separate aligned 4 KiB reads (one while the lower write is outstanding and one after ordinary suspend/resume drain), ordinary suspend and resume, ordinary removal of resources positively created by this run, and insmod/rmmod of only the selected dm-swapz module; no swap activation, mount, physical storage, forced removal, or host reboot."
+```
+
+The current `tests/runtime/virtual-smoke-test.py` verifies only the
+compatibility and safety statements; that rootless gate does not load any
+kernel module and does not establish live kernel or device correctness.
