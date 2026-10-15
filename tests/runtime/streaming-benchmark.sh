@@ -332,7 +332,7 @@ if [[ "$BACKEND_KIND" == nbd ]]; then
   fi
 elif ! setup_nullblk; then
   echo "ERROR: null_blk with memory_backed+mbps+completion_nsec is required for the controlled V2.2 sweep." >&2
-  echo "Use bench/request-plateau.py for a model-only sweep or install a kernel with null_blk controls." >&2
+  echo "Use tools/request-plateau.py for a model-only sweep or install a kernel with null_blk controls." >&2
   exit 2
 fi
 

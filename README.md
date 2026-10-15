@@ -100,6 +100,16 @@ Only `main` remains; the one-time branch-pruning script and workflow
 were retired along with the consumed manifest. None of the historical
 results constitutes current V3 production approval.
 
+## Maintained utilities
+
+The shared, maintained helper programs live in [`tools/`](tools/),
+alongside the owned-RAM V3 safety and benchmark scripts. The harmless
+offline [`request-plateau.py`](tools/request-plateau.py) was moved out
+of `bench/` unchanged. Four retired V2 scripts, including an arbitrary-
+block-device destructive benchmark, were removed from the working tree
+rather than exposed as active V3 tooling; Git history retains them.
+The only public root Make commands remain the owner's four approved goals.
+
 ## Complete tracked Markdown directory
 
 All remaining tracked Markdown files are directly linked here.

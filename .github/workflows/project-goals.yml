@@ -97,6 +97,13 @@ jobs:
               *) echo "FAIL: redundant documentation under docs/: $file"; exit 1 ;;
             esac
           done < <(find docs -type f | sort)
+          # Canonical helpers live only in tools/.
+          test ! -e bench || { echo "FAIL: retired bench/ directory returned"; exit 1; }
+          test ! -e scripts || { echo "FAIL: retired scripts/ directory returned"; exit 1; }
+          test -s tools/request-plateau.py
+          python3 -B tools/request-plateau.py --bandwidth 20 --sizes 4,8 \
+            --latencies 1 --ratios 1 |
+            grep -Fq 'first_plateau_kib=8'
           shopt -s nullglob
           for file in *.md; do
             case "$file" in

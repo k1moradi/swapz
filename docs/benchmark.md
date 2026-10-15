@@ -1436,3 +1436,18 @@ Sources: [Linux block accounting](https://www.kernel.org/doc/html/latest/block/s
 [block queue ABI](https://www.kernel.org/doc/html/latest/admin-guide/abi-stable.html),
 and [swap-file restrictions](https://man7.org/linux/man-pages/man8/swapon.8.html).
 
+## Maintained offline request-size projection
+
+`python3 -B tools/request-plateau.py` models the relationship between
+fixed per-request latency, payload size and an assumed lower-link
+bandwidth. Its request-size plateau and logical/physical ratio projections
+are **hypothetical**, not observed READ/WRITE counts, actual GC or
+performance, kernel drain, flash endurance or a qualifying V3 winner.
+The old `bench/block-benchmark.sh` and the V2 loop, rotation and
+write-batch regression scripts were retired rather than moved into
+active V3 tools: they used legacy kernel interfaces and potentially
+destructive privileged disk operations. The originals are preserved
+in [Git history](https://github.com/k1moradi/swapz/tree/e69acd6525af9bc0567383bd4588d474d93404db).
+Only the owner-authorized owned-RAM V3 comparison protocol supplies
+loaded V3 evidence; no legacy script grants permission to touch physical
+or unrelated storage.

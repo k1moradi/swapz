@@ -107,6 +107,16 @@ canonical standard in the same main-branch commit. The old single-main
 branch-consolidation manifest was a one-time cleanup input; do not
 reintroduce a branch-prune workflow after main is the sole branch.
 
+### Shared utilities and legacy retirement
+
+General-purpose maintained scripts and measurement helpers belong under
+`tools/`, not parallel `bench/` and `scripts/` roots. Fixture-specific
+regressions remain under `tests/`. The root Make API retains exactly four
+approved commands; moving scripts must not add a fifth public goal.
+Old V2 scripts accepting arbitrary block devices or using the retired
+Device Mapper target remain accessible only from immutable Git history,
+not runnable within current V3 helper entry points.
+
 ## Absolute host safety
 
 Never reboot, `swapoff` or `swapon`. Never touch `/dev/sdb1`, `/swapfile`, active swap, physical storage, unrelated DM targets or unowned null_blk. Host tests require exactly owned, uniquely identified **RAM-backed null_blk**, verified major/minor, table UUID and holders, safe ordinary teardown, and quarantine if unresolved I/O remains. Real media experiments are separate owner-authorized future work. Source CI and null_blk results are not physical wear evidence.
