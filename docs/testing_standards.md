@@ -274,7 +274,7 @@ At the end of each implementation task, update this or another of the four stand
 ## Automated governance for the four standards
 
 The `main` project-goal workflow checks that `AGENTS.md`,
-`agent.md`, `CLAUDE.md`, Copilot instructions, `CODEX_VALIDATION.md`,
+`CLAUDE.md`, Copilot instructions, `CODEX_VALIDATION.md`,
 `README.md` and `VISION.md` all reference the four governing standards.
 A same-commit change to kernel, tests, userspace, Make/DKMS or CI workflow
 paths must also modify at least one of `coding_standards.md`,

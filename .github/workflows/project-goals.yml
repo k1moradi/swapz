@@ -68,7 +68,7 @@ jobs:
         run: |
           set -euo pipefail
           standards=(docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
-          entrypoints=(AGENTS.md agent.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md VISION.md)
+          entrypoints=(AGENTS.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md VISION.md)
           for doc in "${standards[@]}"; do
             test -s "$doc" || { echo "FAIL: missing canonical standard $doc"; exit 1; }
             grep -Fq 'VISION.md' "$doc" || { echo "FAIL: standard $doc must cite VISION"; exit 1; }
@@ -113,7 +113,7 @@ jobs:
           shopt -s nullglob
           for file in *.md; do
             case "$file" in
-              README.md|VISION.md|AGENTS.md|CLAUDE.md|agent.md|CODEX_VALIDATION.md) ;;
+              README.md|VISION.md|AGENTS.md|CLAUDE.md|CODEX_VALIDATION.md) ;;
               *) echo "FAIL: move root documentation into docs/: $file"; exit 1 ;;
             esac
           done

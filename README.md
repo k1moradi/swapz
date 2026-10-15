@@ -198,7 +198,6 @@ Component-local specs are subordinate to the six authoritative entry points.
 - [`CODEX_VALIDATION.md`](CODEX_VALIDATION.md)
 - [`README.md`](README.md)
 - [`VISION.md`](VISION.md)
-- [`agent.md`](agent.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/benchmark.md`](docs/benchmark.md)
 - [`docs/coding_standards.md`](docs/coding_standards.md)
