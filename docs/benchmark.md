@@ -343,7 +343,13 @@ invalidate before any mutation. Native tests independently check
 same-extent data correctness, stale-generation rejection, failed cold
 I/O, the strict one-block selective path and payload-failure
 invalidation. The previous exact cold-selective accounting test runs
-with a one-block limit; it is not relaxed. The full owned-RAM matrix
+with a one-block limit and explicitly cold-invalidated scratch on
+**every** measured page; it is not relaxed. CI on the first full-read
+commit caught that the test's *first* 16-page cold count still reused
+data and therefore violated its original lower-bound assertion.
+The cold setup now covers both loops, while the separate warm production-C
+test preserves proof of optimized reuse. This first revision is NOT
+qualified by those failing CI workflows. The full owned-RAM matrix
 must run at the **new exact SHA** before asserting a result; any
 increased read amplification or WRITE/p99 regression remains a
 negative outcome.

@@ -159,7 +159,11 @@ static int test_full_window_and_selective_reads(void)
 	CHECK(engine.submitted_blocks == 10);
 	CHECK(engine.completed_blocks == 10);
 	CHECK(disk.write_blocks == 10);
+	/* Preserve the existing cold, metadata-first lower-block bound:
+	 * disable prefetch and reuse for BOTH loops in this test. */
+	engine.max_read_blocks_per_record = 1;
 	for (index = 0; index < 16; ++index) {
+		sv3_engine_invalidate_read_cache(&engine);
 		CHECK(maps[index].valid && maps[index].generation == 1);
 		CHECK(sv3_engine_read_page(&engine, index,
 					   output, sizeof(output), &length) == 0);
@@ -173,7 +177,6 @@ static int test_full_window_and_selective_reads(void)
 	 * Explicitly disable two-block prefetch for these per-page read-budget
 	 * checks and invalidate any warm metadata before each sample. The
 	 * separate engine tests verify the bounded full-extent fast path. */
-	engine.max_read_blocks_per_record = 1;
 	for (index = 0; index < 16; ++index) {
 		const struct sv3_map *m = &maps[index];
 		int expected;
