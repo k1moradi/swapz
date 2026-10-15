@@ -177,8 +177,13 @@ overwrite an uncapped throughput loss or claim flash endurance.
 
 The source additions are audited by rootless-only CI, including mock
 eight-session fail-closed coverage, exact source/trace SHA validation,
-and full own-device safety checks; **loaded evidence requires the
-owner's fresh `make test`** and cannot be produced in rootless CI.
+and full own-device safety checks. A mocked status line may begin
+directly with `close_pack_ready=` after its marker; the rootless
+parser regression accepts that key while still requiring all
+packed-tail/GC counters from actual loaded status. Mock Make policy
+checks name the eight-pair stage, not the former four-pair stage.
+**Loaded evidence requires the owner's fresh `make test`** and
+cannot be produced in rootless CI.
 
 ## Alpha.22 packed-burst tail correctness contract
 

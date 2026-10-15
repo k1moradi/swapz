@@ -304,7 +304,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertLess(reporter.index('"Native and rootless contracts"'),
                         reporter.index('"Kernel warnings W=1"'))
         self.assertLess(reporter.index('"Kernel warnings W=2"'),
-                        reporter.index('"Owned RAM smoke and 4 pairs"'))
+                        reporter.index('"Owned RAM smoke and 8 pairs"'))
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tools/test-loaded.sh").read_text()

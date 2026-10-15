@@ -175,13 +175,14 @@ def parse_sessions(output):
             current["order"] = line.partition("=")[2].strip()
         elif current is not None and line.startswith(("V3_STATUS_BEFORE=", "V3_STATUS_AFTER=")):
             name = "before" if line.startswith("V3_STATUS_BEFORE=") else "after"
+            status_text = line.partition("=")[2]
             allowed = ("burst_tail_flushes", "packed_early_commits",
                        "close_pack_ready", "one_page_windows", "gc_victims",
                        "gc_role_rotations")
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
                 for key in allowed
-                if (match := re.search(r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", line))
+                if (match := re.search(r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", status_text))
             }
         elif current is not None and line.startswith(
                 "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
