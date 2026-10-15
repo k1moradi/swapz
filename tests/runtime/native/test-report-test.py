@@ -16,15 +16,44 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
-def arm(candidate, *, mode):
+def arm(candidate, *, mode, regime):
     v3 = candidate == "v3"
+    raw_mbps = 14 if regime == "capped" else 32
+    cand_mbps = (20 if mode == 0 else 20.01) if regime == "capped" else (
+        24 if mode == 0 else 24.01)
+    raw_read_time = 1.0
+    packed = {
+        "logical_bytes": 4194304,
+        "logical_image_sha256": "d" * 64,
+        "packed_close_delta": 4 if v3 else None,
+        "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ" if v3
+                          else "ROOTLESS_NO_PACK_PROOF"),
+        "passes": {
+            key: {
+                "logical_bytes": 4194304,
+                "verified_pages": 1024,
+                "verified_image_sha256": "d" * 64,
+                "seconds": raw_read_time * (0.9 if v3 else 1.),
+                "useful_read_mbps": 4.19 if not v3 else 4.65,
+                "read_p99_ms": 2 if v3 else 3,
+                "lower_io": {
+                    "lower_read_bytes": 6291456 if v3 else 4194304,
+                    "lower_read_requests": 1536 if v3 else 1024,
+                },
+                "replay_cpu_user_s": .15,
+                "replay_cpu_system_s": .12,
+                "replay_peak_rss_kb": 12000,
+            }
+            for key in ("sequential", "seeded_random")
+        },
+    }
     return {
         "candidate": candidate, "verdict": "PASS",
         "source_sha": "a" * 40,
         "fixture_sha256": "b" * 64, "trace_sha256": "c" * 64,
         "device_identity": {"device": "PRIVATE_DEVICE_MUST_NOT_ESCAPE"},
         "throughput_mbps": {
-            "logical_write_mbps": (20 if mode == 0 else 19) if v3 else 14,
+            "logical_write_mbps": cand_mbps if v3 else raw_mbps,
             "lower_write_mbps": 12 if v3 else 14,
             "logical_read_mbps": 7 if v3 else 4,
             "logical_write_bytes": 8000, "logical_read_bytes": 4000,
@@ -38,58 +67,75 @@ def arm(candidate, *, mode):
         "read_p95_ns": 4000000 if v3 else 8000000,
         "read_p99_ns": 5000000 if v3 else 10000000,
         "write_p99_ns": 2000000,
-        "seconds": 2, "verified_pages": 1024
+        "seconds": 2, "verified_pages": 1024,
+        "mixed_replay_cpu_user_s": .12,
+        "mixed_replay_cpu_system_s": .08,
+        "mixed_replay_peak_rss_kb": 12000,
+        "packed_read": packed,
     }
 
 
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39, "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
-    for i, mode in enumerate((0, 1, 1, 0)):
-        out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
-        out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
-        for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
-            out.append(json.dumps(arm(candidate, mode=mode)))
-        if mode:
-            out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
-        out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
+    for regime in ("capped", "uncapped"):
+        out.append(f"START_OWNED_RAM_REGIME={regime}")
+        for i, mode in enumerate((0, 1, 1, 0)):
+            out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
+            out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
+            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_AFTER=close_pack_ready=32 burst_tail_flushes=7 packed_early_commits=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
+            for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
+                out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
+            if mode:
+                out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
+            out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
+        out.append(f"PASS_OWNED_RAM_REGIME={regime}")
     return "\n".join(out) + "\n"
 
 
 class ReportContract(unittest.TestCase):
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
-        self.assertEqual([s["async_prepare"] for s in sessions], [0, 1, 1, 0])
+        self.assertEqual(len(sessions), 8)
+        self.assertEqual([s["async_prepare"] for s in sessions],
+                         [0, 1, 1, 0, 0, 1, 1, 0])
+        self.assertEqual([s["regime"] for s in sessions],
+                         ["capped"] * 4 + ["uncapped"] * 4)
         self.assertEqual([s["order"] for s in sessions],
-                         ["off-first", "v3-first", "off-first", "v3-first"])
+                         ["off-first", "v3-first"] * 4)
         self.assertTrue(all(s["status"] == "PASS" for s in sessions))
-        self.assertEqual(sessions[1]["overlap_starts"], 42)
-        self.assertEqual(sessions[2]["overlap_starts"], 42)
-        self.assertNotIn("overlap_starts", sessions[0])
-        self.assertNotIn("overlap_starts", sessions[3])
+        for j in (1, 2, 5, 6):
+            self.assertEqual(sessions[j]["overlap_starts"], 42)
+        for j in (0, 3, 4, 7):
+            self.assertNotIn("overlap_starts", sessions[j])
         self.assertNotIn("device_identity", json.dumps(sessions))
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
 
-    def test_comparison_gives_all_three_user_vision_dimensions(self):
+    def test_capped_gain_and_uncapped_loss_are_both_visible(self):
         data = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
-        self.assertEqual(data["overall"], "PASS_BOUNDED_RAM_PILOT")
-        sync = data["criteria"]["sync"]
-        self.assertEqual(sync["write_throughput_vs_raw"], "PASS")
-        self.assertEqual(sync["lower_write_bytes_vs_raw"], "PASS")
-        self.assertEqual(sync["swap_in_p99_vs_raw"], "PASS")
-        self.assertAlmostEqual(sync["lower_write_saved_fraction"], .375)
-        self.assertEqual(data["criteria"]["async_vs_sync"]["write_throughput"],
-                         "NO_GAIN")
-        self.assertAlmostEqual(data["columns"]["sync"]["swap_in_100mb_estimate_s"],
-                               100 / 7)
+        self.assertEqual(data["overall"], "PASS_BOUNDED_RAM_MATRIX")
+        capped = data["regimes"]["capped"]
+        uncapped = data["regimes"]["uncapped"]
+        self.assertEqual(capped["criteria"]["sync"]["throughput_vs_raw"],
+                         "MATERIAL_GAIN_PRELIMINARY")
+        self.assertEqual(uncapped["criteria"]["sync"]["throughput_vs_raw"],
+                         "MATERIAL_LOSS_PRELIMINARY")
+        self.assertAlmostEqual(
+            capped["criteria"]["sync"]["lower_write_saved_fraction"], .375)
+        self.assertEqual(
+            capped["criteria"]["async_vs_sync"]["write_throughput"],
+            "NO_SIGNIFICANT_ASYNC_GAIN")
+        self.assertAlmostEqual(
+            capped["columns"]["sync"]["sequential_4mib_s"], .9)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
-        self.assertEqual(data["cpu_memory"], "NOT_MEASURED")
+        self.assertIn("kernel DM workers", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
 
-    def test_partial_benchmarks_never_pass(self):
+    def test_incomplete_mismatch_or_forged_packed_result_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
-        self.assertEqual(runner.benchmark_verdicts(sessions[:3])["overall"],
+        self.assertEqual(runner.benchmark_verdicts(sessions[:7])["overall"],
                          "INCOMPLETE")
         sessions[1]["source_sha"] = "different-source"
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
@@ -98,6 +144,15 @@ class ReportContract(unittest.TestCase):
         sessions[1]["trace_sha256"] = "tampered-trace"
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCONCLUSIVE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[6]["arms"]["v3"]["packed_read"]["packed_close_delta"] = 0
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[6]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+            "logical_bytes"] = 0
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
 
     def test_report_replaced_and_not_raw_json_to_terminal(self):
         with tempfile.TemporaryDirectory(prefix="report-", dir=ROOT / "build/tests") as name:

@@ -27,6 +27,55 @@ class PairReplayContract(unittest.TestCase):
             self.assertNotEqual(run.returncode, 0, repr(args))
         return run
 
+    def test_four_mib_verified_fixed_volume_read_rootless(self):
+        # Identical direct replay path and oracle, but WITHOUT any real
+        # Device Mapper loaded or claims about kernel packed extents.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = root / "fixture.bin"
+            fixture.write_bytes(b"".join(bytes([i + 1]) * PAGE
+                                         for i in range(32)))
+            plan = root / "plan"
+            self.run_cmd("prepare", "--fixture", fixture,
+                         "--output-dir", plan, "--logical-pages", 1024,
+                         "--writer-pages", 256, "--reader-start", 512,
+                         "--reader-pages", 256, "--qd", 32,
+                         "--warmup-ops", 32, "--measure-ops", 64,
+                         "--read-pct", 25, "--iops", 0)
+            reports = []
+            for candidate in ("off", "v3"):
+                device = root / f"swapz-replay-{candidate}.bin"
+                with device.open("wb") as fd:
+                    fd.truncate(1024 * PAGE)
+                result = root / f"{candidate}.json"
+                self.run_cmd("run", "--fixture", fixture,
+                             "--trace", plan / "trace.jsonl",
+                             "--manifest", plan / "manifest.json",
+                             "--device", device, "--candidate", candidate,
+                             "--source-sha", "rootless-no-module",
+                             "--regular-file-test", "--packed-read",
+                             "--result", result)
+                record = json.loads(result.read_text())
+                read = record["packed_read"]
+                self.assertEqual(read["qualification"], "ROOTLESS_NO_PACK_PROOF")
+                self.assertEqual(read["logical_bytes"], 4194304)
+                self.assertIsNone(read["packed_close_delta"])
+                for mode in ("sequential", "seeded_random"):
+                    phase = read["passes"][mode]
+                    self.assertEqual(phase["logical_bytes"], 4194304)
+                    self.assertEqual(phase["verified_pages"], 1024)
+                    self.assertEqual(phase["verified_image_sha256"],
+                                     read["logical_image_sha256"])
+                    self.assertGreater(phase["seconds"], 0)
+                    self.assertGreater(phase["useful_read_mbps"], 0)
+                    self.assertGreaterEqual(phase["replay_cpu_user_s"], 0)
+                reports.append(result)
+            self.run_cmd("compare", "--reports", *reports)
+            wrong = json.loads(reports[0].read_text())
+            wrong["packed_read"]["passes"]["sequential"]["verified_pages"] = 100
+            reports[0].write_text(json.dumps(wrong))
+            self.run_cmd("compare", "--reports", *reports, success=False)
+
     def test_pair_exact_bytes_and_ordered_wave_oracle(self):
         for layout in ("disjoint", "same-region"):
             with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temp:

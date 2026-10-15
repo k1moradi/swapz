@@ -142,7 +142,7 @@ def run_stage(title, command, result, *, parse_bench=False):
               round(time.monotonic() - start, 3), "exit_code": rc}
     if rc:
         record["signals"] = safe_lines(output)
-        # The report is optionally published on a public GitHub Release.
+        # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
         record["failed_phase"], record["diagnostic"] = failure_context(output)
@@ -161,16 +161,28 @@ def run_stage(title, command, result, *, parse_bench=False):
 
 
 def parse_sessions(output):
-    sessions, current = [], None
+    sessions, current, regime = [], None, None
     for line in output.splitlines():
         line = line.strip()
-        if line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
+        if line.startswith("START_OWNED_RAM_REGIME="):
+            regime = line.partition("=")[2]
+        elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current = {"async_prepare": int(line.rsplit("=", 1)[-1]),
-                       "status": "INCOMPLETE", "arms": {},
+                       "regime": regime, "status": "INCOMPLETE", "arms": {},
                        "order": "unknown"}
             sessions.append(current)
         elif current is not None and line.startswith("REPLAY_ORDER="):
             current["order"] = line.partition("=")[2].strip()
+        elif current is not None and line.startswith(("V3_STATUS_BEFORE=", "V3_STATUS_AFTER=")):
+            name = "before" if line.startswith("V3_STATUS_BEFORE=") else "after"
+            allowed = ("burst_tail_flushes", "packed_early_commits",
+                       "close_pack_ready", "one_page_windows", "gc_victims",
+                       "gc_role_rotations")
+            current.setdefault("kernel_status", {})[name] = {
+                key: int(match.group(1))
+                for key in allowed
+                if (match := re.search(r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", line))
+            }
         elif current is not None and line.startswith(
                 "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current["status"] = "PASS"
@@ -204,7 +216,37 @@ def parse_sessions(output):
                     "logical_read_bytes": rates.get("logical_read_bytes"),
                     "logical_write_bytes": rates.get("logical_write_bytes"),
                     "seconds": obj.get("seconds"),
+                    "mixed_replay_cpu_user_s": obj.get("mixed_replay_cpu_user_s"),
+                    "mixed_replay_cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
+                    "mixed_replay_peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
+                    "packed_read": None,
                 }
+                packed = obj.get("packed_read")
+                if isinstance(packed, dict):
+                    measures = {}
+                    for mode in ("sequential", "seeded_random"):
+                        phase = packed.get("passes", {}).get(mode) or {}
+                        lower_read = phase.get("lower_io") or {}
+                        measures[mode] = {
+                            "logical_bytes": phase.get("logical_bytes"),
+                            "verified_pages": phase.get("verified_pages"),
+                            "verified_image_sha256": phase.get("verified_image_sha256"),
+                            "seconds": phase.get("seconds"),
+                            "useful_read_mbps": phase.get("useful_read_mbps"),
+                            "read_p99_ms": phase.get("read_p99_ms"),
+                            "lower_read_bytes": lower_read.get("lower_read_bytes"),
+                            "lower_read_requests": lower_read.get("lower_read_requests"),
+                            "replay_cpu_user_s": phase.get("replay_cpu_user_s"),
+                            "replay_cpu_system_s": phase.get("replay_cpu_system_s"),
+                            "replay_peak_rss_kb": phase.get("replay_peak_rss_kb")
+                        }
+                    current["arms"][candidate]["packed_read"] = {
+                        "logical_bytes": packed.get("logical_bytes"),
+                        "logical_image_sha256": packed.get("logical_image_sha256"),
+                        "packed_close_delta": packed.get("packed_close_delta"),
+                        "qualification": packed.get("qualification"),
+                        "passes": measures,
+                    }
                 if obj.get("source_sha"):
                     current["source_sha"] = obj["source_sha"]
                 if obj.get("fixture_sha256"):
@@ -220,110 +262,190 @@ def mean(items, key):
 
 
 def benchmark_verdicts(sessions):
-    valid = [s for s in sessions if s.get("status") == "PASS" and
-             set(s.get("arms", {})) == {"off", "v3"}]
-    if len(valid) != 4 or [s["async_prepare"] for s in valid] != [0, 1, 1, 0]:
-        return {"overall": "INCOMPLETE", "reason": "Four valid ABBA sessions required"}
-
-    if len({s.get("source_sha") for s in valid}) != 1 or \
-            len({s.get("fixture_sha256") for s in valid}) != 1 or \
-            len({s.get("trace_sha256") for s in valid}) != 1:
-        return {"overall": "INCONCLUSIVE",
-                "reason": "Source, fixture or workload traces differ"}
-
-    groups = {"off": [s["arms"]["off"] for s in valid],
-              "sync": [s["arms"]["v3"] for s in valid if not s["async_prepare"]],
-              "async": [s["arms"]["v3"] for s in valid if s["async_prepare"]]}
-    cols = {}
-    for group, arms in groups.items():
-        cols[group] = {k: mean(arms, k) for k in (
-            "input_write_mbps", "output_lower_write_mbps",
-            "swap_in_read_mbps", "swap_in_read_p95_ms", "swap_in_read_p99_ms",
-            "write_p99_ms", "lower_write_bytes", "lower_write_requests",
-            "lower_read_bytes", "lower_read_requests")}
-        rd = cols[group]["swap_in_read_mbps"]
-        cols[group]["swap_in_100mb_estimate_s"] = (
-            100.0 / rd if rd and rd > 0 else None)
-        wr = cols[group]["input_write_mbps"]
-        phy = cols[group]["lower_write_bytes"]
-        inp = mean(arms, "logical_write_bytes")
-        cols[group]["write_input_per_lower_byte"] = (
-            inp / phy if phy and inp else None)
-
-    base = cols["off"]
-    verdicts = {}
-    for key in ("sync", "async"):
-        arm = cols[key]
-        raw_matching = [s for s in valid if (s["async_prepare"] == (key == "async"))]
-        verdicts[key] = {
-            "write_throughput_vs_raw": "PASS" if all(
-                s["arms"]["v3"]["input_write_mbps"] >
-                s["arms"]["off"]["input_write_mbps"] for s in raw_matching) else "NO_GAIN",
-            "lower_write_bytes_vs_raw": "PASS" if all(
-                s["arms"]["v3"]["lower_write_bytes"] <
-                s["arms"]["off"]["lower_write_bytes"] for s in raw_matching) else "NO_GAIN",
-            "swap_in_p99_vs_raw": "PASS" if all(
-                s["arms"]["v3"]["swap_in_read_p99_ms"] <
-                s["arms"]["off"]["swap_in_read_p99_ms"] for s in raw_matching) else "NO_GAIN",
-            "lower_write_saved_fraction": (
-                1 - arm["lower_write_bytes"] / base["lower_write_bytes"]),
-            "write_throughput_gain_fraction": (
-                arm["input_write_mbps"] / base["input_write_mbps"] - 1),
+    """Validate 8 loaded sessions; keep capped/uncapped conclusions separate."""
+    regimes = {}
+    for regime in ("capped", "uncapped"):
+        rows = [s for s in sessions if s.get("regime") == regime]
+        if len(rows) != 4 or [s.get("async_prepare") for s in rows] != [0, 1, 1, 0] \
+                or any(s.get("status") != "PASS" or
+                       set(s.get("arms", {})) != {"off", "v3"} or
+                       s.get("order") != ("v3-first" if i % 2 else "off-first")
+                       for i, s in enumerate(rows)):
+            return {"overall": "INCOMPLETE",
+                    "reason": f"{regime}: four valid ABBA/ABAB pairs required"}
+        regimes[regime] = rows
+    if len(sessions) != 8:
+        return {"overall": "INCOMPLETE", "reason": "exactly eight owned pairs required"}
+    all_rows = regimes["capped"] + regimes["uncapped"]
+    for row in all_rows:
+        status = row.get("kernel_status", {})
+        for field in ("burst_tail_flushes", "packed_early_commits",
+                      "close_pack_ready", "one_page_windows", "gc_victims"):
+            before = status.get("before", {}).get(field)
+            after = status.get("after", {}).get(field)
+            if not isinstance(before, int) or not isinstance(after, int) or after < before:
+                return {"overall": "INCOMPLETE",
+                        "reason": "missing or invalid kernel packed/GC counters"}
+        row["kernel_counter_delta"] = {
+            key: status["after"][key] - status["before"][key]
+            for key in ("burst_tail_flushes", "packed_early_commits",
+                        "close_pack_ready", "one_page_windows", "gc_victims")
         }
-    verdicts["async_vs_sync"] = {
-        "write_throughput": (
-            "PASS" if cols["async"]["input_write_mbps"] >
-            cols["sync"]["input_write_mbps"] else "NO_GAIN"),
-        "swap_in_p99": (
-            "PASS" if cols["async"]["swap_in_read_p99_ms"] <
-            cols["sync"]["swap_in_read_p99_ms"] else "NO_GAIN"),
-        "comparison_note": "Two sync and two async repetitions; not proof of significance",
-    }
+    for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
+        vals = [row.get(digest) for row in all_rows]
+        if None in vals or len(set(vals)) != 1:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"benchmark {digest} differs across regimes"}
+
+    verdicts = {}
+    for regime, rows in regimes.items():
+        arms = {"off": [s["arms"]["off"] for s in rows],
+                "sync": [s["arms"]["v3"] for s in rows if not s["async_prepare"]],
+                "async": [s["arms"]["v3"] for s in rows if s["async_prepare"]]}
+        columns = {}
+        keys = ("input_write_mbps", "output_lower_write_mbps",
+                "swap_in_read_mbps", "swap_in_read_p99_ms",
+                "write_p99_ms", "lower_write_bytes", "lower_write_requests",
+                "lower_read_bytes", "lower_read_requests",
+                "mixed_replay_cpu_user_s", "mixed_replay_cpu_system_s",
+                "mixed_replay_peak_rss_kb")
+        for name, rows_for_arm in arms.items():
+            columns[name] = {key: mean(rows_for_arm, key) for key in keys}
+            input_bytes = mean(rows_for_arm, "logical_write_bytes")
+            backing_bytes = columns[name]["lower_write_bytes"]
+            columns[name]["write_input_per_lower_byte"] = (
+                input_bytes / backing_bytes if input_bytes and backing_bytes else None)
+            for mode in ("sequential", "seeded_random"):
+                reads = [(arm.get("packed_read") or {}).get("passes", {}).get(mode)
+                         for arm in rows_for_arm]
+                if any(not isinstance(item, dict) or
+                       item.get("logical_bytes") != 4194304 or
+                       item.get("verified_pages") != 1024 or
+                       not item.get("verified_image_sha256") for item in reads):
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: measured 4MiB {mode} read missing"}
+                columns[name][f"{mode}_4mib_s"] = statistics.mean(
+                    item["seconds"] for item in reads)
+                columns[name][f"{mode}_read_p99_ms"] = statistics.mean(
+                    item["read_p99_ms"] for item in reads)
+                columns[name][f"{mode}_lower_read_bytes"] = statistics.mean(
+                    item["lower_read_bytes"] for item in reads)
+            if name != "off" and any(
+                    not (arm["packed_read"].get("packed_close_delta") or 0) > 0
+                    for arm in rows_for_arm):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: packed-write closure not demonstrated"}
+
+        raw = columns["off"]
+        criteria = {}
+        for mode in ("sync", "async"):
+            paired = [s for s in rows if s["async_prepare"] == (mode == "async")]
+            change = [(s["arms"]["v3"]["input_write_mbps"] /
+                       s["arms"]["off"]["input_write_mbps"] - 1)
+                      for s in paired]
+            def decision(vals):
+                return ("MATERIAL_GAIN_PRELIMINARY" if all(v >= .05 for v in vals)
+                        else "MATERIAL_LOSS_PRELIMINARY" if all(v <= -.05 for v in vals)
+                        else "NO_ESTABLISHED_GAIN")
+            criteria[mode] = {
+                "throughput_vs_raw": decision(change),
+                "paired_write_gain_fraction": change,
+                "lower_write_saved_fraction": (
+                    1 - columns[mode]["lower_write_bytes"] / raw["lower_write_bytes"]),
+                "lower_write_savings": (
+                    "PASS" if all(s["arms"]["v3"]["lower_write_bytes"] <
+                                  s["arms"]["off"]["lower_write_bytes"]
+                                  for s in paired) else "NO_GAIN"),
+                "mixed_read_p99": (
+                    "LOWER" if all(s["arms"]["v3"]["swap_in_read_p99_ms"] <
+                                   s["arms"]["off"]["swap_in_read_p99_ms"]
+                                   for s in paired) else "NOT_LOWER"),
+                "packed_4mib_sequential": (
+                    "FASTER" if all(
+                        s["arms"]["v3"]["packed_read"]["passes"]["sequential"]["seconds"] <
+                        s["arms"]["off"]["packed_read"]["passes"]["sequential"]["seconds"]
+                        for s in paired) else "NOT_FASTER"),
+            }
+        delta = (columns["async"]["input_write_mbps"] /
+                 columns["sync"]["input_write_mbps"] - 1)
+        criteria["async_vs_sync"] = {
+            "write_gain_fraction": delta,
+            "write_throughput": (
+                "PRELIMINARY_5PCT_GAIN" if delta >= .05 else
+                "PRELIMINARY_5PCT_LOSS" if delta <= -.05 else
+                "NO_SIGNIFICANT_ASYNC_GAIN"),
+            "caution": "Only two observations per mode; no confidence interval",
+        }
+        verdicts[regime] = {
+            "columns": columns, "criteria": criteria,
+            "configured_cap_mib_s": 20 if regime == "capped" else 0,
+            "measurement": "20MiB/s shared read/write budget" if regime == "capped"
+                           else "unthrottled RAM backing, NOT physical SSD",
+            "alpha22_kernel_counters": {
+                key: statistics.mean(row["kernel_counter_delta"][key]
+                                     for row in rows)
+                for key in ("burst_tail_flushes", "packed_early_commits",
+                            "close_pack_ready", "one_page_windows", "gc_victims")
+            },
+        }
     return {
-        "overall": "PASS_BOUNDED_RAM_PILOT",
-        "columns": cols, "criteria": verdicts,
-        "endurance": "PROXY_ONLY: reduced RAM-backed lower writes, not SSD endurance",
-        "read_100mb": "Estimated under mixed 25%-read QD32 traffic, NOT a cold isolated swap-in test",
-        "gc": "NOT_EXERCISED unless separately proven by loaded GC counters",
+        "overall": "PASS_BOUNDED_RAM_MATRIX",
+        "regimes": verdicts,
+        "endurance": "PROXY_ONLY: lower RAM device writes, no flash endurance",
+        "packed_read": "MEASURED_4MIB_QD32_NO_COLD_CACHE_PROOF",
+        "gc": "NOT_EXERCISED unless separate live-GC evidence exists",
+        "cpu_scope": "replay userspace process and threads; kernel DM workers NOT ATTRIBUTED",
         "physical_media": "NOT_TESTED",
-        "cpu_memory": "NOT_MEASURED",
+        "statistical_confidence": "EXPLORATORY: two pairs per mode/regime, materiality 5%, no CI",
     }
 
 
 def print_bench(result):
     verdict = result["benchmarks"]["verdicts"]
-    cols = verdict.get("columns")
-    if not cols:
-        print("  Benchmark comparison: NOT AVAILABLE "
-              f"({verdict.get('overall', 'NOT_RUN')})")
+    if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
+        print("  Benchmark matrix: NOT QUALIFIED "
+              f"({verdict.get('reason', verdict.get('overall', 'NOT_RUN'))})")
         return
-    print("\n  Benchmarks, averaged over four owned RAM-backed sessions")
-    print(f"  {'Metric':<34} {'Raw off':>11} {'swapz sync':>12} {'swapz async':>12}")
-    print("  " + "-" * 73)
-    for title, key, unit in [
-        ("Useful swap-out input", "input_write_mbps", "MB/s"),
-        ("Backing write output", "output_lower_write_mbps", "MB/s"),
-        ("Write input/backing ratio", "write_input_per_lower_byte", "x"),
-        ("Lower write requests", "lower_write_requests", ""),
-        ("Swap-in read throughput", "swap_in_read_mbps", "MB/s"),
-        ("Estimated 100 MB swap-in time", "swap_in_100mb_estimate_s", "s"),
-        ("Swap-in read p99", "swap_in_read_p99_ms", "ms"),
-    ]:
-        fields = []
-        for name in COLUMNS:
-            v = cols[name].get(key)
-            fields.append(f"{v:.2f} {unit}".strip() if v is not None else "n/a")
-        print(f"  {title:<34} {fields[0]:>11} {fields[1]:>12} {fields[2]:>12}")
-    for mode in ("sync", "async"):
-        v = verdict["criteria"][mode]
-        print(f"  {mode.upper():<6} throughput/raw={v['write_throughput_vs_raw']} "
-              f"lower-write-savings={v['lower_write_bytes_vs_raw']} "
-              f"read-p99/raw={v['swap_in_p99_vs_raw']}")
-    a = verdict["criteria"]["async_vs_sync"]
-    print(f"  ASYNC vs SYNC: write throughput={a['write_throughput']}, "
-          f"swap-in p99={a['swap_in_p99']}")
-    print("  NOTE: 100 MB read times are mixed-load estimates; physical "
-          "endurance, CPU and GC are NOT QUALIFIED.")
+    for regime in ("capped", "uncapped"):
+        data = verdict["regimes"][regime]
+        columns = data["columns"]
+        print(f"\n  {regime.upper()} QD32 — raw vs sync vs async (two pairs/mode)")
+        print(f"  {'Metric':<33} {'Raw off':>12} {'swapz sync':>12} {'swapz async':>12}")
+        print("  " + "-" * 73)
+        for title, key, unit in [
+            ("Useful WRITE throughput", "input_write_mbps", "MB/s"),
+            ("Backing WRITE throughput", "output_lower_write_mbps", "MB/s"),
+            ("Logical/backing WRITE ratio", "write_input_per_lower_byte", "x"),
+            ("Backing WRITE requests", "lower_write_requests", ""),
+            ("Mixed READ throughput", "swap_in_read_mbps", "MB/s"),
+            ("Mixed READ p99", "swap_in_read_p99_ms", "ms"),
+            ("Verified 4MiB sequential READ", "sequential_4mib_s", "s"),
+            ("Verified 4MiB random READ", "seeded_random_4mib_s", "s"),
+            ("Packed sequential READ p99", "sequential_read_p99_ms", "ms"),
+            ("Replay process CPU user", "mixed_replay_cpu_user_s", "s"),
+            ("Replay process CPU system", "mixed_replay_cpu_system_s", "s"),
+        ]:
+            fields = []
+            for mode in COLUMNS:
+                val = columns[mode].get(key)
+                fields.append(f"{val:.2f} {unit}".strip() if val is not None else "n/a")
+            print(f"  {title:<33} {fields[0]:>12} {fields[1]:>12} {fields[2]:>12}")
+        for mode in ("sync", "async"):
+            crit = data["criteria"][mode]
+            print(f"  {mode.upper():<6} vs raw: WRITE={crit['throughput_vs_raw']}, "
+                  f"lower WRITE savings={crit['lower_write_savings']}, "
+                  f"packed 4MiB read={crit['packed_4mib_sequential']}")
+        print(f"  ASYNC vs SYNC: "
+              f"{data['criteria']['async_vs_sync']['write_throughput']}")
+        kc = data["alpha22_kernel_counters"]
+        print(f"  Alpha.22 per-pair mean: burst tails={kc['burst_tail_flushes']:.1f}, "
+              f"pack closes={kc['close_pack_ready']:.1f}, "
+              f"one-page windows={kc['one_page_windows']:.1f}, "
+              f"GC victims={kc['gc_victims']:.1f}")
+    print("\n  LIMITATIONS: two pairs per mode; no significance claim; replay CPU"
+          " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
+          "live GC NOT EXERCISED.")
+
 
 
 def code_sha():
@@ -494,7 +616,7 @@ def main():
                                  f"KDIR={args.kdir}", "W=1", "all"]),
         ("Kernel warnings W=2", ["make", "-C", "kernel/extent-v3",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
-        ("Owned RAM smoke and 4 pairs", ["bash", "tools/test-loaded.sh"])
+        ("Owned RAM smoke and 8 pairs", ["bash", "tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):
@@ -509,13 +631,13 @@ def main():
                          result["stages"][-1]["status"] == "BLOCKED" else "FAIL")
     if not exit_code:
         benchmark = result["benchmarks"]["verdicts"]
-        if benchmark.get("overall") == "PASS_BOUNDED_RAM_PILOT" and \
+        if benchmark.get("overall") == "PASS_BOUNDED_RAM_MATRIX" and \
                 re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
             if any(session.get("source_sha") != result["tested_commit_sha"]
                    for session in result["benchmarks"]["sessions"]):
                 benchmark["overall"] = "INCONCLUSIVE"
                 benchmark["reason"] = "Loaded benchmark source Git ID mismatched tested checkout"
-        if benchmark.get("overall") != "PASS_BOUNDED_RAM_PILOT":
+        if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)

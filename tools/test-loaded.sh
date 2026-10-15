@@ -67,25 +67,33 @@ assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
 
-# ABBA sync/async; independently ABAB off/V3 replay order. Each
-# child still constructs and destroys two fresh distinct RAM devices.
-index=0
-for async_prepare in 0 1 1 0; do
-    arguments=(--run-owned-ram-pair --profile medium
-               --retain-ms 2 --unpaced --lower-mbps 20)
-    if (( async_prepare )); then
-        arguments+=(--async-prepare)
-    fi
-    arguments+=(--shared-plan "$shared_plan")
-    if (( index % 2 )); then
-        arguments+=(--v3-first)
-    fi
-    printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
-    "${privileged[@]}" tools/benchmark-owned-pair.sh "${arguments[@]}"
-    printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
-    (( index += 1 ))
+# Capped and uncapped are separate, fully identical logical work.
+# ABBA sync/async and alternating off/V3 replay order within each regime.
+# Every child retains its own fresh, identity-checked RAM-only pair.
+for regime in capped uncapped; do
+    printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
+    index=0
+    for async_prepare in 0 1 1 0; do
+        arguments=(--run-owned-ram-pair --profile medium
+                   --retain-ms 2 --unpaced)
+        if [[ $regime == capped ]]; then
+            arguments+=(--lower-mbps 20)
+        fi
+        if (( async_prepare )); then
+            arguments+=(--async-prepare)
+        fi
+        arguments+=(--shared-plan "$shared_plan")
+        if (( index % 2 )); then
+            arguments+=(--v3-first)
+        fi
+        printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
+        "${privileged[@]}" tools/benchmark-owned-pair.sh "${arguments[@]}"
+        printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
+        (( index += 1 ))
+    done
+    printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke and four rate-capped off/V3 pairs completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, four capped and four uncapped pairs completed.' \
     'PERFORMANCE_WIN=UNDETERMINED: review independent MB/s, p95/p99 and read/write request results.'

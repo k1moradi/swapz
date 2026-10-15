@@ -136,10 +136,14 @@ make test        # rootless checks, W=1/W=2, then owned-RAM smoke and paired ben
 native-suite make goals are not a public user interface. Missing kernel
 headers fail the build/test. `make test` runs the rootless gates then
 `tools/test-loaded.sh`, which executes actual owned-RAM kernel smoke and
-four rate-limited 20 MiB/s off/V3 runs (sync/async/async/sync). The
+eight off/V3 runs: four 20 MiB/s capped and four uncapped (each sync/async/async/sync). The
 loaded phase requires root or previously authorized `sudo -n`; it
-**never prompts**, changes host swap or installs DKMS. If privilege,
-null_blk features, identity checks, oracle or rate caps are unavailable,
+**never prompts**, changes host swap or installs DKMS. In each pair the replay also performs actual 4MiB verified READ-only
+sequential and random passes of a concurrently written dataset; it
+measures Python-process CPU but not kernel-worker CPU. Current trials
+are exploratory, not sustained physical-media or live-GC proof. If
+privilege, null_blk features, identity checks, oracle or rate limits
+are unavailable,
 `make test` exits nonzero BLOCKED/FAIL rather than reporting a complete
 PASS. CI executes only internal rootless checks, not the complete
 operator qualification. Standalone loaded-device scripts are private

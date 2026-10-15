@@ -135,7 +135,7 @@ class PublicMakeContract(unittest.TestCase):
                 "test -x build/tests/device-roundtrip\n"
                 "test -x build/userspace/swapz3ctl\n"
                 "printf 'rootless\\n' >> build/order.log\n")
-            # Synthetic records model all four counterbalanced sessions;
+            # Synthetic records model all eight capped/uncapped sessions;
             # mock Kbuild / loaded phase never touch actual host devices.
             import json
             # This is STILL an unprivileged mock; use a real Git checkout
@@ -155,6 +155,29 @@ class PublicMakeContract(unittest.TestCase):
                     "read_p99_ns": 5000000 if is_v3 else 10000000,
                     "write_p99_ns": 3000000,
                     "seconds": 2,
+                    "mixed_replay_cpu_user_s": 0.12,
+                    "mixed_replay_cpu_system_s": 0.08,
+                    "mixed_replay_peak_rss_kb": 10000,
+                    "packed_read": {
+                        "logical_bytes": 4194304,
+                        "logical_image_sha256": "m" * 64,
+                        "packed_close_delta": 7 if is_v3 else None,
+                        "passes": {
+                            key: {
+                                "logical_bytes": 4194304,
+                                "verified_pages": 1024,
+                                "verified_image_sha256": "m" * 64,
+                                "seconds": 0.6 if is_v3 else 1.,
+                                "useful_read_mbps": 7. if is_v3 else 4.,
+                                "read_p99_ms": 3. if is_v3 else 4.,
+                                "lower_io": {
+                                    "lower_read_bytes": 4194304,
+                                    "lower_read_requests": 1024,
+                                }
+                            }
+                            for key in ("sequential", "seeded_random")
+                        },
+                    },
                     "throughput_mbps": {
                         "logical_write_mbps": 20 if is_v3 else 14,
                         "lower_write_mbps": 12 if is_v3 else 14,
@@ -170,14 +193,19 @@ class PublicMakeContract(unittest.TestCase):
                     }
                 }, sort_keys=True)
             records = []
-            for i, mode in enumerate((0, 1, 1, 0)):
-                records.extend((
-                    f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
-                    "REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first",
-                    mock_arm("v3") if i % 2 else mock_arm("off"),
-                    mock_arm("off") if i % 2 else mock_arm("v3"),
-                    f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
-                ))
+            for regime in ("capped", "uncapped"):
+                records.append(f"START_OWNED_RAM_REGIME={regime}")
+                for i, mode in enumerate((0, 1, 1, 0)):
+                    records.extend((
+                        f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
+                        "REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first",
+                        "V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0",
+                        "V3_STATUS_AFTER=close_pack_ready=32 burst_tail_flushes=7 packed_early_commits=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0",
+                        mock_arm("v3") if i % 2 else mock_arm("off"),
+                        mock_arm("off") if i % 2 else mock_arm("v3"),
+                        f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
+                    ))
+                records.append(f"PASS_OWNED_RAM_REGIME={regime}")
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"

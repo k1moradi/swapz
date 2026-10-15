@@ -14,6 +14,7 @@ import mmap
 import math
 import os
 import random
+import resource
 import re
 import stat
 import subprocess
@@ -442,6 +443,97 @@ def full_read(fd, page, buf, expected):
         raise OSError("short or mismatched logical page read")
 
 
+def process_cpu():
+    """Replay process+threads CPU, excluding dm kernel worker threads."""
+    ru = resource.getrusage(resource.RUSAGE_SELF)
+    return (ru.ru_utime, ru.ru_stime, ru.ru_maxrss)
+
+
+def packed_closes(path, identity):
+    if not identity.get("dm_uuid"):
+        return None
+    out = subprocess.run(["dmsetup", "status", str(path)], text=True,
+                         capture_output=True, check=False, timeout=8)
+    if out.returncode:
+        raise ValueError("owned mapper status unavailable for packed read")
+    match = re.search(r"(?:^|\s)close_pack_ready=(\d+)(?:\s|$)", out.stdout)
+    if not match:
+        raise ValueError("owned mapper lacks packed close counter")
+    return int(match.group(1))
+
+
+def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
+    """Verify real 4MiB sequential/random reads after concurrent packed writes."""
+    if logical_pages != 1024 or qd != 32:
+        raise ValueError("packed read requires 4MiB logical and QD32")
+    before = packed_closes(path, identity)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
+        for base in range(0, logical_pages, qd):
+            jobs = [pool.submit(full_write, fd, page,
+                                chunks[page % len(chunks)])
+                    for page in range(base, base + qd)]
+            for job in jobs:
+                job.result()
+    os.fsync(fd)
+    after = packed_closes(path, identity)
+    packed_delta = after - before if before is not None else None
+    if packed_delta is not None and packed_delta <= 0:
+        raise ValueError("no packed close during concurrent read-set population")
+
+    image_sha = sha(b"".join(chunks[i % len(chunks)]
+                            for i in range(logical_pages)))
+    orders = {"sequential": list(range(logical_pages)),
+              "seeded_random": random.Random(0x51A0A9).sample(
+                  range(logical_pages), logical_pages)}
+    measured = {}
+    for mode, pages in orders.items():
+        def read_one(page):
+            buffer = mmap.mmap(-1, PAGE)
+            view = memoryview(buffer)
+            try:
+                start_ns = time.monotonic_ns()
+                full_read(fd, page, view, chunks[page % len(chunks)])
+                return time.monotonic_ns() - start_ns
+            finally:
+                view.release()
+                buffer.close()
+        lower_before = lower_stat(identity.get("owned_disk"))
+        cpu_before = process_cpu()
+        start_ns = time.monotonic_ns()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
+            durations = []
+            for base in range(0, logical_pages, qd):
+                wave = pages[base:base + qd]
+                jobs = [pool.submit(read_one, page) for page in wave]
+                durations.extend(job.result() for job in jobs)
+        duration = (time.monotonic_ns() - start_ns) / 1e9
+        cpu_after = process_cpu()
+        lower_after = lower_stat(identity.get("owned_disk"))
+        if duration <= 0 or len(durations) != logical_pages:
+            raise ValueError("invalid fixed-volume read accounting")
+        durations.sort()
+        measured[mode] = {
+            "logical_bytes": logical_pages * PAGE,
+            "verified_pages": len(durations),
+            "verified_image_sha256": image_sha,
+            "seconds": duration,
+            "useful_read_mbps": logical_pages * PAGE / duration / 1e6,
+            "read_p99_ms": durations[int((len(durations) - 1) * .99)] / 1e6,
+            "lower_io": iostat_delta(lower_before, lower_after),
+            "replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
+            "replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
+            "replay_peak_rss_kb": cpu_after[2],
+        }
+    return {
+        "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ"
+                          if packed_delta is not None else
+                          "ROOTLESS_NO_PACK_PROOF"),
+        "logical_bytes": logical_pages * PAGE, "logical_pages": logical_pages,
+        "logical_image_sha256": image_sha, "packed_close_delta": packed_delta,
+        "first_pass_is_cold": False, "passes": measured,
+    }
+
+
 def replay(args):
     mf = safe_load(args.manifest)
     if mf.get("schema") != SCHEMA or mf.get("page_bytes") != PAGE:
@@ -519,6 +611,8 @@ def replay(args):
             samples = {"W": [], "R": []}
             measured_start_ns = None
             measured_end_ns = None
+            cpu_before = None
+            cpu_after = None
             before = None
             after = None
             with concurrent.futures.ThreadPoolExecutor(max_workers=mf["qd"]) as pool:
@@ -526,6 +620,7 @@ def replay(args):
                     wave = trace[first:first + mf["qd"]]
                     if wave[0]["phase"] == "measure" and measured_start_ns is None:
                         before = lower_stat(identity.get("owned_disk"))
+                        cpu_before = process_cpu()
                         measured_start_ns = time.monotonic_ns()
                     if wave[0]["phase"] == "warmup":
                         warmup_ns = time.monotonic_ns()
@@ -544,6 +639,7 @@ def replay(args):
                             samples[item["op"]].append(elapsed)
                 os.fsync(fd)
                 measured_end_ns = time.monotonic_ns()
+                cpu_after = process_cpu()
                 after = lower_stat(identity.get("owned_disk"))
             post_hash = hashlib.sha256()
             buffer = mmap.mmap(-1, PAGE)
@@ -557,6 +653,9 @@ def replay(args):
                 buffer.close()
             if post_hash.hexdigest() != mf["expected_post_sha256"]:
                 raise ValueError("final image SHA differs from trace oracle")
+            packed_read = (measure_packed_swapin(
+                fd, path, identity, chunks, mf["logical_pages"], mf["qd"])
+                if args.packed_read else None)
         finally:
             os.close(fd)
         for chunk in chunks:
@@ -584,6 +683,11 @@ def replay(args):
         "measure_ops": mf["measure_ops"], "write_ops": len(samples["W"]),
         "read_ops": len(samples["R"]), "verified_pages": mf["logical_pages"],
         "seconds": seconds, "achieved_iops": mf["measure_ops"] / seconds,
+        "mixed_replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
+        "mixed_replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
+        "mixed_replay_peak_rss_kb": cpu_after[2],
+        "cpu_scope": "replay process+threads only; kernel DM workers excluded",
+        "packed_read": packed_read,
         "lower_io": iostat_delta(before, after), "verdict": "PASS",
         "read_p50_ns": percentile(samples["R"], .50),
         "read_p95_ns": percentile(samples["R"], .95),
@@ -620,6 +724,24 @@ def compare(args):
             entry.get("verified_post_sha256") != entry.get("expected_post_sha256")
         ):
             raise ValueError("INVALID COMPARISON: failing oracle or unverified result")
+    if any(entry.get("packed_read") is not None for entry in entries):
+        packed = [entry.get("packed_read") for entry in entries]
+        if not all(isinstance(p, dict) for p in packed):
+            raise ValueError("INVALID COMPARISON: mixed packed-read qualification")
+        if any(p.get("logical_bytes") != 4194304 or
+               p.get("logical_image_sha256") != packed[0].get("logical_image_sha256")
+               for p in packed):
+            raise ValueError("INVALID COMPARISON: differing packed-read volume/image")
+        for mode in ("sequential", "seeded_random"):
+            phases = [p.get("passes", {}).get(mode) for p in packed]
+            if any(not isinstance(phase, dict) or
+                   phase.get("verified_pages") != 1024 or
+                   phase.get("verified_image_sha256") != packed[0]["logical_image_sha256"]
+                   for phase in phases):
+                raise ValueError("INVALID COMPARISON: packed READ byte oracle mismatch")
+        if packed[1].get("packed_close_delta") is not None and (
+                packed[1]["packed_close_delta"] <= 0):
+            raise ValueError("INVALID COMPARISON: V3 packed write not proven")
     normalized = sorted(entries, key=lambda entry: CANDIDATES.index(entry["candidate"]))
     first, second = normalized
     identities = [entry.get("device_identity") for entry in normalized]
@@ -739,6 +861,7 @@ def main():
     run.add_argument("--device", required=True)
     run.add_argument("--result", required=True)
     run.add_argument("--regular-file-test", action="store_true")
+    run.add_argument("--packed-read", action="store_true")
     run.add_argument("--owned-nullblk-name")
     run.add_argument("--expected-dev")
     run.add_argument("--expected-lower-dev")

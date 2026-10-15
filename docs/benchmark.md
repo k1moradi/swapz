@@ -21,12 +21,15 @@ and [benchmark.md](benchmark.md).
 
 ## Three-axis qualification specification
 
-**Status: specification first, 2026-10-15.** The additional uncapped,
-write-only, packed-read and sustained stages below are proposed extensions,
-not stages already implemented in the runner. The existing official
-`make test` still runs its capped mixed-load schedule. Its correctness
-PASS must not be interpreted as completing this expanded specification.
-There is one operator test command; future stages stay private within it.
+**Status: first bounded matrix implemented after alpha.22's capped-only
+owner run.** The official `make test` now includes capped and uncapped
+**mixed** QD32 trials, verified 4MiB packed-population sequential and
+random READ timings, and replay-process CPU use. It does **not** yet
+include independent write-only saturation, a 100MiB distinct working set,
+attributed kernel worker CPU, cold-device cache behavior, or sustained
+live GC. A correctness PASS must never imply those are qualified.
+The full matrix still needs the owner's loaded run at the new source
+commit; rootless CI cannot provide real device evidence.
 
 ### Quantities and endpoints
 
@@ -156,11 +159,17 @@ published artifact. Publishing status is independent of test outcomes.
 
 ### Why the current read result does not qualify packed swap-in
 
-The present replay prefills pages with sequential blocking writes.
-Timed READs address slots512..767 while timed WRITEs overwrite0..255.
-Thus timed READ pages are predominantly singleton extents; final packed
-readback is outside the performance interval. The reported 100MB time
-is an extrapolation from mixed READ throughput, not an executed volume.
+**Historical capped-only runner:** The earlier replay prefills pages
+with sequential blocking writes. Timed mixed READs address slots512..767
+while WRITEs overwrite0..255, so those READs are predominantly
+singleton extents; the old 100MB time was only an extrapolation.
+**New first-stage implementation:** Each arm also concurrently writes a
+fresh 1024-page 4MiB logical image to encourage packed extents, drains
+writes, and times byte-verified READ-only sequential and seeded-random
+passes of exactly 4,194,304 bytes (QD32). A V3 packed-close counter must
+rise during population. The sequential pass precedes the random pass:
+they are not interchangeable cold-cache observations. This remains
+RAM-only, not cold SSD/SD or a larger distinct working set.
 The current compressed reader always fetches metadata block0, then
 needed payload blocks, and has no extent cache. Cold medium packed
 reads can therefore transfer more than the 4KiB raw page despite LZ4
@@ -187,11 +196,12 @@ A new arrival just after idle can lose a packing opportunity, so lower
 bytes/requests and READ tails must still qualify. This is a focused
 retained-path C change, not a demonstrated performance gain.
 
-**Alpha.22 compilation, native/source tests and loaded tests: NOT RUN,
-explicitly deferred by the owner.** The official `make test` can check
-the current capped suite, but the expanded uncapped/read-volume matrix
-above is still planned and cannot be claimed as completed. Historical
-reports remain bound to their embedded tested commit.
+**Alpha.22 historical owner qualification:** commit
+`63f6ed945044c2a133cdcb6a25282ce06b61157b` passed five stages
+and four capped sessions. That evidence is valid but does not cover
+the newly implemented uncapped or 4MiB read matrix. The new source
+revision awaits fresh loaded device evidence; CI remains rootless only.
+Earlier reports remain bound to their embedded tested commits.
 
 ## Concurrent LZ4 preparation versus lower I/O: measurement gate
 
@@ -288,13 +298,13 @@ ratio based on the fixture alone can replace actual backing counters.
 p95/p99 READ latency, and an **estimated** seconds to deliver 100 MB
 using `100 / measured_read_MBps` under the *same mixed 25%-read
 QD32* trial. Flag reduced swap-in p99 only if both candidate
-repetitions beat their raw control. The 100 MB figure is not an actual
-standalone 100 MB cold read test; direct isolation, cold-cache/page-in
-cost and CPU/memory remain future separate qualifications.
+repetitions beat their raw control. The previous 100 MB figure was only an estimate. The new stage times
+actual 4MiB fixed-volume reads (not 100MB). Cold-cache/page-in cost,
+kernel-worker CPU and full pressure tests remain separate.
 
 **Counterbalancing / redundancy removal:** Run sync/async/async/sync
 so temporal drift is balanced across policies, and alternate
-`off-first`/`V3-first` within the four pairs. Generate a single
+`off-first`/`V3-first` within each of the two four-pair regimes. Generate a single
 immutable 128-medium-page LZ4 fixture and deterministic 16,384-
 operation plan per `make test`, verify its actual payload size, and
 reuse it in each fresh, independently owned RAM-backed device pair.

@@ -75,12 +75,17 @@ not host swap/device paths or credentials.
 
 A PASS means the defined tests completed, **not** that asynchronous
 preparation improves throughput or that real flash lifetime is proven.
-The table separately judges (1) useful swap-out MB/s against raw off,
-(2) independently measured backing WRITE byte/request savings as an
-endurance **proxy**, and (3) swap-in READ MB/s and read p99. The displayed
-time for reading 100 MB is an extrapolation from the **mixed 25%-read**
-benchmark, not an isolated cold 100 MB swap-in trial. GC, CPU pressure
-and physical SSD/SD behavior remain distinct open qualifications.
+The matrix now runs **four 20MiB/s capped and four uncapped mixed-load
+QD32 pairs** with the same source, fixture and logical trace. It shows
+(1) capped versus uncapped useful WRITE MB/s, (2) independently measured
+lower WRITE byte/request savings, and (3) actual timed, verified
+**4MiB** sequential and seeded-random reads *after* concurrently
+populating compressed pages. This is not a 100MB cold SSD swap-in.
+Each mode/regime has only two repetitions: performance differences are
+**exploratory**, with a 5% materiality floor rather than treating a
+0.05% async change as a gain. Replay-process CPU times are measured,
+but kernel DM worker CPU, memory pressure, live GC and real SSD/SD
+endurance remain unqualified.
 
 ## Current C performance work and qualification plan
 
@@ -91,20 +96,16 @@ that can hold up finite-QD issuers. Initial retention, actual lower-write
 completion and mapping authority remain required. The new INFO field
 `burst_tail_flushes` reports attempted tail closures, not measured gains.
 
-**The current revision is source-reviewed only: compilation and tests
-were NOT RUN at the owner's request.** A throughput improvement remains
-a hypothesis until the exact committed source is tested. The
-[three-axis qualification specification](docs/benchmark.md#three-axis-qualification-specification)
-separates uncapped/capped swap-out speed, equal-work lower I/O and
-actual fixed-volume decoded swap-in time. Its additional benchmark
-stages are planned; today's official runner still executes capped mixed
-trials and estimates 100MB read time from that mixed workload.
-
-The timed READ region is currently populated by blocking singleton
-writes and is disjoint from packed measured WRITEs. A future packed
-read-only phase is needed before claiming faster reads of the compressed
-output produced under concurrent writes. See [VISION](VISION.md) for the
-three user outcomes and [ROADMAP](docs/ROADMAP.md) for implementation order.
+**Alpha.22 was owner-qualified at exact source commit
+`63f6ed945044c2a133cdcb6a25282ce06b61157b`:** all five stages
+passed the previous *capped-only* matrix, but a general uncapped speed
+improvement was not measured. The [three-axis specification](docs/benchmark.md#three-axis-qualification-specification)
+is being extended inside the single official test command with a
+second **uncapped mixed** regime, alpha.22 lower-write/packed-tail
+diagnostic counters, verified 4MiB decoded READ trials, and clearly
+scoped replay-process CPU. Independent write-only saturation, 100MiB
+distinct-page SSD reads, kernel-worker CPU attribution, and sustained
+live GC are still separate future qualification work.
 
 ## Supported root Make interface
 
@@ -116,7 +117,7 @@ or invoke internal build targets directly as public goals.
 | `make` | Build V3 without loading a module (parallel Make flags remain optional) |
 | `make install` | Install version-owned V3 DKMS and safe helper without activation |
 | `make uninstall` | Remove only that version-owned installation |
-| `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired 20 MiB/s sync/async benchmarks; no interactive sudo |
+| `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired capped and uncapped sync/async benchmarks; no interactive sudo |
 
 **Parallel, incremental compilation:** `make test -j2` is the same
 single official test command with two compilation jobs. The Device Mapper
@@ -125,14 +126,14 @@ independent Make prerequisites; unchanged userspace outputs are reused.
 Kernel source is staged only when its bytes change, and normal,
 `W=1`, and `W=2` builds keep separate cached outputs under
 `build/kernel/{experimental,w1,w2}/`. Native production-C suites inherit
-the Make jobserver. Loaded `null_blk` correctness and the four
+the Make jobserver. Loaded `null_blk` correctness and the eight
 counterbalanced benchmark sessions **remain strictly sequential**.
 Missing noninteractive privilege still yields BLOCKED, not a partial PASS.
 
 **Owner hold:** do not execute privileged installation or unowned-device
 testing. Full `make test` now executes rootless native/source checks,
 W=1/W=2 kernel compilation, an actual newly owned RAM/null_blk module
-readback smoke, then four rate-limited owned-RAM benchmark sessions in
+readback smoke, then eight owned-RAM benchmark sessions (four capped, four uncapped) in
 sync/async/async/sync order. Each off/V3 comparison uses the same
 immutable logical replay, reports measured lower bytes/requests, and
 checks correct readback. The loaded phase requires root or previously

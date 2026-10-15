@@ -2,10 +2,14 @@
 
 **Status: ACTIVE — V3 experimental and NOT production-ready (read the current version from [VERSION](../kernel/extent-v3/VERSION)).** V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
-Owner-reported alpha.21 capped mixed trials establish useful packing on
-synthetic medium pages. Alpha.22 tail scheduling is implemented but
-uncompiled/untested at owner request; uncapped, packed swap-in and
-sustained GC/CPU/latency qualification remain open.
+Owner-reported alpha.22 capped mixed run at source
+`63f6ed945044c2a133cdcb6a25282ce06b61157b` passed the old
+five-stage suite. It did **not** establish an uncapped throughput win.
+The new runner adds paired uncapped mixed trials, 4MiB verified
+packed-populated read passes, tail counters and replay-process CPU,
+but its loaded execution remains unverified until the owner reruns it.
+Write-only saturation, kernel worker CPU, cold-cache tests and live GC
+remain open.
 
 The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](coding_standards.md),
@@ -20,9 +24,11 @@ Only `main` is used unless the owner explicitly authorizes otherwise.
 
 The [three-axis specification](benchmark.md#three-axis-qualification-specification)
 develops the owner's swap-out speed, lower-write/endurance proxy and
-data-ready swap-in goals. Its expanded matrix is a specification, not
-an already implemented test runner. All operator execution remains
-behind the single official `make test` command.
+data-ready swap-in goals. An **exploratory capped/uncapped mixed matrix**
+and verified 4MiB packed-populated read passes are now implemented as
+private phases of the single official `make test`. A full write-only
+saturation matrix, actual cold-device reads and live-GC profiling
+are still planned.
 
 - [x] Implement alpha.22 production C idle drain for a valid one/two-page
       compressed tail after a successful pack-ready commit. Preserve
@@ -32,12 +38,16 @@ behind the single official `make test` command.
       useful throughput, lower WRITE bytes/requests, READ tails,
       `burst_tail_flushes`, closure conservation and safe teardown.
       Current capped results cannot establish uncapped improvement.
-- [ ] Implement capped AND uncapped write-only/mixed qualification as
-      private stages, with paired controls and declared materiality;
-      retain negative/no-significant-async-gain outcomes.
-- [ ] Add actual fixed-volume sequential/random reads of a dataset
-      populated through packed concurrent writes. Keep the current
-      mixed 100MB estimate labeled as an extrapolation.
+- [x] Add capped AND uncapped **mixed-QD32** owned-RAM trials
+      as private stages with per-regime paired controls and a 5% exploratory
+      materiality threshold; a negative uncapped result stays visible.
+- [x] Add timed actual **4MiB** fixed-volume sequential/random reads of
+      datasets populated through packed concurrent writes; verify every
+      returned page, keep distinct working set and RAM/cache limitations.
+- [ ] Expand to separately measured write-only saturation (QD1/4/8/32)
+      with at least five pairs per regime and confidence intervals.
+- [ ] Extend packed reads to a larger distinct working set with realistic
+      cache/working-set control; 4MiB is not 100MB cold swap-in.
 - [ ] Profile actual C preparation, queue/retention, lower I/O, CRC/decode
       and live GC; use exclusive CPU attribution and interval counters.
       Investigate bounded authority-safe read reuse/aggregation only

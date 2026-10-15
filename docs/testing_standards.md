@@ -99,7 +99,7 @@ make test
 ~~~
 
 It owns all native suites, source and safety contracts, both warning-level
-kernel builds, loaded owned-RAM oracle and four paired benchmark trials.
+kernel builds, loaded owned-RAM oracle and eight paired benchmark trials (four capped, four uncapped).
 There are no supported per-suite test commands or separate benchmark
 entry points. Internal native Make rules remain private implementations.
 
@@ -111,7 +111,7 @@ The `make test -j2` variant of the *same official test command* may run
 independent production-C, userspace and Kbuild compile jobs in parallel,
 but its rootless, W=1, W=2 and loaded-device phases must be strictly
 ordered and fail fast. Loaded smoke must finish before any benchmark,
-and four counterbalanced benchmark sessions must not overlap. The
+and eight counterbalanced benchmark sessions must not overlap. The
 kernel Makefile stages source only when content changes, and W=1/W=2
 use independent `build/kernel/w1/` and `build/kernel/w2/` outputs,
 never overwriting the default module eligible for loaded testing.
@@ -141,6 +141,44 @@ syntax/preflight checks still cover both branches.
 commands into `tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile
 continues to expose only the public `make test` entry point.
+
+## Capped/uncapped matrix and fixed-volume packed-read contract
+
+The official `make test` now exercises two separately labeled mixed
+QD32 **regimes**, with ABBA sync/async and ABAB off/V3 ordering in each:
+a verified shared-read/write `null_blk mbps=20` cap, and an uncapped
+`mbps=0` run. All eight pairs use newly owned RAM-only devices,
+the identical hashed fixture and trace, strict byte oracles, module
+identity validation and independent backing sector counters. A rate
+mismatch is BLOCKED before proceeding; no real disks or host swap are
+modified. The sole public interface remains unchanged.
+
+After each arm's existing verified mixed replay, 1024 independent
+4KiB pages are written with concurrent QD32 workers, drained, and
+then timed for **real 4MiB** sequential and seeded-random READ-only
+passes. The read path verifies every byte. Actual V3
+`close_pack_ready` must increase during population; two read
+passes sharing a RAM-backed logical image are not proof of cold
+physical-device reads or 100MB distinct-page access. The report
+retains lower READ/WRITE bytes/requests, p99 and precise seconds, and
+records the alpha.22 `burst_tail_flushes`/`one_page_windows`/
+`close_pack_ready` differences from loaded module status. Do not
+equate counts with proven latency savings.
+
+Performance verdicts separate capped and uncapped throughput, and
+compare each V3 arm **only with its own paired raw baseline**. Gains
+smaller than 5% are `NO_ESTABLISHED_GAIN`, and 0.05% async
+improvements are `NO_SIGNIFICANT_ASYNC_GAIN`. Two repetitions per
+mode/regime are exploratory, not five-pair confidence-qualified.
+The measured CPU scope is Python replay process/threads, excluding
+kernel DM workers; RSS is a process peak. No GC victim observed means
+live GC remains NOT_EXERCISED. A bounded correctness PASS cannot
+overwrite an uncapped throughput loss or claim flash endurance.
+
+The source additions are audited by rootless-only CI, including mock
+eight-session fail-closed coverage, exact source/trace SHA validation,
+and full own-device safety checks; **loaded evidence requires the
+owner's fresh `make test`** and cannot be produced in rootless CI.
 
 ## Alpha.22 packed-burst tail correctness contract
 
@@ -185,8 +223,8 @@ disabled by default and all device tests stay owned-RAM-null_blk-only.
 The private `tools/run-tests.py` program invoked *only* by root
 `make test` drives five strictly ordered stages: parallel compile
 prerequisites, rootless native/source/safety contracts, W=1 kernel
-build, W=2 kernel build, and privileged owned-RAM smoke plus four
-benchmark comparisons. It replaces the same
+build, W=2 kernel build, and privileged owned-RAM smoke plus eight
+benchmark comparisons across capped/uncapped regimes. It replaces the same
 `build/test_results.json.xz` file at the start and after each stage,
 including on nonzero FAIL/BLOCKED. A failure aborts remaining stages
 without silently claiming loaded success. The root Make API remains

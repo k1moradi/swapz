@@ -69,8 +69,8 @@ else
     exit 2
 fi
 if (( REPLAY_V3_FIRST )) &&
-   [[ $RATE_MODE != unpaced || $PROFILE != medium || $LOWER_MBPS != 20 ]]; then
-    echo 'BLOCKED: V3-first requires exact capped owned medium QD32' >&2
+   [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
+    echo 'BLOCKED: V3-first requires owned medium QD32' >&2
     exit 2
 fi
 if (( ASYNC_PREPARE || LOWER_MBPS )) &&
@@ -252,21 +252,17 @@ create_owned_ram() {
     echo 64 > "$config/size"
     echo 4096 > "$config/blocksize"
     echo 1 > "$config/memory_backed"
-    if (( LOWER_MBPS )); then
-        [[ -e "$config/mbps" ]] ||
-            fail 'owned null_blk does not expose a per-device mbps limit'
-        echo "$LOWER_MBPS" > "$config/mbps" ||
-            fail 'owned null_blk rejected bandwidth limit'
-        [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
-            fail 'owned null_blk bandwidth limit did not match'
-    fi
+    [[ -e "$config/mbps" ]] ||
+        fail 'owned RAM lacks verifiable mbps config'
+    echo "$LOWER_MBPS" > "$config/mbps" ||
+        fail 'owned RAM rejected cap (0 means uncapped)'
+    [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
+        fail 'owned RAM cap mismatch'
     echo 1 > "$config/power"
     [[ $(cat "$config/memory_backed") == 1 && $(cat "$config/power") == 1 ]] ||
         fail 'RAM backing is not active'
-    if (( LOWER_MBPS )); then
-        [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
-            fail 'owned null_blk powered bandwidth cap mismatch'
-    fi
+    [[ $(cat "$config/mbps") == "$LOWER_MBPS" ]] ||
+        fail 'owned RAM powered cap mismatch'
     index="$(cat "$config/index")"
     [[ $index =~ ^(0|[1-9][0-9]*)$ ]] || fail 'configfs index invalid'
     for (( n=0; n<50; ++n )); do
@@ -399,6 +395,7 @@ replay_off() {
         --manifest "$SESSION/plan/manifest.json" \
         --candidate off --source-sha "$SOURCE" \
         --device "${LOWERS[0]}" --result "$SESSION/off.json" \
+         --packed-read \
         --owned-nullblk-name "${NAMES[0]}" \
         --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}" ||
         fail 'uncompressed replay rejected'
@@ -411,6 +408,7 @@ replay_v3() {
         --manifest "$SESSION/plan/manifest.json" \
         --candidate v3 --source-sha "$SOURCE" \
         --device "/dev/mapper/$DMNAME" --result "$SESSION/v3.json" \
+         --packed-read \
         --owned-nullblk-name "${NAMES[1]}" \
         --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
         --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
