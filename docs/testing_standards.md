@@ -171,7 +171,9 @@ allocation, numbered pair) and a vetted actionable error category,
 including missing permissions or the original `BLOCKED:` reason.
 Never substitute "private stage failed" for a diagnosable known
 failure, and never disclose full private paths, device names,
-secrets or raw host swap inventories through the report.
+secrets or raw host swap inventories through the report. Path redaction
+must recognize only absolute path boundaries, not turn ordinary terms
+like lower I/O into misleading output; rootless tests exercise both.
 
 The human terminal displays numbered PASS/FAIL/BLOCKED stage statuses
 and a table of raw-off, synchronous and asynchronous useful WRITE
