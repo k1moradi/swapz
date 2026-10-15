@@ -304,6 +304,57 @@ Readiness still depends on
   `swapon`, `swapoff`, active swap or physical/unowned device access
   is authorized here.
 
+## Stage 5A — prove readiness for a controlled real swap-drive trial (BLOCKED)
+
+**Purpose:** establish reproducible evidence that the **exact production V3
+kernel module** is sufficiently stable and safe to *consider* a separately
+authorized destructive test on a dedicated physical swap drive. This is a
+**physical-trial readiness gate, not proof of production deployment readiness**:
+green CI, successful RAM-only tests or a single pilot cannot establish
+real-device safety. The current `null_blk`-only admission remains unchanged.
+
+**Go/no-go checklist — every item must PASS on one pinned `main` revision:**
+
+- [ ] **Reproducible build and complete qualification:** record source commit,
+      release `VERSION`, exact `.ko` SHA-256/vermagic, Linux kernel and build
+      environment. Run the sole public `make test` interface to completion,
+      including W=1/W=2, native/source/safety gates, loaded owned-RAM
+      `null_blk` correctness and counterbalanced off/V3 trials. A skipped,
+      BLOCKED or NOT RUN required stage does not pass this gate.
+- [ ] **Byte-exact loaded correctness under stress:** repeat the full readback
+      oracle across zero/compressible/RAW pages, overwrites, competing
+      reads, DISCARD, PREFLUSH/FUA, high queue depth, drain/suspend and
+      concurrent GC. Demonstrate exactly-once BIO completion, mapping
+      authority and no stale/torn data or integrity errors.
+- [ ] **Real failure-path and resource safety:** exercise device-originated
+      lower READ/WRITE/flush failures (not just pre-submit synthetic EIO),
+      partial/error completions, CRC faults, ENOSPC/reserve exhaustion,
+      memory pressure and interrupted teardown on owned RAM devices.
+      Show bounded recovery/quarantine without hangs, double completion,
+      use-after-free, leaks or damage to unrelated devices.
+- [ ] **Sustained stability and performance envelope:** repeat long-running
+      churn/near-full GC and mixed swap-like workload trials at declared
+      loads; record achieved IOPS/MB/s, independent lower READ/WRITE bytes
+      and requests, complete drain, memory/CPU growth and cold-read
+      p95/p99. Predeclare acceptance limits; explain counter mismatches
+      and fail on reproducible integrity, liveness, resource or unacceptable
+      latency regressions. Retain negative/inconclusive evidence.
+- [ ] **Independent review and signed evidence:** review kernel-C
+      concurrency, BIO and buffer ownership, failure/teardown paths and
+      host noninterference; attach exact-HEAD test artifacts, failures,
+      cleanup proof and a PASS/FAIL/BLOCKED/NOT RUN matrix to the
+      [testing/release ledger](testing_standards.md). Obtain explicit owner
+      acceptance of remaining risks before *proposing* a physical trial.
+
+**Exit:** all five checks independently reviewed and recorded as PASS.
+Any missing, inconsistent or unrepeatable evidence means **NO-GO /
+PHYSICAL TEST BLOCKED**. Even a PASS **does not authorize** `make install`,
+`swapon`/`swapoff`, changing the `null_blk` guard, or accessing any
+physical or active swap. The trial below still requires its own reviewed
+procedure and fresh per-device owner authorization; production deployment
+readiness can only be assessed *after* separately approved device-class
+qualification, not inferred from this preflight.
+
 ## Future owner-authorized physical trial — `/dev/sdb1` (BLOCKED)
 
 The objective is eventually to measure real lower WRITE bytes/requests,
@@ -531,6 +582,12 @@ Make goal is an official alternative.
 - [ ] Qualify loaded alpha.13 a separately authorized owned-RAM V3 smoke and independent retained
       dependency/read-failure, FUA/PREFLUSH, expiry and suspend/drain
       paths. Header predicates and CI are not sufficient.
+
+- [ ] Close the **Stage 5A physical-trial readiness gate** above with a
+      pinned-source `make test` PASS, repeated loaded integrity/fault and
+      sustained GC/latency evidence, independent kernel safety review and
+      owner sign-off. Until all are documented: **NO-GO / PHYSICAL TEST
+      BLOCKED**; no physical-device or active-swap test is authorized.
 
 ### Blocking performance evidence
 
