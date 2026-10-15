@@ -263,7 +263,7 @@ class ReportContract(unittest.TestCase):
                 "START_OWNED_RAM_PAIR_ASYNC_PREPARE=1\n"
                 "FAIL: independent backing lower I/O mismatch\n")
         phase, reason = runner.failure_context(pair)
-        self.assertIn("comparison 2/4 (async)", phase)
+        self.assertIn("comparison 2/16 (async)", phase)
         self.assertIn("backing lower I/O mismatch", reason)
 
     def test_non_root_fixture_never_uses_privileged_evidence_directory(self):
