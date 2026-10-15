@@ -111,6 +111,18 @@ mechanical check of **where the learning is recorded**, not a validator
 of semantic truth, tested runtime behavior or external agent prompt
 compliance.
 
+## Historical VM smoke compatibility handoff
+
+The V2.2 virtual smoke regression remains an active **rootless safety
+contract**, not an authorized V2.2 deployment or V3 benchmark. The
+dated operator document was removed during documentation cleanup while
+the rootless `virtual-smoke-test.py` still requires its authorization,
+32 MiB capacity, exact two-read and safe-teardown invariants. Restore
+a concise **non-executable safety handoff** at
+[virtual-smoke.md](virtual-smoke.md) rather than dropping assertions.
+README alpha-version tests permit either the concise current V3 heading
+or the older revision-heading phrase; both must match VERSION exactly.
+
 ## Experimental concurrent LZ4 producer correctness
 
 The opt-in production C `async_prepare=1` producer uses one workqueue

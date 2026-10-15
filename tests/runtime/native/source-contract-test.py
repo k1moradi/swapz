@@ -59,7 +59,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertIn("SV3_BUILD_SMOKE", MK)
-        self.assertIn(f"revision: **{version}", README)
+        self.assertTrue(f"revision: **{version}" in README or
+                        f"V{version} is experimental" in README,
+                        "README must identify the exact active V3 alpha")
 
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
         accept = body("sv3_accept_write")

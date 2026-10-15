@@ -110,6 +110,7 @@ Descriptions and authoritative routing are in [docs/INDEX.md](docs/INDEX.md).
 - [`docs/recall-role-bridge.md`](docs/recall-role-bridge.md)
 - [`docs/recall-role-process-rootless.md`](docs/recall-role-process-rootless.md)
 - [`docs/testing_standards.md`](docs/testing_standards.md)
+- [`docs/virtual-smoke.md`](docs/virtual-smoke.md)
 - [`kernel/BESTFIT4_TESTING.md`](kernel/BESTFIT4_TESTING.md)
 - [`kernel/extent-v3/LIVE_TEST_GATE.md`](kernel/extent-v3/LIVE_TEST_GATE.md)
 - [`kernel/extent-v3/LOWER_WRITE_AGGREGATION.md`](kernel/extent-v3/LOWER_WRITE_AGGREGATION.md)
