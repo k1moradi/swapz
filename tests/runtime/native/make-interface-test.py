@@ -21,7 +21,11 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn(".DEFAULT_GOAL := all", MAKE)
         self.assertIn(".PHONY: all install uninstall test", MAKE)
         self.assertIn(".NOTPARALLEL: test", MAKE)
-        for forbidden in ("verify", "run", "deploy", "clean", "v3",
+        self.assertIn("MAKECMDGOALS", MAKE)
+        multi = subprocess.run(["make", "-n", "install", "uninstall"],
+                               cwd=ROOT, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(multi.returncode, 0)
+        for forbidden in ("all", "verify", "run", "deploy", "clean", "v3",
                           "check", "test-codec", "bench-pair-medium"):
             p = subprocess.run(["make", "-n", "--no-print-directory", forbidden],
                                cwd=ROOT, capture_output=True, text=True, timeout=5)
