@@ -380,3 +380,25 @@ same-source throughput measurements and
 actual CPU/queueing attribution, not isolated
 micro-optimizations. GC/CPU and fixed
 physical disk-bandwidth remain open.
+
+### Alpha.20 fixed-source retention duration A/B, not yet run at 1ms
+
+At exact alpha.20 `faf17bc2`, the owner-loaded
+unpaced QD32 medium replay recovered 24.971
+logical WRITE MB/s from alpha.19's separate
+23.650 MB/s trial, while saving 40.52% actual
+lower WRITE bytes at retain=2; against its
+same-run off baseline of 32.256 MB/s, V3
+was still 22.58% slower. Cumulative status
+recorded 1,482 deadline closures and 1,642
+early pack-ready closures from 3,124 windows,
+with zero GC. The next controlled experiment
+**does not change the kernel C yet**: evaluate
+its existing retain=1ms and retain=2ms policies
+with the same unpaced QD32 immutable medium
+trace and independent two-device RAM lower I/O.
+Judge trade-offs in useful logical MB/s,
+lower WRITE bytes/requests, lower READ cost
+and read/write p99; collect counterbalanced
+repeats before an actual C scheduling
+revision. The 1ms trial remains NOT RUN.

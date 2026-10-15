@@ -1062,3 +1062,62 @@ hypothesis pending the same RAM-only unpaced run,
 independent lower counters, read/write p99, full
 oracle and ordinary teardown. Physical-disk
 saturation and sustained CPU/GC remain unqualified.
+
+## Alpha.20 same-source 1ms versus 2ms high-QD retention experiment
+
+The owner loaded exact alpha.20
+`faf17bc2d3614cad56f1d027dda4d2acf6dc6e66`
+(Linux `7.0.0-38-generic`, module SHA-256
+`1f385ee3dc20f59d068a8105de190f1d5c5185d8b2c442bbfdeebde9204c7005`).
+Default `make run` and the distinct unpaced QD32
+16,384-operation `make bench-pair-medium-unpaced`
+passed independently measured READ/WRITE bytes and
+request counts, complete byte-exact oracle, no host
+swap change and safe cleanup of newly owned RAM null_blk.
+The normal uncompressed arm achieved 10,488.863 IOPS,
+**32.255877 logical WRITE MB/s** and the same lower
+WRITE MB/s. Retained 2ms V3 achieved 8,120.119 IOPS,
+**24.971397 logical WRITE MB/s -> 14.853728
+independent lower WRITE MB/s**, 22.58% fewer useful
+IOPS than off. V3 saved **40.517% lower WRITE bytes**
+(29,970,432 vs 50,384,896) and **83.245% lower WRITE
+requests** (2,061 vs 12,301). Lower READ traffic
+was equal at 16,723,968B and 4,083 requests per arm.
+Sampled V3 WRITE p99 2.340ms vs off 1.843ms, and
+READ p99 2.723ms vs off 2.786ms. Cumulative target
+`worker_requeues=3171`, `windows=3124`,
+`close_pack_ready=1642`, `close_deadline=1482`,
+`gc_victims=0` and no target failures. The result
+restores useful write MB/s compared with the separately
+executed alpha.19 trial at 23.650 MB/s (+5.59%)
+but does NOT beat the off arm, prove statistical
+significance, qualify sustained GC or impose a
+fixed physical disk bandwidth ceiling.
+
+**New opt-in comparison at the EXACT SAME production
+alpha.20 kernel source:** `make
+bench-pair-medium-unpaced-retain-1` uses the existing
+kernel-supported `retain_ms=1` policy. It leaves
+`make bench-pair-medium-unpaced` at `retain_ms=2`,
+with identical QD32, 1024 warmup, 16,384 measured
+operations, 25% READ, the immutable medium liblz4
+~2073B fixture, the same full 1024-page byte oracle
+and the same independent lower-device sector and
+request checks. The shell preflight accepts **only**
+the exact opt-in `--run-owned-ram-pair --profile medium
+--retain-ms 1 --unpaced`; it rejects paced 1ms,
+arbitrary 0/3ms and unknown flags before any privilege
+or resource creation. Both arms use separate exclusive
+RAM-backed null_blk, validated DM UUID/backing, stable
+host swap, strict timeout and teardown quarantine.
+Compare completed logical WRITE/READ MB/s, achieved
+IOPS, READ and WRITE p95/p99, actual lower READ/WRITE
+bytes and request counts, and `close_deadline`/
+`close_pack_ready` without relaxing any correctness
+criterion. The 1ms candidate might reduce latency
+and increase useful throughput **at the cost of**
+worse lower WRITE-byte savings. Label both outcomes
+honestly; no 1ms owner-loaded result yet. This is
+intentionally an independent measurement/configuration
+increment, not a new production C algorithm; the
+module stays alpha.20 so comparisons share code.

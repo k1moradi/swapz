@@ -208,3 +208,29 @@ Use `main` only and follow the device/host safety restrictions.
 including legacy checkboxes, is retained *unchanged* in
 [archive/v2.2/TODO.md](archive/v2.2/TODO.md) for provenance;
 unchecked entries there are **not active V3 tasks**.
+
+- [x] Owner alpha.20 exact `faf17bc2` default
+      smoke and 16,384-operation unpaced QD32
+      off/V3 medium comparison PASS: V3 **24.971
+      logical WRITE MB/s -> 14.854 lower WRITE
+      MB/s**, off 32.256 logical/lower WRITE MB/s.
+      V3 used 40.52% fewer lower WRITE bytes and
+      83.25% fewer requests, complete byte oracle,
+      no GC and clean RAM-only teardown. It recovers
+      +5.59% V3 logical MB/s from the separate
+      alpha.19 pilot, but remains 22.58% behind
+      its own off baseline. No sustained proof.
+- [ ] On the SAME alpha.20 source/module, run
+      `make bench-pair-medium-unpaced-retain-1`
+      as a distinctly owned, opt-in RAM-only trial
+      of the existing 1ms retention knob, and
+      compare with the unchanged 2ms unpaced
+      medium benchmark. Preserve equal immutable
+      logical work and lower READ/WRITE bytes and
+      requests, exact final oracle, p95/p99,
+      achieved useful IOPS/MB/s, pack-ready/
+      deadline closure reasons and safe teardown.
+      Reject trade-offs that sacrifice I/O savings
+      or latency; no new kernel alpha version for
+      unchanged production C. Repeat in alternating
+      order before claiming significant gains.

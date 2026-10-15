@@ -1202,3 +1202,68 @@ increase. Loaded alpha.20 qualification remains
 and, ideally, repeated alternated-arm trials
 before claiming a restored or improved maximum
 logical MB/s.
+
+## Alpha.20 owner QD32 unpaced throughput recovers; 1ms duration candidate NOT RUN
+
+Owner loaded exact `faf17bc2d3614cad56f1d027dda4d2acf6dc6e66`
+(alpha.20), module SHA-256
+`1f385ee3dc20f59d068a8105de190f1d5c5185d8b2c442bbfdeebde9204c7005`
+on Linux `7.0.0-38-generic`. The default loaded
+128-page C smoke, full final readback, independent
+READ/WRITE sectors/requests, nine exact-zero elisions,
+unchanged `/swapfile` and `/dev/sda1` swap identity
+and ordinary teardown passed. A separate two-device
+owner-controlled QD32 unpaced medium experiment
+`build/benchmark/session.X2pkhys4/` passed: 128
+measured 2073B LZ4 pages, same fixed fixture and
+16,384-operation trace hashes and byte-identical
+final 1024-page oracle. Both owned RAM lower devices
+were safely torn down.
+
+| Unpaced exact-run metric | Uncompressed | Alpha.20 retained 2ms |
+|---|---:|---:|
+| Achieved IOPS | 10,488.863 | **8,120.119** |
+| Logical WRITE input MB/s | 32.255877 | **24.971397** |
+| Independently observed lower WRITE MB/s | 32.255877 | **14.853728** |
+| Logical READ MB/s | 10.706507 | **8.288612** |
+| Actual lower WRITE bytes | 50,384,896 | **29,970,432** |
+| Actual lower WRITE requests | 12,301 | **2,061** |
+| Actual lower READ bytes/requests | 16,723,968 / 4,083 | 16,723,968 / 4,083 |
+| Sampled WRITE p99 | 1.843ms | **2.340ms** |
+| Sampled READ p99 | 2.786ms | 2.723ms |
+
+The alpha.19 C inline-drain experiment had previously
+measured only 23.650 V3 useful WRITE MB/s, while the
+older alpha.18 run measured 24.664 MB/s and alpha.15
+24.867 MB/s. Alpha.20 recovers to 24.971 MB/s,
+**+5.59%** against alpha.19 as separate trials,
+but its same-source useful throughput remains
+**22.58% BELOW uncompressed**. Sample sizes and
+cross-run workload timing are insufficient to
+claim a stable absolute speedup. The alpha.20
+V3 lower WRITE bytes saved **40.517%** and
+requests **83.245%**; READ bytes/requests matched.
+No GC, fault, physical bandwidth cap, or CPU
+profile was exercised. Cumulative worker stats
+record 3,171 workqueue requeues, 3,124 windows,
+1,642 pack-ready and 1,482 deadline closures.
+Some windows pay the configured 2ms retention
+without ever obtaining 7 medium pages, so a
+shorter but lower-density window is a plausible
+throughput/IO trade-off **not yet measured**.
+
+A new separate, explicitly privileged **same-source**
+`make bench-pair-medium-unpaced-retain-1` probes
+`retain_ms=1` while preserving all original
+independent RAM-device/oracle/safety checks and
+exact immutable workload. Compare it with the
+unchanged `make bench-pair-medium-unpaced`
+(`retain_ms=2`). This is NOT a new kernel C
+optimization; it is a necessary knob qualification
+before changing production retention policy.
+The 1ms loaded result is **NOT RUN**. Faster
+input MB/s alone is NOT acceptance if lower
+WRITE bytes/requests, READ p99, GC, or correct
+completion become unacceptable. Results on
+RAM null_blk do not prove a fixed saturated
+SD/SSD/HDD bandwidth effect.

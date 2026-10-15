@@ -353,6 +353,35 @@ timer, mapping publication, FUA, GC and admission bounds are
 unchanged. Loaded alpha.20 throughput is **NOT RUN**.
 This is evidence-based rollback, not proof of a speed gain.
 
+## Fixed-source retention deadline A/B: 1 ms versus 2 ms
+
+The owner-loaded alpha.20 unpaced QD32 comparison
+measured **24.971 logical WRITE MB/s -> 14.854
+independent lower WRITE MB/s** with V3
+`retain_ms=2`, compared with **32.256 MB/s**
+logical/lower for its own uncompressed arm.
+V3 saved **40.52%** lower WRITE bytes but still
+completed **22.58% less useful logical IOPS**.
+This recovered from alpha.19's negative 23.650
+MB/s candidate; it is not a sustained speedup.
+
+Before another speculative C edit, the separate
+owner-only `make bench-pair-medium-unpaced-retain-1`
+uses alpha.20's already supported `retain_ms=1`
+to test shorter waiting against lost packing.
+The unchanged `make bench-pair-medium-unpaced`
+retains its 2ms configuration. Both replay the
+identical QD32 medium fixture/trace to two
+newly owned RAM-backed devices, check actual
+lower READ/WRITE bytes and requests, full oracle,
+p95/p99, and safe teardown. A shorter deadline
+might improve useful input MB/s while increasing
+physical WRITE MB/s: record BOTH outcomes.
+Alpha.20 **1ms loaded NOT RUN**. No kernel C
+behavior is changed by this validation-only
+increment and no fixed physical disk bandwidth
+is imposed.
+
 ## The active performance question
 
 **Can V3 reduce true backing I/O against uncompressed 4KiB block I/O,

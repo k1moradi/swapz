@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
-    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced]'
+    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced'
     exit 0
 fi
 PROFILE=default
@@ -26,10 +26,13 @@ elif [[ $# == 5 && $1 == --run-owned-ram-pair &&
     RETAIN_MS=2
 elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
         $2 == --profile && $3 == medium &&
-        $4 == --retain-ms && $5 == 2 && $6 == --unpaced ]]; then
-    # Separate unpaced ceiling probe. No physical disk and no host swap.
+        $4 == --retain-ms && ( $5 == 1 || $5 == 2 ) &&
+        $6 == --unpaced ]]; then
+    # Same alpha.20 source, same immutable unpaced QD32 replay:
+    # isolate 1ms vs 2ms window retention without a new kernel policy.
+    # Only two exact retention values are admitted before provisioning.
     PROFILE=medium
-    RETAIN_MS=2
+    RETAIN_MS="$5"
     RATE_MODE=unpaced
     QD=32
     WARMUP_OPS=1024
@@ -260,7 +263,8 @@ DMUUID="SWAPZ-TEST-$token"
 # 4MiB upper (1024 pages), verify=0, gc_policy=2, lower_bulk=1,
 # coalesce=0 and both diagnostic fault knobs disabled.
 # The explicit ninth policy field is 0 for default/control trials.
-# A retained session requires --profile medium --retain-ms 2.
+# Retained unpaced sessions permit --retain-ms 1 OR 2; only the original
+# paced candidate permits 2. Both are pinned above before any setup.
 if ! dmsetup create "$DMNAME" --uuid "$DMUUID" \
     --table "0 8192 swapz3 ${LOWERS[1]} 0 64 0 2 0 0 1 0 $RETAIN_MS"; then
     if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |

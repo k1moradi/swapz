@@ -107,3 +107,14 @@ bench-pair-medium-unpaced:
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
 	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
 	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+
+# Fixed-source retention-duration experiment: identical unpaced QD32
+# medium fixture and owned-RAM safety, but retain_ms=1 rather than 2.
+# Compare the *same* alpha.20 source/KO with bench-pair-medium-unpaced;
+# never run from verify, run, default targets or CI.
+.PHONY: bench-pair-medium-unpaced-retain-1
+bench-pair-medium-unpaced-retain-1:
+	@$(MAKE) --no-print-directory verify
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
+	@$(MAKE) --no-print-directory -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
+	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced
