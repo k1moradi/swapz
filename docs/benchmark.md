@@ -19,6 +19,180 @@ utility does not rename the project or module.
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md).
 
+## Three-axis qualification specification
+
+**Status: specification first, 2026-10-15.** The additional uncapped,
+write-only, packed-read and sustained stages below are proposed extensions,
+not stages already implemented in the runner. The existing official
+`make test` still runs its capped mixed-load schedule. Its correctness
+PASS must not be interpreted as completing this expanded specification.
+There is one operator test command; future stages stay private within it.
+
+### Quantities and endpoints
+
+All rates use decimal MB/s (`bytes / seconds / 1,000,000`); distinguish
+MiB/s device configuration. Measure successful 4KiB logical work, not
+merely accepted/submitted pages or LZ4 attempt bytes. End timing only when
+the declared work and required lower writes/flushes have drained; bracket
+independent lower counters over exactly that interval. Keep prefill,
+warmup and final out-of-band oracle work outside measurement and report
+where verification work is timed.
+
+| User outcome | Primary quantity | Required companion evidence |
+|---|---|---|
+| Swap-out speed | completed logical WRITE MB/s versus paired raw | lower WRITE MB/s, requests, WRITE tails, drain and CPU/GiB |
+| Write reduction | `1 - candidate lower WRITE bytes / raw lower WRITE bytes` for identical completed work | requests saved, codec ratio, GC and lower READ traffic |
+| Data-ready swap-in | actual seconds for a declared logical byte volume, plus useful READ MB/s | lower READ bytes/requests, p95/p99, decode/verification endpoint and CPU/GiB |
+
+`codec_ratio = logical compressed-page input / accepted LZ4 payload` is
+different from `write_efficiency = completed logical WRITE bytes / total
+lower WRITE bytes`. The latter includes alignment, metadata, RAW and
+GC. Smaller total bytes per identical workload and smaller MB/s output
+per wall second are different claims when the candidate finishes sooner.
+No RAM-backed result measures flash lifetime or internal NAND writes.
+
+The current model uses a **shared READ+WRITE** null_blk byte budget:
+`mbps=20` is 20MiB/s, approximately 20.97 decimal MB/s. The upstream
+[Linux 7.0 null_blk implementation](https://raw.githubusercontent.com/torvalds/linux/v7.0/drivers/block/null_blk/main.c)
+deducts each request's bytes from that budget before operation handling
+and replenishes it on a 20ms timer. Verify the actual host configuration;
+this is a synthetic throttle, not a physical device's latency model.
+For a mixed stream, useful WRITE MB/s cannot consume the whole cap.
+
+An optimistic bandwidth bound, before CPU/queue/latency limits, is:
+
+```text
+logical WRITE MB/s <= D / (r_write + a * r_read + g)
+a       = logical READ bytes / logical WRITE bytes
+r_write = foreground lower WRITE bytes / logical WRITE bytes
+r_read  = foreground lower READ bytes / logical READ bytes
+g       = GC lower READ+WRITE bytes / logical WRITE bytes
+D       = shared lower READ+WRITE byte budget in MB/s
+```
+
+Do not count GC in both foreground fractions and `g`. This is a bound
+under an assumed saturated byte budget, not a performance prediction.
+An uncapped RAM backend can expose CPU, preparation, mapping, retention
+or queue overhead even when compression helps the capped case.
+
+### Experiment matrix behind the one official command
+
+Compare bare raw, serialized LZ4 preparation and concurrent LZ4
+preparation at the same code revision with immutable equal-work inputs,
+separate owned RAM devices and counterbalanced order. The existing
+"async" mode overlaps LZ4 preparation only; lower dm_io remains
+synchronous and mappings/decode/GC remain serialized.
+
+1. **Write-only saturation, capped and uncapped separately.** Use the same
+   fixed logical volume and QD1/4/8/32. No offered-rate pacing in
+   saturation mode: differing achieved throughput is the result, not a
+   reason to reject the pair. Verify cap=0 on uncapped devices and the
+   exact selected cap on both capped devices. Record useful and lower
+   WRITE MB/s, upper latency, drain, CPU and actual byte-budget utilization.
+2. **Mixed contention at matched load.** Use declared offered rates and
+   independent readers/writers with disjoint and overlapping page sets.
+   Apply the existing 5% achieved-load matching gate here, not to a peak
+   throughput comparison. Preserve READ work and tails when judging WRITE
+   improvements. Finite QD waves have a completion barrier and are a
+   separate burst workload, not independently progressing readers.
+3. **Read a real fixed volume populated by packed writes.** Write the
+   measured dataset using concurrent target writes, drain and verify it,
+   then time sequential and seeded random READ-only passes at QD1/4/8/32.
+   The timer ends when the requested decoded data have been returned,
+   with the same declared oracle policy for raw and candidate. Report
+   first passes over distinct pages separately from warm/repeated reads;
+   do not globally drop host caches or disguise repeated 4MiB reads as
+   a 100MiB distinct working set. 100MiB means 25,600 4KiB pages;
+   100 decimal MB needs its actual aligned byte count stated explicitly.
+4. **Lifecycle cost.** Choose bounded live occupancy and overwrite/discard
+   churn that demonstrates real live-record copying and reserve-role
+   rotations, with separate GC deltas included in total lower traffic.
+   Dead-segment reuse alone is not a live-GC trial. Include read tails
+   during cleaning, failure/drain correctness and no hidden pending work.
+
+Use primary nonzero measured ~2:1 pages, mixed payload sizes, near-cap
+payloads and RAW controls. Keep exact-zero elision separate. Size the
+owned logical/backing RAM geometry to the actual volume and GC gate;
+never substitute physical or existing system swap. CPU wall counters
+nest and can overlap; obtain real task CPU attribution rather than
+summing `lz4_wall_ns`, commit and lower-I/O wait counters.
+
+### Verdicts, materiality and result schema
+
+Correctness execution and performance qualification have distinct
+verdicts. Keep per-axis/per-regime outcomes, including
+`CAPPED_THROUGHPUT_GAIN`, `UNCAPPED_THROUGHPUT_LOSS`,
+`NO_SIGNIFICANT_ASYNC_GAIN`, `READ_AMPLIFICATION_REGRESSION`,
+`INCONCLUSIVE`, `NOT_MEASURED` and `NOT_EXERCISED`. A capped gain
+cannot overwrite an uncapped loss. No observed GC means NOT_EXERCISED.
+Unknown latency/CPU values are null, never a fabricated zero.
+
+For a confirmatory experiment predeclare the material gain and allowed
+READ-p99, CPU/GiB, memory and lower-I/O regressions in its plan. A
+starting proposal for owner review is **5% material throughput or
+fixed-volume-time improvement**, with the interval for paired gains
+excluding zero; this is not a universal release threshold or a newly
+implemented runner rule. Use at least five counterbalanced pairs per
+mode/regime, enough duration and READ samples, per-pair ratios and
+spread/confidence method. More trials are required if the interval is
+too wide. Tiny positive mean differences remain unestablished.
+
+Derive every candidate/raw ratio from its own paired raw arm; do not
+compare a mode's mean against raw runs belonging to another mode.
+Label aggregation precisely: mean/median of trial p99 is not a pooled
+p99; mean request counts may be fractional although each trial is
+integer. Preserve each trial so summaries can be independently derived.
+
+The sanitized report should retain exact tested/source/code SHAs, kernel
+version, module version/SHA256/vermagic and identity-validation booleans;
+regime, actual configuration, cap units/bytes-per-second/shared scope,
+QD, pacing, actual operation counts/mix, working-set sizes, fixture
+LZ4 histogram, immutable input and final-oracle digests; integer logical
+and lower READ/WRITE bytes/requests, duration, latency sample counts and
+method; interval GC/CPU/memory observations and drain/teardown verdicts.
+Retain the existing source-identification and report-only Git history
+semantics. Keep identifying host paths and raw private logs out of the
+published artifact. Publishing status is independent of test outcomes.
+
+### Why the current read result does not qualify packed swap-in
+
+The present replay prefills pages with sequential blocking writes.
+Timed READs address slots512..767 while timed WRITEs overwrite0..255.
+Thus timed READ pages are predominantly singleton extents; final packed
+readback is outside the performance interval. The reported 100MB time
+is an extrapolation from mixed READ throughput, not an executed volume.
+The current compressed reader always fetches metadata block0, then
+needed payload blocks, and has no extent cache. Cold medium packed
+reads can therefore transfer more than the 4KiB raw page despite LZ4
+compression. Future C work should address measured read reuse or
+aggregation with authority/CRC/GC correctness, and qualify the actual
+packed dataset before claiming faster decoded swap-in.
+
+### Alpha.22 C change and qualification handoff
+
+The finite QD-wave replay waits for every operation before its next
+wave. Alpha.21's useful early packed commits can leave one/two retained
+records waiting for a deadline while those completions hold up new work.
+Alpha.22 tracks successful pack-ready history within the serialized
+worker and, at a locked empty-queue boundary, drains a valid one/two
+compressed-record tail immediately through the existing lower-success
+publication path. It leaves initial unpaired retention and RAW/larger
+tails alone. Ordinary empty fences conservatively end packed history.
+`burst_tail_flushes` counts attempted tail closures, already represented
+by primary `close_idle`; it does not measure saved bytes or elapsed time.
+
+**VISION hypothesis:** reduce avoidable completion wait and improve useful
+WRITE throughput/latency while retaining a measured lower-write saving.
+A new arrival just after idle can lose a packing opportunity, so lower
+bytes/requests and READ tails must still qualify. This is a focused
+retained-path C change, not a demonstrated performance gain.
+
+**Alpha.22 compilation, native/source tests and loaded tests: NOT RUN,
+explicitly deferred by the owner.** The official `make test` can check
+the current capped suite, but the expanded uncapped/read-volume matrix
+above is still planned and cannot be claimed as completed. Historical
+reports remain bound to their embedded tested commit.
+
 ## Concurrent LZ4 preparation versus lower I/O: measurement gate
 
 Experimental `async_prepare=1` runs bounded LZ4 preparation concurrently

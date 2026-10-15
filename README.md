@@ -82,6 +82,30 @@ time for reading 100 MB is an extrapolation from the **mixed 25%-read**
 benchmark, not an isolated cold 100 MB swap-in trial. GC, CPU pressure
 and physical SSD/SD behavior remain distinct open qualifications.
 
+## Current C performance work and qualification plan
+
+The next C revision drains an eligible one/two-page compressed tail
+when an accepted burst has already completed a useful packed write and
+the worker queue is empty. This removes an avoidable retention wait
+that can hold up finite-QD issuers. Initial retention, actual lower-write
+completion and mapping authority remain required. The new INFO field
+`burst_tail_flushes` reports attempted tail closures, not measured gains.
+
+**The current revision is source-reviewed only: compilation and tests
+were NOT RUN at the owner's request.** A throughput improvement remains
+a hypothesis until the exact committed source is tested. The
+[three-axis qualification specification](docs/benchmark.md#three-axis-qualification-specification)
+separates uncapped/capped swap-out speed, equal-work lower I/O and
+actual fixed-volume decoded swap-in time. Its additional benchmark
+stages are planned; today's official runner still executes capped mixed
+trials and estimates 100MB read time from that mixed workload.
+
+The timed READ region is currently populated by blocking singleton
+writes and is disjoint from packed measured WRITEs. A future packed
+read-only phase is needed before claiming faster reads of the compressed
+output produced under concurrent writes. See [VISION](VISION.md) for the
+three user outcomes and [ROADMAP](docs/ROADMAP.md) for implementation order.
+
 ## Supported root Make interface
 
 There are **exactly four supported root commands**. Do not add aliases
@@ -141,8 +165,10 @@ point or separate privileged smoke-test command.
 This is only a simulated lower-rate limit, not actual flash evidence.
 The new `prep_lower_write_overlap_starts` status value measures LZ4
 starts observed during a lower write; it is not a useful-MB/s win.
-**Loaded async correctness, bounded-bandwidth performance and endurance:
-NOT RUN.** Experimental null_blk-only admission remains enforced.
+**Owner alpha.21 capped mixed trials passed bounded correctness and
+showed write savings; current-revision testing is NOT RUN.** No
+uncapped, actual fixed-volume swap-in, CPU, live-GC or physical-endurance
+qualification is implied. Experimental null_blk-only admission remains enforced.
 
 ## Future physical-device gate (not currently authorized)
 

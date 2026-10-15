@@ -182,6 +182,9 @@ struct sv3_dm {
 	u64 retain_timer_arm_skips;
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
+	/* Worker-owned history for one accepted burst, never a BIO owner. */
+	bool packed_burst;
+	u64 burst_tail_flushes;
 	u64 coalesce_deferred;
 	u64 coalesce_urgent;
 	u64 window_records_total;
@@ -986,9 +989,14 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	sv3_u8 committed = 0, index, count = ctx->batch_count;
 	sv3_u8 gc_attempts = 0;
 	bool needs_fua = false;
+	bool packed_close = ctx->next_window_close == SV3_CLOSE_PACK_READY;
 	u64 end_ns, open_age_ns, section_start;
 	int error = 0;
 
+	/* Empty fences, deadline, failure and ordinary closures end a burst.
+	 * Re-enable tail eligibility only after an entire pack-ready window
+	 * has succeeded through the original publication/completion path. */
+	ctx->packed_burst = false;
 	if (!count) {
 		ctx->next_window_close = SV3_CLOSE_UNKNOWN;
 		ctx->window_first_ns = 0;
@@ -1110,6 +1118,7 @@ accounted:
 		sv3_fail(ctx, error ? error : -EIO);
 		return error ? error : -EIO;
 	}
+	ctx->packed_burst = packed_close;
 	return 0;
 }
 
@@ -1640,6 +1649,30 @@ static void sv3_worker(struct work_struct *work)
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
+			/* A useful packed group has already completed in this
+			 * burst. Drain its small compressed tail when no accepted
+			 * BIO can join it now. Completion releases finite-QD
+			 * issuers to submit more work without a full timer wait.
+			 * Keep initial singleton retention and larger/RAW tails.
+			 * The local remainder was spliced above: BOTH queues
+			 * are empty under the same admission lock as ->map(). */
+			if (ctx->accepting && !ctx->failed &&
+			    sv3_window_burst_tail_ready(ctx->batch,
+				ctx->batch_count, ctx->retain_ms,
+				ctx->engine.max_read_blocks_per_record,
+				ctx->packed_burst)) {
+				ctx->packed_burst = false;
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				ctx->next_window_close = SV3_CLOSE_IDLE;
+				ctx->burst_tail_flushes++;
+				/* Flush cancels the timer and completes owners;
+				 * never run it while holding queue_lock. New
+				 * arrivals remain scheduled for a later pass. */
+				sv3_flush_window(ctx);
+				return;
+			}
+			if (!ctx->batch_count)
+				ctx->packed_burst = false;
 			if (ctx->batch_count &&
 			    sv3_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
@@ -2198,6 +2231,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "gc_wall_ns=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
+		       "burst_tail_flushes=%llu "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -2272,6 +2306,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,
+		       ctx->burst_tail_flushes,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

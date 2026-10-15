@@ -85,6 +85,32 @@ static inline int sv3_window_pack_ready(
 }
 
 /*
+ * Once this accepted burst has already committed a useful packed group,
+ * an idle worker may finish its one/two compressed records without another
+ * retention wait. Initial lone writes retain their ordinary opportunity
+ * to collect companions. The serialized caller supplies packed_burst only
+ * after a successful packed commit and owns all idle/dependency fences.
+ * This predicate neither establishes that history nor completes a BIO.
+ */
+static inline int sv3_window_burst_tail_ready(
+		const struct sv3_pending_bio *pending, sv3_u8 count,
+		sv3_u8 retain_ms, sv3_u8 read_budget, int packed_burst)
+{
+	sv3_u8 index;
+
+	if (!retain_ms || read_budget || !packed_burst || !pending ||
+	    !count || count > 2U)
+		return 0;
+	for (index = 0; index < count; ++index)
+		if (pending[index].raw || !pending[index].length ||
+		    pending[index].length > SV3_MAX_COMPRESSED)
+			return 0;
+	if (count == 2U && pending[0].logical == pending[1].logical)
+		return 0;
+	return 1;
+}
+
+/*
  * Equal-length accepted compressed records retain their exact input order
  * under the production greedy ordering: largest is always the earliest
  * remaining record and, when a 4KiB complement exists, the chosen partner

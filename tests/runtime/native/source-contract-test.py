@@ -563,6 +563,34 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("drain_workqueue(ctx->workqueue)", body("sv3_drain"))
         self.assertIn("sv3_flush_window(ctx)", worker)
 
+    def test_alpha22_small_packed_burst_tail_drains_outside_admission_lock(self):
+        flush = body("sv3_flush_window")
+        worker = body("sv3_worker")
+        self.assertIn("bool packed_close = ctx->next_window_close == SV3_CLOSE_PACK_READY",
+                      flush)
+        self.assertLess(flush.index("ctx->packed_burst = false"),
+                        flush.index("if (!count)"))
+        self.assertLess(flush.index("if (error || committed != count)"),
+                        flush.index("ctx->packed_burst = packed_close"))
+        self.assertLess(worker.index("list_splice_init(&local, &ctx->incoming)"),
+                        worker.index("sv3_window_burst_tail_ready"))
+        idle = worker[worker.index("if (list_empty(&ctx->incoming))"):
+                      worker.index("sv3_window_timer_enabled(ctx->retain_ms)")]
+        self.assertIn("if (ctx->accepting && !ctx->failed &&", idle)
+        self.assertIn("sv3_window_burst_tail_ready(ctx->batch", idle)
+        self.assertIn("ctx->batch_count, ctx->retain_ms", idle)
+        self.assertIn("ctx->engine.max_read_blocks_per_record", idle)
+        self.assertIn("ctx->packed_burst", idle)
+        self.assertLess(idle.index("spin_unlock_irqrestore(&ctx->queue_lock, flags)"),
+                        idle.index("sv3_flush_window(ctx)"))
+        self.assertIn("ctx->next_window_close = SV3_CLOSE_IDLE", idle)
+        self.assertIn("ctx->burst_tail_flushes++", idle)
+        self.assertIn("if (!ctx->batch_count)", idle)
+        self.assertIn("ctx->packed_burst = false", idle)
+        self.assertNotIn("ctx->packed_burst", body("sv3_map"))
+        self.assertNotIn("ctx->packed_burst", body("sv3_retention_wake"))
+        self.assertIn("burst_tail_flushes=%llu", body("sv3_status"))
+
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         lower = body("sv3_lower")

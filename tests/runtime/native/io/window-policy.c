@@ -181,6 +181,98 @@ static int test_pack_ready_rejects_raw_and_unfittable(void)
 	return 0;
 }
 
+static int test_burst_tail_one_two_and_mixed_compressed_records(void)
+{
+	struct sv3_pending_bio tail[2] = {
+		{ .logical = 10, .length = 2073 },
+		{ .logical = 11, .length = 2073 },
+	};
+	struct sv3_pending_bio snapshot[2];
+	unsigned int retain;
+
+	memcpy(snapshot, tail, sizeof(tail));
+	for (retain = 1; retain <= 4; ++retain) {
+		CHECK(sv3_window_burst_tail_ready(tail, 1,
+					(sv3_u8)retain, 0, 1));
+		CHECK(sv3_window_burst_tail_ready(tail, 2,
+					(sv3_u8)retain, 0, 1));
+	}
+	CHECK(!memcmp(tail, snapshot, sizeof(tail)));
+	/* The tail rule intentionally admits medium pairs that cannot form
+	 * a useful 4KiB pack; an earlier group earned the burst history. */
+	CHECK(!sv3_window_pack_ready(tail, 2, 2, 0));
+	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	tail[0].length = 1;
+	tail[1].length = SV3_MAX_COMPRESSED;
+	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	tail[0].length = SV3_MAX_COMPRESSED;
+	tail[1].length = 1;
+	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	return 0;
+}
+
+static int test_burst_tail_requires_retention_history_and_safe_bounds(void)
+{
+	struct sv3_pending_bio tail = { .logical = 10, .length = 2073 };
+	unsigned int budget;
+
+	CHECK(!sv3_window_burst_tail_ready(&tail, 1, 0, 0, 1));
+	CHECK(!sv3_window_burst_tail_ready(&tail, 1, 2, 0, 0));
+	for (budget = 1; budget <= 3; ++budget)
+		CHECK(!sv3_window_burst_tail_ready(&tail, 1, 2,
+					(sv3_u8)budget, 1));
+	CHECK(!sv3_window_burst_tail_ready(NULL, 1, 2, 0, 1));
+	CHECK(!sv3_window_burst_tail_ready(&tail, 0, 2, 0, 1));
+	/* Bounds rejection must precede any attempted access past tail. */
+	CHECK(!sv3_window_burst_tail_ready(&tail, 3, 2, 0, 1));
+	CHECK(!sv3_window_burst_tail_ready(&tail, SV3_MAX_RECORDS, 2, 0, 1));
+	CHECK(!sv3_window_burst_tail_ready(&tail, SV3_MAX_RECORDS + 1,
+					2, 0, 1));
+	CHECK(!sv3_window_burst_tail_ready(NULL, 2, 2, 0, 1));
+	return 0;
+}
+
+static int test_burst_tail_rejects_each_raw_invalid_and_duplicate_record(void)
+{
+	struct sv3_pending_bio tail[2] = {
+		{ .logical = 10, .length = 2073 },
+		{ .logical = 11, .length = 2073 },
+	};
+	sv3_u8 index;
+
+	for (index = 0; index < 2; ++index) {
+		tail[index].raw = 1;
+		tail[index].length = SV3_BLOCK_BYTES;
+		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		/* A short length must not hide a RAW classification. */
+		tail[index].length = 100;
+		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		tail[index].raw = 0;
+		tail[index].length = 0;
+		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		tail[index].length = SV3_MAX_COMPRESSED + 1U;
+		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		tail[index].length = 2073;
+	}
+	tail[0].raw = 1;
+	CHECK(!sv3_window_burst_tail_ready(tail, 1, 2, 0, 1));
+	tail[0].raw = 0;
+	tail[0].length = 0;
+	CHECK(!sv3_window_burst_tail_ready(tail, 1, 2, 0, 1));
+	tail[0].length = SV3_MAX_COMPRESSED + 1U;
+	CHECK(!sv3_window_burst_tail_ready(tail, 1, 2, 0, 1));
+	tail[0].length = 2073;
+	tail[1].logical = tail[0].logical;
+	CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	/* Even extreme valid logical identifiers use exact slot equality. */
+	tail[0].logical = ~(sv3_u32)0;
+	tail[1].logical = ~(sv3_u32)0;
+	CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	tail[1].logical = 0;
+	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	return 0;
+}
+
 static int test_uniform_compressed_identity_sort_safety(void)
 {
 	struct sv3_pending_bio batch[SV3_MAX_RECORDS] = { 0 };
@@ -339,6 +431,9 @@ int main(void)
 	CHECK(test_pack_ready_seven_medium_pages() == 0); passed++;
 	CHECK(test_pack_ready_two_and_three_page_real_extent_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
+	CHECK(test_burst_tail_one_two_and_mixed_compressed_records() == 0); passed++;
+	CHECK(test_burst_tail_requires_retention_history_and_safe_bounds() == 0); passed++;
+	CHECK(test_burst_tail_rejects_each_raw_invalid_and_duplicate_record() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;

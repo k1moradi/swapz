@@ -37,6 +37,35 @@ later versions. Read [device geometry and benchmark standards](docs/benchmark.md
 stat units. [V3_GOALS.md](docs/ROADMAP.md) is the algorithm roadmap; this
 document defines *what we are optimizing* and *what evidence counts*.
 
+## Three measurable user outcomes
+
+1. **Swap-out throughput:** deliver more successfully completed logical
+   WRITE bytes per second than the paired uncompressed baseline, including
+   the final required drain. Show `logical input MB/s -> swapz -> lower
+   output MB/s`, with capped and uncapped results separately. A smaller
+   lower output rate alone does not establish greater useful throughput.
+2. **Write I/O efficiency:** transfer fewer independently measured lower
+   WRITE bytes and requests for the same completed logical work, including
+   live GC and flush cost. Report codec payload ratio separately from
+   logical/lower-write byte efficiency. Host-write reduction is an endurance
+   proxy; actual NAND program/erase traffic and lifetime need physical
+   device evidence.
+3. **Swap-in data ready:** deliver a declared volume of decoded, verified
+   logical data sooner than raw, with acceptable single-page p95/p99 and
+   CPU/memory cost. Time actual completion of a fixed-volume read trial
+   populated through the packed write path. Report useful READ MB/s, lower
+   READ MB/s and amplification. An estimate from mixed-load throughput is
+   not an executed fixed-volume swap-in measurement.
+
+The three outcomes receive separate verdicts and remain specific to the
+source, workload, device model and operating regime. Capped-device gains
+cannot establish uncapped throughput; byte savings cannot establish a
+read-latency gain. Preserve negative results and require correctness first.
+The proposed experiment matrix and report contract are developed in
+[the benchmark specification](docs/benchmark.md#three-axis-qualification-specification).
+Current RAM-null_blk trials exercise the block target, not Linux reclaim
+and page-fault handling or physical flash endurance.
+
 ## 1. Start with the device, not the compressor
 
 Linux swap presents 4 KiB logical pages on this project's supported

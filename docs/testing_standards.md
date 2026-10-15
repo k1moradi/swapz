@@ -142,6 +142,44 @@ commands into `tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile
 continues to expose only the public `make test` entry point.
 
+## Alpha.22 packed-burst tail correctness contract
+
+After a successful pack-ready window, the serialized C worker may drain
+a one/two-record compressed tail at a genuine accepted-queue idle point.
+Eligibility requires positive retention, unrestricted read budget, valid
+non-RAW lengths and distinct slots. The worker must splice any unfinished
+local list ahead of incoming and test emptiness under the admission lock.
+Release that lock before the ordinary flush path, which synchronously
+cancels its timer and preserves lower-success publication/completion.
+New BIOs arriving after the decision remain queued for the same worker.
+
+The worker alone owns `packed_burst`. Clear it on every flush entry,
+including empty fences; enable it only after complete error-free
+pack-ready commit. Partial/failed writes never enable it. Clear at
+empty-queue/no-batch idle, preserve across nonclosing worker requeues
+and independent READ bypass, and do not double-complete the current
+WRITE by returning an already-completed flush error from accept_write.
+`burst_tail_flushes` is an attempted-close diagnostic; its windows
+are already counted by `close_idle`, not a new primary close reason.
+
+Direct production-header regressions cover positive/negative tail
+geometry, disabled/no-history/restricted-read cases, invalid/RAW records
+and duplicates. Source contracts check success-gated history, FIFO
+splicing, healthy/open admission, unlock-before-flush, timer ordering
+and status. Predicate regressions do not execute Linux BIO callbacks
+or prove suspend/failure behavior. Loaded follow-up needs
+finite-QD bursts, delayed arrivals, initial singleton writes, true
+fences, same-page overwrites, independent reads, mixed RAW, WRITE
+failure, GC and suspend/drain with exactly-once upper completion.
+
+**Alpha.22 native/source tests, compilation and loaded tests: NOT RUN
+by explicit owner instruction.** Use only `make test` for operator
+qualification. Its current capped mixed workload can exercise the new
+path; the uncapped saturation, packed-read volume, CPU and live-GC
+qualification proposed in [benchmark.md](benchmark.md#three-axis-qualification-specification)
+remain planned. Do not claim those new stages ran. Retention stays
+disabled by default and all device tests stay owned-RAM-null_blk-only.
+
 ## Latest-only compressed result and official terminal output
 
 The private `tools/run-tests.py` program invoked *only* by root

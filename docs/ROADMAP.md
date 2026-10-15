@@ -2,8 +2,10 @@
 
 **Status: ACTIVE — V3 experimental and NOT production-ready (read the current version from [VERSION](../kernel/extent-v3/VERSION)).** V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
-The latest alpha.11 bounded result establishes useful packing on synthetic
-medium pages; sustained GC/CPU/latency qualification remains open.
+Owner-reported alpha.21 capped mixed trials establish useful packing on
+synthetic medium pages. Alpha.22 tail scheduling is implemented but
+uncompiled/untested at owner request; uncapped, packed swap-in and
+sustained GC/CPU/latency qualification remain open.
 
 The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](coding_standards.md),
@@ -13,6 +15,35 @@ Track short, actionable work in the active work queue below; preserve exact
 results and outstanding release gates in
 [current testing and release gates](testing_standards.md).
 Only `main` is used unless the owner explicitly authorizes otherwise.
+
+## Current three-axis performance work
+
+The [three-axis specification](benchmark.md#three-axis-qualification-specification)
+develops the owner's swap-out speed, lower-write/endurance proxy and
+data-ready swap-in goals. Its expanded matrix is a specification, not
+an already implemented test runner. All operator execution remains
+behind the single official `make test` command.
+
+- [x] Implement alpha.22 production C idle drain for a valid one/two-page
+      compressed tail after a successful pack-ready commit. Preserve
+      initial retention, boundaries, physical publication and completion.
+      Source reviewed; compilation/tests NOT RUN by owner instruction.
+- [ ] Owner: run `make test -j2` at the exact committed HEAD and examine
+      useful throughput, lower WRITE bytes/requests, READ tails,
+      `burst_tail_flushes`, closure conservation and safe teardown.
+      Current capped results cannot establish uncapped improvement.
+- [ ] Implement capped AND uncapped write-only/mixed qualification as
+      private stages, with paired controls and declared materiality;
+      retain negative/no-significant-async-gain outcomes.
+- [ ] Add actual fixed-volume sequential/random reads of a dataset
+      populated through packed concurrent writes. Keep the current
+      mixed 100MB estimate labeled as an extrapolation.
+- [ ] Profile actual C preparation, queue/retention, lower I/O, CRC/decode
+      and live GC; use exclusive CPU attribution and interval counters.
+      Investigate bounded authority-safe read reuse/aggregation only
+      against the packed-read bottleneck demonstrated by that evidence.
+- [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
+      GC before promoting retained or concurrent preparation defaults.
 
 ## The measured problem, and the existing foundation
 
