@@ -273,6 +273,7 @@ class ReportContract(unittest.TestCase):
                 "FAIL: independent backing lower I/O mismatch\n")
         phase, reason = runner.failure_context(pair)
         self.assertIn("comparison 2/8 (async)", phase)
+        self.assertIn("backing lower I/O mismatch", reason)
         loaded_subphase = (
             "START_OWNED_RAM_REGIME=sd_emulated\n"
             "START_OWNED_RAM_PAIR_ASYNC_PREPARE=0\n"
@@ -283,7 +284,6 @@ class ReportContract(unittest.TestCase):
         self.assertIn("sd_emulated comparison 1/8 (sync)", phase)
         self.assertIn("[v3 packed_read]", phase)
         self.assertIn("verified fixed volume", reason)
-        self.assertIn("backing lower I/O mismatch", reason)
 
     def test_non_root_fixture_never_uses_privileged_evidence_directory(self):
         loaded = (ROOT / "tools/test-loaded.sh").read_text()

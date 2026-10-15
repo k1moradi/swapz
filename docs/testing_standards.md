@@ -208,7 +208,10 @@ when an owned-device replay aborts. These markers are diagnostic
 metadata, never I/O workload or timed operations.
 The rootless replay-contract test executes those code paths and checks
 that the diagnostic helper has its required imports; a marker must
-never prevent the actual byte-exact replay from running.
+never prevent the actual byte-exact replay from running. The
+fault-localization test must independently assert the previous
+general comparison failure and the later read-specific failure;
+neither synthetic result can silently overwrite another assertion.
 
 **Test structure:** Preserve separate functional components for
 production-C native oracles, Make/Kbuild/API source contracts,
