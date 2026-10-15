@@ -753,6 +753,60 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))
         self.assertIn("experimental live GC", DM)
 
+    def test_async_lz4_preparation_overlaps_lower_io_without_publication(self):
+        producer = body("sv3_preparation_worker")
+        accept = body("sv3_accept_write")
+        mapper = body("sv3_map")
+        ordered = body("sv3_worker")
+        lower = body("sv3_lower")
+        finish = body("sv3_complete")
+        release = body("sv3_release_prepared")
+        ctor = body("sv3_ctr")
+        drain = body("sv3_drain")
+        freeing = body("sv3_free")
+        status = body("sv3_status")
+        benchmark = (ROOT / "tools/benchmark-owned-pair.sh").read_text()
+
+        self.assertIn("module_param_named(async_prepare", DM)
+        self.assertIn("ctx->async_prepare = sv3_async_prepare", ctor)
+        self.assertIn("WQ_MEM_RECLAIM | WQ_UNBOUND", ctor)
+        self.assertIn("mempool_create_kmalloc_pool(", ctor)
+        self.assertIn("sema_init(&ctx->preparation_slots, SV3_MAX_RECORDS)", ctor)
+        self.assertIn("down(&ctx->preparation_slots)", producer)
+        self.assertIn("mempool_alloc(ctx->preparation_pool, GFP_NOIO)", producer)
+        self.assertIn("LZ4_compress_fast(", producer)
+        self.assertIn("complete(&entry->preparation_finished)", producer)
+        for forbidden in ("sv3_complete(", "sv3_finish(", "sv3_stage(",
+                          "sv3_flush_window(", "dm_io(", "bio_endio(",
+                          "sv3_engine_write_window"):
+            self.assertNotIn(forbidden, producer)
+        self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
+        self.assertLess(mapper.index("list_add_tail(&entry->list"),
+                        mapper.index("queue_work(ctx->preparation_workqueue"))
+        self.assertIn("wait_for_completion(&entry->preparation_finished)", ordered)
+        self.assertLess(ordered.index("wait_for_completion("),
+                        ordered.index("sv3_process(ctx, entry->bio)"))
+        self.assertIn("entry->prepared_page->bytes", accept)
+        self.assertIn("sv3_release_prepared(bio)", accept)
+        self.assertIn("sv3_release_prepared(bio)", finish)
+        self.assertLess(finish.index("sv3_release_prepared(bio)"),
+                        finish.index("bio_endio(bio)"))
+        self.assertIn("mempool_free(", release)
+        self.assertIn("up(entry->preparation_slots)", release)
+        self.assertIn("atomic_set(&ctx->lower_write_active, 1)", lower)
+        self.assertIn("atomic_set(&ctx->lower_write_active, 0)", lower)
+        self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
+        self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
+                        drain.index("drain_workqueue(ctx->workqueue)"))
+        self.assertIn("destroy_workqueue(ctx->preparation_workqueue)", freeing)
+        self.assertIn("mempool_destroy(ctx->preparation_pool)", freeing)
+        self.assertIn("async_prepare=%u prep_lower_write_overlap_starts=%llu",
+                      status)
+        self.assertIn("insmod \"$MODULE\" \"async_prepare=$ASYNC_PREPARE\"",
+                      benchmark)
+        self.assertIn("--async-prepare", benchmark)
+        self.assertIn("RATE_MODE != unpaced", benchmark)
+
     def test_map_and_teardown_are_owned(self):
         admitted = body("sv3_map")
         drained = body("sv3_drain")

@@ -5,6 +5,42 @@
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md).
 
+## Concurrent LZ4 preparation versus lower I/O: measurement gate
+
+Experimental `async_prepare=1` runs bounded LZ4 preparation concurrently
+with the original serialized mapping/commit worker, which can still be
+blocked on synchronous lower `dm_io`. The independent producer never
+mutates V3 generation authority or completes a BIO. A 64-buffer
+semaphore/mempool limits staging. This directly addresses the lack of
+CPU/disk overlap in the previous design, not device throughput by itself.
+`prep_lower_write_overlap_starts` counts compression attempts starting
+while lower WRITEs are active; it is a concurrency diagnostic only.
+
+**VISION hypothesis:** with a compressible logical stream, output
+physical-byte fraction `r`, CPU prep ceiling `C`, and independent
+lower write cap `D`, the optimistic overlapped logical write ceiling
+is `min(C, D/r)`, before metadata/read/GC/queue overhead. At an
+illustrative `D=20 MB/s` and `r=0.6`, this gives `33.3 MB/s`
+if CPU and other costs permit. A simple unpaced RAM trial, even
+with `prep_lower_write_overlap_starts>0`, does not establish this
+result or physical flash endurance improvement.
+
+Accept only repeated/counterbalanced same-HEAD tests with (a) loaded
+byte-exact oracle, FUA/barriers/overwrite/GC/error and safe drain PASS;
+(b) identical immutable logical trace and actual compression histogram;
+(c) independently verified lower READ/WRITE bytes and requests, including
+GC; (d) a controlled *verified* roughly 20 MB/s lower write cap with
+identical device behavior for bare off, sync V3 and async V3;
+(e) achieved useful logical MB/s, CPU/memory, swap-in p95/p99 and read
+amplification. A measured upper throughput boost must be sustained
+without a correctness or unacceptable read-tail cost. This is still
+**NOT RUN** on a loaded kernel, and all V3 devices remain null_blk-only.
+
+The owner-only benchmark supports `--async-prepare` as a suffix
+to the explicitly authorized `--run-owned-ram-pair --profile medium
+--retain-ms {1|2} --unpaced` experiment. It records the module
+parameter before the owned mapper is created. `make test` stays rootless.
+
 ## Active comparison: uncompressed baseline versus V3
 
 **No V2.2 benchmark arm, no V2.2 performance gate.** V2.2 has been

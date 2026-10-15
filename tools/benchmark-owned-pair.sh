@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
-    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced'
+    echo 'Usage: sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair [--profile medium] [--retain-ms 2] [--unpaced] | --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced [--async-prepare]'
     exit 0
 fi
 PROFILE=default
@@ -14,6 +14,13 @@ QD=8
 WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
+ASYNC_PREPARE=0
+# Explicitly permit asynchronous preparation on the QD32 medium experiment.
+# Nothing about an arbitrary extra flag may authorize RAM device creation.
+if [[ $# -gt 1 && ${!#} == --async-prepare ]]; then
+    ASYNC_PREPARE=1
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
     :
 elif [[ $# == 3 && $1 == --run-owned-ram-pair &&
@@ -40,6 +47,10 @@ elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
     IOPS=0
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
+    exit 2
+fi
+if (( ASYNC_PREPARE )) && [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
+    echo 'BLOCKED: async preparation requires owned medium unpaced QD32' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -93,7 +104,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS RATE_MODE=$RATE_MODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE RATE_MODE=$RATE_MODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -251,7 +262,8 @@ create_owned_ram  # bare uncompressed
 create_owned_ram  # V3 backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 modprobe dm_mod
-insmod "$MODULE" || fail 'V3 module insertion rejected'
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
+    fail 'V3 module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz3[[:space:]]' ||
     fail 'V3 target registration missing'

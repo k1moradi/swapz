@@ -37,6 +37,28 @@ qualification; missing privilege or safe RAM-device ownership leaves the
 loaded phase **BLOCKED**, not PASS. The retired V2 utility is not installed.
 All build products belong under the one reused `~/swapz/build/` root.
 
+## Opt-in concurrent LZ4 preparation — candidate
+
+The default V3 write path remains serialized. The experimental
+`async_prepare=1` module parameter adds one bounded LZ4 producer
+running on a separate workqueue. It can compress later accepted writes
+while the existing ordered worker waits for an earlier lower WRITE.
+The producer owns temporary buffers only and never publishes mappings,
+issues lower I/O, or completes upper BIOs. A 64-buffer reserved mempool
+and semaphore bound its resident compression staging; the ordered
+consumer waits for each FIFO completion and preserves the original
+SWZ3 authority, read/overwrite/flush/FUA, GC, and shutdown rules.
+The on-disk format and the default `async_prepare=0` do not change.
+
+After a rootless `make test` pass, **separate explicit owner authorization**
+is required for the owned-RAM-only QD32 comparison:
+`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced --async-prepare`.
+The same command without `--async-prepare` is the same-source control.
+The new `prep_lower_write_overlap_starts` status value measures LZ4
+starts observed during a lower write; it is not a useful-MB/s win.
+**Loaded async correctness, bounded-bandwidth performance and endurance:
+NOT RUN.** Experimental null_blk-only admission remains enforced.
+
 ## Current work and documentation
 
 The active [V3 roadmap](docs/ROADMAP.md) and [TODO](docs/TODO.md)

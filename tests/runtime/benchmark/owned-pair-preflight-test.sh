@@ -9,6 +9,7 @@ bash -n "$SCRIPT"
 [[ $(bash "$SCRIPT" --help) == *'--retain-ms 2'* ]]
 [[ $(bash "$SCRIPT" --help) == *'--unpaced'* ]]
 [[ $(bash "$SCRIPT" --help) == *'--retain-ms 1 --unpaced'* ]]
+[[ $(bash "$SCRIPT" --help) == *'--async-prepare'* ]]
 if bash "$SCRIPT" >/dev/null 2>&1 ||
    bash "$SCRIPT" --unknown >/dev/null 2>&1 ||
    bash "$SCRIPT" --run-owned-ram-pair --profile unknown >/dev/null 2>&1 ||
@@ -22,6 +23,8 @@ if bash "$SCRIPT" >/dev/null 2>&1 ||
    bash "$SCRIPT" --run-owned-ram-pair --profile medium --retain-ms 3 --unpaced >/dev/null 2>&1 ||
    bash "$SCRIPT" --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced --extra >/dev/null 2>&1 ||
    bash "$SCRIPT" --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced --unknown >/dev/null 2>&1 ||
+   bash "$SCRIPT" --run-owned-ram-pair --async-prepare >/dev/null 2>&1 ||
+   bash "$SCRIPT" --run-owned-ram-pair --profile medium --retain-ms 2 --async-prepare >/dev/null 2>&1 ||
    bash "$SCRIPT" --run-owned-ram-pair --profile medium --retain-ms 4 >/dev/null 2>&1 ||
    bash "$SCRIPT" --run-owned-ram-pair --profile medium --retain-ms unknown >/dev/null 2>&1; then
     echo 'FAIL: unsafe default benchmark execution' >&2

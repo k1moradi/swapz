@@ -19,6 +19,9 @@
 #include <linux/hrtimer.h>
 #include <linux/ioprio.h>
 #include <linux/jiffies.h>
+#include <linux/completion.h>
+#include <linux/mempool.h>
+#include <linux/semaphore.h>
 #include <linux/ktime.h>
 #include <linux/lz4.h>
 #include <linux/module.h>
@@ -44,9 +47,34 @@
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
 
+/*
+ * Experimental opt-in: a separate bounded LZ4 producer may prepare future
+ * writes while the existing ordered commit worker waits on lower dm_io.
+ * The physical I/O and mapping authority remain single-thread owned.
+ */
+static bool sv3_async_prepare;
+module_param_named(async_prepare, sv3_async_prepare, bool, 0444);
+MODULE_PARM_DESC(async_prepare,
+		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O");
+
+struct sv3_prepared_page {
+	int length;
+	bool zero;
+	u8 bytes[SV3_BLOCK_BYTES];
+};
+
 struct sv3_bio_ref {
 	struct list_head list;
 	struct bio *bio;
+	/* Both lists refer to this dm_per_bio_data object. The ordered worker
+	 * waits for preparation_finished before touching the payload or BIO.
+	 * Only the ordered worker returns a prepared buffer to its pool. */
+	struct list_head preparation_list;
+	struct completion preparation_finished;
+	struct sv3_prepared_page *prepared_page;
+	mempool_t *preparation_pool;
+	struct semaphore *preparation_slots;
+	int preparation_error;
 };
 
 /* The worker attributes exactly one primary reason to each real window. */
@@ -76,6 +104,17 @@ struct sv3_dm {
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
 	struct delayed_work worker;
+	/* One bounded LZ4 producer, separate from the ordered I/O worker.
+	 * No producer ever changes maps, stages extents or completes BIOs. */
+	bool async_prepare;
+	struct workqueue_struct *preparation_workqueue;
+	struct work_struct preparation_worker;
+	struct list_head preparation_incoming;
+	struct semaphore preparation_slots;
+	mempool_t *preparation_pool;
+	u8 *preparation_input_page;
+	atomic_t lower_write_active;
+	u64 prepared_during_lower_write;
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
 	spinlock_t queue_lock;
@@ -214,8 +253,25 @@ struct sv3_dm {
 	u64 io_failures;
 };
 
+/*
+ * Per-BIO prepared bytes have one final owner: the serialized worker.
+ * Release before bio_endio(), which can invalidate dm_per_bio_data.
+ * Early release after copying into batch_bytes bounds producer memory.
+ */
+static void sv3_release_prepared(struct bio *bio)
+{
+	struct sv3_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+
+	if (!entry->prepared_page)
+		return;
+	mempool_free(entry->prepared_page, entry->preparation_pool);
+	entry->prepared_page = NULL;
+	up(entry->preparation_slots);
+}
+
 static void sv3_complete(struct bio *bio, int error)
 {
+	sv3_release_prepared(bio);
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
 	bio_endio(bio);
@@ -280,7 +336,13 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 		ctx->lower_write_submitted_reqs++;
 	}
 	section_start = ktime_get_ns();
+	/* The producer observes only this atomic diagnostic; lower I/O
+	 * completion and mapping publication remain owned by this caller. */
+	if (op == REQ_OP_WRITE)
+		atomic_set(&ctx->lower_write_active, 1);
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
+	if (op == REQ_OP_WRITE)
+		atomic_set(&ctx->lower_write_active, 0);
 	if (op == REQ_OP_READ)
 		ctx->lower_read_wall_ns +=
 			sv3_elapsed_ns(section_start, ktime_get_ns());
@@ -413,6 +475,81 @@ static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 		offset += vec.bv_len;
 	}
 	return offset == SV3_BLOCK_BYTES ? 0 : -EINVAL;
+}
+
+/*
+ * Asynchronous compression is restricted to an independent, finite producer.
+ * It neither acknowledges nor publishes any write. queue_lock transfers a
+ * BIO descriptor from preparation_incoming to this worker, which can then
+ * read its still-pinned upper BIO data. The ordered consumer waits on its
+ * completion and is solely responsible for recycling prepared_page.
+ *
+ * preparation_slots caps resident prepared pages to SV3_MAX_RECORDS even
+ * under unlimited incoming BIOs. Waiting for a slot cannot deadlock the
+ * consumer: the producer takes entries in the same FIFO admission order.
+ */
+static void sv3_preparation_worker(struct work_struct *work)
+{
+	struct sv3_dm *ctx =
+		container_of(work, struct sv3_dm, preparation_worker);
+	struct sv3_bio_ref *entry;
+	unsigned long flags;
+
+	for (;;) {
+		struct sv3_prepared_page *prepared;
+		u64 section_start;
+		int error;
+
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		if (list_empty(&ctx->preparation_incoming)) {
+			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			return;
+		}
+		entry = list_first_entry(&ctx->preparation_incoming,
+					struct sv3_bio_ref, preparation_list);
+		list_del_init(&entry->preparation_list);
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+
+		down(&ctx->preparation_slots);
+		prepared = mempool_alloc(ctx->preparation_pool, GFP_NOIO);
+		if (!prepared) {
+			entry->preparation_error = -ENOMEM;
+			up(&ctx->preparation_slots);
+			complete(&entry->preparation_finished);
+			continue;
+		}
+		error = sv3_copy_bio(entry->bio, ctx->preparation_input_page,
+				    false);
+		if (error) {
+			mempool_free(prepared, ctx->preparation_pool);
+			up(&ctx->preparation_slots);
+			entry->preparation_error = error;
+			complete(&entry->preparation_finished);
+			continue;
+		}
+		section_start = ktime_get_ns();
+		/* This counter records actual temporal overlap, not a physical
+		 * throughput or write-endurance result. */
+		if (atomic_read(&ctx->lower_write_active))
+			ctx->prepared_during_lower_write++;
+		prepared->length = LZ4_compress_fast(
+					ctx->preparation_input_page,
+					prepared->bytes, SV3_BLOCK_BYTES,
+					SV3_MAX_COMPRESSED, 1,
+					ctx->lz4_workmem);
+		ctx->lz4_wall_ns += sv3_elapsed_ns(section_start, ktime_get_ns());
+		prepared->zero = prepared->length > 0 &&
+				 prepared->length <= 64 &&
+				 sv3_page_is_zero(ctx->preparation_input_page);
+		if (prepared->length <= 0)
+			memcpy(prepared->bytes, ctx->preparation_input_page,
+			       SV3_BLOCK_BYTES);
+		/* Release ordering: complete() wakes the sole consumer. Do not
+		 * touch entry again after signaling: it may be bio_endio'd. */
+		entry->prepared_page = prepared;
+		entry->preparation_error = 0;
+		complete(&entry->preparation_finished);
+	}
 }
 
 /*
@@ -1015,6 +1152,7 @@ static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
 static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 {
 	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
+	struct sv3_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 	sv3_u8 i;
 	u64 section_start;
 	int length;
@@ -1035,16 +1173,33 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 			return error;
 	}
 
-	error = sv3_copy_bio(bio, ctx->input_page, false);
-	if (error)
-		return error;
-	section_start = ktime_get_ns();
-	length = LZ4_compress_fast(ctx->input_page,
-			ctx->batch_bytes +
-				(size_t)ctx->batch_count * SV3_BLOCK_BYTES,
-			SV3_BLOCK_BYTES, SV3_MAX_COMPRESSED, 1,
-			ctx->lz4_workmem);
-	ctx->lz4_wall_ns += sv3_elapsed_ns(section_start, ktime_get_ns());
+	if (ctx->async_prepare) {
+		/*
+		 * The producer has completed before the ordered worker entered
+		 * sv3_process(). Only this worker may consume/release the slot.
+		 * The input page and LZ4 work memory belong to the producer.
+		 */
+		if (entry->preparation_error || !entry->prepared_page)
+			return entry->preparation_error ?
+				entry->preparation_error : -EIO;
+		length = entry->prepared_page->length;
+		if (length > 0)
+			memcpy(ctx->batch_bytes +
+			       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
+			       entry->prepared_page->bytes, (size_t)length);
+	} else {
+		error = sv3_copy_bio(bio, ctx->input_page, false);
+		if (error)
+			return error;
+		section_start = ktime_get_ns();
+		length = LZ4_compress_fast(ctx->input_page,
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SV3_BLOCK_BYTES,
+				SV3_BLOCK_BYTES, SV3_MAX_COMPRESSED, 1,
+				ctx->lz4_workmem);
+		ctx->lz4_wall_ns += sv3_elapsed_ns(section_start,
+						   ktime_get_ns());
+	}
 	/* Account for compressibility as the kernel itself observes it.
 	 * A file extension or userspace fixture label is not the codec result;
 	 * raw fallback is already selected when the configured output cap
@@ -1079,7 +1234,8 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	 * the lower flush before this upper BIO completes.
 	 */
 	if (length > 0 && length <= 64 &&
-	    sv3_page_is_zero(ctx->input_page)) {
+	    (ctx->async_prepare ? entry->prepared_page->zero :
+	     sv3_page_is_zero(ctx->input_page))) {
 		ctx->next_window_close = SV3_CLOSE_ZERO;
 		error = sv3_flush_window(ctx);
 		if (!error)
@@ -1100,9 +1256,15 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		/* Preserve the complete original 4KiB page in worker-owned
 		 * staging. Admission and FUA ordering match compressed BIOs;
 		 * CRC authority is published only after the shared lower write. */
-		memcpy(ctx->batch_bytes +
-		       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
-		       ctx->input_page, SV3_BLOCK_BYTES);
+		if (ctx->async_prepare)
+			memcpy(ctx->batch_bytes +
+			       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
+			       entry->prepared_page->bytes, SV3_BLOCK_BYTES);
+		else
+			memcpy(ctx->batch_bytes +
+			       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
+			       ctx->input_page, SV3_BLOCK_BYTES);
+		sv3_release_prepared(bio);
 		sv3_window_admit_clock(ctx);
 		ctx->batch[ctx->batch_count++] = (struct sv3_pending_bio) {
 			.bio = bio,
@@ -1130,6 +1292,9 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		return 0;
 	}
 
+	/* batch_bytes now owns an immutable copy; release producer capacity
+	 * before waiting for a packed window's synchronous lower I/O. */
+	sv3_release_prepared(bio);
 	sv3_window_admit_clock(ctx);
 	ctx->batch[ctx->batch_count] = (struct sv3_pending_bio) {
 		.bio = bio,
@@ -1435,6 +1600,9 @@ static void sv3_worker(struct work_struct *work)
 
 		list_for_each_entry_safe(entry, next, &local, list) {
 			list_del_init(&entry->list);
+			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
+			    bio_sectors(entry->bio))
+				wait_for_completion(&entry->preparation_finished);
 			sv3_process(ctx, entry->bio);
 			if (!(remaining & 7U))
 				cond_resched();
@@ -1556,6 +1724,13 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 	}
 	entry = dm_per_bio_data(bio, sizeof(*entry));
 	INIT_LIST_HEAD(&entry->list);
+	INIT_LIST_HEAD(&entry->preparation_list);
+	entry->prepared_page = NULL;
+	entry->preparation_pool = ctx->preparation_pool;
+	entry->preparation_slots = &ctx->preparation_slots;
+	entry->preparation_error = 0;
+	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
+		init_completion(&entry->preparation_finished);
 	entry->bio = bio;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	/*
@@ -1567,6 +1742,13 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 		return DM_MAPIO_KILL;
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
+	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
+		/* Both queues share admission locking. The producer can run
+		 * while the ordered worker is blocked on prior lower I/O. */
+		list_add_tail(&entry->preparation_list,
+			      &ctx->preparation_incoming);
+		queue_work(ctx->preparation_workqueue, &ctx->preparation_worker);
+	}
 	/*
 	 * With retention off, the first ordinary WRITE starts one finite
 	 * admission coalescing interval; later writes join without extending
@@ -1618,10 +1800,16 @@ static void sv3_drain(struct dm_target *ti)
 	 * by work already executing on the draining queue.
 	 */
 	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+	/* The ordered worker frees prepared slots in FIFO order, allowing
+	 * even a full producer queue to drain. Do not destroy either queue
+	 * until every admitted BIO has reached its sole completion owner. */
+	if (ctx->preparation_workqueue)
+		drain_workqueue(ctx->preparation_workqueue);
 	flush_delayed_work(&ctx->worker);
 	drain_workqueue(ctx->workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (!list_empty(&ctx->incoming) || ctx->batch_count ||
+	if (!list_empty(&ctx->incoming) ||
+	    !list_empty(&ctx->preparation_incoming) || ctx->batch_count ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("V3 drain invariant: accepted BIOs remain after draining");
@@ -1662,6 +1850,14 @@ static void sv3_free(struct sv3_dm *ctx)
 		drain_workqueue(ctx->workqueue);
 		destroy_workqueue(ctx->workqueue);
 	}
+	if (ctx->preparation_workqueue) {
+		cancel_work_sync(&ctx->preparation_worker);
+		drain_workqueue(ctx->preparation_workqueue);
+		destroy_workqueue(ctx->preparation_workqueue);
+	}
+	if (ctx->preparation_pool)
+		mempool_destroy(ctx->preparation_pool);
+	vfree(ctx->preparation_input_page);
 	if (ctx->io_client)
 		dm_io_client_destroy(ctx->io_client);
 	if (ctx->backing)
@@ -1756,9 +1952,14 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
+	ctx->async_prepare = sv3_async_prepare;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
+	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, sv3_worker);
+	INIT_WORK(&ctx->preparation_worker, sv3_preparation_worker);
+	sema_init(&ctx->preparation_slots, SV3_MAX_RECORDS);
+	atomic_set(&ctx->lower_write_active, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, sv3_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
@@ -1883,6 +2084,25 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = -ENOMEM;
 		goto fail;
 	}
+	if (ctx->async_prepare) {
+		/* 64 preallocated producer pages, a semaphore enforcing the
+		 * same hard bound, and no dynamic allocations in ->map. */
+		ctx->preparation_input_page = vzalloc(SV3_BLOCK_BYTES);
+		ctx->preparation_pool = mempool_create_kmalloc_pool(
+					SV3_MAX_RECORDS,
+					sizeof(struct sv3_prepared_page));
+		if (!ctx->preparation_input_page || !ctx->preparation_pool) {
+			error = -ENOMEM;
+			goto fail;
+		}
+		ctx->preparation_workqueue = alloc_workqueue(
+					"swapz3-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,
+					1);
+		if (!ctx->preparation_workqueue) {
+			error = -ENOMEM;
+			goto fail;
+		}
+	}
 	ti->per_io_data_size = sizeof(struct sv3_bio_ref);
 	ti->num_flush_bios = 1;
 	ti->flush_supported = true;
@@ -1971,6 +2191,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
 		       "retain_timer_arm_skips=%llu "
+		       "async_prepare=%u prep_lower_write_overlap_starts=%llu "
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
@@ -2042,6 +2263,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_age_max_ns,
 		       ctx->retain_ms, ctx->retain_worker_passes,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
+		       ctx->async_prepare, ctx->prepared_during_lower_write,
 		       ctx->lz4_wall_ns, ctx->decode_wall_ns,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,

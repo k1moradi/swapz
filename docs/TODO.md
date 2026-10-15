@@ -7,6 +7,21 @@ checklist, not the dated V2.2 work log. Read
 [benchmark standard](benchmark.md) for the acceptance criteria.
 Use `main` only and follow the device/host safety restrictions.
 
+## Experimental concurrent-preparation gate
+
+- [ ] Run rootless native/source contracts and W=1/W=2 Kbuild at the
+      exact async source SHA. Loaded correctness is separate.
+- [ ] Verify full owned-RAM/null_blk FIFO readback for over 64 queued
+      WRITEs, repeated same-page writes, READ/FLUSH/FUA/DISCARD ordering,
+      lower WRITE injection, ENOSPC/GC and suspend/teardown; require no
+      leaked or double-completed BIO.
+- [ ] Counterbalanced medium QD32 off, synchronous V3 and
+      `--async-prepare` V3 same-source runs at verified fixed
+      ~20 MB/s independent lower WRITE cap. Measure input/lower
+      READ/WRITE MB/s, requests, read p95/p99, CPU, memory,
+      overlap starts, GC, integrity and teardown. Physical devices
+      remain prohibited. **Loaded async outcome: NOT RUN**.
+
 ## Blocking correctness and loaded qualification
 
 - [x] Verify zero-elision loaded correctness on a uniquely owned

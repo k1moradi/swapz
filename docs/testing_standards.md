@@ -111,6 +111,25 @@ mechanical check of **where the learning is recorded**, not a validator
 of semantic truth, tested runtime behavior or external agent prompt
 compliance.
 
+## Experimental concurrent LZ4 producer correctness
+
+The opt-in production C `async_prepare=1` producer uses one workqueue
+separate from the ordered lower-I/O worker. Native source contracts
+guard that the producer never calls `bio_endio`, `dm_io`, mapping
+publication or GC; only the consumer waits for preparation completion,
+recycles its buffer and completes the accepted upper BIO. A reserved
+64-buffer mempool plus semaphore caps resident preparation memory.
+The unchanged default is `async_prepare=0`.
+
+Run rootless contracts and W=1/W=2 builds first. Before promotion,
+loaded RAM-only qualification must cover 65+ queued BIOs, same-page
+overwrites, raw/zero/compressed mixes, independent/conflicting reads,
+FUA/PREFLUSH, GC, injected WRITE error and repeated drain/teardown,
+under memory pressure. Only then may an owner test verified lower
+bandwidth saturation as defined in [benchmark.md](benchmark.md).
+**Loaded async safety/performance: NOT RUN**; do not interpret a
+status overlap count as proof of useful throughput or media wear.
+
 ## Active V3-only default gates
 
 `make test` runs V3 native C suites, source/fixture/safety contracts,
