@@ -627,15 +627,19 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("hrtimer_cancel(&ctx->retention_timer);", drain)
         self.assertIn("hrtimer_cancel(&ctx->retention_timer);", free)
 
-    def test_alpha14_pack_ready_only_after_seven_compressed_admissions(self):
+    def test_alpha21_geometry_early_closure_only_after_valid_admission(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
         writer = body("sv3_accept_write")
         flush = body("sv3_flush_window")
         status = body("sv3_status")
         self.assertIn("sv3_window_pack_ready(", policy)
         self.assertIn("extent_bytes += pending[i].length", policy)
-        self.assertIn("SV3_MAX_EXTENT_BYTES", policy)
-        self.assertIn("!retain_ms || read_budget || count != 7U", policy)
+        self.assertIn("sizeof(struct sv3_header)", policy)
+        self.assertIn("count * sizeof(struct sv3_record)", policy)
+        for count in (2, 3, 7):
+            self.assertIn("count == %dU" % count, policy)
+        self.assertIn("!retain_ms || read_budget || !pending", policy)
+        self.assertIn("extent_blocks * SV3_BLOCK_BYTES", policy)
         self.assertIn("pending[i].raw", policy)
         self.assertLess(writer.index("ctx->batch_count++"),
                         writer.index("sv3_window_pack_ready("))

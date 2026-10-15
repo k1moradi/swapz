@@ -104,6 +104,47 @@ static int test_pack_ready_seven_medium_pages(void)
 	return 0;
 }
 
+static int test_pack_ready_two_and_three_page_real_extent_geometry(void)
+{
+	struct sv3_pending_bio batch[3] = { 0 };
+	unsigned int i;
+
+	for (i = 0; i < 3; ++i) {
+		batch[i].logical = 300 + i;
+		batch[i].length = 2073;
+	}
+	/* Two medium objects exceed 4KiB by 98B; three fit 8KiB. */
+	CHECK(!sv3_window_pack_ready(batch, 2, 2, 0));
+	CHECK(sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(sv3_window_pack_ready(batch, 3, 1, 0));
+	CHECK(!sv3_window_pack_ready(batch, 3, 0, 0));
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 1));
+	CHECK(!sv3_window_pack_ready(NULL, 3, 2, 0));
+	/* The exact 4KiB 2-record metadata limit is 2 * 2024 + 48. */
+	batch[0].length = 2024;
+	batch[1].length = 2024;
+	CHECK(sv3_window_pack_ready(batch, 2, 2, 0));
+	batch[1].length = 2025;
+	CHECK(!sv3_window_pack_ready(batch, 2, 2, 0));
+	/* The 8KiB 3-record metadata is 16 + 3*16 = 64B. */
+	for (i = 0; i < 3; ++i)
+		batch[i].length = 2700;
+	CHECK(sv3_window_pack_ready(batch, 3, 2, 0));
+	batch[2].length = 2800;
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	batch[2].length = 2700;
+	batch[0].raw = 1;
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	batch[0].raw = 0;
+	batch[1].length = 0;
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	batch[1].length = SV3_MAX_COMPRESSED + 1U;
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 1, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 4, 2, 0));
+	return 0;
+}
+
 static int test_pack_ready_rejects_raw_and_unfittable(void)
 {
 	struct sv3_pending_bio batch[7] = { 0 };
@@ -296,6 +337,7 @@ int main(void)
 	CHECK(test_disabled_empty_and_invalid_window() == 0); passed++;
 	CHECK(test_caller_fences_override_independence() == 0); passed++;
 	CHECK(test_pack_ready_seven_medium_pages() == 0); passed++;
+	CHECK(test_pack_ready_two_and_three_page_real_extent_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;

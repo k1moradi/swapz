@@ -36,35 +36,52 @@ static inline int sv3_window_read_independent(
 }
 
 /*
- * Alpha.14: a seven-record compressed window fits in ONE 16KiB extent
- * when the exact SWZ3 header, seven descriptors and all accepted LZ4
- * payloads occupy at most 16384 bytes. Seven separate 4KiB writes would
- * cost 28KiB; closing before an eighth write can reduce wait time.
+ * Alpha.21: the opt-in retained stream no longer needs to wait for seven
+ * records before EVERY useful lower write. Two sufficiently small LZ4
+ * records fit in one 4KiB extent, three medium records can fit in one
+ * 8KiB extent, and seven can fit in one 16KiB extent. A full format
+ * header plus one descriptor per record is included in each bound.
  *
- * This is only a byte-minimal planner feasibility bound, not a lower
- * device request-count or latency guarantee. It never publishes mappings,
- * modifies BIO ownership or changes the existing completion gate.
- * Only explicitly retained, unrestricted-read windows qualify; FUA and
- * duplicate-slot dependencies are fenced by the serialized caller.
+ * For the measured 2073-byte medium pages, two do NOT fit one 4KiB
+ * extent (4194B); three DO fit 8KiB (6283B vs 12KiB separate).
+ * This can end a 2ms retained window before the seventh arrival.
+ * It deliberately trades potential seven-page density for earlier
+ * acknowledgement, but only after the SAME successful lower write,
+ * mapping publication and optional flush as the original path.
+ *
+ * All page dependencies, duplicate slots and FUA/PREFLUSH fences are
+ * handled by the serialized caller before this eligibility check.
+ * Restricted read budgets, default retain_ms=0 and RAW/invalid pages
+ * fail closed. This geometry proof does NOT guarantee a speedup:
+ * benchmark lower WRITE bytes/requests and upper read/write p99 too.
  */
 static inline int sv3_window_pack_ready(
 		const struct sv3_pending_bio *pending, sv3_u8 count,
 		sv3_u8 retain_ms, sv3_u8 read_budget)
 {
-	sv3_u32 extent_bytes = sizeof(struct sv3_header) +
-		7U * sizeof(struct sv3_record);
+	sv3_u32 extent_bytes;
+	sv3_u8 extent_blocks;
 	sv3_u8 i;
 
-	if (!retain_ms || read_budget || count != 7U || !pending)
+	if (!retain_ms || read_budget || !pending)
 		return 0;
+	if (count == 2U)
+		extent_blocks = 1U;
+	else if (count == 3U)
+		extent_blocks = 2U;
+	else if (count == 7U)
+		extent_blocks = 4U;
+	else
+		return 0;
+	extent_bytes = sizeof(struct sv3_header) +
+		(sv3_u32)count * sizeof(struct sv3_record);
 	for (i = 0; i < count; ++i) {
 		if (pending[i].raw || !pending[i].length ||
 		    pending[i].length > SV3_MAX_COMPRESSED)
 			return 0;
 		extent_bytes += pending[i].length;
 	}
-	/* All seven ordered records, including exact metadata, fit. */
-	return extent_bytes <= SV3_MAX_EXTENT_BYTES;
+	return extent_bytes <= (sv3_u32)extent_blocks * SV3_BLOCK_BYTES;
 }
 
 /*

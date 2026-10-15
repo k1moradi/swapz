@@ -39,7 +39,7 @@
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
-#define SV3_ALPHA_VERSION "3.0.0-alpha.20"
+#define SV3_ALPHA_VERSION "3.0.0-alpha.21"
 #define SV3_WORK_QUANTUM_BIOS 64U
 #define SV3_MAX_COALESCE_MS 4U
 #define SV3_MAX_RETAIN_MS 4U
@@ -1144,9 +1144,11 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
-		/* All seven immutable staged upper writes fit one 16KiB
-		 * extent. The existing physical-success gate alone can
-		 * publish mapping generations and complete these BIOs. */
+		/* An exact 4/8/16KiB SWZ3 extent fits the staged
+		 * independent compressed records. This only changes when
+		 * the worker closes the retained window; original engine
+		 * write success, generation publication and upper FUA
+		 * completion remain the sole authority. */
 		ctx->next_window_close = SV3_CLOSE_PACK_READY;
 		ctx->packed_early_commits++;
 		sv3_flush_window(ctx);

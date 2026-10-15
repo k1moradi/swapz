@@ -4,7 +4,7 @@
 `swapz3` Device Mapper kernel module uses LZ4, raw fallback, and
 4/8/16KiB extent packing to seek fewer **actual lower-device write/read
 bytes and requests** for useful, verified 4KiB swap-page I/O. Current
-revision: **3.0.0-alpha.20, experimental, NOT production-ready**.
+revision: **3.0.0-alpha.21, experimental, NOT production-ready**.
 V3 deliberately rejects all backing devices except controlled `null_blk`
 until loaded correctness and resource-performance gates are satisfied.
 
@@ -381,6 +381,31 @@ Alpha.20 **1ms loaded NOT RUN**. No kernel C
 behavior is changed by this validation-only
 increment and no fixed physical disk bandwidth
 is imposed.
+
+## Alpha.21: useful 4/8KiB packed writes can commit before a 7-page wait
+
+This is an actual change to the **production V3 C write path**,
+not another benchmark or counter-only milestone. In
+`window-policy.h`, opt-in retained windows can now close
+when two compressed objects and exact SWZ3 descriptors fit
+one 4KiB extent, or when three fit one 8KiB extent. The
+previous seven-record 16KiB bound also remains supported.
+For the owner's real measured 2073B LZ4 medium payloads,
+three pages + 64B metadata fit **6283B into an 8KiB extent**,
+saving 4KiB versus three separate 4KiB writes. Previously
+V3 waited for seven pages to trigger early closure, leaving
+1,482 of 3,124 alpha.20 windows to expire at the deadline.
+
+The goal is **higher useful completed logical MB/s** and
+lower write-tail wait at high QD while retaining lower WRITE
+byte/request savings. Early 3-page commits might pack less
+densely than a later 7-page 16KiB commit, so **any physical
+WRITE increase must be independently measured**. Same
+serialized owner, authoritative mapping publication, CRC,
+FUA/PREFLUSH, GC and failed lower-I/O fences are preserved.
+Default `retain_ms=0` remains unchanged; V3 is still
+RAM-null_blk-only, experimental and NOT production ready.
+Loaded alpha.21 MB/s and correctness: **NOT RUN**.
 
 ## The active performance question
 

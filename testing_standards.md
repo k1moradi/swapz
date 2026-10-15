@@ -1121,3 +1121,61 @@ honestly; no 1ms owner-loaded result yet. This is
 intentionally an independent measurement/configuration
 increment, not a new production C algorithm; the
 module stays alpha.20 so comparisons share code.
+
+## Alpha.21 production C: useful short-window early commits
+
+Alpha.20 owner-loaded QD32 medium run at exact source
+`faf17bc2d3614cad56f1d027dda4d2acf6dc6e66`
+showed V3 **24.971397 logical WRITE MB/s versus
+14.853728 lower WRITE MB/s**, compared to the uncompressed
+**32.255877 MB/s** arm. Independently measured V3 physical
+WRITE bytes were 29,970,432 vs 50,384,896 off (40.517%
+saved), and lower WRITE requests 2,061 vs 12,301
+(83.245% saved). Read lower bytes/requests matched at
+16,723,968B and 4,083. Both arms passed full byte-exact
+1024-page oracle and clean owned RAM teardown; no GC.
+The V3 useful-input shortfall remained 22.58% vs off,
+with sampled WRITE p99 2.340ms vs 1.843ms off.
+Cumulative `close_deadline=1482` and
+`close_pack_ready=1642` out of 3,124 windows. These
+measurements **do not prove** which deadline windows
+would benefit from different packing.
+
+Alpha.21 makes a substantive C write-path policy change
+for **only already opted-in retention**. Previously, a
+7-record group that fit a single 16KiB V3 extent could
+close before the absolute deadline. The actual production
+`sv3_window_pack_ready` now accepts exactly:
+- 2 valid non-RAW compressed pages, including 16B
+  header plus 2x16B records, fitting 4,096B;
+- 3 such pages plus 16B header and 3x16B records,
+  fitting 8,192B; or
+- 7 such pages and 16B+7x16B metadata, fitting
+  16,384B (prior policy).
+All records must have 1..3568 actual accepted LZ4
+bytes; retain_ms>0, zero read-budget and non-NULL
+buffer are mandatory. The native regression checks
+two medium 2073B pages do NOT fit 4KiB but
+three DO fit 8KiB (6283B total), the exact
+two-page boundary at 2024B each, 2700B x3
+fitting 8KiB, and 2800B third, RAW, zero,
+oversized, disabled retention, read budget,
+invalid count and NULL rejections. Source
+contracts require FUA precedence, complete
+admission, exact metadata and the unchanged
+`sv3_flush_window` physical-success publication/
+upper-BIO completion gate. This directly
+addresses earlier closure without relaxing
+ordering, GC, CRC, device ownership or teardown.
+It can **reduce** effective seven-record density:
+for seven 2073B pages, earlier 3+3+1 writes
+can require 20KiB rather than one 16KiB
+extent. Thus a logical MB/s improvement is
+*not sufficient* if actual lower WRITE bytes,
+requests, READ p99 or FUA cost regress badly.
+Measure the retained 2ms alpha.21 owner-loaded
+same-source off/V3 QD32 trial, with full oracle
+and independent lower sector/request counters,
+then compare to alpha.20 under repeated
+counterbalanced conditions. Default retention
+remains off; alpha.21 loaded result: NOT RUN.
