@@ -32,3 +32,4 @@ test: all
 	@bash tools/test-rootless.sh
 	@$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
 	@$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
+	@bash tools/test-loaded.sh

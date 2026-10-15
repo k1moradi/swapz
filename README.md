@@ -26,15 +26,20 @@ or invoke internal build targets directly as public goals.
 | `make -j2` | Parallel V3 build without loading a module |
 | `make install` | Install version-owned V3 DKMS and safe helper without activation |
 | `make uninstall` | Remove only that version-owned installation |
-| `make test` | Run rootless production-C, source/fixture, safety and W=1/W=2 build checks; no sudo |
+| `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired 20 MiB/s sync/async benchmarks; no interactive sudo |
 
-**Owner hold:** do not execute privileged install/uninstall or loaded testing
-on the owner's host without separate authorization. Rootless `make test`
-does **not** establish loaded correctness or device performance. Loaded
-owned-RAM correctness and off/V3 trials are separately authorized operator
-procedures. Missing matching kernel headers or failing rootless checks blocks
-qualification; missing privilege or safe RAM-device ownership leaves the
-loaded phase **BLOCKED**, not PASS. The retired V2 utility is not installed.
+**Owner hold:** do not execute privileged installation or unowned-device
+testing. Full `make test` now executes rootless native/source checks,
+W=1/W=2 kernel compilation, an actual newly owned RAM/null_blk module
+readback smoke, then four rate-limited owned-RAM benchmark sessions in
+sync/async/async/sync order. Each off/V3 comparison uses the same
+immutable logical replay, reports measured lower bytes/requests, and
+checks correct readback. The loaded phase requires root or previously
+authorized `sudo -n` (noninteractive). Without it, the command exits
+nonzero **BLOCKED**, never prompts or reports a false overall PASS.
+No physical storage, active swap, swapon/swapoff or DKMS installation is
+touched. CI runs a private rootless gate only; its green status is
+**not** evidence of loaded throughput. The retired V2 utility is not installed.
 All build products belong under the one reused `~/swapz/build/` root.
 
 ## Opt-in concurrent LZ4 preparation — candidate
@@ -50,8 +55,9 @@ consumer waits for each FIFO completion and preserves the original
 SWZ3 authority, read/overwrite/flush/FUA, GC, and shutdown rules.
 The on-disk format and the default `async_prepare=0` do not change.
 
-After a rootless `make test` pass, **separate explicit owner authorization**
-is required for the owned-RAM-only QD32 comparison:
+The normal `make test` pipeline includes this experiment after
+successfully passing rootless and loaded-smoke gates. An isolated
+manual QD32 comparison, when separately authorized, is:
 `sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced --async-prepare`.
 The same command without `--async-prepare` is the same-source control.
 Append `--lower-mbps 20` immediately before `--async-prepare` in the

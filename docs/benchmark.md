@@ -44,12 +44,21 @@ are powered off, verifies each configured rate both before and after
 power-on, and refuses absent/mismatching attributes. Record achieved
 lower bytes/elapsed wall time independently: the presence of a
 configured cap is not evidence of saturation or a write-endurance win.
-Neither cap nor asynchronous option runs from `make test`.
+The full `make test` now invokes the two owned-RAM comparison variants
+twice in counterbalanced order, after rootless and loaded integrity
+checks. It never silently skips these loaded benchmarks. The private
+`tools/test-loaded.sh` uses `sudo -n` only if already authorized,
+or reports BLOCKED nonzero without a password prompt. CI invokes only
+the rootless half. A successful pair verifies I/O correctness and emits
+measurements; it does not assert a throughput improvement.
 
 The owner-only benchmark supports `--async-prepare` as a suffix
 to the explicitly authorized `--run-owned-ram-pair --profile medium
---retain-ms {1|2} --unpaced` experiment. It records the module
-parameter before the owned mapper is created. `make test` stays rootless.
+--retain-ms {1|2} --unpaced` experiment. It verifies the selected
+`async_prepare` value from the **loaded** target status before replay,
+and the opt-in asynchronous pair requires a positive observed count of
+LZ4 preparations starting during lower WRITEs. This is overlap
+evidence only, not proof of a real performance improvement.
 
 ## Active comparison: uncompressed baseline versus V3
 

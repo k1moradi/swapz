@@ -10,17 +10,19 @@ It is a **bootstrap**, not a seventh independent source of engineering policy.
 parallel; `make install` installs its versioned DKMS package and binary
 to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
-`make test` runs native C, source/fixture contracts, safety preflights,
-and W=1/W=2 compilation **without sudo or device activation**. Loaded
-owned-RAM correctness and paired benchmarks require a separately
-authorized explicit invocation of the owned-device scripts. All previously
-exposed root targets such as
+`make test` runs native C, source/fixture/safety contracts,
+W=1/W=2 kernel compilation, **then actual loaded owned-RAM smoke and
+counterbalanced rate-limited off/V3 benchmark pairs**. No interactive
+sudo is attempted: an ordinary user needs previously authorized
+noninteractive privilege, otherwise the command exits BLOCKED (nonzero)
+rather than misreporting a complete test. All previously exposed root targets such as
 `verify`, `run`, `deploy`, `v3`, `clean`, `bench-*`
 and `test-*` are **removed and must not be reintroduced**.
 Internal Kbuild/native-suite targets do not count as public root commands.
-A rootless `make test` PASS is not loaded-device evidence. Explicitly requested
-privileged qualification must report BLOCKED if privileges or safe owned RAM
-devices are unavailable; never silently skip that separate phase.
+Rootless CI runs `tools/test-rootless.sh` without device access; its PASS
+is not loaded-device evidence. The full `make test` must never silently
+skip a privileged qualification or prompt for a password: it reports
+BLOCKED if safe owned RAM devices or noninteractive privilege are unavailable.
 
 **Enforcement:** `tests/runtime/native/make-interface-test.py`
 runs in the internal rootless script and in GitHub CI, checks the exact

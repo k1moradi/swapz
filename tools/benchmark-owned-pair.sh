@@ -311,6 +311,8 @@ OWN_DM=1
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
     fail 'unexpected V3 retained policy after owned DM creation'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
+    fail 'loaded V3 async preparation does not match selected benchmark arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do
@@ -369,7 +371,17 @@ timeout --signal=TERM --kill-after=5s 120s python3 -B \
     --owned-nullblk-name "${NAMES[1]}" \
     --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
     --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
-note "V3_STATUS_AFTER=$(dmsetup status "$DMNAME")"
+v3_status_after="$(dmsetup status "$DMNAME")"
+note "V3_STATUS_AFTER=$v3_status_after"
+if (( ASYNC_PREPARE )); then
+    if [[ "$v3_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
+        (( ${BASH_REMATCH[1]} > 0 )) ||
+            fail 'async preparation never started while lower WRITE was active'
+        note "PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=${BASH_REMATCH[1]}"
+    else
+        fail 'loaded V3 did not expose the asynchronous preparation counter'
+    fi
+fi
 python3 -B tests/runtime/benchmark/io-replay.py compare \
     --reports "$SESSION/off.json" "$SESSION/v3.json" |
     tee "$SESSION/pair.json" || fail 'pair verification rejected'

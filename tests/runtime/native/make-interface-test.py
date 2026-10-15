@@ -39,12 +39,24 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("tools/test-rootless.sh", rootless_test_recipe)
         self.assertIn("W=1 all", rootless_test_recipe)
         self.assertIn("W=2 all", rootless_test_recipe)
-        for privileged in ("sudo", "deploy-nullblk.sh", "benchmark-owned-pair.sh",
-                           "modprobe", "dmsetup"):
+        # make test must execute the loaded test/benchmark or fail BLOCKED.
+        # No sudo password prompt or device actions in the make recipe.
+        self.assertIn("bash tools/test-loaded.sh", rootless_test_recipe)
+        for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
-        # Loaded qualification is explicit rather than an implicit make test action.
-        self.assertIn("tools/deploy-nullblk.sh",
-                      (ROOT / "tools/test-rootless.sh").read_text())
+        loaded = (ROOT / "tools/test-loaded.sh").read_text()
+        self.assertIn("sudo -n true", loaded)
+        self.assertIn("sudo -n bash", loaded)
+        self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)
+        self.assertIn("tools/deploy-nullblk.sh", loaded)
+        self.assertIn("tools/benchmark-owned-pair.sh", loaded)
+        self.assertIn("--lower-mbps 20", loaded)
+        self.assertIn("--async-prepare", loaded)
+        self.assertIn("for async_prepare in 0 1 1 0", loaded)
+        self.assertLess(loaded.index("tools/deploy-nullblk.sh"),
+                        loaded.index("tools/benchmark-owned-pair.sh"))
+        self.assertNotIn("swapon ", loaded)
+        self.assertNotIn("swapoff ", loaded)
         self.assertIn("W=1 all", MAKE)
         self.assertIn("W=2 all", MAKE)
         package = (ROOT / "tools/package-dkms.sh").read_text()

@@ -9,8 +9,11 @@ Use `main` only and follow the device/host safety restrictions.
 
 ## Experimental concurrent-preparation gate
 
-- [ ] Run rootless native/source contracts and W=1/W=2 Kbuild at the
-      exact async source SHA. Loaded correctness is separate.
+- [ ] Run the full fail-closed `make test` at exact HEAD, collecting
+      rootless/kernel build results, loaded integrity smoke and all four
+      counterbalanced rate-capped off/V3 reports. If no noninteractive
+      privileged access or safe RAM ownership exists, report BLOCKED,
+      not PASS. CI's rootless gates are separately labeled.
 - [ ] Verify full owned-RAM/null_blk FIFO readback for over 64 queued
       WRITEs, repeated same-page writes, READ/FLUSH/FUA/DISCARD ordering,
       lower WRITE injection, ENOSPC/GC and suspend/teardown; require no
