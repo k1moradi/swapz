@@ -694,3 +694,7 @@ Historical defect reviews, source-based checks, and offline evidence; V2.2 remai
 - [`docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md`](docs/archive/v2.2/audits/v22-virtual-benchmark-qualification.md)
 
 <!-- END COMPLETE DOCUMENTATION INDEX -->
+
+## Installation safety hold
+
+**Do not run `make install` or `make uninstall` yet**: the owner has reserved these commands for production-safety readiness. The packaging implementation installs a real read-only V3 administrative program, `/usr/local/sbin/swapz3ctl` (`version`, `status`, `help` only), plus the versioned DKMS module and owned-device test helper. Legacy V2 `swapzctl` is excluded because it can activate swap. The uninstall logic is limited to verified, version-owned files, requires a not-loaded module and successful DKMS removal. Rootless tests rehearse actual packaging with fake DKMS under `build/`; no system installation/removal or swap change has been performed.

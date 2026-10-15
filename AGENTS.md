@@ -74,3 +74,7 @@ provide versioned details, **not competing current policy**.
 The root `CODEX_VALIDATION.md` is a current agent bootstrap,
 not the former historical worklog. Follow these six documents if old instructions
 conflict about branches, build output, testing, or safety.
+
+## Owner hold on installation until production safety
+
+The owner will not execute `make install` or `make uninstall` before production-safety qualification. Keep their package semantics correct through rootless fake-DKMS lifecycle tests, but never run privileged installation, unloading, swap activation or uninstall on the owner's host without explicit future authorization. Install the read-only V3 `swapz3ctl`, not the V2 `swapzctl`; keep AUTOINSTALL disabled and preserve the exact four-command Make API. CI's mock package success is not a claim of system DKMS compatibility or production safety.

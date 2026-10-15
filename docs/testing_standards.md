@@ -1217,3 +1217,7 @@ ordering. The findings and links to all 15 safety audits are consolidated in
 V3 behavior or establish loaded, physical-device, or production readiness.
 Re-test a relevant invariant against *current V3 production C* instead of
 counting retired V2.2 rootless PASS results as V3 evidence.
+
+## Rootless package install/uninstall and production hold
+
+Do not ask the owner to run `make install` or `make uninstall` before V3's production safety gates are accepted. Rootless fake-DKMS tests must run under `build/tests/package-sandbox` and exercise the actual installer, including versioned source installation, the read-only `swapz3ctl` binary, refused activation arguments, ownership checks, double-install prevention, exact uninstall, modified binary refusal, failed DKMS removal quarantine and install rollback. Root execution must reject test-mode overrides. These test results are **not** loaded module correctness, real DKMS compatibility or production readiness. No root Make commands may be added beyond the four owner-approved commands.
