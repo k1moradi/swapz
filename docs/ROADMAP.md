@@ -21,8 +21,20 @@ For SD-model packed 4MiB reads, the serialized C path made exactly
 returning decoded data in ~1.83s versus ~0.40s raw. SSD-model
 payload requests averaged 635 sync / 632 async and packed passes
 remained slower than raw. These are not cold flash reads.
+The owner then ran `make test -j2` at exact source
+`d2eac4a1697879a566e7ca22a6d66f19ffc1562e`: all five stages PASS,
+202.14s loaded matrix, published in report-only `3d2f2507bab9`.
+SD-model sequential 4MiB READ improved from ~1.83s to 1.24/1.26s
+(sync/async), reducing metadata calls to 469/483 and backing READ
+bytes to 4.54/4.60 MiB. Seeded-random stayed ~1.84/1.83s with
+~1,024 metadata and 640 payload callbacks and ~6.81 MiB backing
+traffic. SSD-model sequential fell to ~0.31s but remained slower
+than ~0.22s raw; random stayed ~0.39/0.40s vs ~0.27s raw.
+Write throughput remained behind raw. All results are synthetic
+RAM models, not cold flash reads; the new full-extent-read experiment
+is NOT YET LOADED.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
-remain open. The next metadata-reuse C experiment is NOT YET LOADED.
+remain open.
 
 The authoritative acceptance and engineering rules are
 [vision](../VISION.md), [coding standards](coding_standards.md),
@@ -81,17 +93,21 @@ are still planned.
       A diagnostic-only read-path change now distinguishes metadata from
       payload lower callback requests and snapshots C read/decode wall
       counters across each timed 4MiB read pass, without new workloads.
-      These counters were owner-loaded at exact `933ff984` and expose
-      1,024 metadata plus ~632–640 payload callbacks per packed 4MiB
-      read, with severe SD-model tail latency. A new one-extent
-      **metadata-only** scratch reuse path is now implemented in
-      production C and exercised by a native mock lower-I/O test:
-      last successful verified block-zero is reused only on the same
-      immutable physical extent; mutation/fault invalidates immediately,
-      with no allocations or relaxed authority/CRC checks. The new
-      optimization remains **NOT LOADED / NOT PERFORMANCE QUALIFIED**
-      until the owner runs the exact-HEAD full qualification; metadata
-      hit count and lower bytes/requests will establish any actual gain.
+      The one-extent metadata cache was owner-qualified at exact
+      `d2eac4a`: sequential SD-model read time improved to ~1.24s,
+      but random still used ~1,024 metadata plus 640 payload calls
+      and took ~1.84s. A bounded production-C experiment now replaces
+      cold two-block (8KiB) metadata+dependent-payload reads with one
+      complete extent read, retaining the bytes only in existing scratch
+      for an immediately subsequent same-extent read. A strict one-block
+      planning budget retains metadata-first reads, as do 4-block extents.
+      No new allocations or mapping publication semantics; faults and
+      mutations invalidate, authority and CRC are still checked. The new
+      optimization is **NOT LOADED / NOT PERFORMANCE QUALIFIED**. Measure
+      independently counted lower READ bytes and requests, I/O-complete
+      latencies and p99, CPU, and WRITE results, not prefetch callbacks
+      alone. If extra lower bytes outweigh latency savings, retain the
+      narrower targeted reader rather than claiming a win.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

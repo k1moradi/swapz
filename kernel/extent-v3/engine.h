@@ -89,12 +89,17 @@ struct sv3_engine {
 	sv3_u32 read_metadata_requests;
 	sv3_u32 read_payload_requests;
 	sv3_u32 read_payload_blocks;
-	/* One verified block-zero metadata cache, held in read_scratch.
-	 * The caller serializes reads and invalidates before mutation. */
+	/* One-extent read cache in preallocated read_scratch. On a bounded
+	 * 8KiB fetch it may contain both blocks; otherwise only block zero.
+	 * The serialized caller invalidates before any mutation. */
 	sv3_u32 read_cached_start_block;
 	sv3_u8 read_cached_extent_blocks;
 	sv3_u8 read_cache_valid;
+	sv3_u8 read_cached_full;
 	sv3_u32 read_metadata_cache_hits;
+	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
+	sv3_u32 read_full_extent_requests;
+	sv3_u32 read_full_extent_cache_hits;
 };
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */

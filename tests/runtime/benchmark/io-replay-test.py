@@ -92,8 +92,9 @@ class PairReplayContract(unittest.TestCase):
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
-        before = dict(zip(fields, (10, 4, 5, 3000, 100, 2)))
-        after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000, 402)))
+        before = dict(zip(fields, (10, 4, 5, 3000, 100, 2, 1, 1)))
+        after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
+                                  402, 321, 201)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -105,6 +106,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_payload_reqs"], 512)
         self.assertEqual(measured["read_payload_blocks"], 512)
         self.assertEqual(measured["read_meta_cache_hits"], 400)
+        self.assertEqual(measured["read_full_extent_reqs"], 320)
+        self.assertEqual(measured["read_full_cache_hits"], 200)
         # A high reuse rate may make metadata requests fewer than payload
         # requests; this is valid as long as lower payload blocks match.
         self.assertEqual(module.kernel_read_delta(
@@ -113,6 +116,10 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_read_delta(after, before)
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_payload_blocks=200))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_full_extent_reqs=1100))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_full_cache_hits=500))
         bad = subprocess.CompletedProcess(["dmsetup"], 0,
                                           stdout="0 8192 swapz read_meta_reqs=4")
         with patch.object(module.subprocess, "run", return_value=bad):

@@ -97,13 +97,22 @@ reads and about 632–640 additional payload reads; the SD-emulated
 sequential trial took about 1.83s versus 0.40s raw. These are
 successful lower-callback counts, not physical flash commands.
 
-**New C experiment, NOT YET LOADED:** one verified metadata block may be
-reused for consecutive reads from the same immutable SWZ3 extent on the
-serialized worker. It uses existing scratch storage, invalidates on
-writes/GC/discards/barriers/read failure, and still validates each
-record's generation/CRC. The read benchmark now reports reuse hits
-alongside independently measured lower READ bytes/requests. No new
-performance win or device-endurance result has been demonstrated.
+**Owner-qualified metadata reuse:** source `d2eac4a1697879a566e7ca22a6d66f19ffc1562e`
+passed all five `make test` stages on the owner host (report-only
+`3d2f2507bab9`). The SD model's verified 4MiB sequential read improved
+from ~1.83s to ~1.24s, but random stayed ~1.84s with nearly zero
+metadata-reuse hits. Packed reads remain slower than bare raw, and
+the write-throughput loss persists.
+
+**Current C experiment, NOT YET LOADED:** for a cold two-block SWZ3
+extent only, issue one bounded 8KiB lower READ instead of a metadata
+READ followed by a dependent payload READ. Reuse its full bytes for
+later same-extent reads, using existing scratch, serial ownership,
+generation/CRC checks and mutation/error invalidation. Explicit
+one-block read budgets and larger extents retain selective I/O.
+This trades possible extra lower READ bytes for fewer delayed
+requests; neither faster real swap-in nor lower endurance cost is
+claimed before the next exact-HEAD loaded test.
 
 ## Current C performance work and qualification plan
 

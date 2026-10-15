@@ -169,10 +169,11 @@ static int test_full_window_and_selective_reads(void)
 	reads = disk.read_blocks;
 	CHECK(reads == engine.physical_read_blocks);
 	CHECK(reads >= 16 && reads <= 48);
-	/* Preserve the original exact cold-read/physical-block contract.
-	 * The new one-extent metadata cache is tested separately using the
-	 * actual C engine. Explicit invalidation prevents a warm hit from
-	 * making the existing cold-I/O assertion incorrectly fail. */
+	/* Preserve the original exact metadata-first selective-read contract.
+	 * Explicitly disable two-block prefetch for these per-page read-budget
+	 * checks and invalidate any warm metadata before each sample. The
+	 * separate engine tests verify the bounded full-extent fast path. */
+	engine.max_read_blocks_per_record = 1;
 	for (index = 0; index < 16; ++index) {
 		const struct sv3_map *m = &maps[index];
 		int expected;

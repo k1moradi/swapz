@@ -466,7 +466,8 @@ def packed_closes(path, identity):
 # C READ callback diagnostics: capture outside the READ stopwatch.
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
-                      "decode_wall_ns", "read_meta_cache_hits")
+                      "decode_wall_ns", "read_meta_cache_hits",
+                      "read_full_extent_reqs", "read_full_cache_hits")
 
 
 def kernel_read_snapshot(path, identity):
@@ -497,7 +498,9 @@ def kernel_read_delta(before, after):
         raise ValueError("V3 read telemetry reset during measurement")
     # Cache reuse can legitimately reduce metadata requests below payload
     # requests. Only counted payload block quantities must remain consistent.
-    if counters["read_payload_blocks"] < counters["read_payload_reqs"]:
+    if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
+            counters["read_full_extent_reqs"] > counters["read_meta_reqs"] or
+            counters["read_full_cache_hits"] > counters["read_meta_cache_hits"]):
         raise ValueError("inconsistent V3 read request accounting")
     return counters
 

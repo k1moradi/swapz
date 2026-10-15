@@ -47,6 +47,8 @@ def arm(candidate, *, mode, regime):
                     "lower_read_wall_ns": 120000000,
                     "decode_wall_ns": 20000000,
                     "read_meta_cache_hits": 128,
+                    "read_full_extent_reqs": 200,
+                    "read_full_cache_hits": 64,
                 } if v3 else None),
                 "replay_cpu_user_s": .15,
                 "replay_cpu_system_s": .12,
@@ -192,6 +194,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_reqs"], 1024)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_payload_reqs"], 512)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_cache_hits"], 128)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
+        self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])

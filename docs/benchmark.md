@@ -306,6 +306,48 @@ payload requests, preserving both failure categories. Loaded source
 qualification is still NOT RUN on this new HEAD.
 
 
+### Full two-block READ experiment after owner-qualified metadata reuse
+
+**Measured baseline, exact source `d2eac4a16978` (loaded owner run):**
+The previous metadata-only reuse reduced SD-model sequential 4MiB
+reads to 1.24s sync / 1.26s async, compared with ~1.83s before
+reuse and ~0.40s bare raw. It removed ~555/~541 metadata callbacks
+and read ~4.54/4.60 MiB rather than ~6.82 MiB. The seeded-random
+passes had only 0–1 cache hits, read ~6.81 MiB and took ~1.84s
+(sync) / ~1.83s (async) versus ~0.40s raw. On the SSD model,
+sequential candidate reads were ~0.31s versus ~0.22s raw and
+random ~0.39–0.40s versus ~0.27s. Write losses remain. This is
+RAM-only modeled performance; two pairs per mode have no confidence
+interval. Report-only commit `3d2f2507bab9` preserves the exact
+owner-run source `d2eac4a16978`.
+
+**New C hypothesis (NOT YET OWNER-LOADED):** On a metadata cache
+miss for exactly a two-block SWZ3 extent, submit one synchronous 8KiB
+lower read, rather than a 4KiB metadata read followed by a dependent
+4KiB payload request. Its fully populated scratch extent can be reused
+on a next read of that *same immutable* extent. Do not prefetch if the
+declared maximum read budget is one block, and keep the original
+selective path for single- and four-block extents. Full prefetch may
+read an unnecessary second block for block-zero-only records and
+increase lower READ bytes; this is **explicitly not** an I/O reduction
+claim until independently measured. Track `read_full_extent_reqs`,
+`read_full_cache_hits` with completed lower sectors/requests, timed
+4MiB sequential and seeded-random duration/p99, CPU and WRITE results.
+
+Safety and test boundaries: one serialized mapping worker alone owns
+the existing 16KiB `read_scratch`; no allocation, new target policy or
+on-disk change. Header/generation/authority and payload CRC are checked
+per logical read, including warm reuse. Lower errors leave no valid
+cache; direct compressed/batched/RAW/GC writes, discards and barriers
+invalidate before any mutation. Native tests independently check
+same-extent data correctness, stale-generation rejection, failed cold
+I/O, the strict one-block selective path and payload-failure
+invalidation. The previous exact cold-selective accounting test runs
+with a one-block limit; it is not relaxed. The full owned-RAM matrix
+must run at the **new exact SHA** before asserting a result; any
+increased read amplification or WRITE/p99 regression remains a
+negative outcome.
+
 ### Alpha.22 C change and qualification handoff
 
 The finite QD-wave replay waits for every operation before its next

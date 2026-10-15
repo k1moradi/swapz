@@ -214,9 +214,9 @@ static int test_failed_overwrite_keeps_prior_generation(void)
 }
 
 /*
- * Reuse only one already verified SWZ3 metadata block; never cache payload
- * from another page. A direct engine write, discarded cache, or failed
- * targeted read must cause a fresh lower metadata read.
+ * The bounded full-extent fast path uses existing scratch space and still
+ * checks every record's authoritative generation, metadata and payload CRC.
+ * Direct writes, discards and failed reads invalidate both cached blocks.
  */
 static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 {
@@ -240,7 +240,11 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	}
 	CHECK(engine.read_metadata_requests == 1);
 	CHECK(engine.read_metadata_cache_hits == 2);
-	CHECK(engine.read_cache_valid);
+	CHECK(engine.read_full_extent_requests == 1);
+	CHECK(engine.read_full_extent_cache_hits == 2);
+	CHECK(engine.physical_read_blocks == 2);
+	CHECK(engine.read_payload_requests == 0);
+	CHECK(engine.read_cache_valid && engine.read_cached_full);
 
 	/* A caller-owned DISCARD/barrier invalidates even without a WRITE. */
 	sv3_engine_invalidate_read_cache(&engine);
@@ -248,9 +252,11 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 					   sizeof(result), &size) == 0);
 	CHECK(engine.read_metadata_requests == 2);
 	CHECK(engine.read_metadata_cache_hits == 2);
+	CHECK(engine.read_full_extent_requests == 2);
 
-	/* Record zero's 2072-byte payload needs the second lower block.
-	 * On a failed payload request, the header must no longer be cached. */
+	/* A cold full-extent lower failure cannot leave stale metadata or
+	 * payload available to the next read. */
+	sv3_engine_invalidate_read_cache(&engine);
 	fail_read = 1;
 	CHECK(sv3_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == -EIO);
@@ -259,6 +265,7 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	CHECK(sv3_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
 	CHECK(engine.read_metadata_requests == 3);
+	CHECK(engine.read_full_extent_requests == 3);
 	CHECK(size == sizeof(result) &&
 	      !memcmp(result, payloads[0], size));
 
@@ -270,8 +277,45 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	CHECK(sv3_engine_read_page(&engine, 0, result,
 					   sizeof(result), &size) == 0);
 	CHECK(engine.read_metadata_requests == 4);
+	CHECK(engine.read_full_extent_requests == 4);
 	CHECK(size == sizeof(result) &&
 	      !memcmp(result, payloads[0], size));
+	return 0;
+}
+
+/*
+ * The explicit one-block read budget must not be bypassed by prefetch,
+ * including on the slow payload branch. A failed selective payload read
+ * invalidates the cached header and forces a fresh lower metadata read.
+ */
+static int test_one_block_read_budget_remains_selective(void)
+{
+	sv3_u8 committed = 0, result[2072];
+	sv3_u16 size = 0;
+
+	CHECK(setup() == 0);
+	CHECK(sv3_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(committed == 3 && map[0].extent_blocks == 2);
+	/* The fixture's first record spans a second physical block. */
+	engine.max_read_blocks_per_record = 1;
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == 0);
+	CHECK(size == sizeof(result) && !memcmp(result, payloads[0], size));
+	CHECK(engine.read_metadata_requests == 1);
+	CHECK(engine.read_full_extent_requests == 0);
+	CHECK(engine.read_payload_requests == 1);
+	CHECK(engine.physical_read_blocks == 2);
+	CHECK(!engine.read_cached_full && engine.read_cache_valid);
+	fail_read = 1;
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == -EIO);
+	CHECK(!engine.read_cache_valid && size == 0);
+	fail_read = 0;
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == 0);
+	CHECK(engine.read_metadata_requests == 2);
+	CHECK(engine.read_full_extent_requests == 0);
+	CHECK(size == sizeof(result) && !memcmp(result, payloads[0], size));
 	return 0;
 }
 
@@ -287,6 +331,7 @@ int main(void)
 	CHECK(test_preflight_requires_distinct_readback_buffers() == 0); passed++;
 	CHECK(test_failed_overwrite_keeps_prior_generation() == 0); passed++;
 	CHECK(test_same_extent_read_cache_reuse_and_fail_closed() == 0); passed++;
+	CHECK(test_one_block_read_budget_remains_selective() == 0); passed++;
 	printf("SV3_VERIFY_AFTER_WRITE_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -163,8 +163,10 @@ int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 
 void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 {
-	if (engine)
+	if (engine) {
 		engine->read_cache_valid = 0;
+		engine->read_cached_full = 0;
+	}
 }
 
 int sv3_engine_write_window(struct sv3_engine *engine,
@@ -579,8 +581,9 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	struct sv3_map observed;
 	const sv3_u8 *stored;
 	sv3_u32 bytes, first, last, start, count;
+	sv3_u8 initial_blocks = 1;
 	int error;
-	int cached_metadata;
+	int cached_metadata, cached_full;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
 	    !engine->io.read_blocks || !payload || !payload_length ||
@@ -595,27 +598,41 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			engine->authority->physical_blocks - observed.start_block)
 		return -ESTALE;
 	bytes = (sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES;
-	/* The ordered owner leaves only a verified header in read_scratch.
-	 * Reuse it solely for the same immutable extent, never a new mapping
-	 * or a write/discard/GC transition. Clear all non-header scratch on
-	 * a hit, so no payload bytes can leak from a previous record. */
+	/*
+	 * Two-block extent: the bounded one-request read trades up to one
+	 * extra 4KiB block for avoiding a second synchronous lower callback.
+	 * Never exceed the explicit one-block read-budget policy. Other
+	 * extents keep metadata-first selective I/O.
+	 *
+	 * The ordered worker owns read_scratch and invalidates on every
+	 * write/GC/discard/barrier. Only the same immutable physical extent
+	 * can reuse its block-zero metadata or complete two-block contents;
+	 * payload/generation/CRC validation still runs for EVERY logical read.
+	 */
 	cached_metadata = engine->read_cache_valid &&
 		engine->read_cached_start_block == observed.start_block &&
 		engine->read_cached_extent_blocks == observed.extent_blocks;
+	cached_full = cached_metadata && engine->read_cached_full;
 	engine->read_cache_valid = 0;
+	engine->read_cached_full = 0;
 	if (cached_metadata) {
-		if (bytes > SV3_BLOCK_BYTES)
+		if (!cached_full && bytes > SV3_BLOCK_BYTES)
 			memset(engine->read_scratch + SV3_BLOCK_BYTES, 0,
 			       bytes - SV3_BLOCK_BYTES);
 	} else {
+		if (observed.extent_blocks == 2 &&
+		    engine->max_read_blocks_per_record != 1)
+			initial_blocks = 2;
 		memset(engine->read_scratch, 0, bytes);
 		error = engine->io.read_blocks(engine->io.opaque,
-					       observed.start_block, 1,
+					       observed.start_block, initial_blocks,
 					       engine->read_scratch);
 		if (error)
 			return error;
-		engine->physical_read_blocks++;
+		engine->physical_read_blocks += initial_blocks;
 		engine->read_metadata_requests++;
+		if (initial_blocks == 2)
+			engine->read_full_extent_requests++;
 	}
 	error = sv3_peek(engine->read_scratch, bytes,
 			 observed.record_index, &peek);
@@ -628,8 +645,10 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	first = peek.payload_offset / SV3_BLOCK_BYTES;
 	last = ((sv3_u32)peek.payload_offset +
 		peek.payload_length - 1U) / SV3_BLOCK_BYTES;
-	/* Block zero is already in memory from metadata validation. */
-	start = first ? first : 1U;
+	/* Both blocks are already present after full prefetch or a
+	 * successful same-extent reuse; never issue a duplicate payload I/O. */
+	start = (cached_full || initial_blocks == 2) ?
+		observed.extent_blocks : (first ? first : 1U);
 	if (last >= start) {
 		count = last - start + 1U;
 		if (start + count > observed.extent_blocks)
@@ -652,12 +671,15 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		return -ENOSPC;
 	memcpy(payload, stored, decoded.payload_length);
 	*payload_length = decoded.payload_length;
-	/* Publish a reusable header only after successful authority, generation
+	/* Publish reusable bytes only after successful authority, generation
 	 * and payload-CRC validation. Any error path leaves the cache invalid. */
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
+	engine->read_cached_full = cached_full || initial_blocks == 2;
 	engine->read_cache_valid = 1;
 	if (cached_metadata)
 		engine->read_metadata_cache_hits++;
+	if (cached_full)
+		engine->read_full_extent_cache_hits++;
 	return 0;
 }
