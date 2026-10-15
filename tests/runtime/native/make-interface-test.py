@@ -30,7 +30,8 @@ class PublicMakeContract(unittest.TestCase):
         reporter = (ROOT / "tools/run-tests.py").read_text()
         for required in ("tools/test-rootless.sh", "tools/test-loaded.sh",
                          "W=1", "W=2", "build/test_results.json.xz",
-                         "gh", "release", "upload"):
+                         "tested_commit_sha", "code_commit_sha",
+                         "commit-tree", "mktree", "ls-remote", "push"):
             self.assertIn(required, reporter)
         self.assertIn("build/tests/device-roundtrip: tools/device-roundtrip.c", MAKE)
         self.assertIn("build/userspace/swapz3ctl: userspace/swapz3ctl.c "
@@ -137,11 +138,17 @@ class PublicMakeContract(unittest.TestCase):
             # Synthetic records model all four counterbalanced sessions;
             # mock Kbuild / loaded phase never touch actual host devices.
             import json
+            # This is STILL an unprivileged mock; use a real Git checkout
+            # commit identifier so the new source-provenance gate can
+            # distinguish a valid same-revision fixture from a forged SHA.
+            mocked_source_sha = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=ROOT,
+                text=True, timeout=5).strip()
             def mock_arm(candidate):
                 is_v3 = candidate == "v3"
                 return json.dumps({
                     "candidate": candidate, "verdict": "PASS",
-                    "source_sha": "fake-sha",
+                    "source_sha": mocked_source_sha,
                     "fixture_sha256": "fake-fixture",
                     "trace_sha256": "fake-trace", "verified_pages": 1024,
                     "read_p95_ns": 4000000 if is_v3 else 8000000,

@@ -212,6 +212,12 @@ to avoid repeatedly rerunning rootless CI. No interactive credential
 request is allowed. No private logs, host swap identities, device
 paths, authentication secrets or unsafe error text are committed.
 
+The existing fake-Kbuild regression uses the **real Git checkout SHA**
+in its *synthetic* loaded output rather than a placeholder identifier,
+so it exercises the provenance check without misrepresenting that mock
+as actual device or performance evidence. The policy assertion checks
+Git plumbing and SHA fields, not the deleted `gh`/Release interface.
+
 Tests in `test-report-test.py` exercise actual nonforce Git operations
 against a local bare remote (the configured GitHub push-URL safety
 check alone is mocked); they verify two report-only commits, the full
