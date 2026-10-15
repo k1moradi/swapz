@@ -37,13 +37,16 @@ swap, bypass the null_blk-only guard, or load on physical media.
 make -j2         # build experimental V3 module and owned-device helper
 make install     # install versioned V3 DKMS package + safe helper
 make uninstall   # uninstall only matching owned DKMS package + helper
-make test        # ALL rootless tests, loaded owned-RAM smoke and benchmarks
+make test        # rootless native/source/fixture tests and W=1/W=2; no sudo
 ```
 
 **No other root Make goals or aliases are allowed.** Internal Kbuild and
 native-suite make goals are not a public user interface. Missing kernel
-headers, sudo or exclusively owned RAM null_blk blocks the privileged
-test phase rather than counting it as PASS. The current V3 binary
+headers fail the build/test; lack of sudo or owned RAM null_blk blocks
+only the separately authorized loaded qualification, never rootless
+`make test`. Invoke `sudo bash tools/deploy-nullblk.sh` or
+`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair`
+only after explicit owner authorization and successful rootless gates. The current V3 binary
 `device-roundtrip` installs to `/usr/local/libexec/swapz/` by
 default. The retired V2 `swapzctl` is NOT installed because it
 invokes swapon/swapoff. The V3 DKMS install does not load or activate

@@ -7,12 +7,17 @@
 parallel; `make install` installs its versioned DKMS package and binary
 to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
-`make test` runs the full native, contract, loaded owned-RAM safety and
-paired benchmark pipeline. All previously exposed root targets such as
+`make test` runs native C, source/fixture contracts, safety preflights,
+and W=1/W=2 compilation **without sudo or device activation**. Loaded
+owned-RAM correctness and paired benchmarks require a separately
+authorized explicit invocation of the owned-device scripts. All previously
+exposed root targets such as
 `verify`, `run`, `deploy`, `v3`, `clean`, `bench-*`
 and `test-*` are **removed and must not be reintroduced**.
 Internal Kbuild/native-suite targets do not count as public root commands.
-Tests that need privileges must block rather than silently skip them.
+A rootless `make test` PASS is not loaded-device evidence. Explicitly requested
+privileged qualification must report BLOCKED if privileges or safe owned RAM
+devices are unavailable; never silently skip that separate phase.
 
 **Enforcement:** `tests/runtime/native/make-interface-test.py`
 runs in the internal rootless script and in GitHub CI, checks the exact
@@ -108,8 +113,11 @@ compliance.
 
 ## Active V3-only default gates
 
-`make test` runs V3 native C suites without the retired C++ model; the
-latter is retained for explicit historical reproduction only.
+`make test` runs V3 native C suites, source/fixture/safety contracts,
+and W=1/W=2 builds **without sudo or loading a module**.
+The retired C++ model is retained for explicit historical reproduction.
+Loaded owned-RAM correctness and paired performance are separate
+opt-in owner-authorized tests; rootless PASS does not satisfy them.
 `python3 -B tests/runtime/benchmark/io-replay-test.py -v` verifies the
 **two-arm** off/V3 oracle including bad-input rejection in safe rootless
 files. Benchmarks require an actual loaded V3 module before claiming

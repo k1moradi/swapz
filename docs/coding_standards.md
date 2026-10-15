@@ -7,12 +7,17 @@
 parallel; `make install` installs its versioned DKMS package and binary
 to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
-`make test` runs the full native, contract, loaded owned-RAM safety and
-paired benchmark pipeline. All previously exposed root targets such as
+`make test` runs native C, source/fixture contracts, safety preflights,
+and W=1/W=2 compilation **without sudo or device activation**. Loaded
+owned-RAM correctness and paired benchmarks require a separately
+authorized explicit invocation of the owned-device scripts. All previously
+exposed root targets such as
 `verify`, `run`, `deploy`, `v3`, `clean`, `bench-*`
 and `test-*` are **removed and must not be reintroduced**.
 Internal Kbuild/native-suite targets do not count as public root commands.
-Tests that need privileges must block rather than silently skip them.
+A rootless `make test` PASS is not loaded-device evidence. Explicitly requested
+privileged qualification must report BLOCKED if privileges or safe owned RAM
+devices are unavailable; never silently skip that separate phase.
 
 **Enforcement:** `tests/runtime/native/make-interface-test.py`
 runs in the internal rootless script and in GitHub CI, checks the exact

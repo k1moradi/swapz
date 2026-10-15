@@ -32,10 +32,3 @@ test: all
 	@bash tools/test-rootless.sh
 	@$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
 	@$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
-	@sudo -v
-	@sudo bash tools/deploy-nullblk.sh
-	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair
-	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium
-	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2
-	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
-	@sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair --profile medium --retain-ms 1 --unpaced

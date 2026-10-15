@@ -57,7 +57,7 @@ cd ~/swapz
 make -j2         # build V3 in parallel; never load it
 make install     # install current V3 DKMS and safe helper; no activation
 make uninstall   # reverse this version-owned installation
-make test        # all native tests, owned-RAM loaded smoke and benchmarks
+make test        # rootless tests, contracts and W=1/W=2 builds; no sudo
 ```
 
 `make install` stages versioned sources in
@@ -73,18 +73,21 @@ interface calls `swapon` and `swapoff`.
 `make uninstall` refuses to delete unowned resources
 or remove a loaded module. It does not touch active swap.
 
-`make test` first executes all native production-C tests,
-source contracts and RAM-device safety preflights without
-root. It then builds the current kernel with W=1/W=2,
-requires sudo, runs the ephemeral owned-RAM `null_blk`
-correctness smoke, and runs all supported off/V3
-comparisons, including unpaced QD32 retention.
-These phases are ordered, byte-exact and bounded,
-with independent lower READ/WRITE statistics and
-safe teardown/quarantine. **Missing kernel headers,
-sudo or a safely owned RAM device is a failure/blocker,
-not a silently skipped test**. The rootless-only CI
-runs its private script rather than invoking loaded tests.
+`make test` executes native production-C suites, source
+contracts, deterministic off/V3 replay tests, safety preflights
+and W=1/W=2 kernel builds **without invoking sudo**.
+Missing kernel headers or failed rootless tests are failures;
+they are not silently skipped. This is not loaded-device evidence.
+Privileged correctness smoke and off/V3 paired throughput comparisons
+are **separate, explicitly authorized** owner operations using
+`sudo bash tools/deploy-nullblk.sh` and
+`sudo bash tools/benchmark-owned-pair.sh --run-owned-ram-pair`
+(with separately selected `--profile medium`, `--retain-ms` and
+`--unpaced` flags). Those scripts retain owned-RAM `null_blk`
+checks, independent READ/WRITE statistics and guarded teardown.
+If sudo or a safe exclusively owned RAM device is unavailable,
+report the **loaded** qualification BLOCKED; never conflate it
+with rootless `make test` PASS.
 
 **Automatic enforcement:** The rootless
 `tests/runtime/native/make-interface-test.py` and

@@ -35,8 +35,16 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("tools/package-dkms.sh install", MAKE)
         self.assertIn("tools/package-dkms.sh uninstall", MAKE)
         self.assertIn("tools/test-rootless.sh", MAKE)
-        self.assertIn("sudo bash tools/deploy-nullblk.sh", MAKE)
-        self.assertIn("sudo bash tools/benchmark-owned-pair.sh", MAKE)
+        rootless_test_recipe = MAKE.split("\ntest: all\n", 1)[1]
+        self.assertIn("tools/test-rootless.sh", rootless_test_recipe)
+        self.assertIn("W=1 all", rootless_test_recipe)
+        self.assertIn("W=2 all", rootless_test_recipe)
+        for privileged in ("sudo", "deploy-nullblk.sh", "benchmark-owned-pair.sh",
+                           "modprobe", "dmsetup"):
+            self.assertNotIn(privileged, rootless_test_recipe)
+        # Loaded qualification is explicit rather than an implicit make test action.
+        self.assertIn("tools/deploy-nullblk.sh",
+                      (ROOT / "tools/test-rootless.sh").read_text())
         self.assertIn("W=1 all", MAKE)
         self.assertIn("W=2 all", MAKE)
         package = (ROOT / "tools/package-dkms.sh").read_text()

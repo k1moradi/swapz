@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           bash tools/test-rootless.sh
-          # Privileged loaded tests are only run by an owner with make test.
+          # Loaded tests require separate explicit owner authorization.
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
       - name: Enforce the four-command Make API
@@ -36,8 +36,11 @@ jobs:
           python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq '.PHONY: all install uninstall test' Makefile
-          grep -Fq 'sudo bash tools/deploy-nullblk.sh' Makefile
-          grep -Fq 'sudo bash tools/benchmark-owned-pair.sh' Makefile
+          grep -Fq '@bash tools/test-rootless.sh' Makefile
+          if sed -n '/^test: all$/,$p' Makefile | grep -Eq 'sudo|deploy-nullblk|benchmark-owned-pair'; then
+            echo 'FAIL: make test must never request root or create a device'
+            exit 1
+          fi
       - name: Enforce V3-only active defaults and two-arm benchmark
         shell: bash
         run: |
