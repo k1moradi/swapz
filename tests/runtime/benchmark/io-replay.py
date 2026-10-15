@@ -20,6 +20,7 @@ import stat
 import subprocess
 import struct
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -485,45 +486,69 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
     orders = {"sequential": list(range(logical_pages)),
               "seeded_random": random.Random(0x51A0A9).sample(
                   range(logical_pages), logical_pages)}
+    # Allocate buffers and start worker threads BEFORE any timed read.
+    # A previous benchmark included fresh mmap, worker startup and worker
+    # pool destruction in its read latency/throughput measurements.
+    buffers = [mmap.mmap(-1, PAGE) for _ in range(qd)]
+    views = [memoryview(buf) for buf in buffers]
     measured = {}
-    for mode, pages in orders.items():
-        def read_one(page):
-            buffer = mmap.mmap(-1, PAGE)
-            view = memoryview(buffer)
-            try:
-                start_ns = time.monotonic_ns()
-                full_read(fd, page, view, chunks[page % len(chunks)])
-                return time.monotonic_ns() - start_ns
-            finally:
-                view.release()
-                buffer.close()
-        lower_before = lower_stat(identity.get("owned_disk"))
-        cpu_before = process_cpu()
-        start_ns = time.monotonic_ns()
+    try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=qd) as pool:
-            durations = []
-            for base in range(0, logical_pages, qd):
-                wave = pages[base:base + qd]
-                jobs = [pool.submit(read_one, page) for page in wave]
-                durations.extend(job.result() for job in jobs)
-        duration = (time.monotonic_ns() - start_ns) / 1e9
-        cpu_after = process_cpu()
-        lower_after = lower_stat(identity.get("owned_disk"))
-        if duration <= 0 or len(durations) != logical_pages:
-            raise ValueError("invalid fixed-volume read accounting")
-        durations.sort()
-        measured[mode] = {
-            "logical_bytes": logical_pages * PAGE,
-            "verified_pages": len(durations),
-            "verified_image_sha256": image_sha,
-            "seconds": duration,
-            "useful_read_mbps": logical_pages * PAGE / duration / 1e6,
-            "read_p99_ms": durations[int((len(durations) - 1) * .99)] / 1e6,
-            "lower_io": iostat_delta(lower_before, lower_after),
-            "replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
-            "replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
-            "replay_peak_rss_kb": cpu_after[2],
-        }
+            # Complete one no-I/O task per worker before first stopwatch.
+            # Use a barrier so 32 concurrent kernel-request workers exist
+            # before either arm's first measured read is submitted.
+            barrier = threading.Barrier(qd + 1)
+            jobs = [pool.submit(barrier.wait) for _ in range(qd)]
+            barrier.wait(timeout=10)
+            for job in jobs:
+                job.result(timeout=10)
+
+            def read_one(page, slot):
+                start_ns = time.monotonic_ns()
+                count = os.preadv(fd, [views[slot]], page * PAGE)
+                elapsed_ns = time.monotonic_ns() - start_ns
+                # Correctness checking occurs AFTER the individual I/O
+                # latency sample, before buffers can be recycled.
+                if count != PAGE or views[slot] != chunks[page % len(chunks)]:
+                    raise OSError("short or mismatched packed swap-in page")
+                return elapsed_ns
+
+            for mode, pages in orders.items():
+                lower_before = lower_stat(identity.get("owned_disk"))
+                cpu_before = process_cpu()
+                start_ns = time.monotonic_ns()
+                durations = []
+                for base in range(0, logical_pages, qd):
+                    wave = pages[base:base + qd]
+                    jobs = [pool.submit(read_one, page, slot)
+                            for slot, page in enumerate(wave)]
+                    durations.extend(job.result() for job in jobs)
+                # Stop before teardown, CPU sampling, lower stat capture
+                # and the digest/report calculation.
+                duration = (time.monotonic_ns() - start_ns) / 1e9
+                cpu_after = process_cpu()
+                lower_after = lower_stat(identity.get("owned_disk"))
+                if duration <= 0 or len(durations) != logical_pages:
+                    raise ValueError("invalid fixed-volume read accounting")
+                durations.sort()
+                measured[mode] = {
+                    "logical_bytes": logical_pages * PAGE,
+                    "verified_pages": len(durations),
+                    "verified_image_sha256": image_sha,
+                    "seconds": duration,
+                    "useful_read_mbps": logical_pages * PAGE / duration / 1e6,
+                    "read_p99_ms": durations[int((len(durations) - 1) * .99)] / 1e6,
+                    "lower_io": iostat_delta(lower_before, lower_after),
+                    "replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
+                    "replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
+                    "replay_peak_rss_kb": cpu_after[2],
+                    "timed_scope": "QD32 read submission and completion; buffers and worker setup excluded",
+                }
+    finally:
+        for view in views:
+            view.release()
+        for buffer in buffers:
+            buffer.close()
     return {
         "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ"
                           if packed_delta is not None else
@@ -593,21 +618,16 @@ def replay(args):
                 scratch.release()
                 bufmap.close()
 
-            def execute(item):
-                start = time.monotonic_ns()
-                if item["op"] == "W":
-                    full_write(fd, item["page"], chunks[item["fixture"]])
-                else:
-                    buffer = mmap.mmap(-1, PAGE)
-                    view = memoryview(buffer)
-                    try:
-                        full_read(fd, item["page"], view, chunks[item["fixture"]])
-                    finally:
-                        view.release()
-                        buffer.close()
-                return time.monotonic_ns() - start
-
-            warmup_ns = 0
+            # Allocate reusable QD-slot read buffers before warmup and
+            # measurement. The old hot path did mmap/free for EVERY read.
+            # The throughput clock covers exactly the measured I/O waves,
+            # including their required final device flush.
+            # Pre-split the immutable trace before any benchmark clock;
+            # list slicing is workload preparation, not target I/O.
+            replay_waves = [trace[i:i + mf["qd"]]
+                            for i in range(0, len(trace), mf["qd"])]
+            mixed_buffers = [mmap.mmap(-1, PAGE) for _ in range(mf["qd"])]
+            mixed_views = [memoryview(buf) for buf in mixed_buffers]
             samples = {"W": [], "R": []}
             measured_start_ns = None
             measured_end_ns = None
@@ -615,32 +635,59 @@ def replay(args):
             cpu_after = None
             before = None
             after = None
-            with concurrent.futures.ThreadPoolExecutor(max_workers=mf["qd"]) as pool:
-                for first in range(0, len(trace), mf["qd"]):
-                    wave = trace[first:first + mf["qd"]]
-                    if wave[0]["phase"] == "measure" and measured_start_ns is None:
-                        before = lower_stat(identity.get("owned_disk"))
-                        cpu_before = process_cpu()
-                        measured_start_ns = time.monotonic_ns()
-                    if wave[0]["phase"] == "warmup":
-                        warmup_ns = time.monotonic_ns()
-                    if mf["iops"] and wave[0]["phase"] == "measure":
-                        # Fixed offered schedule; equal operation sequence,
-                        # not a false claim of identical physical arrival.
-                        due = (measured_start_ns +
-                               (wave[0]["seq"] - mf["warmup_ops"]) * 1000000000 // mf["iops"])
-                        remain = due - time.monotonic_ns()
-                        if remain > 0:
-                            time.sleep(remain / 1e9)
-                    futures = [pool.submit(execute, item) for item in wave]
-                    for item, future in zip(wave, futures):
-                        elapsed = future.result()  # fail closed on any short/mismatch
-                        if item["phase"] == "measure":
-                            samples[item["op"]].append(elapsed)
-                os.fsync(fd)
-                measured_end_ns = time.monotonic_ns()
-                cpu_after = process_cpu()
-                after = lower_stat(identity.get("owned_disk"))
+            try:
+                def execute(item, slot):
+                    start = time.monotonic_ns()
+                    if item["op"] == "W":
+                        count = os.pwritev(fd, [chunks[item["fixture"]]],
+                                           item["page"] * PAGE)
+                    else:
+                        count = os.preadv(fd, [mixed_views[slot]],
+                                          item["page"] * PAGE)
+                    elapsed = time.monotonic_ns() - start
+                    # Never include Python byte-oracle checking in the
+                    # individual I/O latency measurement. Still fail the
+                    # operation BEFORE the wave and buffer slot can advance.
+                    if count != PAGE or (item["op"] == "R" and
+                            mixed_views[slot] != chunks[item["fixture"]]):
+                        raise OSError("short or mismatched timed logical I/O")
+                    return elapsed
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=mf["qd"]) as pool:
+                    barrier = threading.Barrier(mf["qd"] + 1)
+                    jobs = [pool.submit(barrier.wait) for _ in range(mf["qd"])]
+                    barrier.wait(timeout=10)
+                    for job in jobs:
+                        job.result(timeout=10)
+                    for wave in replay_waves:
+                        if wave[0]["phase"] == "measure" and measured_start_ns is None:
+                            before = lower_stat(identity.get("owned_disk"))
+                            cpu_before = process_cpu()
+                            measured_start_ns = time.monotonic_ns()
+                        if mf["iops"] and wave[0]["phase"] == "measure":
+                            due = (measured_start_ns +
+                                   (wave[0]["seq"] - mf["warmup_ops"]) *
+                                   1000000000 // mf["iops"])
+                            remain = due - time.monotonic_ns()
+                            if remain > 0:
+                                time.sleep(remain / 1e9)
+                        futures = [pool.submit(execute, item, slot)
+                                   for slot, item in enumerate(wave)]
+                        for item, future in zip(wave, futures):
+                            elapsed = future.result()  # fail closed on mismatch
+                            if item["phase"] == "measure":
+                                samples[item["op"]].append(elapsed)
+                    # Acknowledged write completion requires final drain.
+                    # Buffer and executor teardown are not part of the clock.
+                    os.fsync(fd)
+                    measured_end_ns = time.monotonic_ns()
+                    cpu_after = process_cpu()
+                    after = lower_stat(identity.get("owned_disk"))
+            finally:
+                for view in mixed_views:
+                    view.release()
+                for buffer in mixed_buffers:
+                    buffer.close()
             post_hash = hashlib.sha256()
             buffer = mmap.mmap(-1, PAGE)
             scratch = memoryview(buffer)
@@ -687,6 +734,9 @@ def replay(args):
         "mixed_replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
         "mixed_replay_peak_rss_kb": cpu_after[2],
         "cpu_scope": "replay process+threads only; kernel DM workers excluded",
+        "mixed_timed_scope": ("measured logical QD waves and required final fsync; "
+                              "excludes prefill, fixture/trace setup, warmup, "
+                              "buffer allocations, executor startup and post-run oracle"),
         "packed_read": packed_read,
         "lower_io": iostat_delta(before, after), "verdict": "PASS",
         "read_p50_ns": percentile(samples["R"], .50),

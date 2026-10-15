@@ -19,14 +19,10 @@ COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
 MODEL_SPECS = {
-    "capped": {"cap_mib_s": 20, "completion_nsec": 0, "irqmode": 1,
-               "purpose": "BANDWIDTH_ONLY_REFERENCE"},
     "sd_emulated": {"cap_mib_s": 10, "completion_nsec": 1000000, "irqmode": 2,
                     "purpose": "SYNTHETIC_LOW_BANDWIDTH_HIGH_DELAY"},
     "ssd_emulated": {"cap_mib_s": 80, "completion_nsec": 150000, "irqmode": 2,
                      "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY"},
-    "uncapped": {"cap_mib_s": 0, "completion_nsec": 0, "irqmode": 1,
-                 "purpose": "OVERHEAD_DIAGNOSTIC_ONLY"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
 
@@ -96,9 +92,9 @@ def failure_context(output):
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             pair_number += 1
             mode = "async" if line.rstrip().endswith("=1") else "sync"
-            phase = f"owned RAM comparison {pair_number}/16 ({mode})"
+            phase = f"owned RAM comparison {pair_number}/8 ({mode})"
         elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
-            phase = f"after completed owned RAM comparison {pair_number}/16"
+            phase = f"after completed owned RAM comparison {pair_number}/8"
 
     if "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
@@ -308,7 +304,7 @@ def benchmark_verdicts(sessions):
                         "reason": f"{regime}: exact owned-RAM bandwidth/timer model was not verified"}
         regimes[regime] = rows
     if len(sessions) != len(MODEL_ORDER) * 4:
-        return {"overall": "INCOMPLETE", "reason": "exactly sixteen owned pairs required"}
+        return {"overall": "INCOMPLETE", "reason": "exactly eight modeled RAM-only pairs required"}
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
         status = row.get("kernel_status", {})
@@ -412,9 +408,7 @@ def benchmark_verdicts(sessions):
         verdicts[regime] = {
             "columns": columns, "criteria": criteria,
             "device_model": MODEL_SPECS[regime],
-            "interpretation": ("DIAGNOSTIC_ONLY_NO_PRODUCT_PERFORMANCE_VERDICT"
-                               if regime == "uncapped" else
-                               "SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA"),
+            "interpretation": "SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA",
             "alpha22_kernel_counters": {
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
@@ -486,7 +480,7 @@ def print_bench(result):
               f"pack closes={kc['close_pack_ready']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
               f"GC victims={kc['gc_victims']:.1f}")
-    print("\n  LIMITATIONS: unthrottled RAM is diagnostic only; every modeled profile is synthetic. "
+    print("\n  LIMITATIONS: timer-delayed RAM models are synthetic; no physical-media claim. "
           "Two pairs per mode, no confidence interval; replay CPU"
           " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
           "live GC NOT EXERCISED.")
@@ -661,7 +655,7 @@ def main():
                                  f"KDIR={args.kdir}", "W=1", "all"]),
         ("Kernel warnings W=2", ["make", "-C", "kernel/extent-v3",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
-        ("Owned RAM smoke and 16 pairs", ["bash", "tools/test-loaded.sh"])
+        ("Owned RAM smoke and 8 pairs", ["bash", "tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):

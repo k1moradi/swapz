@@ -858,10 +858,10 @@ class V3ProductionSourceQualification(unittest.TestCase):
                       benchmark)
         self.assertIn("--async-prepare", benchmark)
         self.assertIn("RATE_MODE != unpaced", benchmark)
-        # The old fixed 20MiB cap is now one of four EXACT
-        # owner-RAM models, not an arbitrary physical-device argument.
+        # The mandatory run now has exactly TWO delay-modeled owned-RAM
+        # environments, not the historical bandwidth/uncapped controls.
         self.assertIn("LOWER_MBPS=0", benchmark)
-        self.assertIn("0:0|20:0|10:1000000|80:150000", benchmark)
+        self.assertIn("10:1000000|80:150000", benchmark)
         self.assertIn('echo "$LOWER_MBPS" > "$config/mbps"', benchmark)
         self.assertIn('echo "$COMPLETION_NSEC" > "$config/completion_nsec"', benchmark)
         self.assertIn('echo "$IRQMODE" > "$config/irqmode"', benchmark)

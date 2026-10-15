@@ -123,12 +123,28 @@ branch or changing remote HEAD cause clearly reported SKIPPED/FAILED
 Git sync, independently of test PASS/FAIL/BLOCKED. No force push,
 interactive login, additional public Make goal or user-file staging.
 
+## I/O measurement and setup exclusions
+
+The private replay generator computes completed logical WRITE/READ
+MB/s and lower-device I/O deltas only over the post-warmup QD waves,
+including final `fsync`. Preflight, device/model provisioning, fixture
+hashing, prefill, QD worker startup, buffers and post-run integrity
+verification do not count toward that interval. Timed 4MiB sequential/
+random reads use persistent QD buffers and already running threads,
+with data verification after each read's individual latency sample.
+Per-wave Python scheduling/oracle work remains part of the measured
+aggregate issuing-path experiment and is stated in its report.
+The native/unit and source tests stay modular; the redundant shell
+owned-pair preflight is folded into the Python rootless safety checks.
+No new public commands or test targets are introduced.
+
 ## Owned storage-model requirements
 
 `make test` requires `null_blk` configfs controls for `mbps`,
 `irqmode`, and `completion_nsec` on each newly owned RAM device.
-Exact 20/10/80/0 cap configurations are read back with their matching
-mode/timer values before and after power-on. If unsupported, the
+The two permitted model tuples, 10 MiB/s with 1ms completion
+and 80 MiB/s with 0.15ms completion (both timer irqmode=2), are
+read back before and after power-on. If unsupported, the
 loaded phase fails visibly as BLOCKED and no physical device is
 substituted. Only `make test -j2` is the supported public interface.
 An existing SD swap partition is **never** a test target. All
@@ -147,7 +163,9 @@ make test        # rootless checks, W=1/W=2, then owned-RAM smoke and paired ben
 native-suite make goals are not a public user interface. Missing kernel
 headers fail the build/test. `make test` runs the rootless gates then
 `tools/test-loaded.sh`, which executes actual owned-RAM kernel smoke and
-sixteen off/V3 runs: four each at 20 MiB/s bandwidth-only, 10 MiB/s plus 1ms completion delay, 80 MiB/s plus 0.15ms completion delay, and uncapped RAM diagnostic (each sync/async/async/sync). The
+eight off/V3 runs: four each at 10 MiB/s plus 1ms completion
+delay and 80 MiB/s plus 0.15ms completion delay (each ABBA
+sync/async and alternating baseline-first order). The
 loaded phase requires root or previously authorized `sudo -n`; it
 **never prompts**, changes host swap or installs DKMS. In each pair the replay also performs actual 4MiB verified READ-only
 sequential and random passes of a concurrently written dataset; it

@@ -67,23 +67,20 @@ assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
 
-# The uncapped RAM baseline is an overhead diagnostic, not a modeled
-# SD/SSD verdict. The capped-only control remains for longitudinal trends.
-# Two explicit, fixed bandwidth+request-delay models help expose where
-# compression beats a slow device; they are NOT physical SD/SSD proxies.
-# All sixteen pairs remain separately owned RAM devices, with exact
-# cap/irqmode/timer settings verified before and after power-on.
-for regime in capped sd_emulated ssd_emulated uncapped; do
+# Two representative delay-modeled RAM-backed environments provide paired
+# write/read evidence. Drop the uncapped and bandwidth-only repeats from
+# every mandatory run: old evidence remains in Git history, while neither
+# resembles actual SD/SSD latency. Keep four counterbalanced pairs per
+# environment (two sync and two async) and all owned-device safety gates.
+for regime in sd_emulated ssd_emulated; do
     printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
     index=0
     for async_prepare in 0 1 1 0; do
         arguments=(--run-owned-ram-pair --profile medium
                    --retain-ms 2 --unpaced)
         case "$regime" in
-            capped) arguments+=(--lower-mbps 20) ;;
             sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
             ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
-            uncapped) ;;
             *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
         esac
         if (( async_prepare )); then
@@ -102,5 +99,5 @@ for regime in capped sd_emulated ssd_emulated uncapped; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke and sixteen RAM-only benchmark pairs across four regimes completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke and eight modelled RAM-only benchmark pairs completed.' \
     'PERFORMANCE_WIN=UNDETERMINED: review independent MB/s, p95/p99 and read/write request results.'

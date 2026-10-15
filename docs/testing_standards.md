@@ -99,9 +99,10 @@ make test
 ~~~
 
 It owns all native suites, source and safety contracts, both warning-level
-kernel builds, loaded owned-RAM oracle and sixteen paired RAM-backed
-benchmark trials (four per regime: capped bandwidth-only, synthetic
-slow/high-delay, synthetic fast/low-delay, uncapped diagnostics).
+kernel builds, loaded owned-RAM oracle and eight paired RAM-backed
+benchmark trials (four per synthetic latency model: slow and faster).
+The former uncapped and bandwidth-only reference rows remain in
+Git history, not in the mandatory device setup path.
 There are no supported per-suite test commands or separate benchmark
 entry points. Internal native Make rules remain private implementations.
 
@@ -113,7 +114,7 @@ The `make test -j2` variant of the *same official test command* may run
 independent production-C, userspace and Kbuild compile jobs in parallel,
 but its rootless, W=1, W=2 and loaded-device phases must be strictly
 ordered and fail fast. Loaded smoke must finish before any benchmark,
-and sixteen counterbalanced benchmark sessions must not overlap. The
+and eight counterbalanced benchmark sessions must not overlap. The
 kernel Makefile stages source only when content changes, and W=1/W=2
 use independent `build/kernel/w1/` and `build/kernel/w2/` outputs,
 never overwriting the default module eligible for loaded testing.
@@ -144,92 +145,75 @@ commands into `tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile
 continues to expose only the public `make test` entry point.
 
-## Explicit RAM-backed storage-delay models, not SD deployment
+## Paired modeled RAM I/O: qualification and timing
 
-The single official `make test` now measures sixteen owner-isolated
-RAM-backed off/V3 pairs across `capped`, `sd_emulated`,
-`ssd_emulated` and `uncapped`. For each distinct owned null_blk
-instance, configure and read back the exact `mbps`, `irqmode`,
-and `completion_nsec` values **before** power=1 and verify them
-again **after** power=1, rejecting missing configfs features rather
-than silently disabling the model. Model tuples allowed for internal
-helpers are exactly `(20,1,0)`, `(10,2,1000000)`,
-`(80,2,150000)` and `(0,1,0)` (cap MiB/s, irqmode, delay ns).
-Any other tuple must be BLOCKED before touching kernel configfs.
-The failure-context regression names the global sixteen-pair index,
-not the old four-pair index, while redacting private identifiers.
-The private shell preflight suite also updates its `--help`
-assertions to the explicit model allowlist; it rejects cross-paired
-latency and cap options without privileged access rather than
-requiring a hardcoded `LOWER_MBPS=20` string.
+The single official `make test` runs **eight owned-RAM pairs**:
+four `sd_emulated` at 10 MiB/s / 1 ms completion and four
+`ssd_emulated` at 80 MiB/s / 0.15 ms completion. These are synthetic
+`null_blk memory_backed=1` models, **not** performance or safety
+claims for actual SD/SSD hardware. Counterbalance sync/async as
+`0,1,1,0` and order raw/V3 as `off,v3,off,v3`. Two paired
+observations per preparation mode and model preserve bounded replication.
 
-The native/source harness must assert the exact four-tuple allowlist
-rather than assuming `LOWER_MBPS=20` is the only admitted setting;
-rootless source regressions remain meaningful after profile expansion.
-Each freshly owned pair must emit a sanitized measured-model marker
-so the summary can refuse forged/inconsistent regimes.
+The earlier four-regime 16-pair matrix was an exploratory control and
+is retained as source-identified results in Git history. Removing
+its bandwidth-only and uncapped diagnostic pairs from the mandatory
+test decreases isolated device setup/teardown and maintenance without
+reducing per-model replication. Do not substitute cached or unowned
+block devices for the eight freshly owned RAM-backed pairs.
 
-All sixteen runs use the same immutable fixture and manifest,
-counterbalanced sync/async and off/V3 order, strictly sequential
-owned-device allocation/removal, exact source identification and
-byte-verified oracles. Uncapped RAM is an **overhead diagnostic**
-rather than a product-performance gate; other rows are **synthetic
-storage-delay scenarios only**. Their device labels are not
-measurements of an actual SD card or SSD. Report on both throughput
-and packed-read amplification without hiding losses. The 5% gain
-threshold remains exploratory, not statistically significant.
+Only private model tuples `(10,2,1000000)` and `(80,2,150000)`
+are allowed (MiB/s, irqmode, completion delay in ns). Reject any other
+flag combinations **before** privileged provisioning. Configure and
+read back the exact `mbps`, `irqmode`, `completion_nsec` and
+`memory_backed` identity **before and after power-on**; fail
+BLOCKED on unsupported kernel features. Verify independent device
+identity, absence from host swap/mounts, unchanged swap inventory,
+safe teardown/quarantine and one exact shared fixture and trace.
+Actual physical media, existing SD swap and `swapon`/`swapoff`
+remain prohibited.
 
-**The code and tests remain ineligible for any real SD-card swap
-partition.** No test may accept a physical device path, activate
-`swapon`, disable or modify host swap, or treat existing SD swap as
-owned by the harness. Real-media evaluation needs separately
-authorized destructive testing and additional sustained GC,
-flush/failure, reclaim/page-in, suspend, authority, CPU/memory,
-and controlled recovery qualification. Never reinterpret an
-owner's request to model SD latency as permission to write to SD.
+**Measured I/O boundaries:**
 
-## Capped/uncapped matrix and fixed-volume packed-read contract
+- Mixed-write throughput begins only after fixture verification,
+  target prefill, initial read oracle, worker allocation and all
+  warmup QD waves. It ends **after the last measured wave and
+  required `fsync`**. Lower-device sector counters cover the same
+  interval; later complete-image verification is outside the clock.
+- For the independent 4MiB packed-read trial, concurrent read-set
+  creation, final write drain, packed-close evidence, preallocation
+  of read buffers and the whole QD32 worker pool occur **before**
+  the read clock. Actual I/O submission/completion is timed,
+  and individual read latency samples bracket `preadv` only.
+  The byte oracle runs after each sample but before slot reuse;
+  throughput still includes QD wave orchestration and oracle
+  comparison, which is part of this Python load generator.
+  Sampling counters, SHA, publishing and worker teardown occur
+  after the interval.
+- The replay process/threads CPU values explicitly exclude
+  Device Mapper kernel workers. Timing is a user-space issuing
+  experiment and **not** pure kernel, swap page-fault, NAND or
+  endurance time; avoid claiming otherwise. Tested data remain
+  a 4MiB RAM-backed working set, not a 100MiB cold read.
 
-The official `make test` now exercises two separately labeled mixed
-QD32 **regimes**, with ABBA sync/async and ABAB off/V3 ordering in each:
-a verified shared-read/write `null_blk mbps=20` cap, and an uncapped
-`mbps=0` run. All eight pairs use newly owned RAM-only devices,
-the identical hashed fixture and trace, strict byte oracles, module
-identity validation and independent backing sector counters. A rate
-mismatch is BLOCKED before proceeding; no real disks or host swap are
-modified. The sole public interface remains unchanged.
+**Test structure:** Preserve separate functional components for
+production-C native oracles, Make/Kbuild/API source contracts,
+rootless paired-result/report contracts, and safely loaded devices.
+Remove the former `tests/runtime/benchmark/owned-pair-preflight-test.sh`
+because its argument denial and ownership/teardown assertions are
+now enforced by `tests/runtime/native/test-report-test.py` and
+the other native/source contracts. No unrelated native safety tests
+were removed. This avoids a duplicate shell process matrix while
+keeping fail-closed model validation in CI.
 
-After each arm's existing verified mixed replay, 1024 independent
-4KiB pages are written with concurrent QD32 workers, drained, and
-then timed for **real 4MiB** sequential and seeded-random READ-only
-passes. The read path verifies every byte. Actual V3
-`close_pack_ready` must increase during population; two read
-passes sharing a RAM-backed logical image are not proof of cold
-physical-device reads or 100MB distinct-page access. The report
-retains lower READ/WRITE bytes/requests, p99 and precise seconds, and
-records the alpha.22 `burst_tail_flushes`/`one_page_windows`/
-`close_pack_ready` differences from loaded module status. Do not
-equate counts with proven latency savings.
-
-Performance verdicts separate capped and uncapped throughput, and
-compare each V3 arm **only with its own paired raw baseline**. Gains
-smaller than 5% are `NO_ESTABLISHED_GAIN`, and 0.05% async
-improvements are `NO_SIGNIFICANT_ASYNC_GAIN`. Two repetitions per
-mode/regime are exploratory, not five-pair confidence-qualified.
-The measured CPU scope is Python replay process/threads, excluding
-kernel DM workers; RSS is a process peak. No GC victim observed means
-live GC remains NOT_EXERCISED. A bounded correctness PASS cannot
-overwrite an uncapped throughput loss or claim flash endurance.
-
-The source additions are audited by rootless-only CI, including mock
-eight-session fail-closed coverage, exact source/trace SHA validation,
-and full own-device safety checks. A mocked status line may begin
-directly with `close_pack_ready=` after its marker; the rootless
-parser regression accepts that key while still requiring all
-packed-tail/GC counters from actual loaded status. Mock Make policy
-checks name the eight-pair stage, not the former four-pair stage.
-**Loaded evidence requires the owner's fresh `make test`** and
-cannot be produced in rootless CI.
+An incomplete ABBA pair, mismatched SHA/model tuple, missing packed
+read, physical-device identity or changed swap inventory must never
+be promoted to PASS. Distinguish correctness PASS from separate
+positive/negative performance findings. A 5% materiality threshold
+with only two pairs per mode is exploratory, not a confidence interval.
+No observed GC means GC remains NOT EXERCISED. The owner's next
+`make test -j2` must generate new loaded evidence; rootless CI is
+not a substitute.
 
 ## Alpha.22 packed-burst tail correctness contract
 
@@ -275,7 +259,7 @@ The private `tools/run-tests.py` program invoked *only* by root
 `make test` drives five strictly ordered stages: parallel compile
 prerequisites, rootless native/source/safety contracts, W=1 kernel
 build, W=2 kernel build, and privileged owned-RAM smoke plus eight
-benchmark comparisons across capped/uncapped regimes. It replaces the same
+benchmark comparisons across two latency-modeled regimes. It replaces the same
 `build/test_results.json.xz` file at the start and after each stage,
 including on nonzero FAIL/BLOCKED. A failure aborts remaining stages
 without silently claiming loaded success. The root Make API remains

@@ -18,8 +18,8 @@ spec.loader.exec_module(runner)
 
 def arm(candidate, *, mode, regime):
     v3 = candidate == "v3"
-    raw_mbps = 14 if regime == "capped" else 32
-    cand_mbps = (20 if mode == 0 else 20.01) if regime == "capped" else (
+    raw_mbps = 14 if regime == "sd_emulated" else 32
+    cand_mbps = (20 if mode == 0 else 20.01) if regime == "sd_emulated" else (
         24 if mode == 0 else 24.01)
     raw_read_time = 1.0
     packed = {
@@ -110,6 +110,9 @@ class ReportContract(unittest.TestCase):
             ("--lower-mbps", "999", "--completion-nsec", "150000"),
             ("--completion-nsec", "1000000"),
             ("--lower-mbps", "12"),
+            ("--lower-mbps", "20"),
+            ("--lower-mbps", "0"),
+            ("--lower-mbps", "10"),
         )
         for option in forbidden:
             with self.subTest(option=option):
@@ -122,22 +125,28 @@ class ReportContract(unittest.TestCase):
                     '"$config/completion_nsec"', '"$config/memory_backed"'):
             self.assertIn(key, source)
         self.assertIn('PASS_RAM_MODEL_LOWER_MBPS=', source)
+        # The deleted shell preflight was redundant with this rootless
+        # Python contract. Preserve teardown/ownership/swap guard checks.
+        for gate in ("SWAPS=", "nullb-swapz-", "memory_backed",
+                     "dmsetup remove", "QUARANTINE=0",
+                     "READY_COUNT=0", "COUNT != READY_COUNT",
+                     "--expected-dm-uuid", "timeout --signal=TERM"):
+            self.assertIn(gate, source)
         loaded = (ROOT / "tools/test-loaded.sh").read_text()
-        self.assertIn("for regime in capped sd_emulated ssd_emulated uncapped",
-                      loaded)
+        self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertNotIn("swapon ", loaded)
         self.assertNotIn("swapoff ", loaded)
         self.assertNotIn("/dev/sdb", loaded)
 
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
-        self.assertEqual(len(sessions), 16)
+        self.assertEqual(len(sessions), 8)
         self.assertEqual([s["async_prepare"] for s in sessions],
-                         [0, 1, 1, 0] * 4)
+                         [0, 1, 1, 0] * 2)
         self.assertEqual([s["regime"] for s in sessions],
                          [regime for regime in runner.MODEL_ORDER for _ in range(4)])
         self.assertEqual([s["order"] for s in sessions],
-                         ["off-first", "v3-first"] * 8)
+                         ["off-first", "v3-first"] * 4)
         self.assertTrue(all(s["status"] == "PASS" for s in sessions))
         for j, session in enumerate(sessions):
             self.assertEqual(session["device_model"],
@@ -150,28 +159,28 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("device_identity", json.dumps(sessions))
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
 
-    def test_capped_gain_and_uncapped_loss_are_both_visible(self):
+    def test_slow_model_gain_and_fast_model_loss_are_both_visible(self):
         data = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         self.assertEqual(data["overall"], "PASS_BOUNDED_RAM_MATRIX")
-        capped = data["regimes"]["capped"]
-        uncapped = data["regimes"]["uncapped"]
-        self.assertEqual(capped["criteria"]["sync"]["throughput_vs_raw"],
+        slow = data["regimes"]["sd_emulated"]
+        fast = data["regimes"]["ssd_emulated"]
+        self.assertEqual(slow["criteria"]["sync"]["throughput_vs_raw"],
                          "MATERIAL_GAIN_PRELIMINARY")
-        self.assertEqual(uncapped["criteria"]["sync"]["throughput_vs_raw"],
+        self.assertEqual(fast["criteria"]["sync"]["throughput_vs_raw"],
                          "MATERIAL_LOSS_PRELIMINARY")
-        self.assertEqual(uncapped["interpretation"],
-                         "DIAGNOSTIC_ONLY_NO_PRODUCT_PERFORMANCE_VERDICT")
+        self.assertEqual(fast["interpretation"],
+                         "SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA")
         self.assertEqual(data["regimes"]["sd_emulated"]["device_model"]["completion_nsec"],
                          1000000)
         self.assertEqual(data["regimes"]["ssd_emulated"]["device_model"]["cap_mib_s"],
                          80)
         self.assertAlmostEqual(
-            capped["criteria"]["sync"]["lower_write_saved_fraction"], .375)
+            slow["criteria"]["sync"]["lower_write_saved_fraction"], .375)
         self.assertEqual(
-            capped["criteria"]["async_vs_sync"]["write_throughput"],
+            slow["criteria"]["async_vs_sync"]["write_throughput"],
             "NO_SIGNIFICANT_ASYNC_GAIN")
         self.assertAlmostEqual(
-            capped["columns"]["sync"]["sequential_4mib_s"], .9)
+            slow["columns"]["sync"]["sequential_4mib_s"], .9)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])
@@ -189,11 +198,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCONCLUSIVE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[10]["arms"]["v3"]["packed_read"]["packed_close_delta"] = 0
+        sessions[6]["arms"]["v3"]["packed_read"]["packed_close_delta"] = 0
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[10]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+        sessions[6]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
             "logical_bytes"] = 0
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")

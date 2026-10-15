@@ -21,13 +21,16 @@ and [benchmark.md](benchmark.md).
 
 ## Three-axis qualification specification
 
-**Status: modeled RAM-only matrix.** The official `make test` now
-includes four QD32 mixed regimes: (1) 20MiB/s bandwidth-only reference
-(`irqmode=1`); (2) **synthetic slow-device model** (10MiB/s,
-`irqmode=2`, `completion_nsec=1000000`); (3) **synthetic
-higher-bandwidth model** (80MiB/s, timer completion delay 150000ns);
-and (4) **uncapped `mbps=0` RAM as a software-overhead diagnostic**.
-Each regime has four ABBA sync/async and ABAB raw/V3-order pairs.
+**Status: simplified RAM-only, latency-modeled matrix.** The
+official `make test` now runs only two QD32 mixed models:
+(1) 10MiB/s, `irqmode=2`, `completion_nsec=1000000`;
+(2) 80MiB/s, `irqmode=2`, `completion_nsec=150000`.
+Each has four ABBA sync/async and ABAB raw/V3-order pairs.
+The prior 20MiB/s bandwidth-only and uncapped-RAM controls are
+**removed from the recurring full test** because their extra eight
+device setups do not directly advance current slow-storage claims.
+Prior uncapped data remain valid as *software-overhead diagnostics*
+at their measured source commit in Git history.
 The suite also runs byte-verified 4MiB packed-populated sequential and
 random READs and records replay-process CPU. It does **not** yet
 include independent write-only saturation, a 100MiB distinct working set,
@@ -53,16 +56,27 @@ exact model tuple in the sanitized report. No model result proves
 SD wear reduction, NAND-write amplification, real swap reclaim
 performance or physical media safety.
 
-**Interpretation policy:** The `uncapped` row is
-`DIAGNOSTIC_ONLY_NO_PRODUCT_PERFORMANCE_VERDICT`; a slower compressed
-RAM path measures software overhead, not an expected outcome on SD.
-The bandwidth-only control is a reference, and the two timer-delayed
-profiles are explicitly `SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA`.
-Report all positive and negative per-regime results without a fabricated
-cross-device product PASS. Separate performance verdicts from bounded
-device-safety/correctness PASS. Configured `null_blk` timer delays may
-affect both reference and compressed paths differently because each
-submits different lower request counts.
+**Interpretation policy:** The two timer-delayed profiles are
+`SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA`. Report all gains and
+losses within each model. Historical uncapped RAM cannot establish
+SD/SSD performance, and no longer runs in every mandatory test.
+Correctness PASS is separate from performance verdicts. Each
+`null_blk` model applies a delay per lower request, so metadata
+read amplification can dominate when swapz issues additional reads.
+
+**Timing/attribution:** Prefill, trace/fixture preparation, QD32
+worker startup, buffer allocation, warmup, device creation and teardown
+are **excluded** from mixed and packed-read stopwatch intervals.
+Mixed write timing includes the required post-wave `fsync`; lower
+sectors are sampled over that same interval. Timed packed reads are
+byte-exact, with each `preadv` latency sampled before Python oracle
+comparison; aggregate times still include Python task dispatch and
+byte verification, so they are not pure kernel times. Report CPU
+for replay process/threads separately from unmeasured DM kernel workers.
+The 4MiB read-set population and its write drain occur outside read
+timing. Preserve the negative slow-storage 4MiB-read results as
+historical evidence, but do not numerically compare them to the
+revised I/O-only timing boundaries without a same-source rerun.
 
 **Operator safety:** neither a model run nor the experimental V3
 module is approved for an SD card formatted as swap. Do not activate
@@ -95,8 +109,9 @@ GC. Smaller total bytes per identical workload and smaller MB/s output
 per wall second are different claims when the candidate finishes sooner.
 No RAM-backed result measures flash lifetime or internal NAND writes.
 
-The current model uses a **shared READ+WRITE** null_blk byte budget:
-`mbps=20` is 20MiB/s, approximately 20.97 decimal MB/s. The upstream
+The active models use **shared READ+WRITE** null_blk byte budgets:
+`mbps=10` and `mbps=80`, equal to approximately 10.49 and
+83.89 decimal MB/s, respectively. The upstream
 [Linux 7.0 null_blk implementation](https://raw.githubusercontent.com/torvalds/linux/v7.0/drivers/block/null_blk/main.c)
 deducts each request's bytes from that budget before operation handling
 and replenishes it on a 20ms timer. Verify the actual host configuration;

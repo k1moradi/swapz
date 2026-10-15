@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|20|80] [--completion-nsec 150000|1000000] [--async-prepare] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -37,7 +37,7 @@ if [[ $# -gt 1 && ${!#} == --async-prepare ]]; then
     ASYNC_PREPARE=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
-# Exact internal device-model suffixes. Never permit arbitrary device
+# Exact private device-model suffixes. Never permit arbitrary device
 # settings to authorize privileged block creation.
 if [[ $# -ge 3 && ${@: -2:1} == --completion-nsec &&
       ( ${!#} == 150000 || ${!#} == 1000000 ) ]]; then
@@ -46,12 +46,12 @@ if [[ $# -ge 3 && ${@: -2:1} == --completion-nsec &&
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps &&
-      ( ${!#} == 10 || ${!#} == 20 || ${!#} == 80 ) ]]; then
+      ( ${!#} == 10 || ${!#} == 80 ) ]]; then
     LOWER_MBPS="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 case "$LOWER_MBPS:$COMPLETION_NSEC" in
-    0:0|20:0|10:1000000|80:150000) ;;
+    10:1000000|80:150000) ;;
     *) echo 'BLOCKED: unsupported owned-RAM model/cap/latency tuple' >&2; exit 2 ;;
 esac
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then

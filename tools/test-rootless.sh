@@ -16,12 +16,10 @@ bash -n tools/test-rootless.sh tools/test-loaded.sh tools/package-dkms.sh \
   tools/benchmark-owned-pair.sh tools/nullblk-identity.sh \
   tests/runtime/native/nullblk-identity-test.sh \
   tests/runtime/native/quiet-lower-io-test.sh \
-  tests/runtime/native/swap-inventory-test.sh \
-  tests/runtime/benchmark/owned-pair-preflight-test.sh
+  tests/runtime/native/swap-inventory-test.sh
 bash tests/runtime/native/nullblk-identity-test.sh
 bash tests/runtime/native/quiet-lower-io-test.sh
 bash tests/runtime/native/swap-inventory-test.sh
-bash tests/runtime/benchmark/owned-pair-preflight-test.sh
 grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID_BEFORE' tools/deploy-nullblk.sh

@@ -57,6 +57,7 @@ class PairReplayContract(unittest.TestCase):
                              "--result", result)
                 record = json.loads(result.read_text())
                 read = record["packed_read"]
+                self.assertIn("executor startup", record["mixed_timed_scope"])
                 self.assertEqual(read["qualification"], "ROOTLESS_NO_PACK_PROOF")
                 self.assertEqual(read["logical_bytes"], 4194304)
                 self.assertIsNone(read["packed_close_delta"])
@@ -67,6 +68,7 @@ class PairReplayContract(unittest.TestCase):
                     self.assertEqual(phase["verified_image_sha256"],
                                      read["logical_image_sha256"])
                     self.assertGreater(phase["seconds"], 0)
+                    self.assertIn("buffers and worker setup excluded", phase["timed_scope"])
                     self.assertGreater(phase["useful_read_mbps"], 0)
                     self.assertGreaterEqual(phase["replay_cpu_user_s"], 0)
                 reports.append(result)

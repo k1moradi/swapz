@@ -2,12 +2,12 @@
 
 **Status: ACTIVE — V3 experimental and NOT production-ready (read the current version from [VERSION](../kernel/extent-v3/VERSION)).** V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
-Owner-reported alpha.22 capped mixed run at source
-`63f6ed945044c2a133cdcb6a25282ce06b61157b` passed the old
-five-stage suite. It did **not** establish an uncapped throughput win.
-The new runner adds paired uncapped mixed trials, 4MiB verified
-packed-populated read passes, tail counters and replay-process CPU,
-but its loaded execution remains unverified until the owner reruns it.
+Owner-reported owner-run at commit
+`59761be5a2bcb7a8f1b0b9f764c27f0339eac9b4` passed RAM-backed
+correctness and 16 full benchmark pairs but showed severe 4MiB
+packed-read regressions (1.86s vs 0.40s in the slow-delay model).
+The streamlined two-model/timing-boundary revision remains unverified
+on the loaded host until the owner's new `make test`.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -24,11 +24,13 @@ Only `main` is used unless the owner explicitly authorizes otherwise.
 
 The [three-axis specification](benchmark.md#three-axis-qualification-specification)
 develops the owner's swap-out speed, lower-write/endurance proxy and
-data-ready swap-in goals. An **exploratory four-regime RAM-only matrix** (20MiB/s bandwidth-only,
-10MiB/s plus 1ms completion, 80MiB/s plus 0.15ms completion and
-uncapped RAM overhead diagnostic) and verified 4MiB
-packed-populated read passes are now implemented as private phases of
-the single official `make test`. A full write-only
+data-ready swap-in goals. The **current default matrix is two RAM-only latency models**
+(10MiB/s plus 1ms completion and 80MiB/s plus 0.15ms completion),
+with four counterbalanced pairs per model and 4MiB byte-verified
+packed-populated read passes within the official `make test`.
+The prior 16-pair four-model evidence is retained in Git history.
+Worker/buffer/fixture/device setup is now excluded from timed
+measurements while the required I/O completion and WRITE drain remain. A full write-only
 saturation matrix, actual cold-device reads and live-GC profiling
 are still planned.
 
@@ -40,11 +42,17 @@ are still planned.
       useful throughput, lower WRITE bytes/requests, READ tails,
       `burst_tail_flushes`, closure conservation and safe teardown.
       Current capped results cannot establish uncapped improvement.
-- [x] Add four synthetic/diagnostic **mixed-QD32** owned-RAM regimes
-      as private stages with same-trace paired controls and a 5%
-      exploratory materiality threshold; a negative uncapped result
-      stays visible as *software overhead only*. Physical SD/SSD
-      behavior is NOT qualified.
+- [x] Retain only **two latency-modeled QD32 regimes** in the
+      mandatory path (four pairs each), with identical trace/fixture,
+      order counterbalance, strict ownership and a 5% exploratory
+      threshold. The removed 20MiB/s and uncapped-RAM diagnostic rows
+      remain as prior versioned results, not current physical media claims.
+- [x] Exclude replay worker pool and buffer setup from timed read I/O;
+      retain valid CPU/process scope, final write `fsync`,
+      independent sector deltas and all read/write byte oracles.
+- [x] Merge redundant owner-pair shell preflight into the existing
+      rootless Python safety/regression suite; keep native-C and kernel
+      module tests distinct for fault localization.
 - [x] Add timed actual **4MiB** fixed-volume sequential/random reads of
       datasets populated through packed concurrent writes; verify every
       returned page, keep distinct working set and RAM/cache limitations.

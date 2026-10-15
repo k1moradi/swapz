@@ -42,8 +42,11 @@ document defines *what we are optimizing* and *what evidence counts*.
 1. **Swap-out throughput:** deliver more successfully completed logical
    WRITE bytes per second than the paired uncompressed baseline, including
    the final required drain. Show `logical input MB/s -> swapz -> lower
-   output MB/s`, with capped and uncapped results separately. A smaller
-   lower output rate alone does not establish greater useful throughput.
+   output MB/s`, with each currently tested backing-device model
+   reported separately. Uncapped RAM is a **diagnostic** for software
+   overhead and is not a mandatory recurring qualification nor evidence
+   of real-device performance. A smaller lower output rate alone does
+   not establish greater useful throughput.
 2. **Write I/O efficiency:** transfer fewer independently measured lower
    WRITE bytes and requests for the same completed logical work, including
    live GC and flush cost. Report codec payload ratio separately from
@@ -58,8 +61,10 @@ document defines *what we are optimizing* and *what evidence counts*.
    not an executed fixed-volume swap-in measurement.
 
 The three outcomes receive separate verdicts and remain specific to the
-source, workload, device model and operating regime. Capped-device gains
-cannot establish uncapped throughput; byte savings cannot establish a
+source, workload, device model and operating regime. Gains in one
+synthetic model cannot establish results for any other model or real
+SD card; a RAM-only overhead regression alone cannot establish a
+physical-media regression. Byte savings cannot establish a
 read-latency gain. Preserve negative results and require correctness first.
 The proposed experiment matrix and report contract are developed in
 [the benchmark specification](docs/benchmark.md#three-axis-qualification-specification).

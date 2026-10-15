@@ -135,7 +135,7 @@ class PublicMakeContract(unittest.TestCase):
                 "test -x build/tests/device-roundtrip\n"
                 "test -x build/userspace/swapz3ctl\n"
                 "printf 'rootless\\n' >> build/order.log\n")
-            # Synthetic records model sixteen per-regime RAM-only sessions;
+            # Synthetic records model eight latency-modeled RAM-only sessions;
             # mock Kbuild / loaded phase never touch actual host devices.
             import json
             # This is STILL an unprivileged mock; use a real Git checkout
@@ -193,10 +193,8 @@ class PublicMakeContract(unittest.TestCase):
                     }
                 }, sort_keys=True)
             records = []
-            specs = (("capped", 20, 0, 1),
-                     ("sd_emulated", 10, 1000000, 2),
-                     ("ssd_emulated", 80, 150000, 2),
-                     ("uncapped", 0, 0, 1))
+            specs = (("sd_emulated", 10, 1000000, 2),
+                     ("ssd_emulated", 80, 150000, 2))
             for regime, cap, ns, irq in specs:
                 records.append(f"START_OWNED_RAM_REGIME={regime}")
                 for i, mode in enumerate((0, 1, 1, 0)):
@@ -309,7 +307,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertLess(reporter.index('"Native and rootless contracts"'),
                         reporter.index('"Kernel warnings W=1"'))
         self.assertLess(reporter.index('"Kernel warnings W=2"'),
-                        reporter.index('"Owned RAM smoke and 16 pairs"'))
+                        reporter.index('"Owned RAM smoke and 8 pairs"'))
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tools/test-loaded.sh").read_text()
@@ -318,10 +316,9 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)
         self.assertIn("tools/deploy-nullblk.sh", loaded)
         self.assertIn("tools/benchmark-owned-pair.sh", loaded)
-        self.assertIn("--lower-mbps 20", loaded)
         self.assertIn("--lower-mbps 10 --completion-nsec 1000000", loaded)
         self.assertIn("--lower-mbps 80 --completion-nsec 150000", loaded)
-        self.assertIn("for regime in capped sd_emulated ssd_emulated uncapped", loaded)
+        self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("--async-prepare", loaded)
         self.assertIn("for async_prepare in 0 1 1 0", loaded)
         self.assertLess(loaded.index("tools/deploy-nullblk.sh"),
