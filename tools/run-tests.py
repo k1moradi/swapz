@@ -423,8 +423,12 @@ def print_bench(result):
             ("Verified 4MiB sequential READ", "sequential_4mib_s", "s"),
             ("Verified 4MiB random READ", "seeded_random_4mib_s", "s"),
             ("Packed sequential READ p99", "sequential_read_p99_ms", "ms"),
+            ("Packed random READ p99", "seeded_random_read_p99_ms", "ms"),
+            ("4MiB sequential lower READ", "sequential_lower_read_bytes", "bytes"),
+            ("4MiB random lower READ", "seeded_random_lower_read_bytes", "bytes"),
             ("Replay process CPU user", "mixed_replay_cpu_user_s", "s"),
             ("Replay process CPU system", "mixed_replay_cpu_system_s", "s"),
+            ("Replay process peak RSS", "mixed_replay_peak_rss_kb", "KiB"),
         ]:
             fields = []
             for mode in COLUMNS:

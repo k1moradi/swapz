@@ -163,6 +163,11 @@ published artifact. Publishing status is independent of test outcomes.
 with sequential blocking writes. Timed mixed READs address slots512..767
 while WRITEs overwrite0..255, so those READs are predominantly
 singleton extents; the old 100MB time was only an extrapolation.
+The terminal matrix now also displays each 4MiB pass's lower READ
+bytes, sequential and random READ p99, and replay-process peak RSS
+(KiB). These are visible direct measurements, but replay-process RSS
+is not kernel-module allocation or host memory pressure.
+
 **New first-stage implementation:** Each arm also concurrently writes a
 fresh 1024-page 4MiB logical image to encourage packed extents, drains
 writes, and times byte-verified READ-only sequential and seeded-random
