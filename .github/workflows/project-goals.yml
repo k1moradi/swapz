@@ -37,7 +37,7 @@ jobs:
           python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq '.PHONY: all install uninstall test' Makefile
-          grep -Fq '@bash tools/test-rootless.sh' Makefile
+          grep -Fq '@+bash tools/test-rootless.sh' Makefile
           grep -Fq '@bash tools/test-loaded.sh' Makefile
           grep -Fq 'sudo -n true' tools/test-loaded.sh
           grep -Fq 'BLOCKED_LOADED_QUALIFICATION' tools/test-loaded.sh

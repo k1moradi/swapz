@@ -79,6 +79,26 @@ entry points. Internal native Make rules remain private implementations.
 
 There are **16 behavior-named native C executables** in `build/tests/native/`: `codec-roundtrip`; `mapping-authority`; `transaction-publication`; `write-verification`; `dead-segment-reclamation`; `raw-discard`; `online-packing`; `randomized-authority`; `gc-forbidden-victim`; `gc-cost-accounting`; `gc-rotation`; `gc-engine-rotation`; `flush-ordering`; `lower-write-aggregation`; `zero-write-elision`; `window-policy`. Current V3 test source names reflect behavior in `tests/runtime/native/{codec,mapping,gc,io}/`, without deleting native assertions. Historical v22/host scripts are retained until CI dependency parity is established. One declarative rule in `tests/suites/Makefile` replaces 14 nearly identical C compile recipes. Python helpers must be bounded/necessary and should not replace actual C tests. For sanitizers, use the applicable `SANITIZE=1` native test target and independent ASan/UBSan/Clang gates described in [compile.md](compile.md).
 
+## Parallel build/incremental-regression gate
+
+The `make test -j2` variant of the *same official test command* may run
+independent production-C, userspace and Kbuild compile jobs in parallel,
+but its rootless, W=1, W=2 and loaded-device phases must be strictly
+ordered and fail fast. Loaded smoke must finish before any benchmark,
+and four counterbalanced benchmark sessions must not overlap. The
+kernel Makefile stages source only when content changes, and W=1/W=2
+use independent `build/kernel/w1/` and `build/kernel/w2/` outputs,
+never overwriting the default module eligible for loaded testing.
+
+`tests/runtime/native/make-interface-test.py` includes an unprivileged,
+isolated **fake-Kbuild regression** under `build/tests/` that invokes
+the actual root Makefile with `-j2`. It confirms phase order, reuse of
+module/user binaries on a second unchanged run, selective helper
+recompilation after a helper-only edit, and selective kernel
+restaging/rebuild after a kernel-only edit. This proves build graph
+and mock orchestration only: no module is loaded and no throughput is
+measured by that test. CI must label its result rootless/partial.
+
 ## Minimum correctness matrix
 
 - Compression/decompression: 4096B data and CRC, very small, medium, near-3568B LZ4 payload, RAW fallback, corrupted metadata/CRC and invalid bounds.

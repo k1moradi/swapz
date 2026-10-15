@@ -45,6 +45,46 @@ automatic installation of an experimental module. Even a manual DKMS
 build or a successful compile is **NOT permission** to enable system
 swap, bypass the null_blk-only guard, or load on physical media.
 
+## Incremental parallel builds without parallel device access
+
+The sole official test pipeline supports `make test -j2` (or another
+intentional Make job count). The phony `all` target depends on three
+**independent** build outputs: the current running-kernel Device Mapper
+module, the C direct-I/O oracle, and the read-only userspace helper.
+GNU Make may compile them concurrently. Native test binaries retain
+file prerequisites and inherit Make's jobserver through the private
+rootless runner. Changing `userspace/swapz3ctl.c` or its version rebuilds
+only that helper; changing the C oracle rebuilds only the oracle. The
+root Makefile itself is a dependency of both userspace builds so recipe
+changes are not silently ignored.
+
+A Kbuild invocation still validates the current `KDIR` and module
+build even when no source changed. The staging recipe compares
+content with `cmp -s` before copying Makefile/C/header inputs; it
+**never uses unconditional `cp -f`**, which previously invalidated
+all kernel object timestamps on each test. Kbuild itself decides whether
+an object needs recompilation. Separate staged outputs isolate
+normal `build/kernel/experimental/`, `W=1` at `build/kernel/w1/`,
+`W=2` at `build/kernel/w2/`, and the memory-only research smoke in
+`build/kernel/research/`, preventing warning-flag changes from
+recompiling or replacing the kernel module used for safe loaded tests.
+
+The `test` recipe deliberately has **no `.NOTPARALLEL` directive**.
+Its commands are instead sequential failure gates: prerequisite
+compilation completes; rootless native/source tests complete; W=1 and
+W=2 Kbuild complete; only then does the owned-RAM loaded smoke run;
+only after smoke success do the sync/async/async/sync pairs run in the
+private loaded helper. `@+bash` forwards jobserver descriptors to the
+rootless native suite. Parallelism cannot overlap any privileged
+device session. No extra root Make goals or alternative public test
+commands are introduced.
+
+A rootless sandbox regression runs these actual Makefiles with a fake
+unprivileged Kbuild and mock loaded phase. It checks ordering and the
+mtimes for an unchanged rerun, a userspace-only change and a kernel
+source-only change. **Mock success verifies orchestration/incrementality,
+not loaded-kernel behavior or actual sustained throughput.**
+
 ## Only supported root Make commands (owner policy)
 
 ```sh

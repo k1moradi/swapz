@@ -52,12 +52,17 @@ jobs:
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
           echo "TARGET_BLOB=$(git rev-parse HEAD:kernel/extent-v3/dm-target.c)"
           make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
-          test -s build/kernel/experimental/dm-swapz.ko
-          sha256sum build/kernel/experimental/dm-swapz.ko
+          test -s build/kernel/w1/dm-swapz.ko
+          sha256sum build/kernel/w1/dm-swapz.ko
           make -C kernel/extent-v3 KDIR="$KDIR" SV3_BUILD_SMOKE=1 W=1 -j2 all
           test -s build/kernel/research/swapz_extent_v3.ko
           sha256sum build/kernel/research/swapz_extent_v3.ko
           make -C kernel/extent-v3 KDIR="$KDIR" W=2 -j2 all
+          test -s build/kernel/w2/dm-swapz.ko
+          sha256sum build/kernel/w2/dm-swapz.ko
+          # A normal build is deliberately separate from warning variants:
+          # it remains the only artifact eligible for owned-RAM loading.
+          make -C kernel/extent-v3 KDIR="$KDIR" -j2 all
           test -s build/kernel/experimental/dm-swapz.ko
           sha256sum build/kernel/experimental/dm-swapz.ko
           echo "COMPILE_ONLY_NO_MODULE_INSERTION"

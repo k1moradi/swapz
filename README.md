@@ -42,6 +42,17 @@ or invoke internal build targets directly as public goals.
 | `make uninstall` | Remove only that version-owned installation |
 | `make test` | Run native/source tests, W=1/W=2, then loaded RAM-only correctness and paired 20 MiB/s sync/async benchmarks; no interactive sudo |
 
+**Parallel, incremental compilation:** `make test -j2` is the same
+single official test command with two compilation jobs. The Device Mapper
+kernel objects, test oracle and read-only userspace helper build as
+independent Make prerequisites; unchanged userspace outputs are reused.
+Kernel source is staged only when its bytes change, and normal,
+`W=1`, and `W=2` builds keep separate cached outputs under
+`build/kernel/{experimental,w1,w2}/`. Native production-C suites inherit
+the Make jobserver. Loaded `null_blk` correctness and the four
+counterbalanced benchmark sessions **remain strictly sequential**.
+Missing noninteractive privilege still yields BLOCKED, not a partial PASS.
+
 **Owner hold:** do not execute privileged installation or unowned-device
 testing. Full `make test` now executes rootless native/source checks,
 W=1/W=2 kernel compilation, an actual newly owned RAM/null_blk module
