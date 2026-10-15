@@ -858,8 +858,14 @@ class V3ProductionSourceQualification(unittest.TestCase):
                       benchmark)
         self.assertIn("--async-prepare", benchmark)
         self.assertIn("RATE_MODE != unpaced", benchmark)
-        self.assertIn("LOWER_MBPS=20", benchmark)
-        self.assertIn('"$config/mbps"', benchmark)
+        # The old fixed 20MiB cap is now one of four EXACT
+        # owner-RAM models, not an arbitrary physical-device argument.
+        self.assertIn("LOWER_MBPS=0", benchmark)
+        self.assertIn("0:0|20:0|10:1000000|80:150000", benchmark)
+        self.assertIn('echo "$LOWER_MBPS" > "$config/mbps"', benchmark)
+        self.assertIn('echo "$COMPLETION_NSEC" > "$config/completion_nsec"', benchmark)
+        self.assertIn('echo "$IRQMODE" > "$config/irqmode"', benchmark)
+        self.assertIn("PASS_RAM_MODEL_LOWER_MBPS=", benchmark)
         self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
 
     def test_map_and_teardown_are_owned(self):

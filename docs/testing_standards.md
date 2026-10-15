@@ -156,6 +156,9 @@ than silently disabling the model. Model tuples allowed for internal
 helpers are exactly `(20,1,0)`, `(10,2,1000000)`,
 `(80,2,150000)` and `(0,1,0)` (cap MiB/s, irqmode, delay ns).
 Any other tuple must be BLOCKED before touching kernel configfs.
+The native/source harness must assert the exact four-tuple allowlist
+rather than assuming `LOWER_MBPS=20` is the only admitted setting;
+rootless source regressions remain meaningful after profile expansion.
 Each freshly owned pair must emit a sanitized measured-model marker
 so the summary can refuse forged/inconsistent regimes.
 
