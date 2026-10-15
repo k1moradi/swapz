@@ -25,6 +25,9 @@ MODEL_SPECS = {
                      "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
+KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
+                      "read_payload_blocks", "lower_read_wall_ns",
+                      "decode_wall_ns")
 
 
 
@@ -266,6 +269,7 @@ def parse_sessions(output):
                             "read_p99_ms": phase.get("read_p99_ms"),
                             "lower_read_bytes": lower_read.get("lower_read_bytes"),
                             "lower_read_requests": lower_read.get("lower_read_requests"),
+                            "kernel_read_path": phase.get("kernel_read_path"),
                             "replay_cpu_user_s": phase.get("replay_cpu_user_s"),
                             "replay_cpu_system_s": phase.get("replay_cpu_system_s"),
                             "replay_peak_rss_kb": phase.get("replay_peak_rss_kb")
@@ -368,6 +372,17 @@ def benchmark_verdicts(sessions):
                     item["read_p99_ms"] for item in reads)
                 columns[name][f"{mode}_lower_read_bytes"] = statistics.mean(
                     item["lower_read_bytes"] for item in reads)
+                if name != "off":
+                    diagnostics = [item.get("kernel_read_path") for item in reads]
+                    if any(not isinstance(record, dict) or
+                           any(type(record.get(field)) is not int or
+                               record[field] < 0 for field in KERNEL_READ_FIELDS)
+                           for record in diagnostics):
+                        return {"overall": "INCOMPLETE",
+                                "reason": f"{regime}: missing measured V3 {mode} C read counters"}
+                    for field in KERNEL_READ_FIELDS:
+                        columns[name][f"{mode}_{field}"] = statistics.mean(
+                            record[field] for record in diagnostics)
             if name != "off" and any(
                     not (arm["packed_read"].get("packed_close_delta") or 0) > 0
                     for arm in rows_for_arm):
@@ -477,6 +492,15 @@ def print_bench(result):
                 val = columns[mode].get(key)
                 fields.append(f"{val:.2f} {unit}".strip() if val is not None else "n/a")
             print(f"  {title:<33} {fields[0]:>12} {fields[1]:>12} {fields[2]:>12}")
+        for read_mode, label in (("sequential", "sequential"),
+                                 ("seeded_random", "random")):
+            sync = columns["sync"]
+            asynchronous = columns["async"]
+            print(f"  Timed 4MiB {label} V3 READ calls (sync/async): "
+                  f"metadata={sync[f'{read_mode}_read_meta_reqs']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_meta_reqs']:.1f}, "
+                  f"payload={sync[f'{read_mode}_read_payload_reqs']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_payload_reqs']:.1f}")
         for mode in ("sync", "async"):
             crit = data["criteria"][mode]
             print(f"  {mode.upper():<6} vs raw: WRITE={crit['throughput_vs_raw']}, "

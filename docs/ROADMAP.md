@@ -6,8 +6,14 @@ Owner-reported owner-run at commit
 `59761be5a2bcb7a8f1b0b9f764c27f0339eac9b4` passed RAM-backed
 correctness and 16 full benchmark pairs but showed severe 4MiB
 packed-read regressions (1.86s vs 0.40s in the slow-delay model).
-The streamlined two-model/timing-boundary revision remains unverified
-on the loaded host until the owner's new `make test`.
+The owner subsequently ran the streamlined two-model/timing-boundary
+revision at exact source `aacf8cc869dcfc60c179adcce92a3632688832c6`:
+all five stages PASSED (204.61s loaded stage, eight pairs), and the
+sanitized result was published as report-only `e221e053e052`.
+SD useful WRITE remained 7.85 MB/s raw versus 4.61 sync/4.66 async;
+SSD was 19.67 MB/s raw versus 17.57 sync/19.01 async. Both models
+reduced backing WRITE traffic but the packed 4MiB reads remained
+slower. This PASS does not qualify the next code revision.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -65,6 +71,11 @@ are still planned.
       cache/working-set control; 4MiB is not 100MB cold swap-in.
 - [ ] Profile actual C preparation, queue/retention, lower I/O, CRC/decode
       and live GC; use exclusive CPU attribution and interval counters.
+      A diagnostic-only read-path change now distinguishes metadata from
+      payload lower callback requests and snapshots C read/decode wall
+      counters across each timed 4MiB read pass, without new workloads.
+      This new source is **NOT RUN / NOT LOADED**; the owner must qualify
+      it at its own exact HEAD before using the counters for optimization.
       Investigate bounded authority-safe read reuse/aggregation only
       against the packed-read bottleneck demonstrated by that evidence.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live

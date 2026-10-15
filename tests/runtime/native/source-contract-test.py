@@ -125,6 +125,22 @@ class V3ProductionSourceQualification(unittest.TestCase):
         engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
         self.assertIn("int sv3_page_is_zero(", engine)
 
+    def test_targeted_read_metadata_and_payload_diagnostics_are_success_only(self):
+        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
+        header = (ROOT / "kernel/extent-v3/engine.h").read_text()
+        status = body("sv3_status")
+        self.assertIn("read_metadata_requests", header)
+        self.assertIn("read_payload_requests", header)
+        self.assertIn("read_payload_blocks", header)
+        self.assertIn("engine->read_metadata_requests++", engine)
+        self.assertIn("engine->read_payload_requests++", engine)
+        self.assertIn("engine->read_payload_blocks += count", engine)
+        self.assertLess(engine.index("error = engine->io.read_blocks(", engine.index(
+            "int sv3_engine_read_page(")),
+            engine.index("engine->read_metadata_requests++"))
+        self.assertIn("read_meta_reqs=%u read_payload_reqs=%u", status)
+        self.assertIn("read_payload_blocks=%u", status)
+
     def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
         import importlib.util
         path = ROOT / "tests/runtime/benchmark/anon-page-fixture.py"

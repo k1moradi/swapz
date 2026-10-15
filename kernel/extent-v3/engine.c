@@ -592,6 +592,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	if (error)
 		return error;
 	engine->physical_read_blocks++;
+	engine->read_metadata_requests++;
 	error = sv3_peek(engine->read_scratch, bytes,
 			 observed.record_index, &peek);
 	if (error)
@@ -615,6 +616,8 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		if (error)
 			return error;
 		engine->physical_read_blocks += count;
+		engine->read_payload_requests++;
+		engine->read_payload_blocks += count;
 	}
 	error = sv3_read_authoritative(engine->authority, logical_page,
 				       &observed, engine->read_scratch,

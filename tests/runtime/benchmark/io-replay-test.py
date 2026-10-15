@@ -71,6 +71,7 @@ class PairReplayContract(unittest.TestCase):
                     self.assertEqual(phase["verified_image_sha256"],
                                      read["logical_image_sha256"])
                     self.assertGreater(phase["seconds"], 0)
+                    self.assertIsNone(phase["kernel_read_path"])
                     self.assertIn("buffers and worker setup excluded", phase["timed_scope"])
                     self.assertGreater(phase["useful_read_mbps"], 0)
                     self.assertGreaterEqual(phase["replay_cpu_user_s"], 0)
@@ -80,6 +81,39 @@ class PairReplayContract(unittest.TestCase):
             wrong["packed_read"]["passes"]["sequential"]["verified_pages"] = 100
             reports[0].write_text(json.dumps(wrong))
             self.run_cmd("compare", "--reports", *reports, success=False)
+
+    def test_timed_v3_read_counters_fail_closed_and_skip_rootless(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location("swapz_read_metrics", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertIsNone(module.kernel_read_snapshot(
+            Path("/tmp/not-used"), {"dm_uuid": None}))
+        self.assertIsNone(module.kernel_read_delta(None, None))
+        fields = module.KERNEL_READ_FIELDS
+        before = dict(zip(fields, (10, 4, 5, 3000, 100)))
+        after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000)))
+        result = subprocess.CompletedProcess(
+            ["dmsetup"], 0, stdout="0 8192 swapz " +
+            " ".join(f"{key}={value}" for key, value in before.items()))
+        with patch.object(module.subprocess, "run", return_value=result):
+            self.assertEqual(module.kernel_read_snapshot(
+                Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"}), before)
+        measured = module.kernel_read_delta(before, after)
+        self.assertEqual(measured["read_meta_reqs"], 1024)
+        self.assertEqual(measured["read_payload_reqs"], 512)
+        self.assertEqual(measured["read_payload_blocks"], 512)
+        with self.assertRaisesRegex(ValueError, "reset"):
+            module.kernel_read_delta(after, before)
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_meta_reqs=12))
+        bad = subprocess.CompletedProcess(["dmsetup"], 0,
+                                          stdout="0 8192 swapz read_meta_reqs=4")
+        with patch.object(module.subprocess, "run", return_value=bad):
+            with self.assertRaisesRegex(ValueError, "missing"):
+                module.kernel_read_snapshot(
+                    Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"})
 
     def test_pair_exact_bytes_and_ordered_wave_oracle(self):
         for layout in ("disjoint", "same-region"):

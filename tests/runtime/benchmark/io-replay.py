@@ -463,6 +463,43 @@ def packed_closes(path, identity):
         raise ValueError("owned mapper lacks packed close counter")
     return int(match.group(1))
 
+# C READ callback diagnostics: capture outside the READ stopwatch.
+KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
+                      "read_payload_blocks", "lower_read_wall_ns",
+                      "decode_wall_ns")
+
+
+def kernel_read_snapshot(path, identity):
+    if not identity.get("dm_uuid"):
+        return None
+    status = subprocess.run(["dmsetup", "status", str(path)], text=True,
+                            capture_output=True, check=False, timeout=8)
+    if status.returncode:
+        raise ValueError("owned V3 read telemetry unavailable")
+    counters = {}
+    for field in KERNEL_READ_FIELDS:
+        match = re.search(r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)",
+                          status.stdout)
+        if not match:
+            raise ValueError("owned V3 read telemetry missing " + field)
+        counters[field] = int(match.group(1))
+    return counters
+
+
+def kernel_read_delta(before, after):
+    if before is None and after is None:
+        return None
+    if before is None or after is None:
+        raise ValueError("incomplete V3 read telemetry")
+    counters = {field: after[field] - before[field]
+                for field in KERNEL_READ_FIELDS}
+    if any(value < 0 for value in counters.values()):
+        raise ValueError("V3 read telemetry reset during measurement")
+    if (counters["read_meta_reqs"] < counters["read_payload_reqs"] or
+            counters["read_payload_blocks"] < counters["read_payload_reqs"]):
+        raise ValueError("inconsistent V3 read request accounting")
+    return counters
+
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
     """Verify real 4MiB sequential/random reads after concurrent packed writes."""
@@ -515,6 +552,7 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                 return elapsed_ns
 
             for mode, pages in orders.items():
+                kernel_before = kernel_read_snapshot(path, identity)
                 lower_before = lower_stat(identity.get("owned_disk"))
                 cpu_before = process_cpu()
                 start_ns = time.monotonic_ns()
@@ -529,6 +567,7 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                 duration = (time.monotonic_ns() - start_ns) / 1e9
                 cpu_after = process_cpu()
                 lower_after = lower_stat(identity.get("owned_disk"))
+                kernel_after = kernel_read_snapshot(path, identity)
                 if duration <= 0 or len(durations) != logical_pages:
                     raise ValueError("invalid fixed-volume read accounting")
                 durations.sort()
@@ -540,6 +579,7 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                     "useful_read_mbps": logical_pages * PAGE / duration / 1e6,
                     "read_p99_ms": durations[int((len(durations) - 1) * .99)] / 1e6,
                     "lower_io": iostat_delta(lower_before, lower_after),
+                    "kernel_read_path": kernel_read_delta(kernel_before, kernel_after),
                     "replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
                     "replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
                     "replay_peak_rss_kb": cpu_after[2],

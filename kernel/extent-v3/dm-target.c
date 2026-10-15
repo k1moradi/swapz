@@ -2232,6 +2232,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "burst_tail_flushes=%llu "
+		       "read_meta_reqs=%u read_payload_reqs=%u "
+		       "read_payload_blocks=%u "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -2307,6 +2309,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,
 		       ctx->burst_tail_flushes,
+		       ctx->engine.read_metadata_requests,
+		       ctx->engine.read_payload_requests,
+		       ctx->engine.read_payload_blocks,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

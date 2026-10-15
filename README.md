@@ -90,6 +90,12 @@ Each mode/regime has only two repetitions: performance differences are
 0.05% async change as a gain. Replay-process CPU times are measured,
 but kernel DM worker CPU, memory pressure, live GC and real SSD/SD
 endurance remain unqualified.
+The next diagnostic-only read-path revision adds per-4MiB-pass V3 metadata
+and payload lower-callback counters plus lower-read/decode wall-time deltas
+in the sanitized report. These snapshots exclude benchmark setup and do
+not measure kernel-worker CPU or real flash requests. Owner-loaded tests
+for the new revision remain **NOT RUN**; the aacf8cc results above must
+not be carried forward as a new PASS.
 
 ## Current C performance work and qualification plan
 

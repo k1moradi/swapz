@@ -84,6 +84,11 @@ struct sv3_engine {
 	sv3_u32 submitted_blocks;
 	sv3_u32 completed_blocks;
 	sv3_u32 physical_read_blocks;
+	/* Successful targeted compressed reads: header block zero and additional
+	 * payload callbacks/blocks. Diagnostics do not own I/O or mappings. */
+	sv3_u32 read_metadata_requests;
+	sv3_u32 read_payload_requests;
+	sv3_u32 read_payload_blocks;
 };
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */

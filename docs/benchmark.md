@@ -78,6 +78,21 @@ timing. Preserve the negative slow-storage 4MiB-read results as
 historical evidence, but do not numerically compare them to the
 revised I/O-only timing boundaries without a same-source rerun.
 
+**Targeted READ-path diagnostic (post-aacf8cc change, NOT YET LOADED):**
+The production C engine distinguishes successful metadata-block reads from
+additional payload reads/blocks. Each 4MiB V3 sequential/random pass snapshots
+these counters and the existing `lower_read_wall_ns` and `decode_wall_ns`
+outside its stopwatch. Deltas go into the sanitized JSON report; setup,
+prefill and read-set population are excluded. The raw arm has null C
+counters. These are serialized lower-callback counts and nested wall-time
+measurements, **not** independent block-layer request counts, exclusive
+kernel-worker CPU time, or flash-media measurements. Continue to use
+independent lower `stat` deltas for actual submitted device traffic.
+Counters fail closed on missing fields, reset or impossible request counts.
+Rootless checks and full loaded `make test` at the new code HEAD are
+**NOT RUN** in this development environment; the owner's aacf8cc PASS
+belongs only to that earlier source revision.
+
 **Operator safety:** neither a model run nor the experimental V3
 module is approved for an SD card formatted as swap. Do not activate
 swap, format a partition, mount/write a real device, manipulate
