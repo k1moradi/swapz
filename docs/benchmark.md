@@ -297,6 +297,13 @@ the added native write-verification test independently exercises warm
 metadata reuse, overwrite, read error and cache invalidation. This is a
 test-scope separation, **not** a waiver of real I/O or fault checks.
 The amended exact HEAD still needs CI and owner-loaded qualification.
+A subsequent native workflow still failed in a **negative** rootless
+telemetry fixture: its deliberately impossible payload-block count was
+below the starting counter, so the parser correctly raised a reset
+error before reaching the intended inconsistent-payload test. Adjust
+that synthetic end value to be monotonic but smaller than completed
+payload requests, preserving both failure categories. Loaded source
+qualification is still NOT RUN on this new HEAD.
 
 
 ### Alpha.22 C change and qualification handoff

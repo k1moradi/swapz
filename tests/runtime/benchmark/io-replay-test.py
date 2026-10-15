@@ -112,7 +112,7 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_read_delta(after, before)
         with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_payload_blocks=4))
+            module.kernel_read_delta(before, dict(after, read_payload_blocks=200))
         bad = subprocess.CompletedProcess(["dmsetup"], 0,
                                           stdout="0 8192 swapz read_meta_reqs=4")
         with patch.object(module.subprocess, "run", return_value=bad):
