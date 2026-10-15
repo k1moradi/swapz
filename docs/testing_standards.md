@@ -158,6 +158,10 @@ helpers are exactly `(20,1,0)`, `(10,2,1000000)`,
 Any other tuple must be BLOCKED before touching kernel configfs.
 The failure-context regression names the global sixteen-pair index,
 not the old four-pair index, while redacting private identifiers.
+The private shell preflight suite also updates its `--help`
+assertions to the explicit model allowlist; it rejects cross-paired
+latency and cap options without privileged access rather than
+requiring a hardcoded `LOWER_MBPS=20` string.
 
 The native/source harness must assert the exact four-tuple allowlist
 rather than assuming `LOWER_MBPS=20` is the only admitted setting;
