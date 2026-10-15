@@ -1221,3 +1221,5 @@ counting retired V2.2 rootless PASS results as V3 evidence.
 ## Rootless package install/uninstall and production hold
 
 Do not ask the owner to run `make install` or `make uninstall` before V3's production safety gates are accepted. Rootless fake-DKMS tests must run under `build/tests/package-sandbox` and exercise the actual installer, including versioned source installation, the read-only `swapz3ctl` binary, refused activation arguments, ownership checks, double-install prevention, exact uninstall, modified binary refusal, failed DKMS removal quarantine and install rollback. Root execution must reject test-mode overrides. These test results are **not** loaded module correctness, real DKMS compatibility or production readiness. No root Make commands may be added beyond the four owner-approved commands.
+
+The V3 DKMS script resolves a controlled executable path and invokes `"$dkms_bin" add/build/install/remove`. Policy checks must match those **validated calls**, not a hardcoded bare `dkms add` string; behavioral rootless fake-DKMS tests remain the decisive packaging gate.

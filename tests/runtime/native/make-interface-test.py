@@ -36,8 +36,9 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("W=1 all", MAKE)
         self.assertIn("W=2 all", MAKE)
         package = (ROOT / "tools/package-dkms.sh").read_text()
-        for token in ("AUTOINSTALL", "dkms add", "dkms build", "dkms install",
-                      "dkms remove", "swapz-v3:", "/sys/module/dm_swapz"):
+        for token in ("AUTOINSTALL", '"$dkms_bin" add', '"$dkms_bin" build',
+                      '"$dkms_bin" install', '"$dkms_bin" remove',
+                      "swapz-v3:", "/sys/module/dm_swapz"):
             self.assertIn(token, package)
         self.assertNotIn("swapon ", package)
         self.assertNotIn("swapoff ", package)
