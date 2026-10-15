@@ -242,7 +242,7 @@ def validate_v3_table(table, logical_pages, lower_dev, disk_name):
         raise ValueError("expected exactly one V3 DM table extent")
     fields = rows[0].split()
     if len(fields) not in (12, 13) or fields[:3] != [
-        "0", str(logical_pages * PAGE // 512), "swapz3"
+        "0", str(logical_pages * PAGE // 512), "swapz"
     ]:
         raise ValueError("unexpected V3 DM table geometry or arguments")
     if fields[3] != lower_dev:

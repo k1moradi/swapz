@@ -47,10 +47,10 @@ Pin exact PR source/head SHA and every production blob hash:
 `dm-target.c`, `engine.c`, `authority.c`, `codec.c`, `gc-cost.h`
 and `Makefile`. Separately record the built `dm-swapz.ko` digest,
 vermagic, kernel version, loaded `dm_swapz` module and
-**the actual target keyword `swapz3`**. V2.2 and V3 build the same
+**the actual target keyword `swapz`**. V2.2 and V3 build the same
 module BASENAME and must be tested one at a time, using isolated builds
 and verified module teardown between them. The previous alpha.1
-`dm-swapz3.ko` hash is NOT qualification of this kernel.
+`dm-swapz.ko` hash is NOT qualification of this kernel.
 
 ## New actual Device Mapper table arguments
 

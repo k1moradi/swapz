@@ -1,5 +1,17 @@
 # AGENTS.md — Mandatory swapz agent entry point
 
+**Immutable naming policy (read before every prompt):** The project is `swapz`;
+the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the
+Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
+**Never rename or version-suffix these public identities** (for example to
+`swapz3`, `dm-swapz3`, or any other replacement). Enforce the same names
+in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
+CI and documentation, before every agent change. Version numbers belong in
+release metadata and source paths, not the project/module/target name. Keep
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+utility does not rename the project or module.
+
+
 This file applies to ChatGPT, Codex, Claude, Copilot and all coding agents.
 It is a **bootstrap**, not a seventh independent source of engineering policy.
 

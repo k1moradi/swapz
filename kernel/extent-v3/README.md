@@ -23,7 +23,7 @@ zero-padding across alignment holes. See
 [LOWER_WRITE_AGGREGATION.md](LOWER_WRITE_AGGREGATION.md).
 **No actual loaded alpha.6 performance benefit is yet proven.**
 
-The active `dm-swapz.ko` (target name `swapz3`) is built from
+The active `dm-swapz.ko` (target name `swapz`) is built from
 `kernel/extent-v3/dm-target.c` plus the exact codec, mapping authority and
 packing engine. It now includes **experimental low-live 1MiB segment
 relocation**, using compressed-object size regrouping and raw 4KiB fallback.

@@ -1,5 +1,17 @@
 # Benchmark — V3 Lower-I/O Evidence Only
 
+**Immutable naming policy (read before every prompt):** The project is `swapz`;
+the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the
+Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
+**Never rename or version-suffix these public identities** (for example to
+`swapz3`, `dm-swapz3`, or any other replacement). Enforce the same names
+in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
+CI and documentation, before every agent change. Version numbers belong in
+release metadata and source paths, not the project/module/target name. Keep
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+utility does not rename the project or module.
+
+
 **Mandatory task context:** [README.md](../README.md), [VISION.md](../VISION.md),
 [coding_standards.md](coding_standards.md),
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
@@ -69,7 +81,7 @@ Retain old data only as archived diagnostic provenance.
 | Arm | Actual loaded target |
 |---|---|
 | **off** | uncompressed direct 4096-byte I/O to newly **owned RAM-backed null_blk**; NOT `swapoff` or changing host swap |
-| **V3** | V3 `swapz3` target on an equivalent fresh, owned RAM-backed null_blk; experimental, not production-ready |
+| **V3** | V3 `swapz` target on an equivalent fresh, owned RAM-backed null_blk; experimental, not production-ready |
 
 Use **ONE immutable fixture** and **ONE immutable ordered logical I/O
 trace** for both arms. Require matching fixture SHA256, trace SHA256,

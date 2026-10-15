@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed source qualifications for *real* swapz3 vs codec-only smoke.
+"""Fail-closed source qualifications for *real* swapz vs codec-only smoke.
 
 This is not a replacement for live kernel BIO/GC tests. It prevents CI and
 future privileged harnesses from accidentally selecting the old swapz module
@@ -52,12 +52,23 @@ def source_body(symbol: str, source: str) -> str:
 
 class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
-        self.assertRegex(DM, r'\.name\s*=\s*"swapz3"')
-        self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz3"\)')
+        self.assertRegex(DM, r'\.name\s*=\s*"swapz"')
+        self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz"\)')
         version = (ROOT / "kernel/extent-v3/VERSION").read_text().strip()
         self.assertRegex(version, r"^3\.0\.0-alpha\.[0-9]+$")
         self.assertIn(f'SV3_ALPHA_VERSION "{version}"', DM)
         self.assertIn("obj-m += dm-swapz.o", MK)
+        self.assertNotIn('"swapz3"', DM)
+        for path in ("AGENTS.md", "README.md", "VISION.md",
+                     "docs/coding_standards.md", "docs/testing_standards.md",
+                     "docs/compile.md", "docs/benchmark.md"):
+            with self.subTest(naming_policy=path):
+                document = (ROOT / path).read_text()
+                self.assertIn("Immutable naming policy (read before every prompt)",
+                              document)
+                self.assertIn("Device Mapper target is exactly `swapz`",
+                              document)
+                self.assertIn("module alias is `dm-swapz`", document)
         self.assertIn("SV3_BUILD_SMOKE", MK)
         self.assertTrue(f"revision: **{version}" in README or
                         f"V{version} is experimental" in README,
@@ -173,7 +184,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_alpha_rejects_all_physical_devices(self):
         ctr = body("sv3_ctr")
         self.assertIn('disk_name, "nullb", 5', ctr)
-        self.assertIn('swapz3 alpha accepts null_blk backing only', ctr)
+        self.assertIn('swapz alpha accepts null_blk backing only', ctr)
         self.assertIn("goto fail;", ctr)
 
     def test_real_v3_not_memory_smoke(self):

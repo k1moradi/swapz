@@ -35,17 +35,17 @@ REBOOT.
 ## Distinguish the two independently built modules
 
 - `make -C kernel/extent-v3 W=1 all`: output `dm-swapz.ko`, an
-  EXPERIMENTAL actual DM target with `swapz3` name and source
+  EXPERIMENTAL actual DM target with `swapz` name and source
   `dm-target.c + codec.c + authority.c + engine.c`.
 - `make -C kernel/extent-v3 SV3_BUILD_SMOKE=1 W=1 all`:
   `swapz_extent_v3.ko`, in-memory self-test module, **not** a DM target.
 - Never link or use them in the same modpost build; run `make clean` between.
 - **Module identity:** the V3 installed artifact is **`dm-swapz.ko`**
-  (loaded Linux module `dm_swapz`), but its distinct alpha DM target
-  keyword stays `swapz3`. V2.2 also builds `dm-swapz.ko` in
+  (loaded Linux module `dm_swapz`), and its Device Mapper target
+  keyword is **`swapz`**. V2.2 also builds `dm-swapz.ko` in
   `kernel/`; only ONE of these incompatible implementations can be
   installed or loaded at a time. Keep V2.2 and V3 checkouts/builds separate,
-  and never use the previous alpha.1 `dm_swapz3` test module hash to
+  and never use the previous alpha.1 `dm_swapz` test module hash to
   qualify the current alpha.5 driver.
 - **Correct BIO flush encoding:** Linux rejects a direct
   `REQ_OP_FLUSH` BIO before the target receives it. Test a valid
@@ -82,7 +82,7 @@ REBOOT.
    sysfs major/minor. Ensure its `memory_backed` setting is 1 before
    activating any target. Bounds must allow at least three 1MiB segments
    plus 25% (minimum two segments) of reserve.
-4. Create `swapz3` target only over that exact null_blk node, with a
+4. Create `swapz` target only over that exact null_blk node, with a
    uniquely owned DM UUID. Never point the V2.2-only benchmark runner at
    a V3 module or at the SD partition.
 5. If a DM create/remove or any data I/O times out or leaves callback
@@ -119,7 +119,7 @@ REBOOT.
 - Cold read p50/p95/p99 only if achieved read load matches baseline.
   Low-QD contention, GC, and test storage service-rate must be comparable.
 
-The active release gate ledger is [active testing standards](../../docs/testing_standards.md). The renamed alpha.5 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz3 module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
+The active release gate ledger is [active testing standards](../../docs/testing_standards.md). The renamed alpha.5 kernel module requires new independent loaded test evidence: Codex's alpha.1 dm-swapz module hash cannot be reused. GC must exclude both the paused foreground OPEN segment and the victim, and optional raw CRC/readback needs explicit corruption tests.
 
 ## Independent correctness blockers that prohibit SD / system swap
 
@@ -186,7 +186,7 @@ counts under the same verified achieved workload**, including GC.
   reduction that breaks read service is not an overall win.
 - Keep source and target identity pinned: exact Git SHA, source blob SHA,
   compiled `dm-swapz.ko` SHA-256 and vermagic, actual mapped
-  `swapz3` target/UUID, physical backing major:minor and test isolation.
+  `swapz` target/UUID, physical backing major:minor and test isolation.
 - Report one-window geometry, rootless benchmark, loaded `null_blk` and
   genuine SD/SSD/HDD results as **four distinct evidence classes**. Do not
   claim physical-media improvement from only the first three.

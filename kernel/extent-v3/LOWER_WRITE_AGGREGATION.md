@@ -6,7 +6,7 @@
 
 **Kernel architecture change: physical request submission, NOT just compression.**
 Source: [PR #54](https://github.com/k1moradi/swapz/pull/54). Exact
-module basename remains **dm-swapz.ko**, target keyword **swapz3**.
+module basename remains **dm-swapz.ko**, target keyword **swapz**.
 V2.2 comparator still builds the SAME module basename, so only load
 one at a time. The constructor STILL REJECTS anything other than
 memory-backed, test-owned null_blk. Never touch active /swapfile or

@@ -212,16 +212,16 @@ note "OWNED_RAM_LOWER=$LOWER CONFIG=$CONFIG DISK=$DISK DEVICE=$DEVNO UUID=$UUID"
 modprobe dm_mod || fail "device mapper core unavailable"
 insmod "$MODULE" || fail "V3 kernel module rejected"
 OWN_MODULE=1
-dmsetup targets | grep -Eq '^swapz3[[:space:]]' ||
+dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
 	fail "V3 target registration missing"
 # 16 MiB upper table; 9 constructor arguments, no injected errors.
 dmsetup create "$DMNAME" --uuid "$UUID" \
-	--table "0 32768 swapz3 $LOWER 0 64 1 2 0 0 1 0" ||
+	--table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 0" ||
 	fail "test-only DM mapping creation failed"
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
 	fail "owned DM UUID mismatch"
-dmsetup table "$DMNAME" | grep -Eq '^0 32768 swapz3 ' ||
+dmsetup table "$DMNAME" | grep -Eq '^0 32768 swapz ' ||
 	fail "DM table unexpected"
 dmsetup deps -o devname "$DMNAME" | grep -Fq "$DISK" ||
 	fail "DM dependency does not match owned RAM lower"

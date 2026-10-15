@@ -1,7 +1,19 @@
 # swapz — experimental V3 Device Mapper compression
 
+**Immutable naming policy (read before every prompt):** The project is `swapz`;
+the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the
+Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
+**Never rename or version-suffix these public identities** (for example to
+`swapz3`, `dm-swapz3`, or any other replacement). Enforce the same names
+in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
+CI and documentation, before every agent change. Version numbers belong in
+release metadata and source paths, not the project/module/target name. Keep
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+utility does not rename the project or module.
+
+
 **V3.0.0-alpha.21 is experimental, not production-ready.**
-The active `swapz3` kernel C implementation uses LZ4, raw fallback,
+The active `swapz` kernel C implementation uses LZ4, raw fallback,
 and 4/8/16 KiB physical extents to reduce independently measured lower-device
 I/O for byte-exact 4 KiB logical swap pages. It admits controlled RAM-backed
 `null_blk` only; a build or installed DKMS package is not permission to

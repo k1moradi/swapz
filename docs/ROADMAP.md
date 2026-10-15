@@ -93,7 +93,7 @@ are reported, not hidden. This is not a release or performance gate.
 - Compare the same immutable logical pages, operation trace,
   prefill, completed work and full byte-exact readback on **two
   distinct owned RAM-backed `null_blk` lower devices**: uncompressed
-  `off` vs loaded `swapz3`. Never change host swap state.
+  `off` vs loaded `swapz`. Never change host swap state.
 - Collect independent lower READ/WRITE 512-byte stat-sector deltas,
   actual requests, flushes, GC bytes and requests, full drain,
   achieved useful IOPS, kernel CPU/RAM and cold READ p95/p99.

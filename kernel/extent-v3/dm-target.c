@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * dm-swapz3 - EXPERIMENTAL V3.0-alpha volatile Device Mapper swap target.
+ * dm-swapz - EXPERIMENTAL V3.0-alpha volatile Device Mapper swap target.
  *
  * First runtime integration of actual V3 4/8/16KiB extents. Uses 4KiB logical
  * pages, LZ4, bounded size-aware write windows and synchronous dm-io through
@@ -10,7 +10,7 @@
  * segments, but it remains null_blk-only until independently qualified.
  * On ENOSPC or failed lower I/O, fail closed; never use as system swap.
  */
-#define DM_MSG_PREFIX "swapz3"
+#define DM_MSG_PREFIX "swapz"
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/device-mapper.h>
@@ -38,7 +38,7 @@
 #include "window-policy.h"
 
 #if PAGE_SIZE != SV3_BLOCK_BYTES
-#error "swapz3 V3.0-alpha requires 4KiB PAGE_SIZE"
+#error "swapz V3.0-alpha requires 4KiB PAGE_SIZE"
 #endif
 #define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
@@ -1983,7 +1983,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	 */
 	if (!ctx->backing->bdev->bd_disk ||
 	    strncmp(ctx->backing->bdev->bd_disk->disk_name, "nullb", 5)) {
-		ti->error = "swapz3 alpha accepts null_blk backing only";
+		ti->error = "swapz alpha accepts null_blk backing only";
 		error = -EOPNOTSUPP;
 		goto fail;
 	}
@@ -2079,7 +2079,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->io_client = NULL;
 		goto fail;
 	}
-	ctx->workqueue = alloc_workqueue("swapz3", WQ_MEM_RECLAIM, 1);
+	ctx->workqueue = alloc_workqueue("swapz", WQ_MEM_RECLAIM, 1);
 	if (!ctx->workqueue) {
 		error = -ENOMEM;
 		goto fail;
@@ -2096,7 +2096,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			goto fail;
 		}
 		ctx->preparation_workqueue = alloc_workqueue(
-					"swapz3-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,
+					"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,
 					1);
 		if (!ctx->preparation_workqueue) {
 			error = -ENOMEM;
@@ -2290,7 +2290,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 }
 
 static struct target_type sv3_target = {
-	.name = "swapz3",
+	.name = "swapz",
 	.version = {3, 0, 0},
 	.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE,
 	.module = THIS_MODULE,
@@ -2319,4 +2319,4 @@ module_exit(sv3_dm_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("swapz main developer");
 MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC");
-MODULE_ALIAS("dm-swapz3");
+MODULE_ALIAS("dm-swapz");

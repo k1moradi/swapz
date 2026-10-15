@@ -183,7 +183,7 @@ class PairReplayContract(unittest.TestCase):
         spec.loader.exec_module(module)
         lower = "251:7"
         name = "nullb-swapz-0123456789abcdef"
-        tokens = f"0 32768 swapz3 {lower} 0 64 0 2 0 0 1 0"
+        tokens = f"0 32768 swapz {lower} 0 64 0 2 0 0 1 0"
         self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["window"], 64)
         self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["retain_ms"], 0)
         self.assertEqual(module.validate_v3_table(
@@ -200,7 +200,7 @@ class PairReplayContract(unittest.TestCase):
             tokens.replace("251:7", "251:8"),
             tokens.replace("251:7", "/dev/sda1"),
             tokens.replace("32768", "32760"),
-            tokens.replace("swapz3", "linear"),
+            tokens.replace("swapz", "linear"),
             tokens + "\n" + tokens,
             tokens + " 0 0",
             tokens + " 5",

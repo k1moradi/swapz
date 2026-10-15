@@ -1,5 +1,17 @@
 # Compile — V3-only Active Build
 
+**Immutable naming policy (read before every prompt):** The project is `swapz`;
+the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the
+Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
+**Never rename or version-suffix these public identities** (for example to
+`swapz3`, `dm-swapz3`, or any other replacement). Enforce the same names
+in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
+CI and documentation, before every agent change. Version numbers belong in
+release metadata and source paths, not the project/module/target name. Keep
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+utility does not rename the project or module.
+
+
 **Required per-task context:** [README.md](../README.md), [VISION.md](../VISION.md),
 [coding_standards.md](coding_standards.md),
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
@@ -7,7 +19,7 @@ and [benchmark.md](benchmark.md). Work on **main only**.
 
 ## One active module: V3.0.0-alpha.21
 
-`make -j2` builds **only the V3 Device Mapper `swapz3`
+`make -j2` builds **only the V3 Device Mapper `swapz`
 module**, without loading it, using Linux **Kbuild/Make**. Linux kernel
 module compilation is controlled by the kernel's headers, compiler flags,
 symbol versions and module link process, so CMake cannot replace Kbuild.

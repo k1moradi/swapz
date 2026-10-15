@@ -284,7 +284,7 @@ modprobe dm_mod
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
     fail 'V3 module insertion rejected'
 OWN_MODULE=1
-dmsetup targets | grep -Eq '^swapz3[[:space:]]' ||
+dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
     fail 'V3 target registration missing'
 token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
 [[ $token =~ ^[a-f0-9]{16}$ ]] || fail 'mapper token invalid'
@@ -297,7 +297,7 @@ DMUUID="SWAPZ-TEST-$token"
 # Retained unpaced sessions permit --retain-ms 1 OR 2; only the original
 # paced candidate permits 2. Both are pinned above before any setup.
 if ! dmsetup create "$DMNAME" --uuid "$DMUUID" \
-    --table "0 8192 swapz3 ${LOWERS[1]} 0 64 0 2 0 0 1 0 $RETAIN_MS"; then
+    --table "0 8192 swapz ${LOWERS[1]} 0 64 0 2 0 0 1 0 $RETAIN_MS"; then
     if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
              tr -d '[:space:]') == "$DMUUID" ]]; then
         OWN_DM=1
