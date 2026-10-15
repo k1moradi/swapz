@@ -17,6 +17,18 @@ MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
 LOWER_MBPS=0
+REPLAY_V3_FIRST=0
+# The final internal suffix controls safe replay order only.
+if [[ $# -gt 1 && ${!#} == --v3-first ]]; then
+    REPLAY_V3_FIRST=1
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
+SHARED_PLAN=""
+# Only make test supplies its freshly made immutable workload directory.
+if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
+    SHARED_PLAN="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
 # Explicitly permit asynchronous preparation on the QD32 medium experiment.
 # Nothing about an arbitrary extra flag may authorize RAM device creation.
 if [[ $# -gt 1 && ${!#} == --async-prepare ]]; then
@@ -56,6 +68,11 @@ else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
     exit 2
 fi
+if (( REPLAY_V3_FIRST )) &&
+   [[ $RATE_MODE != unpaced || $PROFILE != medium || $LOWER_MBPS != 20 ]]; then
+    echo 'BLOCKED: V3-first requires exact capped owned medium QD32' >&2
+    exit 2
+fi
 if (( ASYNC_PREPARE || LOWER_MBPS )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
     echo 'BLOCKED: async/rate-cap trials require owned medium unpaced QD32' >&2
@@ -85,7 +102,7 @@ devno() {
 }
 for program in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
                findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
-               mkdir rmdir stat tee cat ls sleep python3 sort; do
+               mkdir rmdir stat tee cat ls sleep python3 sort cp; do
     command -v "$program" >/dev/null || fail "missing command $program"
 done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
@@ -327,56 +344,86 @@ for (( n=0; n<50; ++n )); do
 done
 [[ -b /dev/mapper/$DMNAME ]] || fail 'owned DM block node missing'
 DMDEV="$(devno "/dev/mapper/$DMNAME")"
-if [[ $PROFILE == medium ]]; then
-    python3 -B tests/runtime/benchmark/anon-page-fixture.py \
-        --output-prefix "$SESSION/fixture" --pages 128 \
-        --seed 0x51a0a9 --weights medium=100
-    # Reject the fixture before any replay unless actual host liblz4
-    # outputs meet the predeclared medium nonzero-page size range.
-    python3 -B - "$SESSION/fixture.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-manifest = json.loads(Path(sys.argv[1]).read_text())
-assert manifest["pages"] == 128
-assert manifest["profile_pages"] == {"medium": 128}
-assert manifest["lz4_size_buckets"] == {"2049_3072": 128}
-assert manifest["raw_pages"] == 0
-assert 2049 <= manifest["lz4_min_accepted_payload_bytes"] <= manifest["lz4_max_accepted_payload_bytes"] <= 2200
-assert 128 * 2049 <= manifest["lz4_accepted_payload_bytes"] <= 128 * 2200
-print("MEDIUM_FIXTURE_MEASURED_LZ4_BYTES=" +
-      str(manifest["lz4_accepted_payload_bytes"]))
-PY
+if [[ -n $SHARED_PLAN ]]; then
+    [[ $SHARED_PLAN == "$ROOT/build/benchmark/shared."* &&
+       -d $SHARED_PLAN && ! -L $SHARED_PLAN &&
+       -f $SHARED_PLAN/fixture.bin && ! -L $SHARED_PLAN/fixture.bin &&
+       -f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json &&
+       -d $SHARED_PLAN/plan && ! -L $SHARED_PLAN/plan &&
+       -f $SHARED_PLAN/plan/trace.jsonl &&
+       -f $SHARED_PLAN/plan/manifest.json ]] ||
+        fail 'shared immutable replay plan missing or outside owned build root'
+    mkdir -p "$SESSION/plan"
+    cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"
+    cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
+    cp -- "$SHARED_PLAN/plan/trace.jsonl" "$SESSION/plan/trace.jsonl"
+    cp -- "$SHARED_PLAN/plan/manifest.json" "$SESSION/plan/manifest.json"
+    note 'IMMUTABLE_PLAN_REUSED=1'
 else
-    python3 -B tests/runtime/benchmark/anon-page-fixture.py \
-        --output-prefix "$SESSION/fixture" --pages 128 --seed 0x51a0a9
+    if [[ $PROFILE == medium ]]; then
+        python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+            --output-prefix "$SESSION/fixture" --pages 128 \
+            --seed 0x51a0a9 --weights medium=100
+        # Reject the fixture before any replay unless actual host liblz4
+        # outputs meet the predeclared medium nonzero-page size range.
+        python3 -B - "$SESSION/fixture.json" <<'PY'
+    import json
+    import sys
+    from pathlib import Path
+    manifest = json.loads(Path(sys.argv[1]).read_text())
+    assert manifest["pages"] == 128
+    assert manifest["profile_pages"] == {"medium": 128}
+    assert manifest["lz4_size_buckets"] == {"2049_3072": 128}
+    assert manifest["raw_pages"] == 0
+    assert 2049 <= manifest["lz4_min_accepted_payload_bytes"] <= manifest["lz4_max_accepted_payload_bytes"] <= 2200
+    assert 128 * 2049 <= manifest["lz4_accepted_payload_bytes"] <= 128 * 2200
+    print("MEDIUM_FIXTURE_MEASURED_LZ4_BYTES=" +
+          str(manifest["lz4_accepted_payload_bytes"]))
+    PY
+    else
+        python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+            --output-prefix "$SESSION/fixture" --pages 128 --seed 0x51a0a9
+    fi
+    python3 -B tests/runtime/benchmark/io-replay.py prepare \
+        --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
+        --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+        --reader-pages 256 --qd "$QD" --read-pct 25 \
+        --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 fi
-python3 -B tests/runtime/benchmark/io-replay.py prepare \
-    --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
-    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-    --reader-pages 256 --qd "$QD" --read-pct 25 \
-    --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 note "V3_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
-timeout --signal=TERM --kill-after=5s 120s python3 -B \
-    tests/runtime/benchmark/io-replay.py run \
-    --fixture "$SESSION/fixture.bin" \
-    --trace "$SESSION/plan/trace.jsonl" \
-    --manifest "$SESSION/plan/manifest.json" \
-    --candidate off --source-sha "$SOURCE" \
-    --device "${LOWERS[0]}" --result "$SESSION/off.json" \
-    --owned-nullblk-name "${NAMES[0]}" \
-    --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}" ||
-    fail 'uncompressed replay rejected'
-timeout --signal=TERM --kill-after=5s 120s python3 -B \
-    tests/runtime/benchmark/io-replay.py run \
-    --fixture "$SESSION/fixture.bin" \
-    --trace "$SESSION/plan/trace.jsonl" \
-    --manifest "$SESSION/plan/manifest.json" \
-    --candidate v3 --source-sha "$SOURCE" \
-    --device "/dev/mapper/$DMNAME" --result "$SESSION/v3.json" \
-    --owned-nullblk-name "${NAMES[1]}" \
-    --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
-    --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
+replay_off() {
+    timeout --signal=TERM --kill-after=5s 120s python3 -B \
+        tests/runtime/benchmark/io-replay.py run \
+        --fixture "$SESSION/fixture.bin" \
+        --trace "$SESSION/plan/trace.jsonl" \
+        --manifest "$SESSION/plan/manifest.json" \
+        --candidate off --source-sha "$SOURCE" \
+        --device "${LOWERS[0]}" --result "$SESSION/off.json" \
+        --owned-nullblk-name "${NAMES[0]}" \
+        --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}" ||
+        fail 'uncompressed replay rejected'
+}
+replay_v3() {
+    timeout --signal=TERM --kill-after=5s 120s python3 -B \
+        tests/runtime/benchmark/io-replay.py run \
+        --fixture "$SESSION/fixture.bin" \
+        --trace "$SESSION/plan/trace.jsonl" \
+        --manifest "$SESSION/plan/manifest.json" \
+        --candidate v3 --source-sha "$SOURCE" \
+        --device "/dev/mapper/$DMNAME" --result "$SESSION/v3.json" \
+        --owned-nullblk-name "${NAMES[1]}" \
+        --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
+        --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
+}
+if (( REPLAY_V3_FIRST )); then
+    note 'REPLAY_ORDER=v3-first'
+    replay_v3
+    replay_off
+else
+    note 'REPLAY_ORDER=off-first'
+    replay_off
+    replay_v3
+fi
 v3_status_after="$(dmsetup status "$DMNAME")"
 note "V3_STATUS_AFTER=$v3_status_after"
 if (( ASYNC_PREPARE )); then

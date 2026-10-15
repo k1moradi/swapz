@@ -32,6 +32,40 @@ implementation and performance comparisons are retired.
 [Compilation](docs/compile.md) ·
 [Benchmarking](docs/benchmark.md)
 
+## One replace-in-place result; no raw JSON console flood
+
+The single official `make test -j2` command prints short CTest-style
+PASS / FAIL / BLOCKED phase verdicts and an aligned off / synchronous
+swapz / asynchronous swapz performance table. Raw machine-readable
+JSON and host swap inventories are **not printed** by this command.
+It atomically replaces exactly one user-facing report file:
+`build/test_results.json.xz`. The compressed report contains the exact
+source revision and summarized correctness, benchmark, backing-I/O and
+swap-in latency measurements, **not** device paths, filenames from the
+host swap inventory, authentication material or complete raw logs.
+Privileged per-session diagnostic evidence may still remain privately
+under `build/deploy/` and `build/benchmark/` to support safe failures.
+
+When a GitHub CLI (`gh`) API login is detected **on the actual main
+checkout**, the same command replaces the stable `test_results.json.xz`
+asset in this repository's
+[latest test-results Release](https://github.com/k1moradi/swapz/releases/tag/test-results).
+The published asset is always named `test_results.json.xz`; no date,
+release version or run number appears in its filename. GitHub publishing
+is best-effort and does not modify `main`; absent or rejected API
+authorization is prominently reported as SKIPPED / UPLOAD_FAILED without
+turning a successful kernel test into a failure. The release asset is
+**public**, so only non-identifying summaries are included.
+
+A PASS means the defined tests completed, **not** that asynchronous
+preparation improves throughput or that real flash lifetime is proven.
+The table separately judges (1) useful swap-out MB/s against raw off,
+(2) independently measured backing WRITE byte/request savings as an
+endurance **proxy**, and (3) swap-in READ MB/s and read p99. The displayed
+time for reading 100 MB is an extrapolation from the **mixed 25%-read**
+benchmark, not an isolated cold 100 MB swap-in trial. GC, CPU pressure
+and physical SSD/SD behavior remain distinct open qualifications.
+
 ## Supported root Make interface
 
 There are **exactly four supported root commands**. Do not add aliases

@@ -37,12 +37,13 @@ jobs:
           python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq '.PHONY: all install uninstall test' Makefile
-          grep -Fq '@+bash tools/test-rootless.sh' Makefile
-          grep -Fq '@bash tools/test-loaded.sh' Makefile
+          grep -Fq '@+python3 -B tools/run-tests.py --kdir' Makefile
+          grep -Fq 'tools/test-rootless.sh' tools/run-tests.py
+          grep -Fq 'tools/test-loaded.sh' tools/run-tests.py
           grep -Fq 'sudo -n true' tools/test-loaded.sh
           grep -Fq 'BLOCKED_LOADED_QUALIFICATION' tools/test-loaded.sh
           grep -Fq 'for async_prepare in 0 1 1 0' tools/test-loaded.sh
-          if sed -n '/^test: all$/,$p' Makefile | grep -Eq 'sudo -v|sudo bash|modprobe|dmsetup'; then
+          if sed -n '/^test:$/,$p' Makefile | grep -Eq 'sudo -v|sudo bash|modprobe|dmsetup'; then
             echo 'FAIL: make test must not prompt or provision directly'
             exit 1
           fi

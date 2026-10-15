@@ -26,7 +26,12 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn(".PHONY: build/kernel/experimental/dm-swapz.ko", MAKE)
         self.assertIn("all: build/kernel/experimental/dm-swapz.ko "
                       "build/tests/device-roundtrip build/userspace/swapz3ctl", MAKE)
-        self.assertIn("@+bash tools/test-rootless.sh", MAKE)
+        self.assertIn("@+python3 -B tools/run-tests.py --kdir", MAKE)
+        reporter = (ROOT / "tools/run-tests.py").read_text()
+        for required in ("tools/test-rootless.sh", "tools/test-loaded.sh",
+                         "W=1", "W=2", "build/test_results.json.xz",
+                         "gh", "release", "upload"):
+            self.assertIn(required, reporter)
         self.assertIn("build/tests/device-roundtrip: tools/device-roundtrip.c", MAKE)
         self.assertIn("build/userspace/swapz3ctl: userspace/swapz3ctl.c "
                       "kernel/extent-v3/VERSION", MAKE)
@@ -120,6 +125,8 @@ class PublicMakeContract(unittest.TestCase):
                 "\t@if ! cmp -s '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; "
                 "then cp '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; fi\n"
                 "\t@rm -f '$(M)/.module-candidate'\n")
+            (fixture / "tools/run-tests.py").write_text(
+                (ROOT / "tools/run-tests.py").read_text())
             (fixture / "tools/test-rootless.sh").write_text(
                 "#!/bin/bash\n"
                 "set -eu\n"
@@ -127,11 +134,49 @@ class PublicMakeContract(unittest.TestCase):
                 "test -x build/tests/device-roundtrip\n"
                 "test -x build/userspace/swapz3ctl\n"
                 "printf 'rootless\\n' >> build/order.log\n")
-            (fixture / "tools/test-loaded.sh").write_text(
-                "#!/bin/bash\n"
-                "set -eu\n"
-                "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
-                "printf 'loaded\\n' >> build/order.log\n")
+            # Synthetic records model all four counterbalanced sessions;
+            # mock Kbuild / loaded phase never touch actual host devices.
+            import json
+            def mock_arm(candidate):
+                is_v3 = candidate == "v3"
+                return json.dumps({
+                    "candidate": candidate, "verdict": "PASS",
+                    "source_sha": "fake-sha",
+                    "fixture_sha256": "fake-fixture",
+                    "trace_sha256": "fake-trace", "verified_pages": 1024,
+                    "read_p95_ns": 4000000 if is_v3 else 8000000,
+                    "read_p99_ns": 5000000 if is_v3 else 10000000,
+                    "write_p99_ns": 3000000,
+                    "seconds": 2,
+                    "throughput_mbps": {
+                        "logical_write_mbps": 20 if is_v3 else 14,
+                        "lower_write_mbps": 12 if is_v3 else 14,
+                        "logical_read_mbps": 6 if is_v3 else 4,
+                        "logical_read_bytes": 4000,
+                        "logical_write_bytes": 8000,
+                    },
+                    "lower_io": {
+                        "lower_write_bytes": 5000 if is_v3 else 8000,
+                        "lower_read_bytes": 4000,
+                        "lower_write_requests": 5 if is_v3 else 8,
+                        "lower_read_requests": 4
+                    }
+                }, sort_keys=True)
+            records = []
+            for i, mode in enumerate((0, 1, 1, 0)):
+                records.extend((
+                    f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
+                    "REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first",
+                    mock_arm("v3") if i % 2 else mock_arm("off"),
+                    mock_arm("off") if i % 2 else mock_arm("v3"),
+                    f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
+                ))
+            script = ("#!/bin/bash\nset -eu\n"
+                      "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
+                      "printf 'loaded\\n' >> build/order.log\n"
+                      "cat <<'MOCK_RECORDS'\n" + "\n".join(records) +
+                      "\nMOCK_RECORDS\n")
+            (fixture / "tools/test-loaded.sh").write_text(script)
 
             env = os.environ.copy()
             env.pop("MAKEFLAGS", None)
@@ -214,13 +259,17 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("tools/package-dkms.sh install", MAKE)
         self.assertIn("tools/package-dkms.sh uninstall", MAKE)
         self.assertIn("tools/test-rootless.sh", MAKE)
-        rootless_test_recipe = MAKE.split("\ntest: all\n", 1)[1]
-        self.assertIn("tools/test-rootless.sh", rootless_test_recipe)
-        self.assertIn("W=1 all", rootless_test_recipe)
-        self.assertIn("W=2 all", rootless_test_recipe)
-        # make test must execute the loaded test/benchmark or fail BLOCKED.
-        # No sudo password prompt or device actions in the make recipe.
-        self.assertIn("bash tools/test-loaded.sh", rootless_test_recipe)
+        rootless_test_recipe = MAKE.split("\ntest:\n", 1)[1]
+        self.assertIn("tools/run-tests.py", rootless_test_recipe)
+        reporter = (ROOT / "tools/run-tests.py").read_text()
+        self.assertIn("tools/test-rootless.sh", reporter)
+        self.assertIn("tools/test-loaded.sh", reporter)
+        self.assertIn("W=1", reporter)
+        self.assertIn("W=2", reporter)
+        self.assertLess(reporter.index('"Native and rootless contracts"'),
+                        reporter.index('"Kernel warnings W=1"'))
+        self.assertLess(reporter.index('"Kernel warnings W=2"'),
+                        reporter.index('"Owned RAM smoke and 4 pairs"'))
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tools/test-loaded.sh").read_text()
@@ -236,8 +285,10 @@ class PublicMakeContract(unittest.TestCase):
                         loaded.index("tools/benchmark-owned-pair.sh"))
         self.assertNotIn("swapon ", loaded)
         self.assertNotIn("swapoff ", loaded)
-        self.assertIn("W=1 all", MAKE)
-        self.assertIn("W=2 all", MAKE)
+        self.assertIn("--shared-plan", loaded)
+        self.assertIn("--v3-first", loaded)
+        self.assertIn("W=1", reporter)
+        self.assertIn("W=2", reporter)
         package = (ROOT / "tools/package-dkms.sh").read_text()
         for token in ("AUTOINSTALL", '"$dkms_bin" add', '"$dkms_bin" build',
                       '"$dkms_bin" install', '"$dkms_bin" remove',

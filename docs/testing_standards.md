@@ -125,6 +125,43 @@ restaging/rebuild after a kernel-only edit. This proves build graph
 and mock orchestration only: no module is loaded and no throughput is
 measured by that test. CI must label its result rootless/partial.
 
+## Latest-only compressed result and official terminal output
+
+The private `tools/run-tests.py` program invoked *only* by root
+`make test` drives five strictly ordered stages: parallel compile
+prerequisites, rootless native/source/safety contracts, W=1 kernel
+build, W=2 kernel build, and privileged owned-RAM smoke plus four
+benchmark comparisons. It replaces the same
+`build/test_results.json.xz` file at the start and after each stage,
+including on nonzero FAIL/BLOCKED. A failure aborts remaining stages
+without silently claiming loaded success. The root Make API remains
+exactly four goals; no new public runner is added.
+
+The human terminal displays numbered PASS/FAIL/BLOCKED stage statuses
+and a table of raw-off, synchronous and asynchronous useful WRITE
+throughput, backing WRITE rate, input/backing WRITE-byte ratio,
+lower WRITE requests, READ MB/s, estimated 100 MB swap-in time,
+and READ p99. The compressed JSON includes exact source SHA, stage
+codes and durations and **sanitized** session aggregates. Raw JSON,
+device paths, host swap inventories and authentication details stay
+out of terminal and the publishable summary. Existing private evidence
+logs remain under `build/` to permit safe audit.
+
+The stable GitHub Release `test-results` publishes only
+`test_results.json.xz` via detected noninteractive `gh` API login
+on `main`. Overwriting that asset does **not** modify Git source
+history or require force-pushing a results branch. A release/tag can
+still have GitHub metadata; old raw evidence within `build/` is not
+automatically purged because failure quarantine may require it.
+Lacking GitHub API credentials or network must visibly show SKIPPED or
+UPLOAD_FAILED, with local correctness status unchanged. The
+`make-interface-test.py` fake Kbuild and `test-report-test.py`
+regressions verify no sandbox upload, incremental reuse, finite
+compression, exact four-pair summarization and absent raw JSON stdout.
+Loaded RAM results, actual swap behavior and real physical endurance
+are separate qualification levels; a mixed or negative performance
+verdict is not a false correctness failure.
+
 ## Minimum correctness matrix
 
 - Compression/decompression: 4096B data and CRC, very small, medium, near-3568B LZ4 payload, RAW fallback, corrupted metadata/CRC and invalid bounds.

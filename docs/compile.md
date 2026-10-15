@@ -85,6 +85,27 @@ mtimes for an unchanged rerun, a userspace-only change and a kernel
 source-only change. **Mock success verifies orchestration/incrementality,
 not loaded-kernel behavior or actual sustained throughput.**
 
+## One test runner, compressed report and authenticated publication
+
+The sole official invocation remains `make test -j2`. The private
+`tools/run-tests.py` orchestrates the default incremental build, all
+rootless/native checks, independent W=1/W=2 kernel builds and sequential
+loaded-device smoke and paired benchmarks. GNU Make jobserver tokens
+are passed to internal child builds rather than disabling compilation
+parallelism. The runner captures verbose output and shows CTest-style
+stage results, preserving return codes, fail-fast ordering and
+noninteractive privilege checks.
+
+One stable user-facing compressed file is atomically replaced at
+`build/test_results.json.xz`, whether the run PASSES, FAILS or is
+BLOCKED. Summary JSON never includes host swap inventory or identifying
+device paths. When `gh` is installed and already authorized for
+`k1moradi/swapz`, the runner uses the fixed GitHub Release tag
+`test-results` and `gh release upload --clobber` to replace the
+`test_results.json.xz` asset; it never writes to source `main`.
+No API authentication means a clearly printed SKIPPED publication,
+not a test FAIL. The release asset is publicly readable once created.
+
 ## Only supported root Make commands (owner policy)
 
 ```sh

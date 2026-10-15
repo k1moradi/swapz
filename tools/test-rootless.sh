@@ -9,6 +9,7 @@ make -C tests test
 python3 -B tests/runtime/native/source-contract-test.py -v
 python3 -B tests/runtime/benchmark/io-replay-test.py -v
 python3 -B tests/runtime/native/make-interface-test.py -v
+python3 -B tests/runtime/native/test-report-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
 bash -n tools/test-rootless.sh tools/test-loaded.sh tools/package-dkms.sh \
   tools/deploy-nullblk.sh tools/swap-inventory.sh tools/quiet-lower-io.sh \

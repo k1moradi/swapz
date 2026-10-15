@@ -74,6 +74,57 @@ and the opt-in asynchronous pair requires a positive observed count of
 LZ4 preparations starting during lower WRITEs. This is overlap
 evidence only, not proof of a real performance improvement.
 
+## Automated evidence report and transparent per-axis verdicts
+
+Every official `make test` run overwrites
+`build/test_results.json.xz` atomically and prints a CTest-like
+success/failure stage list plus a readable benchmark table. Raw stdout
+JSON from fixture preparation, replay and lower-device status is
+captured, validated and summarized, not dumped to the terminal. The
+public report excludes exact device IDs, host swap paths, kernel module
+load paths and user credentials. The optional uploaded copy overwrites
+a **single fixed GitHub Release asset** (`test_results.json.xz` on
+release tag `test-results`) without modifying source `main`. GitHub
+API authentication via `gh` must already be present; unavailable
+authorization leads to SKIPPED_UPLOAD, not a misreported test failure.
+
+**Criterion 1, useful swap-out throughput:** use completed 4 KiB
+logical swap WRITE bytes divided by measurement seconds, in decimal
+MB/s, for each replay of the same exact fixture and trace. Report the
+matching uncompressed `off`, synchronous V3 and async V3 and flag a
+V3 gain only if the candidate beats its paired raw baseline in **both
+repetitions**. Also report actual completed lower WRITE MB/s; distinguish
+input useful throughput from output physical rate. A configured
+20 MiB/s `null_blk` cap is not evidence that it was saturated.
+
+**Criterion 2, I/O reduction and endurance proxy:** calculate
+logical WRITE bytes / independently measured lower WRITE bytes and
+the percentage fewer lower WRITE bytes and requests than the identical
+raw replay. Include lower READ bytes and requests so a write saving
+does not hide read amplification. Never equate fewer RAM-backed sectors
+to measured SD/SSD lifetime or physical NAND writes. No compression
+ratio based on the fixture alone can replace actual backing counters.
+
+**Criterion 3, swap-in/READ cost:** report useful READ MB/s,
+p95/p99 READ latency, and an **estimated** seconds to deliver 100 MB
+using `100 / measured_read_MBps` under the *same mixed 25%-read
+QD32* trial. Flag reduced swap-in p99 only if both candidate
+repetitions beat their raw control. The 100 MB figure is not an actual
+standalone 100 MB cold read test; direct isolation, cold-cache/page-in
+cost and CPU/memory remain future separate qualifications.
+
+**Counterbalancing / redundancy removal:** Run sync/async/async/sync
+so temporal drift is balanced across policies, and alternate
+`off-first`/`V3-first` within the four pairs. Generate a single
+immutable 128-medium-page LZ4 fixture and deterministic 16,384-
+operation plan per `make test`, verify its actual payload size, and
+reuse it in each fresh, independently owned RAM-backed device pair.
+Keep the separate loaded 128-page overwrite/flush/zero-page smoke
+because it verifies semantics absent from the synthetic throughput
+pilot. A PASS for bounded correctness never implies a performance win.
+The reporter records incomplete, mixed and no-gain outcomes rather
+than inflating them to a single positive benchmark verdict.
+
 ## Active comparison: uncompressed baseline versus V3
 
 **No V2.2 benchmark arm, no V2.2 performance gate.** V2.2 has been

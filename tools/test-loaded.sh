@@ -26,19 +26,59 @@ printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 "${privileged[@]}" tools/deploy-nullblk.sh
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 
-# Counterbalanced two-pair A/B/B/A pilot: every child constructs newly
-# owned RAM-backed null_blk lowers and reports independent device counters.
-# This is a loaded performance experiment, NOT an assertion of a throughput
-# advantage or evidence of physical SD/SSD/HDD endurance.
+# One deterministic, measured-LZ4 immutable fixture/trace for all four
+# comparisons. Safe user-space preparation happens before any new device.
+# Children copy this verified plan into their own owned-device session.
+umask 077
+mkdir -p "$ROOT/build/benchmark"
+shared_plan="$(mktemp -d "$ROOT/build/benchmark/shared.XXXXXXXX")"
+cleanup_shared_plan() {
+    # Remove only exactly named files from this freshly allocated directory.
+    [[ $shared_plan == "$ROOT/build/benchmark/shared."* &&
+       -d $shared_plan && ! -L $shared_plan ]] || return
+    rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
+        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json"
+    rmdir -- "$shared_plan/plan" "$shared_plan" 2>/dev/null || true
+}
+trap cleanup_shared_plan EXIT
+python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+    --output-prefix "$shared_plan/fixture" --pages 128 \
+    --seed 0x51a0a9 --weights medium=100
+python3 -B tests/runtime/benchmark/io-replay.py prepare \
+    --fixture "$shared_plan/fixture.bin" --output-dir "$shared_plan/plan" \
+    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+    --reader-pages 256 --qd 32 --read-pct 25 \
+    --warmup-ops 1024 --measure-ops 16384 --iops 0
+# Assert the representative fixture remains in the measured ~2KiB class.
+python3 -B - "$shared_plan/fixture.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as inp:
+    fixture = json.load(inp)
+assert fixture["pages"] == 128
+assert fixture["profile_pages"] == {"medium": 128}
+assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
+assert fixture["raw_pages"] == 0
+assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
+PY
+
+# ABBA sync/async; independently ABAB off/V3 replay order. Each
+# child still constructs and destroys two fresh distinct RAM devices.
+index=0
 for async_prepare in 0 1 1 0; do
     arguments=(--run-owned-ram-pair --profile medium
                --retain-ms 2 --unpaced --lower-mbps 20)
     if (( async_prepare )); then
         arguments+=(--async-prepare)
     fi
+    arguments+=(--shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--v3-first)
+    fi
     printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
     "${privileged[@]}" tools/benchmark-owned-pair.sh "${arguments[@]}"
     printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
+    (( index += 1 ))
 done
 
 printf '%s\n' \

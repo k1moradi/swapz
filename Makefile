@@ -39,11 +39,9 @@ install: all
 uninstall:
 	@sudo bash tools/package-dkms.sh uninstall "$(PREFIX)"
 
-# Do not use .NOTPARALLEL here: it disables parallel compilation too.
-# A single recipe is an ordered gate: rootless tests, W=1, W=2, then
-# privileged isolated devices. Each command must succeed before the next.
-test: all
-	@+bash tools/test-rootless.sh
-	@$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" W=1 all
-	@$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" W=2 all
-	@bash tools/test-loaded.sh
+# The only public test goal: all stages are run by the private,
+# bounded reporter, which replaces one XZ result on PASS/FAIL/BLOCKED.
+# The + preserves GNU Make jobserver FDs for parallel compilation;
+# the reporter completes each stage before starting the next.
+test:
+	@+python3 -B tools/run-tests.py --kdir "$(KDIR)"
