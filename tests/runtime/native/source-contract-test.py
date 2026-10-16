@@ -589,7 +589,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         process = body("sv3_process")
         worker = body("sv3_worker")
         status = body("sv3_status")
-        self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
+        self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
         self.assertIn("ctx->next_window_close = SV3_CLOSE_UNKNOWN", flush)
         self.assertLess(flush.index("if (!count)"),
                         flush.index("ctx->window_close_reasons[ctx->next_window_close]++"))
@@ -850,7 +850,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         flush.index("sv3_engine_write_window_batched_read_cap(&ctx->engine"))
         self.assertIn("sv3_engine_write_window_batched_read_cap(&ctx->engine", flush)
         self.assertIn("planning_read_cap);", flush)
-        self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
+        self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
         expiry = body("sv3_retention_expired")
