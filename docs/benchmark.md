@@ -159,6 +159,25 @@ under an assumed saturated byte budget, not a performance prediction.
 An uncapped RAM backend can expose CPU, preparation, mapping, retention
 or queue overhead even when compression helps the capped case.
 
+### Loaded lifecycle evidence before performance promotion
+
+The owned RAM smoke must separately qualify the retained drain path. Its
+normal byte oracle still uses `O_SYNC` and explicit `fsync`, but the
+private suspend writer must use `O_DIRECT` without `O_SYNC` so FUA
+cannot make a supposed retention test close immediately. On a fresh mapper
+using the already-supported 4ms maximum retention bound, the harness must
+observe `retain_timer_arms > windows` while the writer is alive before
+calling ordinary `dmsetup suspend`. Resume must succeed, at least one
+`close_shutdown` window must be recorded, and all 128 pages must verify.
+This is a race-resistant drain-path correctness probe only; it does not
+authorize a longer production retention policy, which remains 2ms.
+
+The sanitized result must also conserve the smoke's deterministic RAW,
+zero and flush profile and the retained synthetic WRITE/FLUSH fault
+markers. Missing or inconsistent markers make loaded qualification
+incomplete. These pre-submission fault hooks still do not model
+device-originated partial/torn I/O or physical durability.
+
 ### Experiment matrix behind the one official command
 
 Compare bare raw, serialized LZ4 preparation and concurrent LZ4

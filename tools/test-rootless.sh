@@ -36,4 +36,13 @@ grep -Fq 'close_total == window_delta' tools/deploy-nullblk.sh
 grep -Fq 'PASS_WINDOW_CLOSE_REASONS=' tools/deploy-nullblk.sh
 grep -Fq 'age_total == window_delta' tools/deploy-nullblk.sh
 grep -Fq 'PASS_WINDOW_OPEN_AGE=' tools/deploy-nullblk.sh
+grep -Fq 'raw_writes == 64' tools/deploy-nullblk.sh
+grep -Fq 'PASS_LOADED_ORACLE_PROFILE=' tools/deploy-nullblk.sh
+grep -Fq 'timer_arms > lifecycle_windows' tools/deploy-nullblk.sh
+grep -Fq 'dmsetup suspend "$DMNAME"' tools/deploy-nullblk.sh
+grep -Fq 'PASS_LOADED_SUSPEND_DRAIN=' tools/deploy-nullblk.sh
+grep -Fq 'PASS_RETAINED_SYNTHETIC_WRITE_FAULT=' tools/deploy-nullblk.sh
+grep -Fq 'PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=' tools/deploy-nullblk.sh
+grep -Fq -- '--write-series' tools/device-roundtrip.c
+grep -Fq -- '--verify-series' tools/device-roundtrip.c
 printf '%s\n' 'PASS: rootless C tests, source contracts, Make policy and owned-device preflights'

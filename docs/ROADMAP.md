@@ -353,6 +353,11 @@ admission rules.
   PREFLUSH/FUA, DISCARD, GC relocation/reserve exhaustion,
   suspend/drain and safe owned-resource quarantine. A pre-submission
   synthetic `-EIO` is **not** a torn/device-originated write.
+  The current owned-RAM lifecycle candidate additionally requires explicit
+  RAW/zero/flush accounting and a genuinely open retained window drained
+  by ordinary suspend/resume with 128-page byte verification. Its 4ms
+  retention setting is a correctness-only observability aid, not a policy
+  experiment; production benchmarking remains at 2ms.
 - Before changing the scheduling model, capture a safe same-source
   current-behavior baseline, including existing window counters,
   zero-elision and fully drained lower-sector reconciliation.

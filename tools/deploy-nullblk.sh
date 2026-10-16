@@ -22,6 +22,7 @@ OWN_NULL=0
 OWN_DM=0
 OWN_MODULE=0
 QUARANTINE=0
+SUSPENDED=0
 fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
@@ -74,6 +75,16 @@ cleanup() {
 	   [[ "$current_id" != "$SWAPS_ID_BEFORE" ]]; then
 		QUARANTINE=1
 		note "QUARANTINED: host swap identity changed before teardown"
+	fi
+	if (( OWN_DM && SUSPENDED && !QUARANTINE )); then
+		if [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
+		          tr -d '[:space:]')" == "$UUID" ]] &&
+		   dmsetup resume "$DMNAME" >/dev/null 2>&1; then
+			SUSPENDED=0
+		else
+			note "QUARANTINED: suspended owned mapping could not resume"
+			QUARANTINE=1
+		fi
 	fi
 	if (( OWN_DM && !QUARANTINE )); then
 		if [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null | tr -d '[:space:]')" == "$UUID" ]]; then
@@ -336,12 +347,91 @@ fi
 note "PASS_ZERO_WRITE_LOWER_IO=logical_bytes:$logical_writes zero_pages:$zero_writes target_write_bytes:$target_write_bytes lower_write_bytes:$lower_write_bytes target_write_reqs:$target_write_reqs lower_write_reqs:$lower_write_reqs"
 note "PASS_ORACLE_LOWER_READ=target_read_bytes:$target_read_bytes lower_read_bytes:$lower_read_bytes target_read_reqs:$target_read_reqs lower_read_reqs:$lower_read_reqs"
 
+# Make the oracle's existing RAW and explicit barrier coverage a loaded
+# contract instead of relying on the fixture shape implicitly.
+raw_writes="$(status_delta raw)"
+flush_calls="$(status_delta flush_calls)"
+flush_ok="$(status_delta flush_ok)"
+flush_err="$(status_delta flush_err)"
+flush_injected="$(status_delta flush_injected)"
+(( raw_writes == 64 )) ||
+    fail "loaded oracle RAW fallback count changed: $raw_writes (expected 64)"
+(( flush_calls >= 2 && flush_ok == flush_calls &&
+   flush_err == 0 && flush_injected == 0 )) ||
+    fail "loaded oracle flush/barrier accounting changed"
+note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
+
+# Retained lifecycle qualification. Use the maximum already-supported
+# retention interval only to make the drain-path race observable; the real
+# performance policy remains owner-qualified retain_ms=2. The private writer
+# deliberately omits O_SYNC/FUA so a successful timer arm can represent a
+# genuinely retained upper write.
+note "START_LOADED_SUSPEND_DRAIN"
+dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before lifecycle phase"
+OWN_DM=0
+UUID="SWAPZ-TEST-$TOKEN-suspend"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 0 4" ||
+    fail "cannot create retained suspend mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "retained suspend DM UUID mismatch"
+suspend_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$suspend_before" retain_ms) == 4 &&
+   $(status_u64 "$suspend_before" failed) == 0 )) ||
+    fail "retained suspend mapping policy mismatch"
+shutdown_before="$(status_u64 "$suspend_before" close_shutdown)" ||
+    fail "retained suspend status lacks close_shutdown"
+timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --write-series 128 2 \
+    >"$SESSION/suspend-writer.log" 2>&1 &
+writer_pid=$!
+open_window=0
+for i in {1..400}; do
+    if ! kill -0 "$writer_pid" 2>/dev/null; then
+        break
+    fi
+    lifecycle_status="$(dmsetup status "$DMNAME")" ||
+        fail "cannot sample retained lifecycle status"
+    timer_arms="$(status_u64 "$lifecycle_status" retain_timer_arms)" ||
+        fail "retained lifecycle status lacks timer arms"
+    lifecycle_windows="$(status_u64 "$lifecycle_status" windows)" ||
+        fail "retained lifecycle status lacks windows"
+    if (( timer_arms > lifecycle_windows )); then
+        open_window=1
+        break
+    fi
+    sleep 0.001
+done
+if (( !open_window )); then
+    wait "$writer_pid" 2>/dev/null || true
+    fail "retained lifecycle writer never exposed an open timed window"
+fi
+timeout --signal=TERM --kill-after=2s 10s dmsetup suspend "$DMNAME" ||
+    fail "owned retained mapping did not suspend/drain"
+SUSPENDED=1
+timeout --signal=TERM --kill-after=2s 10s dmsetup resume "$DMNAME" ||
+    fail "owned retained mapping did not resume"
+SUSPENDED=0
+wait "$writer_pid" || fail "retained lifecycle writer failed across suspend/resume"
+timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --verify-series 128 2 ||
+    fail "retained lifecycle bytes changed across suspend/resume"
+suspend_after="$(dmsetup status "$DMNAME")"
+shutdown_after="$(status_u64 "$suspend_after" close_shutdown)" ||
+    fail "retained lifecycle status lost close_shutdown"
+lifecycle_failed="$(status_u64 "$suspend_after" failed)" ||
+    fail "retained lifecycle status lacks fail state"
+(( shutdown_after > shutdown_before && lifecycle_failed == 0 )) ||
+    fail "suspend did not drain an open retained window cleanly"
+note "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 shutdown_windows:$((shutdown_after-shutdown_before)) verified_pages:128"
+dmsetup remove "$DMNAME" || fail "cannot remove retained suspend mapping"
+OWN_DM=0
 
 # Retained-policy synthetic WRITE failure qualification. Reuse only this
 # already-owned RAM lower, but recreate the DM target so fault counters and
 # fail-closed state are isolated from the ordinary byte-exact oracle.
-dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before fault phase"
-OWN_DM=0
+note "START_LOADED_RETAINED_WRITE_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-writefault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
     --table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 1 2" ||
@@ -376,6 +466,7 @@ OWN_DM=0
 # Retained-policy synthetic FLUSH failure qualification. The data WRITE must
 # reach the owned RAM lower first; only the subsequent explicit fsync/PREFLUSH
 # is injected. This is not a device-originated or torn-completion test.
+note "START_LOADED_RETAINED_FLUSH_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-flushfault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
     --table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 0 2" ||

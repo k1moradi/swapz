@@ -301,6 +301,18 @@ data WRITE before the injected fsync/PREFLUSH error and then fail-close.
 These are safe pre-submission protocol tests only; they do not qualify a
 device-originated, partial or torn I/O failure.
 
+**Parallel retained lifecycle gate:** the same owned-RAM smoke now makes
+its existing data classes explicit (64 RAW fallback writes, nine zero
+elisions and successful explicit flushes), then recreates only its own
+mapper with the already-supported 4ms maximum retention bound. A private
+`O_DIRECT` writer deliberately omits `O_SYNC`/FUA, the harness must
+observe `retain_timer_arms > windows` while that writer is still active,
+and ordinary DM suspend/resume must drain at least one window through
+swapz's `.presuspend` path. All 128 pages are then byte-verified. The 4ms
+value is only a race-resistant correctness probe; the owner-qualified
+performance policy remains 2ms. All four fixed lifecycle/fault markers are
+mandatory in the sanitized report. Sustained live GC remains unqualified.
+
 ## Current C performance work and qualification plan
 
 The current experimental C revision drains an eligible one/two-page compressed tail

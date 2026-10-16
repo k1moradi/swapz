@@ -78,6 +78,28 @@ and both privileged owned-RAM helpers compare `modinfo -F version`
 to the canonical source before any device access. This is a version
 consistency gate, **not** permission to load onto physical media.
 
+## Current retained lifecycle contract
+
+Before retained/concurrent preparation can advance toward a default, the
+single `make test` loaded phase must carry four sanitized owned-RAM
+correctness markers. The deterministic oracle must report exactly 64 RAW
+fallback writes, nine zero elisions and at least two successful explicit
+flushes. A fresh mapper at the already-supported 4ms maximum retention
+bound must expose an actually open timed window
+(`retain_timer_arms > windows`) under a private `O_DIRECT`, non-FUA
+writer, then ordinary suspend/resume must increase `close_shutdown` and
+the helper must verify all 128 pages. Separately recreated retain=2
+mappings must pass the existing pre-submission WRITE and FLUSH fault
+contracts.
+
+The 4ms lifecycle setting exists only to make the open-window drain race
+observable. It does not change the owner-qualified 2ms benchmark policy.
+Cleanup may resume the exact owned mapper if the lifecycle command left it
+known suspended, but must never force-remove it; UUID, holder or swap
+identity ambiguity still quarantines the RAM resource. Synthetic injected
+EIO is not device-originated failure evidence. The sanitized reporter must
+fail closed when any lifecycle marker is absent or inconsistent.
+
 ## Qualification ladder (do not confuse evidence levels)
 
 | Gate | Shows | Cannot claim |

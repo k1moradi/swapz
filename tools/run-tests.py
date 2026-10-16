@@ -91,6 +91,64 @@ def safe_lines(log):
     return list(dict.fromkeys(found))[-20:]
 
 
+def parse_loaded_correctness(output):
+    """Parse fixed, non-identifying owned-RAM correctness evidence."""
+    patterns = {
+        "oracle": re.compile(
+            r"PASS_LOADED_ORACLE_PROFILE=raw_pages:(\d+) zero_pages:(\d+) "
+            r"flush_calls:(\d+)$"),
+        "suspend": re.compile(
+            r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
+            r"shutdown_windows:(\d+) verified_pages:(\d+)$"),
+        "write_fault": re.compile(
+            r"PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:(\d+) "
+            r"injected:(\d+) lower_write_delta:(\d+)$"),
+        "flush_fault": re.compile(
+            r"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:(\d+) "
+            r"injected:(\d+) data_write_reached_lower:(\d+)$"),
+    }
+    found = {}
+    for line in output.splitlines():
+        text = line.strip()
+        for name, pattern in patterns.items():
+            match = pattern.fullmatch(text)
+            if match:
+                found[name] = tuple(int(value) for value in match.groups())
+    missing = [name for name in patterns if name not in found]
+    if missing:
+        return {"overall": "INCOMPLETE",
+                "reason": "missing loaded correctness markers: " + ",".join(missing)}
+
+    raw_pages, zero_pages, flush_calls = found["oracle"]
+    suspend_retain, shutdown_windows, verified_pages = found["suspend"]
+    write_retain, write_injected, write_lower_delta = found["write_fault"]
+    flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
+    if raw_pages != 64 or zero_pages != 9 or flush_calls < 2:
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
+    if suspend_retain != 4 or shutdown_windows < 1 or verified_pages != 128:
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded suspend/drain evidence is incomplete"}
+    if write_retain != 2 or write_injected != 1 or write_lower_delta != 0:
+        return {"overall": "INCOMPLETE",
+                "reason": "synthetic retained WRITE fault contract failed"}
+    if flush_retain != 2 or flush_injected != 1 or flush_data_lower != 1:
+        return {"overall": "INCOMPLETE",
+                "reason": "synthetic retained FLUSH fault contract failed"}
+    return {
+        "overall": "PASS",
+        "raw_pages": raw_pages,
+        "zero_pages": zero_pages,
+        "flush_calls": flush_calls,
+        "suspend_retain_ms": suspend_retain,
+        "suspend_shutdown_windows": shutdown_windows,
+        "suspend_verified_pages": verified_pages,
+        "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
+        "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
+        "scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_ONLY",
+    }
+
+
 def write_report(result):
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(result, sort_keys=True, indent=2,
@@ -133,6 +191,12 @@ def failure_context(output, *, loaded=True, default_phase=None):
         for line in output.splitlines():
             if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "owned RAM kernel smoke"
+            elif line.startswith("START_LOADED_SUSPEND_DRAIN"):
+                phase = "owned RAM retained suspend/drain"
+            elif line.startswith("START_LOADED_RETAINED_WRITE_FAULT"):
+                phase = "owned RAM retained synthetic WRITE fault"
+            elif line.startswith("START_LOADED_RETAINED_FLUSH_FAULT"):
+                phase = "owned RAM retained synthetic FLUSH fault"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
             elif line.startswith("START_OWNED_RAM_REGIME="):
@@ -205,6 +269,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
+    loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
+    marker_failure = (parse_bench and rc == 0 and
+                      loaded_correctness.get("overall") != "PASS")
+    if marker_failure:
+        rc = 1
     blocked_marker = parse_bench and any(
         line.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION"))
         for line in output.splitlines())
@@ -216,11 +285,16 @@ def run_stage(title, command, result, *, parse_bench=False):
         # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
-        record["failed_phase"], record["diagnostic"] = failure_context(
-            output, loaded=parse_bench,
-            default_phase=None if parse_bench else title)
+        if marker_failure:
+            record["failed_phase"] = "owned RAM lifecycle evidence"
+            record["diagnostic"] = loaded_correctness["reason"]
+        else:
+            record["failed_phase"], record["diagnostic"] = failure_context(
+                output, loaded=parse_bench,
+                default_phase=None if parse_bench else title)
     result["stages"].append(record)
     if parse_bench:
+        result["benchmarks"]["loaded_correctness"] = loaded_correctness
         result["benchmarks"]["sessions"] = parse_sessions(output)
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])
@@ -871,6 +945,16 @@ def print_bench(result):
             for field, label in DEADLINE_CONTEXT_LABELS if kc[field])
         print("  Deadline closure contexts per-pair mean: " +
               (deadline or "none"))
+    loaded = result["benchmarks"].get("loaded_correctness", {})
+    if loaded.get("overall") == "PASS":
+        print("\n  Loaded lifecycle: "
+              f"RAW={loaded['raw_pages']}, zero={loaded['zero_pages']}, "
+              f"flushes={loaded['flush_calls']}; retain="
+              f"{loaded['suspend_retain_ms']}ms suspend/drain closed "
+              f"{loaded['suspend_shutdown_windows']} window(s) and verified "
+              f"{loaded['suspend_verified_pages']} pages; retained synthetic "
+              "WRITE/FLUSH faults failed closed.")
+
     print("\n  LIMITATIONS: timer-delayed RAM models are synthetic; no physical-media claim. "
           "Two pairs per mode, no confidence interval; replay CPU"
           " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
@@ -1058,6 +1142,7 @@ def main():
         "qualification": "RAM_BACKED_NULL_BLK_ONLY",
         "stages": [],
         "benchmarks": {"sessions": [], "verdicts": {"overall": "NOT_RUN"},
+                       "loaded_correctness": {"overall": "NOT_RUN"},
                        "write_saturation_sessions": [],
                        "write_saturation": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
