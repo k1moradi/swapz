@@ -281,8 +281,14 @@ exceed capped windows, and any
 `accepted_burst_plan_stats_failures` makes the loaded report incomplete.
 The production planner-stat helper itself is covered for the exact
 10-block/two-16KiB versus 11-block/zero-16KiB oracle and zeroed outputs
-on invalid input. Loaded performance qualification remains separate from
-these diagnostic safety contracts.
+on invalid input. Every newly mandatory status field must also be present
+in the per-session counter-delta dictionary before any invariant indexes
+it; a parser that validates a field and then omits it from the delta
+schema is a qualification failure, not an optional diagnostic omission.
+The synthetic report fixture must exercise all mandatory planner counters
+through the normal verdict path so such schema drift fails rootless CI
+before an owner-loaded run. Loaded performance qualification remains
+separate from these diagnostic safety contracts.
 
 ## Alpha.22 packed-burst tail correctness contract
 
