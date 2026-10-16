@@ -107,8 +107,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
-            out.append("V3_STATUS_AFTER=close_pack_ready=32 burst_tail_flushes=7 packed_early_commits=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
             for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:

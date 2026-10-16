@@ -437,6 +437,13 @@ suspend and shutdown preserve their original drains.
 `single_pack_deferrals` counts each first pack deliberately held;
 it is diagnostic, not a throughput claim.
 
+**First CI feedback for the two-pack revision:** production-C exact tests
+and kernel W=1/W=2 compilation passed, but the native project-goal
+workflow correctly rejected one stale synthetic reporter status line that
+omitted the newly required `single_pack_deferrals` field. Fix only that
+fixture and keep the real result parser fail-closed; this failure does
+not qualify loaded performance at the amended HEAD.
+
 **Predeclared decision:** prefer the new rule only if the owner-loaded
 same-matrix run lowers independent V3 backing WRITE requests and
 lower-WRITE callback wall time while keeping lower WRITE bytes no worse,
