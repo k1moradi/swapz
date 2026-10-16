@@ -376,6 +376,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("owned RAM kernel smoke", phase)
         self.assertIn("BLOCKED:", reason)
         self.assertNotIn("/home/private", reason)
+        self.assertNotIn("swapz", reason)
         self.assertNotIn("abcdef0123456789", reason)
 
         pair = ("PASS_LOADED_OWNED_NULLBLK_SMOKE\n"

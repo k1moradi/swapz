@@ -134,7 +134,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
             candidate = line.strip()
             if candidate.startswith(("BLOCKED: ", "FAIL: ")):
                 msg = candidate.partition(": ")[2]
-                msg = re.sub(r"(?<![A-Za-z0-9])/[^s'\"<>]+", "[path]", msg)
+                msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
                 msg = re.sub(r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
                              "[id]", msg, flags=re.I)
                 msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)

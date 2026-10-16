@@ -370,8 +370,9 @@ assertion such as the `ee95492` planner-oracle failure must retain the
 without its source path. Never substitute "private stage failed" for a
 diagnosable known failure, and never disclose full private paths, device
 names, secrets or raw host swap inventories through the report. Path
-redaction must recognize only absolute path boundaries, not turn ordinary
-terms like lower I/O into misleading output; rootless tests exercise both.
+redaction must consume a complete absolute path through its whitespace or
+quote boundary without turning ordinary terms like lower I/O into misleading
+output; rootless tests exercise both.
 
 The human terminal displays numbered PASS/FAIL/BLOCKED stage statuses
 and a table of raw-off, synchronous and asynchronous useful WRITE
