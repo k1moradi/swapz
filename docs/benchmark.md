@@ -574,12 +574,35 @@ in the metric label (for example `Useful WRITE throughput (MB/s)`) and
 keeps the raw/sync/async cells numeric. This is presentation-only; report
 JSON field names and numeric units are unchanged.
 
-Use the loaded classification before choosing another threshold. If the
-full-recovery count is near zero, this cap=3 byte-recovery direction is
-exhausted for the workload. If full recovery is common but Pareto
-candidates remain near zero, the 16KiB shape guard is the blocker and
-must not be relaxed without new read-side evidence. Independent device
-bytes and requests remain decisive; planner telemetry is explanatory only.
+**Owner-qualified classification:** exact code
+`9f9178cf89fc0296144a74ab2f7c514229def1cc` passed all five stages;
+report-only `14cb5a77a032`. SD cap=3 recovered 149.5 blocks over 68.2
+expensive windows and fully recovered all 68.2. SSD recovered 188.5
+blocks over 94.2 windows and fully recovered all 94.2. Both models
+reported zero Pareto candidates. Since the byte-recovery prerequisite
+succeeded for every expensive window, the prior one-16KiB guard is the
+specific blocker. Do not relax it merely to regain WRITE bytes.
+
+**Predeclared metadata-reuse diagnostic:** keep all real read/write
+behavior unchanged. Maintain an MRU-first stack of at most 64
+`(start_block, extent_blocks)` identities only; no cached data, no new
+lower callbacks, no skipped callbacks, no allocation in the read path.
+The same `sv3_engine_invalidate_read_cache()` mutation fence clears the
+stack on writes, GC, discard and barriers. After a *successful fully
+validated* read, update the stack and count whether the prior identity was
+within the most recent 4, 16 or 64 extents. Failed/stale/corrupt reads do
+not populate or score the shadow.
+
+The seeded-random 4MiB pass is the selection gate. For each capacity
+`N in {4,16,64}`, compute additional potential reuse as
+`shadow_hits_N - read_meta_cache_hits`. A real metadata cache may be
+implemented only for the smallest N whose mean adds at least 96 hits per
+1024 reads in **both sync and async arms of both modeled regimes**. Each
+such hit could at most remove one 4KiB metadata fetch, so 96 corresponds
+to 384KiB potential lower traffic—above 5% of the current ~6.6-6.8MiB
+random-read traffic. This is still an upper-bound diagnostic: actual
+bytes, requests, latency, p99, CPU and memory must be remeasured before
+claiming a gain. If no capacity meets the gate, stop this cache direction.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

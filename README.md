@@ -202,14 +202,28 @@ introducing zero 16KiB extents. Therefore none of the run-to-run WRITE or
 READ differences can be credited to that policy. Do not widen the rule
 merely to force a selection.
 
-**Next diagnostic:** restore the real accepted-burst write to the proven
-cap=2 unconditionally. Keep the uncapped/cap=2 tax measurement, but run
-the CPU-only cap=3 probe only inside the measured >1-extra-block tail
-(~8% of capped accepted windows). Record how many 4KiB blocks cap=3 would
-recover, how many expensive windows would fully recover the uncapped byte
-count, and how many would satisfy the prior one-16KiB Pareto shape. This
-classifies why the bounded attempt selected nothing while reducing probe
-work on the common path; it does not change real I/O or publication.
+**Owner-qualified cap=3 classification:** exact code
+`9f9178cf89fc0296144a74ab2f7c514229def1cc` passed all five owner
+stages; report-only commit `14cb5a77a032`. In SD, cap=3 recovered
+149.5 blocks across 68.2 expensive windows and fully recovered every
+one of those windows; SSD recovered 188.5 across 94.2 and likewise fully
+recovered every expensive window. Yet Pareto candidates were **zero in
+both regimes**. Therefore byte recovery is not the blocker: every
+byte-recoverable cap=3 shape violates the prior at-most-one-16KiB read
+guard. Keep the real write at cap=2 and do not weaken that guard without
+new read-side evidence.
+
+**Next diagnostic:** measure metadata reuse distance without changing I/O.
+The engine keeps a 64-entry identity-only MRU/LRU shadow stack, cleared by
+the exact existing cache invalidation fence. It stores no metadata bytes
+and never satisfies a read. Successful reads report hypothetical hits for
+4-, 16- and 64-entry metadata caches. The seeded-random 4MiB pass is the
+decision input: only consider implementing a real bounded cache if the
+smallest tested capacity provides at least 96 *additional* hits over the
+current one-extent cache in both sync/async arms and both RAM models.
+Ninety-six 4KiB metadata blocks is 384KiB of potential traffic, safely
+above the existing exploratory 5% materiality scale for ~6.6-6.8MiB
+random lower READs. Shadow hits remain explanatory, not measured savings.
 
 ## Current C performance work and qualification plan
 

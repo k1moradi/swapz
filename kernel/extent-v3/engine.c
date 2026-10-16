@@ -193,11 +193,65 @@ int sv3_engine_plan_stats(const struct sv3_compressed_page *pages,
 	return 0;
 }
 
+/*
+ * Shadow reuse-distance probe for a future metadata cache. Keep only extent
+ * identity, never bytes, so this cannot satisfy or alter a real read. The
+ * stack is MRU-first and is cleared by the exact same mutation fence as the
+ * existing one-extent cache.
+ */
+static int sv3_read_shadow_position(const struct sv3_engine *engine,
+				    sv3_u32 start_block, sv3_u8 extent_blocks)
+{
+	sv3_u8 index;
+
+	for (index = 0; index < engine->read_shadow_count; ++index)
+		if (engine->read_shadow_start_blocks[index] == start_block &&
+		    engine->read_shadow_extent_blocks[index] == extent_blocks)
+			return index;
+	return -1;
+}
+
+static void sv3_read_shadow_commit(struct sv3_engine *engine,
+				   sv3_u32 start_block, sv3_u8 extent_blocks,
+				   int position)
+{
+	sv3_u8 index;
+	sv3_u8 limit = engine->read_shadow_count;
+
+	if (position >= 0) {
+		if (position < 4)
+			engine->read_shadow_hits_4++;
+		if (position < 16)
+			engine->read_shadow_hits_16++;
+		engine->read_shadow_hits_64++;
+		for (index = (sv3_u8)position; index > 0; --index) {
+			engine->read_shadow_start_blocks[index] =
+				engine->read_shadow_start_blocks[index - 1U];
+			engine->read_shadow_extent_blocks[index] =
+				engine->read_shadow_extent_blocks[index - 1U];
+		}
+	} else {
+		if (limit < SV3_READ_SHADOW_ENTRIES) {
+			limit++;
+			engine->read_shadow_count = limit;
+		}
+		for (index = limit - 1U; index > 0; --index) {
+			engine->read_shadow_start_blocks[index] =
+				engine->read_shadow_start_blocks[index - 1U];
+			engine->read_shadow_extent_blocks[index] =
+				engine->read_shadow_extent_blocks[index - 1U];
+		}
+	}
+	engine->read_shadow_start_blocks[0] = start_block;
+	engine->read_shadow_extent_blocks[0] = extent_blocks;
+}
+
 void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 {
 	if (engine) {
 		engine->read_cache_valid = 0;
 		engine->read_cached_full = 0;
+		engine->read_shadow_count = 0;
 	}
 }
 
@@ -643,6 +697,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	sv3_u8 initial_blocks = 1;
 	int error;
 	int cached_metadata, cached_full;
+	int shadow_position;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
 	    !engine->io.read_blocks || !payload || !payload_length ||
@@ -663,6 +718,8 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		observed.payload_offset)
 		return -ESTALE;
 	bytes = (sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES;
+	shadow_position = sv3_read_shadow_position(engine, observed.start_block,
+						   observed.extent_blocks);
 	/*
 	 * Two-block extent: the bounded one-request read trades up to one
 	 * extra 4KiB block for avoiding a second synchronous lower callback.
@@ -752,5 +809,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_metadata_cache_hits++;
 	if (cached_full)
 		engine->read_full_extent_cache_hits++;
+	sv3_read_shadow_commit(engine, observed.start_block,
+			       observed.extent_blocks, shadow_position);
 	return 0;
 }

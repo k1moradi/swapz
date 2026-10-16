@@ -235,14 +235,22 @@ are still planned.
       in both modeled regimes. The matrix still passed, but no WRITE-byte
       improvement can be attributed to a branch that never executed.
       Do not widen the threshold merely to manufacture a gain.
-      Restore the actual accepted-burst write to cap=2. For diagnosis only,
-      keep uncapped/cap=2 stats on every accepted window and run the cap=3
-      CPU planner only for the existing >1-extra-block tail. Accumulate
-      cap=3 recovered blocks, full byte-recovery windows and windows that
-      satisfy the prior full-recovery/at-most-one-16KiB shape. Use that
-      distribution to decide whether this Pareto direction is exhausted or
-      whether a different bounded experiment is justified. New source
-      **NOT YET OWNER-LOADED**.
+      Owner-loaded `9f9178cf` (report-only `14cb5a77a032`) completes
+      that classification. SD cap=3 recovered 149.5 blocks across 68.2
+      expensive windows and fully recovered all 68.2; SSD recovered 188.5
+      across 94.2 and fully recovered all 94.2. Pareto candidates were zero
+      in both models, proving that the at-most-one-16KiB shape guard—not
+      byte recovery—is the blocker. Keep production cap=2 and do not weaken
+      the guard without new read-side evidence.
+      Next, add an identity-only 64-entry LRU shadow to the existing
+      serialized read cache. It performs no lower I/O and stores no data;
+      after each successful read it reports whether the immutable extent
+      would have remained resident at capacities 4, 16 or 64, and the
+      ordinary write/discard/barrier invalidation clears the shadow history.
+      Use the seeded-random 4MiB pass to choose the smallest future cache
+      only if it provides >=96 additional potential metadata hits over the
+      real one-entry cache in every sync/async/model arm. Otherwise abandon
+      this bounded cache direction. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

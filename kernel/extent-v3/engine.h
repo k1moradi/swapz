@@ -3,6 +3,7 @@
 #define SWAPZ_V3_EXTENT_ENGINE_H
 #include "authority.h"
 #define SV3_BULK_BLOCKS 64U
+#define SV3_READ_SHADOW_ENTRIES 64
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int sv3_page_is_zero(const sv3_u8 *page);
@@ -97,6 +98,18 @@ struct sv3_engine {
 	sv3_u8 read_cache_valid;
 	sv3_u8 read_cached_full;
 	sv3_u32 read_metadata_cache_hits;
+	/*
+	 * Diagnostic-only LRU of immutable extent identities. It stores NO data
+	 * and never suppresses lower I/O; it estimates how often a future
+	 * multi-entry metadata cache of 4/16/64 extents could have reused block
+	 * zero under the exact current access/invalidation stream.
+	 */
+	sv3_u32 read_shadow_start_blocks[SV3_READ_SHADOW_ENTRIES];
+	sv3_u8 read_shadow_extent_blocks[SV3_READ_SHADOW_ENTRIES];
+	sv3_u8 read_shadow_count;
+	sv3_u32 read_shadow_hits_4;
+	sv3_u32 read_shadow_hits_16;
+	sv3_u32 read_shadow_hits_64;
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	sv3_u32 read_full_extent_requests;
 	sv3_u32 read_full_extent_cache_hits;

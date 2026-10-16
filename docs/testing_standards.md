@@ -292,16 +292,26 @@ both loaded models. Per its predeclared gate, that production relaxation
 is rejected rather than widened. The real accepted-burst planner must
 remain cap=2.
 
-The follow-up is diagnostic only. Run the cap=3 CPU planner only after
-the cap=2 reference proves a window costs >1 extra block. Its outputs
-must remain between uncapped and cap=2 block counts. Record recovered
-blocks, full-recovery windows and prior Pareto-shape candidates; a
-candidate must be a full-recovery window, and both counts must not exceed
-the >1-block tail. Recovered blocks must not exceed the total cap=2
-reference tax. Any cap=3 planner inconsistency makes the loaded report
-incomplete. The existing batched engine still owns staging, lower
-completion, publication and upper completion, and source qualification
-must reject any `planning_read_cap = 3U` production assignment.
+Owner-loaded `9f9178cf` completes the cap=3 diagnostic: every
+expensive window in both modeled regimes fully recovered the uncapped
+block count at cap=3, but zero windows satisfied the at-most-one-16KiB
+Pareto shape. The byte-recovery direction is therefore read-shape
+constrained. The real accepted-burst planner must remain cap=2 and source
+qualification must continue to reject any `planning_read_cap = 3U`
+production assignment.
+
+The next read diagnostic must not cache data or alter lower I/O. A
+64-entry MRU/LRU shadow stores only immutable extent identity
+`(start_block, extent_blocks)`; `sv3_engine_invalidate_read_cache()`
+clears its occupancy together with the real one-entry cache before every
+mutation. Only a successful authoritative/generation/CRC-validated read
+may update the shadow or increment its 4/16/64-capacity hit counters.
+Native exact-C coverage must distinguish distance-4 and distance-16
+reuse, prove real lower-read counts are unchanged by shadow hits, and
+prove invalidation clears shadow occupancy while preserving cumulative
+diagnostic counters. Reporter plumbing must fail closed if
+`shadow4 > shadow16`, `shadow16 > shadow64`, or the real one-entry
+metadata-hit count exceeds `shadow4`.
 
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned
