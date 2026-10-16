@@ -362,7 +362,12 @@ time. Payload CRC equality alone is not equivalent.
 For singleton WRITE analysis, `sv3_flush_window()` must increment exactly
 one `one_page_close_reasons[reason]` entry whenever `count == 1`.
 The status/report layer must carry all reasons and fail closed unless their
-delta sum equals `one_page_windows`.
+delta sum equals `one_page_windows`. The read report must likewise carry
+`read_block_shadow_hits`, `read_block_shadow_misses` and
+`read_block_shadow_reqs` through timed snapshots, sanitized per-pass
+aggregation and the terminal summary; predicted requests may never exceed
+predicted miss blocks. Rootless synthetic fixtures must exercise both the
+valid joint singleton sum and a mismatched failure case.
 
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned

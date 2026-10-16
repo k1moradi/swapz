@@ -663,7 +663,15 @@ strict: only replace the retained metadata cache if, in every seeded-random
 arm, simulated miss blocks are <=95% of the measured real lower blocks and
 simulated miss runs are <=95% of the measured real lower READ requests.
 These are explanatory predictions; a subsequent real-cache owner run would
-still need independent device bytes/requests.
+still need independent device bytes/requests. The exact timed fields are
+`read_block_shadow_hits`, `read_block_shadow_misses` and
+`read_block_shadow_reqs`; the timed reader and final reporter reject
+predicted request runs greater than predicted miss blocks.
+
+The same report now carries all sixteen `win1_*` close-reason deltas.
+Their sum must equal `one_page_windows`, and the terminal summary prints
+only nonzero reasons so the next owner run can identify the actual
+singleton causes without dumping private/raw status text.
 
 The block-zero-skip CRC proposal is not part of this experiment. Compressed
 `sv3_read_authoritative()` currently reparses CRC-protected metadata and

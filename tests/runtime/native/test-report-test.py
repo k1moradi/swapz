@@ -51,6 +51,9 @@ def arm(candidate, *, mode, regime):
                     "read_shadow_hits_4": 160,
                     "read_shadow_hits_16": 240,
                     "read_shadow_hits_64": 300,
+                    "read_block_shadow_hits": 200,
+                    "read_block_shadow_misses": 900,
+                    "read_block_shadow_reqs": 700,
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
@@ -111,8 +114,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
-            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0")
+            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1")
             for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -214,6 +217,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_4"], 160)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_16"], 240)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_64"], 300)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_block_shadow_hits"], 200)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_block_shadow_misses"], 900)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_block_shadow_reqs"], 700)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
@@ -232,6 +238,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_recovered_blocks"], 2)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_full_recovery_windows"], 1)
         self.assertEqual(slow["alpha22_kernel_counters"]["close_pack_ready"], 18)
+        self.assertEqual(slow["alpha22_kernel_counters"]["win1_deadline"], 2)
+        self.assertEqual(slow["alpha22_kernel_counters"]["win1_pack_ready"], 1)
+        self.assertEqual(slow["alpha22_kernel_counters"]["win1_read_unrelated"], 1)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])
@@ -244,7 +253,9 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("LRU64 reused=", rendered)
+        self.assertIn("block-LRU64 simulation", rendered)
         self.assertIn("shadow metadata LRU hits", rendered)
+        self.assertIn("One-page close reasons per-pair mean", rendered)
         self.assertIn("4MiB random lower READ requests", rendered)
         lines = rendered.splitlines()
         cases = (
@@ -331,6 +342,18 @@ class ReportContract(unittest.TestCase):
             "kernel_read_path"]
         path["read_meta_lru_hits"] = (
             path["read_shadow_hits_64"] - path["read_meta_cache_hits"] + 1)
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+            "kernel_read_path"]
+        path["read_block_shadow_reqs"] = path["read_block_shadow_misses"] + 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["kernel_status"]["after"]["win1_deadline"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 

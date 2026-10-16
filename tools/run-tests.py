@@ -25,12 +25,26 @@ MODEL_SPECS = {
                      "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
+ONE_PAGE_CLOSE_LABELS = (
+    ("win1_unknown", "unknown"), ("win1_full", "full"),
+    ("win1_duplicate", "duplicate"), ("win1_zero", "zero"),
+    ("win1_fua", "fua"), ("win1_raw", "raw"),
+    ("win1_read_conflict", "read-conflict"),
+    ("win1_read_unrelated", "read-unrelated"),
+    ("win1_discard", "discard"), ("win1_preflush", "preflush"),
+    ("win1_quantum", "quantum"), ("win1_idle", "idle"),
+    ("win1_shutdown", "shutdown"), ("win1_other", "other"),
+    ("win1_deadline", "deadline"), ("win1_pack_ready", "pack-ready"),
+)
+ONE_PAGE_CLOSE_FIELDS = tuple(field for field, _ in ONE_PAGE_CLOSE_LABELS)
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
                       "read_meta_lru_hits",
                       "read_shadow_hits_4", "read_shadow_hits_16",
                       "read_shadow_hits_64",
+                      "read_block_shadow_hits", "read_block_shadow_misses",
+                      "read_block_shadow_reqs",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
 KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
@@ -241,7 +255,7 @@ def parse_sessions(output):
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
                        "close_pack_ready", "one_page_windows", "gc_victims",
-                       "gc_role_rotations")
+                       "gc_role_rotations") + ONE_PAGE_CLOSE_FIELDS
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
                 for key in allowed
@@ -364,7 +378,7 @@ def benchmark_verdicts(sessions):
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
                        "close_pack_ready",
-                      "one_page_windows", "gc_victims"):
+                      "one_page_windows", "gc_victims") + ONE_PAGE_CLOSE_FIELDS:
             before = status.get("before", {}).get(field)
             after = status.get("after", {}).get(field)
             if not isinstance(before, int) or not isinstance(after, int) or after < before:
@@ -383,8 +397,13 @@ def benchmark_verdicts(sessions):
                         "accepted_burst_cap3_recovered_blocks",
                         "accepted_burst_cap3_full_recovery_windows",
                         "close_pack_ready",
-                        "one_page_windows", "gc_victims")
+                        "one_page_windows", "gc_victims") + ONE_PAGE_CLOSE_FIELDS
         }
+        if sum(row["kernel_counter_delta"][field]
+               for field in ONE_PAGE_CLOSE_FIELDS) != \
+                row["kernel_counter_delta"]["one_page_windows"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "one-page close-reason accounting is inconsistent"}
         if (row["kernel_counter_delta"]["accepted_burst_tail_flushes"] >
                 row["kernel_counter_delta"]["accepted_burst_extensions"]):
             return {"overall": "INCOMPLETE",
@@ -480,7 +499,11 @@ def benchmark_verdicts(sessions):
                            record["read_meta_lru_hits"] > record["read_shadow_hits_64"] or
                            record["read_meta_cache_hits"] > record["read_shadow_hits_4"] or
                            record["read_shadow_hits_4"] > record["read_shadow_hits_16"] or
-                           record["read_shadow_hits_16"] > record["read_shadow_hits_64"]
+                           record["read_shadow_hits_16"] > record["read_shadow_hits_64"] or
+                           record["read_block_shadow_reqs"] >
+                               record["read_block_shadow_misses"] or
+                           record["read_block_shadow_hits"] +
+                               record["read_block_shadow_misses"] < 1024
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
                                 "reason": f"{regime}: inconsistent V3 {mode} shadow-cache counters"}
@@ -551,7 +574,7 @@ def benchmark_verdicts(sessions):
                             "accepted_burst_cap3_recovered_blocks",
                             "accepted_burst_cap3_full_recovery_windows",
                             "close_pack_ready",
-                            "one_page_windows", "gc_victims")
+                            "one_page_windows", "gc_victims") + ONE_PAGE_CLOSE_FIELDS
             },
         }
     return {
@@ -627,6 +650,13 @@ def print_bench(result):
                   f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}, "
                   f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
+            print(f"  Timed 4MiB {label} block-LRU64 simulation (sync/async): "
+                  f"hits={sync[f'{read_mode}_read_block_shadow_hits']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_block_shadow_hits']:.1f}, "
+                  f"miss blocks={sync[f'{read_mode}_read_block_shadow_misses']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_block_shadow_misses']:.1f}, "
+                  f"lower runs={sync[f'{read_mode}_read_block_shadow_reqs']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_block_shadow_reqs']:.1f}")
             print(f"  Timed 4MiB {label} shadow metadata LRU hits (sync/async): "
                   f"4={sync[f'{read_mode}_read_shadow_hits_4']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_shadow_hits_4']:.1f}, "
@@ -670,6 +700,10 @@ def print_bench(result):
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
               f"GC victims={kc['gc_victims']:.1f}")
+        win1 = ", ".join(
+            f"{label}={kc[field]:.1f}"
+            for field, label in ONE_PAGE_CLOSE_LABELS if kc[field])
+        print("  One-page close reasons per-pair mean: " + (win1 or "none"))
     print("\n  LIMITATIONS: timer-delayed RAM models are synthetic; no physical-media claim. "
           "Two pairs per mode, no confidence interval; replay CPU"
           " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
