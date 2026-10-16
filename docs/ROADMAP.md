@@ -252,22 +252,24 @@ are still planned.
       122.5/118.5 SSD; lower READ bytes improved 8.25%/7.41% and
       8.06%/7.40% versus `2619385c`, with time/p99 and useful WRITE inside
       the predeclared regression guards.
-      Before caching payload blocks, keep real I/O unchanged and compare
-      two explicit memory budgets. Simulate an identity-only 64-physical-
-      block LRU at the same 256KiB capacity; replace the metadata LRU only
-      if every seeded-random arm predicts >=5% additional savings in both
-      lower blocks and lower callbacks. Separately, attach an identity-only
-      optional block-one companion to each of the 64 metadata slots. This
-      models the proposed 512KiB full-two-block design without allocating
-      payload bytes. Consider that larger design only if measured companion
-      hits alone predict >=5% savings in both lower blocks and callbacks in
-      every random arm; prefer the same-memory design if both qualify.
-      Report all close-reason marginals as well as joint one-page-window
-      close reasons before changing WRITE admission. Full reasons must sum
-      to windows; singleton reasons must sum to one_page_windows.
-      The proposed compressed-payload sidecar CRC shortcut remains deferred
-      because it would stop per-read block-zero metadata/sequence corruption
-      detection and therefore changes the current integrity contract.
+      Owner-loaded `cc2da694` (report-only `c95e1d4a49fd`) closes
+      both payload-cache proposals. The same-memory 64-block simulation
+      predicts no >=5% block/request improvement in any random arm, while
+      the 512KiB companion design predicts only 44.0/44.0 SD and
+      50.5/43.0 SSD random block-one hits; block savings stay below 5%
+      everywhere. Retain the 256KiB metadata LRU and do not allocate a
+      payload companion cache.
+      The same loaded run attributes singleton WRITE windows almost entirely
+      to the hard deadline: SD 1249.2/1252.8 and SSD 1072.5/1167.2
+      one-page windows closed at deadline, with no material zero/RAW/read
+      closure signal. Reject the proposed zero-page bypass from this
+      workload and do not infer a future-arrival admission change.
+      Next, keep the 2ms policy unchanged and classify every deadline close
+      by discovery site: before an already-admitted BIO, after an independent
+      read, worker end with local work pending, or worker end empty. Require
+      exact conservation against `close_deadline`. Use that evidence before
+      any retention-duration change, then advance to the planned QD1/4/8/32
+      write-only saturation characterization.
       New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.

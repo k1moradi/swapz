@@ -702,6 +702,29 @@ checks the on-media sequence on every read. A volatile payload CRC sidecar
 could validate payload bytes but not metadata-only corruption, so skipping
 block zero would weaken an existing integrity invariant.
 
+**Owner result for both cache probes:** exact source
+`cc2da694c4be500ae32705e199ba7b853edd10f1`, report-only
+`c95e1d4a49fd`, passed the full owner matrix. The same-memory physical-
+block cache fails its 5%/5% replacement gate: random predicted miss
+blocks/runs were SD 1564.0/974.5 and 1563.5/970.5, SSD
+1519.5/969.0 and 1519.0/972.5 (sync/async), versus measured real
+metadata-LRU lower blocks/requests of SD 1537.0/983.5 and
+1540.0/977.5, SSD 1503.0/984.0 and 1503.5/982.5. The larger 512KiB
+companion design also fails: random companion hits 44.0/44.0 SD and
+50.5/43.0 SSD imply <5% block savings in every arm. Keep the real
+256KiB metadata cache; both payload-cache directions are closed unless a
+materially different workload supplies new evidence.
+
+**Deadline attribution probe (NOT YET OWNER-LOADED):** do not change
+`retain_ms=2`. Every deadline closure must increment exactly one of
+`deadline_before_bio`, `deadline_after_read`,
+`deadline_worker_with_local`, or `deadline_worker_empty`. Their timed
+status deltas must sum exactly to `close_deadline`; a mismatch makes the
+matrix INCOMPLETE. The terminal report prints nonzero contexts per regime.
+This probe changes no timer, admission, publication, I/O or completion
+behavior. It decides whether to study a longer retention bound or proceed
+directly to the separate QD1/4/8/32 write-only saturation matrix.
+
 **Singleton attribution:** add a joint counter for each primary
 `SV3_CLOSE_*` reason when `count == 1`. The sum must equal
 `one_page_windows`. Only that joint distribution may justify a follow-up

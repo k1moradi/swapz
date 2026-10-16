@@ -180,6 +180,14 @@ struct sv3_dm {
 	u64 retain_worker_passes;
 	u64 retain_timer_arms;
 	u64 retain_timer_arm_skips;
+	/*
+	 * Diagnostic-only attribution of the hard 2ms retention deadline.
+	 * These four mutually exclusive sites must sum to close_deadline.
+	 */
+	u64 deadline_before_bio;
+	u64 deadline_after_read;
+	u64 deadline_worker_with_local;
+	u64 deadline_worker_empty;
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
@@ -1607,6 +1615,7 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 	if (ctx->batch_count && ctx->retain_ms &&
 	    sv3_retention_expired(ctx)) {
 		ctx->next_window_close = SV3_CLOSE_DEADLINE;
+		ctx->deadline_before_bio++;
 		error = sv3_flush_window(ctx);
 		if (error) {
 			sv3_complete(bio, error);
@@ -1632,6 +1641,7 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 		 * completion, but a slow read must not extend the deadline. */
 		if (!error && sv3_retention_expired(ctx)) {
 			ctx->next_window_close = SV3_CLOSE_DEADLINE;
+			ctx->deadline_after_read++;
 			sv3_flush_window(ctx);
 		}
 		return;
@@ -1786,11 +1796,16 @@ static void sv3_worker(struct work_struct *work)
 				 ctx->batch_count >= ctx->max_window)
 				ctx->next_window_close = SV3_CLOSE_FULL;
 			else if (ctx->retain_ms &&
-				 sv3_retention_expired(ctx))
+				 sv3_retention_expired(ctx)) {
 				ctx->next_window_close = SV3_CLOSE_DEADLINE;
-			else
+				if (!list_empty(&local))
+					ctx->deadline_worker_with_local++;
+				else
+					ctx->deadline_worker_empty++;
+			} else {
 				ctx->next_window_close = !remaining ?
 					SV3_CLOSE_QUANTUM : SV3_CLOSE_IDLE;
+			}
 			sv3_flush_window(ctx);
 		} else if (ctx->batch_count) {
 			ctx->retain_worker_passes++;
@@ -2392,7 +2407,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
-		       "close_deadline=%llu retained_read_bypasses=%llu "
+		       "close_deadline=%llu "
+		       "deadline_before_bio=%llu deadline_after_read=%llu "
+		       "deadline_worker_with_local=%llu deadline_worker_empty=%llu "
+		       "retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
@@ -2502,6 +2520,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
+		       ctx->deadline_before_bio, ctx->deadline_after_read,
+		       ctx->deadline_worker_with_local, ctx->deadline_worker_empty,
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,

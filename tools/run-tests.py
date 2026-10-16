@@ -49,6 +49,13 @@ ONE_PAGE_CLOSE_LABELS = (
     ("win1_deadline", "deadline"), ("win1_pack_ready", "pack-ready"),
 )
 ONE_PAGE_CLOSE_FIELDS = tuple(field for field, _ in ONE_PAGE_CLOSE_LABELS)
+DEADLINE_CONTEXT_LABELS = (
+    ("deadline_before_bio", "before-bio"),
+    ("deadline_after_read", "after-read"),
+    ("deadline_worker_with_local", "worker-local"),
+    ("deadline_worker_empty", "worker-empty"),
+)
+DEADLINE_CONTEXT_FIELDS = tuple(field for field, _ in DEADLINE_CONTEXT_LABELS)
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
@@ -268,7 +275,7 @@ def parse_sessions(output):
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
                        "windows", "one_page_windows", "gc_victims",
-                       "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS
+                       "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS + DEADLINE_CONTEXT_FIELDS
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
                 for key in allowed
@@ -391,7 +398,7 @@ def benchmark_verdicts(sessions):
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
                        "windows",
-                      "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS:
+                      "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS:
             before = status.get("before", {}).get(field)
             after = status.get("after", {}).get(field)
             if not isinstance(before, int) or not isinstance(after, int) or after < before:
@@ -410,7 +417,7 @@ def benchmark_verdicts(sessions):
                         "accepted_burst_cap3_recovered_blocks",
                         "accepted_burst_cap3_full_recovery_windows",
                         "windows",
-                        "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS
+                        "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
         }
         if sum(row["kernel_counter_delta"][field]
                for field in CLOSE_REASON_FIELDS) != \
@@ -422,6 +429,11 @@ def benchmark_verdicts(sessions):
                 row["kernel_counter_delta"]["one_page_windows"]:
             return {"overall": "INCOMPLETE",
                     "reason": "one-page close-reason accounting is inconsistent"}
+        if sum(row["kernel_counter_delta"][field]
+               for field in DEADLINE_CONTEXT_FIELDS) != \
+                row["kernel_counter_delta"]["close_deadline"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "deadline-context accounting is inconsistent"}
         if (row["kernel_counter_delta"]["accepted_burst_tail_flushes"] >
                 row["kernel_counter_delta"]["accepted_burst_extensions"]):
             return {"overall": "INCOMPLETE",
@@ -595,7 +607,7 @@ def benchmark_verdicts(sessions):
                             "accepted_burst_cap3_recovered_blocks",
                             "accepted_burst_cap3_full_recovery_windows",
                             "windows",
-                            "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS
+                            "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS + DEADLINE_CONTEXT_FIELDS
             },
         }
     return {
@@ -734,6 +746,11 @@ def print_bench(result):
             f"{label}={kc[field]:.1f}"
             for field, label in ONE_PAGE_CLOSE_LABELS if kc[field])
         print("  One-page close reasons per-pair mean: " + (win1 or "none"))
+        deadline = ", ".join(
+            f"{label}={kc[field]:.1f}"
+            for field, label in DEADLINE_CONTEXT_LABELS if kc[field])
+        print("  Deadline closure contexts per-pair mean: " +
+              (deadline or "none"))
     print("\n  LIMITATIONS: timer-delayed RAM models are synthetic; no physical-media claim. "
           "Two pairs per mode, no confidence interval; replay CPU"
           " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "

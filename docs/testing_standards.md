@@ -370,10 +370,26 @@ while real payload I/O remains unchanged. The larger 512KiB production
 cache is gated by >=5% predicted block and request savings in every
 seeded-random arm; diagnostics alone do not authorize allocation.
 
+Owner-loaded `cc2da694` fails both payload-cache gates, so the
+64-entry/256KiB metadata-only cache remains the qualified design. Do not
+allocate block-one data from the companion-shadow result and do not
+replace metadata slots with the same-memory physical-block design.
+
 Do not repurpose `raw_crc32c` for a compressed fast path without an
 explicit integrity-contract change. Raw pages have no on-media metadata;
 compressed pages do, and current reads validate its CRC and sequence every
 time. Payload CRC equality alone is not equivalent.
+
+Owner-loaded `cc2da694` shows the QD32 singleton population is
+deadline-dominated, not zero-page dominated. Before any retention-policy
+change, source/status/report contracts must carry the four mutually
+exclusive deadline discovery counters: `deadline_before_bio`,
+`deadline_after_read`, `deadline_worker_with_local`, and
+`deadline_worker_empty`. Their per-session deltas must sum exactly to
+`close_deadline`; synthetic report fixtures must include both a valid
+conservation case and a mismatched failure case. These counters are
+diagnostic-only and must not move or extend the absolute retention
+deadline.
 
 For WRITE closure analysis, the status/report layer must carry all sixteen
 `window_close_reasons` deltas and fail closed unless their sum equals

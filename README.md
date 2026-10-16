@@ -240,44 +240,43 @@ Versus `2619385c`, lower READ bytes fell 8.25%/7.41% on SD and
 predeclared 5% regression guards, so the metadata-only LRU is retained.
 It remains synthetic RAM evidence, not a physical-media claim.
 
-**Next bounded read diagnostics:** keep the retained 64-entry metadata LRU
-as the real baseline and change no lower I/O. First, simulate a same-memory
-64-physical-block (256KiB) LRU using identities only under the exact
-successful read stream. Block zero remains mandatory under the current
-integrity contract; also mark only payload blocks required by the target
-record. Count hypothetical 4KiB misses and contiguous miss runs. Replace
-the retained metadata LRU only if this same-memory block cache predicts at
-least 5% fewer lower blocks **and** 5% fewer lower callbacks than the real
-metadata-LRU result in every seeded-random arm.
+**Owner-qualified cache-direction closure:** exact source
+`cc2da694c4be500ae32705e199ba7b853edd10f1` passed all five owner
+stages; report-only commit `c95e1d4a49fd`. Keep the proven 256KiB
+metadata-only LRU. The same-memory 64-physical-block simulation failed its
+predeclared replacement gate: on seeded-random reads it predicted
+1564.0/1563.5 miss blocks and 974.5/970.5 lower runs on SD, and
+1519.5/1519.0 miss blocks and 969.0/972.5 lower runs on SSD. That is not
+>=5% better than the real metadata-LRU device traffic in any model/mode
+combination and can increase block traffic by evicting useful block zero.
 
-In parallel, measure the proposed larger full-two-block design without
-allocating its extra 256KiB. Each real metadata-LRU slot carries one
-identity-only `second_valid` shadow. A successful LRU64 metadata hit that
-needs block one records either a companion hit or miss; after any
-successfully validated read that actually had block one available, the
-slot's companion becomes valid. Thus `second_hits + second_misses` is the
-exact measured intersection of **LRU64 reuse and block-one demand**, not an
-inference from two unrelated marginals. A real 512KiB/target extent cache
-is justified only if companion hits alone predict at least 5% fewer lower
-blocks and 5% fewer lower callbacks in every seeded-random arm. If the
-same-memory cache also qualifies, prefer it because it uses no extra data
-memory.
+The proposed larger 512KiB full-two-block extent cache also fails its
+predeclared 5%/5% gate. Random companion block-one hits were 44.0/44.0
+on SD and 50.5/43.0 on SSD. Even treating every hit as one avoided 4KiB
+block and one avoided lower request, predicted block savings are only
+about 2.9%/2.9% and 3.4%/2.9%; request savings exceed 5% in only SSD sync.
+Do not allocate the extra 256KiB or replace the retained cache from this
+evidence. The compressed payload-CRC/block-zero-skip idea remains deferred
+because it changes the existing per-read metadata/sequence corruption
+oracle.
 
-Do not take the proposed compressed-payload CRC shortcut yet. Current V3
-compressed reads deliberately revalidate block-zero header/record metadata
-and on-media sequence on every read; skipping block zero for a record
-wholly in a later block would stop detecting metadata-only corruption.
-That is a correctness-policy change, unlike the raw-page sidecar CRC, and
-needs separate integrity evidence before any implementation.
+**Owner-qualified WRITE closure attribution:** the same run shows zero-page,
+RAW, read-conflict and unrelated-read closures are not material in this
+QD32 medium workload. SD singleton windows were approximately 99.7%
+deadline closures (1249.2 of 1252.8; 3.5 idle). SSD singleton windows were
+approximately 91.9% deadline closures (1072.5 of 1167.2; 94.8 idle).
+Therefore do not implement the proposed zero-page bypass or revive the
+rejected future-arrival admission rule.
 
-For the remaining WRITE windows, report both full close-reason marginals
-and the existing joint `win1 × close_reason` cross-tab. The sixteen
-full close-reason deltas must sum to `windows`, while the singleton
-cross-tab must sum to `one_page_windows`. In particular, evaluate
-zero-page preservation only from measured `close_zero` and
-`win1_zero` counts; do not assume zero pages dominate singleton creation.
-Likewise, do not change worker-tail admission until the loaded distribution
-shows which closures are actually material.
+**Next bounded diagnostic:** keep the hard 2ms retention policy unchanged
+and classify every `SV3_CLOSE_DEADLINE` by the exact discovery site:
+before processing an already-admitted BIO, after a successful independent
+read, at worker end with older local BIOs still pending, or at worker end
+with no local successor. The four deltas must sum exactly to
+`close_deadline`. This distinguishes a genuinely starved finite-QD
+window from a deadline reached while already-admitted work exists, and is
+the evidence gate before changing retention duration or moving to the
+roadmap's QD1/4/8/32 write-only saturation matrix.
 
 ## Current C performance work and qualification plan
 

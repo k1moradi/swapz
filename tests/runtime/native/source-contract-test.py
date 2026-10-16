@@ -885,6 +885,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
                           "ctx->batch", "ctx->authority", "ctx->window_first_ns"):
             self.assertNotIn(forbidden, wake)
         self.assertIn("SV3_CLOSE_DEADLINE", process)
+        self.assertIn("ctx->deadline_before_bio++", process)
+        self.assertIn("ctx->deadline_after_read++", process)
+        self.assertIn("ctx->deadline_worker_with_local++", worker)
+        self.assertIn("ctx->deadline_worker_empty++", worker)
+        self.assertIn("!list_empty(&local)", worker)
         self.assertIn("sv3_flush_window(ctx)", process)
         self.assertIn("ctx->retain_worker_passes++", worker)
         self.assertIn("ctx->retain_timer_arms++", worker)
@@ -911,7 +916,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("retain > SV3_MAX_RETAIN_MS", ctr)
         self.assertIn("ctx->retain_ms = retain", ctr)
         for field in ("retain_ms=%u", "retain_passes=%llu",
-                      "retain_timer_arms=%llu", "close_deadline=%llu"):
+                      "retain_timer_arms=%llu", "close_deadline=%llu",
+                      "deadline_before_bio=%llu",
+                      "deadline_after_read=%llu",
+                      "deadline_worker_with_local=%llu",
+                      "deadline_worker_empty=%llu"):
             self.assertIn(field, status)
         self.assertIn("SV3_CLOSE_DEADLINE", DM)
         self.assertIn("if (bio->bi_opf & REQ_FUA)", body("sv3_accept_write"))
