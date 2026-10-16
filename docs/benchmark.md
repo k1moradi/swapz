@@ -603,6 +603,11 @@ to 384KiB potential lower traffic—above 5% of the current ~6.6-6.8MiB
 random-read traffic. This is still an upper-bound diagnostic: actual
 bytes, requests, latency, p99, CPU and memory must be remeasured before
 claiming a gain. If no capacity meets the gate, stop this cache direction.
+The three shadow counters are mandatory through `dmsetup status`,
+`io-replay.py` timed-pass deltas, sanitized report aggregation and the
+terminal summary. Both the timed reader and final reporter reject
+non-nested evidence (`real one-entry <= shadow4 <= shadow16 <= shadow64`)
+instead of publishing a partial reuse claim.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

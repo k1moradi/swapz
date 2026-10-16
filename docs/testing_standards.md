@@ -311,7 +311,12 @@ reuse, prove real lower-read counts are unchanged by shadow hits, and
 prove invalidation clears shadow occupancy while preserving cumulative
 diagnostic counters. Reporter plumbing must fail closed if
 `shadow4 > shadow16`, `shadow16 > shadow64`, or the real one-entry
-metadata-hit count exceeds `shadow4`.
+metadata-hit count exceeds `shadow4`. The exact fields
+`read_shadow_hits_4`, `read_shadow_hits_16` and
+`read_shadow_hits_64` are mandatory in the timed read snapshot/delta,
+the sanitized per-pass report schema and the final matrix aggregation.
+Synthetic io-replay and report fixtures must exercise both valid nesting
+and each invalid ordering before owner-loaded qualification.
 
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned

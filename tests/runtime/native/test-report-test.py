@@ -47,6 +47,9 @@ def arm(candidate, *, mode, regime):
                     "lower_read_wall_ns": 120000000,
                     "decode_wall_ns": 20000000,
                     "read_meta_cache_hits": 128,
+                    "read_shadow_hits_4": 160,
+                    "read_shadow_hits_16": 240,
+                    "read_shadow_hits_64": 300,
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
@@ -206,6 +209,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_reqs"], 1024)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_payload_reqs"], 512)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_cache_hits"], 128)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_4"], 160)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_16"], 240)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_64"], 300)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
@@ -234,7 +240,9 @@ class ReportContract(unittest.TestCase):
         report = {"benchmarks": {"verdicts": verdicts}}
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
-        lines = output.getvalue().splitlines()
+        rendered = output.getvalue()
+        self.assertIn("shadow metadata LRU hits", rendered)
+        lines = rendered.splitlines()
         cases = (
             ("Useful WRITE throughput (MB/s)", "MB/s"),
             ("Mixed READ p99 (ms)", "ms"),
@@ -289,6 +297,28 @@ class ReportContract(unittest.TestCase):
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
         sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_full_recovery_windows"] = 2
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+    def test_shadow_read_diagnostics_fail_closed_when_not_nested(self):
+        sessions = runner.parse_sessions(synthetic_log())
+        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+            "kernel_read_path"]
+        path["read_shadow_hits_4"] = path["read_meta_cache_hits"] - 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+            "kernel_read_path"]
+        path["read_shadow_hits_4"] = path["read_shadow_hits_16"] + 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+            "kernel_read_path"]
+        path["read_shadow_hits_16"] = path["read_shadow_hits_64"] + 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 

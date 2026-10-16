@@ -28,6 +28,8 @@ MODEL_ORDER = tuple(MODEL_SPECS)
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
+                      "read_shadow_hits_4", "read_shadow_hits_16",
+                      "read_shadow_hits_64",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
 KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
@@ -471,6 +473,12 @@ def benchmark_verdicts(sessions):
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
                                 "reason": f"{regime}: missing measured V3 {mode} C read counters"}
+                    if any(record["read_meta_cache_hits"] > record["read_shadow_hits_4"] or
+                           record["read_shadow_hits_4"] > record["read_shadow_hits_16"] or
+                           record["read_shadow_hits_16"] > record["read_shadow_hits_64"]
+                           for record in diagnostics):
+                        return {"overall": "INCOMPLETE",
+                                "reason": f"{regime}: inconsistent V3 {mode} shadow-cache counters"}
                     for field in KERNEL_READ_FIELDS:
                         columns[name][f"{mode}_{field}"] = statistics.mean(
                             record[field] for record in diagnostics)
@@ -610,6 +618,13 @@ def print_bench(result):
                   f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}, "
                   f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
+            print(f"  Timed 4MiB {label} shadow metadata LRU hits (sync/async): "
+                  f"4={sync[f'{read_mode}_read_shadow_hits_4']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_shadow_hits_4']:.1f}, "
+                  f"16={sync[f'{read_mode}_read_shadow_hits_16']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_shadow_hits_16']:.1f}, "
+                  f"64={sync[f'{read_mode}_read_shadow_hits_64']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_shadow_hits_64']:.1f}")
         sync, asynchronous = columns["sync"], columns["async"]
         print("  Timed mixed V3 C WRITE (sync/async; overlapping wall ns): "
               f"LZ4={sync['mixed_lz4_wall_ns']/1e9:.2f}/"
