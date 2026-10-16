@@ -113,6 +113,11 @@ int sv3_engine_plan_bounded(const struct sv3_compressed_page *pages,
 			    sv3_u8 count, sv3_u8 max_read_blocks,
 			    sv3_u8 *classes, sv3_u8 *records_per_extent,
 			    sv3_u8 *extent_count);
+/* CPU-only summary of the same exact planner; no allocation or I/O. */
+int sv3_engine_plan_stats(const struct sv3_compressed_page *pages,
+			  sv3_u8 count, sv3_u8 max_read_blocks,
+			  sv3_u16 *total_blocks, sv3_u8 *extent_count,
+			  sv3_u8 *four_block_extents);
 /*
  * Partial failure returns a nonzero status and sets *committed_pages to
  * exactly the prefix whose complete extents became authoritative. It NEVER

@@ -255,12 +255,10 @@ and clears the extension state through `sv3_flush_window`.
 
 Owner qualification at `ed2ea3d` showed that unconstrained replanning
 of these larger windows reduced WRITE requests but caused a material
-packed-READ regression through denser 16KiB layouts. The current
-correctness experiment therefore captures whether a window was actually
-extended before clearing extension state and, only for that window when
-the target's configured read budget is the default zero, supplies a
-planning-only cap of two cold 4KiB blocks per compressed record to the
-same batched engine. This temporary planning argument must not mutate
+packed-READ regression through denser 16KiB layouts. Owner-qualified
+`c60f24a` then showed that a planning-only cap of two cold 4KiB blocks
+per record restores the read side while preserving the accepted-burst
+request/wait gain. This temporary planning argument must not mutate
 `engine.max_read_blocks_per_record`; runtime reads and explicit target
 budgets retain their original semantics.
 
@@ -272,8 +270,19 @@ must retain its 10-block/four-block-extent control, while cap=2 uses
 11 blocks, maps every record to <=2 blocks, still aggregates lower runs
 and verifies exact readback. An invalid planning cap must fail before
 staging. Source/report contracts require
-`accepted_burst_read_caps <= accepted_burst_extensions`. Loaded
-performance qualification remains separate from these safety contracts.
+`accepted_burst_read_caps <= accepted_burst_extensions`.
+
+The current diagnostic may call only the CPU planner over the already
+ordered compressed prefix before the unchanged capped write. It records
+the uncapped-vs-capped block delta and 16KiB extent elimination; it must
+perform no I/O, allocate no memory, mutate no authority and never replace
+the actual write plan. `accepted_burst_cap_extra_gt1_windows` must not
+exceed capped windows, and any
+`accepted_burst_plan_stats_failures` makes the loaded report incomplete.
+The production planner-stat helper itself is covered for the exact
+10-block/two-16KiB versus 11-block/zero-16KiB oracle and zeroed outputs
+on invalid input. Loaded performance qualification remains separate from
+these diagnostic safety contracts.
 
 ## Alpha.22 packed-burst tail correctness contract
 

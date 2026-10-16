@@ -481,33 +481,48 @@ window allowed the byte-minimal planner to select denser 16KiB extents,
 reintroducing metadata-then-payload read dependence. This is useful
 write-path evidence, not a complete VISION win.
 
-**Current production-C experiment (NOT YET OWNER-LOADED):** preserve
-accepted-burst aggregation but separate *lower submission grouping*
-from *logical extent density*. When a window was actually extended
-after reaching pack-ready geometry, call the exact same batched
-publication path with an explicit planning-only `max_read_blocks=2`.
-That cap applies only while selecting the written SWZ3 extent layout;
-the target's configured runtime read policy remains unchanged. Normal
-non-extended windows use the original planner unchanged.
+**Owner-qualified read-capped accepted-burst result:** exact code
+`c60f24a28fec48b33d616f9cd85f6bde8b02d591` passed all five owner
+stages; result-only publication `8e2557839a3d`. The cap materially
+reversed `ed2ea3d`'s packed-read regression while retaining its
+lower-request write benefit. SD sync/async useful WRITE is 5.44/5.54
+MB/s with 2865/2838.5 lower requests and 3.08/3.05s lower callback
+wall; sequential 4MiB READ is 0.63/0.62s and random 1.16/1.16s with
+6,801,408/6,807,552 random lower bytes and effectively zero dependent
+payload callbacks. SSD useful WRITE is 18.84/20.69 MB/s versus 18.85
+raw; async is `MATERIAL_GAIN_PRELIMINARY`. Random READ is 0.26/0.26s
+with 6,684,672/6,668,288 lower bytes and packed p99 5.43/5.83ms versus
+6.08ms raw.
 
-The existing planner oracle demonstrates the expected bounded tradeoff:
-sixteen uniform 2072-byte records require 10 normalized write blocks
-under byte-minimal planning and 11 with cap=2. A new exact production-C
-bulk test requires the capped batch to publish no mapping wider than
-two blocks, add no padding, retain lower-run aggregation and read back
-all sixteen records byte-for-byte. The uncapped control must still
-exercise a four-block extent. `accepted_burst_read_caps` counts
-extended windows where the default planner was replaced by this
-planning-only cap; it is diagnostic only.
+The tradeoff is WRITE bytes, not requests: logical/backing WRITE ratio
+falls to 1.38x on SD and 1.42/1.43x on SSD, versus 1.48x and
+1.56/1.57x respectively in the rejected dense `ed2ea3d` layout.
+Because the mandatory matrix still has only two observations per
+preparation mode/model, all material-gain labels remain preliminary.
 
-**Predeclared decision:** prefer the capped accepted-burst layout only
-if the loaded matrix materially reverses `ed2ea3d`'s read regression
-(lower READ bytes, payload callbacks, fixed-volume time/p99) while
-preserving a substantial portion of its lower-WRITE request/wait gain.
-Useful WRITE should remain no materially worse than the qualified
-`bd8fe3a` baseline, and independent lower WRITE bytes must be reported
-rather than hidden by the request win. A prettier extent-class profile
-alone is not success.
+**Current production-C diagnostic (NOT YET OWNER-LOADED):** keep
+`c60f24a`'s actual write/read policy unchanged. After the window has
+been ordered but before the real capped batched write, run the existing
+CPU-only finite planner twice over the compressed prefix: once with
+the byte-minimal default and once with the same cap=2 that the real
+write will use. Record only:
+- cumulative extra normalized 4KiB WRITE blocks selected by cap=2;
+- number of capped windows whose extra cost exceeds one block;
+- number of 16KiB extent candidates eliminated by the cap;
+- planner-stat inconsistencies, which make qualification incomplete.
+
+The helper allocates nothing, performs no I/O and mutates no authority.
+The actual write still replans through the unchanged capped production
+path. Exact-C coverage pins sixteen uniform 2072-byte records at
+10 blocks / 3 extents / two 16KiB extents uncapped versus
+11 blocks / 6 extents / zero 16KiB extents at cap=2, and invalid
+budgets fail before producing stats.
+
+**Decision after the diagnostic:** do not introduce a Pareto threshold
+unless the loaded distribution shows a stable bounded cost that can
+recover meaningful WRITE bytes without reintroducing the 16KiB layouts
+that caused `ed2ea3d`'s read regression. Independent device bytes and
+requests remain decisive; planner telemetry is explanatory only.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

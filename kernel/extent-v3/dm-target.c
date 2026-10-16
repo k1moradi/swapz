@@ -191,6 +191,10 @@ struct sv3_dm {
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
 	u64 accepted_burst_read_caps;
+	u64 accepted_burst_cap_extra_blocks;
+	u64 accepted_burst_cap_extra_gt1_windows;
+	u64 accepted_burst_four_extents_avoided;
+	u64 accepted_burst_plan_stats_failures;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1077,6 +1081,45 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	sv3_order_window(ctx);
 	ctx->window_sort_wall_ns +=
 		sv3_elapsed_ns(section_start, ktime_get_ns());
+	/*
+	 * Diagnostic-only dual planning: quantify the exact WRITE-block tax
+	 * paid by the accepted-burst read cap and the number of 16KiB extents
+	 * it removes. This performs no allocation, authority mutation or I/O.
+	 * The real capped planner below still owns the actual layout decision.
+	 */
+	if (accepted_burst_extended &&
+	    !ctx->engine.max_read_blocks_per_record) {
+		sv3_u8 compressed_count = 0;
+		sv3_u8 uncapped_extents = 0, capped_extents = 0;
+		sv3_u8 uncapped_four = 0, capped_four = 0;
+		sv3_u16 uncapped_blocks = 0, capped_blocks = 0;
+		int uncapped_error, capped_error;
+
+		while (compressed_count < count &&
+		       !ctx->planned[compressed_count].raw)
+			compressed_count++;
+		uncapped_error = compressed_count ?
+			sv3_engine_plan_stats(ctx->planned, compressed_count, 0,
+					      &uncapped_blocks, &uncapped_extents,
+					      &uncapped_four) : -EINVAL;
+		capped_error = compressed_count ?
+			sv3_engine_plan_stats(ctx->planned, compressed_count, 2,
+					      &capped_blocks, &capped_extents,
+					      &capped_four) : -EINVAL;
+		if (uncapped_error || capped_error ||
+		    capped_blocks < uncapped_blocks ||
+		    capped_four > uncapped_four) {
+			ctx->accepted_burst_plan_stats_failures++;
+		} else {
+			sv3_u16 extra = capped_blocks - uncapped_blocks;
+
+			ctx->accepted_burst_cap_extra_blocks += extra;
+			if (extra > 1U)
+				ctx->accepted_burst_cap_extra_gt1_windows++;
+			ctx->accepted_burst_four_extents_avoided +=
+				uncapped_four - capped_four;
+		}
+	}
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
@@ -2310,6 +2353,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
+		       "accepted_burst_cap_extra_blocks=%llu "
+		       "accepted_burst_cap_extra_gt1_windows=%llu "
+		       "accepted_burst_four_extents_avoided=%llu "
+		       "accepted_burst_plan_stats_failures=%llu "
 		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
@@ -2394,6 +2441,10 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_burst_extensions,
 		       ctx->accepted_burst_tail_flushes,
 		       ctx->accepted_burst_read_caps,
+		       ctx->accepted_burst_cap_extra_blocks,
+		       ctx->accepted_burst_cap_extra_gt1_windows,
+		       ctx->accepted_burst_four_extents_avoided,
+		       ctx->accepted_burst_plan_stats_failures,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,

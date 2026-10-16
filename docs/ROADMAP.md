@@ -99,6 +99,17 @@ into read-hostile layouts. SD random 4MiB READ regressed to
 1.82/1.85s, 8,316,928/8,361,984 lower bytes and ~628/651 payload
 callbacks; SSD random rose to 0.34/0.33s with ~8.45/8.43ms p99.
 This is a write-side mechanism win but a rejected three-axis outcome.
+The owner then qualified exact code
+`c60f24a28fec48b33d616f9cd85f6bde8b02d591` (report-only
+`8e2557839a3d`). The accepted-burst cap restored the read side while
+retaining the request/wait improvement: SD useful WRITE 5.44/5.54 MB/s,
+2865/2838.5 lower requests and 3.08/3.05s lower wait; random 4MiB READ
+1.16s with ~6.80MiB lower traffic. SSD reached 18.84/20.69 MB/s with
+2198/2159 requests; async is `MATERIAL_GAIN_PRELIMINARY`, and random
+4MiB READ is 0.26s with ~6.67MiB lower traffic. This is the best current
+three-axis RAM-model baseline. Its cost is WRITE-byte density: 1.38x
+logical/backing on SD and 1.42/1.43x on SSD, below the denser
+`ed2ea3d` layout.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -204,21 +215,23 @@ are still planned.
       lower WRITE requests/wait improved materially, while 4MiB packed
       READ amplification/p99 regressed in both modeled regimes and SD
       random time returned near the pre-read-optimization ~1.8s range.
-      The next bounded production-C experiment preserves the accepted
-      burst and existing no-padding lower-run aggregation but gives only
-      those extended windows a **planning-only cold-read cap of two 4KiB
-      blocks per compressed record**. It does not change the target's
-      configured runtime read policy, timer, admission, publication or
-      future-arrival rules. Existing planner tests establish the concrete
-      tradeoff for sixteen ~2072-byte records: 10 write blocks
-      unconstrained versus 11 under cap=2, with the capped layout avoiding
-      16KiB mappings. New exact-C bulk coverage requires zero padding,
-      <=8KiB mappings, byte-exact readback and continued run aggregation.
-      Add `accepted_burst_read_caps` telemetry. Keep this only if packed
-      READ bytes/payload callbacks/p99 recover materially from `ed2ea3d`
-      while lower WRITE request/wait gains remain substantial and useful
-      WRITE does not materially regress past the owner-qualified
-      `bd8fe3a` cross-regime baseline. New source **NOT YET OWNER-LOADED**.
+      Owner-loaded `c60f24a` satisfies that read-cap experiment's
+      predeclared direction: packed READ bytes/callbacks/time recovered
+      essentially to the pre-extension behavior while lower WRITE requests
+      and wait stayed below `bd8fe3a`; SSD async reached a preliminary
+      material useful-WRITE gain. The cost is independently visible in
+      lower WRITE bytes (1.38x SD and 1.42/1.43x SSD logical/backing,
+      versus 1.48/1.56-1.57x for the rejected dense layout).
+      Do **not** guess a new threshold yet. The next production-C change is
+      diagnostic only: for every default-policy accepted-burst window,
+      compute the same ordered planner both uncapped and with cap=2 before
+      the unchanged real capped write. Accumulate exact extra 4KiB blocks,
+      windows whose cap costs >1 block, 16KiB extents avoided, and any
+      impossible planner inconsistency. No allocation, I/O, timing policy,
+      authority or wire-format change. Exact-C tests pin the 16x2072 case
+      at 10 blocks / two 16KiB extents uncapped versus 11 blocks / zero
+      16KiB extents capped. Use the loaded distribution to decide the next
+      Pareto policy. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

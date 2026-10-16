@@ -171,16 +171,28 @@ regressed packed READs: SD random 4MiB rose to 1.82/1.85s with
 SSD random rose to 0.34/0.33s and ~8.45ms p99. This fails the
 predeclared three-axis read/p99 gate despite the write-side gain.
 
-**Next C experiment, NOT YET OWNER-LOADED:** keep the accepted-burst
-extension and adjacent lower-run aggregation, but apply an explicit
-planning-only two-block cold-read cap to windows that were actually
-extended through the accepted local burst. Ordinary windows and the
-target's runtime read policy are unchanged. Exact production-C coverage
-shows sixteen 2072-byte records use 10 blocks unconstrained versus
-11 blocks under the cap, while capped mappings stay at 4/8KiB and the
-no-padding bulk writer remains able to aggregate adjacent extents.
-The goal is to retain lower-request savings without recreating
-read-hostile 16KiB record layouts.
+**Owner-qualified read-capped accepted burst (current best three-axis
+baseline):** exact code `c60f24a28fec48b33d616f9cd85f6bde8b02d591`
+passed all five owner stages; sanitized report-only commit
+`8e2557839a3d`. The cap kept the accepted-burst request reduction
+while restoring packed reads: SD useful WRITE reached 5.44/5.54 MB/s
+with 2865/2838.5 lower requests and ~3.08/3.05s lower-WRITE wait;
+SD random 4MiB READ returned to 1.16s and ~6.80MiB lower traffic.
+SSD reached 18.84/20.69 MB/s, with async classified
+`MATERIAL_GAIN_PRELIMINARY`, 2198/2159 lower requests, and random
+4MiB READ back to 0.26s with ~6.67MiB lower traffic. The remaining
+tradeoff is lower WRITE bytes: logical/backing ratio is 1.38 on SD and
+1.42/1.43 on SSD versus the denser but read-regressing `ed2ea3d`
+layout.
+
+**Next C diagnostic, NOT YET OWNER-LOADED:** keep `c60f24a` behavior
+unchanged and run the existing CPU-only planner twice for each
+read-capped accepted window: uncapped and cap=2. Record the exact extra
+4KiB WRITE blocks paid by the cap, how many windows cost more than one
+extra block, and how many 16KiB extents are eliminated. No new I/O,
+allocation, timer, format or publication semantics. This evidence will
+decide whether a later Pareto rule can safely recover WRITE bytes
+without sacrificing the restored read behavior.
 
 ## Current C performance work and qualification plan
 

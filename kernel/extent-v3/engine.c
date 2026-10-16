@@ -161,6 +161,38 @@ int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
 				      extent_count);
 }
 
+int sv3_engine_plan_stats(const struct sv3_compressed_page *pages,
+			  sv3_u8 count, sv3_u8 max_read_blocks,
+			  sv3_u16 *total_blocks, sv3_u8 *extent_count,
+			  sv3_u8 *four_block_extents)
+{
+	sv3_u8 classes[SV3_MAX_RECORDS];
+	sv3_u8 takes[SV3_MAX_RECORDS];
+	sv3_u8 groups = 0, group;
+	sv3_u16 blocks = 0;
+	sv3_u8 fours = 0;
+	int error;
+
+	if (!total_blocks || !extent_count || !four_block_extents)
+		return -EINVAL;
+	*total_blocks = 0;
+	*extent_count = 0;
+	*four_block_extents = 0;
+	error = sv3_engine_plan_bounded(pages, count, max_read_blocks,
+					classes, takes, &groups);
+	if (error)
+		return error;
+	for (group = 0; group < groups; ++group) {
+		blocks += classes[group];
+		if (classes[group] == 4U)
+			fours++;
+	}
+	*total_blocks = blocks;
+	*extent_count = groups;
+	*four_block_extents = fours;
+	return 0;
+}
+
 void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 {
 	if (engine) {

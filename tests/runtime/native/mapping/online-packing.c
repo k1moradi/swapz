@@ -142,6 +142,35 @@ static int test_finite_window_planner(void)
 	return 0;
 }
 
+static int test_planner_stats_quantify_cap_tradeoff(void)
+{
+	struct sv3_compressed_page pages[16];
+	sv3_u16 blocks = 99;
+	sv3_u8 extents = 99, four = 99;
+
+	prepare(pages, 16, 0, 0);
+	CHECK(sv3_engine_plan_stats(pages, 16, 0,
+				    &blocks, &extents, &four) == 0);
+	CHECK(blocks == 10);
+	CHECK(extents == 3);
+	CHECK(four == 2);
+
+	blocks = 99;
+	extents = four = 99;
+	CHECK(sv3_engine_plan_stats(pages, 16, 2,
+				    &blocks, &extents, &four) == 0);
+	CHECK(blocks == 11);
+	CHECK(extents == 6);
+	CHECK(four == 0);
+
+	blocks = 99;
+	extents = four = 99;
+	CHECK(sv3_engine_plan_stats(pages, 16, 4,
+				    &blocks, &extents, &four) == -EINVAL);
+	CHECK(blocks == 0 && extents == 0 && four == 0);
+	return 0;
+}
+
 static int test_full_window_and_selective_reads(void)
 {
 	struct sv3_compressed_page pages[16];
@@ -403,6 +432,7 @@ int main(void)
 	disk.storage = calloc(PHYSICAL_BLOCKS, SV3_BLOCK_BYTES);
 	CHECK(disk.storage != NULL);
 	CHECK(test_finite_window_planner() == 0); completed++;
+	CHECK(test_planner_stats_quantify_cap_tradeoff() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;

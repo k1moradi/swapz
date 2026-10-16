@@ -337,6 +337,10 @@ def benchmark_verdicts(sessions):
         for field in ("burst_tail_flushes", "packed_early_commits",
                       "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
+                       "accepted_burst_cap_extra_blocks",
+                       "accepted_burst_cap_extra_gt1_windows",
+                       "accepted_burst_four_extents_avoided",
+                       "accepted_burst_plan_stats_failures",
                        "close_pack_ready",
                       "one_page_windows", "gc_victims"):
             before = status.get("before", {}).get(field)
@@ -360,6 +364,13 @@ def benchmark_verdicts(sessions):
                 row["kernel_counter_delta"]["accepted_burst_extensions"]):
             return {"overall": "INCOMPLETE",
                     "reason": "accepted-burst read caps exceed extensions"}
+        if (row["kernel_counter_delta"]["accepted_burst_cap_extra_gt1_windows"] >
+                row["kernel_counter_delta"]["accepted_burst_read_caps"]):
+            return {"overall": "INCOMPLETE",
+                    "reason": "accepted-burst >1-block windows exceed capped windows"}
+        if row["kernel_counter_delta"]["accepted_burst_plan_stats_failures"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "accepted-burst dual-plan telemetry failed"}
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
         if None in vals or len(set(vals)) != 1:
@@ -578,6 +589,9 @@ def print_bench(result):
               f"accepted-burst extensions={kc['accepted_burst_extensions']:.1f}, "
               f"accepted-burst tail closes={kc['accepted_burst_tail_flushes']:.1f}, "
               f"read-capped accepted windows={kc['accepted_burst_read_caps']:.1f}, "
+              f"cap extra 4KiB blocks={kc['accepted_burst_cap_extra_blocks']:.1f}, "
+              f"cap >1-block windows={kc['accepted_burst_cap_extra_gt1_windows']:.1f}, "
+              f"16KiB extents avoided={kc['accepted_burst_four_extents_avoided']:.1f}, "
               f"early pack closes={kc['close_pack_ready']:.1f}, "
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
