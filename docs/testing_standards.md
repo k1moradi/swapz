@@ -276,7 +276,9 @@ The current diagnostic may call only the CPU planner over the already
 ordered compressed prefix before the unchanged capped write. It records
 the uncapped-vs-capped block delta and 16KiB extent elimination; it must
 perform no I/O, allocate no memory, mutate no authority and never replace
-the actual write plan. `accepted_burst_cap_extra_gt1_windows` must not
+the actual write plan. Source qualification must check the actual lower
+callback expressions (`io.write_extent`, `io.write_run`, `io.read_blocks`),
+not reject the legitimate planner-policy identifier `max_read_blocks`. `accepted_burst_cap_extra_gt1_windows` must not
 exceed capped windows, and any
 `accepted_burst_plan_stats_failures` makes the loaded report incomplete.
 The production planner-stat helper itself is covered for the exact

@@ -368,9 +368,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
         stats = source_body("sv3_engine_plan_stats", engine)
         self.assertIn("sv3_engine_plan_bounded(", stats)
-        self.assertNotIn("write_extent", stats)
-        self.assertNotIn("write_run", stats)
-        self.assertNotIn("read_blocks", stats)
+        self.assertNotIn("io.write_extent", stats)
+        self.assertNotIn("io.write_run", stats)
+        self.assertNotIn("io.read_blocks", stats)
         self.assertNotIn("kmalloc", stats)
         self.assertNotIn("vmalloc", stats)
 
