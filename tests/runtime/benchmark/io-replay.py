@@ -527,7 +527,7 @@ def kernel_write_snapshot(path, identity):
         raise ValueError("owned V3 write telemetry unavailable")
     counters = {}
     for field in KERNEL_WRITE_FIELDS:
-        match = re.search(r"(?:^|\\s)" + field + r"=(\\d+)(?:\\s|$)",
+        match = re.search(r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)",
                           status.stdout)
         if not match:
             raise ValueError("owned V3 write telemetry missing " + field)

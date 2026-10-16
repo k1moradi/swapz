@@ -430,6 +430,14 @@ mixed QD32 wave (after warm-up), and immediately after measured
 pairs, exact immutable fixture/trace, independently read
 lower-device statistics, validated byte oracle and safe teardown.
 
+**First CI feedback:** the new rootless write-status parser initially used
+a double-escaped regex for whitespace and decimal counters. Both the
+native-policy job and production-C exact-test job correctly FAILED the
+synthetic status contract, while the module compile job PASSED. Fix the
+parser expression rather than relaxing histogram reconciliation or
+fabricating a loaded pass. At the correction commit, full owner-loaded
+qualification remains **NOT RUN**.
+
 **Interpretation boundaries:** `window_commit_wall_ns` includes
 lower-write wait time, so adding it to `lower_write_wall_ns`
 double-counts; async compression may overlap worker activity.
