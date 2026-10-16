@@ -142,24 +142,22 @@ static inline int sv3_window_burst_tail_ready(
 }
 
 /*
- * Pareto relaxation for the accepted-burst planning-only read cap.
+ * Diagnostic classifier for the rejected cap=3 Pareto rule.
  *
- * Keep the proven two-block cap unless it costs more than one extra
- * physical 4KiB WRITE block. A three-block cap is eligible only when it
- * recovers the complete byte-minimal block count and contains at most one
- * 16KiB extent. The caller validates all three planner-stat samples first.
- * This helper performs no I/O and changes no mapping or BIO ownership.
+ * Owner-loaded qualification selected cap=3 zero times, so production stays
+ * at the proven cap=2. Probe only expensive (>1 extra 4KiB block) windows
+ * and classify whether cap=3 would both recover the byte-minimal block count
+ * and contain at most one 16KiB extent. This helper performs no I/O and does
+ * not choose the real planner cap.
  */
-static inline sv3_u8 sv3_window_pareto_read_cap(
+static inline int sv3_window_cap3_pareto_candidate(
 		sv3_u16 uncapped_blocks, sv3_u16 cap2_blocks,
 		sv3_u16 cap3_blocks, sv3_u8 cap3_four_extents)
 {
-	if (cap2_blocks > uncapped_blocks &&
-	    cap2_blocks - uncapped_blocks > 1 &&
-	    cap3_blocks == uncapped_blocks &&
-	    cap3_four_extents <= 1U)
-		return 3U;
-	return 2U;
+	return cap2_blocks > uncapped_blocks &&
+		cap2_blocks - uncapped_blocks > 1 &&
+		cap3_blocks == uncapped_blocks &&
+		cap3_four_extents <= 1U;
 }
 
 /*

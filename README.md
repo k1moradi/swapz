@@ -194,15 +194,22 @@ windows (>1 block); SSD averaged 877.2 across 1031.5 windows, with
 window and only 7.7%/8.6% in the expensive tail. The cap avoided
 747.0/950.8 16KiB extents while preserving the prior read recovery.
 
-**Next bounded C experiment:** keep cap=2 for the common path. Only when
-cap=2 costs more than one extra 4KiB block, allow a temporary cap=3 if
-that plan recovers the complete byte-minimal block count and contains at
-most one 16KiB extent. Each record therefore remains bounded to three
-cold 4KiB blocks and the denser layout is limited to the measured rare
-tail. New telemetry records selected cap=3 windows, recovered blocks and
-chosen 16KiB extents. Keep the change only if the same owner matrix shows
-better lower WRITE bytes without materially reversing packed READ
-time/bytes/p99.
+**Owner-qualified bounded cap=3 attempt (no effect, rejected):** exact
+code `8d63054957f4b932745d39487ca6837ac634c34c` passed all five owner
+stages; report-only commit `d5a673920b38`. The predeclared rule selected
+cap=3 **zero times** in both modeled regimes, recovering zero blocks and
+introducing zero 16KiB extents. Therefore none of the run-to-run WRITE or
+READ differences can be credited to that policy. Do not widen the rule
+merely to force a selection.
+
+**Next diagnostic:** restore the real accepted-burst write to the proven
+cap=2 unconditionally. Keep the uncapped/cap=2 tax measurement, but run
+the CPU-only cap=3 probe only inside the measured >1-extra-block tail
+(~8% of capped accepted windows). Record how many 4KiB blocks cap=3 would
+recover, how many expensive windows would fully recover the uncapped byte
+count, and how many would satisfy the prior one-16KiB Pareto shape. This
+classifies why the bounded attempt selected nothing while reducing probe
+work on the common path; it does not change real I/O or publication.
 
 ## Current C performance work and qualification plan
 

@@ -195,9 +195,9 @@ struct sv3_dm {
 	u64 accepted_burst_cap_extra_gt1_windows;
 	u64 accepted_burst_four_extents_avoided;
 	u64 accepted_burst_plan_stats_failures;
-	u64 accepted_burst_pareto_cap3_windows;
-	u64 accepted_burst_pareto_saved_blocks;
-	u64 accepted_burst_pareto_four_extents;
+	u64 accepted_burst_cap3_recovered_blocks;
+	u64 accepted_burst_cap3_full_recovery_windows;
+	u64 accepted_burst_cap3_pareto_candidates;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1085,20 +1085,20 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	ctx->window_sort_wall_ns +=
 		sv3_elapsed_ns(section_start, ktime_get_ns());
 	/*
-	 * Three CPU-only plans quantify the cap=2 WRITE tax and permit one
-	 * bounded Pareto relaxation. The common path remains cap=2. Only an
-	 * expensive (>1 block) tail may use cap=3, and only when cap=3 fully
-	 * recovers the byte-minimal block count with at most one 16KiB extent.
-	 * The actual engine call below still owns staging, lower I/O, mapping
-	 * publication and upper completion; these samples perform none of them.
+	 * Keep the owner-qualified real write at cap=2. The rejected cap=3
+	 * Pareto rule selected zero windows in both loaded models, so do not
+	 * widen it or retain an unproven production branch. Preserve the useful
+	 * cap=2 tax diagnostic, and probe cap=3 only for the rare windows whose
+	 * hard cap costs more than one 4KiB block. The probe is CPU-only: it
+	 * performs no allocation, I/O, authority or completion mutation.
 	 */
 	if (accepted_burst_extended &&
 	    !ctx->engine.max_read_blocks_per_record) {
 		sv3_u8 compressed_count = 0;
-		sv3_u8 uncapped_extents = 0, capped_extents = 0, cap3_extents = 0;
-		sv3_u8 uncapped_four = 0, capped_four = 0, cap3_four = 0;
-		sv3_u16 uncapped_blocks = 0, capped_blocks = 0, cap3_blocks = 0;
-		int uncapped_error, capped_error, cap3_error;
+		sv3_u8 uncapped_extents = 0, capped_extents = 0;
+		sv3_u8 uncapped_four = 0, capped_four = 0;
+		sv3_u16 uncapped_blocks = 0, capped_blocks = 0;
+		int uncapped_error, capped_error;
 
 		while (compressed_count < count &&
 		       !ctx->planned[compressed_count].raw)
@@ -1111,32 +1111,39 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 			sv3_engine_plan_stats(ctx->planned, compressed_count, 2,
 					      &capped_blocks, &capped_extents,
 					      &capped_four) : -EINVAL;
-		cap3_error = compressed_count ?
-			sv3_engine_plan_stats(ctx->planned, compressed_count, 3,
-					      &cap3_blocks, &cap3_extents,
-					      &cap3_four) : -EINVAL;
-		if (uncapped_error || capped_error || cap3_error ||
+		if (uncapped_error || capped_error ||
 		    capped_blocks < uncapped_blocks ||
-		    cap3_blocks < uncapped_blocks ||
-		    cap3_blocks > capped_blocks ||
 		    capped_four > uncapped_four) {
 			ctx->accepted_burst_plan_stats_failures++;
 		} else {
 			sv3_u16 extra = capped_blocks - uncapped_blocks;
 
 			ctx->accepted_burst_cap_extra_blocks += extra;
-			if (extra > 1U)
-				ctx->accepted_burst_cap_extra_gt1_windows++;
 			ctx->accepted_burst_four_extents_avoided +=
 				uncapped_four - capped_four;
-			if (sv3_window_pareto_read_cap(
-				    uncapped_blocks, capped_blocks,
-				    cap3_blocks, cap3_four) == 3U) {
-				planning_read_cap = 3U;
-				ctx->accepted_burst_pareto_cap3_windows++;
-				ctx->accepted_burst_pareto_saved_blocks +=
-					capped_blocks - cap3_blocks;
-				ctx->accepted_burst_pareto_four_extents += cap3_four;
+			if (extra > 1) {
+				sv3_u8 cap3_extents = 0, cap3_four = 0;
+				sv3_u16 cap3_blocks = 0;
+				int cap3_error;
+
+				ctx->accepted_burst_cap_extra_gt1_windows++;
+				cap3_error = sv3_engine_plan_stats(
+					ctx->planned, compressed_count, 3,
+					&cap3_blocks, &cap3_extents, &cap3_four);
+				if (cap3_error ||
+				    cap3_blocks < uncapped_blocks ||
+				    cap3_blocks > capped_blocks) {
+					ctx->accepted_burst_plan_stats_failures++;
+				} else {
+					ctx->accepted_burst_cap3_recovered_blocks +=
+						capped_blocks - cap3_blocks;
+					if (cap3_blocks == uncapped_blocks)
+						ctx->accepted_burst_cap3_full_recovery_windows++;
+					if (sv3_window_cap3_pareto_candidate(
+						    uncapped_blocks, capped_blocks,
+						    cap3_blocks, cap3_four))
+						ctx->accepted_burst_cap3_pareto_candidates++;
+				}
 			}
 		}
 	}
@@ -2377,9 +2384,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "accepted_burst_cap_extra_gt1_windows=%llu "
 		       "accepted_burst_four_extents_avoided=%llu "
 		       "accepted_burst_plan_stats_failures=%llu "
-		       "accepted_burst_pareto_cap3_windows=%llu "
-		       "accepted_burst_pareto_saved_blocks=%llu "
-		       "accepted_burst_pareto_four_extents=%llu "
+		       "accepted_burst_cap3_recovered_blocks=%llu "
+		       "accepted_burst_cap3_full_recovery_windows=%llu "
+		       "accepted_burst_cap3_pareto_candidates=%llu "
 		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
@@ -2468,9 +2475,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_burst_cap_extra_gt1_windows,
 		       ctx->accepted_burst_four_extents_avoided,
 		       ctx->accepted_burst_plan_stats_failures,
-		       ctx->accepted_burst_pareto_cap3_windows,
-		       ctx->accepted_burst_pareto_saved_blocks,
-		       ctx->accepted_burst_pareto_four_extents,
+		       ctx->accepted_burst_cap3_recovered_blocks,
+		       ctx->accepted_burst_cap3_full_recovery_windows,
+		       ctx->accepted_burst_cap3_pareto_candidates,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,

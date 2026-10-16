@@ -287,24 +287,31 @@ oracle and zeroed outputs on invalid input.
 
 Owner-loaded diagnostic source `de16e7cf` showed cap=2's >1-block tax
 in only 7.7% of SD-model and 8.6% of SSD-model capped accepted windows.
-The bounded follow-up may choose planning cap=3 only when cap=2 costs
-more than one block, cap=3 exactly matches the uncapped byte-minimal
-block count, and cap=3 contains at most one 16KiB extent. Otherwise it
-must remain cap=2. The helper is pure; the existing batched engine still
-owns staging, lower completion, publication and upper completion.
-`accepted_burst_pareto_cap3_windows` must not exceed
-`accepted_burst_cap_extra_gt1_windows`; chosen 16KiB extents must not
-exceed selected cap=3 windows; recovered blocks must be at least two per
-selected window and no more than the cap=2 reference tax. Any violation
-makes the loaded report incomplete. The first exact-head native CI for this
-policy failed before runtime because the bounded uint16 subtraction was
-compared with unsigned literal `1U`, producing `-Wsign-compare` under
-`-Werror`. Keep the prior greater-than guard and compare the promoted
-difference with signed literal `1`; do not hide the warning with a cast.
-All three Pareto counters are
-mandatory through status parsing, per-session deltas and per-regime
-summary output; synthetic report fixtures must exercise the same
-relationships so schema drift fails before owner-loaded qualification. For sixteen uniform 2072-byte
+The bounded cap=3 source `8d630549` then selected cap=3 zero times in
+both loaded models. Per its predeclared gate, that production relaxation
+is rejected rather than widened. The real accepted-burst planner must
+remain cap=2.
+
+The follow-up is diagnostic only. Run the cap=3 CPU planner only after
+the cap=2 reference proves a window costs >1 extra block. Its outputs
+must remain between uncapped and cap=2 block counts. Record recovered
+blocks, full-recovery windows and prior Pareto-shape candidates; a
+candidate must be a full-recovery window, and both counts must not exceed
+the >1-block tail. Recovered blocks must not exceed the total cap=2
+reference tax. Any cap=3 planner inconsistency makes the loaded report
+incomplete. The existing batched engine still owns staging, lower
+completion, publication and upper completion, and source qualification
+must reject any `planning_read_cap = 3U` production assignment.
+
+The first exact-head native CI for the rejected policy failed before
+runtime because the bounded uint16 subtraction was compared with unsigned
+literal `1U`, producing `-Wsign-compare` under `-Werror`. Keep the
+prior greater-than guard and compare the promoted difference with signed
+literal `1`; do not hide the warning with a cast. The three replacement
+cap=3 probe counters are mandatory through status parsing, per-session
+deltas and per-regime summary output; synthetic report fixtures must
+exercise the same relationships so schema drift fails before owner-loaded
+qualification. For sixteen uniform 2072-byte
 records, the uncapped planner's existing read-cost tie-break selects
 3+3+3+7 records; tests must not replace that with the byte-equivalent
 7+7+2 shape merely to reduce extent count. Every newly mandatory status field must also be present

@@ -550,27 +550,31 @@ windows and 950.8 avoided 16KiB extents. SD random packed READ remained
 ~6.67MiB and ~5.5ms p99. The stable rare expensive tail satisfies the
 predeclared condition for a bounded follow-up; it does not prove a win.
 
-The follow-up keeps cap=2 unless its byte tax is >1 block. It samples
-cap=3 with the same CPU-only planner and may select it only when
-`cap3_blocks == uncapped_blocks` and the cap=3 plan contains at most
-one 16KiB extent. Every selected record stays bounded to at most three
-4KiB cold-read blocks, while common one-block-tax windows remain cap=2.
-The cap=2 diagnostics remain a hypothetical hard-cap reference even when
-cap=3 is selected for the actual write. The sanitized report must carry
-`accepted_burst_pareto_cap3_windows`,
-`accepted_burst_pareto_saved_blocks` and
-`accepted_burst_pareto_four_extents` from target status through
-per-session deltas and regime means, rejecting impossible relationships
-instead of printing partial evidence.
+**Owner-qualified bounded cap=3 result:** exact code
+`8d63054957f4b932745d39487ca6837ac634c34c` passed all five owner
+stages; report-only `d5a673920b38`. The bounded rule selected cap=3
+zero times in SD and zero times in SSD; recovered blocks and selected
+16KiB extents were also zero. This is the predeclared valid no-effect
+outcome, so the production relaxation is rejected rather than widened.
+Because the real write remained cap=2 throughout this matrix, differences
+versus `de16e7cf` are run-to-run variation and/or diagnostic overhead,
+not evidence for a cap=3 write-policy gain.
 
-**Predeclared decision:** retain the relaxation only if independent lower
-WRITE bytes improve versus `de16e7cf` while packed READ recovery does
-not materially reverse. Compare SD random 4MiB ~1.16s / ~6.80MiB /
-~33ms p99 and SSD random ~0.26s / ~6.67MiB / ~5.5ms p99 together with
-sequential reads, useful WRITE, lower requests and lower-write wait.
-A selected-window count of zero is a valid no-effect result; do not widen
-the rule merely to manufacture a gain. Independent device bytes and
-requests remain decisive; planner telemetry is explanatory only.
+The next source restores real accepted-burst planning to cap=2
+unconditionally. It retains the uncapped/cap=2 reference on every
+accepted window, but computes cap=3 only when cap=2 costs >1 extra block.
+For that expensive tail the diagnostic records cumulative blocks cap=3
+would recover, windows where cap=3 fully recovers the uncapped byte count,
+and windows that also satisfy the prior at-most-one-16KiB Pareto shape.
+A cap=3 planner inconsistency still makes qualification incomplete. This
+is explanatory CPU-only work and must not change the actual write plan.
+
+Use the loaded classification before choosing another threshold. If the
+full-recovery count is near zero, this cap=3 byte-recovery direction is
+exhausted for the workload. If full recovery is common but Pareto
+candidates remain near zero, the 16KiB shape guard is the blocker and
+must not be relaxed without new read-side evidence. Independent device
+bytes and requests remain decisive; planner telemetry is explanatory only.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

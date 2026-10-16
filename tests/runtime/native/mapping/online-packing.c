@@ -172,7 +172,7 @@ static int test_planner_stats_quantify_cap_tradeoff(void)
 	CHECK(blocks == 10);
 	CHECK(extents == 4);
 	CHECK(four == 1);
-	CHECK(sv3_window_pareto_read_cap(10, 11, 10, 1) == 2U);
+	CHECK(!sv3_window_cap3_pareto_candidate(10, 11, 10, 1));
 
 	blocks = 99;
 	extents = four = 99;
@@ -209,8 +209,8 @@ static int test_planner_stats_pareto_tail_candidate(void)
 	CHECK(sv3_engine_plan_stats(pages, 13, 3, &cap3_blocks,
 				    &extents, &cap3_four) == 0);
 	CHECK(cap3_blocks == 9 && extents == 4 && cap3_four == 1);
-	CHECK(sv3_window_pareto_read_cap(uncapped_blocks, cap2_blocks,
-				 cap3_blocks, cap3_four) == 3U);
+	CHECK(sv3_window_cap3_pareto_candidate(uncapped_blocks, cap2_blocks,
+				       cap3_blocks, cap3_four));
 	return 0;
 }
 
