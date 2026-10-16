@@ -213,17 +213,30 @@ byte-recoverable cap=3 shape violates the prior at-most-one-16KiB read
 guard. Keep the real write at cap=2 and do not weaken that guard without
 new read-side evidence.
 
-**Next diagnostic:** measure metadata reuse distance without changing I/O.
-The engine keeps a 64-entry identity-only MRU/LRU shadow stack, cleared by
-the exact existing cache invalidation fence. It stores no metadata bytes
-and never satisfies a read. Successful reads report hypothetical hits for
-4-, 16- and 64-entry metadata caches. The seeded-random 4MiB pass is the
-decision input: only consider implementing a real bounded cache if the
-smallest tested capacity provides at least 96 *additional* hits over the
-current one-extent cache in both sync/async arms and both RAM models.
-Ninety-six 4KiB metadata blocks is 384KiB of potential traffic, safely
-above the existing exploratory 5% materiality scale for ~6.6-6.8MiB
-random lower READs. Shadow hits remain explanatory, not measured savings.
+**Owner-qualified metadata-reuse classification:** exact code
+`2619385cb99cd63035acb43239aed693f151a89b` passed all five owner
+stages; report-only commit `5ecef1bceb65`. The 4- and 16-entry shadows
+missed the predeclared random-read gate, but 64 entries passed every arm.
+Additional potential metadata hits over the current one-extent cache were
+134.0/125.0 for SD sync/async and 123.0/129.5 for SSD sync/async per
+1024-page seeded-random pass. This selects **64 entries**, not a larger or
+smaller guessed cache.
+
+**Next production-C experiment:** add a fixed 64-entry, metadata-block-only
+LRU. It caches exactly one validated 4KiB SWZ3 block zero per immutable
+extent, never payload blocks, and costs 256KiB of preallocated data per
+target plus small fixed slot metadata. The existing one-extent/full-8KiB
+fast path stays first priority. A 64-entry hit may only replace the block
+zero lower read; the current authority/generation/descriptor/payload-CRC
+checks still run on every logical read. Writes, GC, discard and barriers
+clear all residency through the existing invalidation fence.
+
+Retain this cache only if the seeded-random owner matrix shows at least
+96 successful LRU metadata hits per pass in every arm, at least 5% fewer
+independent lower READ bytes than the `2619385` baseline in every arm,
+and no >5% material regression in random-read time/p99 or useful WRITE.
+Otherwise revert it. Physical-media and cold-NAND claims remain out of
+scope.
 
 ## Current C performance work and qualification plan
 

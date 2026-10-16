@@ -242,15 +242,18 @@ are still planned.
       in both models, proving that the at-most-one-16KiB shape guard—not
       byte recovery—is the blocker. Keep production cap=2 and do not weaken
       the guard without new read-side evidence.
-      Next, add an identity-only 64-entry LRU shadow to the existing
-      serialized read cache. It performs no lower I/O and stores no data;
-      after each successful read it reports whether the immutable extent
-      would have remained resident at capacities 4, 16 or 64, and the
-      ordinary write/discard/barrier invalidation clears the shadow history.
-      Use the seeded-random 4MiB pass to choose the smallest future cache
-      only if it provides >=96 additional potential metadata hits over the
-      real one-entry cache in every sync/async/model arm. Otherwise abandon
-      this bounded cache direction. New source **NOT YET OWNER-LOADED**.
+      Owner-loaded `2619385c` (report-only `5ecef1bceb65`) selects a
+      bounded 64-entry metadata cache: random additional shadow hits above
+      the real one-entry cache were SD 134.0/125.0 and SSD 123.0/129.5
+      sync/async. The 4- and 16-entry shadows were below the predeclared
+      96-hit gate.
+      Implement only that measured size: 64 preallocated 4KiB metadata
+      blocks (256KiB/target), exact LRU replacement, no payload caching,
+      and the existing global mutation invalidation. Keep the one-extent
+      full-cache fast path. Retain the real cache only if every seeded-random
+      arm records >=96 LRU hits, >=5% lower independent READ bytes versus
+      `2619385c`, and no >5% material regression in random-read time/p99
+      or useful WRITE. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

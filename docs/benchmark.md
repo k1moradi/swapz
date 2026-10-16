@@ -609,6 +609,36 @@ terminal summary. Both the timed reader and final reporter reject
 non-nested evidence (`real one-entry <= shadow4 <= shadow16 <= shadow64`)
 instead of publishing a partial reuse claim.
 
+**Owner-qualified reuse-distance result:** exact code
+`2619385cb99cd63035acb43239aed693f151a89b`, report-only
+`5ecef1bceb65`, passed all five stages. Seeded-random one-entry hits were
+0.5/1.0 in both models. Shadow hits at 4/16/64 entries were SD
+6.0/6.5, 29.5/29.0, 134.5/126.0 and SSD 6.5/5.5, 30.0/33.0,
+123.5/130.5 (sync/async). Thus only the 64-entry capacity passes the
+predeclared >=96 *additional* hit gate in every arm.
+
+**Real 64-entry metadata-cache experiment (NOT YET OWNER-LOADED):**
+preallocate exactly 64 block-zero slots, 4096 bytes each (256KiB target
+data), plus fixed identity/age metadata. Do not cache payload blocks.
+The existing one-extent cache remains first priority; on its miss, a
+64-entry hit copies validated block zero into `read_scratch` and skips
+only that lower metadata fetch. Any required payload blocks are still read,
+and the normal metadata CRC/record identity/generation/payload CRC and
+authority checks still decide success. Insert/touch a slot only after a
+fully successful logical read. The existing write/GC/discard/barrier
+invalidation clears all slot validity before mutation.
+
+The acceptance baseline is the exact `2619385c` seeded-random result:
+SD lower READ bytes 6,805,504/6,799,360 with ~1.16s and
+32.96/33.01ms p99; SSD 6,707,200/6,666,240 with ~0.26s and
+5.65/5.69ms p99 (sync/async). Retain only if every arm reports >=96
+successful real LRU hits and at least 5% fewer independent lower READ
+bytes (thresholds 6,465,228.8 / 6,459,392 SD and
+6,371,840 / 6,332,928 SSD), while random time/p99 and useful WRITE do
+not regress by more than 5%. Two pairs remain preliminary evidence.
+A cache hit is not itself a byte/request claim; independent lower-device
+deltas are decisive.
+
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the
 native-policy job and production-C exact-test job correctly FAILED the

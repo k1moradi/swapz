@@ -246,11 +246,79 @@ static void sv3_read_shadow_commit(struct sv3_engine *engine,
 	engine->read_shadow_extent_blocks[0] = extent_blocks;
 }
 
+static int sv3_read_metadata_lru_lookup(const struct sv3_engine *engine,
+					sv3_u32 start_block,
+					sv3_u8 extent_blocks)
+{
+	sv3_u8 index;
+
+	if (!engine->read_metadata_cache)
+		return -1;
+	for (index = 0; index < SV3_READ_METADATA_CACHE_ENTRIES; ++index)
+		if (engine->read_metadata_lru_valid[index] &&
+		    engine->read_metadata_lru_start_blocks[index] == start_block &&
+		    engine->read_metadata_lru_extent_blocks[index] == extent_blocks)
+			return index;
+	return -1;
+}
+
+static void sv3_read_metadata_lru_commit(struct sv3_engine *engine,
+					sv3_u32 start_block,
+					sv3_u8 extent_blocks,
+					int hit_slot)
+{
+	sv3_u32 oldest_age = ~(sv3_u32)0;
+	sv3_u8 index, slot = 0;
+	int have_slot = 0;
+
+	if (!engine->read_metadata_cache)
+		return;
+	engine->read_metadata_lru_clock++;
+	if (!engine->read_metadata_lru_clock) {
+		/* Preserve exact age ordering across wrap by starting a fresh epoch.
+		 * Current validated metadata is inserted below. */
+		memset(engine->read_metadata_lru_valid, 0,
+		       sizeof(engine->read_metadata_lru_valid));
+		engine->read_metadata_lru_clock = 1;
+		hit_slot = -1;
+	}
+	if (hit_slot >= 0) {
+		slot = (sv3_u8)hit_slot;
+		have_slot = 1;
+	} else {
+		for (index = 0; index < SV3_READ_METADATA_CACHE_ENTRIES; ++index) {
+			if (!engine->read_metadata_lru_valid[index]) {
+				slot = index;
+				have_slot = 1;
+				break;
+			}
+			if (engine->read_metadata_lru_ages[index] < oldest_age) {
+				oldest_age = engine->read_metadata_lru_ages[index];
+				slot = index;
+				have_slot = 1;
+			}
+		}
+	}
+	if (!have_slot)
+		return;
+	if (hit_slot < 0)
+		memcpy(engine->read_metadata_cache +
+		       (size_t)slot * SV3_BLOCK_BYTES,
+		       engine->read_scratch, SV3_BLOCK_BYTES);
+	engine->read_metadata_lru_start_blocks[slot] = start_block;
+	engine->read_metadata_lru_extent_blocks[slot] = extent_blocks;
+	engine->read_metadata_lru_ages[slot] = engine->read_metadata_lru_clock;
+	engine->read_metadata_lru_valid[slot] = 1;
+}
+
 void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 {
 	if (engine) {
 		engine->read_cache_valid = 0;
 		engine->read_cached_full = 0;
+		memset(engine->read_metadata_lru_valid, 0,
+		       sizeof(engine->read_metadata_lru_valid));
+		engine->read_metadata_lru_clock = 0;
 		engine->read_shadow_count = 0;
 	}
 }
@@ -696,7 +764,8 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	sv3_u32 bytes, first, last, start, count;
 	sv3_u8 initial_blocks = 1;
 	int error;
-	int cached_metadata, cached_full;
+	int cached_metadata, cached_full, lru_cached_metadata;
+	int metadata_lru_slot;
 	int shadow_position;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
@@ -735,12 +804,22 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_cached_start_block == observed.start_block &&
 		engine->read_cached_extent_blocks == observed.extent_blocks;
 	cached_full = cached_metadata && engine->read_cached_full;
+	metadata_lru_slot = sv3_read_metadata_lru_lookup(engine,
+						 observed.start_block,
+						 observed.extent_blocks);
+	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	if (cached_metadata) {
 		if (!cached_full && bytes > SV3_BLOCK_BYTES)
 			memset(engine->read_scratch + SV3_BLOCK_BYTES, 0,
 			       bytes - SV3_BLOCK_BYTES);
+	} else if (lru_cached_metadata) {
+		memset(engine->read_scratch, 0, bytes);
+		memcpy(engine->read_scratch,
+		       engine->read_metadata_cache +
+		       (size_t)metadata_lru_slot * SV3_BLOCK_BYTES,
+		       SV3_BLOCK_BYTES);
 	} else {
 		if (observed.extent_blocks == 2 &&
 		    engine->max_read_blocks_per_record != 1 &&
@@ -809,6 +888,11 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_metadata_cache_hits++;
 	if (cached_full)
 		engine->read_full_extent_cache_hits++;
+	if (lru_cached_metadata)
+		engine->read_metadata_lru_hits++;
+	sv3_read_metadata_lru_commit(engine, observed.start_block,
+				     observed.extent_blocks,
+				     metadata_lru_slot);
 	sv3_read_shadow_commit(engine, observed.start_block,
 			       observed.extent_blocks, shadow_position);
 	return 0;

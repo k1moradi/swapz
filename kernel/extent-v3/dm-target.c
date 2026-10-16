@@ -2058,6 +2058,7 @@ static void sv3_free(struct sv3_dm *ctx)
 	vfree(ctx->read_compressed);
 	vfree(ctx->engine.write_scratch);
 	vfree(ctx->engine.read_scratch);
+	vfree(ctx->engine.read_metadata_cache);
 	vfree(ctx->engine.bulk_scratch);
 	kvfree(ctx->engine.bulk_txs);
 	kfree(ctx->lz4_workmem);
@@ -2233,6 +2234,8 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->read_compressed = vzalloc(SV3_BLOCK_BYTES);
 	ctx->engine.write_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
 	ctx->engine.read_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
+	ctx->engine.read_metadata_cache =
+		vzalloc(SV3_READ_METADATA_CACHE_ENTRIES * SV3_BLOCK_BYTES);
 	ctx->engine.bulk_scratch = vzalloc(SV3_BULK_BLOCKS * SV3_BLOCK_BYTES);
 	ctx->engine.bulk_txs = kvcalloc(SV3_MAX_RECORDS,
 				       sizeof(*ctx->engine.bulk_txs),
@@ -2242,6 +2245,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
 	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
+	    !ctx->engine.read_metadata_cache ||
 	    !ctx->engine.bulk_scratch || !ctx->engine.bulk_txs ||
 	    !ctx->lz4_workmem) {
 		error = -ENOMEM;
@@ -2390,6 +2394,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
+		       "read_meta_lru_hits=%u "
 		       "read_shadow_hits_4=%u read_shadow_hits_16=%u "
 		       "read_shadow_hits_64=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
@@ -2485,6 +2490,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_payload_requests,
 		       ctx->engine.read_payload_blocks,
 		       ctx->engine.read_metadata_cache_hits,
+		       ctx->engine.read_metadata_lru_hits,
 		       ctx->engine.read_shadow_hits_4,
 		       ctx->engine.read_shadow_hits_16,
 		       ctx->engine.read_shadow_hits_64,

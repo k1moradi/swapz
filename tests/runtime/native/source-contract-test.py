@@ -141,6 +141,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_meta_reqs=%u read_payload_reqs=%u", status)
         self.assertIn("read_payload_blocks=%u", status)
         self.assertIn("read_meta_cache_hits=%u", status)
+        self.assertIn("read_meta_lru_hits=%u", status)
         self.assertIn("read_shadow_hits_4=%u read_shadow_hits_16=%u", status)
         self.assertIn("read_shadow_hits_64=%u", status)
         self.assertIn("read_full_extent_reqs=%u read_full_cache_hits=%u", status)
@@ -155,12 +156,18 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine->read_full_extent_cache_hits++", engine)
         self.assertIn("engine->max_read_blocks_per_record != 1", engine)
         self.assertIn("engine->read_metadata_cache_hits++", engine)
+        self.assertIn("engine->read_metadata_lru_hits++", engine)
+        self.assertIn("sv3_read_metadata_lru_lookup(", engine)
+        self.assertIn("sv3_read_metadata_lru_commit(", engine)
+        self.assertIn("engine->read_metadata_lru_valid", engine)
+        self.assertIn("engine->read_metadata_cache +", engine)
         self.assertIn("sv3_read_shadow_position(", engine)
         self.assertIn("sv3_read_shadow_commit(", engine)
         self.assertIn("engine->read_shadow_hits_4++", engine)
         self.assertIn("engine->read_shadow_hits_16++", engine)
         self.assertIn("engine->read_shadow_hits_64++", engine)
         self.assertIn("engine->read_shadow_count = 0", engine)
+        self.assertIn("memset(engine->read_metadata_lru_valid, 0", engine)
         self.assertIn("engine->read_cache_valid = 0", engine)
         self.assertIn("sv3_engine_invalidate_read_cache(engine)", engine)
         self.assertIn("sv3_engine_invalidate_read_cache(e)", engine)
@@ -168,6 +175,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
                       body("sv3_lower"))
         self.assertIn("sv3_engine_invalidate_read_cache(&ctx->engine)",
                       body("sv3_process"))
+        self.assertIn("ctx->engine.read_metadata_cache =",
+                      body("sv3_ctr"))
+        self.assertIn("SV3_READ_METADATA_CACHE_ENTRIES * SV3_BLOCK_BYTES",
+                      body("sv3_ctr"))
+        self.assertIn("vfree(ctx->engine.read_metadata_cache)",
+                      body("sv3_free"))
 
     def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
         import importlib.util

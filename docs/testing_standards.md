@@ -318,6 +318,26 @@ the sanitized per-pass report schema and the final matrix aggregation.
 Synthetic io-replay and report fixtures must exercise both valid nesting
 and each invalid ordering before owner-loaded qualification.
 
+Owner-loaded `2619385c` selects exactly 64 entries for the next real
+cache: only shadow64 exceeds the >=96 additional seeded-random hit gate in
+all four model/mode arms. The production cache must therefore be fixed at
+64 metadata-only 4KiB slots; do not enlarge it or add payload caching from
+this evidence. Slot data are owner-preallocated before I/O, lookup and
+replacement are serialized, and the existing one-extent cache has first
+priority. A multi-entry hit may suppress only the lower block-zero fetch;
+it must still run `sv3_peek`, authority/generation/offset/length checks
+and payload CRC validation, and it may not suppress any payload block the
+record needs.
+
+Cache residency must be cleared by `sv3_engine_invalidate_read_cache()`
+on every existing write/GC/discard/barrier fence. A failed, stale or
+corrupt read must not insert/touch a slot or increment the successful LRU
+hit counter. Exact-C tests must prove a reuse distance beyond one entry
+saves a real lower metadata read, explicit invalidation restores the lower
+read, and an overwrite cannot return an old generation. Status and report
+contracts must carry the successful LRU-hit counter and reject
+`one_entry_hits + lru_hits > shadow64`.
+
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned
 literal `1U`, producing `-Wsign-compare` under `-Werror`. Keep the

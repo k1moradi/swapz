@@ -24,6 +24,8 @@ static sv3_u16 live[PHYSICAL_BLOCKS];
 static sv3_u8 classes[PHYSICAL_BLOCKS];
 static sv3_u8 scratch_write[SV3_MAX_EXTENT_BYTES];
 static sv3_u8 scratch_read[SV3_MAX_EXTENT_BYTES];
+static sv3_u8 scratch_metadata_cache[
+	SV3_READ_METADATA_CACHE_ENTRIES * SV3_BLOCK_BYTES];
 static sv3_u8 originals[64][2072];
 
 struct memory_disk {
@@ -328,6 +330,73 @@ static int test_shadow_metadata_lru_tracks_reuse_without_changing_io(void)
 	return 0;
 }
 
+static int test_metadata_lru64_reuses_validated_block_zero(void)
+{
+	struct sv3_compressed_page pages[64];
+	sv3_u8 committed = 0, output[3568];
+	sv3_u16 length = 0;
+	sv3_u32 i;
+	sv3_u32 reads_before;
+
+	CHECK(setup() == 0);
+	memset(scratch_metadata_cache, 0, sizeof(scratch_metadata_cache));
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.max_read_blocks_per_record = 1;
+	prepare(pages, 64, 0, 0);
+	CHECK(sv3_engine_write_window(&engine, pages, 64, &committed) == 0);
+	CHECK(committed == 64);
+
+	/* Five distinct one-block extents evict the real one-entry cache but not
+	 * the bounded 64-entry metadata cache. A successful LRU hit must return
+	 * exact data without issuing another lower read. */
+	for (i = 0; i < 5; ++i)
+		CHECK(sv3_engine_read_page(&engine, i, output,
+					   sizeof(output), &length) == 0);
+	reads_before = disk.read_blocks;
+	CHECK(sv3_engine_read_page(&engine, 0, output,
+				   sizeof(output), &length) == 0);
+	CHECK(length == 2072 && !memcmp(output, originals[0], length));
+	CHECK(disk.read_blocks == reads_before);
+	CHECK(engine.read_metadata_cache_hits == 0);
+	CHECK(engine.read_metadata_lru_hits == 1);
+
+	/* The ordinary mutation fence clears residency. Re-reading after an
+	 * explicit invalidation must hit the lower device again. */
+	sv3_engine_invalidate_read_cache(&engine);
+	reads_before = disk.read_blocks;
+	CHECK(sv3_engine_read_page(&engine, 0, output,
+				   sizeof(output), &length) == 0);
+	CHECK(disk.read_blocks == reads_before + 1);
+	CHECK(engine.read_metadata_lru_hits == 1);
+
+	/* A real engine write invokes the same invalidation before publication.
+	 * The old cached block-zero must never survive a generation change. */
+	prepare(pages, 1, 0, 70);
+	committed = 0;
+	CHECK(sv3_engine_write_window(&engine, pages, 1, &committed) == 0);
+	CHECK(committed == 1 && maps[0].generation == 2);
+	reads_before = disk.read_blocks;
+	CHECK(sv3_engine_read_page(&engine, 0, output,
+				   sizeof(output), &length) == 0);
+	CHECK(disk.read_blocks == reads_before + 1);
+	CHECK(length == 2072 && output[0] == 71);
+
+	/* The measured capacity retains an entry across 63 distinct successors. */
+	sv3_engine_invalidate_read_cache(&engine);
+	CHECK(sv3_engine_read_page(&engine, 0, output,
+				   sizeof(output), &length) == 0);
+	for (i = 1; i < 64; ++i)
+		CHECK(sv3_engine_read_page(&engine, i, output,
+					   sizeof(output), &length) == 0);
+	/* Page 0 is still resident after only 63 distinct successors. */
+	reads_before = disk.read_blocks;
+	CHECK(sv3_engine_read_page(&engine, 0, output,
+				   sizeof(output), &length) == 0);
+	CHECK(disk.read_blocks == reads_before);
+	CHECK(engine.read_metadata_lru_hits == 2);
+	return 0;
+}
+
 static int test_full_extent_corruption_rejected(void)
 {
 	struct sv3_compressed_page pages[7];
@@ -539,6 +608,7 @@ int main(void)
 	CHECK(test_planner_stats_pareto_tail_candidate() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_shadow_metadata_lru_tracks_reuse_without_changing_io() == 0); completed++;
+	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;

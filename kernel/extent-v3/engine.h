@@ -4,6 +4,7 @@
 #include "authority.h"
 #define SV3_BULK_BLOCKS 64U
 #define SV3_READ_SHADOW_ENTRIES 64
+#define SV3_READ_METADATA_CACHE_ENTRIES 64
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int sv3_page_is_zero(const sv3_u8 *page);
@@ -98,6 +99,19 @@ struct sv3_engine {
 	sv3_u8 read_cache_valid;
 	sv3_u8 read_cached_full;
 	sv3_u32 read_metadata_cache_hits;
+	/*
+	 * Owner-preallocated metadata-only cache. Each slot holds exactly the
+	 * immutable SWZ3 block zero for one extent; payload blocks are never
+	 * cached here. The serialized reader scans 64 fixed slots and uses an
+	 * age stamp for exact LRU replacement without moving 4KiB data blocks.
+	 */
+	sv3_u8 *read_metadata_cache; /* 64 * 4096 bytes */
+	sv3_u32 read_metadata_lru_start_blocks[SV3_READ_METADATA_CACHE_ENTRIES];
+	sv3_u32 read_metadata_lru_ages[SV3_READ_METADATA_CACHE_ENTRIES];
+	sv3_u8 read_metadata_lru_extent_blocks[SV3_READ_METADATA_CACHE_ENTRIES];
+	sv3_u8 read_metadata_lru_valid[SV3_READ_METADATA_CACHE_ENTRIES];
+	sv3_u32 read_metadata_lru_clock;
+	sv3_u32 read_metadata_lru_hits;
 	/*
 	 * Diagnostic-only LRU of immutable extent identities. It stores NO data
 	 * and never suppresses lower I/O; it estimates how often a future
