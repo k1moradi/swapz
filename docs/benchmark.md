@@ -668,10 +668,33 @@ still need independent device bytes/requests. The exact timed fields are
 `read_block_shadow_reqs`; the timed reader and final reporter reject
 predicted request runs greater than predicted miss blocks.
 
-The same report now carries all sixteen `win1_*` close-reason deltas.
-Their sum must equal `one_page_windows`, and the terminal summary prints
-only nonzero reasons so the next owner run can identify the actual
-singleton causes without dumping private/raw status text.
+**Larger 64-extent companion probe:** the same loaded pass also measures
+the proposed full-two-block cache at its real memory cost without allocating
+payload data. Each of the retained metadata LRU's 64 slots has one
+identity-only block-one-valid bit. On a successful metadata-LRU hit for a
+two-block extent whose target requires block one,
+`read_second_shadow_hits` means a 512KiB full-extent cache would have
+avoided exactly one 4KiB lower block and one lower payload callback;
+`read_second_shadow_misses` means it would not. A successful validated
+read that actually has block one available primes the companion bit.
+Replacement and global mutation invalidation follow the real metadata-LRU
+slot lifecycle. Therefore
+`second_hits + second_misses <= read_meta_lru_hits` is mandatory.
+
+For each seeded-random arm, compute the larger-cache predicted byte/block
+saving as `second_hits / (lower_read_bytes / 4096)` and request saving as
+`second_hits / lower_read_requests`. Only if **both are >=5% in every
+arm** may a real +256KiB companion allocation be attempted. If the
+same-memory physical-block LRU also passes its 5%/5% gate, choose the
+same-memory design first. Any real cache still requires a fresh owner run
+using independent lower-device deltas before claiming a gain.
+
+The report carries all sixteen total `close_*` deltas and all sixteen
+`win1_*` deltas. Total close reasons must sum to `windows`; singleton
+reasons must sum to `one_page_windows`. The terminal summary prints only
+nonzero reasons. This makes `close_zero` versus `win1_zero` directly
+measurable before any zero-page preservation change, and avoids treating
+the old marginal one-page count as a causal explanation.
 
 The block-zero-skip CRC proposal is not part of this experiment. Compressed
 `sv3_read_authoritative()` currently reparses CRC-protected metadata and

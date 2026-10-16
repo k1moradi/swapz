@@ -240,14 +240,28 @@ Versus `2619385c`, lower READ bytes fell 8.25%/7.41% on SD and
 predeclared 5% regression guards, so the metadata-only LRU is retained.
 It remains synthetic RAM evidence, not a physical-media claim.
 
-**Next bounded read diagnostic:** do not double cache size yet. Simulate a
-same-memory 64-physical-block (256KiB) LRU using identities only under the
-exact successful read stream. Block zero remains mandatory under the
-current integrity contract; also mark only payload blocks required by the
-target record. Count hypothetical 4KiB misses and contiguous miss runs.
-Only replace the retained metadata LRU if this same-memory block cache
-predicts at least 5% fewer lower blocks **and** 5% fewer lower callbacks
-than the real metadata-LRU result in every seeded-random arm.
+**Next bounded read diagnostics:** keep the retained 64-entry metadata LRU
+as the real baseline and change no lower I/O. First, simulate a same-memory
+64-physical-block (256KiB) LRU using identities only under the exact
+successful read stream. Block zero remains mandatory under the current
+integrity contract; also mark only payload blocks required by the target
+record. Count hypothetical 4KiB misses and contiguous miss runs. Replace
+the retained metadata LRU only if this same-memory block cache predicts at
+least 5% fewer lower blocks **and** 5% fewer lower callbacks than the real
+metadata-LRU result in every seeded-random arm.
+
+In parallel, measure the proposed larger full-two-block design without
+allocating its extra 256KiB. Each real metadata-LRU slot carries one
+identity-only `second_valid` shadow. A successful LRU64 metadata hit that
+needs block one records either a companion hit or miss; after any
+successfully validated read that actually had block one available, the
+slot's companion becomes valid. Thus `second_hits + second_misses` is the
+exact measured intersection of **LRU64 reuse and block-one demand**, not an
+inference from two unrelated marginals. A real 512KiB/target extent cache
+is justified only if companion hits alone predict at least 5% fewer lower
+blocks and 5% fewer lower callbacks in every seeded-random arm. If the
+same-memory cache also qualifies, prefer it because it uses no extra data
+memory.
 
 Do not take the proposed compressed-payload CRC shortcut yet. Current V3
 compressed reads deliberately revalidate block-zero header/record metadata
@@ -256,10 +270,14 @@ wholly in a later block would stop detecting metadata-only corruption.
 That is a correctness-policy change, unlike the raw-page sidecar CRC, and
 needs separate integrity evidence before any implementation.
 
-For the remaining one-page WRITE windows, add joint
-`win1 × close_reason` telemetry. Existing `win1` and `close_*`
-marginals cannot identify which closure reason produced a singleton, so
-do not tune admission from those marginals alone.
+For the remaining WRITE windows, report both full close-reason marginals
+and the existing joint `win1 × close_reason` cross-tab. The sixteen
+full close-reason deltas must sum to `windows`, while the singleton
+cross-tab must sum to `one_page_windows`. In particular, evaluate
+zero-page preservation only from measured `close_zero` and
+`win1_zero` counts; do not assume zero pages dominate singleton creation.
+Likewise, do not change worker-tail admission until the loaded distribution
+shows which closures are actually material.
 
 ## Current C performance work and qualification plan
 

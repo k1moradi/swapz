@@ -357,15 +357,29 @@ same read cannot evict a block it already found resident; exact-C coverage
 must pin this case. Reporter contracts require predicted requests <=
 predicted miss blocks.
 
+A second diagnostic may model the proposed 64 full-two-block extent slots
+without caching bytes: one `read_metadata_lru_second_valid` bit follows
+each real metadata-LRU slot. Only a successful metadata-LRU hit that needs
+block one can score `read_second_shadow_hits` or
+`read_second_shadow_misses`; the two counters together must never exceed
+`read_meta_lru_hits`. A replacement clears that slot's companion bit,
+successful validation may set it when block one was actually present, and
+`sv3_engine_invalidate_read_cache()` clears all companion validity.
+Exact-C coverage must prove both a companion-hit and a forced companion-miss
+while real payload I/O remains unchanged. The larger 512KiB production
+cache is gated by >=5% predicted block and request savings in every
+seeded-random arm; diagnostics alone do not authorize allocation.
+
 Do not repurpose `raw_crc32c` for a compressed fast path without an
 explicit integrity-contract change. Raw pages have no on-media metadata;
 compressed pages do, and current reads validate its CRC and sequence every
 time. Payload CRC equality alone is not equivalent.
 
-For singleton WRITE analysis, `sv3_flush_window()` must increment exactly
-one `one_page_close_reasons[reason]` entry whenever `count == 1`.
-The status/report layer must carry all reasons and fail closed unless their
-delta sum equals `one_page_windows`. The read report must likewise carry
+For WRITE closure analysis, the status/report layer must carry all sixteen
+`window_close_reasons` deltas and fail closed unless their sum equals
+`windows`. For singleton analysis, `sv3_flush_window()` must increment
+exactly one `one_page_close_reasons[reason]` entry whenever `count == 1`;
+those deltas must sum to `one_page_windows`. The read report must likewise carry
 `read_block_shadow_hits`, `read_block_shadow_misses` and
 `read_block_shadow_reqs` through timed snapshots, sanitized per-pass
 aggregation and the terminal summary; predicted requests may never exceed

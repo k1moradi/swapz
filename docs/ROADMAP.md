@@ -252,13 +252,19 @@ are still planned.
       122.5/118.5 SSD; lower READ bytes improved 8.25%/7.41% and
       8.06%/7.40% versus `2619385c`, with time/p99 and useful WRITE inside
       the predeclared regression guards.
-      Before caching payload blocks, simulate an identity-only 64-physical-
-      block LRU at the same 256KiB capacity. Count required block misses and
-      contiguous miss runs after successful validation. Replace the metadata
-      LRU only if every seeded-random arm predicts >=5% additional savings
-      in both lower blocks and lower callbacks. Also add joint one-page-window
-      close-reason telemetry before changing WRITE admission; the existing
-      marginal counters cannot attribute singletons to a closure cause.
+      Before caching payload blocks, keep real I/O unchanged and compare
+      two explicit memory budgets. Simulate an identity-only 64-physical-
+      block LRU at the same 256KiB capacity; replace the metadata LRU only
+      if every seeded-random arm predicts >=5% additional savings in both
+      lower blocks and lower callbacks. Separately, attach an identity-only
+      optional block-one companion to each of the 64 metadata slots. This
+      models the proposed 512KiB full-two-block design without allocating
+      payload bytes. Consider that larger design only if measured companion
+      hits alone predict >=5% savings in both lower blocks and callbacks in
+      every random arm; prefer the same-memory design if both qualify.
+      Report all close-reason marginals as well as joint one-page-window
+      close reasons before changing WRITE admission. Full reasons must sum
+      to windows; singleton reasons must sum to one_page_windows.
       The proposed compressed-payload sidecar CRC shortcut remains deferred
       because it would stop per-read block-zero metadata/sequence corruption
       detection and therefore changes the current integrity contract.

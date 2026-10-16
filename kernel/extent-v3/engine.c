@@ -301,10 +301,14 @@ static void sv3_read_metadata_lru_commit(struct sv3_engine *engine,
 	}
 	if (!have_slot)
 		return;
-	if (hit_slot < 0)
+	if (hit_slot < 0) {
+		/* A replacement starts without a companion block. The successful
+		 * read path may mark block one available after validation below. */
+		engine->read_metadata_lru_second_valid[slot] = 0;
 		memcpy(engine->read_metadata_cache +
 		       (size_t)slot * SV3_BLOCK_BYTES,
 		       engine->read_scratch, SV3_BLOCK_BYTES);
+	}
 	engine->read_metadata_lru_start_blocks[slot] = start_block;
 	engine->read_metadata_lru_extent_blocks[slot] = extent_blocks;
 	engine->read_metadata_lru_ages[slot] = engine->read_metadata_lru_clock;
@@ -414,6 +418,8 @@ void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 		engine->read_cached_full = 0;
 		memset(engine->read_metadata_lru_valid, 0,
 		       sizeof(engine->read_metadata_lru_valid));
+		memset(engine->read_metadata_lru_second_valid, 0,
+		       sizeof(engine->read_metadata_lru_second_valid));
 		engine->read_metadata_lru_clock = 0;
 		memset(engine->read_block_shadow_valid, 0,
 		       sizeof(engine->read_block_shadow_valid));
@@ -864,7 +870,8 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	sv3_u8 initial_blocks = 1;
 	int error;
 	int cached_metadata, cached_full, lru_cached_metadata;
-	int metadata_lru_slot;
+	int metadata_lru_slot, committed_lru_slot;
+	int second_shadow_candidate, second_shadow_hit;
 	int shadow_position;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
@@ -907,6 +914,12 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 						 observed.start_block,
 						 observed.extent_blocks);
 	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
+	second_shadow_candidate = lru_cached_metadata &&
+		observed.extent_blocks == 2 &&
+		(sv3_u32)observed.payload_offset + observed.payload_length >
+			SV3_BLOCK_BYTES;
+	second_shadow_hit = second_shadow_candidate &&
+		engine->read_metadata_lru_second_valid[metadata_lru_slot];
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	if (cached_metadata) {
@@ -989,9 +1002,22 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_full_extent_cache_hits++;
 	if (lru_cached_metadata)
 		engine->read_metadata_lru_hits++;
+	if (second_shadow_candidate) {
+		if (second_shadow_hit)
+			engine->read_second_shadow_hits++;
+		else
+			engine->read_second_shadow_misses++;
+	}
 	sv3_read_metadata_lru_commit(engine, observed.start_block,
 				     observed.extent_blocks,
 				     metadata_lru_slot);
+	committed_lru_slot = sv3_read_metadata_lru_lookup(
+		engine, observed.start_block, observed.extent_blocks);
+	if (committed_lru_slot >= 0 && observed.extent_blocks == 2 &&
+	    (cached_full ||
+	     (sv3_u32)observed.payload_offset + observed.payload_length >
+		SV3_BLOCK_BYTES))
+		engine->read_metadata_lru_second_valid[committed_lru_slot] = 1;
 	sv3_read_block_shadow_commit(engine, &observed, first, last);
 	sv3_read_shadow_commit(engine, observed.start_block,
 			       observed.extent_blocks, shadow_position);

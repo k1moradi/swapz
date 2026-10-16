@@ -397,6 +397,77 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	return 0;
 }
 
+static int test_second_block_companion_shadow_tracks_exact_lru_overlap(void)
+{
+	struct sv3_compressed_page pages[16];
+	sv3_u8 committed = 0, output[3568];
+	sv3_u16 length = 0;
+	sv3_u32 hit0, miss0, payload0, i;
+	int target = -1, other = -1, slot;
+
+	CHECK(setup() == 0);
+	memset(scratch_metadata_cache, 0, sizeof(scratch_metadata_cache));
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.max_read_blocks_per_record = 2;
+	prepare(pages, 16, 0, 0);
+	CHECK(sv3_engine_write_window(&engine, pages, 16, &committed) == 0);
+	CHECK(committed == 16);
+	for (i = 0; i < 16; ++i)
+		if (maps[i].extent_blocks == 2 &&
+		    (sv3_u32)maps[i].payload_offset + maps[i].payload_length >
+			SV3_BLOCK_BYTES) {
+			target = (int)i;
+			break;
+		}
+	CHECK(target >= 0);
+	for (i = 0; i < 16; ++i)
+		if (maps[i].start_block != maps[target].start_block) {
+			other = (int)i;
+			break;
+		}
+	CHECK(other >= 0);
+
+	/* Cold target reads both blocks and seeds the diagnostic companion.
+	 * Another extent evicts only the one-extent read_scratch fast path. */
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)other, output,
+				   sizeof(output), &length) == 0);
+	hit0 = engine.read_second_shadow_hits;
+	miss0 = engine.read_second_shadow_misses;
+	payload0 = engine.read_payload_requests;
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_metadata_lru_hits > 0);
+	CHECK(engine.read_second_shadow_hits == hit0 + 1);
+	CHECK(engine.read_second_shadow_misses == miss0);
+	/* The probe is identity-only: real metadata-LRU behavior still issues
+	 * the payload callback today. */
+	CHECK(engine.read_payload_requests == payload0 + 1);
+
+	/* Removing only the companion prediction converts the exact same
+	 * successful LRU64+block1 access into a diagnostic miss. */
+	slot = -1;
+	for (i = 0; i < SV3_READ_METADATA_CACHE_ENTRIES; ++i)
+		if (engine.read_metadata_lru_valid[i] &&
+		    engine.read_metadata_lru_start_blocks[i] ==
+			maps[target].start_block) {
+			slot = (int)i;
+			break;
+		}
+	CHECK(slot >= 0);
+	engine.read_metadata_lru_second_valid[slot] = 0;
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)other, output,
+				   sizeof(output), &length) == 0);
+	payload0 = engine.read_payload_requests;
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_second_shadow_hits == hit0 + 1);
+	CHECK(engine.read_second_shadow_misses == miss0 + 1);
+	CHECK(engine.read_payload_requests == payload0 + 1);
+	return 0;
+}
+
 static int test_block_lru64_shadow_counts_blocks_and_runs_only(void)
 {
 	struct sv3_compressed_page pages[16];
@@ -684,6 +755,7 @@ int main(void)
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_shadow_metadata_lru_tracks_reuse_without_changing_io() == 0); completed++;
 	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
+	CHECK(test_second_block_companion_shadow_tracks_exact_lru_overlap() == 0); completed++;
 	CHECK(test_block_lru64_shadow_counts_blocks_and_runs_only() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;

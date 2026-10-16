@@ -25,6 +25,18 @@ MODEL_SPECS = {
                      "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
+CLOSE_REASON_LABELS = (
+    ("close_unknown", "unknown"), ("close_full", "full"),
+    ("close_duplicate", "duplicate"), ("close_zero", "zero"),
+    ("close_fua", "fua"), ("close_raw", "raw"),
+    ("close_read_conflict", "read-conflict"),
+    ("close_read_unrelated", "read-unrelated"),
+    ("close_discard", "discard"), ("close_preflush", "preflush"),
+    ("close_quantum", "quantum"), ("close_idle", "idle"),
+    ("close_shutdown", "shutdown"), ("close_other", "other"),
+    ("close_deadline", "deadline"), ("close_pack_ready", "pack-ready"),
+)
+CLOSE_REASON_FIELDS = tuple(field for field, _ in CLOSE_REASON_LABELS)
 ONE_PAGE_CLOSE_LABELS = (
     ("win1_unknown", "unknown"), ("win1_full", "full"),
     ("win1_duplicate", "duplicate"), ("win1_zero", "zero"),
@@ -41,6 +53,7 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
                       "read_meta_lru_hits",
+                      "read_second_shadow_hits", "read_second_shadow_misses",
                       "read_shadow_hits_4", "read_shadow_hits_16",
                       "read_shadow_hits_64",
                       "read_block_shadow_hits", "read_block_shadow_misses",
@@ -254,8 +267,8 @@ def parse_sessions(output):
                        "accepted_burst_cap3_pareto_candidates",
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
-                       "close_pack_ready", "one_page_windows", "gc_victims",
-                       "gc_role_rotations") + ONE_PAGE_CLOSE_FIELDS
+                       "windows", "one_page_windows", "gc_victims",
+                       "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
                 for key in allowed
@@ -377,8 +390,8 @@ def benchmark_verdicts(sessions):
                        "accepted_burst_cap3_pareto_candidates",
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
-                       "close_pack_ready",
-                      "one_page_windows", "gc_victims") + ONE_PAGE_CLOSE_FIELDS:
+                       "windows",
+                      "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS:
             before = status.get("before", {}).get(field)
             after = status.get("after", {}).get(field)
             if not isinstance(before, int) or not isinstance(after, int) or after < before:
@@ -396,9 +409,14 @@ def benchmark_verdicts(sessions):
                         "accepted_burst_cap3_pareto_candidates",
                         "accepted_burst_cap3_recovered_blocks",
                         "accepted_burst_cap3_full_recovery_windows",
-                        "close_pack_ready",
-                        "one_page_windows", "gc_victims") + ONE_PAGE_CLOSE_FIELDS
+                        "windows",
+                        "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS
         }
+        if sum(row["kernel_counter_delta"][field]
+               for field in CLOSE_REASON_FIELDS) != \
+                row["kernel_counter_delta"]["windows"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "window close-reason accounting is inconsistent"}
         if sum(row["kernel_counter_delta"][field]
                for field in ONE_PAGE_CLOSE_FIELDS) != \
                 row["kernel_counter_delta"]["one_page_windows"]:
@@ -497,6 +515,9 @@ def benchmark_verdicts(sessions):
                                 "reason": f"{regime}: missing measured V3 {mode} C read counters"}
                     if any(record["read_meta_cache_hits"] +
                            record["read_meta_lru_hits"] > record["read_shadow_hits_64"] or
+                           record["read_second_shadow_hits"] +
+                               record["read_second_shadow_misses"] >
+                               record["read_meta_lru_hits"] or
                            record["read_meta_cache_hits"] > record["read_shadow_hits_4"] or
                            record["read_shadow_hits_4"] > record["read_shadow_hits_16"] or
                            record["read_shadow_hits_16"] > record["read_shadow_hits_64"] or
@@ -573,8 +594,8 @@ def benchmark_verdicts(sessions):
                             "accepted_burst_cap3_pareto_candidates",
                             "accepted_burst_cap3_recovered_blocks",
                             "accepted_burst_cap3_full_recovery_windows",
-                            "close_pack_ready",
-                            "one_page_windows", "gc_victims") + ONE_PAGE_CLOSE_FIELDS
+                            "windows",
+                            "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS
             },
         }
     return {
@@ -644,6 +665,11 @@ def print_bench(result):
                   f"{asynchronous[f'{read_mode}_read_meta_cache_hits']:.1f}, "
                   f"LRU64 reused={sync[f'{read_mode}_read_meta_lru_hits']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_meta_lru_hits']:.1f}, "
+                  f"companion block1 hit/miss="
+                  f"{sync[f'{read_mode}_read_second_shadow_hits']:.1f}/"
+                  f"{sync[f'{read_mode}_read_second_shadow_misses']:.1f} | "
+                  f"{asynchronous[f'{read_mode}_read_second_shadow_hits']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_second_shadow_misses']:.1f}, "
                   f"full 8KiB fetch={sync[f'{read_mode}_read_full_extent_reqs']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_full_extent_reqs']:.1f}, "
                   f"full reuse={sync[f'{read_mode}_read_full_cache_hits']:.1f}/"
@@ -700,6 +726,10 @@ def print_bench(result):
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
               f"GC victims={kc['gc_victims']:.1f}")
+        closes = ", ".join(
+            f"{label}={kc[field]:.1f}"
+            for field, label in CLOSE_REASON_LABELS if kc[field])
+        print("  All-window close reasons per-pair mean: " + (closes or "none"))
         win1 = ", ".join(
             f"{label}={kc[field]:.1f}"
             for field, label in ONE_PAGE_CLOSE_LABELS if kc[field])

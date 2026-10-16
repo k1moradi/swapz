@@ -2407,6 +2407,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_meta_lru_hits=%u "
+		       "read_second_shadow_hits=%u read_second_shadow_misses=%u "
 		       "read_shadow_hits_4=%u read_shadow_hits_16=%u "
 		       "read_shadow_hits_64=%u "
 		       "read_block_shadow_hits=%u read_block_shadow_misses=%u "
@@ -2521,6 +2522,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_payload_blocks,
 		       ctx->engine.read_metadata_cache_hits,
 		       ctx->engine.read_metadata_lru_hits,
+		       ctx->engine.read_second_shadow_hits,
+		       ctx->engine.read_second_shadow_misses,
 		       ctx->engine.read_shadow_hits_4,
 		       ctx->engine.read_shadow_hits_16,
 		       ctx->engine.read_shadow_hits_64,

@@ -114,6 +114,14 @@ struct sv3_engine {
 	sv3_u32 read_metadata_lru_clock;
 	sv3_u32 read_metadata_lru_hits;
 	/*
+	 * Diagnostic companion-block shadow for the 64 metadata slots. This
+	 * models the proposed +256KiB design (one optional block one beside
+	 * each retained block zero) without storing or serving payload bytes.
+	 */
+	sv3_u8 read_metadata_lru_second_valid[SV3_READ_METADATA_CACHE_ENTRIES];
+	sv3_u32 read_second_shadow_hits;
+	sv3_u32 read_second_shadow_misses;
+	/*
 	 * Diagnostic-only LRU of immutable extent identities. It stores NO data
 	 * and never suppresses lower I/O; it estimates how often a future
 	 * multi-entry metadata cache of 4/16/64 extents could have reused block
