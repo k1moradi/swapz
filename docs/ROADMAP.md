@@ -72,6 +72,15 @@ callback wall both fell ~31%. SSD lower requests fell ~44%, but useful
 WRITE regressed from 17.69/19.31 to 16.60/17.39 MB/s. This shows
 request aggregation helps when callback latency dominates, while
 unnecessary retention delay hurts the faster model.
+The owner next qualified exact code
+`bd8fe3a8ff3d0878f243240f2a4ac01587b5ade0` (report-only
+`be387969176f`): all five stages PASS and all three CI workflows PASS.
+SD useful WRITE was 5.18/5.26 MB/s with ~3.28k/~3.30k lower requests
+and ~3.53/3.54s lower-WRITE callback wall, retaining almost all of the
+unconditional two-pack gain. SSD recovered to 17.97/18.51 MB/s versus
+19.14 raw while requests remained ~2.62k, and benchmark classification
+improved from MATERIAL_LOSS to NO_ESTABLISHED_GAIN for both V3 modes.
+This validates accepted-backlog gating as the better cross-regime policy.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -165,19 +174,22 @@ are still planned.
       unconditional waiting as the final policy: SD lower callbacks and
       wait wall fell ~31% and useful WRITE rose ~13%, while SSD useful
       WRITE regressed ~6% sync/~10% async despite ~44% fewer requests.
-      The next bounded production-C refinement makes first-pack deferral
-      **accepted-backlog aware**. The worker snapshots whether another
-      BIO already exists in its current local FIFO before removing the
-      current entry. Only that immediate accepted successor may justify
-      holding a valid 2/3-record first pack for the 4/6-record second-pack
-      close. A local FIFO tail commits the first pack immediately; later
-      concurrently arriving BIOs are deliberately ignored for this
-      decision. No device-profile branch, new timer, padding, allocation,
-      I/O or authority change. Keep the existing absolute deadline and
-      all conflict/FUA/read/discard/failure/shutdown fences. Re-run the
-      same matrix and require SD request/wait savings to persist while
-      restoring the SSD useful-WRITE regression, with lower WRITE bytes
-      and read/write p99 no worse. New source **NOT YET OWNER-LOADED**.
+      Owner-loaded `bd8fe3a` confirms that accepted-backlog gating
+      preserves the SD improvement (~5.18/5.26 MB/s, ~3.29k lower
+      requests) while recovering SSD to 17.97/18.51 MB/s and
+      NO_ESTABLISHED_GAIN classification versus raw. The next bounded
+      refinement removes **known non-packable successors** from that
+      backlog signal. Only an immediately following accepted, nonempty
+      ordinary WRITE without PREFLUSH/FUA may justify first-pack
+      deferral; READ, DISCARD, empty flush and fenced writes force the
+      first pack to commit rather than buying retention delay. The
+      helper deliberately does not speculate about compression, zero
+      detection or duplicate logical slots; those remain authoritative
+      serialized admission decisions. No timing knob, device-profile
+      branch, allocation, I/O, format or publication change. Re-run the
+      same matrix and keep the change only if SD request/wait savings
+      remain while SSD throughput/p99 are no worse. New source
+      **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

@@ -1483,6 +1483,26 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 
 static bool sv3_retention_expired(struct sv3_dm *ctx);
 
+/*
+ * Backlog may justify holding the first useful pack only when the next
+ * ALREADY accepted local entry is itself an ordinary data WRITE. READ,
+ * DISCARD, PREFLUSH/FUA and empty flush protocol BIOs are guaranteed
+ * boundaries or non-packable work and must not buy retention latency.
+ *
+ * Compression/zero/duplicate outcome is intentionally not predicted here:
+ * the ordered worker still performs the authoritative admission checks.
+ */
+static bool sv3_followup_is_plain_write(const struct sv3_bio_ref *entry)
+{
+	const struct bio *bio;
+
+	if (!entry || !entry->bio)
+		return false;
+	bio = entry->bio;
+	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
+		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
+}
+
 static bool sv3_read_is_independent(struct sv3_dm *ctx, struct bio *bio)
 {
 	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
@@ -1649,11 +1669,12 @@ static void sv3_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		list_for_each_entry_safe(entry, next, &local, list) {
-			/* Snapshot only work already accepted into this worker-local
-			 * FIFO. A concurrent later arrival cannot retroactively make
-			 * the current queue tail worth retaining. */
+			/* Snapshot only immediately joinable work already accepted
+			 * into this worker-local FIFO. A control/read boundary or
+			 * concurrent later arrival cannot justify retention here. */
 			ctx->worker_has_immediate_followup =
-				entry->list.next != &local;
+				entry->list.next != &local &&
+				sv3_followup_is_plain_write(next);
 			list_del_init(&entry->list);
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))

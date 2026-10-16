@@ -141,14 +141,23 @@ fell ~31% (4.92s -> ~3.39s), and useful WRITE rose ~13%
 ~6% sync and ~10% async despite ~44% fewer lower requests. The
 unconditional second-pack wait is therefore not a cross-regime VISION win.
 
-**Next C experiment, NOT YET OWNER-LOADED:** defer the first valid
-2/3-record pack only when the serialized worker already has another
-accepted BIO in its local FIFO. At a current local queue tail, commit
-that first pack immediately rather than waiting for the retention timer.
-This uses queue state already owned by the worker, adds no timing knob,
-padding, format change or new I/O, and ignores future racing arrivals
-when deciding to wait. Existing absolute deadline and all ordering,
-FUA/read/discard/failure/shutdown drains remain unchanged.
+**Owner-qualified accepted-backlog result:** exact code
+`bd8fe3a8ff3d0878f243240f2a4ac01587b5ade0` passed all five
+owner stages and all three CI workflows; sanitized report-only commit
+`be387969176f`. SD useful WRITE held at 5.18/5.26 MB/s while lower
+WRITE requests stayed ~28% below the pre-aggregation profiling baseline
+(~3.29k vs ~4.59k). SSD recovered to 17.97/18.51 MB/s, and both sync
+and async moved from MATERIAL_LOSS to NO_ESTABLISHED_GAIN versus raw.
+The queue-aware rule therefore keeps most slow-model request savings
+without the unconditional policy's fast-model loss.
+
+**Next C experiment, NOT YET OWNER-LOADED:** an immediate follow-up
+qualifies as backlog only if it is already accepted **and** is an
+ordinary nonempty WRITE without PREFLUSH/FUA. READ, DISCARD, flush
+protocol and fenced writes cannot form the next packed group, so they
+must not justify retaining the current first pack. Compression, zero
+elision and duplicate-slot outcomes remain decided by the existing
+serialized admission path rather than guessed from queue metadata.
 
 ## Current C performance work and qualification plan
 

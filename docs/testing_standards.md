@@ -232,6 +232,27 @@ No observed GC means GC remains NOT EXERCISED. The owner's next
 `make test -j2` must generate new loaded evidence; rootless CI is
 not a substitute.
 
+## Accepted-backlog first-pack deferral contract
+
+A first valid 2/3-record pack may be retained for a second pack only
+from worker-local work that was already admitted before the current
+decision. The worker must snapshot that successor before removing the
+current local-list entry. A later concurrent admission must never
+retroactively justify retention. The current refinement further
+requires that immediate successor to be a nonempty REQ_OP_WRITE with
+neither PREFLUSH nor FUA; READ, DISCARD and flush/fenced operations are
+known boundaries and are not packing opportunities.
+
+This classification is intentionally conservative and non-authoritative:
+it may still admit a later RAW, zero-elided or duplicate-slot write,
+which the existing serialized `sv3_accept_write` path must handle with
+its original drains and publication rules. It must not inspect or trust
+uncompleted asynchronous compression output. Source contracts require
+the plain-write filter, snapshot-before-list-removal ordering, reset
+after each processed entry and unchanged FUA/dependency handling.
+Loaded performance qualification remains separate from these safety
+contracts.
+
 ## Alpha.22 packed-burst tail correctness contract
 
 After a successful pack-ready window, the serialized C worker may drain

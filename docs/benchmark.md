@@ -436,28 +436,41 @@ requests falling from ~4.28k to ~2.41k and lower callback wall falling
 to ~0.48–0.49s. The predeclared no-material-regression gate therefore
 rejects unconditional first-pack deferral as a general policy.
 
-**Current production-C refinement (NOT YET OWNER-LOADED):** keep the
-same 4-in-8KiB / 6-in-16KiB second-pack geometry, but defer the first
-valid 2/3-record pack only when another BIO is already present in the
-serialized worker's current local FIFO. The worker samples
-`entry->list.next != &local` before removing the current accepted
-entry. At a local FIFO tail, commit the valid first pack immediately
-instead of paying the retention deadline. A BIO arriving concurrently
-after that snapshot is intentionally ignored; this is a conservative
-latency choice, not an attempt to predict future arrivals.
+**Owner-qualified accepted-backlog outcome:** exact code
+`bd8fe3a8ff3d0878f243240f2a4ac01587b5ade0` passed the full owner
+matrix and all three CI workflows; sanitized report-only commit
+`be387969176f`. SD sync/async useful WRITE was 5.18/5.26 MB/s,
+lower requests 3283.5/3295.5 and lower callback wall 3.53/3.54s.
+That retains most of the prior aggregation benefit relative to the
+`ea9fe58` profiling baseline (~4.60/4.66 MB/s, ~4.59k requests,
+4.92s lower wait). SSD recovered from the unconditional policy's
+16.60/17.39 to 17.97/18.51 MB/s while keeping requests down at
+2628.5/2619.5; both V3 modes are now NO_ESTABLISHED_GAIN rather than
+MATERIAL_LOSS versus raw. Random/packed-read behavior remained within
+the previously observed synthetic envelope. This satisfies the
+predeclared direction: accepted backlog is a better policy signal than
+unconditional deadline waiting.
 
-No device-model check, adaptive clock threshold, new timer, padding,
-format, allocator or asynchronous publication is added. The existing
-absolute retention deadline, FUA/conflict/read/discard/failure/suspend/
-shutdown drains and post-success authority publication remain the only
-safety boundaries. `single_pack_deferrals` now counts first packs
-actually held under already-accepted backlog.
+**Current production-C refinement (NOT YET OWNER-LOADED):** narrow that
+signal from “any immediate accepted BIO” to an immediate accepted
+ordinary data WRITE only. The worker still snapshots before removing
+the current local entry, but `sv3_followup_is_plain_write()` requires
+REQ_OP_WRITE, nonzero sectors and no PREFLUSH/FUA. READ, DISCARD,
+empty flush protocol BIOs and fenced writes are guaranteed boundaries
+or non-packable work and therefore cannot buy first-pack retention.
+A concurrently admitted later BIO remains irrelevant to the snapshot.
 
-**Predeclared decision:** retain this refinement only if the same loaded
-matrix preserves a substantial part of the SD lower-request/wait
-reduction while recovering the SSD useful-WRITE loss, with no lower
-WRITE byte increase and no material read/write p99 or correctness
-regression. Fewer requests alone are insufficient.
+The helper deliberately does **not** predict LZ4 outcome, zero elision
+or duplicate logical-page conflicts; the ordered production admission
+path remains authoritative and may still drain when those are observed.
+No new timer, threshold, device-model branch, allocation, I/O, format
+or publication mechanism is introduced.
+
+**Predeclared decision:** keep this refinement only if the same loaded
+matrix preserves the accepted-backlog SD request/wait reduction and
+does not materially worsen SSD useful WRITE or read/write p99. A
+smaller `single_pack_deferrals` count is diagnostic only; independent
+lower bytes/requests and completed useful throughput remain primary.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

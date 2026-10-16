@@ -754,10 +754,15 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         writer.index("sv3_window_pack_ready("))
         self.assertIn("ctx->next_window_close = SV3_CLOSE_PACK_READY", writer)
         worker = body("sv3_worker")
+        followup = body("sv3_followup_is_plain_write")
+        self.assertIn("bio_op(bio) == REQ_OP_WRITE", followup)
+        self.assertIn("bio_sectors(bio)", followup)
+        self.assertIn("REQ_PREFLUSH | REQ_FUA", followup)
         self.assertIn("ctx->worker_has_immediate_followup", writer)
         self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
-        self.assertIn("entry->list.next != &local", worker)
-        self.assertLess(worker.index("entry->list.next != &local"),
+        self.assertIn("entry->list.next != &local &&", worker)
+        self.assertIn("sv3_followup_is_plain_write(next)", worker)
+        self.assertLess(worker.index("entry->list.next != &local &&"),
                         worker.index("list_del_init(&entry->list)"))
         self.assertIn("ctx->worker_has_immediate_followup = false", worker)
         self.assertIn("ctx->single_pack_deferrals++", writer)
