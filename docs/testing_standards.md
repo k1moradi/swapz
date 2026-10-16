@@ -232,26 +232,34 @@ No observed GC means GC remains NOT EXERCISED. The owner's next
 `make test -j2` must generate new loaded evidence; rootless CI is
 not a substitute.
 
-## Accepted-backlog first-pack deferral contract
+## Accepted-backlog and accepted-burst packing contract
 
 A first valid 2/3-record pack may be retained for a second pack only
 from worker-local work that was already admitted before the current
-decision. The worker must snapshot that successor before removing the
-current local-list entry. A later concurrent admission must never
-retroactively justify retention. The current refinement further
-requires that immediate successor to be a nonempty REQ_OP_WRITE with
-neither PREFLUSH nor FUA; READ, DISCARD and flush/fenced operations are
-known boundaries and are not packing opportunities.
+decision. The worker snapshots `entry->list.next != &local` before
+removing the current local-list entry. A later concurrent admission must
+never retroactively justify retention. The owner-qualified
+plain-WRITE-only successor experiment at `b4d828d` reduced useful
+aggregation and is rejected; do not preserve that failed policy merely
+as a source-cleanliness preference.
 
-This classification is intentionally conservative and non-authoritative:
-it may still admit a later RAW, zero-elided or duplicate-slot write,
-which the existing serialized `sv3_accept_write` path must handle with
-its original drains and publication rules. It must not inspect or trust
-uncompleted asynchronous compression output. Source contracts require
-the plain-write filter, snapshot-before-list-removal ordering, reset
-after each processed entry and unchanged FUA/dependency handling.
-Loaded performance qualification remains separate from these safety
-contracts.
+After the existing 4/6-record second-pack geometry is reached, the
+worker may keep the window open only while entries remain in that same
+finite local snapshot. This is **not additional retention**: at the
+snapshot tail, if the window still exists, admission is open, no error
+occurred and the original absolute deadline has not expired, the worker
+must set the ordinary PACK_READY close reason and synchronously flush
+before resetting the local-follow-up snapshot. Any existing boundary
+encountered while walking the accepted burst retains its original drain
+and clears the extension state through `sv3_flush_window`.
+
+The extension must not alter on-disk layout, add padding, refresh the
+retention deadline, inspect future admissions, bypass FUA/read/discard/
+duplicate/zero/RAW handling, or publish a mapping before lower success.
+Exact-C aggregation tests remain the correctness basis for larger
+batches; source contracts additionally require extension state reset on
+every flush and tail-close-before-follow-up-reset ordering. Loaded
+performance qualification remains separate from these safety contracts.
 
 ## Alpha.22 packed-burst tail correctness contract
 

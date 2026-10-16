@@ -218,7 +218,8 @@ def parse_sessions(output):
             name = "before" if line.startswith("V3_STATUS_BEFORE=") else "after"
             status_text = line.partition("=")[2]
             allowed = ("burst_tail_flushes", "packed_early_commits",
-                       "single_pack_deferrals", "close_pack_ready",
+                       "single_pack_deferrals", "accepted_burst_extensions",
+                      "accepted_burst_tail_flushes", "close_pack_ready",
                        "one_page_windows", "gc_victims",
                        "gc_role_rotations")
             current.setdefault("kernel_status", {})[name] = {
@@ -333,7 +334,8 @@ def benchmark_verdicts(sessions):
     for row in all_rows:
         status = row.get("kernel_status", {})
         for field in ("burst_tail_flushes", "packed_early_commits",
-                      "single_pack_deferrals", "close_pack_ready",
+                      "single_pack_deferrals", "accepted_burst_extensions",
+                       "accepted_burst_tail_flushes", "close_pack_ready",
                       "one_page_windows", "gc_victims"):
             before = status.get("before", {}).get(field)
             after = status.get("after", {}).get(field)
@@ -343,9 +345,14 @@ def benchmark_verdicts(sessions):
         row["kernel_counter_delta"] = {
             key: status["after"][key] - status["before"][key]
             for key in ("burst_tail_flushes", "packed_early_commits",
-                        "single_pack_deferrals", "close_pack_ready",
+                        "single_pack_deferrals", "accepted_burst_extensions",
+                        "accepted_burst_tail_flushes", "close_pack_ready",
                         "one_page_windows", "gc_victims")
         }
+        if (row["kernel_counter_delta"]["accepted_burst_tail_flushes"] >
+                row["kernel_counter_delta"]["accepted_burst_extensions"]):
+            return {"overall": "INCOMPLETE",
+                    "reason": "accepted-burst tail closes exceed extensions"}
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
         if None in vals or len(set(vals)) != 1:
@@ -463,7 +470,8 @@ def benchmark_verdicts(sessions):
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
                 for key in ("burst_tail_flushes", "packed_early_commits",
-                            "single_pack_deferrals", "close_pack_ready",
+                            "single_pack_deferrals", "accepted_burst_extensions",
+                            "accepted_burst_tail_flushes", "close_pack_ready",
                             "one_page_windows", "gc_victims")
             },
         }
@@ -559,6 +567,8 @@ def print_bench(result):
         kc = data["alpha22_kernel_counters"]
         print(f"  Packed-window per-pair mean: deferred first packs="
               f"{kc['single_pack_deferrals']:.1f}, "
+              f"accepted-burst extensions={kc['accepted_burst_extensions']:.1f}, "
+              f"accepted-burst tail closes={kc['accepted_burst_tail_flushes']:.1f}, "
               f"early pack closes={kc['close_pack_ready']:.1f}, "
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "

@@ -754,22 +754,27 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         writer.index("sv3_window_pack_ready("))
         self.assertIn("ctx->next_window_close = SV3_CLOSE_PACK_READY", writer)
         worker = body("sv3_worker")
-        followup = body("sv3_followup_is_plain_write")
-        self.assertIn("bio_op(bio) == REQ_OP_WRITE", followup)
-        self.assertIn("bio_sectors(bio)", followup)
-        self.assertIn("REQ_PREFLUSH | REQ_FUA", followup)
         self.assertIn("ctx->worker_has_immediate_followup", writer)
         self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
-        self.assertIn("entry->list.next != &local &&", worker)
-        self.assertIn("sv3_followup_is_plain_write(next)", worker)
-        self.assertLess(worker.index("entry->list.next != &local &&"),
+        self.assertIn("entry->list.next != &local", worker)
+        self.assertLess(worker.index("entry->list.next != &local"),
                         worker.index("list_del_init(&entry->list)"))
-        self.assertIn("ctx->worker_has_immediate_followup = false", worker)
+        self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
+        self.assertIn("ctx->accepted_burst_extensions++", writer)
+        self.assertIn("if (ctx->accepted_burst_pack_ready &&", worker)
+        self.assertIn("!ctx->worker_has_immediate_followup", worker)
+        self.assertIn("!sv3_retention_expired(ctx)", worker)
+        self.assertLess(worker.index("sv3_process(ctx, entry->bio)"),
+                        worker.index("ctx->accepted_burst_tail_flushes++"))
+        self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
+                        worker.index("ctx->worker_has_immediate_followup = false"))
+        self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
         self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("sv3_flush_window(ctx)", writer)
         self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
-        self.assertIn("single_pack_deferrals=%llu", status)
+        self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
+        self.assertIn("accepted_burst_tail_flushes=%llu", status)
         self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):

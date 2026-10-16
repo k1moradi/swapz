@@ -151,13 +151,23 @@ and async moved from MATERIAL_LOSS to NO_ESTABLISHED_GAIN versus raw.
 The queue-aware rule therefore keeps most slow-model request savings
 without the unconditional policy's fast-model loss.
 
-**Next C experiment, NOT YET OWNER-LOADED:** an immediate follow-up
-qualifies as backlog only if it is already accepted **and** is an
-ordinary nonempty WRITE without PREFLUSH/FUA. READ, DISCARD, flush
-protocol and fenced writes cannot form the next packed group, so they
-must not justify retaining the current first pack. Compression, zero
-elision and duplicate-slot outcomes remain decided by the existing
-serialized admission path rather than guessed from queue metadata.
+**Owner-qualified plain-successor filter (negative result):** exact code
+`b4d828db54924389a7ac35c6327f6ffbe18cd4d5` passed all five owner
+stages (report-only `7e8bdb9abf38`), but failed its performance gate.
+Compared with `bd8fe3a`, SD useful WRITE slipped from 5.18/5.26 to
+5.15/5.22 MB/s and lower requests rose from ~3.29k to ~3.36k. SSD
+also fell from 17.97/18.51 to 17.52/17.96 MB/s while requests rose
+from ~2.62k to ~2.87k. The plain-WRITE-only follow-up filter is therefore
+rejected; the broader already-accepted backlog signal performed better.
+
+**Next C experiment, NOT YET OWNER-LOADED:** restore the accepted-local
+backlog rule, then, once the existing 4-in-8KiB or 6-in-16KiB
+pack-ready geometry is reached, continue consuming only BIOs already
+present in that worker-local snapshot. Flush immediately at the snapshot
+tail. This adds no retention-timer wait and lets the existing
+no-padding adjacent-extent bulk writer see a larger batch. Future
+arrivals remain ineligible; all ordinary dependency/fence/failure drains
+can still close the batch earlier.
 
 ## Current C performance work and qualification plan
 

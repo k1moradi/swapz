@@ -81,6 +81,14 @@ unconditional two-pack gain. SSD recovered to 17.97/18.51 MB/s versus
 19.14 raw while requests remained ~2.62k, and benchmark classification
 improved from MATERIAL_LOSS to NO_ESTABLISHED_GAIN for both V3 modes.
 This validates accepted-backlog gating as the better cross-regime policy.
+The owner then qualified exact code
+`b4d828db54924389a7ac35c6327f6ffbe18cd4d5` (report-only
+`7e8bdb9abf38`): all five stages PASS, but the narrower
+plain-WRITE-only successor filter failed its predeclared performance
+gate. SD useful WRITE slipped to 5.15/5.22 MB/s and lower requests rose
+to ~3.36k; SSD slipped to 17.52/17.96 MB/s and requests rose to
+~2.87k. Revert that policy refinement rather than accumulating another
+heuristic on it.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -177,19 +185,22 @@ are still planned.
       Owner-loaded `bd8fe3a` confirms that accepted-backlog gating
       preserves the SD improvement (~5.18/5.26 MB/s, ~3.29k lower
       requests) while recovering SSD to 17.97/18.51 MB/s and
-      NO_ESTABLISHED_GAIN classification versus raw. The next bounded
-      refinement removes **known non-packable successors** from that
-      backlog signal. Only an immediately following accepted, nonempty
-      ordinary WRITE without PREFLUSH/FUA may justify first-pack
-      deferral; READ, DISCARD, empty flush and fenced writes force the
-      first pack to commit rather than buying retention delay. The
-      helper deliberately does not speculate about compression, zero
-      detection or duplicate logical slots; those remain authoritative
-      serialized admission decisions. No timing knob, device-profile
-      branch, allocation, I/O, format or publication change. Re-run the
-      same matrix and keep the change only if SD request/wait savings
-      remain while SSD throughput/p99 are no worse. New source
-      **NOT YET OWNER-LOADED**.
+      NO_ESTABLISHED_GAIN classification versus raw. The subsequent
+      `b4d828d` plain-WRITE-only filter was owner-qualified and
+      **rejected**: requests and useful WRITE both worsened in SD and
+      SSD. Restore the broader accepted-local signal.
+      The next bounded production-C experiment adds no new waiting:
+      after the normal 4/6-record second-pack threshold is reached,
+      keep consuming only BIOs already present in the current worker-local
+      snapshot and close immediately at that snapshot tail. Existing
+      dependency/FUA/discard/read/error/deadline/full-window drains can
+      still close earlier. The existing no-padding `lower_bulk=1`
+      writer already has exact-C coverage for 64-record batches,
+      overwrite rollback, mixed RAW/compressed groups, byte equality and
+      post-success authority publication. Add explicit extension/tail
+      telemetry and require independent lower WRITE bytes to stay flat
+      while request/wait reductions improve without SSD or p99 regression.
+      New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

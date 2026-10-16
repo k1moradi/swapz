@@ -107,8 +107,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
-            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
             for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -213,6 +213,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
         self.assertEqual(slow["alpha22_kernel_counters"]["single_pack_deferrals"], 24)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_extensions"], 6)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_tail_flushes"], 5)
         self.assertEqual(slow["alpha22_kernel_counters"]["close_pack_ready"], 18)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
@@ -230,6 +232,11 @@ class ReportContract(unittest.TestCase):
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
         sessions[2]["arms"]["v3"]["kernel_write_path"]["lz4_wall_ns"] = -1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["kernel_status"]["after"]["accepted_burst_tail_flushes"] = 7
+        sessions[0]["kernel_status"]["after"]["accepted_burst_extensions"] = 6
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 

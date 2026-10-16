@@ -451,26 +451,43 @@ the previously observed synthetic envelope. This satisfies the
 predeclared direction: accepted backlog is a better policy signal than
 unconditional deadline waiting.
 
-**Current production-C refinement (NOT YET OWNER-LOADED):** narrow that
-signal from “any immediate accepted BIO” to an immediate accepted
-ordinary data WRITE only. The worker still snapshots before removing
-the current local entry, but `sv3_followup_is_plain_write()` requires
-REQ_OP_WRITE, nonzero sectors and no PREFLUSH/FUA. READ, DISCARD,
-empty flush protocol BIOs and fenced writes are guaranteed boundaries
-or non-packable work and therefore cannot buy first-pack retention.
-A concurrently admitted later BIO remains irrelevant to the snapshot.
+**Owner-qualified plain-successor result (rejected):** exact code
+`b4d828db54924389a7ac35c6327f6ffbe18cd4d5` passed all five owner
+stages at report-only `7e8bdb9abf38`, but the predeclared gate failed.
+Relative to `bd8fe3a`, SD sync/async useful WRITE fell
+5.18/5.26 -> 5.15/5.22 MB/s, lower requests rose
+3283.5/3295.5 -> 3356/3359 and lower callback wall rose
+3.53/3.54 -> 3.61/3.61s. SSD useful WRITE fell
+17.97/18.51 -> 17.52/17.96 MB/s while requests rose
+2628.5/2619.5 -> 2879.5/2863.5. Narrowing the already-accepted
+successor classification removed useful aggregation more often than it
+avoided harmful waiting; restore the broader worker-local snapshot rule.
 
-The helper deliberately does **not** predict LZ4 outcome, zero elision
-or duplicate logical-page conflicts; the ordered production admission
-path remains authoritative and may still drain when those are observed.
-No new timer, threshold, device-model branch, allocation, I/O, format
-or publication mechanism is introduced.
+**Current production-C experiment (NOT YET OWNER-LOADED):** once a
+retained window reaches the existing second-pack geometry
+(4 records fitting 8KiB or 6 fitting 16KiB), do not immediately submit
+it when more BIOs are already present in the same worker-local snapshot.
+Mark the window pack-ready, continue through that finite accepted burst,
+and flush immediately when the current local snapshot reaches its tail.
+No future admission can extend this decision and no retention timer is
+added or refreshed. If a READ, duplicate slot, zero page, RAW/fence,
+DISCARD, failure, absolute deadline, full window or other existing
+boundary is encountered, the original drain path wins.
 
-**Predeclared decision:** keep this refinement only if the same loaded
-matrix preserves the accepted-backlog SD request/wait reduction and
-does not materially worsen SSD useful WRITE or read/write p99. A
-smaller `single_pack_deferrals` count is diagnostic only; independent
-lower bytes/requests and completed useful throughput remain primary.
+The purpose is to give the already-qualified no-padding adjacent-extent
+bulk writer a larger transaction **without buying additional wait**.
+The engine already has production-C tests for 64-record aggregation,
+failed-run rollback, overwrite authority preservation, mixed
+RAW/compressed batches, zero padding in default bulk mode, byte-identical
+lower output and readback. New `accepted_burst_extensions` and
+`accepted_burst_tail_flushes` counters are explanatory only.
+
+**Predeclared decision:** retain this experiment only if independent
+lower WRITE requests and lower-WRITE callback wall improve relative to
+`bd8fe3a` while lower WRITE bytes do not increase and SSD useful WRITE
+plus read/write p99 do not materially regress. More driver-side bulk
+callbacks or larger windows without independent device improvement are
+not a VISION win.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

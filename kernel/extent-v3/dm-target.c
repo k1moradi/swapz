@@ -183,9 +183,13 @@ struct sv3_dm {
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
-	/* Snapshot of the current worker-local FIFO only. New concurrent
-	 * arrivals do not justify extra retention latency. */
+	/* Current worker-local snapshot only: future arrivals never justify
+	 * retention. A pack-ready window may continue through accepted local
+	 * work and must close immediately at that snapshot tail. */
 	bool worker_has_immediate_followup;
+	bool accepted_burst_pack_ready;
+	u64 accepted_burst_extensions;
+	u64 accepted_burst_tail_flushes;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1019,6 +1023,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	 * Re-enable tail eligibility only after an entire pack-ready window
 	 * has succeeded through the original publication/completion path. */
 	ctx->packed_burst = false;
+	ctx->accepted_burst_pack_ready = false;
 	if (!count) {
 		ctx->next_window_close = SV3_CLOSE_UNKNOWN;
 		ctx->window_first_ns = 0;
@@ -1355,14 +1360,17 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
-		/* An exact 4/8/16KiB SWZ3 extent fits the staged
-		 * independent compressed records. This only changes when
-		 * the worker closes the retained window; original engine
-		 * write success, generation publication and upper FUA
-		 * completion remain the sole authority. */
-		ctx->next_window_close = SV3_CLOSE_PACK_READY;
-		ctx->packed_early_commits++;
-		sv3_flush_window(ctx);
+		/* Once a second pack exists, consume only work already accepted
+		 * in this worker-local snapshot. This adds no timer wait and lets
+		 * the existing no-padding bulk writer see a larger batch. */
+		if (ctx->worker_has_immediate_followup) {
+			ctx->accepted_burst_pack_ready = true;
+			ctx->accepted_burst_extensions++;
+		} else {
+			ctx->next_window_close = SV3_CLOSE_PACK_READY;
+			ctx->packed_early_commits++;
+			sv3_flush_window(ctx);
+		}
 	}
 	return 0;
 }
@@ -1482,26 +1490,6 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 }
 
 static bool sv3_retention_expired(struct sv3_dm *ctx);
-
-/*
- * Backlog may justify holding the first useful pack only when the next
- * ALREADY accepted local entry is itself an ordinary data WRITE. READ,
- * DISCARD, PREFLUSH/FUA and empty flush protocol BIOs are guaranteed
- * boundaries or non-packable work and must not buy retention latency.
- *
- * Compression/zero/duplicate outcome is intentionally not predicted here:
- * the ordered worker still performs the authoritative admission checks.
- */
-static bool sv3_followup_is_plain_write(const struct sv3_bio_ref *entry)
-{
-	const struct bio *bio;
-
-	if (!entry || !entry->bio)
-		return false;
-	bio = entry->bio;
-	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
-		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
-}
 
 static bool sv3_read_is_independent(struct sv3_dm *ctx, struct bio *bio)
 {
@@ -1669,17 +1657,25 @@ static void sv3_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		list_for_each_entry_safe(entry, next, &local, list) {
-			/* Snapshot only immediately joinable work already accepted
-			 * into this worker-local FIFO. A control/read boundary or
-			 * concurrent later arrival cannot justify retention here. */
+			/* Only the finite worker-local snapshot can justify more
+			 * batching. A later concurrent arrival is deliberately ignored. */
 			ctx->worker_has_immediate_followup =
-				entry->list.next != &local &&
-				sv3_followup_is_plain_write(next);
+				entry->list.next != &local;
 			list_del_init(&entry->list);
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
 			sv3_process(ctx, entry->bio);
+			if (ctx->accepted_burst_pack_ready &&
+			    !ctx->worker_has_immediate_followup &&
+			    ctx->batch_count && !ctx->failed &&
+			    READ_ONCE(ctx->accepting) &&
+			    !sv3_retention_expired(ctx)) {
+				ctx->next_window_close = SV3_CLOSE_PACK_READY;
+				ctx->packed_early_commits++;
+				ctx->accepted_burst_tail_flushes++;
+				sv3_flush_window(ctx);
+			}
 			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
 				cond_resched();
@@ -2300,7 +2296,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
-		       "single_pack_deferrals=%llu burst_tail_flushes=%llu "
+		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
+		       "accepted_burst_tail_flushes=%llu burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
@@ -2381,6 +2378,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
+		       ctx->accepted_burst_extensions,
+		       ctx->accepted_burst_tail_flushes,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,
