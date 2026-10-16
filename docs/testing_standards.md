@@ -296,7 +296,10 @@ owns staging, lower completion, publication and upper completion.
 `accepted_burst_cap_extra_gt1_windows`; chosen 16KiB extents must not
 exceed selected cap=3 windows; recovered blocks must be at least two per
 selected window and no more than the cap=2 reference tax. Any violation
-makes the loaded report incomplete. For sixteen uniform 2072-byte
+makes the loaded report incomplete. All three Pareto counters are
+mandatory through status parsing, per-session deltas and per-regime
+summary output; synthetic report fixtures must exercise the same
+relationships so schema drift fails before owner-loaded qualification. For sixteen uniform 2072-byte
 records, the uncapped planner's existing read-cost tie-break selects
 3+3+3+7 records; tests must not replace that with the byte-equivalent
 7+7+2 shape merely to reduce extent count. Every newly mandatory status field must also be present

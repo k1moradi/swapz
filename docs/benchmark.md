@@ -556,7 +556,12 @@ cap=3 with the same CPU-only planner and may select it only when
 one 16KiB extent. Every selected record stays bounded to at most three
 4KiB cold-read blocks, while common one-block-tax windows remain cap=2.
 The cap=2 diagnostics remain a hypothetical hard-cap reference even when
-cap=3 is selected for the actual write.
+cap=3 is selected for the actual write. The sanitized report must carry
+`accepted_burst_pareto_cap3_windows`,
+`accepted_burst_pareto_saved_blocks` and
+`accepted_burst_pareto_four_extents` from target status through
+per-session deltas and regime means, rejecting impossible relationships
+instead of printing partial evidence.
 
 **Predeclared decision:** retain the relaxation only if independent lower
 WRITE bytes improve versus `de16e7cf` while packed READ recovery does

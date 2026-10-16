@@ -234,6 +234,9 @@ def parse_sessions(output):
                        "accepted_burst_cap_extra_gt1_windows",
                        "accepted_burst_four_extents_avoided",
                        "accepted_burst_plan_stats_failures",
+                       "accepted_burst_pareto_cap3_windows",
+                       "accepted_burst_pareto_saved_blocks",
+                       "accepted_burst_pareto_four_extents",
                        "close_pack_ready", "one_page_windows", "gc_victims",
                        "gc_role_rotations")
             current.setdefault("kernel_status", {})[name] = {
@@ -354,6 +357,9 @@ def benchmark_verdicts(sessions):
                        "accepted_burst_cap_extra_gt1_windows",
                        "accepted_burst_four_extents_avoided",
                        "accepted_burst_plan_stats_failures",
+                       "accepted_burst_pareto_cap3_windows",
+                       "accepted_burst_pareto_saved_blocks",
+                       "accepted_burst_pareto_four_extents",
                        "close_pack_ready",
                       "one_page_windows", "gc_victims"):
             before = status.get("before", {}).get(field)
@@ -370,6 +376,9 @@ def benchmark_verdicts(sessions):
                         "accepted_burst_cap_extra_gt1_windows",
                         "accepted_burst_four_extents_avoided",
                         "accepted_burst_plan_stats_failures",
+                        "accepted_burst_pareto_cap3_windows",
+                        "accepted_burst_pareto_saved_blocks",
+                        "accepted_burst_pareto_four_extents",
                         "close_pack_ready",
                         "one_page_windows", "gc_victims")
         }
@@ -387,7 +396,20 @@ def benchmark_verdicts(sessions):
                     "reason": "accepted-burst >1-block windows exceed capped windows"}
         if row["kernel_counter_delta"]["accepted_burst_plan_stats_failures"]:
             return {"overall": "INCOMPLETE",
-                    "reason": "accepted-burst dual-plan telemetry failed"}
+                    "reason": "accepted-burst planner telemetry failed"}
+        cap3_windows = row["kernel_counter_delta"]["accepted_burst_pareto_cap3_windows"]
+        cap3_saved = row["kernel_counter_delta"]["accepted_burst_pareto_saved_blocks"]
+        cap3_four = row["kernel_counter_delta"]["accepted_burst_pareto_four_extents"]
+        if cap3_windows > row["kernel_counter_delta"]["accepted_burst_cap_extra_gt1_windows"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "Pareto cap=3 windows exceed expensive cap=2 tail"}
+        if cap3_four > cap3_windows:
+            return {"overall": "INCOMPLETE",
+                    "reason": "Pareto cap=3 selected more than one 16KiB extent per window"}
+        if cap3_saved < 2 * cap3_windows or \
+                cap3_saved > row["kernel_counter_delta"]["accepted_burst_cap_extra_blocks"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "Pareto cap=3 saved-block accounting is inconsistent"}
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
         if None in vals or len(set(vals)) != 1:
@@ -511,6 +533,9 @@ def benchmark_verdicts(sessions):
                             "accepted_burst_cap_extra_gt1_windows",
                             "accepted_burst_four_extents_avoided",
                             "accepted_burst_plan_stats_failures",
+                            "accepted_burst_pareto_cap3_windows",
+                            "accepted_burst_pareto_saved_blocks",
+                            "accepted_burst_pareto_four_extents",
                             "close_pack_ready",
                             "one_page_windows", "gc_victims")
             },
@@ -613,6 +638,9 @@ def print_bench(result):
               f"cap extra 4KiB blocks={kc['accepted_burst_cap_extra_blocks']:.1f}, "
               f"cap >1-block windows={kc['accepted_burst_cap_extra_gt1_windows']:.1f}, "
               f"16KiB extents avoided={kc['accepted_burst_four_extents_avoided']:.1f}, "
+              f"Pareto cap3 windows={kc['accepted_burst_pareto_cap3_windows']:.1f}, "
+              f"cap3 blocks recovered={kc['accepted_burst_pareto_saved_blocks']:.1f}, "
+              f"cap3 16KiB extents={kc['accepted_burst_pareto_four_extents']:.1f}, "
               f"early pack closes={kc['close_pack_ready']:.1f}, "
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "

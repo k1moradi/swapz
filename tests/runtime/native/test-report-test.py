@@ -107,8 +107,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
-            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_pareto_cap3_windows=0 accepted_burst_pareto_saved_blocks=0 accepted_burst_pareto_four_extents=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_pareto_cap3_windows=1 accepted_burst_pareto_saved_blocks=2 accepted_burst_pareto_four_extents=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
             for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -217,9 +217,12 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_tail_flushes"], 5)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_read_caps"], 4)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap_extra_blocks"], 4)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap_extra_gt1_windows"], 0)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap_extra_gt1_windows"], 1)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_four_extents_avoided"], 8)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_plan_stats_failures"], 0)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_pareto_cap3_windows"], 1)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_pareto_saved_blocks"], 2)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_pareto_four_extents"], 1)
         self.assertEqual(slow["alpha22_kernel_counters"]["close_pack_ready"], 18)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
@@ -256,6 +259,19 @@ class ReportContract(unittest.TestCase):
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
         sessions[0]["kernel_status"]["after"]["accepted_burst_plan_stats_failures"] = 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["kernel_status"]["after"]["accepted_burst_pareto_cap3_windows"] = 2
+        sessions[0]["kernel_status"]["after"]["accepted_burst_cap_extra_gt1_windows"] = 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["kernel_status"]["after"]["accepted_burst_pareto_saved_blocks"] = 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["kernel_status"]["after"]["accepted_burst_pareto_four_extents"] = 2
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
