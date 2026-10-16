@@ -739,20 +739,27 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("count * sizeof(struct sv3_record)", policy)
         for count in (2, 3, 4, 6):
             self.assertIn("count == %dU" % count, policy)
-        self.assertIn("static inline int sv3_window_single_pack_deferred(", policy)
+        self.assertIn("static inline int sv3_window_single_pack_ready(", policy)
         self.assertIn("static inline int sv3_window_pack_ready(", policy)
         self.assertIn("sv3_window_extent_fits(", policy)
         self.assertIn("!retain_ms || read_budget || !pending", policy)
         self.assertIn("extent_blocks * SV3_BLOCK_BYTES", policy)
         self.assertIn("pending[i].raw", policy)
         self.assertLess(writer.index("ctx->batch_count++"),
-                        writer.index("sv3_window_single_pack_deferred("))
+                        writer.index("sv3_window_single_pack_ready("))
         self.assertLess(writer.index("ctx->batch_count++"),
                         writer.index("sv3_window_pack_ready("))
         self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
                                      writer.index("ctx->batch_count++")),
                         writer.index("sv3_window_pack_ready("))
         self.assertIn("ctx->next_window_close = SV3_CLOSE_PACK_READY", writer)
+        worker = body("sv3_worker")
+        self.assertIn("ctx->worker_has_immediate_followup", writer)
+        self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
+        self.assertIn("entry->list.next != &local", worker)
+        self.assertLess(worker.index("entry->list.next != &local"),
+                        worker.index("list_del_init(&entry->list)"))
+        self.assertIn("ctx->worker_has_immediate_followup = false", worker)
         self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("sv3_flush_window(ctx)", writer)

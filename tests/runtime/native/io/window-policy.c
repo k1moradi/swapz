@@ -96,7 +96,7 @@ static int test_pack_ready_waits_for_second_medium_pack(void)
 	/* Three medium pages fit 8KiB but are deliberately retained.
 	 * Six fit one 16KiB extent: same bytes as two old 8KiB commits,
 	 * one synchronous lower callback. */
-	CHECK(sv3_window_single_pack_deferred(batch, 3, 2, 0));
+	CHECK(sv3_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 5, 2, 0));
 	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
@@ -120,8 +120,8 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	}
 	/* Two medium pages do not fit 4KiB. Three fit 8KiB, but wait for
 	 * a second triplet instead of closing the first pack immediately. */
-	CHECK(!sv3_window_single_pack_deferred(batch, 2, 2, 0));
-	CHECK(sv3_window_single_pack_deferred(batch, 3, 2, 0));
+	CHECK(!sv3_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(sv3_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
 	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
 
@@ -131,8 +131,8 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 		batch[i].length = 2028;
 	batch[0].length = 2024;
 	batch[1].length = 2024;
-	CHECK(sv3_window_single_pack_deferred(batch, 2, 2, 0));
-	CHECK(!sv3_window_single_pack_deferred(batch, 3, 2, 0));
+	CHECK(sv3_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(!sv3_window_single_pack_ready(batch, 3, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 2, 2, 0));
 	for (i = 0; i < 4; ++i)
 		batch[i].length = 2028;

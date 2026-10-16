@@ -183,6 +183,9 @@ struct sv3_dm {
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
+	/* Snapshot of the current worker-local FIFO only. New concurrent
+	 * arrivals do not justify extra retention latency. */
+	bool worker_has_immediate_followup;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1334,13 +1337,21 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	if (bio->bi_opf & REQ_FUA) {
 		ctx->next_window_close = SV3_CLOSE_FUA;
 		sv3_flush_window(ctx);
-	} else if (sv3_window_single_pack_deferred(ctx->batch,
-						 ctx->batch_count,
-						 ctx->retain_ms,
-						 ctx->engine.max_read_blocks_per_record)) {
-		/* Keep the first useful pack only until the original absolute
-		 * deadline or a second pack arrives; no timer extension. */
-		ctx->single_pack_deferrals++;
+	} else if (sv3_window_single_pack_ready(ctx->batch,
+					      ctx->batch_count,
+					      ctx->retain_ms,
+					      ctx->engine.max_read_blocks_per_record)) {
+		if (ctx->worker_has_immediate_followup) {
+			/* Another already-accepted BIO will be processed without
+			 * waiting for a timer or a future producer arrival. */
+			ctx->single_pack_deferrals++;
+		} else {
+			/* Queue tail: do not pay the retention deadline merely to
+			 * hope for a future arrival. Commit the valid first pack. */
+			ctx->next_window_close = SV3_CLOSE_PACK_READY;
+			ctx->packed_early_commits++;
+			sv3_flush_window(ctx);
+		}
 	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
@@ -1638,11 +1649,17 @@ static void sv3_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		list_for_each_entry_safe(entry, next, &local, list) {
+			/* Snapshot only work already accepted into this worker-local
+			 * FIFO. A concurrent later arrival cannot retroactively make
+			 * the current queue tail worth retaining. */
+			ctx->worker_has_immediate_followup =
+				entry->list.next != &local;
 			list_del_init(&entry->list);
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
 			sv3_process(ctx, entry->bio);
+			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
 				cond_resched();
 			if (!--remaining)

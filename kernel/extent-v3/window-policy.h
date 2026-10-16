@@ -78,8 +78,13 @@ static inline int sv3_window_extent_fits(
 	return extent_bytes <= (sv3_u32)extent_blocks * SV3_BLOCK_BYTES;
 }
 
-/* Count an opportunity deliberately retained for a second pack. */
-static inline int sv3_window_single_pack_deferred(
+/*
+ * Identify the first useful pack. The worker decides whether an already
+ * accepted local FIFO successor exists: only that immediate backlog may
+ * justify deferring this pack for a second group. This pure geometry helper
+ * never inspects queue state or changes the absolute retention deadline.
+ */
+static inline int sv3_window_single_pack_ready(
 		const struct sv3_pending_bio *pending, sv3_u8 count,
 		sv3_u8 retain_ms, sv3_u8 read_budget)
 {

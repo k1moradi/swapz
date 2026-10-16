@@ -131,14 +131,24 @@ completed callbacks fell in the 1–4ms bin. SSD lower-WRITE wait was
 ~0.82–0.84s, with almost every callback <=1ms. These nested wall-time
 counters diagnose serialized waiting, not exclusive CPU or flash latency.
 
-**Next C experiment, NOT YET OWNER-LOADED:** retained compressed windows
-no longer early-close on the first 2/3-record pack. Four small records
-may close into one 8KiB extent and six medium-like records into one
-16KiB extent, while the existing absolute `retain_ms` deadline drains
-smaller tails. This aims to replace two synchronous lower callbacks with
-one **without padding or extra lower bytes**. FUA/conflict/read/discard/
-shutdown fences, authority publication and fail-close remain unchanged.
-`single_pack_deferrals` reports how often the first useful pack was held.
+**Owner-qualified two-pack result:** code
+`269fd05bc6dd5584282b861117a1e23e51a14b95` passed all five stages
+when tested at report-only parent `e42573afa5d879ac10a660dd6bae40478df06661`
+(latest report `1214f8c20a7c`). On the SD RAM model, lower WRITE
+requests fell ~31% (about 4.59k -> 3.15k), lower-WRITE callback wall
+fell ~31% (4.92s -> ~3.39s), and useful WRITE rose ~13%
+(4.60/4.66 -> 5.19/5.27 MB/s). However SSD useful WRITE regressed
+~6% sync and ~10% async despite ~44% fewer lower requests. The
+unconditional second-pack wait is therefore not a cross-regime VISION win.
+
+**Next C experiment, NOT YET OWNER-LOADED:** defer the first valid
+2/3-record pack only when the serialized worker already has another
+accepted BIO in its local FIFO. At a current local queue tail, commit
+that first pack immediately rather than waiting for the retention timer.
+This uses queue state already owned by the worker, adds no timing knob,
+padding, format change or new I/O, and ignores future racing arrivals
+when deciding to wait. Existing absolute deadline and all ordering,
+FUA/read/discard/failure/shutdown drains remain unchanged.
 
 ## Current C performance work and qualification plan
 

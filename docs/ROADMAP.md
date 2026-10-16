@@ -63,6 +63,15 @@ lower callbacks versus ~5.22–5.23s total window-commit wall time;
 were <=1ms. This strongly implicates serialized lower-write callback
 count/latency in the SD-model useful-WRITE gap, without proving
 hardware latency or exclusive kernel CPU.
+The next two-pack policy was owner-qualified at code
+`269fd05bc6dd5584282b861117a1e23e51a14b95`, tested at report-only
+parent `e42573afa5d879ac10a660dd6bae40478df06661` and published
+as `1214f8c20a7c`. All five stages PASS. SD useful WRITE improved
+from 4.60/4.66 to 5.19/5.27 MB/s while V3 lower requests and lower
+callback wall both fell ~31%. SSD lower requests fell ~44%, but useful
+WRITE regressed from 17.69/19.31 to 16.60/17.39 MB/s. This shows
+request aggregation helps when callback latency dominates, while
+unnecessary retention delay hurts the faster model.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -152,19 +161,23 @@ are still planned.
       inside ~5.22–5.23s commit, versus ~0.14s LZ4, with every
       ~4.59k callback in the 1–4ms bucket. SSD lower wait is only
       ~0.82–0.84s and nearly all callbacks are <=1ms.
-      The next bounded production-C experiment therefore delays the
-      first valid 2/3-record packed early close until a second pack
-      can join: 4 records fitting 8KiB or 6 records fitting 16KiB.
-      The already-pinned absolute retention deadline remains the hard
-      tail bound, so a lone useful pack cannot wait indefinitely.
-      This does **not** write padding or add lower bytes; all existing
-      conflict/FUA/read/discard/shutdown drains and post-success
-      authority publication remain unchanged. Track
-      `single_pack_deferrals`, early pack closes, independent lower
-      WRITE bytes/requests, useful WRITE MB/s and read/write p99.
-      The new source is **NOT YET OWNER-LOADED**. Reject it if callback
-      savings disappear, lower bytes increase, or latency/correctness
-      regress despite fewer synchronous commits.
+      Owner-loaded code `269fd05` validates the mechanism but rejects
+      unconditional waiting as the final policy: SD lower callbacks and
+      wait wall fell ~31% and useful WRITE rose ~13%, while SSD useful
+      WRITE regressed ~6% sync/~10% async despite ~44% fewer requests.
+      The next bounded production-C refinement makes first-pack deferral
+      **accepted-backlog aware**. The worker snapshots whether another
+      BIO already exists in its current local FIFO before removing the
+      current entry. Only that immediate accepted successor may justify
+      holding a valid 2/3-record first pack for the 4/6-record second-pack
+      close. A local FIFO tail commits the first pack immediately; later
+      concurrently arriving BIOs are deliberately ignored for this
+      decision. No device-profile branch, new timer, padding, allocation,
+      I/O or authority change. Keep the existing absolute deadline and
+      all conflict/FUA/read/discard/failure/shutdown fences. Re-run the
+      same matrix and require SD request/wait savings to persist while
+      restoring the SSD useful-WRITE regression, with lower WRITE bytes
+      and read/write p99 no worse. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

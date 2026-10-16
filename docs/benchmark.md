@@ -424,32 +424,40 @@ must not be summed. They show that reducing serialized callback
 count is the next measured lever, not that null_blk models flash
 latency or that CPU cost is negligible.
 
-**Current production-C experiment (NOT YET OWNER-LOADED):** replace
-the first small/medium retained pack's immediate close with a bounded
-second-pack opportunity under the *same absolute retention deadline*.
-Two small records that fit one 4KiB extent are retained until four
-fit one 8KiB extent; three records that fit one 8KiB extent are
-retained until six fit one 16KiB extent. If companions do not arrive,
-the unchanged timer drains the smaller window. No padding, new format,
-allocator, parallel publisher or asynchronous lower completion is
-introduced. FUA, same-slot conflict, READ dependency, DISCARD, failure,
-suspend and shutdown preserve their original drains.
-`single_pack_deferrals` counts each first pack deliberately held;
-it is diagnostic, not a throughput claim.
+**Owner-qualified two-pack outcome:** exact code
+`269fd05bc6dd5584282b861117a1e23e51a14b95` passed all five stages
+when the owner tested report-only parent
+`e42573afa5d879ac10a660dd6bae40478df06661`; sanitized publication
+`1214f8c20a7c`. SD V3 useful WRITE rose from 4.60/4.66 to
+5.19/5.27 MB/s, lower WRITE callbacks fell from ~4.59k to ~3.15k,
+and lower callback wall fell from 4.92s to ~3.39s. In contrast, SSD
+useful WRITE fell from 17.69/19.31 to 16.60/17.39 MB/s despite lower
+requests falling from ~4.28k to ~2.41k and lower callback wall falling
+to ~0.48–0.49s. The predeclared no-material-regression gate therefore
+rejects unconditional first-pack deferral as a general policy.
 
-**First CI feedback for the two-pack revision:** production-C exact tests
-and kernel W=1/W=2 compilation passed, but the native project-goal
-workflow correctly rejected one stale synthetic reporter status line that
-omitted the newly required `single_pack_deferrals` field. Fix only that
-fixture and keep the real result parser fail-closed; this failure does
-not qualify loaded performance at the amended HEAD.
+**Current production-C refinement (NOT YET OWNER-LOADED):** keep the
+same 4-in-8KiB / 6-in-16KiB second-pack geometry, but defer the first
+valid 2/3-record pack only when another BIO is already present in the
+serialized worker's current local FIFO. The worker samples
+`entry->list.next != &local` before removing the current accepted
+entry. At a local FIFO tail, commit the valid first pack immediately
+instead of paying the retention deadline. A BIO arriving concurrently
+after that snapshot is intentionally ignored; this is a conservative
+latency choice, not an attempt to predict future arrivals.
 
-**Predeclared decision:** prefer the new rule only if the owner-loaded
-same-matrix run lowers independent V3 backing WRITE requests and
-lower-WRITE callback wall time while keeping lower WRITE bytes no worse,
-preserving byte-exact correctness and avoiding material WRITE/read-p99
-regressions. A lower callback count with increased bytes or deadline
-tail cost is not a VISION win.
+No device-model check, adaptive clock threshold, new timer, padding,
+format, allocator or asynchronous publication is added. The existing
+absolute retention deadline, FUA/conflict/read/discard/failure/suspend/
+shutdown drains and post-success authority publication remain the only
+safety boundaries. `single_pack_deferrals` now counts first packs
+actually held under already-accepted backlog.
+
+**Predeclared decision:** retain this refinement only if the same loaded
+matrix preserves a substantial part of the SD lower-request/wait
+reduction while recovering the SSD useful-WRITE loss, with no lower
+WRITE byte increase and no material read/write p99 or correctness
+regression. Fewer requests alone are insufficient.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the
