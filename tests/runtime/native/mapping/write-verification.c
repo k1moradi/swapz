@@ -319,6 +319,65 @@ static int test_one_block_read_budget_remains_selective(void)
 	return 0;
 }
 
+/*
+ * A validated volatile offset can save the extra 4KiB without adding a
+ * second delayed lower request. This is distinct from the strictly
+ * metadata-first budget and complete-two-block read regression above.
+ */
+static int test_two_block_payload_offset_skips_unneeded_second_block(void)
+{
+	sv3_u8 committed = 0, result[2072];
+	sv3_u16 size = 0;
+	sv3_u16 offset;
+	sv3_u32 before;
+
+	CHECK(setup() == 0);
+	CHECK(sv3_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(committed == 3 && map[2].extent_blocks == 2);
+	CHECK(map[2].payload_offset + map[2].payload_length <=
+	      SV3_BLOCK_BYTES);
+	CHECK(map[0].payload_offset + map[0].payload_length >
+	      SV3_BLOCK_BYTES);
+	CHECK(map[1].payload_offset < SV3_BLOCK_BYTES &&
+	      map[1].payload_offset + map[1].payload_length >
+	      SV3_BLOCK_BYTES);
+	CHECK(sv3_engine_read_page(&engine, 2, result,
+					   sizeof(result), &size) == 0);
+	CHECK(size == sizeof(result) && !memcmp(result, payloads[2], size));
+	CHECK(reads == 1 && engine.physical_read_blocks == 1);
+	CHECK(engine.read_two_block_skips == 1);
+	CHECK(!engine.read_cached_full && engine.read_cache_valid);
+	/* Shared block-zero metadata remains validated for sibling access. */
+	CHECK(sv3_engine_read_page(&engine, 1, result,
+					   sizeof(result), &size) == 0);
+	CHECK(size == sizeof(result) && !memcmp(result, payloads[1], size));
+	CHECK(reads == 2 && engine.read_metadata_cache_hits == 1);
+	CHECK(engine.read_payload_requests == 1 &&
+	      engine.read_full_extent_requests == 0);
+
+	/* A corrupt mapping hint is never allowed to bypass the on-disk
+	 * descriptor equality check, including when the correct payload
+	 * happens to reside wholly in metadata block zero. */
+	sv3_engine_invalidate_read_cache(&engine);
+	offset = map[2].payload_offset;
+	map[2].payload_offset++;
+	before = reads;
+	CHECK(sv3_engine_read_page(&engine, 2, result,
+					   sizeof(result), &size) == -EUCLEAN);
+	CHECK(size == 0 && !engine.read_cache_valid && reads == before + 1);
+	map[2].payload_offset = offset;
+
+	/* Other records still get one complete two-block request. */
+	sv3_engine_invalidate_read_cache(&engine);
+	before = reads;
+	CHECK(sv3_engine_read_page(&engine, 0, result,
+					   sizeof(result), &size) == 0);
+	CHECK(size == sizeof(result) && !memcmp(result, payloads[0], size));
+	CHECK(reads == before + 2 &&
+	      engine.read_full_extent_requests == 1);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -332,6 +391,7 @@ int main(void)
 	CHECK(test_failed_overwrite_keeps_prior_generation() == 0); passed++;
 	CHECK(test_same_extent_read_cache_reuse_and_fail_closed() == 0); passed++;
 	CHECK(test_one_block_read_budget_remains_selective() == 0); passed++;
+	CHECK(test_two_block_payload_offset_skips_unneeded_second_block() == 0); passed++;
 	printf("SV3_VERIFY_AFTER_WRITE_TESTS_PASS=%d\n", passed);
 	return 0;
 }

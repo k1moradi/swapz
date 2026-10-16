@@ -21,6 +21,9 @@ struct sv3_map {
 	/* Volatile compressed payload bytes (4096 for raw). Required for
 	 * real live-byte GC victim selection without reading every extent. */
 	sv3_u16 payload_length;
+	/* Validated at publication; read hint only, cross-checked against the
+	 * on-media CRC-protected record before trusting returned payload. */
+	sv3_u16 payload_offset;
 	sv3_u8 extent_blocks;
 	sv3_u8 record_index;
 	sv3_u8 raw;

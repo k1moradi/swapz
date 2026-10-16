@@ -595,7 +595,13 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	    observed.extent_blocks > SV3_MAX_BLOCKS ||
 	    observed.start_block >= engine->authority->physical_blocks ||
 	    observed.extent_blocks >
-			engine->authority->physical_blocks - observed.start_block)
+			engine->authority->physical_blocks - observed.start_block ||
+	    !observed.payload_length ||
+	    observed.payload_offset >=
+		(sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES ||
+	    observed.payload_length >
+		(sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES -
+		observed.payload_offset)
 		return -ESTALE;
 	bytes = (sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES;
 	/*
@@ -621,7 +627,9 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			       bytes - SV3_BLOCK_BYTES);
 	} else {
 		if (observed.extent_blocks == 2 &&
-		    engine->max_read_blocks_per_record != 1)
+		    engine->max_read_blocks_per_record != 1 &&
+		    (sv3_u32)observed.payload_offset +
+			observed.payload_length > SV3_BLOCK_BYTES)
 			initial_blocks = 2;
 		memset(engine->read_scratch, 0, bytes);
 		error = engine->io.read_blocks(engine->io.opaque,
@@ -633,6 +641,9 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_metadata_requests++;
 		if (initial_blocks == 2)
 			engine->read_full_extent_requests++;
+		else if (observed.extent_blocks == 2 &&
+			 engine->max_read_blocks_per_record != 1)
+			engine->read_two_block_skips++;
 	}
 	error = sv3_peek(engine->read_scratch, bytes,
 			 observed.record_index, &peek);
@@ -640,7 +651,8 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		return error;
 	if (peek.logical_page != logical_page ||
 	    peek.generation != observed.generation ||
-	    peek.payload_length != observed.payload_length)
+	    peek.payload_length != observed.payload_length ||
+	    peek.payload_offset != observed.payload_offset)
 		return -EUCLEAN;
 	first = peek.payload_offset / SV3_BLOCK_BYTES;
 	last = ((sv3_u32)peek.payload_offset +

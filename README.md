@@ -104,15 +104,23 @@ from ~1.83s to ~1.24s, but random stayed ~1.84s with nearly zero
 metadata-reuse hits. Packed reads remain slower than bare raw, and
 the write-throughput loss persists.
 
-**Current C experiment, NOT YET LOADED:** for a cold two-block SWZ3
-extent only, issue one bounded 8KiB lower READ instead of a metadata
-READ followed by a dependent payload READ. Reuse its full bytes for
-later same-extent reads, using existing scratch, serial ownership,
-generation/CRC checks and mutation/error invalidation. Explicit
-one-block read budgets and larger extents retain selective I/O.
-This trades possible extra lower READ bytes for fewer delayed
-requests; neither faster real swap-in nor lower endurance cost is
-claimed before the next exact-HEAD loaded test.
+**Owner-qualified two-block fetch:** `35fb224caba5bf61ab637181d963dadd9a94e6ef`
+passed the full five-stage `make test` on the owner's RAM-only models
+(report-only `0d9ec4017a5f`). SSD-model 4MiB reads reached ~0.19–0.20s
+sequential and ~0.26s random, compared with ~0.23s/~0.27s raw, but
+seeded-random lower READ traffic was ~8.1MiB for only 4MiB useful data.
+SD-model random improved to ~1.16s but was still slower than ~0.40s raw.
+The candidate continues to lose SD-model WRITE throughput.
+
+**Next C experiment, NOT YET OWNER-LOADED:** preserve each compressed
+payload's validated on-media offset as a worker-owned volatile mapping
+hint, confirmed again against the CRC-protected descriptor on every read.
+For a cold two-block extent when that payload lies wholly within block
+zero, read only 4KiB; other two-block reads retain the one-request
+8KiB fetch. This aims to save avoidable READ bytes **without increasing
+lower request count**, with no new allocations, format changes, or
+unverified data acceptance. Compare both lower bytes and requests,
+fixed-volume time/p99 and WRITE impact before claiming any gain.
 
 ## Current C performance work and qualification plan
 

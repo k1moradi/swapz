@@ -662,6 +662,7 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 {
 	const sv3_u8 *image = extent;
 	sv3_u16 payload_lengths[SV3_MAX_RECORDS] = { 0 };
+	sv3_u16 payload_offsets[SV3_MAX_RECORDS] = { 0 };
 	sv3_u8 index;
 	int error = 0;
 
@@ -697,6 +698,7 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 		if (error)
 			goto fail;
 		payload_lengths[index] = decoded.payload_length;
+		payload_offsets[index] = decoded.payload_offset;
 		if (!payload_lengths[index] ||
 		    payload_lengths[index] > SV3_MAX_COMPRESSED) {
 			error = -EUCLEAN;
@@ -759,6 +761,7 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 			.sequence = tx->sequence,
 			.generation = tx->records[index].generation,
 			.payload_length = payload_lengths[index],
+			.payload_offset = payload_offsets[index],
 			.extent_blocks = tx->extent_blocks,
 			.record_index = index,
 			.valid = 1,
@@ -790,7 +793,8 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	    current->generation != observed->generation ||
 	    current->extent_blocks != observed->extent_blocks ||
 	    current->record_index != observed->record_index ||
-	    current->payload_length != observed->payload_length)
+	    current->payload_length != observed->payload_length ||
+	    current->payload_offset != observed->payload_offset)
 		return -ESTALE;
 	if (current->raw)
 		return -EOPNOTSUPP;
@@ -804,6 +808,7 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	if (decoded->logical_page != logical_page ||
 	    decoded->generation != current->generation ||
 	    decoded->payload_length != current->payload_length ||
+	    decoded->payload_offset != current->payload_offset ||
 	    sv3_disk_sequence(extent) != current->sequence) {
 		*decoded = (struct sv3_decoded){ 0 };
 		*payload = NULL;

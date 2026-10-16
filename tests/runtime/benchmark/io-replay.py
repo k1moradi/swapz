@@ -467,7 +467,8 @@ def packed_closes(path, identity):
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
-                      "read_full_extent_reqs", "read_full_cache_hits")
+                      "read_full_extent_reqs", "read_full_cache_hits",
+                      "read_two_block_skips")
 
 
 def kernel_read_snapshot(path, identity):
@@ -499,7 +500,8 @@ def kernel_read_delta(before, after):
     # Cache reuse can legitimately reduce metadata requests below payload
     # requests. Only counted payload block quantities must remain consistent.
     if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
-            counters["read_full_extent_reqs"] > counters["read_meta_reqs"] or
+            counters["read_full_extent_reqs"] +
+            counters["read_two_block_skips"] > counters["read_meta_reqs"] or
             counters["read_full_cache_hits"] > counters["read_meta_cache_hits"]):
         raise ValueError("inconsistent V3 read request accounting")
     return counters

@@ -100,6 +100,9 @@ struct sv3_engine {
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	sv3_u32 read_full_extent_requests;
 	sv3_u32 read_full_extent_cache_hits;
+	/* Cold two-block records proven wholly inside metadata block zero;
+	 * avoiding a speculative second block does not skip CRC validation. */
+	sv3_u32 read_two_block_skips;
 };
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */

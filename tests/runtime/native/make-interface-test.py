@@ -185,6 +185,7 @@ class PublicMakeContract(unittest.TestCase):
                                     "read_meta_cache_hits": 128,
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
+                    "read_two_block_skips": 128,
                                 } if is_v3 else None),
                             }
                             for key in ("sequential", "seeded_random")

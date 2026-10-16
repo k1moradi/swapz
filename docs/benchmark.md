@@ -361,6 +361,42 @@ must run at the **new exact SHA** before asserting a result; any
 increased read amplification or WRITE/p99 regression remains a
 negative outcome.
 
+### Offset-verified two-block read selection (current experiment)
+
+**Loaded evidence on `35fb224caba5bf61ab637181d963dadd9a94e6ef`:**
+all five official stages PASS (195.24s loaded, report-only commit
+`0d9ec4017a5f`). The one-request 8KiB reader took 0.20/0.19s
+sequential and 0.26/0.26s random for 4MiB on the SSD RAM model,
+versus raw 0.23/0.27s. But its random lower traffic was ~8.1MiB
+versus raw 4MiB. On SD RAM, sequential was 0.57s vs 0.39s raw,
+random 1.16s vs 0.40s, and WRITE 4.61/4.66 MB/s versus 7.85 raw.
+Fast SSD timing with ~2x READ amplification is a bounded but
+**incomplete** VISION result, not a flash endurance claim.
+
+**Next C hypothesis (new exact SHA NOT YET LOADED):** The byte-verified
+SWZ3 writer already decodes every record, checks its CRC/generation,
+and publishes a volatile authoritative mapping only after the full
+lower write completes. Record the codec-validated `payload_offset`
+there, alongside the existing payload length. On a cold two-block
+read where `offset + length <= 4096`, fetch only block zero; all
+other two-block reads retain one full 8KiB lower request. Re-read and
+verify the on-disk metadata CRC, decoded descriptor offset, logical
+identity, generation, payload CRC and authority before returning
+data. A stale or corrupted hint must fail closed, not silently
+select or return other bytes. RAW and invalid/zero mappings follow
+their existing paths. The hint changes no SWZ3 wire bytes, cache
+lifetime, GC publication order, or four-command operator API.
+
+The diagnostic `read_two_block_skips` counts successful cold
+4KiB callbacks substituted for speculative 8KiB callbacks; each
+such skip avoids 4KiB of submitted READ payload but does not by
+itself prove faster user data-ready time or fewer physical-device
+requests. The existing full-fetch/reuse counters and independent
+block-device stat deltas remain available. Test every native authority
+handoff, sidecar tampering, warm/strict-budget/fault paths and exact
+owner-loaded benchmark at the new commit. Full CI is partial
+qualification; the 4MiB RAM models are not cold NAND.
+
 ### Alpha.22 C change and qualification handoff
 
 The finite QD-wave replay waits for every operation before its next

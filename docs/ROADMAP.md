@@ -33,6 +33,15 @@ than ~0.22s raw; random stayed ~0.39/0.40s vs ~0.27s raw.
 Write throughput remained behind raw. All results are synthetic
 RAM models, not cold flash reads; the new full-extent-read experiment
 is NOT YET LOADED.
+The owner then ran all five stages at exact source
+`35fb224caba5bf61ab637181d963dadd9a94e6ef` (loaded stage 195.24s,
+report-only `0d9ec4017a5f`, eight paired sessions). SSD-model
+4MiB sequential 0.20/0.19s and random 0.26/0.26s matched or beat raw
+0.23/0.27s in that synthetic model, but seeded-random lower READ bytes
+grew to ~8.10MiB versus raw 4MiB. SD-model sequential improved
+to 0.57s against 0.39s raw and random 1.16s against 0.40s;
+WRITE remained 4.61/4.66 MB/s against 7.85 raw. Successful 8KiB
+prefetch is therefore NOT a three-axis performance win.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -103,11 +112,19 @@ are still planned.
       planning budget retains metadata-first reads, as do 4-block extents.
       No new allocations or mapping publication semantics; faults and
       mutations invalidate, authority and CRC are still checked. The new
-      optimization is **NOT LOADED / NOT PERFORMANCE QUALIFIED**. Measure
-      independently counted lower READ bytes and requests, I/O-complete
-      latencies and p99, CPU, and WRITE results, not prefetch callbacks
-      alone. If extra lower bytes outweigh latency savings, retain the
-      narrower targeted reader rather than claiming a win.
+      full-extent optimization was owner-qualified at exact `35fb224c`:
+      SSD-mode timings improved, but random 4MiB V3 reads transferred
+      ~8.1MiB versus 4MiB raw and SD-model random remained slower.
+      The next C-first optimization stores each codec-validated
+      compressed payload offset in the volatile mapping and cross-checks
+      it against the on-media descriptor and CRC on every read. On a
+      cold 8KiB extent where the target payload fits wholly in block
+      zero, skip the speculative second block **without adding a lower
+      request**. Other packed 8KiB reads preserve one-request prefetch.
+      The change is **NOT YET OWNER-LOADED**. Measure skipped second
+      blocks, independently observed READ bytes/requests, fixed-volume
+      latency/p99, WRITE throughput and errors at exact new HEAD. No
+      medium-specific policy or new public test target is permitted.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

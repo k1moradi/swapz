@@ -142,6 +142,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_payload_blocks=%u", status)
         self.assertIn("read_meta_cache_hits=%u", status)
         self.assertIn("read_full_extent_reqs=%u read_full_cache_hits=%u", status)
+        self.assertIn("read_two_block_skips=%u", status)
+        self.assertIn("read_two_block_skips++", engine)
+        self.assertIn("peek.payload_offset != observed.payload_offset", engine)
+        self.assertIn("payload_offsets[index] = decoded.payload_offset",
+                      (ROOT / "kernel/extent-v3/authority.c").read_text())
         self.assertIn("read_full_extent_requests", header)
         self.assertIn("read_full_extent_cache_hits", header)
         self.assertIn("engine->read_full_extent_requests++", engine)

@@ -87,7 +87,16 @@ static int test_full_publish_and_authoritative_reads(void)
 		CHECK(sv3_read_authoritative(&authority, index, &observed,
 					    extent, 16384, &decoded, &payload) == 0);
 		CHECK(decoded.logical_page == index && decoded.generation == 1);
+		CHECK(observed.payload_offset == decoded.payload_offset);
 		CHECK(payload[0] == index + 1 && payload[2071] == index + 1);
+		if (index == 0) {
+			struct sv3_map forged = observed;
+
+			forged.payload_offset++;
+			CHECK(sv3_read_authoritative(&authority, index, &forged,
+					    extent, 16384,
+					    &decoded, &payload) == -ESTALE);
+		}
 	}
 	CHECK(sv3_finish(&authority, &tx, extent, 16384, 4, 0) == -ESTALE);
 	return 0;

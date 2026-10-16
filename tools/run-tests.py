@@ -28,7 +28,8 @@ MODEL_ORDER = tuple(MODEL_SPECS)
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
-                      "read_full_extent_reqs", "read_full_cache_hits")
+                      "read_full_extent_reqs", "read_full_cache_hits",
+                      "read_two_block_skips")
 
 
 
@@ -507,7 +508,9 @@ def print_bench(result):
                   f"full 8KiB fetch={sync[f'{read_mode}_read_full_extent_reqs']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_full_extent_reqs']:.1f}, "
                   f"full reuse={sync[f'{read_mode}_read_full_cache_hits']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}")
+                  f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}, "
+                  f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
         for mode in ("sync", "async"):
             crit = data["criteria"][mode]
             print(f"  {mode.upper():<6} vs raw: WRITE={crit['throughput_vs_raw']}, "

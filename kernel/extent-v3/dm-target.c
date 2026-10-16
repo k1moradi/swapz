@@ -2243,6 +2243,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
+		       "read_two_block_skips=%u "
 		       "failed=%u error=%d",
 		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -2324,6 +2325,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_metadata_cache_hits,
 		       ctx->engine.read_full_extent_requests,
 		       ctx->engine.read_full_extent_cache_hits,
+		       ctx->engine.read_two_block_skips,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
