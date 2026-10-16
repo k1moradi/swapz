@@ -185,14 +185,24 @@ tradeoff is lower WRITE bytes: logical/backing ratio is 1.38 on SD and
 1.42/1.43 on SSD versus the denser but read-regressing `ed2ea3d`
 layout.
 
-**Next C diagnostic, NOT YET OWNER-LOADED:** keep `c60f24a` behavior
-unchanged and run the existing CPU-only planner twice for each
-read-capped accepted window: uncapped and cap=2. Record the exact extra
-4KiB WRITE blocks paid by the cap, how many windows cost more than one
-extra block, and how many 16KiB extents are eliminated. No new I/O,
-allocation, timer, format or publication semantics. This evidence will
-decide whether a later Pareto rule can safely recover WRITE bytes
-without sacrificing the restored read behavior.
+**Owner-qualified planner-tax diagnostic:** exact code
+`de16e7cf0167c9e3bf9dcc7eed7bfed2f227bd76` passed all five owner
+stages; report-only commit `67a17f2207ef`. SD averaged 703.2 extra
+4KiB blocks across 938.5 capped accepted windows, with only 72.5
+windows (>1 block); SSD averaged 877.2 across 1031.5 windows, with
+88.2 expensive windows. That is about 0.75/0.85 extra blocks per
+window and only 7.7%/8.6% in the expensive tail. The cap avoided
+747.0/950.8 16KiB extents while preserving the prior read recovery.
+
+**Next bounded C experiment:** keep cap=2 for the common path. Only when
+cap=2 costs more than one extra 4KiB block, allow a temporary cap=3 if
+that plan recovers the complete byte-minimal block count and contains at
+most one 16KiB extent. Each record therefore remains bounded to three
+cold 4KiB blocks and the denser layout is limited to the measured rare
+tail. New telemetry records selected cap=3 windows, recovered blocks and
+chosen 16KiB extents. Keep the change only if the same owner matrix shows
+better lower WRITE bytes without materially reversing packed READ
+time/bytes/p99.
 
 ## Current C performance work and qualification plan
 

@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "engine.h"
+#include "window-policy.h"
 
 #define CHECK(x) do { if (!(x)) { \
 	fprintf(stderr, "%s:%d: FAIL: %s\n", __FILE__, __LINE__, #x); \
@@ -166,9 +167,50 @@ static int test_planner_stats_quantify_cap_tradeoff(void)
 
 	blocks = 99;
 	extents = four = 99;
+	CHECK(sv3_engine_plan_stats(pages, 16, 3,
+				    &blocks, &extents, &four) == 0);
+	CHECK(blocks == 10);
+	CHECK(extents == 4);
+	CHECK(four == 1);
+	CHECK(sv3_window_pareto_read_cap(10, 11, 10, 1) == 2U);
+
+	blocks = 99;
+	extents = four = 99;
 	CHECK(sv3_engine_plan_stats(pages, 16, 4,
 				    &blocks, &extents, &four) == -EINVAL);
 	CHECK(blocks == 0 && extents == 0 && four == 0);
+	return 0;
+}
+
+static int test_planner_stats_pareto_tail_candidate(void)
+{
+	static const sv3_u16 lengths[13] = {
+		2546, 1813, 2689, 2003, 2975, 2759, 2292,
+		2916, 2922, 2416, 2806, 2912, 2597,
+	};
+	struct sv3_compressed_page pages[13];
+	sv3_u16 uncapped_blocks = 0, cap2_blocks = 0, cap3_blocks = 0;
+	sv3_u8 extents = 0, uncapped_four = 0, cap2_four = 0, cap3_four = 0;
+	sv3_u8 index;
+
+	/* plan_stats validates pointers/lengths but never dereferences payload. */
+	for (index = 0; index < 13; ++index) {
+		pages[index].logical_page = index;
+		pages[index].payload = originals[index];
+		pages[index].length = lengths[index];
+		pages[index].raw = 0;
+	}
+	CHECK(sv3_engine_plan_stats(pages, 13, 0, &uncapped_blocks,
+				    &extents, &uncapped_four) == 0);
+	CHECK(uncapped_blocks == 9 && extents == 4 && uncapped_four == 1);
+	CHECK(sv3_engine_plan_stats(pages, 13, 2, &cap2_blocks,
+				    &extents, &cap2_four) == 0);
+	CHECK(cap2_blocks == 11 && extents == 9 && cap2_four == 0);
+	CHECK(sv3_engine_plan_stats(pages, 13, 3, &cap3_blocks,
+				    &extents, &cap3_four) == 0);
+	CHECK(cap3_blocks == 9 && extents == 4 && cap3_four == 1);
+	CHECK(sv3_window_pareto_read_cap(uncapped_blocks, cap2_blocks,
+				 cap3_blocks, cap3_four) == 3U);
 	return 0;
 }
 
@@ -434,6 +476,7 @@ int main(void)
 	CHECK(disk.storage != NULL);
 	CHECK(test_finite_window_planner() == 0); completed++;
 	CHECK(test_planner_stats_quantify_cap_tradeoff() == 0); completed++;
+	CHECK(test_planner_stats_pareto_tail_candidate() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;

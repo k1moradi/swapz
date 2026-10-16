@@ -539,10 +539,32 @@ and per-regime summary—before any invariant or printer indexes it. The
 synthetic report contract asserts all four values end-to-end. This is
 report-path correctness only and does not change the kernel policy.
 
-**Decision after the diagnostic:** do not introduce a Pareto threshold
-unless the loaded distribution shows a stable bounded cost that can
-recover meaningful WRITE bytes without reintroducing the 16KiB layouts
-that caused `ed2ea3d`'s read regression. Independent device bytes and
+**Owner result and Pareto decision:** exact diagnostic source
+`de16e7cf0167c9e3bf9dcc7eed7bfed2f227bd76` passed all five owner
+stages; report-only `67a17f2207ef`. SD averaged 703.2 cap=2 extra
+4KiB blocks / 938.5 capped accepted windows (0.75/window), with 72.5
+windows (7.7%) costing >1 block and 747.0 16KiB extents avoided. SSD
+averaged 877.2 / 1031.5 (0.85/window), with 88.2 (8.6%) expensive
+windows and 950.8 avoided 16KiB extents. SD random packed READ remained
+1.16s with ~6.80MiB lower bytes and ~33ms p99; SSD remained 0.26s with
+~6.67MiB and ~5.5ms p99. The stable rare expensive tail satisfies the
+predeclared condition for a bounded follow-up; it does not prove a win.
+
+The follow-up keeps cap=2 unless its byte tax is >1 block. It samples
+cap=3 with the same CPU-only planner and may select it only when
+`cap3_blocks == uncapped_blocks` and the cap=3 plan contains at most
+one 16KiB extent. Every selected record stays bounded to at most three
+4KiB cold-read blocks, while common one-block-tax windows remain cap=2.
+The cap=2 diagnostics remain a hypothetical hard-cap reference even when
+cap=3 is selected for the actual write.
+
+**Predeclared decision:** retain the relaxation only if independent lower
+WRITE bytes improve versus `de16e7cf` while packed READ recovery does
+not materially reverse. Compare SD random 4MiB ~1.16s / ~6.80MiB /
+~33ms p99 and SSD random ~0.26s / ~6.67MiB / ~5.5ms p99 together with
+sequential reads, useful WRITE, lower requests and lower-write wait.
+A selected-window count of zero is a valid no-effect result; do not widen
+the rule merely to manufacture a gain. Independent device bytes and
 requests remain decisive; planner telemetry is explanatory only.
 
 **First CI feedback:** the new rootless write-status parser initially used

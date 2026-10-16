@@ -283,7 +283,20 @@ exceed capped windows, and any
 `accepted_burst_plan_stats_failures` makes the loaded report incomplete.
 The production planner-stat helper itself is covered for the exact
 10-block/four-extent/one-16KiB versus 11-block/six-extent/zero-16KiB
-oracle and zeroed outputs on invalid input. For sixteen uniform 2072-byte
+oracle and zeroed outputs on invalid input.
+
+Owner-loaded diagnostic source `de16e7cf` showed cap=2's >1-block tax
+in only 7.7% of SD-model and 8.6% of SSD-model capped accepted windows.
+The bounded follow-up may choose planning cap=3 only when cap=2 costs
+more than one block, cap=3 exactly matches the uncapped byte-minimal
+block count, and cap=3 contains at most one 16KiB extent. Otherwise it
+must remain cap=2. The helper is pure; the existing batched engine still
+owns staging, lower completion, publication and upper completion.
+`accepted_burst_pareto_cap3_windows` must not exceed
+`accepted_burst_cap_extra_gt1_windows`; chosen 16KiB extents must not
+exceed selected cap=3 windows; recovered blocks must be at least two per
+selected window and no more than the cap=2 reference tax. Any violation
+makes the loaded report incomplete. For sixteen uniform 2072-byte
 records, the uncapped planner's existing read-cost tie-break selects
 3+3+3+7 records; tests must not replace that with the byte-equivalent
 7+7+2 shape merely to reduce extent count. Every newly mandatory status field must also be present

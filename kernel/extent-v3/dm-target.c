@@ -195,6 +195,9 @@ struct sv3_dm {
 	u64 accepted_burst_cap_extra_gt1_windows;
 	u64 accepted_burst_four_extents_avoided;
 	u64 accepted_burst_plan_stats_failures;
+	u64 accepted_burst_pareto_cap3_windows;
+	u64 accepted_burst_pareto_saved_blocks;
+	u64 accepted_burst_pareto_four_extents;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1082,18 +1085,20 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	ctx->window_sort_wall_ns +=
 		sv3_elapsed_ns(section_start, ktime_get_ns());
 	/*
-	 * Diagnostic-only dual planning: quantify the exact WRITE-block tax
-	 * paid by the accepted-burst read cap and the number of 16KiB extents
-	 * it removes. This performs no allocation, authority mutation or I/O.
-	 * The real capped planner below still owns the actual layout decision.
+	 * Three CPU-only plans quantify the cap=2 WRITE tax and permit one
+	 * bounded Pareto relaxation. The common path remains cap=2. Only an
+	 * expensive (>1 block) tail may use cap=3, and only when cap=3 fully
+	 * recovers the byte-minimal block count with at most one 16KiB extent.
+	 * The actual engine call below still owns staging, lower I/O, mapping
+	 * publication and upper completion; these samples perform none of them.
 	 */
 	if (accepted_burst_extended &&
 	    !ctx->engine.max_read_blocks_per_record) {
 		sv3_u8 compressed_count = 0;
-		sv3_u8 uncapped_extents = 0, capped_extents = 0;
-		sv3_u8 uncapped_four = 0, capped_four = 0;
-		sv3_u16 uncapped_blocks = 0, capped_blocks = 0;
-		int uncapped_error, capped_error;
+		sv3_u8 uncapped_extents = 0, capped_extents = 0, cap3_extents = 0;
+		sv3_u8 uncapped_four = 0, capped_four = 0, cap3_four = 0;
+		sv3_u16 uncapped_blocks = 0, capped_blocks = 0, cap3_blocks = 0;
+		int uncapped_error, capped_error, cap3_error;
 
 		while (compressed_count < count &&
 		       !ctx->planned[compressed_count].raw)
@@ -1106,8 +1111,14 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 			sv3_engine_plan_stats(ctx->planned, compressed_count, 2,
 					      &capped_blocks, &capped_extents,
 					      &capped_four) : -EINVAL;
-		if (uncapped_error || capped_error ||
+		cap3_error = compressed_count ?
+			sv3_engine_plan_stats(ctx->planned, compressed_count, 3,
+					      &cap3_blocks, &cap3_extents,
+					      &cap3_four) : -EINVAL;
+		if (uncapped_error || capped_error || cap3_error ||
 		    capped_blocks < uncapped_blocks ||
+		    cap3_blocks < uncapped_blocks ||
+		    cap3_blocks > capped_blocks ||
 		    capped_four > uncapped_four) {
 			ctx->accepted_burst_plan_stats_failures++;
 		} else {
@@ -1118,6 +1129,15 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 				ctx->accepted_burst_cap_extra_gt1_windows++;
 			ctx->accepted_burst_four_extents_avoided +=
 				uncapped_four - capped_four;
+			if (sv3_window_pareto_read_cap(
+				    uncapped_blocks, capped_blocks,
+				    cap3_blocks, cap3_four) == 3U) {
+				planning_read_cap = 3U;
+				ctx->accepted_burst_pareto_cap3_windows++;
+				ctx->accepted_burst_pareto_saved_blocks +=
+					capped_blocks - cap3_blocks;
+				ctx->accepted_burst_pareto_four_extents += cap3_four;
+			}
 		}
 	}
 	for (index = 0; index < count; ++index)
@@ -2357,6 +2377,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "accepted_burst_cap_extra_gt1_windows=%llu "
 		       "accepted_burst_four_extents_avoided=%llu "
 		       "accepted_burst_plan_stats_failures=%llu "
+		       "accepted_burst_pareto_cap3_windows=%llu "
+		       "accepted_burst_pareto_saved_blocks=%llu "
+		       "accepted_burst_pareto_four_extents=%llu "
 		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
@@ -2445,6 +2468,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_burst_cap_extra_gt1_windows,
 		       ctx->accepted_burst_four_extents_avoided,
 		       ctx->accepted_burst_plan_stats_failures,
+		       ctx->accepted_burst_pareto_cap3_windows,
+		       ctx->accepted_burst_pareto_saved_blocks,
+		       ctx->accepted_burst_pareto_four_extents,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,

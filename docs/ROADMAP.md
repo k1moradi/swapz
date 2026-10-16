@@ -222,18 +222,22 @@ are still planned.
       material useful-WRITE gain. The cost is independently visible in
       lower WRITE bytes (1.38x SD and 1.42/1.43x SSD logical/backing,
       versus 1.48/1.56-1.57x for the rejected dense layout).
-      Do **not** guess a new threshold yet. The next production-C change is
-      diagnostic only: for every default-policy accepted-burst window,
-      compute the same ordered planner both uncapped and with cap=2 before
-      the unchanged real capped write. Accumulate exact extra 4KiB blocks,
-      windows whose cap costs >1 block, 16KiB extents avoided, and any
-      impossible planner inconsistency. No allocation, I/O, timing policy,
-      authority or wire-format change. Exact-C tests pin the 16x2072 case
-      at 10 blocks / four extents / one 16KiB extent uncapped versus
-      11 blocks / six extents / zero 16KiB extents capped. The uncapped
-      planner's read-cost tie-break selects 3+3+3+7 records rather than
-      the byte-equivalent 7+7+2 layout. Use the loaded distribution to decide the next
-      Pareto policy. New source **NOT YET OWNER-LOADED**.
+      Owner-loaded `de16e7cf` (report-only `67a17f2207ef`) completed
+      that diagnostic. SD cap=2 paid 703.2 extra 4KiB blocks over 938.5
+      capped accepted windows; 72.5 (7.7%) cost >1 block and 747.0
+      16KiB extents were avoided. SSD paid 877.2 extra blocks over
+      1031.5 windows; 88.2 (8.6%) cost >1 and 950.8 16KiB extents were
+      avoided. The tax is bounded and the expensive tail is rare in both
+      modeled regimes.
+      The next Pareto experiment keeps cap=2 for the common path and relaxes
+      only an expensive (>1 extra block) window to cap=3 when cap=3 exactly
+      recovers the uncapped byte-minimal block count and contains at most
+      one 16KiB extent. Per-record cold-read planning remains bounded to
+      three 4KiB blocks; no timer, admission, authority, lower-run or format
+      rule changes. Record selected cap=3 windows, blocks recovered and
+      16KiB extents chosen. Keep only if lower WRITE bytes improve while
+      packed fixed-volume READ time/bytes/p99 remain materially consistent
+      with the read-capped baseline. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

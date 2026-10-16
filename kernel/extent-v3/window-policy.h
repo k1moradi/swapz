@@ -142,6 +142,27 @@ static inline int sv3_window_burst_tail_ready(
 }
 
 /*
+ * Pareto relaxation for the accepted-burst planning-only read cap.
+ *
+ * Keep the proven two-block cap unless it costs more than one extra
+ * physical 4KiB WRITE block. A three-block cap is eligible only when it
+ * recovers the complete byte-minimal block count and contains at most one
+ * 16KiB extent. The caller validates all three planner-stat samples first.
+ * This helper performs no I/O and changes no mapping or BIO ownership.
+ */
+static inline sv3_u8 sv3_window_pareto_read_cap(
+		sv3_u16 uncapped_blocks, sv3_u16 cap2_blocks,
+		sv3_u16 cap3_blocks, sv3_u8 cap3_four_extents)
+{
+	if (cap2_blocks > uncapped_blocks &&
+	    cap2_blocks - uncapped_blocks > 1U &&
+	    cap3_blocks == uncapped_blocks &&
+	    cap3_four_extents <= 1U)
+		return 3U;
+	return 2U;
+}
+
+/*
  * Equal-length accepted compressed records retain their exact input order
  * under the production greedy ordering: largest is always the earliest
  * remaining record and, when a 4KiB complement exists, the chosen partner
