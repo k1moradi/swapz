@@ -152,8 +152,9 @@ static int test_planner_stats_quantify_cap_tradeoff(void)
 	CHECK(sv3_engine_plan_stats(pages, 16, 0,
 				    &blocks, &extents, &four) == 0);
 	CHECK(blocks == 10);
-	CHECK(extents == 3);
-	CHECK(four == 2);
+	/* Equal-byte plans prefer lower predicted read cost: 3+3+3+7. */
+	CHECK(extents == 4);
+	CHECK(four == 1);
 
 	blocks = 99;
 	extents = four = 99;

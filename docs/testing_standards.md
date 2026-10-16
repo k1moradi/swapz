@@ -280,8 +280,11 @@ the actual write plan. `accepted_burst_cap_extra_gt1_windows` must not
 exceed capped windows, and any
 `accepted_burst_plan_stats_failures` makes the loaded report incomplete.
 The production planner-stat helper itself is covered for the exact
-10-block/two-16KiB versus 11-block/zero-16KiB oracle and zeroed outputs
-on invalid input. Every newly mandatory status field must also be present
+10-block/four-extent/one-16KiB versus 11-block/six-extent/zero-16KiB
+oracle and zeroed outputs on invalid input. For sixteen uniform 2072-byte
+records, the uncapped planner's existing read-cost tie-break selects
+3+3+3+7 records; tests must not replace that with the byte-equivalent
+7+7+2 shape merely to reduce extent count. Every newly mandatory status field must also be present
 in the per-session counter-delta dictionary before any invariant indexes
 it; a parser that validates a field and then omits it from the delta
 schema is a qualification failure, not an optional diagnostic omission.

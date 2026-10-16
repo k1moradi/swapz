@@ -514,9 +514,18 @@ write will use. Record only:
 The helper allocates nothing, performs no I/O and mutates no authority.
 The actual write still replans through the unchanged capped production
 path. Exact-C coverage pins sixteen uniform 2072-byte records at
-10 blocks / 3 extents / two 16KiB extents uncapped versus
-11 blocks / 6 extents / zero 16KiB extents at cap=2, and invalid
-budgets fail before producing stats.
+10 blocks / 4 extents / one 16KiB extent uncapped versus
+11 blocks / 6 extents / zero 16KiB extents at cap=2. The uncapped
+planner selects 3+3+3+7 records because predicted read cost breaks the
+byte tie against 7+7+2. Invalid budgets fail before producing stats.
+
+**Exact-C correction after `ee95492`:** both active V3 push workflows
+failed the new `online-packing` assertion because the first diagnostic
+oracle expected the byte-only 7+7+2 shape and ignored the planner's
+existing read-cost tie-break. The production planner itself is unchanged;
+the corrected oracle records the actual 10-block/four-extent/one-16KiB
+control above. Fresh rootless CI at the correction commit is required
+before owner-loaded qualification.
 
 **Pre-loaded reporter audit:** the first correction propagated the four
 new planner diagnostics into per-session deltas, but the per-regime mean

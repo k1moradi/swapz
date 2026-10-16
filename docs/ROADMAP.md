@@ -229,8 +229,10 @@ are still planned.
       windows whose cap costs >1 block, 16KiB extents avoided, and any
       impossible planner inconsistency. No allocation, I/O, timing policy,
       authority or wire-format change. Exact-C tests pin the 16x2072 case
-      at 10 blocks / two 16KiB extents uncapped versus 11 blocks / zero
-      16KiB extents capped. Use the loaded distribution to decide the next
+      at 10 blocks / four extents / one 16KiB extent uncapped versus
+      11 blocks / six extents / zero 16KiB extents capped. The uncapped
+      planner's read-cost tie-break selects 3+3+3+7 records rather than
+      the byte-equivalent 7+7+2 layout. Use the loaded distribution to decide the next
       Pareto policy. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
