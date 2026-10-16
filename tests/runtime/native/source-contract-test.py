@@ -589,6 +589,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
         process = body("sv3_process")
         worker = body("sv3_worker")
         status = body("sv3_status")
+        # The implementation snapshots the primary reason before resetting
+        # next_window_close so the singleton cross-tab and legacy marginal
+        # counter must index the same captured value.
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
         self.assertIn("ctx->next_window_close = SV3_CLOSE_UNKNOWN", flush)
         self.assertLess(flush.index("if (!count)"),

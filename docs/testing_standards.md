@@ -367,7 +367,10 @@ delta sum equals `one_page_windows`. The read report must likewise carry
 `read_block_shadow_reqs` through timed snapshots, sanitized per-pass
 aggregation and the terminal summary; predicted requests may never exceed
 predicted miss blocks. Rootless synthetic fixtures must exercise both the
-valid joint singleton sum and a mismatched failure case.
+valid joint singleton sum and a mismatched failure case. Source contracts
+must assert the captured `close_reason` index rather than the mutable
+`next_window_close` expression, because the latter is deliberately reset
+immediately after the legacy close-reason counter is charged.
 
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned
