@@ -518,6 +518,13 @@ path. Exact-C coverage pins sixteen uniform 2072-byte records at
 11 blocks / 6 extents / zero 16KiB extents at cap=2, and invalid
 budgets fail before producing stats.
 
+**Pre-loaded reporter audit:** the first correction propagated the four
+new planner diagnostics into per-session deltas, but the per-regime mean
+dictionary still omitted them while `print_bench()` indexed those keys.
+Propagate the same mandatory fields through the summary means as well;
+the synthetic report contract already asserts all four values. This is
+report-path correctness only and does not change the kernel policy.
+
 **Decision after the diagnostic:** do not introduce a Pareto threshold
 unless the loaded distribution shows a stable bounded cost that can
 recover meaningful WRITE bytes without reintroducing the 16KiB layouts

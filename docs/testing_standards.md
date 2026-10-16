@@ -285,6 +285,9 @@ on invalid input. Every newly mandatory status field must also be present
 in the per-session counter-delta dictionary before any invariant indexes
 it; a parser that validates a field and then omits it from the delta
 schema is a qualification failure, not an optional diagnostic omission.
+The per-regime diagnostic-mean dictionary must carry the same mandatory
+planner fields whenever user-visible reporting indexes them; summary
+propagation is part of the strict schema rather than an optional view.
 The synthetic report fixture must exercise all mandatory planner counters
 through the normal verdict path so such schema drift fails rootless CI
 before an owner-loaded run. Loaded performance qualification remains

@@ -494,6 +494,10 @@ def benchmark_verdicts(sessions):
                 for key in ("burst_tail_flushes", "packed_early_commits",
                             "single_pack_deferrals", "accepted_burst_extensions",
                             "accepted_burst_tail_flushes", "accepted_burst_read_caps",
+                            "accepted_burst_cap_extra_blocks",
+                            "accepted_burst_cap_extra_gt1_windows",
+                            "accepted_burst_four_extents_avoided",
+                            "accepted_burst_plan_stats_failures",
                             "close_pack_ready",
                             "one_page_windows", "gc_victims")
             },
