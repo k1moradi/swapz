@@ -229,9 +229,12 @@ def parse_sessions(output):
             status_text = line.partition("=")[2]
             allowed = ("burst_tail_flushes", "packed_early_commits",
                        "single_pack_deferrals", "accepted_burst_extensions",
-                      "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                      "close_pack_ready",
-                       "one_page_windows", "gc_victims",
+                       "accepted_burst_tail_flushes", "accepted_burst_read_caps",
+                       "accepted_burst_cap_extra_blocks",
+                       "accepted_burst_cap_extra_gt1_windows",
+                       "accepted_burst_four_extents_avoided",
+                       "accepted_burst_plan_stats_failures",
+                       "close_pack_ready", "one_page_windows", "gc_victims",
                        "gc_role_rotations")
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))

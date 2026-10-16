@@ -530,8 +530,13 @@ before owner-loaded qualification.
 **Pre-loaded reporter audit:** the first correction propagated the four
 new planner diagnostics into per-session deltas, but the per-regime mean
 dictionary still omitted them while `print_bench()` indexed those keys.
-Propagate the same mandatory fields through the summary means as well;
-the synthetic report contract already asserts all four values. This is
+The next correction carried them through the summary means. Final-head CI
+then exposed the remaining ingestion gap: `parse_sessions()` still omitted
+all four from its strict `V3_STATUS_*` allowlist, so otherwise complete
+synthetic evidence became `INCOMPLETE`. Mandatory status telemetry must
+survive all three layers—status parsing, per-session delta construction,
+and per-regime summary—before any invariant or printer indexes it. The
+synthetic report contract asserts all four values end-to-end. This is
 report-path correctness only and does not change the kernel policy.
 
 **Decision after the diagnostic:** do not introduce a Pareto threshold
