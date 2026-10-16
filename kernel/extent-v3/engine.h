@@ -3,9 +3,7 @@
 #define SWAPZ_V3_EXTENT_ENGINE_H
 #include "authority.h"
 #define SV3_BULK_BLOCKS 64U
-#define SV3_READ_SHADOW_ENTRIES 64
 #define SV3_READ_METADATA_CACHE_ENTRIES 64
-#define SV3_READ_BLOCK_SHADOW_ENTRIES 64
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int sv3_page_is_zero(const sv3_u8 *page);
@@ -113,40 +111,6 @@ struct sv3_engine {
 	sv3_u8 read_metadata_lru_valid[SV3_READ_METADATA_CACHE_ENTRIES];
 	sv3_u32 read_metadata_lru_clock;
 	sv3_u32 read_metadata_lru_hits;
-	/*
-	 * Diagnostic companion-block shadow for the 64 metadata slots. This
-	 * models the proposed +256KiB design (one optional block one beside
-	 * each retained block zero) without storing or serving payload bytes.
-	 */
-	sv3_u8 read_metadata_lru_second_valid[SV3_READ_METADATA_CACHE_ENTRIES];
-	sv3_u32 read_second_shadow_hits;
-	sv3_u32 read_second_shadow_misses;
-	/*
-	 * Diagnostic-only LRU of immutable extent identities. It stores NO data
-	 * and never suppresses lower I/O; it estimates how often a future
-	 * multi-entry metadata cache of 4/16/64 extents could have reused block
-	 * zero under the exact current access/invalidation stream.
-	 */
-	sv3_u32 read_shadow_start_blocks[SV3_READ_SHADOW_ENTRIES];
-	sv3_u8 read_shadow_extent_blocks[SV3_READ_SHADOW_ENTRIES];
-	sv3_u8 read_shadow_count;
-	sv3_u32 read_shadow_hits_4;
-	sv3_u32 read_shadow_hits_16;
-	sv3_u32 read_shadow_hits_64;
-	/*
-	 * Diagnostic-only same-memory alternative to the real metadata cache:
-	 * an exact 64-physical-block LRU simulation. It stores identities only
-	 * and never satisfies I/O. Successful reads count the 4KiB block misses
-	 * and contiguous miss runs a real 256KiB block cache would require for
-	 * block-zero metadata plus the target payload blocks.
-	 */
-	sv3_u32 read_block_shadow_blocks[SV3_READ_BLOCK_SHADOW_ENTRIES];
-	sv3_u32 read_block_shadow_ages[SV3_READ_BLOCK_SHADOW_ENTRIES];
-	sv3_u8 read_block_shadow_valid[SV3_READ_BLOCK_SHADOW_ENTRIES];
-	sv3_u32 read_block_shadow_clock;
-	sv3_u32 read_block_shadow_hits;
-	sv3_u32 read_block_shadow_misses;
-	sv3_u32 read_block_shadow_requests;
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	sv3_u32 read_full_extent_requests;
 	sv3_u32 read_full_extent_cache_hits;

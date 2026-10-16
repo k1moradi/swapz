@@ -258,7 +258,9 @@ are still planned.
       the 512KiB companion design predicts only 44.0/44.0 SD and
       50.5/43.0 SSD random block-one hits; block savings stay below 5%
       everywhere. Retain the 256KiB metadata LRU and do not allocate a
-      payload companion cache.
+      payload companion cache. Retire the now-decided reuse-distance,
+      physical-block and companion identity probes from production C and
+      timed reporting; keep only the proven metadata LRU.
       The same loaded run attributes singleton WRITE windows almost entirely
       to the hard deadline: SD 1249.2/1252.8 and SSD 1072.5/1167.2
       one-page windows closed at deadline, with no material zero/RAW/read

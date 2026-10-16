@@ -92,11 +92,9 @@ class PairReplayContract(unittest.TestCase):
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
-        before = dict(zip(fields, (10, 4, 5, 3000, 100, 2, 1, 1, 1,
-                                   3, 4, 5, 2, 3, 2, 1, 1, 0)))
+        before = dict(zip(fields, (10, 4, 5, 3000, 100, 2, 1, 1, 1, 0)))
         after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
-                                  402, 102, 51, 31, 453, 604, 705,
-                                  202, 903, 702, 321, 201, 200)))
+                                  402, 102, 321, 201, 200)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -109,14 +107,6 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_payload_blocks"], 512)
         self.assertEqual(measured["read_meta_cache_hits"], 400)
         self.assertEqual(measured["read_meta_lru_hits"], 101)
-        self.assertEqual(measured["read_second_shadow_hits"], 50)
-        self.assertEqual(measured["read_second_shadow_misses"], 30)
-        self.assertEqual(measured["read_shadow_hits_4"], 450)
-        self.assertEqual(measured["read_shadow_hits_16"], 600)
-        self.assertEqual(measured["read_shadow_hits_64"], 700)
-        self.assertEqual(measured["read_block_shadow_hits"], 200)
-        self.assertEqual(measured["read_block_shadow_misses"], 900)
-        self.assertEqual(measured["read_block_shadow_reqs"], 700)
         self.assertEqual(measured["read_full_extent_reqs"], 320)
         self.assertEqual(measured["read_full_cache_hits"], 200)
         self.assertEqual(measured["read_two_block_skips"], 200)
@@ -136,19 +126,7 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_read_delta(before, dict(after, read_full_cache_hits=500))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_two_block_skips=850))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_shadow_hits_4=800))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_shadow_hits_16=900))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_shadow_hits_4=350))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_meta_lru_hits=402))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_second_shadow_hits=90,
-                                                   read_second_shadow_misses=30))
-        with self.assertRaisesRegex(ValueError, "inconsistent"):
-            module.kernel_read_delta(before, dict(after, read_block_shadow_reqs=1000))
+
         bad = subprocess.CompletedProcess(["dmsetup"], 0,
                                           stdout="0 8192 swapz read_meta_reqs=4")
         with patch.object(module.subprocess, "run", return_value=bad):

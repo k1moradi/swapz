@@ -222,7 +222,7 @@ Additional potential metadata hits over the current one-extent cache were
 1024-page seeded-random pass. This selects **64 entries**, not a larger or
 smaller guessed cache.
 
-**Next production-C experiment:** add a fixed 64-entry, metadata-block-only
+**Implemented production-C cache:** a fixed 64-entry, metadata-block-only
 LRU. It caches exactly one validated 4KiB SWZ3 block zero per immutable
 extent, never payload blocks, and costs 256KiB of preallocated data per
 target plus small fixed slot metadata. The existing one-extent/full-8KiB
@@ -256,7 +256,9 @@ on SD and 50.5/43.0 on SSD. Even treating every hit as one avoided 4KiB
 block and one avoided lower request, predicted block savings are only
 about 2.9%/2.9% and 3.4%/2.9%; request savings exceed 5% in only SSD sync.
 Do not allocate the extra 256KiB or replace the retained cache from this
-evidence. The compressed payload-CRC/block-zero-skip idea remains deferred
+evidence. The closed reuse-distance, physical-block and companion identity
+probes are retired from the read hot path and report schema; only the real
+metadata LRU remains. The compressed payload-CRC/block-zero-skip idea remains deferred
 because it changes the existing per-read metadata/sequence corruption
 oracle.
 

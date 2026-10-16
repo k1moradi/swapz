@@ -60,11 +60,6 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
                       "read_meta_lru_hits",
-                      "read_second_shadow_hits", "read_second_shadow_misses",
-                      "read_shadow_hits_4", "read_shadow_hits_16",
-                      "read_shadow_hits_64",
-                      "read_block_shadow_hits", "read_block_shadow_misses",
-                      "read_block_shadow_reqs",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
 KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
@@ -275,7 +270,7 @@ def parse_sessions(output):
                        "accepted_burst_cap3_recovered_blocks",
                        "accepted_burst_cap3_full_recovery_windows",
                        "windows", "one_page_windows", "gc_victims",
-                       "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS + DEADLINE_CONTEXT_FIELDS
+                       "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
                 for key in allowed
@@ -525,21 +520,6 @@ def benchmark_verdicts(sessions):
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
                                 "reason": f"{regime}: missing measured V3 {mode} C read counters"}
-                    if any(record["read_meta_cache_hits"] +
-                           record["read_meta_lru_hits"] > record["read_shadow_hits_64"] or
-                           record["read_second_shadow_hits"] +
-                               record["read_second_shadow_misses"] >
-                               record["read_meta_lru_hits"] or
-                           record["read_meta_cache_hits"] > record["read_shadow_hits_4"] or
-                           record["read_shadow_hits_4"] > record["read_shadow_hits_16"] or
-                           record["read_shadow_hits_16"] > record["read_shadow_hits_64"] or
-                           record["read_block_shadow_reqs"] >
-                               record["read_block_shadow_misses"] or
-                           record["read_block_shadow_hits"] +
-                               record["read_block_shadow_misses"] < 1024
-                           for record in diagnostics):
-                        return {"overall": "INCOMPLETE",
-                                "reason": f"{regime}: inconsistent V3 {mode} shadow-cache counters"}
                     for field in KERNEL_READ_FIELDS:
                         columns[name][f"{mode}_{field}"] = statistics.mean(
                             record[field] for record in diagnostics)
@@ -677,31 +657,12 @@ def print_bench(result):
                   f"{asynchronous[f'{read_mode}_read_meta_cache_hits']:.1f}, "
                   f"LRU64 reused={sync[f'{read_mode}_read_meta_lru_hits']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_meta_lru_hits']:.1f}, "
-                  f"companion block1 hit/miss="
-                  f"{sync[f'{read_mode}_read_second_shadow_hits']:.1f}/"
-                  f"{sync[f'{read_mode}_read_second_shadow_misses']:.1f} | "
-                  f"{asynchronous[f'{read_mode}_read_second_shadow_hits']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_second_shadow_misses']:.1f}, "
                   f"full 8KiB fetch={sync[f'{read_mode}_read_full_extent_reqs']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_full_extent_reqs']:.1f}, "
                   f"full reuse={sync[f'{read_mode}_read_full_cache_hits']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}, "
                   f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
-            print(f"  Timed 4MiB {label} block-LRU64 simulation (sync/async): "
-                  f"hits={sync[f'{read_mode}_read_block_shadow_hits']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_block_shadow_hits']:.1f}, "
-                  f"miss blocks={sync[f'{read_mode}_read_block_shadow_misses']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_block_shadow_misses']:.1f}, "
-                  f"lower runs={sync[f'{read_mode}_read_block_shadow_reqs']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_block_shadow_reqs']:.1f}")
-            print(f"  Timed 4MiB {label} shadow metadata LRU hits (sync/async): "
-                  f"4={sync[f'{read_mode}_read_shadow_hits_4']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_shadow_hits_4']:.1f}, "
-                  f"16={sync[f'{read_mode}_read_shadow_hits_16']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_shadow_hits_16']:.1f}, "
-                  f"64={sync[f'{read_mode}_read_shadow_hits_64']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_shadow_hits_64']:.1f}")
         sync, asynchronous = columns["sync"], columns["async"]
         print("  Timed mixed V3 C WRITE (sync/async; overlapping wall ns): "
               f"LZ4={sync['mixed_lz4_wall_ns']/1e9:.2f}/"

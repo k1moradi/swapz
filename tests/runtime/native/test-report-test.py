@@ -48,14 +48,6 @@ def arm(candidate, *, mode, regime):
                     "decode_wall_ns": 20000000,
                     "read_meta_cache_hits": 128,
                     "read_meta_lru_hits": 100,
-                    "read_second_shadow_hits": 40,
-                    "read_second_shadow_misses": 20,
-                    "read_shadow_hits_4": 160,
-                    "read_shadow_hits_16": 240,
-                    "read_shadow_hits_64": 300,
-                    "read_block_shadow_hits": 200,
-                    "read_block_shadow_misses": 900,
-                    "read_block_shadow_reqs": 700,
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
@@ -216,14 +208,6 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_payload_reqs"], 512)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_cache_hits"], 128)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_lru_hits"], 100)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_second_shadow_hits"], 40)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_second_shadow_misses"], 20)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_4"], 160)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_16"], 240)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_64"], 300)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_block_shadow_hits"], 200)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_block_shadow_misses"], 900)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_block_shadow_reqs"], 700)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
@@ -261,10 +245,7 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("LRU64 reused=", rendered)
-        self.assertIn("companion block1 hit/miss=", rendered)
-        self.assertIn("block-LRU64 simulation", rendered)
         self.assertIn("All-window close reasons per-pair mean", rendered)
-        self.assertIn("shadow metadata LRU hits", rendered)
         self.assertIn("One-page close reasons per-pair mean", rendered)
         self.assertIn("Deadline closure contexts per-pair mean", rendered)
         self.assertIn("4MiB random lower READ requests", rendered)
@@ -326,51 +307,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
-    def test_shadow_read_diagnostics_fail_closed_when_not_nested(self):
-        sessions = runner.parse_sessions(synthetic_log())
-        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
-            "kernel_read_path"]
-        path["read_shadow_hits_4"] = path["read_meta_cache_hits"] - 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-
-        sessions = runner.parse_sessions(synthetic_log())
-        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
-            "kernel_read_path"]
-        path["read_shadow_hits_4"] = path["read_shadow_hits_16"] + 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-
-        sessions = runner.parse_sessions(synthetic_log())
-        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
-            "kernel_read_path"]
-        path["read_shadow_hits_16"] = path["read_shadow_hits_64"] + 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-
-        sessions = runner.parse_sessions(synthetic_log())
-        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
-            "kernel_read_path"]
-        path["read_meta_lru_hits"] = (
-            path["read_shadow_hits_64"] - path["read_meta_cache_hits"] + 1)
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-
-        sessions = runner.parse_sessions(synthetic_log())
-        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
-            "kernel_read_path"]
-        path["read_second_shadow_hits"] = path["read_meta_lru_hits"]
-        path["read_second_shadow_misses"] = 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-
-        sessions = runner.parse_sessions(synthetic_log())
-        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
-            "kernel_read_path"]
-        path["read_block_shadow_reqs"] = path["read_block_shadow_misses"] + 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-
+    def test_close_and_deadline_accounting_fail_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
         sessions[0]["kernel_status"]["after"]["close_zero"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
@@ -385,7 +322,6 @@ class ReportContract(unittest.TestCase):
         sessions[0]["kernel_status"]["after"]["deadline_worker_empty"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
-
     def test_incomplete_mismatch_or_forged_packed_result_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
         self.assertEqual(runner.benchmark_verdicts(sessions[:7])["overall"],

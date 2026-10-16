@@ -653,49 +653,14 @@ cache-retention gate. Random lower READ bytes changed from the
 137.0/125.5 and 122.5/118.5; no guarded time/p99 or useful-WRITE metric
 regressed by more than 5%. Retain the 64-entry metadata LRU.
 
-**Same-memory block-cache probe:** the next source adds no cached bytes and
-changes no lower I/O. It simulates 64 physical 4KiB LRU slots. For each
-successfully validated compressed read, required blocks are metadata block
-zero plus every block intersecting the target payload. The simulator counts
-block hits/misses and contiguous miss runs, then updates recency metadata.
-Mutation uses the same global invalidation fence. The selection gate is
-strict: only replace the retained metadata cache if, in every seeded-random
-arm, simulated miss blocks are <=95% of the measured real lower blocks and
-simulated miss runs are <=95% of the measured real lower READ requests.
-These are explanatory predictions; a subsequent real-cache owner run would
-still need independent device bytes/requests. The exact timed fields are
-`read_block_shadow_hits`, `read_block_shadow_misses` and
-`read_block_shadow_reqs`; the timed reader and final reporter reject
-predicted request runs greater than predicted miss blocks.
-
-**Larger 64-extent companion probe:** the same loaded pass also measures
-the proposed full-two-block cache at its real memory cost without allocating
-payload data. Each of the retained metadata LRU's 64 slots has one
-identity-only block-one-valid bit. On a successful metadata-LRU hit for a
-two-block extent whose target requires block one,
-`read_second_shadow_hits` means a 512KiB full-extent cache would have
-avoided exactly one 4KiB lower block and one lower payload callback;
-`read_second_shadow_misses` means it would not. A successful validated
-read that actually has block one available primes the companion bit.
-Replacement and global mutation invalidation follow the real metadata-LRU
-slot lifecycle. Therefore
-`second_hits + second_misses <= read_meta_lru_hits` is mandatory.
-
-For each seeded-random arm, compute the larger-cache predicted byte/block
-saving as `second_hits / (lower_read_bytes / 4096)` and request saving as
-`second_hits / lower_read_requests`. Only if **both are >=5% in every
-arm** may a real +256KiB companion allocation be attempted. If the
-same-memory physical-block LRU also passes its 5%/5% gate, choose the
-same-memory design first. Any real cache still requires a fresh owner run
-using independent lower-device deltas before claiming a gain.
-
-The report carries all sixteen total `close_*` deltas and all sixteen
-`win1_*` deltas. Total close reasons must sum to `windows`; singleton
-reasons must sum to `one_page_windows`. The terminal summary prints only
-nonzero reasons. This makes `close_zero` versus `win1_zero` directly
-measurable before any zero-page preservation change, and avoids treating
-the old marginal one-page count as a causal explanation.
-
+**Closed read-cache probes:** the same-memory physical-block
+and larger companion-block experiments are now historical decision
+evidence only. Owner-loaded `be84880c` rejected the former and
+owner-loaded `cc2da694` rejected the latter under their predeclared
+byte-and-request gates. The real 64-entry metadata-only LRU remains.
+The identity-only reuse-distance, physical-block and companion probes are
+removed from production C and timed-read reporting after this decision;
+independent lower-device bytes/requests remain the performance authority.
 The block-zero-skip CRC proposal is not part of this experiment. Compressed
 `sv3_read_authoritative()` currently reparses CRC-protected metadata and
 checks the on-media sequence on every read. A volatile payload CRC sidecar
@@ -713,7 +678,8 @@ metadata-LRU lower blocks/requests of SD 1537.0/983.5 and
 companion design also fails: random companion hits 44.0/44.0 SD and
 50.5/43.0 SSD imply <5% block savings in every arm. Keep the real
 256KiB metadata cache; both payload-cache directions are closed unless a
-materially different workload supplies new evidence.
+materially different workload supplies new evidence. Their diagnostic
+fields are intentionally retired after this owner-qualified decision.
 
 **Deadline attribution probe (NOT YET OWNER-LOADED):** do not change
 `retain_ms=2`. Every deadline closure must increment exactly one of

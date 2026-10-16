@@ -300,81 +300,35 @@ constrained. The real accepted-burst planner must remain cap=2 and source
 qualification must continue to reject any `planning_read_cap = 3U`
 production assignment.
 
-The next read diagnostic must not cache data or alter lower I/O. A
-64-entry MRU/LRU shadow stores only immutable extent identity
-`(start_block, extent_blocks)`; `sv3_engine_invalidate_read_cache()`
-clears its occupancy together with the real one-entry cache before every
-mutation. Only a successful authoritative/generation/CRC-validated read
-may update the shadow or increment its 4/16/64-capacity hit counters.
-Native exact-C coverage must distinguish distance-4 and distance-16
-reuse, prove real lower-read counts are unchanged by shadow hits, and
-prove invalidation clears shadow occupancy while preserving cumulative
-diagnostic counters. Reporter plumbing must fail closed if
-`shadow4 > shadow16`, `shadow16 > shadow64`, or the real one-entry
-metadata-hit count exceeds `shadow4`. The exact fields
-`read_shadow_hits_4`, `read_shadow_hits_16` and
-`read_shadow_hits_64` are mandatory in the timed read snapshot/delta,
-the sanitized per-pass report schema and the final matrix aggregation.
-Synthetic io-replay and report fixtures must exercise both valid nesting
-and each invalid ordering before owner-loaded qualification.
+Owner-loaded `2619385c` selected 64 metadata entries, and
+owner-loaded `8e21ca7e` proved the resulting 256KiB metadata-only LRU.
+The production read cache remains exactly 64 validated 4KiB block-zero
+slots plus the existing one-extent `read_scratch` fast path. It must not
+cache payload blocks or suppress required payload I/O. Every logical read
+still executes `sv3_peek`, authority/generation/offset/length checks and
+payload CRC validation.
 
-Owner-loaded `2619385c` selects exactly 64 entries for the next real
-cache: only shadow64 exceeds the >=96 additional seeded-random hit gate in
-all four model/mode arms. The production cache must therefore be fixed at
-64 metadata-only 4KiB slots; do not enlarge it or add payload caching from
-this evidence. Slot data are owner-preallocated before I/O, lookup and
-replacement are serialized, and the existing one-extent cache has first
-priority. A multi-entry hit may suppress only the lower block-zero fetch;
-it must still run `sv3_peek`, authority/generation/offset/length checks
-and payload CRC validation, and it may not suppress any payload block the
-record needs.
+Owner-loaded `be84880c` (report-only `df8ae7d2`) rejected the
+same-memory 64-physical-block alternative: random predicted miss-block
+traffic was 1.4-2.1% higher than the retained metadata-cache traffic, with
+only 0.6-1.4% predicted request-run savings. Owner-loaded `cc2da694`
+(report-only `c95e1d4a`) rejected the 512KiB companion-block design:
+predicted random byte savings were 2.86/2.86% SD and 3.36/2.86% SSD,
+while request savings were 4.47/4.50% and 5.13/4.38%. Both predeclared
+>=5% byte-and-request gates failed. The reuse-distance, physical-block and
+companion-block identity probes are therefore retired from production C,
+status, timed-read schema and rootless fixtures after their decisions.
+Do not pay hot-path diagnostic scan cost after a direction is closed.
 
-Cache residency must be cleared by `sv3_engine_invalidate_read_cache()`
-on every existing write/GC/discard/barrier fence. A failed, stale or
-corrupt read must not insert/touch a slot or increment the successful LRU
-hit counter. Exact-C tests must prove a reuse distance beyond one entry
-saves a real lower metadata read, explicit invalidation restores the lower
-read, and an overwrite cannot return an old generation. Status and report
-contracts must carry the successful `read_meta_lru_hits` counter through
-the timed snapshot/delta, sanitized per-pass schema and final matrix, and
-reject `one_entry_hits + lru_hits > shadow64`. The final human-readable
-table must also expose independent lower READ requests for both fixed 4MiB
-passes; C metadata/payload callback counts cannot substitute for those
-device counters.
-
-Owner-loaded `8e21ca7e` passed the retention gate, so the 64-entry
-metadata-only LRU is now the proven baseline for subsequent synthetic
-experiments. A same-memory block-cache alternative must first be
-diagnostic-only: 64 physical block identities, no cached bytes, no skipped
-I/O, state updated only after a successful authoritative read, and cleared
-by `sv3_engine_invalidate_read_cache()`. Required blocks are block zero
-plus payload-intersecting blocks; contiguous misses count as one predicted
-lower callback. Tests must prove a cold two-block record is two misses/one
-predicted request, repeated access is hits/no new request, and invalidation
-restores misses. For a full simulated cache with a mixed hit/miss read,
-all required resident hits must be refreshed before miss insertion so the
-same read cannot evict a block it already found resident; exact-C coverage
-must pin this case. Reporter contracts require predicted requests <=
-predicted miss blocks.
-
-A second diagnostic may model the proposed 64 full-two-block extent slots
-without caching bytes: one `read_metadata_lru_second_valid` bit follows
-each real metadata-LRU slot. Only a successful metadata-LRU hit that needs
-block one can score `read_second_shadow_hits` or
-`read_second_shadow_misses`; the two counters together must never exceed
-`read_meta_lru_hits`. A replacement clears that slot's companion bit,
-successful validation may set it when block one was actually present, and
-`sv3_engine_invalidate_read_cache()` clears all companion validity.
-Exact-C coverage must prove both a companion-hit and a forced companion-miss
-while real payload I/O remains unchanged. The larger 512KiB production
-cache is gated by >=5% predicted block and request savings in every
-seeded-random arm; diagnostics alone do not authorize allocation.
-
-Owner-loaded `cc2da694` fails both payload-cache gates, so the
-64-entry/256KiB metadata-only cache remains the qualified design. Do not
-allocate block-one data from the companion-shadow result and do not
-replace metadata slots with the same-memory physical-block design.
-
+Cache residency must still be cleared by
+`sv3_engine_invalidate_read_cache()` on every existing
+write/GC/discard/barrier fence. A failed, stale or corrupt read must not
+insert/touch a slot or increment `read_meta_lru_hits`. Exact-C coverage
+must prove reuse beyond one entry saves a real lower metadata read,
+explicit invalidation restores the lower read, and overwrite cannot return
+an old generation. Timed reports retain the real metadata/payload callback
+counters, one-entry/LRU hits, full-extent reuse, 4KiB skip counters and
+independent lower-device bytes/requests.
 Do not repurpose `raw_crc32c` for a compressed fast path without an
 explicit integrity-contract change. Raw pages have no on-media metadata;
 compressed pages do, and current reads validate its CRC and sequence every
@@ -395,11 +349,7 @@ For WRITE closure analysis, the status/report layer must carry all sixteen
 `window_close_reasons` deltas and fail closed unless their sum equals
 `windows`. For singleton analysis, `sv3_flush_window()` must increment
 exactly one `one_page_close_reasons[reason]` entry whenever `count == 1`;
-those deltas must sum to `one_page_windows`. The read report must likewise carry
-`read_block_shadow_hits`, `read_block_shadow_misses` and
-`read_block_shadow_reqs` through timed snapshots, sanitized per-pass
-aggregation and the terminal summary; predicted requests may never exceed
-predicted miss blocks. Rootless synthetic fixtures must exercise both the
+those deltas must sum to `one_page_windows`. Rootless synthetic fixtures must exercise both the
 valid joint singleton sum and a mismatched failure case. Source contracts
 must assert the captured `close_reason` index rather than the mutable
 `next_window_close` expression, because the latter is deliberately reset

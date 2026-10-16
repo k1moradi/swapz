@@ -468,11 +468,6 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
                       "read_meta_lru_hits",
-                      "read_second_shadow_hits", "read_second_shadow_misses",
-                      "read_shadow_hits_4", "read_shadow_hits_16",
-                      "read_shadow_hits_64",
-                      "read_block_shadow_hits", "read_block_shadow_misses",
-                      "read_block_shadow_reqs",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
 
@@ -508,16 +503,7 @@ def kernel_read_delta(before, after):
     if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
             counters["read_full_extent_reqs"] +
             counters["read_two_block_skips"] > counters["read_meta_reqs"] or
-            counters["read_full_cache_hits"] > counters["read_meta_cache_hits"] or
-            counters["read_meta_cache_hits"] +
-            counters["read_meta_lru_hits"] > counters["read_shadow_hits_64"] or
-            counters["read_second_shadow_hits"] +
-            counters["read_second_shadow_misses"] >
-                counters["read_meta_lru_hits"] or
-            counters["read_meta_cache_hits"] > counters["read_shadow_hits_4"] or
-            counters["read_shadow_hits_4"] > counters["read_shadow_hits_16"] or
-            counters["read_shadow_hits_16"] > counters["read_shadow_hits_64"] or
-            counters["read_block_shadow_reqs"] > counters["read_block_shadow_misses"]):
+            counters["read_full_cache_hits"] > counters["read_meta_cache_hits"]):
         raise ValueError("inconsistent V3 read request accounting")
     return counters
 
