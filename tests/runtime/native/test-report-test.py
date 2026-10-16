@@ -107,8 +107,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_pareto_cap3_windows=0 accepted_burst_pareto_saved_blocks=0 accepted_burst_pareto_four_extents=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
-            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_pareto_cap3_windows=1 accepted_burst_pareto_saved_blocks=2 accepted_burst_pareto_four_extents=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_BEFORE=close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0")
+            out.append("V3_STATUS_AFTER=close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0")
             for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -220,14 +220,31 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap_extra_gt1_windows"], 1)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_four_extents_avoided"], 8)
         self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_plan_stats_failures"], 0)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_pareto_cap3_windows"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_pareto_saved_blocks"], 2)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_pareto_four_extents"], 1)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_pareto_candidates"], 1)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_recovered_blocks"], 2)
+        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_full_recovery_windows"], 1)
         self.assertEqual(slow["alpha22_kernel_counters"]["close_pack_ready"], 18)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
+
+    def test_benchmark_table_places_units_in_metric_column_once(self):
+        verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
+        report = {"benchmarks": {"verdicts": verdicts}}
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            runner.print_bench(report)
+        lines = output.getvalue().splitlines()
+        cases = (
+            ("Useful WRITE throughput (MB/s)", "MB/s"),
+            ("Mixed READ p99 (ms)", "ms"),
+            ("4MiB sequential lower READ (bytes)", "bytes"),
+            ("Replay process peak RSS (KiB)", "KiB"),
+        )
+        for metric, unit in cases:
+            with self.subTest(metric=metric):
+                line = next(item for item in lines if metric in item)
+                self.assertEqual(line.count(unit), 1)
 
     def test_mixed_write_diagnostics_missing_or_inconsistent_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
@@ -262,16 +279,16 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_pareto_cap3_windows"] = 2
+        sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_pareto_candidates"] = 2
         sessions[0]["kernel_status"]["after"]["accepted_burst_cap_extra_gt1_windows"] = 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_pareto_saved_blocks"] = 1
+        sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_recovered_blocks"] = 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_pareto_four_extents"] = 2
+        sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_full_recovery_windows"] = 2
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 

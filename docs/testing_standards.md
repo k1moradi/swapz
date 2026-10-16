@@ -311,7 +311,9 @@ literal `1`; do not hide the warning with a cast. The three replacement
 cap=3 probe counters are mandatory through status parsing, per-session
 deltas and per-regime summary output; synthetic report fixtures must
 exercise the same relationships so schema drift fails before owner-loaded
-qualification. For sixteen uniform 2072-byte
+qualification. The human-readable benchmark table places units in each
+metric label once and keeps all three result cells numeric; rootless report
+tests pin this presentation without changing machine-readable units. For sixteen uniform 2072-byte
 records, the uncapped planner's existing read-cost tie-break selects
 3+3+3+7 records; tests must not replace that with the byte-equivalent
 7+7+2 shape merely to reduce extent count. Every newly mandatory status field must also be present

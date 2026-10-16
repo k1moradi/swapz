@@ -234,9 +234,9 @@ def parse_sessions(output):
                        "accepted_burst_cap_extra_gt1_windows",
                        "accepted_burst_four_extents_avoided",
                        "accepted_burst_plan_stats_failures",
-                       "accepted_burst_pareto_cap3_windows",
-                       "accepted_burst_pareto_saved_blocks",
-                       "accepted_burst_pareto_four_extents",
+                       "accepted_burst_cap3_pareto_candidates",
+                       "accepted_burst_cap3_recovered_blocks",
+                       "accepted_burst_cap3_full_recovery_windows",
                        "close_pack_ready", "one_page_windows", "gc_victims",
                        "gc_role_rotations")
             current.setdefault("kernel_status", {})[name] = {
@@ -357,9 +357,9 @@ def benchmark_verdicts(sessions):
                        "accepted_burst_cap_extra_gt1_windows",
                        "accepted_burst_four_extents_avoided",
                        "accepted_burst_plan_stats_failures",
-                       "accepted_burst_pareto_cap3_windows",
-                       "accepted_burst_pareto_saved_blocks",
-                       "accepted_burst_pareto_four_extents",
+                       "accepted_burst_cap3_pareto_candidates",
+                       "accepted_burst_cap3_recovered_blocks",
+                       "accepted_burst_cap3_full_recovery_windows",
                        "close_pack_ready",
                       "one_page_windows", "gc_victims"):
             before = status.get("before", {}).get(field)
@@ -376,9 +376,9 @@ def benchmark_verdicts(sessions):
                         "accepted_burst_cap_extra_gt1_windows",
                         "accepted_burst_four_extents_avoided",
                         "accepted_burst_plan_stats_failures",
-                        "accepted_burst_pareto_cap3_windows",
-                        "accepted_burst_pareto_saved_blocks",
-                        "accepted_burst_pareto_four_extents",
+                        "accepted_burst_cap3_pareto_candidates",
+                        "accepted_burst_cap3_recovered_blocks",
+                        "accepted_burst_cap3_full_recovery_windows",
                         "close_pack_ready",
                         "one_page_windows", "gc_victims")
         }
@@ -397,19 +397,20 @@ def benchmark_verdicts(sessions):
         if row["kernel_counter_delta"]["accepted_burst_plan_stats_failures"]:
             return {"overall": "INCOMPLETE",
                     "reason": "accepted-burst planner telemetry failed"}
-        cap3_windows = row["kernel_counter_delta"]["accepted_burst_pareto_cap3_windows"]
-        cap3_saved = row["kernel_counter_delta"]["accepted_burst_pareto_saved_blocks"]
-        cap3_four = row["kernel_counter_delta"]["accepted_burst_pareto_four_extents"]
-        if cap3_windows > row["kernel_counter_delta"]["accepted_burst_cap_extra_gt1_windows"]:
+        cap3_recovered = row["kernel_counter_delta"]["accepted_burst_cap3_recovered_blocks"]
+        cap3_full = row["kernel_counter_delta"]["accepted_burst_cap3_full_recovery_windows"]
+        cap3_candidates = row["kernel_counter_delta"]["accepted_burst_cap3_pareto_candidates"]
+        expensive = row["kernel_counter_delta"]["accepted_burst_cap_extra_gt1_windows"]
+        if cap3_full > expensive:
             return {"overall": "INCOMPLETE",
-                    "reason": "Pareto cap=3 windows exceed expensive cap=2 tail"}
-        if cap3_four > cap3_windows:
+                    "reason": "cap=3 full-recovery windows exceed expensive cap=2 tail"}
+        if cap3_candidates > cap3_full:
             return {"overall": "INCOMPLETE",
-                    "reason": "Pareto cap=3 selected more than one 16KiB extent per window"}
-        if cap3_saved < 2 * cap3_windows or \
-                cap3_saved > row["kernel_counter_delta"]["accepted_burst_cap_extra_blocks"]:
+                    "reason": "cap=3 Pareto candidates exceed full-recovery windows"}
+        if cap3_recovered < 2 * cap3_full or \
+                cap3_recovered > row["kernel_counter_delta"]["accepted_burst_cap_extra_blocks"]:
             return {"overall": "INCOMPLETE",
-                    "reason": "Pareto cap=3 saved-block accounting is inconsistent"}
+                    "reason": "cap=3 recovered-block accounting is inconsistent"}
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
         if None in vals or len(set(vals)) != 1:
@@ -533,9 +534,9 @@ def benchmark_verdicts(sessions):
                             "accepted_burst_cap_extra_gt1_windows",
                             "accepted_burst_four_extents_avoided",
                             "accepted_burst_plan_stats_failures",
-                            "accepted_burst_pareto_cap3_windows",
-                            "accepted_burst_pareto_saved_blocks",
-                            "accepted_burst_pareto_four_extents",
+                            "accepted_burst_cap3_pareto_candidates",
+                            "accepted_burst_cap3_recovered_blocks",
+                            "accepted_burst_cap3_full_recovery_windows",
                             "close_pack_ready",
                             "one_page_windows", "gc_victims")
             },
@@ -568,30 +569,30 @@ def print_bench(result):
               f"irqmode={cfg['irqmode']}, "
               f"completion delay={cfg['completion_nsec']} ns")
         print(f"  SCOPE: {data['interpretation']}")
-        print(f"  {'Metric':<33} {'Raw off':>12} {'swapz sync':>12} {'swapz async':>12}")
-        print("  " + "-" * 73)
-        for title, key, unit in [
-            ("Useful WRITE throughput", "input_write_mbps", "MB/s"),
-            ("Backing WRITE throughput", "output_lower_write_mbps", "MB/s"),
-            ("Logical/backing WRITE ratio", "write_input_per_lower_byte", "x"),
-            ("Backing WRITE requests", "lower_write_requests", ""),
-            ("Mixed READ throughput", "swap_in_read_mbps", "MB/s"),
-            ("Mixed READ p99", "swap_in_read_p99_ms", "ms"),
-            ("Verified 4MiB sequential READ", "sequential_4mib_s", "s"),
-            ("Verified 4MiB random READ", "seeded_random_4mib_s", "s"),
-            ("Packed sequential READ p99", "sequential_read_p99_ms", "ms"),
-            ("Packed random READ p99", "seeded_random_read_p99_ms", "ms"),
-            ("4MiB sequential lower READ", "sequential_lower_read_bytes", "bytes"),
-            ("4MiB random lower READ", "seeded_random_lower_read_bytes", "bytes"),
-            ("Replay process CPU user", "mixed_replay_cpu_user_s", "s"),
-            ("Replay process CPU system", "mixed_replay_cpu_system_s", "s"),
-            ("Replay process peak RSS", "mixed_replay_peak_rss_kb", "KiB"),
+        print(f"  {'Metric':<37} {'Raw off':>12} {'swapz sync':>12} {'swapz async':>12}")
+        print("  " + "-" * 76)
+        for title, key in [
+            ("Useful WRITE throughput (MB/s)", "input_write_mbps"),
+            ("Backing WRITE throughput (MB/s)", "output_lower_write_mbps"),
+            ("Logical/backing WRITE ratio (x)", "write_input_per_lower_byte"),
+            ("Backing WRITE requests", "lower_write_requests"),
+            ("Mixed READ throughput (MB/s)", "swap_in_read_mbps"),
+            ("Mixed READ p99 (ms)", "swap_in_read_p99_ms"),
+            ("Verified 4MiB sequential READ (s)", "sequential_4mib_s"),
+            ("Verified 4MiB random READ (s)", "seeded_random_4mib_s"),
+            ("Packed sequential READ p99 (ms)", "sequential_read_p99_ms"),
+            ("Packed random READ p99 (ms)", "seeded_random_read_p99_ms"),
+            ("4MiB sequential lower READ (bytes)", "sequential_lower_read_bytes"),
+            ("4MiB random lower READ (bytes)", "seeded_random_lower_read_bytes"),
+            ("Replay process CPU user (s)", "mixed_replay_cpu_user_s"),
+            ("Replay process CPU system (s)", "mixed_replay_cpu_system_s"),
+            ("Replay process peak RSS (KiB)", "mixed_replay_peak_rss_kb"),
         ]:
             fields = []
             for mode in COLUMNS:
                 val = columns[mode].get(key)
-                fields.append(f"{val:.2f} {unit}".strip() if val is not None else "n/a")
-            print(f"  {title:<33} {fields[0]:>12} {fields[1]:>12} {fields[2]:>12}")
+                fields.append(f"{val:.2f}" if val is not None else "n/a")
+            print(f"  {title:<37} {fields[0]:>12} {fields[1]:>12} {fields[2]:>12}")
         for read_mode, label in (("sequential", "sequential"),
                                  ("seeded_random", "random")):
             sync = columns["sync"]
@@ -638,9 +639,9 @@ def print_bench(result):
               f"cap extra 4KiB blocks={kc['accepted_burst_cap_extra_blocks']:.1f}, "
               f"cap >1-block windows={kc['accepted_burst_cap_extra_gt1_windows']:.1f}, "
               f"16KiB extents avoided={kc['accepted_burst_four_extents_avoided']:.1f}, "
-              f"Pareto cap3 windows={kc['accepted_burst_pareto_cap3_windows']:.1f}, "
-              f"cap3 blocks recovered={kc['accepted_burst_pareto_saved_blocks']:.1f}, "
-              f"cap3 16KiB extents={kc['accepted_burst_pareto_four_extents']:.1f}, "
+              f"cap3 recovered blocks={kc['accepted_burst_cap3_recovered_blocks']:.1f}, "
+              f"cap3 full-recovery windows={kc['accepted_burst_cap3_full_recovery_windows']:.1f}, "
+              f"cap3 Pareto candidates={kc['accepted_burst_cap3_pareto_candidates']:.1f}, "
               f"early pack closes={kc['close_pack_ready']:.1f}, "
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "

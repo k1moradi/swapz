@@ -569,6 +569,11 @@ and windows that also satisfy the prior at-most-one-16KiB Pareto shape.
 A cap=3 planner inconsistency still makes qualification incomplete. This
 is explanatory CPU-only work and must not change the actual write plan.
 
+For terminal readability, the aligned benchmark table prints each unit once
+in the metric label (for example `Useful WRITE throughput (MB/s)`) and
+keeps the raw/sync/async cells numeric. This is presentation-only; report
+JSON field names and numeric units are unchanged.
+
 Use the loaded classification before choosing another threshold. If the
 full-recovery count is near zero, this cap=3 byte-recovery direction is
 exhausted for the workload. If full recovery is common but Pareto
