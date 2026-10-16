@@ -218,7 +218,8 @@ def parse_sessions(output):
             name = "before" if line.startswith("V3_STATUS_BEFORE=") else "after"
             status_text = line.partition("=")[2]
             allowed = ("burst_tail_flushes", "packed_early_commits",
-                       "close_pack_ready", "one_page_windows", "gc_victims",
+                       "single_pack_deferrals", "close_pack_ready",
+                       "one_page_windows", "gc_victims",
                        "gc_role_rotations")
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
@@ -332,7 +333,8 @@ def benchmark_verdicts(sessions):
     for row in all_rows:
         status = row.get("kernel_status", {})
         for field in ("burst_tail_flushes", "packed_early_commits",
-                      "close_pack_ready", "one_page_windows", "gc_victims"):
+                      "single_pack_deferrals", "close_pack_ready",
+                      "one_page_windows", "gc_victims"):
             before = status.get("before", {}).get(field)
             after = status.get("after", {}).get(field)
             if not isinstance(before, int) or not isinstance(after, int) or after < before:
@@ -341,7 +343,8 @@ def benchmark_verdicts(sessions):
         row["kernel_counter_delta"] = {
             key: status["after"][key] - status["before"][key]
             for key in ("burst_tail_flushes", "packed_early_commits",
-                        "close_pack_ready", "one_page_windows", "gc_victims")
+                        "single_pack_deferrals", "close_pack_ready",
+                        "one_page_windows", "gc_victims")
         }
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
@@ -460,7 +463,8 @@ def benchmark_verdicts(sessions):
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
                 for key in ("burst_tail_flushes", "packed_early_commits",
-                            "close_pack_ready", "one_page_windows", "gc_victims")
+                            "single_pack_deferrals", "close_pack_ready",
+                            "one_page_windows", "gc_victims")
             },
         }
     return {
@@ -553,8 +557,10 @@ def print_bench(result):
         print(f"  ASYNC vs SYNC: "
               f"{data['criteria']['async_vs_sync']['write_throughput']}")
         kc = data["alpha22_kernel_counters"]
-        print(f"  Alpha.22 per-pair mean: burst tails={kc['burst_tail_flushes']:.1f}, "
-              f"pack closes={kc['close_pack_ready']:.1f}, "
+        print(f"  Packed-window per-pair mean: deferred first packs="
+              f"{kc['single_pack_deferrals']:.1f}, "
+              f"early pack closes={kc['close_pack_ready']:.1f}, "
+              f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
               f"GC victims={kc['gc_victims']:.1f}")
     print("\n  LIMITATIONS: timer-delayed RAM models are synthetic; no physical-media claim. "

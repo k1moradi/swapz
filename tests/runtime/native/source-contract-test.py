@@ -737,20 +737,27 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("extent_bytes += pending[i].length", policy)
         self.assertIn("sizeof(struct sv3_header)", policy)
         self.assertIn("count * sizeof(struct sv3_record)", policy)
-        for count in (2, 3, 7):
+        for count in (2, 3, 4, 6):
             self.assertIn("count == %dU" % count, policy)
+        self.assertIn("static inline int sv3_window_single_pack_deferred(", policy)
+        self.assertIn("static inline int sv3_window_pack_ready(", policy)
+        self.assertIn("sv3_window_extent_fits(", policy)
         self.assertIn("!retain_ms || read_budget || !pending", policy)
         self.assertIn("extent_blocks * SV3_BLOCK_BYTES", policy)
         self.assertIn("pending[i].raw", policy)
+        self.assertLess(writer.index("ctx->batch_count++"),
+                        writer.index("sv3_window_single_pack_deferred("))
         self.assertLess(writer.index("ctx->batch_count++"),
                         writer.index("sv3_window_pack_ready("))
         self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
                                      writer.index("ctx->batch_count++")),
                         writer.index("sv3_window_pack_ready("))
         self.assertIn("ctx->next_window_close = SV3_CLOSE_PACK_READY", writer)
+        self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("sv3_flush_window(ctx)", writer)
         self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
+        self.assertIn("single_pack_deferrals=%llu", status)
         self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):

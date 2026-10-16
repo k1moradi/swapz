@@ -84,7 +84,7 @@ static int test_caller_fences_override_independence(void)
 	return 0;
 }
 
-static int test_pack_ready_seven_medium_pages(void)
+static int test_pack_ready_waits_for_second_medium_pack(void)
 {
 	struct sv3_pending_bio batch[8] = { 0 };
 	unsigned int i;
@@ -93,91 +93,102 @@ static int test_pack_ready_seven_medium_pages(void)
 		batch[i].logical = 100 + i;
 		batch[i].length = 2073;
 	}
-	/* 7*2073 + 16 + 7*16 = 14639B, inside one 16KiB extent. */
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
-	CHECK(sv3_window_pack_ready(batch, 7, 2, 0));
+	/* Three medium pages fit 8KiB but are deliberately retained.
+	 * Six fit one 16KiB extent: same bytes as two old 8KiB commits,
+	 * one synchronous lower callback. */
+	CHECK(sv3_window_single_pack_deferred(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 5, 2, 0));
+	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 7, 0, 0));
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 1));
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 3));
-	CHECK(!sv3_window_pack_ready(NULL, 7, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 0, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 1));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 3));
+	CHECK(!sv3_window_pack_ready(NULL, 6, 2, 0));
 	return 0;
 }
 
-static int test_pack_ready_two_and_three_page_real_extent_geometry(void)
+static int test_pack_ready_small_and_medium_exact_geometry(void)
 {
-	struct sv3_pending_bio batch[3] = { 0 };
+	struct sv3_pending_bio batch[6] = { 0 };
 	unsigned int i;
 
-	for (i = 0; i < 3; ++i) {
+	for (i = 0; i < 6; ++i) {
 		batch[i].logical = 300 + i;
 		batch[i].length = 2073;
 	}
-	/* Two medium objects exceed 4KiB by 98B; three fit 8KiB. */
-	CHECK(!sv3_window_pack_ready(batch, 2, 2, 0));
-	CHECK(sv3_window_pack_ready(batch, 3, 2, 0));
-	CHECK(sv3_window_pack_ready(batch, 3, 1, 0));
-	CHECK(!sv3_window_pack_ready(batch, 3, 0, 0));
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 1));
-	CHECK(!sv3_window_pack_ready(NULL, 3, 2, 0));
-	/* The exact 4KiB 2-record metadata limit is 2 * 2024 + 48. */
+	/* Two medium pages do not fit 4KiB. Three fit 8KiB, but wait for
+	 * a second triplet instead of closing the first pack immediately. */
+	CHECK(!sv3_window_single_pack_deferred(batch, 2, 2, 0));
+	CHECK(sv3_window_single_pack_deferred(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+
+	/* Exact 4KiB two-record pack is deferred; two such packs close
+	 * together at the exact 8KiB four-record metadata limit. */
+	for (i = 0; i < 4; ++i)
+		batch[i].length = 2028;
 	batch[0].length = 2024;
 	batch[1].length = 2024;
-	CHECK(sv3_window_pack_ready(batch, 2, 2, 0));
-	batch[1].length = 2025;
+	CHECK(sv3_window_single_pack_deferred(batch, 2, 2, 0));
+	CHECK(!sv3_window_single_pack_deferred(batch, 3, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 2, 2, 0));
-	/* The 8KiB 3-record metadata is 16 + 3*16 = 64B. */
-	for (i = 0; i < 3; ++i)
-		batch[i].length = 2700;
-	CHECK(sv3_window_pack_ready(batch, 3, 2, 0));
-	batch[2].length = 2800;
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
-	batch[2].length = 2700;
+	for (i = 0; i < 4; ++i)
+		batch[i].length = 2028;
+	CHECK(sv3_window_pack_ready(batch, 4, 2, 0));
+	batch[3].length = 2029;
+	CHECK(!sv3_window_pack_ready(batch, 4, 2, 0));
+
+	/* Six records have 112 bytes of SWZ3 header/descriptor overhead:
+	 * 6 * 2712 + 112 == 16384 exactly. */
+	for (i = 0; i < 6; ++i)
+		batch[i].length = 2712;
+	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+	batch[5].length = 2713;
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	batch[5].length = 2712;
 	batch[0].raw = 1;
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
 	batch[0].raw = 0;
 	batch[1].length = 0;
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
 	batch[1].length = SV3_MAX_COMPRESSED + 1U;
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
 	CHECK(!sv3_window_pack_ready(batch, 1, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 4, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
 	return 0;
 }
 
 static int test_pack_ready_rejects_raw_and_unfittable(void)
 {
-	struct sv3_pending_bio batch[7] = { 0 };
+	struct sv3_pending_bio batch[6] = { 0 };
 	unsigned int i;
 
-	for (i = 0; i < 7; ++i) {
+	for (i = 0; i < 6; ++i) {
 		batch[i].logical = 200 + i;
 		batch[i].length = 2073;
 	}
 	batch[4].raw = 1;
 	batch[4].length = SV3_BLOCK_BYTES;
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
 	batch[4].raw = 0;
 	batch[4].length = 0;
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
 	batch[4].length = SV3_MAX_COMPRESSED + 1;
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
-	batch[4].length = SV3_MAX_COMPRESSED;
-	CHECK(sv3_window_pack_ready(batch, 7, 2, 0));
-	for (i = 0; i < 7; ++i)
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	batch[4].length = 2073;
+	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+	for (i = 0; i < 6; ++i)
 		batch[i].length = SV3_MAX_COMPRESSED;
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
-	for (i = 0; i < 7; ++i)
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	for (i = 0; i < 6; ++i)
 		batch[i].length = 2000;
-	CHECK(sv3_window_pack_ready(batch, 7, 1, 0));
-	/* Moving a short outlier does not make six 2800B pages fit. */
-	for (i = 0; i < 7; ++i)
-		batch[i].length = 2800;
-	batch[6].length = 100;
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
-	batch[6].length = 2800;
-	batch[0].length = 100;
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
+	CHECK(sv3_window_pack_ready(batch, 6, 1, 0));
+	/* The same geometry fails closed when retention/read policy disallows it. */
+	CHECK(!sv3_window_pack_ready(batch, 6, 0, 0));
+	CHECK(!sv3_window_pack_ready(batch, 6, 2, 1));
+	CHECK(!sv3_window_pack_ready(NULL, 6, 2, 0));
 	return 0;
 }
 
@@ -428,8 +439,8 @@ int main(void)
 	CHECK(test_every_pending_slot_fences_read() == 0); passed++;
 	CHECK(test_disabled_empty_and_invalid_window() == 0); passed++;
 	CHECK(test_caller_fences_override_independence() == 0); passed++;
-	CHECK(test_pack_ready_seven_medium_pages() == 0); passed++;
-	CHECK(test_pack_ready_two_and_three_page_real_extent_geometry() == 0); passed++;
+	CHECK(test_pack_ready_waits_for_second_medium_pack() == 0); passed++;
+	CHECK(test_pack_ready_small_and_medium_exact_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_burst_tail_one_two_and_mixed_compressed_records() == 0); passed++;
 	CHECK(test_burst_tail_requires_retention_history_and_safe_bounds() == 0); passed++;

@@ -36,42 +36,36 @@ static inline int sv3_window_read_independent(
 }
 
 /*
- * Alpha.21: the opt-in retained stream no longer needs to wait for seven
- * records before EVERY useful lower write. Two sufficiently small LZ4
- * records fit in one 4KiB extent, three medium records can fit in one
- * 8KiB extent, and seven can fit in one 16KiB extent. A full format
- * header plus one descriptor per record is included in each bound.
+ * Retained packed-write geometry.
  *
- * For the measured 2073-byte medium pages, two do NOT fit one 4KiB
- * extent (4194B); three DO fit 8KiB (6283B vs 12KiB separate).
- * This can end a 2ms retained window before the seventh arrival.
- * It deliberately trades potential seven-page density for earlier
- * acknowledgement, but only after the SAME successful lower write,
- * mapping publication and optional flush as the original path.
+ * A single small/medium pack is useful for byte reduction, but owner-loaded
+ * profiling shows synchronous lower WRITE wait dominates the slow model.
+ * Closing immediately at two small records or three medium records turns
+ * each first pack into a separate synchronous dm_io. The first staged BIO
+ * already pins a hard retain_ms deadline, so wait for a SECOND equivalent
+ * pack when geometry permits:
  *
- * All page dependencies, duplicate slots and FUA/PREFLUSH fences are
- * handled by the serialized caller before this eligibility check.
- * Restricted read budgets, default retain_ms=0 and RAW/invalid pages
- * fail closed. This geometry proof does NOT guarantee a speedup:
- * benchmark lower WRITE bytes/requests and upper read/write p99 too.
+ *   4 records fitting 8KiB  -> one lower callback instead of two 4KiB packs
+ *   6 records fitting 16KiB -> one lower callback instead of two 8KiB packs
+ *
+ * If companions never arrive, the existing absolute timer drains the
+ * smaller window. FUA/conflict/read/discard/shutdown fences remain caller
+ * owned and bypass this predicate. This changes only the early-close point;
+ * the engine still chooses the real extent and publishes only after lower
+ * success. Restricted read budgets, RAW records and invalid inputs fail
+ * closed.
  */
-static inline int sv3_window_pack_ready(
+static inline int sv3_window_extent_fits(
 		const struct sv3_pending_bio *pending, sv3_u8 count,
-		sv3_u8 retain_ms, sv3_u8 read_budget)
+		sv3_u8 retain_ms, sv3_u8 read_budget, sv3_u8 extent_blocks)
 {
 	sv3_u32 extent_bytes;
-	sv3_u8 extent_blocks;
 	sv3_u8 i;
 
-	if (!retain_ms || read_budget || !pending)
-		return 0;
-	if (count == 2U)
-		extent_blocks = 1U;
-	else if (count == 3U)
-		extent_blocks = 2U;
-	else if (count == 7U)
-		extent_blocks = 4U;
-	else
+	if (!retain_ms || read_budget || !pending || !count ||
+	    count > SV3_MAX_RECORDS ||
+	    (extent_blocks != 1U && extent_blocks != 2U &&
+	     extent_blocks != 4U))
 		return 0;
 	extent_bytes = sizeof(struct sv3_header) +
 		(sv3_u32)count * sizeof(struct sv3_record);
@@ -82,6 +76,38 @@ static inline int sv3_window_pack_ready(
 		extent_bytes += pending[i].length;
 	}
 	return extent_bytes <= (sv3_u32)extent_blocks * SV3_BLOCK_BYTES;
+}
+
+/* Count an opportunity deliberately retained for a second pack. */
+static inline int sv3_window_single_pack_deferred(
+		const struct sv3_pending_bio *pending, sv3_u8 count,
+		sv3_u8 retain_ms, sv3_u8 read_budget)
+{
+	if (count == 2U)
+		return sv3_window_extent_fits(pending, count, retain_ms,
+					     read_budget, 1U);
+	if (count == 3U) {
+		/* A two-record 4KiB first pack was already counted at count=2. */
+		if (sv3_window_extent_fits(pending, 2U, retain_ms,
+					   read_budget, 1U))
+			return 0;
+		return sv3_window_extent_fits(pending, count, retain_ms,
+					     read_budget, 2U);
+	}
+	return 0;
+}
+
+static inline int sv3_window_pack_ready(
+		const struct sv3_pending_bio *pending, sv3_u8 count,
+		sv3_u8 retain_ms, sv3_u8 read_budget)
+{
+	if (count == 4U)
+		return sv3_window_extent_fits(pending, count, retain_ms,
+					     read_budget, 2U);
+	if (count == 6U)
+		return sv3_window_extent_fits(pending, count, retain_ms,
+					     read_budget, 4U);
+	return 0;
 }
 
 /*

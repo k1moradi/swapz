@@ -182,6 +182,7 @@ struct sv3_dm {
 	u64 retain_timer_arm_skips;
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
+	u64 single_pack_deferrals;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1333,6 +1334,13 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	if (bio->bi_opf & REQ_FUA) {
 		ctx->next_window_close = SV3_CLOSE_FUA;
 		sv3_flush_window(ctx);
+	} else if (sv3_window_single_pack_deferred(ctx->batch,
+						 ctx->batch_count,
+						 ctx->retain_ms,
+						 ctx->engine.max_read_blocks_per_record)) {
+		/* Keep the first useful pack only until the original absolute
+		 * deadline or a second pack arrives; no timer extension. */
+		ctx->single_pack_deferrals++;
 	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
@@ -2254,7 +2262,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
-		       "burst_tail_flushes=%llu "
+		       "single_pack_deferrals=%llu burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
@@ -2334,6 +2342,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,
+		       ctx->single_pack_deferrals,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,

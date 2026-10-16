@@ -212,6 +212,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
+        self.assertEqual(slow["alpha22_kernel_counters"]["single_pack_deferrals"], 24)
+        self.assertEqual(slow["alpha22_kernel_counters"]["close_pack_ready"], 18)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])

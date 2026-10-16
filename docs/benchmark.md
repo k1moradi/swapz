@@ -412,23 +412,37 @@ proving fewer actual physical-device commands. Useful SD WRITE
 remained 4.61/4.66 MB/s versus 7.85 raw. Neither physical NAND
 endurance nor real cold swap-in is qualified.
 
-**Current production-C hypothesis (NOT YET OWNER-LOADED):**
-The serialized worker may be stalled predominantly in synchronous
-lower-WRITE `dm_io` callbacks instead of LZ4 or window planning.
-Use the existing `ktime_get_ns` call interval in `sv3_lower` to
-classify successful lower WRITE callbacks by wall duration:
-at most 1ms, over 1ms through 4ms, over 4ms. An injected or failed
-write does not increment the successful bins. The histogram
-must sum to `physical_write_reqs` for any bracketing interval;
-no new allocation, waits or I/O paths. Record the already existing
-`lz4_wall_ns`, `window_sort_wall_ns`,
-`window_commit_wall_ns`, `lower_write_wall_ns`,
-`windows` and successful write callbacks with the new bins.
-Capture Device Mapper status immediately before the first timed
-mixed QD32 wave (after warm-up), and immediately after measured
-`fsync`, outside the stopwatch. Preserve the same 8 counterbalanced
-pairs, exact immutable fixture/trace, independently read
-lower-device statistics, validated byte oracle and safe teardown.
+**Owner-qualified diagnosis at exact code
+`ea9fe5892bde824b4076529bbc81a79aea3469aa` (report-only
+`8a6f56a4d801`):** all five stages PASS. SD-model sync/async mixed
+V3 recorded 5.23/5.22s window-commit wall, 4.92/4.92s lower-WRITE
+callback wall, and 0.14/0.14s LZ4; 4592/4583.5 completed callbacks
+were all in the 1–4ms bucket. SSD recorded 1.04/1.02s commit,
+0.84/0.82s lower wait and 0.10/0.08s LZ4, with essentially every
+callback <=1ms. Since commit time nests lower wait, these values
+must not be summed. They show that reducing serialized callback
+count is the next measured lever, not that null_blk models flash
+latency or that CPU cost is negligible.
+
+**Current production-C experiment (NOT YET OWNER-LOADED):** replace
+the first small/medium retained pack's immediate close with a bounded
+second-pack opportunity under the *same absolute retention deadline*.
+Two small records that fit one 4KiB extent are retained until four
+fit one 8KiB extent; three records that fit one 8KiB extent are
+retained until six fit one 16KiB extent. If companions do not arrive,
+the unchanged timer drains the smaller window. No padding, new format,
+allocator, parallel publisher or asynchronous lower completion is
+introduced. FUA, same-slot conflict, READ dependency, DISCARD, failure,
+suspend and shutdown preserve their original drains.
+`single_pack_deferrals` counts each first pack deliberately held;
+it is diagnostic, not a throughput claim.
+
+**Predeclared decision:** prefer the new rule only if the owner-loaded
+same-matrix run lowers independent V3 backing WRITE requests and
+lower-WRITE callback wall time while keeping lower WRITE bytes no worse,
+preserving byte-exact correctness and avoiding material WRITE/read-p99
+regressions. A lower callback count with increased bytes or deadline
+tail cost is not a VISION win.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

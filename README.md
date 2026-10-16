@@ -122,14 +122,23 @@ SSD-model random remained ~0.26s and ~6.80MiB backing reads.
 WRITE remained slower than raw (SD: 4.61/4.66 vs 7.85 MB/s).
 The exact source and report-only Git commits must not be conflated.
 
-**Next C diagnostic, NOT YET OWNER-LOADED:** classify each successfully
-completed synchronous lower WRITE callback into <=1ms, 1–4ms and
->4ms wait buckets. The existing worker LZ4, window and lower-I/O
-wall counters are sampled *only across the timed mixed workload*
-and printed beside throughput. This isolates a potential
-serialization/wait bottleneck before changing write scheduling.
-Wall-time totals overlap and do not measure exclusive kernel CPU or
-physical flash latency; no speedup is claimed for instrumentation.
+**Owner-qualified mixed-WRITE profiling:** exact code
+`ea9fe5892bde824b4076529bbc81a79aea3469aa` passed all five stages
+(report-only `8a6f56a4d801`). In the SD RAM model, V3 spent ~4.92s
+inside successful synchronous lower-WRITE callbacks versus ~5.22–5.23s
+window-commit wall time and only ~0.14s LZ4 time; all ~4,584–4,592
+completed callbacks fell in the 1–4ms bin. SSD lower-WRITE wait was
+~0.82–0.84s, with almost every callback <=1ms. These nested wall-time
+counters diagnose serialized waiting, not exclusive CPU or flash latency.
+
+**Next C experiment, NOT YET OWNER-LOADED:** retained compressed windows
+no longer early-close on the first 2/3-record pack. Four small records
+may close into one 8KiB extent and six medium-like records into one
+16KiB extent, while the existing absolute `retain_ms` deadline drains
+smaller tails. This aims to replace two synchronous lower callbacks with
+one **without padding or extra lower bytes**. FUA/conflict/read/discard/
+shutdown fences, authority publication and fail-close remain unchanged.
+`single_pack_deferrals` reports how often the first useful pack was held.
 
 ## Current C performance work and qualification plan
 

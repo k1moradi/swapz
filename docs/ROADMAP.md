@@ -53,6 +53,16 @@ SSD model random ~6.80MiB and ~0.26s versus raw 4MiB / ~0.26s.
 The 4KiB skipping works (about 320 cold skips per random pass),
 but no established swap-in latency improvement or useful SD WRITE
 speedup resulted from this code revision.
+The owner then qualified exact code
+`ea9fe5892bde824b4076529bbc81a79aea3469aa`
+(report-only `8a6f56a4d801`): all five stages PASS, loaded stage
+195.21s. SD V3 mixed WRITE spent ~4.92s in successful synchronous
+lower callbacks versus ~5.22–5.23s total window-commit wall time;
+~4.58k callbacks all landed in the 1–4ms bucket while LZ4 used only
+~0.14s. SSD lower wait was ~0.82–0.84s and almost all callbacks
+were <=1ms. This strongly implicates serialized lower-write callback
+count/latency in the SD-model useful-WRITE gap, without proving
+hardware latency or exclusive kernel CPU.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -137,16 +147,24 @@ are still planned.
       callbacks and ~1.31MiB less random READ traffic per 4MiB
       compared with `35fb224`, but SD-model random still requires
       ~1.16s and SD useful WRITE still 4.61/4.66 MB/s versus 7.85 raw.
-      The next C-first change adds completed lower-WRITE dm_io wait
-      histogram bins and brackets existing LZ4/window/lower-write
-      wall counters around the current measured mixed QD32 workload;
-      no new benchmark sessions, allocation, I/O, publishing or
-      scheduling semantics. Check histogram conservation and
-      independently measured lower request counts. The next source
-      is **NOT YET OWNER-LOADED**, and these nested wall intervals
-      cannot be summed or attributed as exclusive kernel CPU.
-      Use measured write wait vs packing/retention fractions to
-      select a bounded, correctness-preserving WRITE optimization.
+      Owner-loaded `ea9fe58` profiling now shows synchronous lower
+      WRITE wait dominates SD commit wall time: ~4.92s lower wait
+      inside ~5.22–5.23s commit, versus ~0.14s LZ4, with every
+      ~4.59k callback in the 1–4ms bucket. SSD lower wait is only
+      ~0.82–0.84s and nearly all callbacks are <=1ms.
+      The next bounded production-C experiment therefore delays the
+      first valid 2/3-record packed early close until a second pack
+      can join: 4 records fitting 8KiB or 6 records fitting 16KiB.
+      The already-pinned absolute retention deadline remains the hard
+      tail bound, so a lone useful pack cannot wait indefinitely.
+      This does **not** write padding or add lower bytes; all existing
+      conflict/FUA/read/discard/shutdown drains and post-success
+      authority publication remain unchanged. Track
+      `single_pack_deferrals`, early pack closes, independent lower
+      WRITE bytes/requests, useful WRITE MB/s and read/write p99.
+      The new source is **NOT YET OWNER-LOADED**. Reject it if callback
+      savings disappear, lower bytes increase, or latency/correctness
+      regress despite fewer synchronous commits.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 
