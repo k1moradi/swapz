@@ -26,7 +26,7 @@ fail() { echo "BLOCKED: $*" >&2; exit 1; }
 note() { printf '%s\n' "$*"; }
 for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
            findmnt mountpoint mount timeout sha256sum cmp od awk grep tr \
-           tee mktemp ls sleep cat id rmdir stat sort; do
+           tee mktemp ls sleep cat id rmdir stat sort dd; do
 	command -v "$cmd" >/dev/null || fail "missing required tool $cmd"
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
@@ -335,3 +335,74 @@ fi
 # merges, so report each read/write request pair instead of assuming equality.
 note "PASS_ZERO_WRITE_LOWER_IO=logical_bytes:$logical_writes zero_pages:$zero_writes target_write_bytes:$target_write_bytes lower_write_bytes:$lower_write_bytes target_write_reqs:$target_write_reqs lower_write_reqs:$lower_write_reqs"
 note "PASS_ORACLE_LOWER_READ=target_read_bytes:$target_read_bytes lower_read_bytes:$lower_read_bytes target_read_reqs:$target_read_reqs lower_read_reqs:$lower_read_reqs"
+
+
+# Retained-policy synthetic WRITE failure qualification. Reuse only this
+# already-owned RAM lower, but recreate the DM target so fault counters and
+# fail-closed state are isolated from the ordinary byte-exact oracle.
+dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before fault phase"
+OWN_DM=0
+UUID="SWAPZ-TEST-$TOKEN-writefault"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 1 2" ||
+    fail "cannot create retained WRITE-fault mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "retained WRITE-fault DM UUID mismatch"
+write_fault_status_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$write_fault_status_before" retain_ms) == 2 &&
+   $(status_u64 "$write_fault_status_before" write_fault_nth) == 1 &&
+   $(status_u64 "$write_fault_status_before" failed) == 0 )) ||
+    fail "retained WRITE-fault mapping policy mismatch"
+read -r -a write_fault_lower_before < "/sys/block/$DISK/stat"
+if timeout --signal=TERM --kill-after=5s 20s dd if=/dev/urandom \
+        of="/dev/mapper/$DMNAME" bs=4096 count=1 oflag=direct status=none; then
+    fail "synthetic retained WRITE fault unexpectedly completed successfully"
+fi
+write_fault_status_after="$(dmsetup status "$DMNAME")"
+read -r -a write_fault_lower_after < "/sys/block/$DISK/stat"
+(( $(status_u64 "$write_fault_status_after" failed) == 1 &&
+   $(status_u64 "$write_fault_status_after" write_fault_calls) == 1 &&
+   $(status_u64 "$write_fault_status_after" write_fault_injected) == 1 )) ||
+    fail "retained WRITE fault did not fail-close exactly once"
+(( write_fault_lower_after[4] == write_fault_lower_before[4] &&
+   write_fault_lower_after[6] == write_fault_lower_before[6] )) ||
+    fail "pre-submission WRITE fault reached the owned lower device"
+note "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0"
+
+dmsetup remove "$DMNAME" || fail "cannot remove retained WRITE-fault mapping"
+OWN_DM=0
+
+# Retained-policy synthetic FLUSH failure qualification. The data WRITE must
+# reach the owned RAM lower first; only the subsequent explicit fsync/PREFLUSH
+# is injected. This is not a device-originated or torn-completion test.
+UUID="SWAPZ-TEST-$TOKEN-flushfault"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 0 2" ||
+    fail "cannot create retained FLUSH-fault mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "retained FLUSH-fault DM UUID mismatch"
+flush_fault_status_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$flush_fault_status_before" retain_ms) == 2 &&
+   $(status_u64 "$flush_fault_status_before" flush_fault_nth) == 1 &&
+   $(status_u64 "$flush_fault_status_before" failed) == 0 )) ||
+    fail "retained FLUSH-fault mapping policy mismatch"
+read -r -a flush_fault_lower_before < "/sys/block/$DISK/stat"
+if timeout --signal=TERM --kill-after=5s 20s dd if=/dev/urandom \
+        of="/dev/mapper/$DMNAME" bs=4096 count=1 oflag=direct conv=fsync status=none; then
+    fail "synthetic retained FLUSH fault unexpectedly completed successfully"
+fi
+flush_fault_status_after="$(dmsetup status "$DMNAME")"
+read -r -a flush_fault_lower_after < "/sys/block/$DISK/stat"
+(( $(status_u64 "$flush_fault_status_after" failed) == 1 &&
+   $(status_u64 "$flush_fault_status_after" flush_injected) == 1 &&
+   $(status_u64 "$flush_fault_status_after" flush_err) == 1 &&
+   $(status_u64 "$flush_fault_status_after" write_fault_injected) == 0 )) ||
+    fail "retained FLUSH fault did not propagate and fail-close"
+(( flush_fault_lower_after[6] > flush_fault_lower_before[6] )) ||
+    fail "retained FLUSH-fault setup did not first complete a lower data WRITE"
+note "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1"
+
+dmsetup remove "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
+OWN_DM=0

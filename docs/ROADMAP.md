@@ -282,6 +282,15 @@ are still planned.
       New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
+      The ordinary loaded oracle already exercises byte-exact overwrite,
+      mixed RAW/compressed pages, O_SYNC/FUA-style writes and explicit
+      flushes with retention disabled. The current next source adds two
+      retained-policy synthetic pre-submission fault phases on the same
+      positively owned null_blk: WRITE failure must fail-close with no
+      lower WRITE delta; FLUSH failure must first complete a lower data
+      WRITE and then fail-close on the injected flush. Device-originated,
+      partial/torn failure, pending-batch suspend/drain and sustained live
+      GC remain open.
 
 ## The measured problem, and the existing foundation
 

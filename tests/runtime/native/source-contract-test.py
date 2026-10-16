@@ -1032,6 +1032,29 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("PASS_RAM_MODEL_LOWER_MBPS=", benchmark)
         self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
 
+    def test_owned_nullblk_smoke_qualifies_retained_synthetic_faults(self):
+        deploy = (ROOT / "tools/deploy-nullblk.sh").read_text()
+        # These are deliberately pre-submission injections on the already
+        # authenticated RAM null_blk lower, not claims about torn/device faults.
+        self.assertIn("PASS_RETAINED_SYNTHETIC_WRITE_FAULT=", deploy)
+        self.assertIn("PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=", deploy)
+        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 1 2"', deploy)
+        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 0 2"', deploy)
+        self.assertIn('status_u64 "$write_fault_status_before" retain_ms', deploy)
+        self.assertIn('status_u64 "$flush_fault_status_before" retain_ms', deploy)
+        self.assertIn('write_fault_lower_after[6] == write_fault_lower_before[6]',
+                      deploy)
+        self.assertIn('status_u64 "$write_fault_status_after" write_fault_injected',
+                      deploy)
+        self.assertIn('status_u64 "$flush_fault_status_after" flush_injected',
+                      deploy)
+        self.assertIn('status_u64 "$flush_fault_status_after" flush_err', deploy)
+        self.assertIn('flush_fault_lower_after[6] > flush_fault_lower_before[6]',
+                      deploy)
+        self.assertIn('if timeout --signal=TERM --kill-after=5s 20s dd', deploy)
+        self.assertNotIn("tests/runtime/write-fault.sh", deploy)
+        self.assertNotIn("tests/runtime/read-fault.sh", deploy)
+
     def test_map_and_teardown_are_owned(self):
         admitted = body("sv3_map")
         drained = body("sv3_drain")

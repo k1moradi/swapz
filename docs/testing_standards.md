@@ -357,6 +357,19 @@ and publish independent lower WRITE bytes/requests plus WRITE p99. The
 pilot has one pair per mode/QD and must label confidence NOT ESTABLISHED;
 the existing >=5-pair confirmatory requirement remains open.
 
+For loaded fault qualification, the owned null_blk smoke may use only the
+target's existing **pre-submission** test hooks. A retained WRITE-fault
+phase must recreate the owned DM target with `test_fail_write_nth=1` and
+`retain_ms=2`, observe one injected failure plus target fail-close, and
+independently prove that lower WRITE requests/sectors did not advance. A
+separate retained FLUSH-fault phase must recreate the target with
+`test_fail_flush_nth=1`, complete a nonzero lower data WRITE, then
+observe the injected flush error and target fail-close. Recreate the DM
+mapping between phases so counters and failure state cannot leak. These
+tests are protocol/fail-close evidence only: device-originated, partial,
+torn, and media-failure coverage remains explicitly unqualified, and the
+legacy loop/error-device fault scripts must not be invoked by `make test`.
+
 For WRITE closure analysis, the status/report layer must carry all sixteen
 `window_close_reasons` deltas and fail closed unless their sum equals
 `windows`. For singleton analysis, `sv3_flush_window()` must increment

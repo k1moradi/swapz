@@ -291,6 +291,16 @@ interval and cannot establish a performance win. If the path and runtime
 qualify, expand to the roadmap's >=5 counterbalanced pairs per mode/regime
 before changing policy.
 
+**Parallel loaded correctness step:** extend the existing positively owned
+RAM-`null_blk` smoke with two retained-policy synthetic fault phases. A
+`test_fail_write_nth=1, retain_ms=2` target must return an upper WRITE
+error, fail-close exactly once and show zero independent lower WRITE
+request/sector delta. A separately recreated
+`test_fail_flush_nth=1, retain_ms=2` target must complete a nonzero lower
+data WRITE before the injected fsync/PREFLUSH error and then fail-close.
+These are safe pre-submission protocol tests only; they do not qualify a
+device-originated, partial or torn I/O failure.
+
 ## Current C performance work and qualification plan
 
 The current experimental C revision drains an eligible one/two-page compressed tail
