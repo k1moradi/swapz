@@ -361,11 +361,17 @@ On nonzero stage exits the single report and terminal MUST include
 a sanitized, concrete **failed subphase** (smoke, shared fixture
 allocation, numbered pair) and a vetted actionable error category,
 including missing permissions or the original `BLOCKED:` reason.
-Never substitute "private stage failed" for a diagnosable known
-failure, and never disclose full private paths, device names,
-secrets or raw host swap inventories through the report. Path redaction
-must recognize only absolute path boundaries, not turn ordinary terms
-like lower I/O into misleading output; rootless tests exercise both.
+Only the privilege-dependent loaded stage may be classified BLOCKED:
+an exit code 2 from build, native/rootless, W=1 or W=2 is a FAIL unless
+the loaded stage emits a vetted BLOCKED marker. In particular, a native
+assertion such as the `ee95492` planner-oracle failure must retain the
+"Native and rootless contracts" phase and must never be relabeled as
+"administrator authorization". Sanitized assertion text may be surfaced
+without its source path. Never substitute "private stage failed" for a
+diagnosable known failure, and never disclose full private paths, device
+names, secrets or raw host swap inventories through the report. Path
+redaction must recognize only absolute path boundaries, not turn ordinary
+terms like lower I/O into misleading output; rootless tests exercise both.
 
 The human terminal displays numbered PASS/FAIL/BLOCKED stage statuses
 and a table of raw-off, synchronous and asynchronous useful WRITE

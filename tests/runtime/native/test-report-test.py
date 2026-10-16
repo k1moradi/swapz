@@ -316,6 +316,45 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
+    def test_exit_two_is_fail_before_loaded_stage_and_blocked_only_when_marked(self):
+        with tempfile.TemporaryDirectory(prefix="report-", dir=ROOT / "build/tests") as name:
+            original_root, original_report = runner.ROOT, runner.REPORT
+            try:
+                runner.ROOT = Path(name)
+                runner.REPORT = runner.ROOT / "build/test_results.json.xz"
+                report = {"schema": "swapz-test-results-v1", "stages": [],
+                          "benchmarks": {"sessions": [], "verdicts": {}}}
+                rootless = [
+                    "python3", "-c",
+                    "import sys; print('/private/native.c:155: FAIL: extents == 3'); sys.exit(2)",
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        runner.run_stage("Native and rootless contracts",
+                                         rootless, report), 2)
+                stage = report["stages"][-1]
+                self.assertEqual(stage["status"], "FAIL")
+                self.assertEqual(stage["failed_phase"],
+                                 "Native and rootless contracts")
+                self.assertIn("extents == 3", stage["diagnostic"])
+                self.assertNotIn("/private", stage["diagnostic"])
+                self.assertNotIn("administrator", stage["failed_phase"])
+
+                loaded = [
+                    "python3", "-c",
+                    "import sys; print('BLOCKED_LOADED_QUALIFICATION: no root'); sys.exit(2)",
+                ]
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        runner.run_stage("Owned RAM smoke and 8 pairs",
+                                         loaded, report, parse_bench=True), 2)
+                stage = report["stages"][-1]
+                self.assertEqual(stage["status"], "BLOCKED")
+                self.assertIn("administrator authorization",
+                              stage["failed_phase"])
+            finally:
+                runner.ROOT, runner.REPORT = original_root, original_report
+
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created
         # build/benchmark/ (mode 0700), then a non-root user attempted

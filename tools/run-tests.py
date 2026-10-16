@@ -87,42 +87,43 @@ def jobserver_fds():
     return fds
 
 
-def failure_context(output):
-    """Sanitized and specific; never publish raw privileged host logs.
+def failure_context(output, *, loaded=True, default_phase=None):
+    """Return a sanitized failure phase/reason without leaking host details.
 
-    The diagnostic states the last completed/started *named* phase,
-    plus a vetted failure category or scrubbed BLOCKED/FAIL reason.
-    Synthetic output and inaccessible paths are never echoed verbatim.
+    Loaded diagnostics track the last named owned-device phase. Earlier
+    build/rootless stages retain their own stage name and must never be
+    mislabeled as administrator-authorization failures.
     """
-    phase = "preflight / administrator authorization"
+    phase = default_phase or "preflight / administrator authorization"
     pair_number = 0
     regime = None
-    for line in output.splitlines():
-        if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
-            phase = "owned RAM kernel smoke"
-        elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
-            phase = "shared fixture allocation and workload generation"
-        elif line.startswith("START_OWNED_RAM_REGIME="):
-            label = line.partition("=")[2]
-            if label in MODEL_ORDER:
-                regime = label
-        elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
-            pair_number += 1
-            mode = "async" if line.rstrip().endswith("=1") else "sync"
-            where = (regime + " " if regime else "")
-            phase = f"owned RAM {where}comparison {pair_number}/8 ({mode})"
-        elif (match := re.fullmatch(
-                r"BENCH_IO_PHASE=(off|v3):(prefill|mixed|packed_read)", line)):
-            phase += f" [{match.group(1)} {match.group(2)}]"
-        elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
-            phase = f"after completed owned RAM comparison {pair_number}/8"
+    if loaded:
+        for line in output.splitlines():
+            if line.startswith("START_LOADED_OWNED_NULLBLK_SMOKE"):
+                phase = "owned RAM kernel smoke"
+            elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
+                phase = "shared fixture allocation and workload generation"
+            elif line.startswith("START_OWNED_RAM_REGIME="):
+                label = line.partition("=")[2]
+                if label in MODEL_ORDER:
+                    regime = label
+            elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
+                pair_number += 1
+                mode = "async" if line.rstrip().endswith("=1") else "sync"
+                where = (regime + " " if regime else "")
+                phase = f"owned RAM {where}comparison {pair_number}/8 ({mode})"
+            elif (match := re.fullmatch(
+                    r"BENCH_IO_PHASE=(off|v3):(prefill|mixed|packed_read)", line)):
+                phase += f" [{match.group(1)} {match.group(2)}]"
+            elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
+                phase = f"after completed owned RAM comparison {pair_number}/8"
 
-    if "BLOCKED_LOADED_QUALIFICATION" in output:
+    if loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
-    elif "QUARANTINED:" in output:
+    elif loaded and "QUARANTINED:" in output:
         reason = "Safety quarantine: owned device or swap identity could not be safely released"
-    elif any("mktemp:" in line and "Permission denied" in line
-             for line in output.splitlines()):
+    elif loaded and any("mktemp:" in line and "Permission denied" in line
+                        for line in output.splitlines()):
         reason = ("Cannot allocate the shared fixture: directory is not writable "
                   "(check build/tests permissions)")
     else:
@@ -133,11 +134,16 @@ def failure_context(output):
             candidate = line.strip()
             if candidate.startswith(("BLOCKED: ", "FAIL: ")):
                 msg = candidate.partition(": ")[2]
-                msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
+                msg = re.sub(r"(?<![A-Za-z0-9])/[^s'\"<>]+", "[path]", msg)
                 msg = re.sub(r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
                              "[id]", msg, flags=re.I)
                 msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
                 reason = f"{candidate.split(':', 1)[0]}: {msg[:155]}"
+                break
+            if ": FAIL:" in candidate:
+                msg = candidate.rsplit(": FAIL:", 1)[1].strip()
+                msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
+                reason = f"FAIL: {msg[:155]}"
                 break
             if "PermissionError:" in candidate or "Permission denied" in candidate:
                 reason = "Filesystem permissions rejected the operation"
@@ -152,10 +158,10 @@ def failure_context(output):
                 reason = "Operation exceeded its bounded timeout"
                 break
         if reason is None:
-            reason = ("Child returned nonzero; inspect the latest local owned-device "
-                      "diagnostic session under build/")
+            reason = (("Child returned nonzero; inspect the latest local owned-device "
+                       "diagnostic session under build/") if loaded else
+                      "Child returned nonzero in this non-privileged stage")
     return phase, reason
-
 
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
@@ -167,8 +173,10 @@ def run_stage(title, command, result, *, parse_bench=False):
         output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
-    status = ("PASS" if rc == 0 else
-              "BLOCKED" if rc == 2 or "BLOCKED" in output else "FAIL")
+    blocked_marker = parse_bench and any(
+        line.startswith(("BLOCKED:", "BLOCKED_LOADED_QUALIFICATION"))
+        for line in output.splitlines())
+    status = ("PASS" if rc == 0 else "BLOCKED" if blocked_marker else "FAIL")
     record = {"name": title, "status": status, "elapsed_s":
               round(time.monotonic() - start, 3), "exit_code": rc}
     if rc:
@@ -176,7 +184,9 @@ def run_stage(title, command, result, *, parse_bench=False):
         # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
-        record["failed_phase"], record["diagnostic"] = failure_context(output)
+        record["failed_phase"], record["diagnostic"] = failure_context(
+            output, loaded=parse_bench,
+            default_phase=None if parse_bench else title)
     result["stages"].append(record)
     if parse_bench:
         result["benchmarks"]["sessions"] = parse_sessions(output)
