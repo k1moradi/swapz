@@ -437,6 +437,13 @@ synthetic status contract, while the module compile job PASSED. Fix the
 parser expression rather than relaxing histogram reconciliation or
 fabricating a loaded pass. At the correction commit, full owner-loaded
 qualification remains **NOT RUN**.
+The follow-up native project-goal workflow then caught an incomplete
+rootless reporter fixture: the fake V3 mixed arm had no
+`kernel_write_path`, so the unchanged fail-closed verdict refused it.
+Populate that synthetic dictionary with the exact loaded schema and
+a conserved 2+2+1 WRITE wait histogram over five successful calls;
+keep the real loaded `INCOMPLETE` guard in place. No owner-loaded result
+exists for this diagnostic revision yet.
 
 **Interpretation boundaries:** `window_commit_wall_ns` includes
 lower-write wait time, so adding it to `lower_write_wall_ns`

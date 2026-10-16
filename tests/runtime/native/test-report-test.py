@@ -83,6 +83,17 @@ def arm(candidate, *, mode, regime):
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
         "packed_read": packed,
+        "kernel_write_path": ({
+            "physical_write_reqs": 5,
+            "lz4_wall_ns": 20000000,
+            "window_sort_wall_ns": 1000000,
+            "window_commit_wall_ns": 40000000,
+            "lower_write_wall_ns": 30000000,
+            "windows": 4,
+            "write_wait_le1ms": 2,
+            "write_wait_1to4ms": 2,
+            "write_wait_gt4ms": 1,
+        } if v3 else None),
     }
 
 
