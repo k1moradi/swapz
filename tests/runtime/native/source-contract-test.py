@@ -592,7 +592,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
         self.assertIn("ctx->next_window_close = SV3_CLOSE_UNKNOWN", flush)
         self.assertLess(flush.index("if (!count)"),
-                        flush.index("ctx->window_close_reasons[ctx->next_window_close]++"))
+                        flush.index("ctx->window_close_reasons[close_reason]++"))
         self.assertIn("ctx->window_gc_pressure++", flush)
         for cause in ("FULL", "DUPLICATE", "ZERO", "FUA", "RAW"):
             self.assertIn("SV3_CLOSE_" + cause, write)
