@@ -98,6 +98,38 @@ def arm(candidate, *, mode, regime):
     }
 
 
+
+def write_arm(candidate, *, qd, regime):
+    v3 = candidate == "v3"
+    raw = 8.0 if regime == "sd_emulated" else 20.0
+    v3_rate = raw * (0.72 + qd / 200.0)
+    logical = 4096 * 4096
+    lower = int(logical / 1.40) if v3 else logical
+    return {
+        "candidate": candidate, "verdict": "PASS",
+        "source_sha": "a" * 40,
+        "fixture_sha256": "b" * 64,
+        "trace_sha256": (f"{qd:x}" * 64)[:64],
+        "throughput_mbps": {
+            "logical_write_mbps": v3_rate if v3 else raw,
+            "lower_write_mbps": (v3_rate / 1.40) if v3 else raw,
+            "logical_read_mbps": 0.0,
+            "logical_write_bytes": logical,
+            "logical_read_bytes": 0,
+        },
+        "lower_io": {
+            "lower_write_bytes": lower,
+            "lower_write_requests": 1600 if v3 else 4096,
+            "lower_read_bytes": 0,
+            "lower_read_requests": 0,
+        },
+        "write_p99_ns": 2500000 if v3 else 1500000,
+        "seconds": 2.0,
+        "mixed_replay_cpu_user_s": .12,
+        "mixed_replay_cpu_system_s": .08,
+        "mixed_replay_peak_rss_kb": 12000,
+    }
+
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39, "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
@@ -116,6 +148,26 @@ def synthetic_log():
                 out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
+    for regime in runner.MODEL_ORDER:
+        spec = runner.MODEL_SPECS[regime]
+        out.append(f"START_WRITE_SATURATION_REGIME={regime}")
+        index = 0
+        for qd in (1, 4, 8, 32):
+            for mode in (0, 1):
+                out.append(
+                    f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
+                out.append("REPLAY_ORDER=v3-first" if index % 2 else
+                           "REPLAY_ORDER=off-first")
+                out.append(
+                    "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+                    "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
+                for candidate in (("v3", "off") if index % 2 else ("off", "v3")):
+                    out.append(json.dumps(write_arm(
+                        candidate, qd=qd, regime=regime)))
+                out.append(
+                    f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
+                index += 1
+        out.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
     return "\n".join(out) + "\n"
 
 
@@ -157,6 +209,8 @@ class ReportContract(unittest.TestCase):
             self.assertIn(gate, source)
         loaded = (ROOT / "tools/test-loaded.sh").read_text()
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
+        self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
+        self.assertIn("--write-only-qd", loaded)
         self.assertNotIn("swapon ", loaded)
         self.assertNotIn("swapoff ", loaded)
         self.assertNotIn("/dev/sdb", loaded)
@@ -181,6 +235,22 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("overlap_starts", session)
         self.assertNotIn("device_identity", json.dumps(sessions))
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
+
+    def test_write_saturation_pilot_is_separate_and_not_confirmatory(self):
+        sessions = runner.parse_write_saturation(synthetic_log())
+        self.assertEqual(len(sessions), 16)
+        verdict = runner.write_saturation_verdict(sessions)
+        self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_PILOT")
+        self.assertEqual(verdict["pairs_per_mode_qd"], 1)
+        self.assertIn("NOT_ESTABLISHED", verdict["confidence"])
+        self.assertEqual(
+            [(p["qd"], p["mode"]) for p in verdict["regimes"]["sd_emulated"]],
+            [(1, "sync"), (1, "async"), (4, "sync"), (4, "async"),
+             (8, "sync"), (8, "async"), (32, "sync"), (32, "async")])
+        broken = runner.parse_write_saturation(synthetic_log())
+        broken[0]["arms"]["off"]["logical_read_bytes"] = 4096
+        self.assertEqual(runner.write_saturation_verdict(broken)["overall"],
+                         "INCOMPLETE")
 
     def test_slow_model_gain_and_fast_model_loss_are_both_visible(self):
         data = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
@@ -240,7 +310,10 @@ class ReportContract(unittest.TestCase):
 
     def test_benchmark_table_places_units_in_metric_column_once(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
-        report = {"benchmarks": {"verdicts": verdicts}}
+        saturation = runner.write_saturation_verdict(
+            runner.parse_write_saturation(synthetic_log()))
+        report = {"benchmarks": {"verdicts": verdicts,
+                                 "write_saturation": saturation}}
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
         rendered = output.getvalue()
@@ -249,6 +322,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("One-page close reasons per-pair mean", rendered)
         self.assertIn("Deadline closure contexts per-pair mean", rendered)
         self.assertIn("4MiB random lower READ requests", rendered)
+        self.assertIn("WRITE-ONLY SATURATION PILOT", rendered)
+        self.assertIn("one pair per mode/QD", rendered)
         lines = rendered.splitlines()
         cases = (
             ("Useful WRITE throughput (MB/s)", "MB/s"),

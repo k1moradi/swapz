@@ -270,15 +270,26 @@ approximately 91.9% deadline closures (1072.5 of 1167.2; 94.8 idle).
 Therefore do not implement the proposed zero-page bypass or revive the
 rejected future-arrival admission rule.
 
-**Next bounded diagnostic:** keep the hard 2ms retention policy unchanged
-and classify every `SV3_CLOSE_DEADLINE` by the exact discovery site:
-before processing an already-admitted BIO, after a successful independent
-read, at worker end with older local BIOs still pending, or at worker end
-with no local successor. The four deltas must sum exactly to
-`close_deadline`. This distinguishes a genuinely starved finite-QD
-window from a deadline reached while already-admitted work exists, and is
-the evidence gate before changing retention duration or moving to the
-roadmap's QD1/4/8/32 write-only saturation matrix.
+**Owner-qualified deadline attribution:** exact source
+`9eafe9ea18e3228b5591276f0d516d7ae8fb36cb` passed all five owner
+stages. In SD, deadline closures were approximately 0.2 before-BIO,
+1580.2 after an independent read, 0 with worker-local successors and
+1254.5 worker-empty; in SSD they were 0.8/15.0/0/1186.5 respectively.
+Thus the 2ms deadline almost never wins while an already-admitted local
+successor is waiting. Do not extend retention from this evidence: SD's
+large after-read bucket is explained by the synthetic 1ms lower-read delay,
+while worker-empty dominates the actual no-successor boundary in both
+models.
+
+**Next bounded benchmark:** advance to a write-only saturation pilot at
+QD1/4/8/32 under both existing timer-delayed RAM models. The private
+`make test` orchestration reuses the same measured ~2KiB fixture and
+exact replay/oracle, uses 0% reads, unpaced finite waves and no packed-read
+subexperiment, and runs one sync plus one async raw/V3 pair per QD/model.
+This first pilot is directional only: one pair per point has no confidence
+interval and cannot establish a performance win. If the path and runtime
+qualify, expand to the roadmap's >=5 counterbalanced pairs per mode/regime
+before changing policy.
 
 ## Current C performance work and qualification plan
 
@@ -336,14 +347,13 @@ independent Make prerequisites; unchanged userspace outputs are reused.
 Kernel source is staged only when its bytes change, and normal,
 `W=1`, and `W=2` builds keep separate cached outputs under
 `build/kernel/{experimental,w1,w2}/`. Native production-C suites inherit
-the Make jobserver. Loaded `null_blk` correctness and the eight
-counterbalanced benchmark sessions **remain strictly sequential**.
+the Make jobserver. Loaded `null_blk` correctness, the eight mixed benchmark sessions and the sixteen write-only QD pilot sessions **remain strictly sequential**.
 Missing noninteractive privilege still yields BLOCKED, not a partial PASS.
 
 **Owner hold:** do not execute privileged installation or unowned-device
 testing. Full `make test` now executes rootless native/source checks,
 W=1/W=2 kernel compilation, an actual newly owned RAM/null_blk module
-readback smoke, then eight owned-RAM benchmark sessions (four in each of two synthetic regimes) in
+readback smoke, then eight mixed owned-RAM benchmark sessions plus sixteen write-only QD pilot sessions in
 sync/async/async/sync order. Each off/V3 comparison uses the same
 immutable logical replay, reports measured lower bytes/requests, and
 checks correct readback. The loaded phase requires root or previously

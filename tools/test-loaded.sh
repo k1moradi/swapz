@@ -43,6 +43,11 @@ cleanup_shared_plan() {
        -d $shared_plan && ! -L $shared_plan ]] || return
     rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
         "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json"
+    for qd in 1 4 8 32; do
+        rm -f -- "$shared_plan/plan-write-qd$qd/trace.jsonl" \
+            "$shared_plan/plan-write-qd$qd/manifest.json"
+        rmdir -- "$shared_plan/plan-write-qd$qd" 2>/dev/null || true
+    done
     rmdir -- "$shared_plan/plan" "$shared_plan" 2>/dev/null || true
 }
 trap cleanup_shared_plan EXIT
@@ -54,6 +59,17 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd 32 --read-pct 25 \
     --warmup-ops 1024 --measure-ops 16384 --iops 0
+# Four immutable unpaced write-only plans reuse the identical fixture and
+# logical volume. This is a bounded QD-shape pilot, not confirmatory statistics.
+for qd in 1 4 8 32; do
+    python3 -B tests/runtime/benchmark/io-replay.py prepare \
+        --fixture "$shared_plan/fixture.bin" \
+        --output-dir "$shared_plan/plan-write-qd$qd" \
+        --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+        --reader-pages 256 --qd "$qd" --read-pct 0 \
+        --warmup-ops 256 --measure-ops 4096 --iops 0
+done
+
 # Assert the representative fixture remains in the measured ~2KiB class.
 python3 -B - "$shared_plan/fixture.json" <<'PY'
 import json
@@ -98,6 +114,37 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke and eight modelled RAM-only benchmark pairs completed.' \
-    'PERFORMANCE_WIN=UNDETERMINED: review independent MB/s, p95/p99 and read/write request results.'
+# Bounded write-only saturation pilot: one sync and one async same-work pair
+# at each QD/model. This validates queue-depth direction and recurring-run
+# cost only; the roadmap's >=5 counterbalanced pairs and confidence interval
+# remain required before any confirmatory performance claim.
+for regime in sd_emulated ssd_emulated; do
+    printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
+    index=0
+    for qd in 1 4 8 32; do
+        for async_prepare in 0 1; do
+            arguments=(--run-owned-ram-pair --profile medium
+                       --retain-ms 2 --unpaced)
+            case "$regime" in
+                sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
+                ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
+                *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
+            esac
+            arguments+=(--write-only-qd "$qd")
+            if (( async_prepare )); then
+                arguments+=(--async-prepare)
+            fi
+            arguments+=(--shared-plan "$shared_plan")
+            if (( index % 2 )); then
+                arguments+=(--v3-first)
+            fi
+            printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
+            "${privileged[@]}" tools/benchmark-owned-pair.sh "${arguments[@]}"
+            printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
+            (( index += 1 ))
+        done
+    done
+    printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
+done
+
+printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, eight mixed pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: write-only pilot has one pair per mode/QD; confirmatory confidence is NOT established.'

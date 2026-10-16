@@ -16,6 +16,9 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
+WRITE_ONLY_QD=0
+READ_PCT=25
+PACKED_READ=1
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
@@ -36,6 +39,12 @@ fi
 if [[ $# -gt 1 && ${!#} == --async-prepare ]]; then
     ASYNC_PREPARE=1
     set -- "${@:1:$(( $# - 1 ))}"
+fi
+# Private write-only saturation pilot. Reject arbitrary QD before privilege.
+if [[ $# -ge 3 && ${@: -2:1} == --write-only-qd &&
+      ( ${!#} == 1 || ${!#} == 4 || ${!#} == 8 || ${!#} == 32 ) ]]; then
+    WRITE_ONLY_QD="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Exact private device-model suffixes. Never permit arbitrary device
 # settings to authorize privileged block creation.
@@ -81,6 +90,14 @@ elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
 else
     echo 'BLOCKED: explicit owned-RAM opt-in and supported profile required' >&2
     exit 2
+fi
+if (( WRITE_ONLY_QD )); then
+    QD="$WRITE_ONLY_QD"
+    WARMUP_OPS=256
+    MEASURE_OPS=4096
+    IOPS=0
+    READ_PCT=0
+    PACKED_READ=0
 fi
 if (( REPLAY_V3_FIRST )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
@@ -148,7 +165,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -369,19 +386,23 @@ done
 [[ -b /dev/mapper/$DMNAME ]] || fail 'owned DM block node missing'
 DMDEV="$(devno "/dev/mapper/$DMNAME")"
 if [[ -n $SHARED_PLAN ]]; then
+    plan_dir="$SHARED_PLAN/plan"
+    if (( WRITE_ONLY_QD )); then
+        plan_dir="$SHARED_PLAN/plan-write-qd$QD"
+    fi
     [[ $SHARED_PLAN == "$ROOT/build/tests/benchmark-plan."* &&
        -d $SHARED_PLAN && ! -L $SHARED_PLAN &&
        -f $SHARED_PLAN/fixture.bin && ! -L $SHARED_PLAN/fixture.bin &&
        -f $SHARED_PLAN/fixture.json && ! -L $SHARED_PLAN/fixture.json &&
-       -d $SHARED_PLAN/plan && ! -L $SHARED_PLAN/plan &&
-       -f $SHARED_PLAN/plan/trace.jsonl &&
-       -f $SHARED_PLAN/plan/manifest.json ]] ||
+       -d $plan_dir && ! -L $plan_dir &&
+       -f $plan_dir/trace.jsonl &&
+       -f $plan_dir/manifest.json ]] ||
         fail 'shared immutable replay plan missing or outside owned build root'
     mkdir -p "$SESSION/plan"
     cp -- "$SHARED_PLAN/fixture.bin" "$SESSION/fixture.bin"
     cp -- "$SHARED_PLAN/fixture.json" "$SESSION/fixture.json"
-    cp -- "$SHARED_PLAN/plan/trace.jsonl" "$SESSION/plan/trace.jsonl"
-    cp -- "$SHARED_PLAN/plan/manifest.json" "$SESSION/plan/manifest.json"
+    cp -- "$plan_dir/trace.jsonl" "$SESSION/plan/trace.jsonl"
+    cp -- "$plan_dir/manifest.json" "$SESSION/plan/manifest.json"
     note 'IMMUTABLE_PLAN_REUSED=1'
 else
 if [[ $PROFILE == medium ]]; then
@@ -411,10 +432,12 @@ fi
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-    --reader-pages 256 --qd "$QD" --read-pct 25 \
+    --reader-pages 256 --qd "$QD" --read-pct "$READ_PCT" \
     --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 fi
 note "V3_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
+PACKED_ARGS=()
+(( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
 replay_off() {
     timeout --signal=TERM --kill-after=5s 120s python3 -B \
         tests/runtime/benchmark/io-replay.py run \
@@ -423,7 +446,7 @@ replay_off() {
         --manifest "$SESSION/plan/manifest.json" \
         --candidate off --source-sha "$SOURCE" \
         --device "${LOWERS[0]}" --result "$SESSION/off.json" \
-         --packed-read \
+        "${PACKED_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[0]}" \
         --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}" ||
         fail 'uncompressed replay rejected'
@@ -436,7 +459,7 @@ replay_v3() {
         --manifest "$SESSION/plan/manifest.json" \
         --candidate v3 --source-sha "$SOURCE" \
         --device "/dev/mapper/$DMNAME" --result "$SESSION/v3.json" \
-         --packed-read \
+        "${PACKED_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[1]}" \
         --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
         --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
@@ -452,7 +475,7 @@ else
 fi
 v3_status_after="$(dmsetup status "$DMNAME")"
 note "V3_STATUS_AFTER=$v3_status_after"
-if (( ASYNC_PREPARE )); then
+if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
     if [[ "$v3_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
         (( ${BASH_REMATCH[1]} > 0 )) ||
             fail 'async preparation never started while lower WRITE was active'

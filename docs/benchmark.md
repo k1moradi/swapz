@@ -681,15 +681,25 @@ companion design also fails: random companion hits 44.0/44.0 SD and
 materially different workload supplies new evidence. Their diagnostic
 fields are intentionally retired after this owner-qualified decision.
 
-**Deadline attribution probe (NOT YET OWNER-LOADED):** do not change
-`retain_ms=2`. Every deadline closure must increment exactly one of
-`deadline_before_bio`, `deadline_after_read`,
-`deadline_worker_with_local`, or `deadline_worker_empty`. Their timed
-status deltas must sum exactly to `close_deadline`; a mismatch makes the
-matrix INCOMPLETE. The terminal report prints nonzero contexts per regime.
-This probe changes no timer, admission, publication, I/O or completion
-behavior. It decides whether to study a longer retention bound or proceed
-directly to the separate QD1/4/8/32 write-only saturation matrix.
+**Owner deadline result:** exact source
+`9eafe9ea18e3228b5591276f0d516d7ae8fb36cb` passed the full owner
+matrix. Worker-local deadline closures were zero in both models; before-BIO
+was effectively zero; worker-empty dominated SSD and was large on SD.
+SD's remaining large after-read bucket occurs under the synthetic 1ms
+lower-request delay. This does not justify a longer retention deadline.
+
+**Write-only QD pilot (NOT YET OWNER-LOADED):** the official `make test`
+loaded phase now adds QD1/4/8/32, 0%-read, unpaced write-only traces for
+both existing timer-delayed RAM models. Each point runs exactly one sync
+and one async raw/V3 pair with alternating arm order, 256 warmup writes and
+4096 measured writes. The ordinary full-image oracle and independent lower
+I/O counters remain mandatory; packed-read population is omitted. Report
+useful WRITE MB/s, logical/lower byte ratio, lower WRITE requests and
+WRITE p99 for every point. The result is
+`PASS_WRITE_SATURATION_PILOT` only when all sixteen pairs are present and
+same-source/model/fixture checks pass. One pair per point is explicitly
+`NOT_ESTABLISHED_ONE_PAIR_PER_MODE_QD`; it is not the >=5-pair
+confirmatory matrix and cannot establish a material gain.
 
 **Singleton attribution:** add a joint counter for each primary
 `SV3_CLOSE_*` reason when `count == 1`. The sum must equal

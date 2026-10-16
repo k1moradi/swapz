@@ -266,12 +266,19 @@ are still planned.
       one-page windows closed at deadline, with no material zero/RAW/read
       closure signal. Reject the proposed zero-page bypass from this
       workload and do not infer a future-arrival admission change.
-      Next, keep the 2ms policy unchanged and classify every deadline close
-      by discovery site: before an already-admitted BIO, after an independent
-      read, worker end with local work pending, or worker end empty. Require
-      exact conservation against `close_deadline`. Use that evidence before
-      any retention-duration change, then advance to the planned QD1/4/8/32
-      write-only saturation characterization.
+      Owner-loaded `9eafe9ea` passes all five stages and closes the
+      retention-duration branch for the current workload. Deadline contexts
+      were SD 0.2 before-BIO / 1580.2 after-read / 0 worker-local /
+      1254.5 worker-empty, and SSD 0.8 / 15.0 / 0 / 1186.5. No meaningful
+      population has an already-admitted local successor when the hard
+      deadline fires, so extending 2ms is not justified.
+      Next, run a bounded write-only saturation pilot at QD1/4/8/32 under
+      both existing capped/timer models. Reuse the immutable medium fixture,
+      0% reads, unpaced finite waves and exact final oracle; omit packed-read
+      work. Run one sync and one async raw/V3 pair per QD/model to establish
+      direction and recurring runtime only. Keep the roadmap item open until
+      >=5 counterbalanced pairs per mode/regime and confidence intervals are
+      implemented.
       New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.

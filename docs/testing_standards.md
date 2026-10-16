@@ -345,6 +345,18 @@ conservation case and a mismatched failure case. These counters are
 diagnostic-only and must not move or extend the absolute retention
 deadline.
 
+Owner-loaded `9eafe9ea` then showed zero worker-local deadline closures
+in both modeled regimes, effectively zero before-BIO closures, and
+worker-empty dominance; a longer retention interval is therefore not
+authorized by this workload. The next write-only pilot must remain under
+the one official `make test` command and may use only owned RAM-backed
+`null_blk`. It must generate exact QD1/4/8/32 immutable 0%-read traces,
+run sync and async raw/V3 pairs separately under both existing model
+tuples, omit packed-read work, preserve the ordinary final-image oracle,
+and publish independent lower WRITE bytes/requests plus WRITE p99. The
+pilot has one pair per mode/QD and must label confidence NOT ESTABLISHED;
+the existing >=5-pair confirmatory requirement remains open.
+
 For WRITE closure analysis, the status/report layer must carry all sixteen
 `window_close_reasons` deltas and fail closed unless their sum equals
 `windows`. For singleton analysis, `sv3_flush_window()` must increment

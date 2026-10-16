@@ -85,6 +85,25 @@ class V3ProductionSourceQualification(unittest.TestCase):
             "[`kernel/extent-v3/VERSION`](kernel/extent-v3/VERSION)", README)
         self.assertIn("single source of truth", README)
 
+    def test_write_saturation_pilot_stays_private_bounded_and_write_only(self):
+        loaded = (ROOT / "tools/test-loaded.sh").read_text()
+        pair = (ROOT / "tools/benchmark-owned-pair.sh").read_text()
+        reporter = (ROOT / "tools/run-tests.py").read_text()
+        for qd in ("1", "4", "8", "32"):
+            self.assertIn("for qd in 1 4 8 32", loaded)
+        self.assertIn("--read-pct 0", loaded)
+        self.assertIn("--write-only-qd", loaded)
+        self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
+        self.assertIn("PASS_WRITE_SATURATION_PAIR_QD=", loaded)
+        self.assertIn("WRITE_ONLY_QD=0", pair)
+        self.assertIn("READ_PCT=0", pair)
+        self.assertIn("PACKED_READ=0", pair)
+        self.assertIn("ASYNC_PREPARE && !WRITE_ONLY_QD", pair)
+        self.assertIn("def parse_write_saturation", reporter)
+        self.assertIn("PASS_WRITE_SATURATION_PILOT", reporter)
+        self.assertIn("NOT_ESTABLISHED_ONE_PAIR_PER_MODE_QD", reporter)
+
+
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
         accept = body("sv3_accept_write")
         status = body("sv3_status")

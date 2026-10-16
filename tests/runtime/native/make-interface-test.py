@@ -217,6 +217,35 @@ class PublicMakeContract(unittest.TestCase):
                         "lower_read_requests": 4
                     }
                 }, sort_keys=True)
+            def mock_write_arm(candidate, qd):
+                is_v3 = candidate == "v3"
+                logical = 4096 * 4096
+                lower = int(logical / 1.4) if is_v3 else logical
+                return json.dumps({
+                    "candidate": candidate, "verdict": "PASS",
+                    "source_sha": mocked_source_sha,
+                    "fixture_sha256": "fake-fixture",
+                    "trace_sha256": ("f" * 60) + f"{qd:04x}",
+                    "write_p99_ns": 3000000,
+                    "seconds": 2,
+                    "mixed_replay_cpu_user_s": 0.12,
+                    "mixed_replay_cpu_system_s": 0.08,
+                    "mixed_replay_peak_rss_kb": 10000,
+                    "throughput_mbps": {
+                        "logical_write_mbps": 20 if is_v3 else 14,
+                        "lower_write_mbps": 12 if is_v3 else 14,
+                        "logical_read_mbps": 0,
+                        "logical_read_bytes": 0,
+                        "logical_write_bytes": logical,
+                    },
+                    "lower_io": {
+                        "lower_write_bytes": lower,
+                        "lower_read_bytes": 0,
+                        "lower_write_requests": 5 if is_v3 else 8,
+                        "lower_read_requests": 0,
+                    },
+                }, sort_keys=True)
+
             records = []
             specs = (("sd_emulated", 10, 1000000, 2),
                      ("ssd_emulated", 80, 150000, 2))
@@ -234,6 +263,21 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
+            for regime, cap, ns, irq in specs:
+                records.append(f"START_WRITE_SATURATION_REGIME={regime}")
+                index = 0
+                for qd in (1, 4, 8, 32):
+                    for mode in (0, 1):
+                        records.extend((
+                            f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
+                            "REPLAY_ORDER=v3-first" if index % 2 else "REPLAY_ORDER=off-first",
+                            f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
+                            mock_write_arm("v3", qd) if index % 2 else mock_write_arm("off", qd),
+                            mock_write_arm("off", qd) if index % 2 else mock_write_arm("v3", qd),
+                            f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
+                        ))
+                        index += 1
+                records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"
@@ -332,7 +376,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertLess(reporter.index('"Native and rootless contracts"'),
                         reporter.index('"Kernel warnings W=1"'))
         self.assertLess(reporter.index('"Kernel warnings W=2"'),
-                        reporter.index('"Owned RAM smoke and 8 pairs"'))
+                        reporter.index('"Owned RAM smoke + mixed/QD pilot"'))
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
         loaded = (ROOT / "tools/test-loaded.sh").read_text()
@@ -346,6 +390,9 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("--async-prepare", loaded)
         self.assertIn("for async_prepare in 0 1 1 0", loaded)
+        self.assertIn("for qd in 1 4 8 32", loaded)
+        self.assertIn("--write-only-qd", loaded)
+        self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
         self.assertLess(loaded.index("tools/deploy-nullblk.sh"),
                         loaded.index("tools/benchmark-owned-pair.sh"))
         self.assertNotIn("swapon ", loaded)

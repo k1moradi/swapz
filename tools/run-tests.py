@@ -224,6 +224,9 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["sessions"] = parse_sessions(output)
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])
+        result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
+        result["benchmarks"]["write_saturation"] = write_saturation_verdict(
+            result["benchmarks"]["write_saturation_sessions"])
     print(f"  {len(result['stages']):>2}/5  {title:<29} "
           f"{status:<8} {record['elapsed_s']:>8.2f}s", flush=True)
     if rc and "diagnostic" in record:
@@ -239,6 +242,8 @@ def parse_sessions(output):
         line = line.strip()
         if line.startswith("START_OWNED_RAM_REGIME="):
             regime = line.partition("=")[2]
+        elif line.startswith("START_WRITE_SATURATION_REGIME="):
+            current = None
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current = {"async_prepare": int(line.rsplit("=", 1)[-1]),
                        "regime": regime, "status": "INCOMPLETE", "arms": {},
@@ -350,6 +355,160 @@ def parse_sessions(output):
                     current["trace_sha256"] = obj["trace_sha256"]
     return sessions
 
+
+
+def parse_write_saturation(output):
+    """Parse only the bounded write-only QD pilot; never mix it into QD32."""
+    sessions, current, regime = [], None, None
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("START_WRITE_SATURATION_REGIME="):
+            regime = line.partition("=")[2]
+            current = None
+        elif line.startswith("START_WRITE_SATURATION_PAIR_QD="):
+            match = re.fullmatch(
+                r"START_WRITE_SATURATION_PAIR_QD=(1|4|8|32) ASYNC_PREPARE=([01])",
+                line)
+            if not match:
+                continue
+            current = {
+                "regime": regime, "qd": int(match.group(1)),
+                "async_prepare": int(match.group(2)),
+                "status": "INCOMPLETE", "order": "unknown",
+                "device_model": None, "arms": {},
+            }
+            sessions.append(current)
+        elif current is not None and line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            match = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+)",
+                line)
+            if match:
+                current["device_model"] = {
+                    "cap_mib_s": int(match.group(1)),
+                    "completion_nsec": int(match.group(2)),
+                    "irqmode": int(match.group(3)),
+                }
+        elif current is not None and line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") not in ("off", "v3") or obj.get("verdict") != "PASS":
+                continue
+            candidate = obj["candidate"]
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            current["arms"][candidate] = {
+                "input_write_mbps": rates.get("logical_write_mbps"),
+                "output_lower_write_mbps": rates.get("lower_write_mbps"),
+                "logical_write_bytes": rates.get("logical_write_bytes"),
+                "logical_read_bytes": rates.get("logical_read_bytes"),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "lower_read_bytes": lower.get("lower_read_bytes"),
+                "lower_read_requests": lower.get("lower_read_requests"),
+                "write_p99_ms": obj.get("write_p99_ns", 0) / 1e6,
+                "seconds": obj.get("seconds"),
+                "cpu_user_s": obj.get("mixed_replay_cpu_user_s"),
+                "cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
+                "peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
+            }
+            for field in ("source_sha", "fixture_sha256", "trace_sha256"):
+                if obj.get(field):
+                    current[field] = obj[field]
+        elif current is not None and line.startswith("PASS_WRITE_SATURATION_PAIR_QD="):
+            match = re.fullmatch(
+                r"PASS_WRITE_SATURATION_PAIR_QD=(1|4|8|32) ASYNC_PREPARE=([01])",
+                line)
+            if match and int(match.group(1)) == current["qd"] and \
+                    int(match.group(2)) == current["async_prepare"]:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def write_saturation_verdict(sessions):
+    """Validate the one-pair-per-point pilot without claiming confidence."""
+    expected_shape = [(qd, mode) for qd in (1, 4, 8, 32) for mode in (0, 1)]
+    regimes = {}
+    for regime in MODEL_ORDER:
+        rows = [row for row in sessions if row.get("regime") == regime]
+        shape = [(row.get("qd"), row.get("async_prepare")) for row in rows]
+        if shape != expected_shape:
+            return {"overall": "INCOMPLETE",
+                    "reason": f"{regime}: QD1/4/8/32 sync+async pilot required"}
+        expected = MODEL_SPECS[regime]
+        for index, row in enumerate(rows):
+            if row.get("status") != "PASS" or set(row.get("arms", {})) != {"off", "v3"}:
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: incomplete write-only pair"}
+            if row.get("order") != ("v3-first" if index % 2 else "off-first"):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: write-only replay order mismatch"}
+            model = row.get("device_model")
+            if not isinstance(model, dict) or any(
+                    model.get(key) != expected[key]
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode")):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: write-only device model mismatch"}
+            for arm in row["arms"].values():
+                required = ("input_write_mbps", "output_lower_write_mbps",
+                            "logical_write_bytes", "logical_read_bytes",
+                            "lower_write_bytes", "lower_write_requests",
+                            "write_p99_ms", "seconds")
+                if any(not isinstance(arm.get(key), (int, float)) for key in required):
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: write-only metrics missing"}
+                if arm["logical_read_bytes"] != 0:
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: write-only trace contained logical reads"}
+                if arm["logical_write_bytes"] <= 0 or arm["lower_write_bytes"] <= 0:
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: write-only byte accounting invalid"}
+            if not re.fullmatch(r"[0-9a-f]{40}", row.get("source_sha", "")):
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: write-only source SHA unavailable"}
+        regimes[regime] = rows
+    if len(sessions) != len(MODEL_ORDER) * 8:
+        return {"overall": "INCOMPLETE",
+                "reason": "exactly sixteen write-only pilot pairs required"}
+    if len({row["source_sha"] for row in sessions}) != 1 or \
+            len({row.get("fixture_sha256") for row in sessions}) != 1:
+        return {"overall": "INCONCLUSIVE",
+                "reason": "write-only source/fixture differs across pilot"}
+    for regime, rows in regimes.items():
+        for qd in (1, 4, 8, 32):
+            traces = {row.get("trace_sha256") for row in rows if row["qd"] == qd}
+            if None in traces or len(traces) != 1:
+                return {"overall": "INCONCLUSIVE",
+                        "reason": f"{regime}: QD{qd} write-only trace mismatch"}
+    return {
+        "overall": "PASS_WRITE_SATURATION_PILOT",
+        "pairs_per_mode_qd": 1,
+        "confidence": "NOT_ESTABLISHED_ONE_PAIR_PER_MODE_QD",
+        "regimes": {
+            regime: [{
+                "qd": row["qd"],
+                "mode": "async" if row["async_prepare"] else "sync",
+                "raw_write_mbps": row["arms"]["off"]["input_write_mbps"],
+                "v3_write_mbps": row["arms"]["v3"]["input_write_mbps"],
+                "v3_to_raw_write_ratio": (
+                    row["arms"]["v3"]["input_write_mbps"] /
+                    row["arms"]["off"]["input_write_mbps"]),
+                "v3_logical_to_lower_ratio": (
+                    row["arms"]["v3"]["logical_write_bytes"] /
+                    row["arms"]["v3"]["lower_write_bytes"]),
+                "raw_lower_write_requests": row["arms"]["off"]["lower_write_requests"],
+                "v3_lower_write_requests": row["arms"]["v3"]["lower_write_requests"],
+                "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
+                "v3_write_p99_ms": row["arms"]["v3"]["write_p99_ms"],
+            } for row in rows]
+            for regime, rows in regimes.items()
+        },
+        "interpretation": "SYNTHETIC_RAM_QD_DIRECTION_ONLY_NOT_CONFIRMATORY",
+    }
 
 def mean(items, key):
     vals = [arm[key] for arm in items if isinstance(arm.get(key), (int, float))]
@@ -587,7 +746,7 @@ def benchmark_verdicts(sessions):
                             "accepted_burst_cap3_recovered_blocks",
                             "accepted_burst_cap3_full_recovery_windows",
                             "windows",
-                            "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS + DEADLINE_CONTEXT_FIELDS
+                            "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
             },
         }
     return {
@@ -716,6 +875,31 @@ def print_bench(result):
           "Two pairs per mode, no confidence interval; replay CPU"
           " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
           "live GC NOT EXERCISED.")
+
+    saturation = result["benchmarks"].get("write_saturation", {})
+    if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT":
+        print("\n  WRITE-ONLY SATURATION PILOT — one pair per mode/QD; NOT confirmatory")
+        for regime in MODEL_ORDER:
+            cfg = MODEL_SPECS[regime]
+            print(f"  {regime.upper()} cap={cfg['cap_mib_s']} MiB/s "
+                  f"completion={cfg['completion_nsec']} ns")
+            print("  QD  mode    raw MB/s    V3 MB/s   V3/raw  logical/lower  "
+                  "raw reqs  V3 reqs  raw p99ms  V3 p99ms")
+            for point in saturation["regimes"][regime]:
+                print(f"  {point['qd']:>2}  {point['mode']:<5} "
+                      f"{point['raw_write_mbps']:>10.2f} "
+                      f"{point['v3_write_mbps']:>10.2f} "
+                      f"{point['v3_to_raw_write_ratio']:>8.3f} "
+                      f"{point['v3_logical_to_lower_ratio']:>14.3f} "
+                      f"{point['raw_lower_write_requests']:>9.0f} "
+                      f"{point['v3_lower_write_requests']:>8.0f} "
+                      f"{point['raw_write_p99_ms']:>10.2f} "
+                      f"{point['v3_write_p99_ms']:>9.2f}")
+        print("  PILOT LIMITATION: one pair per mode/QD; no confidence interval "
+              "and no confirmatory performance verdict.")
+    else:
+        print("\n  Write-only saturation pilot: NOT QUALIFIED "
+              f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")
 
 
 
@@ -873,7 +1057,9 @@ def main():
         "kernel_release": os.uname().release,
         "qualification": "RAM_BACKED_NULL_BLK_ONLY",
         "stages": [],
-        "benchmarks": {"sessions": [], "verdicts": {"overall": "NOT_RUN"}},
+        "benchmarks": {"sessions": [], "verdicts": {"overall": "NOT_RUN"},
+                       "write_saturation_sessions": [],
+                       "write_saturation": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
     }
     REPORT.parent.mkdir(parents=True, exist_ok=True)
@@ -887,7 +1073,7 @@ def main():
                                  f"KDIR={args.kdir}", "W=1", "all"]),
         ("Kernel warnings W=2", ["make", "-C", "kernel/extent-v3",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
-        ("Owned RAM smoke and 8 pairs", ["bash", "tools/test-loaded.sh"])
+        ("Owned RAM smoke + mixed/QD pilot", ["bash", "tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):
@@ -908,7 +1094,15 @@ def main():
                    for session in result["benchmarks"]["sessions"]):
                 benchmark["overall"] = "INCONCLUSIVE"
                 benchmark["reason"] = "Loaded benchmark source Git ID mismatched tested checkout"
-        if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
+        saturation = result["benchmarks"]["write_saturation"]
+        if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT" and \
+                re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
+            if any(session.get("source_sha") != result["tested_commit_sha"]
+                   for session in result["benchmarks"]["write_saturation_sessions"]):
+                saturation["overall"] = "INCONCLUSIVE"
+                saturation["reason"] = "Write-only pilot source Git ID mismatched tested checkout"
+        if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
+                saturation.get("overall") != "PASS_WRITE_SATURATION_PILOT":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)
