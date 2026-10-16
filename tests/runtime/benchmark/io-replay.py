@@ -467,6 +467,7 @@ def packed_closes(path, identity):
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
+                      "read_meta_lru_hits",
                       "read_shadow_hits_4", "read_shadow_hits_16",
                       "read_shadow_hits_64",
                       "read_full_extent_reqs", "read_full_cache_hits",
@@ -505,6 +506,8 @@ def kernel_read_delta(before, after):
             counters["read_full_extent_reqs"] +
             counters["read_two_block_skips"] > counters["read_meta_reqs"] or
             counters["read_full_cache_hits"] > counters["read_meta_cache_hits"] or
+            counters["read_meta_cache_hits"] +
+            counters["read_meta_lru_hits"] > counters["read_shadow_hits_64"] or
             counters["read_meta_cache_hits"] > counters["read_shadow_hits_4"] or
             counters["read_shadow_hits_4"] > counters["read_shadow_hits_16"] or
             counters["read_shadow_hits_16"] > counters["read_shadow_hits_64"]):

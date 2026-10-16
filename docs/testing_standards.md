@@ -335,8 +335,12 @@ corrupt read must not insert/touch a slot or increment the successful LRU
 hit counter. Exact-C tests must prove a reuse distance beyond one entry
 saves a real lower metadata read, explicit invalidation restores the lower
 read, and an overwrite cannot return an old generation. Status and report
-contracts must carry the successful LRU-hit counter and reject
-`one_entry_hits + lru_hits > shadow64`.
+contracts must carry the successful `read_meta_lru_hits` counter through
+the timed snapshot/delta, sanitized per-pass schema and final matrix, and
+reject `one_entry_hits + lru_hits > shadow64`. The final human-readable
+table must also expose independent lower READ requests for both fixed 4MiB
+passes; C metadata/payload callback counts cannot substitute for those
+device counters.
 
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned

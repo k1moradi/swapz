@@ -194,6 +194,7 @@ class PublicMakeContract(unittest.TestCase):
                                     "lower_read_wall_ns": 120000000,
                                     "decode_wall_ns": 20000000,
                                     "read_meta_cache_hits": 128,
+                    "read_meta_lru_hits": 100,
                     "read_shadow_hits_4": 160,
                     "read_shadow_hits_16": 240,
                     "read_shadow_hits_64": 300,

@@ -637,7 +637,12 @@ bytes (thresholds 6,465,228.8 / 6,459,392 SD and
 6,371,840 / 6,332,928 SSD), while random time/p99 and useful WRITE do
 not regress by more than 5%. Two pairs remain preliminary evidence.
 A cache hit is not itself a byte/request claim; independent lower-device
-deltas are decisive.
+deltas are decisive. The timed-read report must carry
+`read_meta_lru_hits` separately from the existing one-entry hit counter,
+and fail closed if `one_entry_hits + lru_hits > shadow64`. The terminal
+matrix also prints independent lower READ request counts for the
+sequential and seeded-random 4MiB passes next to the byte totals; those
+device deltas, not C callback counters, are the request-level evidence.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

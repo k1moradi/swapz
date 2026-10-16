@@ -47,6 +47,7 @@ def arm(candidate, *, mode, regime):
                     "lower_read_wall_ns": 120000000,
                     "decode_wall_ns": 20000000,
                     "read_meta_cache_hits": 128,
+                    "read_meta_lru_hits": 100,
                     "read_shadow_hits_4": 160,
                     "read_shadow_hits_16": 240,
                     "read_shadow_hits_64": 300,
@@ -209,6 +210,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_reqs"], 1024)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_payload_reqs"], 512)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_cache_hits"], 128)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_lru_hits"], 100)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_4"], 160)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_16"], 240)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_shadow_hits_64"], 300)
@@ -241,7 +243,9 @@ class ReportContract(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
         rendered = output.getvalue()
+        self.assertIn("LRU64 reused=", rendered)
         self.assertIn("shadow metadata LRU hits", rendered)
+        self.assertIn("4MiB random lower READ requests", rendered)
         lines = rendered.splitlines()
         cases = (
             ("Useful WRITE throughput (MB/s)", "MB/s"),
@@ -319,6 +323,14 @@ class ReportContract(unittest.TestCase):
         path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
             "kernel_read_path"]
         path["read_shadow_hits_16"] = path["read_shadow_hits_64"] + 1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        path = sessions[0]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+            "kernel_read_path"]
+        path["read_meta_lru_hits"] = (
+            path["read_shadow_hits_64"] - path["read_meta_cache_hits"] + 1)
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 

@@ -28,6 +28,7 @@ MODEL_ORDER = tuple(MODEL_SPECS)
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
                       "decode_wall_ns", "read_meta_cache_hits",
+                      "read_meta_lru_hits",
                       "read_shadow_hits_4", "read_shadow_hits_16",
                       "read_shadow_hits_64",
                       "read_full_extent_reqs", "read_full_cache_hits",
@@ -465,6 +466,8 @@ def benchmark_verdicts(sessions):
                     item["read_p99_ms"] for item in reads)
                 columns[name][f"{mode}_lower_read_bytes"] = statistics.mean(
                     item["lower_read_bytes"] for item in reads)
+                columns[name][f"{mode}_lower_read_requests"] = statistics.mean(
+                    item["lower_read_requests"] for item in reads)
                 if name != "off":
                     diagnostics = [item.get("kernel_read_path") for item in reads]
                     if any(not isinstance(record, dict) or
@@ -473,7 +476,9 @@ def benchmark_verdicts(sessions):
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
                                 "reason": f"{regime}: missing measured V3 {mode} C read counters"}
-                    if any(record["read_meta_cache_hits"] > record["read_shadow_hits_4"] or
+                    if any(record["read_meta_cache_hits"] +
+                           record["read_meta_lru_hits"] > record["read_shadow_hits_64"] or
+                           record["read_meta_cache_hits"] > record["read_shadow_hits_4"] or
                            record["read_shadow_hits_4"] > record["read_shadow_hits_16"] or
                            record["read_shadow_hits_16"] > record["read_shadow_hits_64"]
                            for record in diagnostics):
@@ -592,6 +597,8 @@ def print_bench(result):
             ("Packed random READ p99 (ms)", "seeded_random_read_p99_ms"),
             ("4MiB sequential lower READ (bytes)", "sequential_lower_read_bytes"),
             ("4MiB random lower READ (bytes)", "seeded_random_lower_read_bytes"),
+            ("4MiB sequential lower READ requests", "sequential_lower_read_requests"),
+            ("4MiB random lower READ requests", "seeded_random_lower_read_requests"),
             ("Replay process CPU user (s)", "mixed_replay_cpu_user_s"),
             ("Replay process CPU system (s)", "mixed_replay_cpu_system_s"),
             ("Replay process peak RSS (KiB)", "mixed_replay_peak_rss_kb"),
@@ -612,6 +619,8 @@ def print_bench(result):
                   f"{asynchronous[f'{read_mode}_read_payload_reqs']:.1f}, "
                   f"metadata reused={sync[f'{read_mode}_read_meta_cache_hits']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_meta_cache_hits']:.1f}, "
+                  f"LRU64 reused={sync[f'{read_mode}_read_meta_lru_hits']:.1f}/"
+                  f"{asynchronous[f'{read_mode}_read_meta_lru_hits']:.1f}, "
                   f"full 8KiB fetch={sync[f'{read_mode}_read_full_extent_reqs']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_full_extent_reqs']:.1f}, "
                   f"full reuse={sync[f'{read_mode}_read_full_cache_hits']:.1f}/"
