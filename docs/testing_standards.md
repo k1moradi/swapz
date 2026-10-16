@@ -351,8 +351,11 @@ by `sv3_engine_invalidate_read_cache()`. Required blocks are block zero
 plus payload-intersecting blocks; contiguous misses count as one predicted
 lower callback. Tests must prove a cold two-block record is two misses/one
 predicted request, repeated access is hits/no new request, and invalidation
-restores misses. Reporter contracts require predicted requests <= predicted
-miss blocks.
+restores misses. For a full simulated cache with a mixed hit/miss read,
+all required resident hits must be refreshed before miss insertion so the
+same read cannot evict a block it already found resident; exact-C coverage
+must pin this case. Reporter contracts require predicted requests <=
+predicted miss blocks.
 
 Do not repurpose `raw_crc32c` for a compressed fast path without an
 explicit integrity-contract change. Raw pages have no on-media metadata;

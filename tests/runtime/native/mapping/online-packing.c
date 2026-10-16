@@ -437,6 +437,38 @@ static int test_block_lru64_shadow_counts_blocks_and_runs_only(void)
 				   sizeof(output), &length) == 0);
 	CHECK(engine.read_block_shadow_misses == miss0 + 4);
 	CHECK(engine.read_block_shadow_requests == req0 + 2);
+
+	/*
+	 * Full-cache mixed hit/miss: make required block one the oldest resident
+	 * slot while block zero is absent. The logical read must pin/touch that
+	 * hit before inserting block zero, so both required identities survive.
+	 */
+	for (i = 0; i < SV3_READ_BLOCK_SHADOW_ENTRIES; ++i) {
+		engine.read_block_shadow_valid[i] = 1;
+		engine.read_block_shadow_blocks[i] = 100000U + i;
+		engine.read_block_shadow_ages[i] = i + 2U;
+	}
+	engine.read_block_shadow_blocks[0] =
+		maps[target].start_block + 1U;
+	engine.read_block_shadow_ages[0] = 1U;
+	engine.read_block_shadow_clock = SV3_READ_BLOCK_SHADOW_ENTRIES + 1U;
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	{
+		int have_metadata = 0, have_payload = 0;
+
+		for (i = 0; i < SV3_READ_BLOCK_SHADOW_ENTRIES; ++i) {
+			if (engine.read_block_shadow_valid[i] &&
+			    engine.read_block_shadow_blocks[i] ==
+				maps[target].start_block)
+				have_metadata = 1;
+			if (engine.read_block_shadow_valid[i] &&
+			    engine.read_block_shadow_blocks[i] ==
+				maps[target].start_block + 1U)
+				have_payload = 1;
+		}
+		CHECK(have_metadata && have_payload);
+	}
 	return 0;
 }
 

@@ -390,12 +390,21 @@ static void sv3_read_block_shadow_commit(struct sv3_engine *engine,
 			previous_miss = rel;
 		}
 	}
-	/* Metadata first, then payload blocks in physical order. This fixed
-	 * ordering makes replacement deterministic for a multi-block read. */
+	/*
+	 * A real multi-block cache lookup resolves/pins every required hit before
+	 * admitting miss data. Mirror that lifecycle: refresh all pre-existing
+	 * hits first so inserting a required miss cannot evict another block the
+	 * same logical read already proved resident. Then insert misses in
+	 * physical order. Counts above remain an atomic view of this read.
+	 */
 	for (rel = 0; rel < observed->extent_blocks; ++rel)
-		if (needed[rel])
+		if (needed[rel] && slots[rel] >= 0)
 			sv3_read_block_shadow_touch(engine,
 				observed->start_block + rel, slots[rel]);
+	for (rel = 0; rel < observed->extent_blocks; ++rel)
+		if (needed[rel] && slots[rel] < 0)
+			sv3_read_block_shadow_touch(engine,
+				observed->start_block + rel, -1);
 }
 
 void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
