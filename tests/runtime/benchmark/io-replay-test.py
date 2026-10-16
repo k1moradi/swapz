@@ -132,6 +132,44 @@ class PairReplayContract(unittest.TestCase):
                 module.kernel_read_snapshot(
                     Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"})
 
+    def test_mixed_v3_write_wait_telemetry_is_time_bracketed_and_fail_closed(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location("swapz_write_metrics", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertIsNone(module.kernel_write_snapshot(
+            Path("/tmp/not-used"), {"dm_uuid": None}))
+        self.assertIsNone(module.kernel_write_delta(None, None))
+        before = dict(zip(module.KERNEL_WRITE_FIELDS,
+                          (2, 100, 20, 400, 300, 1, 1, 1, 0)))
+        after = dict(zip(module.KERNEL_WRITE_FIELDS,
+                         (7, 50100, 1020, 70400, 60300, 4, 3, 3, 1)))
+        fake = subprocess.CompletedProcess(
+            ["dmsetup"], 0, stdout="0 8192 swapz " +
+            " ".join(f"{key}={value}" for key, value in before.items()))
+        with patch.object(module.subprocess, "run", return_value=fake):
+            self.assertEqual(module.kernel_write_snapshot(
+                Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"}), before)
+        delta = module.kernel_write_delta(before, after)
+        self.assertEqual(delta["physical_write_reqs"], 5)
+        self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
+                         [2, 2, 1])
+        self.assertEqual(delta["lower_write_wall_ns"], 60000)
+        with self.assertRaisesRegex(ValueError, "reset"):
+            module.kernel_write_delta(after, before)
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_write_delta(
+                before, dict(after, write_wait_gt4ms=2))
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            module.kernel_write_delta(None, after)
+        with patch.object(module.subprocess, "run",
+                          return_value=subprocess.CompletedProcess(
+                              ["dmsetup"], 0, stdout="0 8192 swapz physical_write_reqs=1")):
+            with self.assertRaisesRegex(ValueError, "missing"):
+                module.kernel_write_snapshot(
+                    Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"})
+
     def test_pair_exact_bytes_and_ordered_wave_oracle(self):
         for layout in ("disjoint", "same-region"):
             with self.subTest(layout=layout), tempfile.TemporaryDirectory() as temp:

@@ -42,6 +42,17 @@ grew to ~8.10MiB versus raw 4MiB. SD-model sequential improved
 to 0.57s against 0.39s raw and random 1.16s against 0.40s;
 WRITE remained 4.61/4.66 MB/s against 7.85 raw. Successful 8KiB
 prefetch is therefore NOT a three-axis performance win.
+The owner has now run all five stages on report-only
+`71f54532d9ab167d7f0842247c4609f1b6fd4951` with
+exact code `b848304aff321e738b5be50177143ba8797d7c32`
+(latest result-only publication `b481256360f8`).
+Loaded stage 194.96s PASS, eight pairs. SD model random 4MiB
+READ ~6.81MiB lower traffic and ~1.16s completion versus raw
+4MiB / ~0.40s; compared with ~8.11MiB before the offset hint.
+SSD model random ~6.80MiB and ~0.26s versus raw 4MiB / ~0.26s.
+The 4KiB skipping works (about 320 cold skips per random pass),
+but no established swap-in latency improvement or useful SD WRITE
+speedup resulted from this code revision.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -121,10 +132,21 @@ are still planned.
       cold 8KiB extent where the target payload fits wholly in block
       zero, skip the speculative second block **without adding a lower
       request**. Other packed 8KiB reads preserve one-request prefetch.
-      The change is **NOT YET OWNER-LOADED**. Measure skipped second
-      blocks, independently observed READ bytes/requests, fixed-volume
-      latency/p99, WRITE throughput and errors at exact new HEAD. No
-      medium-specific policy or new public test target is permitted.
+      Owner-loaded `b848304` code (report-only tested HEAD
+      `71f5453`, sanitized report `b481256`) confirms ~320 skip
+      callbacks and ~1.31MiB less random READ traffic per 4MiB
+      compared with `35fb224`, but SD-model random still requires
+      ~1.16s and SD useful WRITE still 4.61/4.66 MB/s versus 7.85 raw.
+      The next C-first change adds completed lower-WRITE dm_io wait
+      histogram bins and brackets existing LZ4/window/lower-write
+      wall counters around the current measured mixed QD32 workload;
+      no new benchmark sessions, allocation, I/O, publishing or
+      scheduling semantics. Check histogram conservation and
+      independently measured lower request counts. The next source
+      is **NOT YET OWNER-LOADED**, and these nested wall intervals
+      cannot be summed or attributed as exclusive kernel CPU.
+      Use measured write wait vs packing/retention fractions to
+      select a bounded, correctness-preserving WRITE optimization.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

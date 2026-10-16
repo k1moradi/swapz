@@ -198,10 +198,27 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
+        self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
+        self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
+        self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
+
+    def test_mixed_write_diagnostics_missing_or_inconsistent_fails_closed(self):
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["arms"]["v3"]["kernel_write_path"] = None
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[3]["arms"]["v3"]["kernel_write_path"]["write_wait_gt4ms"] = 2
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[2]["arms"]["v3"]["kernel_write_path"]["lz4_wall_ns"] = -1
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
 
     def test_incomplete_mismatch_or_forged_packed_result_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())

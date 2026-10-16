@@ -296,6 +296,19 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("flush_fail_nth > 64U", body("sv3_ctr"))
         self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("sv3_ctr"))
 
+    def test_serialized_completed_lower_write_wall_wait_buckets(self):
+        lower = body("sv3_lower")
+        status = body("sv3_status")
+        self.assertIn("elapsed_ns = sv3_elapsed_ns(section_start", lower)
+        self.assertIn("ctx->lower_write_wall_ns += elapsed_ns", lower)
+        self.assertIn("ctx->write_wait_le_1ms++", lower)
+        self.assertIn("ctx->write_wait_1_to_4ms++", lower)
+        self.assertIn("ctx->write_wait_gt_4ms++", lower)
+        self.assertLess(lower.index("if (error || bitmap)"),
+                        lower.index("ctx->write_wait_le_1ms++"))
+        self.assertIn("write_wait_le1ms=%llu write_wait_1to4ms=%llu", status)
+        self.assertIn("write_wait_gt4ms=%llu", status)
+
     def test_owned_nullblk_lower_write_fault_is_pre_submission_and_counted(self):
         # This tests fail-closed propagation through the actual dm_io adapter.
         # It cannot model a device-originated partial/torn write.

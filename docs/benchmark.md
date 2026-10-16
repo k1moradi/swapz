@@ -397,6 +397,50 @@ handoff, sidecar tampering, warm/strict-budget/fault paths and exact
 owner-loaded benchmark at the new commit. Full CI is partial
 qualification; the 4MiB RAM models are not cold NAND.
 
+### Timed mixed-write C profiling after offset-read qualification
+
+**Owner result (2026-10-15):** exact code `b848304aff321e738b5be50177143ba8797d7c32`
+was fully qualified by the owner at Git HEAD `71f54532d9ab167d7f0842247c4609f1b6fd4951`
+(a report-only commit); result-only publication `b481256360f8`.
+All five stages passed. For seeded-random verified 4MiB READ,
+the SD RAM model used ~6.81MiB of independent lower READ traffic
+versus ~8.11MiB before validated-offset selection, but duration
+remained ~1.16s versus ~0.40s raw; SSD model remained ~0.26s with
+~6.80MiB lower READ bytes. Mean ~320 verified-offset block-zero
+skips per random pass corroborate the byte reduction without
+proving fewer actual physical-device commands. Useful SD WRITE
+remained 4.61/4.66 MB/s versus 7.85 raw. Neither physical NAND
+endurance nor real cold swap-in is qualified.
+
+**Current production-C hypothesis (NOT YET OWNER-LOADED):**
+The serialized worker may be stalled predominantly in synchronous
+lower-WRITE `dm_io` callbacks instead of LZ4 or window planning.
+Use the existing `ktime_get_ns` call interval in `sv3_lower` to
+classify successful lower WRITE callbacks by wall duration:
+at most 1ms, over 1ms through 4ms, over 4ms. An injected or failed
+write does not increment the successful bins. The histogram
+must sum to `physical_write_reqs` for any bracketing interval;
+no new allocation, waits or I/O paths. Record the already existing
+`lz4_wall_ns`, `window_sort_wall_ns`,
+`window_commit_wall_ns`, `lower_write_wall_ns`,
+`windows` and successful write callbacks with the new bins.
+Capture Device Mapper status immediately before the first timed
+mixed QD32 wave (after warm-up), and immediately after measured
+`fsync`, outside the stopwatch. Preserve the same 8 counterbalanced
+pairs, exact immutable fixture/trace, independently read
+lower-device statistics, validated byte oracle and safe teardown.
+
+**Interpretation boundaries:** `window_commit_wall_ns` includes
+lower-write wait time, so adding it to `lower_write_wall_ns`
+double-counts; async compression may overlap worker activity.
+The buckets measure elapsed kernel `dm_io` synchronous callback
+wall time, not flash command latency, iowait, scheduler-accurate
+kernel-worker CPU or exclusive phase cost. C counters cannot
+replace independent completed-sector/request statistics. Rootless
+synthetic report values test fail-closed plumbing only. A future
+loaded test at the new source SHA is required before deciding on a
+WRITE scheduling or retention optimization.
+
 ### Alpha.22 C change and qualification handoff
 
 The finite QD-wave replay waits for every operation before its next

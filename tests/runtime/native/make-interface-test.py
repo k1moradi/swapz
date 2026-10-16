@@ -158,6 +158,17 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_user_s": 0.12,
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
+                    "kernel_write_path": ({
+                        "physical_write_reqs": 5,
+                        "lz4_wall_ns": 20000000,
+                        "window_sort_wall_ns": 1000000,
+                        "window_commit_wall_ns": 40000000,
+                        "lower_write_wall_ns": 30000000,
+                        "windows": 4,
+                        "write_wait_le1ms": 2,
+                        "write_wait_1to4ms": 2,
+                        "write_wait_gt4ms": 1,
+                    } if is_v3 else None),
                     "packed_read": {
                         "logical_bytes": 4194304,
                         "logical_image_sha256": "m" * 64,

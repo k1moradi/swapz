@@ -112,15 +112,24 @@ seeded-random lower READ traffic was ~8.1MiB for only 4MiB useful data.
 SD-model random improved to ~1.16s but was still slower than ~0.40s raw.
 The candidate continues to lose SD-model WRITE throughput.
 
-**Next C experiment, NOT YET OWNER-LOADED:** preserve each compressed
-payload's validated on-media offset as a worker-owned volatile mapping
-hint, confirmed again against the CRC-protected descriptor on every read.
-For a cold two-block extent when that payload lies wholly within block
-zero, read only 4KiB; other two-block reads retain the one-request
-8KiB fetch. This aims to save avoidable READ bytes **without increasing
-lower request count**, with no new allocations, format changes, or
-unverified data acceptance. Compare both lower bytes and requests,
-fixed-volume time/p99 and WRITE impact before claiming any gain.
+**Owner-qualified read-offset selection:** `b848304aff321e738b5be50177143ba8797d7c32`
+passed all five `make test` stages on the owner host at report-only
+source HEAD `71f54532d9ab167d7f0842247c4609f1b6fd4951`; its
+latest sanitized report is `b481256360f8`. Timed 4MiB random
+READ transferred ~6.81MiB in the SD RAM model, down from ~8.11MiB
+at `35fb224`, while time remained ~1.16s versus 0.40s raw.
+SSD-model random remained ~0.26s and ~6.80MiB backing reads.
+WRITE remained slower than raw (SD: 4.61/4.66 vs 7.85 MB/s).
+The exact source and report-only Git commits must not be conflated.
+
+**Next C diagnostic, NOT YET OWNER-LOADED:** classify each successfully
+completed synchronous lower WRITE callback into <=1ms, 1–4ms and
+>4ms wait buckets. The existing worker LZ4, window and lower-I/O
+wall counters are sampled *only across the timed mixed workload*
+and printed beside throughput. This isolates a potential
+serialization/wait bottleneck before changing write scheduling.
+Wall-time totals overlap and do not measure exclusive kernel CPU or
+physical flash latency; no speedup is claimed for instrumentation.
 
 ## Current C performance work and qualification plan
 

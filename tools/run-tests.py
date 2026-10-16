@@ -30,6 +30,13 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "decode_wall_ns", "read_meta_cache_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
+KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
+                       "window_sort_wall_ns", "window_commit_wall_ns",
+                       "lower_write_wall_ns", "windows",
+                       "write_wait_le1ms", "write_wait_1to4ms",
+                       "write_wait_gt4ms")
+WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
+                   "write_wait_gt4ms")
 
 
 
@@ -254,6 +261,7 @@ def parse_sessions(output):
                     "mixed_replay_cpu_user_s": obj.get("mixed_replay_cpu_user_s"),
                     "mixed_replay_cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                     "mixed_replay_peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
+                    "kernel_write_path": obj.get("kernel_write_path"),
                     "packed_read": None,
                 }
                 packed = obj.get("packed_read")
@@ -359,6 +367,19 @@ def benchmark_verdicts(sessions):
             backing_bytes = columns[name]["lower_write_bytes"]
             columns[name]["write_input_per_lower_byte"] = (
                 input_bytes / backing_bytes if input_bytes and backing_bytes else None)
+            if name != "off":
+                diagnostics = [arm.get("kernel_write_path") for arm in rows_for_arm]
+                if any(not isinstance(record, dict) or
+                       any(type(record.get(field)) is not int or
+                           record[field] < 0 for field in KERNEL_WRITE_FIELDS) or
+                       sum(record[field] for field in WRITE_WAIT_BINS) !=
+                           record["physical_write_reqs"]
+                       for record in diagnostics):
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: missing/inconsistent timed V3 C write counters"}
+                for field in KERNEL_WRITE_FIELDS:
+                    columns[name][f"mixed_{field}"] = statistics.mean(
+                        record[field] for record in diagnostics)
             for mode in ("sequential", "seeded_random"):
                 reads = [(arm.get("packed_read") or {}).get("passes", {}).get(mode)
                          for arm in rows_for_arm]
@@ -511,6 +532,19 @@ def print_bench(result):
                   f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}, "
                   f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
+        sync, asynchronous = columns["sync"], columns["async"]
+        print("  Timed mixed V3 C WRITE (sync/async; overlapping wall ns): "
+              f"LZ4={sync['mixed_lz4_wall_ns']/1e9:.2f}/"
+              f"{asynchronous['mixed_lz4_wall_ns']/1e9:.2f}s, "
+              f"commit={sync['mixed_window_commit_wall_ns']/1e9:.2f}/"
+              f"{asynchronous['mixed_window_commit_wall_ns']/1e9:.2f}s, "
+              f"lower wait={sync['mixed_lower_write_wall_ns']/1e9:.2f}/"
+              f"{asynchronous['mixed_lower_write_wall_ns']/1e9:.2f}s")
+        print("  Completed lower WRITE wait bins (sync/async; <=1ms / 1–4ms / >4ms): "
+              + ", ".join(
+                  f"{sync[f'mixed_{field}']:.1f}/"
+                  f"{asynchronous[f'mixed_{field}']:.1f}"
+                  for field in WRITE_WAIT_BINS))
         for mode in ("sync", "async"):
             crit = data["criteria"][mode]
             print(f"  {mode.upper():<6} vs raw: WRITE={crit['throughput_vs_raw']}, "

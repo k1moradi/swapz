@@ -507,6 +507,46 @@ def kernel_read_delta(before, after):
     return counters
 
 
+# Timed MIXED-workload write diagnosis; dmsetup is sampled outside the
+# stopwatch. All values are C kernel target counters, never CPU time.
+KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
+                       "window_sort_wall_ns", "window_commit_wall_ns",
+                       "lower_write_wall_ns", "windows",
+                       "write_wait_le1ms", "write_wait_1to4ms",
+                       "write_wait_gt4ms")
+WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
+                   "write_wait_gt4ms")
+
+
+def kernel_write_snapshot(path, identity):
+    if not identity.get("dm_uuid"):
+        return None
+    status = subprocess.run(["dmsetup", "status", str(path)], text=True,
+                            capture_output=True, check=False, timeout=8)
+    if status.returncode:
+        raise ValueError("owned V3 write telemetry unavailable")
+    counters = {}
+    for field in KERNEL_WRITE_FIELDS:
+        match = re.search(r"(?:^|\\s)" + field + r"=(\\d+)(?:\\s|$)",
+                          status.stdout)
+        if not match:
+            raise ValueError("owned V3 write telemetry missing " + field)
+        counters[field] = int(match.group(1))
+    return counters
+
+
+def kernel_write_delta(before, after):
+    if before is None and after is None:
+        return None
+    if before is None or after is None:
+        raise ValueError("incomplete V3 write telemetry")
+    counters = {key: after[key] - before[key] for key in KERNEL_WRITE_FIELDS}
+    if any(value < 0 for value in counters.values()):
+        raise ValueError("V3 write telemetry reset during measurement")
+    if sum(counters[key] for key in WRITE_WAIT_BINS) != counters["physical_write_reqs"]:
+        raise ValueError("inconsistent V3 lower write wait histogram")
+    return counters
+
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
     """Verify real 4MiB sequential/random reads after concurrent packed writes."""
     if logical_pages != 1024 or qd != 32:
@@ -684,6 +724,8 @@ def replay(args):
             cpu_after = None
             before = None
             after = None
+            kernel_write_before = None
+            kernel_write_after = None
             try:
                 def execute(item, slot):
                     start = time.monotonic_ns()
@@ -711,6 +753,7 @@ def replay(args):
                     for wave in replay_waves:
                         if wave[0]["phase"] == "measure" and measured_start_ns is None:
                             before = lower_stat(identity.get("owned_disk"))
+                            kernel_write_before = kernel_write_snapshot(path, identity)
                             cpu_before = process_cpu()
                             measured_start_ns = time.monotonic_ns()
                         if mf["iops"] and wave[0]["phase"] == "measure":
@@ -732,6 +775,7 @@ def replay(args):
                     measured_end_ns = time.monotonic_ns()
                     cpu_after = process_cpu()
                     after = lower_stat(identity.get("owned_disk"))
+                    kernel_write_after = kernel_write_snapshot(path, identity)
             finally:
                 for view in mixed_views:
                     view.release()
@@ -790,6 +834,7 @@ def replay(args):
                               "excludes prefill, fixture/trace setup, warmup, "
                               "buffer allocations, executor startup and post-run oracle"),
         "packed_read": packed_read,
+        "kernel_write_path": kernel_write_delta(kernel_write_before, kernel_write_after),
         "lower_io": iostat_delta(before, after), "verdict": "PASS",
         "read_p50_ns": percentile(samples["R"], .50),
         "read_p95_ns": percentile(samples["R"], .95),

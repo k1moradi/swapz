@@ -248,6 +248,11 @@ struct sv3_dm {
 	u64 gc_wall_ns;
 	u64 lower_read_wall_ns;
 	u64 lower_write_wall_ns;
+	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
+	 * nested in lower_write_wall_ns, not hardware command latency. */
+	u64 write_wait_le_1ms;
+	u64 write_wait_1_to_4ms;
+	u64 write_wait_gt_4ms;
 	u64 lz4_accepted_bytes;
 	u64 lz4_size_bins[6];
 	u64 discard_pages;
@@ -312,7 +317,7 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 		.client = ctx->io_client,
 	};
 	unsigned long bitmap = 0;
-	u64 section_start;
+	u64 section_start, elapsed_ns;
 	int error;
 
 	if (!blocks || block >= ctx->physical_blocks ||
@@ -350,14 +355,23 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
 	if (op == REQ_OP_WRITE)
 		atomic_set(&ctx->lower_write_active, 0);
+	elapsed_ns = sv3_elapsed_ns(section_start, ktime_get_ns());
 	if (op == REQ_OP_READ)
-		ctx->lower_read_wall_ns +=
-			sv3_elapsed_ns(section_start, ktime_get_ns());
+		ctx->lower_read_wall_ns += elapsed_ns;
 	else
-		ctx->lower_write_wall_ns +=
-			sv3_elapsed_ns(section_start, ktime_get_ns());
+		ctx->lower_write_wall_ns += elapsed_ns;
 	if (error || bitmap)
 		return error ? error : -EIO;
+	/* Count SUCCESSFUL dm_io callbacks, not attempted or error-injected
+	 * requests. Each accepted lower write is in exactly one wait bin. */
+	if (op == REQ_OP_WRITE) {
+		if (elapsed_ns <= 1000000ULL)
+			ctx->write_wait_le_1ms++;
+		else if (elapsed_ns <= 4000000ULL)
+			ctx->write_wait_1_to_4ms++;
+		else
+			ctx->write_wait_gt_4ms++;
+	}
 	if (op == REQ_OP_READ) {
 		ctx->physical_read_bytes += (u64)blocks * SV3_BLOCK_BYTES;
 		ctx->physical_read_reqs++;
@@ -2236,7 +2250,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
-		       "gc_wall_ns=%llu "
+		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
+		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "burst_tail_flushes=%llu "
@@ -2313,7 +2328,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lz4_wall_ns, ctx->decode_wall_ns,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
-		       ctx->gc_wall_ns,
+		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
+		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
