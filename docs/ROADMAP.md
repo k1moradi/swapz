@@ -247,13 +247,22 @@ are still planned.
       the real one-entry cache were SD 134.0/125.0 and SSD 123.0/129.5
       sync/async. The 4- and 16-entry shadows were below the predeclared
       96-hit gate.
-      Implement only that measured size: 64 preallocated 4KiB metadata
-      blocks (256KiB/target), exact LRU replacement, no payload caching,
-      and the existing global mutation invalidation. Keep the one-extent
-      full-cache fast path. Retain the real cache only if every seeded-random
-      arm records >=96 LRU hits, >=5% lower independent READ bytes versus
-      `2619385c`, and no >5% material regression in random-read time/p99
-      or useful WRITE. New source **NOT YET OWNER-LOADED**.
+      Owner-loaded `8e21ca7e` (report-only `ad570c8f48c3`) retains the
+      real 64-entry metadata LRU. Random LRU hits were 137.0/125.5 SD and
+      122.5/118.5 SSD; lower READ bytes improved 8.25%/7.41% and
+      8.06%/7.40% versus `2619385c`, with time/p99 and useful WRITE inside
+      the predeclared regression guards.
+      Before caching payload blocks, simulate an identity-only 64-physical-
+      block LRU at the same 256KiB capacity. Count required block misses and
+      contiguous miss runs after successful validation. Replace the metadata
+      LRU only if every seeded-random arm predicts >=5% additional savings
+      in both lower blocks and lower callbacks. Also add joint one-page-window
+      close-reason telemetry before changing WRITE admission; the existing
+      marginal counters cannot attribute singletons to a closure cause.
+      The proposed compressed-payload sidecar CRC shortcut remains deferred
+      because it would stop per-read block-zero metadata/sequence corruption
+      detection and therefore changes the current integrity contract.
+      New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

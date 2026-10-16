@@ -311,6 +311,93 @@ static void sv3_read_metadata_lru_commit(struct sv3_engine *engine,
 	engine->read_metadata_lru_valid[slot] = 1;
 }
 
+static int sv3_read_block_shadow_lookup(const struct sv3_engine *engine,
+					sv3_u32 block)
+{
+	sv3_u8 index;
+
+	for (index = 0; index < SV3_READ_BLOCK_SHADOW_ENTRIES; ++index)
+		if (engine->read_block_shadow_valid[index] &&
+		    engine->read_block_shadow_blocks[index] == block)
+			return index;
+	return -1;
+}
+
+static void sv3_read_block_shadow_touch(struct sv3_engine *engine,
+				       sv3_u32 block, int hit_slot)
+{
+	sv3_u32 oldest_age = ~(sv3_u32)0;
+	sv3_u8 index, slot = 0;
+
+	engine->read_block_shadow_clock++;
+	if (!engine->read_block_shadow_clock) {
+		memset(engine->read_block_shadow_valid, 0,
+		       sizeof(engine->read_block_shadow_valid));
+		engine->read_block_shadow_clock = 1;
+		hit_slot = -1;
+	}
+	if (hit_slot >= 0) {
+		slot = (sv3_u8)hit_slot;
+	} else {
+		for (index = 0; index < SV3_READ_BLOCK_SHADOW_ENTRIES; ++index) {
+			if (!engine->read_block_shadow_valid[index]) {
+				slot = index;
+				break;
+			}
+			if (engine->read_block_shadow_ages[index] < oldest_age) {
+				oldest_age = engine->read_block_shadow_ages[index];
+				slot = index;
+			}
+		}
+	}
+	engine->read_block_shadow_blocks[slot] = block;
+	engine->read_block_shadow_ages[slot] = engine->read_block_shadow_clock;
+	engine->read_block_shadow_valid[slot] = 1;
+}
+
+/*
+ * Simulate the exact 256KiB alternative requested by the next experiment:
+ * 64 physical 4KiB blocks rather than 64 metadata extents. Metadata block
+ * zero is always needed for the current integrity contract. Payload blocks
+ * touched by the target record are the only additional required blocks.
+ * Count contiguous miss runs as hypothetical lower callbacks, then update
+ * LRU recency only after the real read has fully validated.
+ */
+static void sv3_read_block_shadow_commit(struct sv3_engine *engine,
+					 const struct sv3_map *observed,
+					 sv3_u32 first, sv3_u32 last)
+{
+	int slots[SV3_MAX_BLOCKS] = { -1, -1, -1, -1 };
+	sv3_u8 needed[SV3_MAX_BLOCKS] = { 0 };
+	sv3_u8 rel;
+	int previous_miss = -2;
+
+	needed[0] = 1;
+	for (rel = (sv3_u8)first; rel <= (sv3_u8)last; ++rel)
+		needed[rel] = 1;
+	for (rel = 0; rel < observed->extent_blocks; ++rel) {
+		if (!needed[rel])
+			continue;
+		slots[rel] = sv3_read_block_shadow_lookup(
+			engine, observed->start_block + rel);
+		if (slots[rel] >= 0) {
+			engine->read_block_shadow_hits++;
+			previous_miss = -2;
+		} else {
+			engine->read_block_shadow_misses++;
+			if (previous_miss + 1 != rel)
+				engine->read_block_shadow_requests++;
+			previous_miss = rel;
+		}
+	}
+	/* Metadata first, then payload blocks in physical order. This fixed
+	 * ordering makes replacement deterministic for a multi-block read. */
+	for (rel = 0; rel < observed->extent_blocks; ++rel)
+		if (needed[rel])
+			sv3_read_block_shadow_touch(engine,
+				observed->start_block + rel, slots[rel]);
+}
+
 void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 {
 	if (engine) {
@@ -319,6 +406,9 @@ void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 		memset(engine->read_metadata_lru_valid, 0,
 		       sizeof(engine->read_metadata_lru_valid));
 		engine->read_metadata_lru_clock = 0;
+		memset(engine->read_block_shadow_valid, 0,
+		       sizeof(engine->read_block_shadow_valid));
+		engine->read_block_shadow_clock = 0;
 		engine->read_shadow_count = 0;
 	}
 }
@@ -893,6 +983,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	sv3_read_metadata_lru_commit(engine, observed.start_block,
 				     observed.extent_blocks,
 				     metadata_lru_slot);
+	sv3_read_block_shadow_commit(engine, &observed, first, last);
 	sv3_read_shadow_commit(engine, observed.start_block,
 			       observed.extent_blocks, shadow_position);
 	return 0;

@@ -207,6 +207,8 @@ struct sv3_dm {
 	/* Worker-owned telemetry only; status is a diagnostic snapshot. */
 	enum sv3_window_close_reason next_window_close;
 	u64 window_close_reasons[SV3_CLOSE_REASON_COUNT];
+	/* Joint diagnostic: which primary closure actually produced win1. */
+	u64 one_page_close_reasons[SV3_CLOSE_REASON_COUNT];
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -1025,6 +1027,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	bool needs_fua = false;
 	bool packed_close = ctx->next_window_close == SV3_CLOSE_PACK_READY;
 	bool accepted_burst_extended = ctx->accepted_burst_pack_ready;
+	enum sv3_window_close_reason close_reason = ctx->next_window_close;
 	sv3_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record;
 	u64 end_ns, open_age_ns, section_start;
 	int error = 0;
@@ -1061,7 +1064,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		ctx->window_age_101_1000us++;
 	else
 		ctx->window_age_gt_1000us++;
-	ctx->window_close_reasons[ctx->next_window_close]++;
+	ctx->window_close_reasons[close_reason]++;
 	ctx->next_window_close = SV3_CLOSE_UNKNOWN;
 	/* An independent READ can fail while older writes are only prepared.
 	 * Complete their original owners once, without ordering/staging or
@@ -1220,8 +1223,10 @@ accounted:
 		ctx->window_bins[4]++;
 	else
 		ctx->window_bins[5]++;
-	if (count == 1)
+	if (count == 1) {
 		ctx->one_page_windows++;
+		ctx->one_page_close_reasons[close_reason]++;
+	}
 	ctx->batch_count = 0;
 	if (error || committed != count) {
 		sv3_fail(ctx, error ? error : -EIO);
@@ -2369,7 +2374,14 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_read_conflict=%llu close_read_unrelated=%llu "
 		       "close_discard=%llu close_preflush=%llu "
 		       "close_quantum=%llu close_idle=%llu close_shutdown=%llu "
-		       "close_other=%llu window_gc_pressure=%llu "
+		       "close_other=%llu "
+		       "win1_unknown=%llu win1_full=%llu win1_duplicate=%llu "
+		       "win1_zero=%llu win1_fua=%llu win1_raw=%llu "
+		       "win1_read_conflict=%llu win1_read_unrelated=%llu "
+		       "win1_discard=%llu win1_preflush=%llu win1_quantum=%llu "
+		       "win1_idle=%llu win1_shutdown=%llu win1_other=%llu "
+		       "win1_deadline=%llu win1_pack_ready=%llu "
+		       "window_gc_pressure=%llu "
 		       "age_le100us=%llu age_101_1000us=%llu "
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
@@ -2397,6 +2409,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "read_meta_lru_hits=%u "
 		       "read_shadow_hits_4=%u read_shadow_hits_16=%u "
 		       "read_shadow_hits_64=%u "
+		       "read_block_shadow_hits=%u read_block_shadow_misses=%u "
+		       "read_block_shadow_reqs=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
 		       "read_two_block_skips=%u "
 		       "failed=%u error=%d",
@@ -2458,6 +2472,22 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_close_reasons[SV3_CLOSE_IDLE],
 		       ctx->window_close_reasons[SV3_CLOSE_SHUTDOWN],
 		       ctx->window_close_reasons[SV3_CLOSE_OTHER],
+		       ctx->one_page_close_reasons[SV3_CLOSE_UNKNOWN],
+		       ctx->one_page_close_reasons[SV3_CLOSE_FULL],
+		       ctx->one_page_close_reasons[SV3_CLOSE_DUPLICATE],
+		       ctx->one_page_close_reasons[SV3_CLOSE_ZERO],
+		       ctx->one_page_close_reasons[SV3_CLOSE_FUA],
+		       ctx->one_page_close_reasons[SV3_CLOSE_RAW],
+		       ctx->one_page_close_reasons[SV3_CLOSE_READ_CONFLICT],
+		       ctx->one_page_close_reasons[SV3_CLOSE_READ_UNRELATED],
+		       ctx->one_page_close_reasons[SV3_CLOSE_DISCARD],
+		       ctx->one_page_close_reasons[SV3_CLOSE_PREFLUSH],
+		       ctx->one_page_close_reasons[SV3_CLOSE_QUANTUM],
+		       ctx->one_page_close_reasons[SV3_CLOSE_IDLE],
+		       ctx->one_page_close_reasons[SV3_CLOSE_SHUTDOWN],
+		       ctx->one_page_close_reasons[SV3_CLOSE_OTHER],
+		       ctx->one_page_close_reasons[SV3_CLOSE_DEADLINE],
+		       ctx->one_page_close_reasons[SV3_CLOSE_PACK_READY],
 		       ctx->window_gc_pressure,
 		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
 		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,
@@ -2494,6 +2524,9 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_shadow_hits_4,
 		       ctx->engine.read_shadow_hits_16,
 		       ctx->engine.read_shadow_hits_64,
+		       ctx->engine.read_block_shadow_hits,
+		       ctx->engine.read_block_shadow_misses,
+		       ctx->engine.read_block_shadow_requests,
 		       ctx->engine.read_full_extent_requests,
 		       ctx->engine.read_full_extent_cache_hits,
 		       ctx->engine.read_two_block_skips,

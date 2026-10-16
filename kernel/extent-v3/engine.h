@@ -5,6 +5,7 @@
 #define SV3_BULK_BLOCKS 64U
 #define SV3_READ_SHADOW_ENTRIES 64
 #define SV3_READ_METADATA_CACHE_ENTRIES 64
+#define SV3_READ_BLOCK_SHADOW_ENTRIES 64
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int sv3_page_is_zero(const sv3_u8 *page);
@@ -124,6 +125,20 @@ struct sv3_engine {
 	sv3_u32 read_shadow_hits_4;
 	sv3_u32 read_shadow_hits_16;
 	sv3_u32 read_shadow_hits_64;
+	/*
+	 * Diagnostic-only same-memory alternative to the real metadata cache:
+	 * an exact 64-physical-block LRU simulation. It stores identities only
+	 * and never satisfies I/O. Successful reads count the 4KiB block misses
+	 * and contiguous miss runs a real 256KiB block cache would require for
+	 * block-zero metadata plus the target payload blocks.
+	 */
+	sv3_u32 read_block_shadow_blocks[SV3_READ_BLOCK_SHADOW_ENTRIES];
+	sv3_u32 read_block_shadow_ages[SV3_READ_BLOCK_SHADOW_ENTRIES];
+	sv3_u8 read_block_shadow_valid[SV3_READ_BLOCK_SHADOW_ENTRIES];
+	sv3_u32 read_block_shadow_clock;
+	sv3_u32 read_block_shadow_hits;
+	sv3_u32 read_block_shadow_misses;
+	sv3_u32 read_block_shadow_requests;
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	sv3_u32 read_full_extent_requests;
 	sv3_u32 read_full_extent_cache_hits;

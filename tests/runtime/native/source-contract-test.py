@@ -144,6 +144,8 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_meta_lru_hits=%u", status)
         self.assertIn("read_shadow_hits_4=%u read_shadow_hits_16=%u", status)
         self.assertIn("read_shadow_hits_64=%u", status)
+        self.assertIn("read_block_shadow_hits=%u read_block_shadow_misses=%u", status)
+        self.assertIn("read_block_shadow_reqs=%u", status)
         self.assertIn("read_full_extent_reqs=%u read_full_cache_hits=%u", status)
         self.assertIn("read_two_block_skips=%u", status)
         self.assertIn("read_two_block_skips++", engine)
@@ -166,6 +168,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine->read_shadow_hits_4++", engine)
         self.assertIn("engine->read_shadow_hits_16++", engine)
         self.assertIn("engine->read_shadow_hits_64++", engine)
+        self.assertIn("sv3_read_block_shadow_commit(", engine)
+        self.assertIn("engine->read_block_shadow_hits++", engine)
+        self.assertIn("engine->read_block_shadow_misses++", engine)
+        self.assertIn("engine->read_block_shadow_requests++", engine)
+        self.assertIn("memset(engine->read_block_shadow_valid, 0", engine)
         self.assertIn("engine->read_shadow_count = 0", engine)
         self.assertIn("memset(engine->read_metadata_lru_valid, 0", engine)
         self.assertIn("engine->read_cache_valid = 0", engine)
@@ -551,6 +558,12 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
         self.assertIn("coalesce > SV3_MAX_COALESCE_MS", ctor)
         self.assertIn("ctx->window_size_counts[count]++", body("sv3_flush_window"))
+        self.assertIn("ctx->one_page_close_reasons[close_reason]++",
+                      body("sv3_flush_window"))
+        self.assertIn("win1_read_conflict=%llu win1_read_unrelated=%llu",
+                      body("sv3_status"))
+        self.assertIn("win1_deadline=%llu win1_pack_ready=%llu",
+                      body("sv3_status"))
         self.assertIn("ctx->window_bins[0]++", body("sv3_flush_window"))
         self.assertIn("ctx->window_bins[5]++", body("sv3_flush_window"))
         self.assertIn("gc_read_reqs=%llu gc_write_reqs=%llu", DM)

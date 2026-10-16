@@ -644,6 +644,39 @@ matrix also prints independent lower READ request counts for the
 sequential and seeded-random 4MiB passes next to the byte totals; those
 device deltas, not C callback counters, are the request-level evidence.
 
+**Owner result:** exact `8e21ca7ef1a40b522def0612a3ce6bd01e93e175`
+(report-only `ad570c8f48c3`) passed all five stages and the predeclared
+cache-retention gate. Random lower READ bytes changed from the
+`2619385c` baseline 6,805,504/6,799,360 to 6,244,352/6,295,552 on SD
+(8.25%/7.41% less), and from 6,707,200/6,666,240 to
+6,166,528/6,172,672 on SSD (8.06%/7.40% less). Real LRU hits were
+137.0/125.5 and 122.5/118.5; no guarded time/p99 or useful-WRITE metric
+regressed by more than 5%. Retain the 64-entry metadata LRU.
+
+**Same-memory block-cache probe:** the next source adds no cached bytes and
+changes no lower I/O. It simulates 64 physical 4KiB LRU slots. For each
+successfully validated compressed read, required blocks are metadata block
+zero plus every block intersecting the target payload. The simulator counts
+block hits/misses and contiguous miss runs, then updates recency metadata.
+Mutation uses the same global invalidation fence. The selection gate is
+strict: only replace the retained metadata cache if, in every seeded-random
+arm, simulated miss blocks are <=95% of the measured real lower blocks and
+simulated miss runs are <=95% of the measured real lower READ requests.
+These are explanatory predictions; a subsequent real-cache owner run would
+still need independent device bytes/requests.
+
+The block-zero-skip CRC proposal is not part of this experiment. Compressed
+`sv3_read_authoritative()` currently reparses CRC-protected metadata and
+checks the on-media sequence on every read. A volatile payload CRC sidecar
+could validate payload bytes but not metadata-only corruption, so skipping
+block zero would weaken an existing integrity invariant.
+
+**Singleton attribution:** add a joint counter for each primary
+`SV3_CLOSE_*` reason when `count == 1`. The sum must equal
+`one_page_windows`. Only that joint distribution may justify a follow-up
+WRITE admission experiment; separate close-reason and window-size marginals
+are insufficient.
+
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the
 native-policy job and production-C exact-test job correctly FAILED the

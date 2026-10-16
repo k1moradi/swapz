@@ -397,6 +397,49 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	return 0;
 }
 
+static int test_block_lru64_shadow_counts_blocks_and_runs_only(void)
+{
+	struct sv3_compressed_page pages[16];
+	sv3_u8 committed = 0, output[3568];
+	sv3_u16 length = 0;
+	sv3_u32 hit0, miss0, req0, i;
+	int target = -1;
+
+	CHECK(setup() == 0);
+	prepare(pages, 16, 0, 0);
+	engine.max_read_blocks_per_record = 2;
+	CHECK(sv3_engine_write_window(&engine, pages, 16, &committed) == 0);
+	CHECK(committed == 16);
+	for (i = 0; i < 16; ++i)
+		if (maps[i].extent_blocks == 2 &&
+		    (sv3_u32)maps[i].payload_offset + maps[i].payload_length >
+			SV3_BLOCK_BYTES) {
+			target = (int)i;
+			break;
+		}
+	CHECK(target >= 0);
+	sv3_engine_invalidate_read_cache(&engine);
+	hit0 = engine.read_block_shadow_hits;
+	miss0 = engine.read_block_shadow_misses;
+	req0 = engine.read_block_shadow_requests;
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_block_shadow_hits == hit0);
+	CHECK(engine.read_block_shadow_misses == miss0 + 2);
+	CHECK(engine.read_block_shadow_requests == req0 + 1);
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_block_shadow_hits == hit0 + 2);
+	CHECK(engine.read_block_shadow_misses == miss0 + 2);
+	CHECK(engine.read_block_shadow_requests == req0 + 1);
+	sv3_engine_invalidate_read_cache(&engine);
+	CHECK(sv3_engine_read_page(&engine, (sv3_u32)target, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_block_shadow_misses == miss0 + 4);
+	CHECK(engine.read_block_shadow_requests == req0 + 2);
+	return 0;
+}
+
 static int test_full_extent_corruption_rejected(void)
 {
 	struct sv3_compressed_page pages[7];
@@ -609,6 +652,7 @@ int main(void)
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_shadow_metadata_lru_tracks_reuse_without_changing_io() == 0); completed++;
 	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
+	CHECK(test_block_lru64_shadow_counts_blocks_and_runs_only() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;

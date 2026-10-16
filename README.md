@@ -231,12 +231,35 @@ zero lower read; the current authority/generation/descriptor/payload-CRC
 checks still run on every logical read. Writes, GC, discard and barriers
 clear all residency through the existing invalidation fence.
 
-Retain this cache only if the seeded-random owner matrix shows at least
-96 successful LRU metadata hits per pass in every arm, at least 5% fewer
-independent lower READ bytes than the `2619385` baseline in every arm,
-and no >5% material regression in random-read time/p99 or useful WRITE.
-Otherwise revert it. Physical-media and cold-NAND claims remain out of
-scope.
+**Owner-qualified 64-entry metadata LRU:** exact code
+`8e21ca7ef1a40b522def0612a3ce6bd01e93e175` passed all five owner
+stages; report-only commit `ad570c8f48c3`. All four seeded-random arms
+exceeded 96 successful LRU hits (137.0/125.5 SD, 122.5/118.5 SSD).
+Versus `2619385c`, lower READ bytes fell 8.25%/7.41% on SD and
+8.06%/7.40% on SSD. Random time/p99 and useful WRITE stayed inside the
+predeclared 5% regression guards, so the metadata-only LRU is retained.
+It remains synthetic RAM evidence, not a physical-media claim.
+
+**Next bounded read diagnostic:** do not double cache size yet. Simulate a
+same-memory 64-physical-block (256KiB) LRU using identities only under the
+exact successful read stream. Block zero remains mandatory under the
+current integrity contract; also mark only payload blocks required by the
+target record. Count hypothetical 4KiB misses and contiguous miss runs.
+Only replace the retained metadata LRU if this same-memory block cache
+predicts at least 5% fewer lower blocks **and** 5% fewer lower callbacks
+than the real metadata-LRU result in every seeded-random arm.
+
+Do not take the proposed compressed-payload CRC shortcut yet. Current V3
+compressed reads deliberately revalidate block-zero header/record metadata
+and on-media sequence on every read; skipping block zero for a record
+wholly in a later block would stop detecting metadata-only corruption.
+That is a correctness-policy change, unlike the raw-page sidecar CRC, and
+needs separate integrity evidence before any implementation.
+
+For the remaining one-page WRITE windows, add joint
+`win1 × close_reason` telemetry. Existing `win1` and `close_*`
+marginals cannot identify which closure reason produced a singleton, so
+do not tune admission from those marginals alone.
 
 ## Current C performance work and qualification plan
 

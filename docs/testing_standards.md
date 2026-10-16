@@ -342,6 +342,28 @@ table must also expose independent lower READ requests for both fixed 4MiB
 passes; C metadata/payload callback counts cannot substitute for those
 device counters.
 
+Owner-loaded `8e21ca7e` passed the retention gate, so the 64-entry
+metadata-only LRU is now the proven baseline for subsequent synthetic
+experiments. A same-memory block-cache alternative must first be
+diagnostic-only: 64 physical block identities, no cached bytes, no skipped
+I/O, state updated only after a successful authoritative read, and cleared
+by `sv3_engine_invalidate_read_cache()`. Required blocks are block zero
+plus payload-intersecting blocks; contiguous misses count as one predicted
+lower callback. Tests must prove a cold two-block record is two misses/one
+predicted request, repeated access is hits/no new request, and invalidation
+restores misses. Reporter contracts require predicted requests <= predicted
+miss blocks.
+
+Do not repurpose `raw_crc32c` for a compressed fast path without an
+explicit integrity-contract change. Raw pages have no on-media metadata;
+compressed pages do, and current reads validate its CRC and sequence every
+time. Payload CRC equality alone is not equivalent.
+
+For singleton WRITE analysis, `sv3_flush_window()` must increment exactly
+one `one_page_close_reasons[reason]` entry whenever `count == 1`.
+The status/report layer must carry all reasons and fail closed unless their
+delta sum equals `one_page_windows`.
+
 The first exact-head native CI for the rejected policy failed before
 runtime because the bounded uint16 subtraction was compared with unsigned
 literal `1U`, producing `-Wsign-compare` under `-Werror`. Keep the
