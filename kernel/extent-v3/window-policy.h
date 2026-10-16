@@ -155,7 +155,7 @@ static inline sv3_u8 sv3_window_pareto_read_cap(
 		sv3_u16 cap3_blocks, sv3_u8 cap3_four_extents)
 {
 	if (cap2_blocks > uncapped_blocks &&
-	    cap2_blocks - uncapped_blocks > 1U &&
+	    cap2_blocks - uncapped_blocks > 1 &&
 	    cap3_blocks == uncapped_blocks &&
 	    cap3_four_extents <= 1U)
 		return 3U;

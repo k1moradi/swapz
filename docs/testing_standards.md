@@ -296,7 +296,12 @@ owns staging, lower completion, publication and upper completion.
 `accepted_burst_cap_extra_gt1_windows`; chosen 16KiB extents must not
 exceed selected cap=3 windows; recovered blocks must be at least two per
 selected window and no more than the cap=2 reference tax. Any violation
-makes the loaded report incomplete. All three Pareto counters are
+makes the loaded report incomplete. The first exact-head native CI for this
+policy failed before runtime because the bounded uint16 subtraction was
+compared with unsigned literal `1U`, producing `-Wsign-compare` under
+`-Werror`. Keep the prior greater-than guard and compare the promoted
+difference with signed literal `1`; do not hide the warning with a cast.
+All three Pareto counters are
 mandatory through status parsing, per-session deltas and per-regime
 summary output; synthetic report fixtures must exercise the same
 relationships so schema drift fails before owner-loaded qualification. For sixteen uniform 2072-byte
