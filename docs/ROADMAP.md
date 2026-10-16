@@ -89,6 +89,16 @@ gate. SD useful WRITE slipped to 5.15/5.22 MB/s and lower requests rose
 to ~3.36k; SSD slipped to 17.52/17.96 MB/s and requests rose to
 ~2.87k. Revert that policy refinement rather than accumulating another
 heuristic on it.
+The owner next qualified exact code
+`ed2ea3df84c66eb0747d4161da4309831c4072f8` (report-only
+`adbe231e66d0`). The accepted-burst extension materially improved
+writes: SD useful WRITE 5.43/5.50 MB/s, ~2.88k lower requests and
+~3.10s lower-write wait; SSD 18.31/20.40 MB/s with 2309.5/2152
+requests. However the globally larger planner windows shifted records
+into read-hostile layouts. SD random 4MiB READ regressed to
+1.82/1.85s, 8,316,928/8,361,984 lower bytes and ~628/651 payload
+callbacks; SSD random rose to 0.34/0.33s with ~8.45/8.43ms p99.
+This is a write-side mechanism win but a rejected three-axis outcome.
 Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
@@ -189,18 +199,26 @@ are still planned.
       `b4d828d` plain-WRITE-only filter was owner-qualified and
       **rejected**: requests and useful WRITE both worsened in SD and
       SSD. Restore the broader accepted-local signal.
-      The next bounded production-C experiment adds no new waiting:
-      after the normal 4/6-record second-pack threshold is reached,
-      keep consuming only BIOs already present in the current worker-local
-      snapshot and close immediately at that snapshot tail. Existing
-      dependency/FUA/discard/read/error/deadline/full-window drains can
-      still close earlier. The existing no-padding `lower_bulk=1`
-      writer already has exact-C coverage for 64-record batches,
-      overwrite rollback, mixed RAW/compressed groups, byte equality and
-      post-success authority publication. Add explicit extension/tail
-      telemetry and require independent lower WRITE bytes to stay flat
-      while request/wait reductions improve without SSD or p99 regression.
-      New source **NOT YET OWNER-LOADED**.
+      Owner-loaded `ed2ea3d` validates accepted-burst lower-request
+      aggregation but rejects its unconstrained on-media layout:
+      lower WRITE requests/wait improved materially, while 4MiB packed
+      READ amplification/p99 regressed in both modeled regimes and SD
+      random time returned near the pre-read-optimization ~1.8s range.
+      The next bounded production-C experiment preserves the accepted
+      burst and existing no-padding lower-run aggregation but gives only
+      those extended windows a **planning-only cold-read cap of two 4KiB
+      blocks per compressed record**. It does not change the target's
+      configured runtime read policy, timer, admission, publication or
+      future-arrival rules. Existing planner tests establish the concrete
+      tradeoff for sixteen ~2072-byte records: 10 write blocks
+      unconstrained versus 11 under cap=2, with the capped layout avoiding
+      16KiB mappings. New exact-C bulk coverage requires zero padding,
+      <=8KiB mappings, byte-exact readback and continued run aggregation.
+      Add `accepted_burst_read_caps` telemetry. Keep this only if packed
+      READ bytes/payload callbacks/p99 recover materially from `ed2ea3d`
+      while lower WRITE request/wait gains remain substantial and useful
+      WRITE does not materially regress past the owner-qualified
+      `bd8fe3a` cross-regime baseline. New source **NOT YET OWNER-LOADED**.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
 

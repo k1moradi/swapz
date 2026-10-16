@@ -190,6 +190,7 @@ struct sv3_dm {
 	bool accepted_burst_pack_ready;
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
+	u64 accepted_burst_read_caps;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1016,6 +1017,8 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	sv3_u8 gc_attempts = 0;
 	bool needs_fua = false;
 	bool packed_close = ctx->next_window_close == SV3_CLOSE_PACK_READY;
+	bool accepted_burst_extended = ctx->accepted_burst_pack_ready;
+	sv3_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record;
 	u64 end_ns, open_age_ns, section_start;
 	int error = 0;
 
@@ -1062,6 +1065,14 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 			sv3_complete(ctx->batch[index].bio, error);
 		goto accounted;
 	}
+	/* The accepted-burst experiment may aggregate many logical records
+	 * without waiting for future arrivals. Keep that lower-run opportunity,
+	 * but cap only ITS write planner to at most two cold read blocks per
+	 * record. Runtime reads retain the target's configured policy. */
+	if (accepted_burst_extended && !planning_read_cap) {
+		planning_read_cap = 2U;
+		ctx->accepted_burst_read_caps++;
+	}
 	section_start = ktime_get_ns();
 	sv3_order_window(ctx);
 	ctx->window_sort_wall_ns +=
@@ -1073,9 +1084,10 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		sv3_u8 succeeded = 0;
 
 		section_start = ktime_get_ns();
-		error = sv3_engine_write_window_batched(&ctx->engine,
+		error = sv3_engine_write_window_batched_read_cap(&ctx->engine,
 				ctx->planned + committed,
-				count - committed, &succeeded);
+				count - committed, &succeeded,
+				planning_read_cap);
 		ctx->window_commit_wall_ns +=
 			sv3_elapsed_ns(section_start, ktime_get_ns());
 		committed += succeeded;
@@ -2297,7 +2309,8 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "close_deadline=%llu retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
-		       "accepted_burst_tail_flushes=%llu burst_tail_flushes=%llu "
+		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
+		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
@@ -2380,6 +2393,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,
 		       ctx->accepted_burst_tail_flushes,
+		       ctx->accepted_burst_read_caps,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,

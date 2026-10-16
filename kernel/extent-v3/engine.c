@@ -169,9 +169,10 @@ void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 	}
 }
 
-int sv3_engine_write_window(struct sv3_engine *engine,
+static int sv3_engine_write_window_planned(struct sv3_engine *engine,
 			    const struct sv3_compressed_page *pages,
-			    sv3_u8 count, sv3_u8 *committed_pages)
+			    sv3_u8 count, sv3_u8 *committed_pages,
+			    sv3_u8 plan_read_blocks)
 {
 	struct sv3_tx *tx;
 	sv3_u8 extent_count, entry = 0, group;
@@ -191,8 +192,9 @@ int sv3_engine_write_window(struct sv3_engine *engine,
 	    (!engine->read_scratch || !engine->io.read_blocks ||
 	     engine->read_scratch == engine->write_scratch))
 		return -EINVAL;
-	error = sv3_engine_plan_bounded(pages, count,
-					engine->max_read_blocks_per_record,
+	if (plan_read_blocks > 3U)
+		return -EINVAL;
+	error = sv3_engine_plan_bounded(pages, count, plan_read_blocks,
 					engine->plan_classes,
 					engine->plan_takes, &extent_count);
 	if (error)
@@ -282,6 +284,17 @@ abort_transaction:
 		return error;
 	}
 	return 0;
+}
+
+int sv3_engine_write_window(struct sv3_engine *engine,
+			    const struct sv3_compressed_page *pages,
+			    sv3_u8 count, sv3_u8 *committed_pages)
+{
+	if (!engine)
+		return -EINVAL;
+	return sv3_engine_write_window_planned(engine, pages, count,
+					      committed_pages,
+					      engine->max_read_blocks_per_record);
 }
 
 /*
@@ -387,9 +400,10 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 	return 0;
 }
 
-int sv3_engine_write_window_batched(struct sv3_engine *e,
+int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
 				   const struct sv3_compressed_page *pages,
-				   sv3_u8 count, sv3_u8 *committed_pages)
+				   sv3_u8 count, sv3_u8 *committed_pages,
+				   sv3_u8 plan_read_blocks)
 {
 	sv3_u8 extent_count = 0, compressed_count = 0, raw_count = 0;
 	sv3_u8 entry = 0, group, staged = 0;
@@ -397,7 +411,7 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 	sv3_u16 run_blocks = 0;
 	int error;
 
-	if (!e || !e->authority || !committed_pages)
+	if (!e || !e->authority || !committed_pages || plan_read_blocks > 3U)
 		return -EINVAL;
 	*committed_pages = 0;
 	sv3_engine_invalidate_read_cache(e);
@@ -424,15 +438,17 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 			if (pages[group].logical_page == pages[j].logical_page) {
 				if (raw_count)
 					return -EEXIST;
-				return sv3_engine_write_window(e, pages, count,
-							      committed_pages);
+				return sv3_engine_write_window_planned(e, pages, count,
+							      committed_pages,
+							      plan_read_blocks);
 			}
 	}
 	if (!raw_count && (!e->bulk_enabled || !e->bulk_scratch ||
 	    !e->bulk_txs || !e->io.write_run || e->verify_after_write ||
 	    count <= 1))
-		return sv3_engine_write_window(e, pages, count,
-					      committed_pages);
+		return sv3_engine_write_window_planned(e, pages, count,
+					      committed_pages,
+					      plan_read_blocks);
 	/* Raw admission stays serialized in lower_bulk=0/verify mode.
 	 * Never silently reinterpret it as a compressed SWZ3 record. */
 	if (!e->bulk_enabled || !e->bulk_scratch || !e->bulk_txs ||
@@ -440,7 +456,7 @@ int sv3_engine_write_window_batched(struct sv3_engine *e,
 		return -EOPNOTSUPP;
 	if (compressed_count) {
 		error = sv3_engine_plan_bounded(pages, compressed_count,
-					e->max_read_blocks_per_record,
+					plan_read_blocks,
 					e->plan_classes, e->plan_takes,
 					&extent_count);
 		if (error)
@@ -571,6 +587,17 @@ abort_group:
 	}
 	return sv3_bulk_flush(e, run_start, run_blocks, staged,
 			      committed_pages);
+}
+
+int sv3_engine_write_window_batched(struct sv3_engine *e,
+				   const struct sv3_compressed_page *pages,
+				   sv3_u8 count, sv3_u8 *committed_pages)
+{
+	if (!e)
+		return -EINVAL;
+	return sv3_engine_write_window_batched_read_cap(e, pages, count,
+						committed_pages,
+						e->max_read_blocks_per_record);
 }
 
 int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,

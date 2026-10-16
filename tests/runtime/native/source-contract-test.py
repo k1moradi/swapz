@@ -336,13 +336,13 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_bounded_lower_run_aggregation_preserves_commit_gate(self):
         engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
         authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
-        writer = source_body("sv3_engine_write_window_batched", engine)
+        writer = source_body("sv3_engine_write_window_batched_read_cap", engine)
         flush = source_body("sv3_bulk_flush", engine)
         pause = source_body("sv3_batch_pause", authority)
         resume = source_body("sv3_batch_resume", authority)
         self.assertIn("SV3_BULK_BLOCKS 64U",
                       (ROOT / "kernel/extent-v3/engine.h").read_text())
-        self.assertIn("sv3_engine_write_window_batched(&ctx->engine", DM)
+        self.assertIn("sv3_engine_write_window_batched_read_cap(&ctx->engine", DM)
         self.assertIn("ctx->engine.io.write_run = sv3_lower_write_run", DM)
         self.assertIn("sv3_batch_pause(e->authority, tx)", writer)
         self.assertIn("sv3_bulk_flush(e, run_start", writer)
@@ -369,7 +369,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
 
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
         engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
-        writer = source_body("sv3_engine_write_window_batched", engine)
+        writer = source_body("sv3_engine_write_window_batched_read_cap", engine)
         flush = source_body("sv3_bulk_flush", engine)
         accept = body("sv3_accept_write")
         complete = body("sv3_flush_window")
@@ -666,7 +666,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
                     "lower_write_wall_ns", "gc_wall_ns"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
-        self.assertIn("sv3_engine_write_window_batched(", flush)
+        self.assertIn("sv3_engine_write_window_batched_read_cap(", flush)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
@@ -688,7 +688,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
                       greedy)
         self.assertIn("if (index != position)", reorder)
         self.assertIn("sv3_order_window(ctx)", flush)
-        self.assertIn("sv3_engine_write_window_batched", flush)
+        self.assertIn("sv3_engine_write_window_batched_read_cap", flush)
 
     def test_alpha16_no_rearm_of_already_queued_retention_timer(self):
         policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
@@ -775,6 +775,14 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
         self.assertIn("accepted_burst_tail_flushes=%llu", status)
+        self.assertIn("accepted_burst_read_caps=%llu", status)
+        self.assertIn("bool accepted_burst_extended = ctx->accepted_burst_pack_ready", flush)
+        self.assertIn("sv3_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record", flush)
+        self.assertIn("if (accepted_burst_extended && !planning_read_cap)", flush)
+        self.assertIn("planning_read_cap = 2U", flush)
+        self.assertIn("ctx->accepted_burst_read_caps++", flush)
+        self.assertIn("sv3_engine_write_window_batched_read_cap(&ctx->engine", flush)
+        self.assertIn("planning_read_cap);", flush)
         self.assertIn("ctx->window_close_reasons[ctx->next_window_close]++", flush)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):

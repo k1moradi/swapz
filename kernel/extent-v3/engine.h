@@ -127,6 +127,16 @@ int sv3_engine_write_window(struct sv3_engine *engine,
  * confirmed lower write completes. Respects 1MiB segment boundary,
  * a 256KiB memory/I/O cap, and the prior committed-page-prefix ABI.
  */
+/*
+ * Explicit planning-only cold-read cap for an otherwise identical batched
+ * write. This selects a less read-amplifying 4/8/16KiB layout without
+ * changing the target's runtime read policy or lower publication contract.
+ */
+int sv3_engine_write_window_batched_read_cap(
+				   struct sv3_engine *engine,
+				   const struct sv3_compressed_page *pages,
+				   sv3_u8 count, sv3_u8 *committed_pages,
+				   sv3_u8 plan_read_blocks);
 int sv3_engine_write_window_batched(struct sv3_engine *engine,
 				   const struct sv3_compressed_page *pages,
 				   sv3_u8 count, sv3_u8 *committed_pages);

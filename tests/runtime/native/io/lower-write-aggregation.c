@@ -960,6 +960,55 @@ static int test_mixed_realistic_payloads_keep_zero_padding(void)
 	return 0;
 }
 
+static int test_explicit_read_cap_keeps_bulk_run_and_avoids_4block_extents(void)
+{
+	unsigned long long unbounded_bytes;
+	unsigned int i, unbounded_calls;
+	sv3_u8 committed = 0;
+	int saw_four = 0;
+
+	CHECK(setup() == 0);
+	for (i = 0; i < 16; ++i) {
+		pages[i].length = 2072;
+		memset(payloads[i], (int)i + 31, pages[i].length);
+	}
+	CHECK(sv3_engine_write_window_batched(&e, pages, 16, &committed) == 0);
+	CHECK(committed == 16);
+	for (i = 0; i < 16; ++i)
+		if (maps[i].extent_blocks == 4)
+			saw_four = 1;
+	CHECK(saw_four);
+	unbounded_bytes = lower_written_bytes;
+	unbounded_calls = run_calls;
+	CHECK(unbounded_bytes == 10ULL * SV3_BLOCK_BYTES);
+	CHECK(validate_prefix(16) == 0);
+
+	CHECK(setup() == 0);
+	for (i = 0; i < 16; ++i) {
+		pages[i].length = 2072;
+		memset(payloads[i], (int)i + 31, pages[i].length);
+	}
+	committed = 0;
+	CHECK(sv3_engine_write_window_batched_read_cap(&e, pages, 16,
+						      &committed, 2) == 0);
+	CHECK(committed == 16);
+	for (i = 0; i < 16; ++i)
+		CHECK(maps[i].extent_blocks <= 2);
+	CHECK(lower_written_bytes == 11ULL * SV3_BLOCK_BYTES);
+	CHECK(!e.bulk_padding_blocks);
+	CHECK(run_calls < e.bulk_extents);
+	CHECK(run_calls <= unbounded_calls + 1);
+	CHECK(validate_prefix(16) == 0);
+
+	CHECK(setup() == 0);
+	committed = 55;
+	CHECK(sv3_engine_write_window_batched_read_cap(&e, pages, 16,
+						      &committed, 4) == -EINVAL);
+	CHECK(committed == 55);
+	CHECK(!run_calls && !extent_calls && !a.in_flight && !a.batch_pending);
+	return 0;
+}
+
 static int test_malformed_mixed_input_fails_before_staging(void)
 {
 	sv3_u8 committed = 44;
@@ -1015,6 +1064,7 @@ int main(void)
 	CHECK(test_mixed_successful_cross_format_overwrite() == 0); passed++;
 	CHECK(test_mixed_819_205_distribution_economy() == 0); passed++;
 	CHECK(test_mixed_realistic_payloads_keep_zero_padding() == 0); passed++;
+	CHECK(test_explicit_read_cap_keeps_bulk_run_and_avoids_4block_extents() == 0); passed++;
 	CHECK(test_malformed_mixed_input_fails_before_staging() == 0); passed++;
 	printf("SV3_BULK_IO_TESTS_PASS=%d\n", passed);
 	return 0;

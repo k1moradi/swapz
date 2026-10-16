@@ -160,14 +160,27 @@ also fell from 17.97/18.51 to 17.52/17.96 MB/s while requests rose
 from ~2.62k to ~2.87k. The plain-WRITE-only follow-up filter is therefore
 rejected; the broader already-accepted backlog signal performed better.
 
-**Next C experiment, NOT YET OWNER-LOADED:** restore the accepted-local
-backlog rule, then, once the existing 4-in-8KiB or 6-in-16KiB
-pack-ready geometry is reached, continue consuming only BIOs already
-present in that worker-local snapshot. Flush immediately at the snapshot
-tail. This adds no retention-timer wait and lets the existing
-no-padding adjacent-extent bulk writer see a larger batch. Future
-arrivals remain ineligible; all ordinary dependency/fence/failure drains
-can still close the batch earlier.
+**Owner-qualified accepted-burst extension (write win, read loss):**
+exact code `ed2ea3df84c66eb0747d4161da4309831c4072f8` passed all five
+owner stages; sanitized report-only commit `adbe231e66d0`. SD useful
+WRITE improved to 5.43/5.50 MB/s with ~2.88k lower requests and
+3.09/3.10s lower-WRITE wait. SSD reached 18.31/20.40 MB/s with
+2309.5/2152 lower requests. But larger globally replanned windows
+regressed packed READs: SD random 4MiB rose to 1.82/1.85s with
+8,316,928/8,361,984 lower bytes and ~628/651 payload callbacks;
+SSD random rose to 0.34/0.33s and ~8.45ms p99. This fails the
+predeclared three-axis read/p99 gate despite the write-side gain.
+
+**Next C experiment, NOT YET OWNER-LOADED:** keep the accepted-burst
+extension and adjacent lower-run aggregation, but apply an explicit
+planning-only two-block cold-read cap to windows that were actually
+extended through the accepted local burst. Ordinary windows and the
+target's runtime read policy are unchanged. Exact production-C coverage
+shows sixteen 2072-byte records use 10 blocks unconstrained versus
+11 blocks under the cap, while capped mappings stay at 4/8KiB and the
+no-padding bulk writer remains able to aggregate adjacent extents.
+The goal is to retain lower-request savings without recreating
+read-hostile 16KiB record layouts.
 
 ## Current C performance work and qualification plan
 

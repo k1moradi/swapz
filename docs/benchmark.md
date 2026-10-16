@@ -463,31 +463,51 @@ Relative to `bd8fe3a`, SD sync/async useful WRITE fell
 successor classification removed useful aggregation more often than it
 avoided harmful waiting; restore the broader worker-local snapshot rule.
 
-**Current production-C experiment (NOT YET OWNER-LOADED):** once a
-retained window reaches the existing second-pack geometry
-(4 records fitting 8KiB or 6 fitting 16KiB), do not immediately submit
-it when more BIOs are already present in the same worker-local snapshot.
-Mark the window pack-ready, continue through that finite accepted burst,
-and flush immediately when the current local snapshot reaches its tail.
-No future admission can extend this decision and no retention timer is
-added or refreshed. If a READ, duplicate slot, zero page, RAW/fence,
-DISCARD, failure, absolute deadline, full window or other existing
-boundary is encountered, the original drain path wins.
+**Owner-qualified accepted-burst result:** exact code
+`ed2ea3df84c66eb0747d4161da4309831c4072f8` passed all five owner
+stages; result-only publication `adbe231e66d0`. The write hypothesis
+was strongly supported: SD useful WRITE reached 5.43/5.50 MB/s with
+2879.5/2883.5 lower requests and 3.09/3.10s lower callback wall;
+SSD reached 18.31/20.40 MB/s with 2309.5/2152 requests and
+0.46/0.42s lower wait. Write byte efficiency also improved to
+1.48x SD and 1.56/1.57x SSD.
 
-The purpose is to give the already-qualified no-padding adjacent-extent
-bulk writer a larger transaction **without buying additional wait**.
-The engine already has production-C tests for 64-record aggregation,
-failed-run rollback, overwrite authority preservation, mixed
-RAW/compressed batches, zero padding in default bulk mode, byte-identical
-lower output and readback. New `accepted_burst_extensions` and
-`accepted_burst_tail_flushes` counters are explanatory only.
+The predeclared three-axis gate nevertheless **failed**. SD sequential
+4MiB packed READ rose to 1.11/1.13s and seeded-random to 1.82/1.85s;
+random lower traffic reached 8,316,928/8,361,984 bytes and payload
+callbacks 627.5/651. SSD random rose to 0.34/0.33s with
+8.45/8.43ms p99 and ~7.7/7.6MB lower traffic. The larger accepted
+window allowed the byte-minimal planner to select denser 16KiB extents,
+reintroducing metadata-then-payload read dependence. This is useful
+write-path evidence, not a complete VISION win.
 
-**Predeclared decision:** retain this experiment only if independent
-lower WRITE requests and lower-WRITE callback wall improve relative to
-`bd8fe3a` while lower WRITE bytes do not increase and SSD useful WRITE
-plus read/write p99 do not materially regress. More driver-side bulk
-callbacks or larger windows without independent device improvement are
-not a VISION win.
+**Current production-C experiment (NOT YET OWNER-LOADED):** preserve
+accepted-burst aggregation but separate *lower submission grouping*
+from *logical extent density*. When a window was actually extended
+after reaching pack-ready geometry, call the exact same batched
+publication path with an explicit planning-only `max_read_blocks=2`.
+That cap applies only while selecting the written SWZ3 extent layout;
+the target's configured runtime read policy remains unchanged. Normal
+non-extended windows use the original planner unchanged.
+
+The existing planner oracle demonstrates the expected bounded tradeoff:
+sixteen uniform 2072-byte records require 10 normalized write blocks
+under byte-minimal planning and 11 with cap=2. A new exact production-C
+bulk test requires the capped batch to publish no mapping wider than
+two blocks, add no padding, retain lower-run aggregation and read back
+all sixteen records byte-for-byte. The uncapped control must still
+exercise a four-block extent. `accepted_burst_read_caps` counts
+extended windows where the default planner was replaced by this
+planning-only cap; it is diagnostic only.
+
+**Predeclared decision:** prefer the capped accepted-burst layout only
+if the loaded matrix materially reverses `ed2ea3d`'s read regression
+(lower READ bytes, payload callbacks, fixed-volume time/p99) while
+preserving a substantial portion of its lower-WRITE request/wait gain.
+Useful WRITE should remain no materially worse than the qualified
+`bd8fe3a` baseline, and independent lower WRITE bytes must be reported
+rather than hidden by the request win. A prettier extent-class profile
+alone is not success.
 
 **First CI feedback:** the new rootless write-status parser initially used
 a double-escaped regex for whitespace and decimal counters. Both the

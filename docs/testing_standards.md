@@ -253,12 +253,26 @@ before resetting the local-follow-up snapshot. Any existing boundary
 encountered while walking the accepted burst retains its original drain
 and clears the extension state through `sv3_flush_window`.
 
-The extension must not alter on-disk layout, add padding, refresh the
-retention deadline, inspect future admissions, bypass FUA/read/discard/
-duplicate/zero/RAW handling, or publish a mapping before lower success.
-Exact-C aggregation tests remain the correctness basis for larger
-batches; source contracts additionally require extension state reset on
-every flush and tail-close-before-follow-up-reset ordering. Loaded
+Owner qualification at `ed2ea3d` showed that unconstrained replanning
+of these larger windows reduced WRITE requests but caused a material
+packed-READ regression through denser 16KiB layouts. The current
+correctness experiment therefore captures whether a window was actually
+extended before clearing extension state and, only for that window when
+the target's configured read budget is the default zero, supplies a
+planning-only cap of two cold 4KiB blocks per compressed record to the
+same batched engine. This temporary planning argument must not mutate
+`engine.max_read_blocks_per_record`; runtime reads and explicit target
+budgets retain their original semantics.
+
+The capped batched engine must preserve all ordinary validation,
+committed-prefix failure behavior, batch pause/resume, lower-run
+aggregation, no-padding default and post-success publication. Exact-C
+coverage compares the same sixteen 2072-byte records: uncapped planning
+must retain its 10-block/four-block-extent control, while cap=2 uses
+11 blocks, maps every record to <=2 blocks, still aggregates lower runs
+and verifies exact readback. An invalid planning cap must fail before
+staging. Source/report contracts require
+`accepted_burst_read_caps <= accepted_burst_extensions`. Loaded
 performance qualification remains separate from these safety contracts.
 
 ## Alpha.22 packed-burst tail correctness contract
