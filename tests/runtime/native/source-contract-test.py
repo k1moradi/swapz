@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DM = (ROOT / "src/kernel/dm-target.c").read_text()
 AUTH = (ROOT / "src/kernel/authority.c").read_text()
 MK = (ROOT / "src/kernel/Makefile").read_text()
-README = (ROOT / "README.md").read_text()
+README = (ROOT / "docs/README.md").read_text()
 
 
 def body(symbol: str) -> str:
@@ -68,7 +68,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertNotIn('PACKAGE_VERSION="' + version + '"', dkms)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertNotIn('"swapz3"', DM)
-        for path in ("AGENTS.md", "README.md", "VISION.md",
+        for path in ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
                      "docs/compile.md", "docs/benchmark.md"):
             with self.subTest(naming_policy=path):
@@ -82,7 +82,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         # A public README must link to the single version source rather
         # than becoming a second, manually edited alpha-number string.
         self.assertIn(
-            "[`src/kernel/VERSION`](src/kernel/VERSION)", README)
+            "[`src/kernel/VERSION`](../src/kernel/VERSION)", README)
         self.assertIn("single source of truth", README)
 
     def test_write_saturation_pilot_stays_private_bounded_and_write_only(self):
