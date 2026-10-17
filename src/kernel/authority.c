@@ -804,37 +804,6 @@ static int swapz_read_observed_authority(
 	return 0;
 }
 
-int swapz_read_authoritative(const struct swapz_authority *a,
-			   swapz_u32 logical_page, const struct swapz_map *observed,
-			   const void *extent, swapz_u32 bytes_total,
-			   struct swapz_decoded *decoded,
-			   const swapz_u8 **payload)
-{
-	const struct swapz_map *current;
-	int error;
-
-	if (!decoded || !payload)
-		return -EINVAL;
-	error = swapz_read_observed_authority(a, logical_page, observed,
-					   extent, bytes_total, &current);
-	if (error)
-		return error;
-	error = swapz_lookup(extent, bytes_total, current->record_index,
-			   decoded, payload);
-	if (error)
-		return error;
-	if (decoded->logical_page != logical_page ||
-	    decoded->generation != current->generation ||
-	    decoded->payload_length != current->payload_length ||
-	    decoded->payload_offset != current->payload_offset ||
-	    swapz_disk_sequence(extent) != current->sequence) {
-		*decoded = (struct swapz_decoded){ 0 };
-		*payload = NULL;
-		return -EUCLEAN;
-	}
-	return 0;
-}
-
 int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 				  swapz_u32 logical_page,
 				  const struct swapz_map *observed,

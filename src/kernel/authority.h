@@ -166,15 +166,6 @@ int swapz_verify_raw(const struct swapz_authority *authority,
 		   swapz_u32 logical_page, const void *raw_page);
 /* Serialized explicit logical discard: invalidate and advance generation. */
 int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical_page);
-/* Fail-closed multi-page discard: prevalidate entire range before mutation. */
-int swapz_discard_range(struct swapz_authority *authority,
-		      swapz_u32 first_page, swapz_u32 page_count);
-/* Binds on-media readback to current in-memory mapping and generation. */
-int swapz_read_authoritative(const struct swapz_authority *authority,
-			   swapz_u32 logical_page, const struct swapz_map *observed,
-			   const void *extent, swapz_u32 bytes_total,
-			   struct swapz_decoded *decoded,
-			   const swapz_u8 **payload);
 /*
  * Fast path after swapz_peek() has validated metadata in worker-owned scratch.
  * Rechecks current authority/sequence and verifies the payload CRC without

@@ -84,7 +84,8 @@ static int test_full_publish_and_authoritative_reads(void)
 		CHECK(observed.valid && observed.start_block == 0 &&
 		      observed.generation == 1 && observed.record_index == index &&
 		      observed.extent_blocks == 4 && observed.sequence == 1);
-		CHECK(swapz_read_authoritative(&authority, index, &observed,
+		CHECK(swapz_peek(extent, 16384, observed.record_index, &decoded) == 0);
+		CHECK(swapz_read_authoritative_peeked(&authority, index, &observed,
 					    extent, 16384, &decoded, &payload) == 0);
 		CHECK(decoded.logical_page == index && decoded.generation == 1);
 		CHECK(observed.payload_offset == decoded.payload_offset);
@@ -93,7 +94,7 @@ static int test_full_publish_and_authoritative_reads(void)
 			struct swapz_map forged = observed;
 
 			forged.payload_offset++;
-			CHECK(swapz_read_authoritative(&authority, index, &forged,
+			CHECK(swapz_read_authoritative_peeked(&authority, index, &forged,
 					    extent, 16384,
 					    &decoded, &payload) == -ESTALE);
 		}
@@ -195,13 +196,16 @@ static int test_overwrite_generation_and_liveness(void)
 	CHECK(live[0] == 4 && live[4] == 3);
 	CHECK(classes[0] == 4 && classes[4] == 2);
 	CHECK(maps[0].generation == 2 && maps[3].generation == 1);
-	CHECK(swapz_read_authoritative(&authority, 0, &old,
+	CHECK(swapz_peek(previous_extent, 16384, old.record_index, &decoded) == 0);
+	CHECK(swapz_read_authoritative_peeked(&authority, 0, &old,
 				    previous_extent, 16384,
 				    &decoded, &payload) == -ESTALE);
-	CHECK(swapz_read_authoritative(&authority, 0, &maps[0],
+	CHECK(swapz_peek(extent, 8192, maps[0].record_index, &decoded) == 0);
+	CHECK(swapz_read_authoritative_peeked(&authority, 0, &maps[0],
 				    extent, 8192, &decoded, &payload) == 0);
 	CHECK(decoded.generation == 2 && decoded.logical_page == 0);
-	CHECK(swapz_read_authoritative(&authority, 3, &maps[3],
+	CHECK(swapz_peek(previous_extent, 16384, maps[3].record_index, &decoded) == 0);
+	CHECK(swapz_read_authoritative_peeked(&authority, 3, &maps[3],
 				    previous_extent, 16384,
 				    &decoded, &payload) == 0);
 	return 0;

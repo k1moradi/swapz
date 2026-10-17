@@ -76,3 +76,9 @@ The public engine surface contains only paths used by the current Device Mapper
 target. Native tests must not keep convenience wrappers alive; they can select
 the production batched writer's sequential fallback or bounded planner
 explicitly when qualifying those behaviors.
+
+
+The authority header exports only implemented, production-used operations.
+The current compressed read path is metadata peek plus
+`swapz_read_authoritative_peeked()`; the older reparsing read wrapper and
+unimplemented range-discard declaration are not retained for test convenience.
