@@ -10,21 +10,21 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`b35a72cb5cc92bbb3bbe58b58a031985b62595a4` also passed all five stages and
-is useful exploratory evidence, but is not promoted: QD4 requests fell
-materially in async mode while faster-model async QD4 useful throughput also
-fell, so request reduction alone does not satisfy acceptance. It retained the 512-entry metadata-LRU random-read savings, reduced
-slow mixed-QD32 lower WRITE requests to about 762-764 with only two mean
-deadline closes, and recovered write-only QD8 to about 0.89x raw on the slow
-model and up to 0.77x raw on the faster model. Faster-model async mixed QD32
-reached 22.57 MB/s versus 20.02 MB/s raw in the bounded synthetic model.
+`4529140f689183ead86d94526b9974b875d915f4` passed all five stages and is
+the strongest request-reduction experiment so far, but is not promoted.
 
-QD4 remains the clearest unresolved write-path loss: roughly 2025-2048 lower
-WRITE requests for 4096 medium writes, about two lower requests per four-write
-wave, with useful throughput only about 0.60-0.70x raw. The write-only pilot is
-one pair per mode/QD and has no confidence interval, so these are directional
-engineering signals, not confirmatory performance claims. Live GC was not
-exercised.
+At `4529140...`, write-only QD4 converged to about 1032 lower WRITE requests
+and QD8 to about 520 for 4096 medium writes. Faster-model QD32 reached about
+138-139 requests, and slow async QD32 reached 141. Those are large endurance-
+direction reductions. However, faster-model QD8 useful throughput fell to
+0.35x/0.59x raw sync/async, mixed faster-model QD32 fell to 16.39/18.06 MB/s,
+and mixed faster-model deadline closes rose to about 214 per pair. Slow QD32
+sync also learned an invalidly narrow target of 3, produced 82 deadline closes
+and 209 lower requests. Request reduction without acceptable throughput remains
+diagnostic evidence, not acceptance.
+
+The write-only pilot is still one pair per mode/QD with no confidence interval,
+and live GC remains unexercised.
 
 ## Completed cleanup after that baseline
 
@@ -38,19 +38,22 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify adaptive retained-burst width learned only from finite admitted
-   tails observed after synchronous lower writes, with one-deadline downward
-   adaptation for a smaller multi-record stream.
-2. Report write-only QD window bins plus pack/deadline/idle closures. Accept
-   request reductions only when they come with acceptable useful throughput,
-   lower bytes, QD1/QD8 behavior, read tails and correctness.
-3. Keep the accepted-burst planner read cap at two and physical layout policy
-   unchanged. If large windows still issue multiple requests, then investigate
-   lower-run/allocator geometry separately.
-4. Keep asynchronous-preparation QD1 scheduling as a separate experiment after
-   burst closure stabilizes.
-5. Add statistically repeated saturation only after policy stabilizes; keep
-   sustained live GC, genuine lower errors and resource pressure as open gates.
+1. Qualify dry accepted-pack closure: once a complete second pack is staged and
+   the finite accepted queue is empty, close it instead of waiting only for a
+   larger learned burst target and burning the absolute deadline.
+2. Preserve learned width from the complete worker-local plus incoming accepted
+   FIFO, and do not let one two/three-record deadline collapse the target below
+   the original four-record anti-chopping floor.
+3. Require the next run to preserve the QD4/QD8/QD32 lower-request gains while
+   recovering mixed faster-model throughput and sharply reducing worker-empty
+   deadline closes.
+4. Keep asynchronous-preparation QD1 scheduling as a separate production-C
+   experiment after burst closure stabilizes.
+5. Revisit GC reserve/probe wear distribution only with direct rotation tests
+   and then sustained loaded GC evidence; current loaded runs exercise no live
+   GC, so do not mix allocator changes into the burst experiment.
+6. Add statistically repeated saturation only after policy stabilizes; genuine
+   lower errors and long-run resource pressure remain open gates.
 
 ## Release gates
 

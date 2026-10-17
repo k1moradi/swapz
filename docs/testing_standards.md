@@ -174,3 +174,13 @@ must include the same window-size, close-reason and retained-burst-target
 attribution required from the real loaded reporter. Fixture success must not
 bypass a newly required evidence field merely because no kernel device is
 present.
+
+
+Dry accepted-pack qualification keeps the existing write-only window attribution
+and additionally requires direct production-C/source coverage that a complete
+accepted pack may close on a proven dry queue below a larger learned target,
+that admitted-tail evidence observes worker-local FIFO entries before later
+`incoming` entries, and that a single two/three-record deadline cannot shrink
+the learned target below the four-record floor. These are scheduling-policy
+checks only; acceptance still depends on useful throughput, lower bytes and
+requests, latency and loaded correctness.

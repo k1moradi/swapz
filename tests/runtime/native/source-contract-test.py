@@ -688,11 +688,19 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_window_burst_close_ready", policy)
         self.assertIn("ctx->retained_chain_completed", flush)
         self.assertIn("ctx->pack_close_pending_tail_sample = true", flush)
+        self.assertIn("struct list_head *local", sample)
+        self.assertIn("list_for_each_entry(entry, local, list)", sample)
         self.assertIn("list_for_each_entry(entry, &ctx->incoming, list)", sample)
+        self.assertLess(sample.index("list_for_each_entry(entry, local, list)"),
+                        sample.index("list_for_each_entry(entry, &ctx->incoming, list)"))
         self.assertIn("swapz_plain_retained_write(entry->bio)", sample)
         self.assertIn("ctx->retained_tail_target = tail", sample)
-        self.assertIn("swapz_sample_pack_tail_locked(ctx)", worker)
+        self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         self.assertIn("swapz_window_shrink_burst_target(", worker)
+        self.assertIn("!ctx->retained_chain_completed", worker)
+        close_ready = body("swapz_retained_pack_close_ready")
+        self.assertIn("ctx->accepted_burst_pack_ready", close_ready)
+        self.assertIn("swapz_window_burst_close_ready(", close_ready)
         self.assertIn("retained_burst_target=%u", status)
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):

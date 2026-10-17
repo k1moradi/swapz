@@ -80,12 +80,25 @@ read cap. A QD4 request reduction therefore tests worker/window chopping rather
 than a new lower-byte-versus-read-amplification tradeoff.
 
 
-### Adaptive retained-burst attribution
+### Qualified adaptive retained-burst result
 
-The next experiment keeps the accepted-burst cold-read cap at two and does not
-change extent planning. It begins with a four-record target, learns larger
-targets only from ordinary write BIOs already queued when a successful
-pack-ready lower write returns, and allows one smaller multi-record deadline to
-adapt downward. No grace timer or future-arrival wait is added. The write-only
-pilot reports window bins and pack/deadline/idle closures so request changes can
-be attributed to window coalescing rather than planner geometry.
+Source `4529140f689183ead86d94526b9974b875d915f4` passed all five
+qualification stages. It confirmed that larger accepted windows can cut lower
+WRITE requests dramatically: write-only QD4 used about 1032 requests, QD8 about
+520, and faster-model QD32 about 138-139 for 4096 writes.
+
+It is not promoted. Faster-model QD8 useful throughput fell materially despite
+the lower request count, mixed faster-model QD32 fell to 16.39/18.06 MB/s
+sync/async and accumulated about 214 mean deadline closes, and slow QD32 sync
+collapsed its learned target to 3 with 82 deadline closes. The attribution
+therefore shows that the learned width is useful while accepted work remains,
+but harmful when an already useful packed window sits on an actually dry queue
+only to wait for a larger historical target.
+
+The next candidate keeps the accepted-burst cold-read cap at two and leaves
+extent planning unchanged. A complete second pack closes immediately when the
+finite accepted queue is dry; admitted-tail learning scans the worker-local FIFO
+before `incoming`; and one two/three-record deadline cannot shrink the learned
+target below the original four-record anti-chopping floor. No grace timer or
+future-arrival wait is added. QD1 asynchronous preparation and GC allocation are
+separate experiments.

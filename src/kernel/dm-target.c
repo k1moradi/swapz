@@ -1271,20 +1271,42 @@ static bool swapz_plain_retained_write(const struct bio *bio)
 	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
 		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
 }
-static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx)
+static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
+					  struct list_head *local)
 {
 	struct swapz_bio_ref *entry;
 	swapz_u8 tail = 0;
 	swapz_u8 room;
+	bool prefix_open = true;
+
 	if (!ctx->pack_close_pending_tail_sample)
 		return;
 	room = ctx->retained_chain_completed < ctx->max_window ?
 		ctx->max_window - ctx->retained_chain_completed : 0;
-	list_for_each_entry(entry, &ctx->incoming, list) {
-		if (!room || !swapz_plain_retained_write(entry->bio))
-			break;
-		tail++;
-		room--;
+	/*
+	 * local is older than incoming. Count the complete already-admitted FIFO
+	 * prefix in that order so synchronous preparation cannot hide residual
+	 * burst width merely because the worker spliced it out of incoming.
+	 */
+	if (local) {
+		list_for_each_entry(entry, local, list) {
+			if (!room)
+				break;
+			if (!swapz_plain_retained_write(entry->bio)) {
+				prefix_open = false;
+				break;
+			}
+			tail++;
+			room--;
+		}
+	}
+	if (prefix_open && room) {
+		list_for_each_entry(entry, &ctx->incoming, list) {
+			if (!room || !swapz_plain_retained_write(entry->bio))
+				break;
+			tail++;
+			room--;
+		}
 	}
 	if (tail) {
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
@@ -1300,7 +1322,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx)
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 {
 	return swapz_window_burst_close_ready(
-		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready,
+		ctx->single_pack_deferred, ctx->accepted_burst_pack_ready,
 		ctx->batch_count, ctx->retained_burst_target,
 		ctx->retained_tail_target);
 }
@@ -1829,7 +1851,7 @@ static void swapz_worker(struct work_struct *work)
 			 */
 			if (remaining > 1U && list_empty(&local)) {
 				spin_lock_irqsave(&ctx->queue_lock, flags);
-				swapz_sample_pack_tail_locked(ctx);
+				swapz_sample_pack_tail_locked(ctx, &local);
 				if (!list_empty(&ctx->incoming)) {
 					list_splice_tail_init(&ctx->incoming, &local);
 					ctx->worker_has_immediate_followup = true;
@@ -1893,7 +1915,8 @@ static void swapz_worker(struct work_struct *work)
 						ctx->singleton_fast_close = false;
 						if ((ctx->single_pack_deferred ||
 						     ctx->accepted_burst_pack_ready) &&
-						    !ctx->retained_tail_target)
+						    !ctx->retained_tail_target &&
+						    !ctx->retained_chain_completed)
 							ctx->retained_burst_target =
 								swapz_window_shrink_burst_target(
 									ctx->retained_burst_target,
@@ -1910,7 +1933,7 @@ static void swapz_worker(struct work_struct *work)
 		}
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
-		swapz_sample_pack_tail_locked(ctx);
+		swapz_sample_pack_tail_locked(ctx, &local);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {

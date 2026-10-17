@@ -202,20 +202,25 @@ static int test_retained_burst_target_adapts_from_finite_evidence(void)
 	CHECK(swapz_window_grow_burst_target(8, 8, 8, SWAPZ_MAX_RECORDS) == 16);
 	CHECK(swapz_window_grow_burst_target(48, 48, 32, SWAPZ_MAX_RECORDS) == SWAPZ_MAX_RECORDS);
 	CHECK(swapz_window_shrink_burst_target(32, 8) == 8);
-	CHECK(swapz_window_shrink_burst_target(4, 3) == 3);
+	CHECK(swapz_window_shrink_burst_target(32, 3) == 32);
+	CHECK(swapz_window_shrink_burst_target(4, 3) == 4);
 	CHECK(swapz_window_shrink_burst_target(4, 1) == 4);
 	return 0;
 }
 static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 {
-	CHECK(!swapz_window_burst_close_ready(0, 3, 4, 0));
-	CHECK(!swapz_window_burst_close_ready(1, 3, 4, 0));
-	CHECK(swapz_window_burst_close_ready(1, 4, 4, 0));
-	CHECK(!swapz_window_burst_close_ready(1, 7, 8, 0));
-	CHECK(swapz_window_burst_close_ready(1, 8, 8, 0));
-	CHECK(swapz_window_burst_close_ready(0, 1, 8, 1));
-	CHECK(!swapz_window_burst_close_ready(0, 2, 8, 3));
-	CHECK(swapz_window_burst_close_ready(0, 3, 8, 3));
+	CHECK(!swapz_window_burst_close_ready(0, 0, 3, 4, 0));
+	CHECK(!swapz_window_burst_close_ready(1, 0, 3, 4, 0));
+	CHECK(swapz_window_burst_close_ready(1, 0, 4, 4, 0));
+	CHECK(!swapz_window_burst_close_ready(1, 0, 7, 8, 0));
+	CHECK(swapz_window_burst_close_ready(1, 0, 8, 8, 0));
+	/* A complete second pack on a proven dry accepted queue must not wait
+	 * for an oversized learned target and burn the absolute deadline. */
+	CHECK(swapz_window_burst_close_ready(1, 1, 6, 32, 0));
+	CHECK(swapz_window_burst_close_ready(0, 1, 6, 32, 0));
+	CHECK(swapz_window_burst_close_ready(0, 0, 1, 8, 1));
+	CHECK(!swapz_window_burst_close_ready(0, 0, 2, 8, 3));
+	CHECK(swapz_window_burst_close_ready(0, 0, 3, 8, 3));
 	return 0;
 }
 

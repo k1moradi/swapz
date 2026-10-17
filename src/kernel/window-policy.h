@@ -120,7 +120,9 @@ static inline int swapz_window_pack_ready(
  * without waiting for a future arrival. Start at four records. A successful
  * pack-ready close may expose a finite admitted tail accumulated while lower
  * I/O was in flight; that tail raises the learned target, capped by max_window.
- * A later smaller multi-record deadline may shrink it. QD1 remains separate.
+ * A later smaller multi-record deadline may shrink it only to the original
+ * four-record floor; a transient two/three-record deadline must not recreate
+ * first-pack chopping. QD1 remains separate.
  */
 static inline swapz_u8 swapz_window_initial_burst_target(swapz_u8 max_window)
 {
@@ -147,7 +149,13 @@ static inline swapz_u8 swapz_window_grow_burst_target(
 static inline swapz_u8 swapz_window_shrink_burst_target(
 		swapz_u8 current_target, swapz_u8 observed)
 {
-	if (observed > 1U && observed < current_target)
+	/*
+	 * A single two/three-record deadline is not enough evidence to undo the
+	 * four-record floor that prevents first-pack chopping. Smaller streams
+	 * retain the hard deadline until a separately qualified policy proves a
+	 * safe low-QD adaptation.
+	 */
+	if (observed >= 4U && observed < current_target)
 		return observed;
 	return current_target;
 }
@@ -157,13 +165,23 @@ static inline swapz_u8 swapz_window_effective_burst_target(
 	return admitted_tail ? admitted_tail : learned;
 }
 static inline int swapz_window_burst_close_ready(
-		int pack_seen, swapz_u8 count, swapz_u8 learned_target,
-		swapz_u8 admitted_tail_target)
+		int first_pack_seen, int accepted_pack_ready, swapz_u8 count,
+		swapz_u8 learned_target, swapz_u8 admitted_tail_target)
 {
 	swapz_u8 target = swapz_window_effective_burst_target(
 		learned_target, admitted_tail_target);
-	return count && target && count >= target &&
-		(pack_seen || admitted_tail_target);
+
+	if (!count)
+		return 0;
+	/*
+	 * Once a complete second pack is already staged and the caller proves
+	 * the finite accepted queue is dry, waiting only for a larger learned
+	 * target spends the retention deadline without gaining accepted work.
+	 */
+	if (accepted_pack_ready)
+		return 1;
+	return target && count >= target &&
+		(first_pack_seen || admitted_tail_target);
 }
 
 /*

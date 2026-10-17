@@ -226,3 +226,26 @@ introducing a second pre-definition expiry path.
 
 Kernel-header macro hygiene applies to every reference after a parameter rename;
 native and Kbuild warning builds must both compile the exact helper body.
+
+
+### Dry accepted-pack closure
+
+A learned retained-burst width is a coalescing hint, not permission to idle on
+an already useful packed window after all finite accepted work is exhausted.
+When the worker has formed a complete second pack and has refreshed both its
+private local FIFO and `incoming` to prove there is no accepted successor, it
+closes immediately through the normal pack-ready commit path. It must not spend
+the remaining absolute retention budget merely hoping a future BIO will satisfy
+a larger historical target.
+
+Admitted-tail learning scans the older worker-local FIFO before `incoming` and
+counts only one contiguous prefix of ordinary writes, capped by `max_window`.
+A fence or non-ordinary BIO ends that evidence. Downward learning from one
+deadline must not cross below the original four-record target: a transient
+two/three-record gap must not recreate the first-pack chopping that retention
+was introduced to avoid. An active packed chain is not evidence for shrinking.
+
+This policy changes neither lower-byte planning nor publication order. The
+accepted-burst read cap remains two, future arrivals never refresh the pinned
+deadline, and PREFLUSH/FUA, dependency, suspend/drain and fail-closed ownership
+are unchanged.
