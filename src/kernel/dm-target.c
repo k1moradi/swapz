@@ -194,6 +194,9 @@ struct swapz_dm {
 	u64 deadline_worker_with_local;
 	u64 deadline_worker_empty;
 	u64 retained_read_bypasses;
+	/* Successful independent reads serviced while the current retained
+	 * write window is open. This is finite accepted-work evidence only. */
+	swapz_u8 retained_window_read_bypasses;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
 	/*
@@ -1068,6 +1071,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->window_first_ns = 0;
 		return 0;
 	}
+	/* This evidence belongs only to the window now being committed. */
+	ctx->retained_window_read_bypasses = 0;
 	/* Measure BEFORE any dm_io, GC, verification or lower FUA. */
 	end_ns = ktime_get_ns();
 	/* The timer can only be armed by opted-in retained windows.
@@ -1319,10 +1324,36 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	}
 	ctx->pack_close_pending_tail_sample = false;
 }
-static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
+/*
+ * Admission may close only at the effective learned/admitted target. A
+ * momentarily empty queue while the ordered worker is still inside one BIO
+ * is not proof that a larger accepted burst has ended.
+ */
+static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
 {
 	return swapz_window_burst_close_ready(
-		ctx->single_pack_deferred, ctx->accepted_burst_pack_ready,
+		ctx->single_pack_deferred, 0,
+		ctx->batch_count, ctx->retained_burst_target,
+		ctx->retained_tail_target);
+}
+
+/*
+ * The worker-tail path has refreshed both its local FIFO and incoming under
+ * queue_lock. It may close below the learned target only after real accepted
+ * service in this retained chain/window: a prior packed commit or a successful
+ * independent read while the window was open. Never bypass a sampled tail.
+ */
+static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
+{
+	bool service_proven_dry_pack =
+		!ctx->retained_tail_target &&
+		(ctx->retained_chain_completed ||
+		 ctx->retained_window_read_bypasses) &&
+		(ctx->single_pack_deferred ||
+		 ctx->accepted_burst_pack_ready);
+
+	return swapz_window_burst_close_ready(
+		ctx->single_pack_deferred, service_proven_dry_pack,
 		ctx->batch_count, ctx->retained_burst_target,
 		ctx->retained_tail_target);
 }
@@ -1504,7 +1535,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			ctx->accepted_burst_pack_ready = true;
 			ctx->accepted_burst_extensions++;
 		}
-		if (swapz_retained_pack_close_ready(ctx) &&
+		if (swapz_retained_target_close_ready(ctx) &&
 		    !ctx->worker_has_immediate_followup) {
 			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
@@ -1688,6 +1719,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			u64 read_end_ns = ktime_get_ns();
 
 			ctx->retained_read_bypasses++;
+			if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
+				ctx->retained_window_read_bypasses++;
 			/*
 			 * Retention measures time available for companion writes, not
 			 * synchronous service of an unrelated committed read. Shift the

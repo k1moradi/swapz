@@ -192,3 +192,13 @@ full-source/signature assertion, not to a body-only search. When a production
 helper gains parameters, every call-site spelling asserted by source contracts
 must be updated in the same test change; do not keep stale call syntax as a
 compatibility alias.
+
+
+Service-proven retained closure qualification must distinguish the write
+admission decision from the worker-tail decision. Source coverage requires
+admission to ignore the accepted-second-pack shortcut below the effective
+target, while the worker-tail path may use it only after refreshed queue state,
+no active sampled tail, and prior packed-chain or independent-read service
+evidence. A successful independent read while a retained write window is open
+must be boundedly attributed to that window and cleared when the nonempty
+window commits.

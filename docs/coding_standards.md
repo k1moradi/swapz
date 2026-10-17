@@ -249,3 +249,21 @@ This policy changes neither lower-byte planning nor publication order. The
 accepted-burst read cap remains two, future arrivals never refresh the pinned
 deadline, and PREFLUSH/FUA, dependency, suspend/drain and fail-closed ownership
 are unchanged.
+
+
+### Service-proven dry retained closure
+
+A useful packed window must not bypass a larger learned burst target from inside
+write admission merely because `incoming` is momentarily empty. Admission may
+close at the effective learned or sampled-tail target only. The ordered worker
+may close below that target only after it has refreshed its private FIFO and
+`incoming` and the current retained chain/window has concrete synchronous
+service evidence: either an earlier packed commit in the same admitted chain or
+a successful independent read serviced while the write window was open.
+
+A sampled admitted tail is stronger evidence than dry closure and must be
+drained to its finite target without an accepted-pack shortcut. The worker-tail
+shortcut applies to either a first useful pack or a complete second pack after
+service evidence; it adds no sleep, spin, grace interval or future-arrival wait.
+PREFLUSH/FUA, dependency, publication, completion and fail-closed gates remain
+unchanged.
