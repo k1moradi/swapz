@@ -70,6 +70,9 @@ struct swapz_bio_ref {
 	struct list_head preparation_list;
 	struct completion preparation_finished;
 	struct swapz_prepared_page *prepared_page;
+	/* Set only when the ordered worker atomically removes this BIO from
+	 * preparation_incoming before the producer claims it. */
+	bool preparation_inline;
 	mempool_t *preparation_pool;
 	struct semaphore *preparation_slots;
 	int preparation_error;
@@ -111,6 +114,10 @@ struct swapz_dm {
 	struct semaphore preparation_slots;
 	mempool_t *preparation_pool;
 	u8 *preparation_input_page;
+	/* Producer and ordered worker may now compress concurrently. Never
+	 * share LZ4 work memory or a single-writer timing accumulator. */
+	void *preparation_lz4_workmem;
+	u64 preparation_lz4_wall_ns;
 	atomic_t lower_write_active;
 	u64 prepared_during_lower_write;
 	/* Callback only queues the serialized worker; it never owns BIOs. */
@@ -590,8 +597,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 					ctx->preparation_input_page,
 					prepared->bytes, SWAPZ_BLOCK_BYTES,
 					SWAPZ_MAX_COMPRESSED, 1,
-					ctx->lz4_workmem);
-		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start, ktime_get_ns());
+					ctx->preparation_lz4_workmem);
+		ctx->preparation_lz4_wall_ns +=
+			swapz_elapsed_ns(section_start, ktime_get_ns());
 		prepared->zero = prepared->length > 0 &&
 				 prepared->length <= 64 &&
 				 swapz_page_is_zero(ctx->preparation_input_page);
@@ -1364,6 +1372,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 	swapz_u8 i;
 	u64 section_start;
+	bool prepared_async = ctx->async_prepare && !entry->preparation_inline;
 	int length;
 	int error;
 
@@ -1382,7 +1391,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			return error;
 	}
 
-	if (ctx->async_prepare) {
+	if (prepared_async) {
 		/*
 		 * The producer has completed before the ordered worker entered
 		 * swapz_process(). Only this worker may consume/release the slot.
@@ -1443,7 +1452,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	 * the lower flush before this upper BIO completes.
 	 */
 	if (length > 0 && length <= 64 &&
-	    (ctx->async_prepare ? entry->prepared_page->zero :
+	    (prepared_async ? entry->prepared_page->zero :
 	     swapz_page_is_zero(ctx->input_page))) {
 		ctx->next_window_close = SWAPZ_CLOSE_ZERO;
 		error = swapz_flush_window(ctx);
@@ -1465,7 +1474,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		/* Preserve the complete original 4KiB page in worker-owned
 		 * staging. Admission and FUA ordering match compressed BIOs;
 		 * CRC authority is published only after the shared lower write. */
-		if (ctx->async_prepare)
+		if (prepared_async)
 			memcpy(ctx->batch_bytes +
 			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
 			       entry->prepared_page->bytes, SWAPZ_BLOCK_BYTES);
@@ -1861,15 +1870,29 @@ static void swapz_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		while (remaining && !list_empty(&local)) {
+			bool wait_for_preparation = false;
+
 			entry = list_first_entry(&local, struct swapz_bio_ref, list);
 			/*
-			 * Preparation may block while later BIOs enter incoming. Sample
-			 * accepted successors afterwards so pack policy never relies on a
-			 * stale pre-preparation observation.
+			 * The two queues share queue_lock. If the bounded producer has
+			 * not claimed this FIFO entry yet, the ordered worker may steal
+			 * only that unstarted preparation and compress it inline with its
+			 * own scratch/workmem. If the producer already removed it, retain
+			 * the original completion handoff and never touch its scratch.
 			 */
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
-			    bio_sectors(entry->bio))
-				wait_for_completion(&entry->preparation_finished);
+			    bio_sectors(entry->bio)) {
+				wait_for_preparation = true;
+				spin_lock_irqsave(&ctx->queue_lock, flags);
+				if (!list_empty(&entry->preparation_list)) {
+					list_del_init(&entry->preparation_list);
+					entry->preparation_inline = true;
+					wait_for_preparation = false;
+				}
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				if (wait_for_preparation)
+					wait_for_completion(&entry->preparation_finished);
+			}
 			ctx->worker_has_immediate_followup =
 				entry->list.next != &local;
 			swapz_refresh_accepted_followup(ctx);
@@ -2071,6 +2094,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	INIT_LIST_HEAD(&entry->list);
 	INIT_LIST_HEAD(&entry->preparation_list);
 	entry->prepared_page = NULL;
+	entry->preparation_inline = false;
 	entry->preparation_pool = ctx->preparation_pool;
 	entry->preparation_slots = &ctx->preparation_slots;
 	entry->preparation_error = 0;
@@ -2192,6 +2216,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	}
 	if (ctx->preparation_pool)
 		mempool_destroy(ctx->preparation_pool);
+	kfree(ctx->preparation_lz4_workmem);
 	vfree(ctx->preparation_input_page);
 	if (ctx->io_client)
 		dm_io_client_destroy(ctx->io_client);
@@ -2425,10 +2450,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		/* 64 preallocated producer pages, a semaphore enforcing the
 		 * same hard bound, and no dynamic allocations in ->map. */
 		ctx->preparation_input_page = vzalloc(SWAPZ_BLOCK_BYTES);
+		ctx->preparation_lz4_workmem =
+			kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 		ctx->preparation_pool = mempool_create_kmalloc_pool(
 					SWAPZ_MAX_RECORDS,
 					sizeof(struct swapz_prepared_page));
-		if (!ctx->preparation_input_page || !ctx->preparation_pool) {
+		if (!ctx->preparation_input_page ||
+		    !ctx->preparation_lz4_workmem || !ctx->preparation_pool) {
 			error = -ENOMEM;
 			goto fail;
 		}
@@ -2634,7 +2662,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->retain_ms, ctx->retain_worker_passes,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
 		       ctx->async_prepare, ctx->prepared_during_lower_write,
-		       ctx->lz4_wall_ns, ctx->decode_wall_ns,
+		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
+		       ctx->decode_wall_ns,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,

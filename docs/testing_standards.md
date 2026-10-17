@@ -202,3 +202,12 @@ no active sampled tail, and prior packed-chain or independent-read service
 evidence. A successful independent read while a retained write window is open
 must be boundedly attributed to that window and cleared when the nonempty
 window commits.
+
+
+Ordered-worker preparation-steal qualification must preserve the producer's
+no-publication rule and the original completion wait for entries the producer
+has already claimed. Source coverage requires the steal decision and list
+removal under `queue_lock`, an explicit inline marker, distinct producer LZ4
+work memory, no producer use of the ordered worker's work memory, and combined
+reporting from separately written timing accumulators. Drain and teardown must
+still empty both queues and free all bounded producer resources.

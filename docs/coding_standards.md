@@ -267,3 +267,20 @@ shortcut applies to either a first useful pack or a complete second pack after
 service evidence; it adds no sleep, spin, grace interval or future-arrival wait.
 PREFLUSH/FUA, dependency, publication, completion and fail-closed gates remain
 unchanged.
+
+
+### Ordered-worker preparation steal
+
+Asynchronous preparation remains a bounded producer/consumer optimization, not
+a publication owner. The ordered worker may remove its next FIFO BIO from
+`preparation_incoming` only while holding the shared admission lock and only
+if the producer has not already claimed that preparation entry. A claimed entry
+retains the original completion handoff; an unclaimed stolen entry is compressed
+inline by the ordered worker and is never waited on or producer-completed.
+
+Once stealing is possible, producer and ordered compression may overlap.
+Therefore they must have distinct input scratch and distinct LZ4 work memory.
+Producer and ordered timing accumulation must also remain single-writer and may
+be summed only for reporting. Prepared-page mempool/semaphore ownership applies
+only to producer-prepared entries; inline entries allocate no prepared page and
+must not release a slot they never acquired.

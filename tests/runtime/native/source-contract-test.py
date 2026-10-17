@@ -1048,10 +1048,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->async_prepare = swapz_async_prepare", ctor)
         self.assertIn("WQ_MEM_RECLAIM | WQ_UNBOUND", ctor)
         self.assertIn("mempool_create_kmalloc_pool(", ctor)
+        self.assertIn("ctx->preparation_lz4_workmem", ctor)
         self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
         self.assertIn("down(&ctx->preparation_slots)", producer)
         self.assertIn("mempool_alloc(ctx->preparation_pool, GFP_NOIO)", producer)
         self.assertIn("LZ4_compress_fast(", producer)
+        self.assertIn("ctx->preparation_lz4_workmem", producer)
+        self.assertNotIn("ctx->lz4_workmem", producer)
         self.assertIn("complete(&entry->preparation_finished)", producer)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
                           "swapz_flush_window(", "dm_io(", "bio_endio(",
@@ -1061,9 +1064,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(mapper.index("list_add_tail(&entry->list"),
                         mapper.index("queue_work(ctx->preparation_workqueue"))
         self.assertIn("wait_for_completion(&entry->preparation_finished)", ordered)
+        self.assertIn("!list_empty(&entry->preparation_list)", ordered)
+        self.assertIn("list_del_init(&entry->preparation_list)", ordered)
+        self.assertIn("entry->preparation_inline = true", ordered)
+        self.assertIn("spin_lock_irqsave(&ctx->queue_lock, flags)", ordered)
         self.assertLess(ordered.index("wait_for_completion("),
                         ordered.index("swapz_process(ctx, entry->bio)"))
+        self.assertIn("prepared_async = ctx->async_prepare && !entry->preparation_inline", accept)
         self.assertIn("entry->prepared_page->bytes", accept)
+        self.assertIn("ctx->lz4_workmem", accept)
         self.assertIn("swapz_release_prepared(bio)", accept)
         self.assertIn("swapz_release_prepared(bio)", finish)
         self.assertLess(finish.index("swapz_release_prepared(bio)"),
@@ -1077,6 +1086,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         drain.index("drain_workqueue(ctx->workqueue)"))
         self.assertIn("destroy_workqueue(ctx->preparation_workqueue)", freeing)
         self.assertIn("mempool_destroy(ctx->preparation_pool)", freeing)
+        self.assertIn("kfree(ctx->preparation_lz4_workmem)", freeing)
+        self.assertIn("ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns", status)
         self.assertIn("async_prepare=%u prep_lower_write_overlap_starts=%llu",
                       status)
         self.assertIn("insmod \"$MODULE\" \"async_prepare=$ASYNC_PREPARE\"",
