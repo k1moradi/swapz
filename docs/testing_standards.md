@@ -201,7 +201,9 @@ Each raw/V3 pair must carry `source_sha`, `fixture_sha256` and
 the pair before aggregation. Missing or divergent arm provenance is
 INCONCLUSIVE; parser order must never overwrite one arm's identity and mask
 a mismatch. Rootless report regressions must independently corrupt each
-of the three arm fields and require an INCONCLUSIVE verdict. Cross-pair/regime
+of the three arm fields and require an INCONCLUSIVE verdict. An existing
+pair-level provenance field must also equal the value agreed by both arms;
+validation must not silently normalize a tampered aggregate. Cross-pair/regime
 provenance checks still apply after this per-pair gate. Actual physical media,
 existing SD swap and
 `swapon`/`swapoff` remain prohibited.

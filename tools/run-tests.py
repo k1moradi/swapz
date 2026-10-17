@@ -89,8 +89,12 @@ def paired_provenance_error(row, label):
                 len(set(values)) != 1):
             return {"overall": "INCONCLUSIVE",
                     "reason": f"{label}: {field} missing or differs within pair"}
+        agreed_value = values[0]
+        if row.get(field) is not None and row[field] != agreed_value:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{label}: {field} aggregate differs from paired arms"}
         # Preserve the existing pair-level shape only after both arms agree.
-        row[field] = values[0]
+        row[field] = agreed_value
     return None
 
 
