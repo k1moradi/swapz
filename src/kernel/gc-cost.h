@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef SWAPZ_V3_GC_COST_H
-#define SWAPZ_V3_GC_COST_H
+#ifndef SWAPZ_GC_COST_H
+#define SWAPZ_GC_COST_H
 
 #include "authority.h"
 
@@ -27,7 +27,7 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 /*
  * Conservative host I/O-cost estimate for a single authoritative record.
  * A GC move MUST issue a selective lower read of the source before writing
- * the destination. A packed V3 extent may take more than one block to
+ * the destination. A packed SWZ3 extent may take more than one block to
  * fetch the metadata and record payload. The actual read path and read
  * cache/budget decide the completed count, so this is a selection
  * heuristic, NOT a measured or guaranteed bound on physical IO.
@@ -53,7 +53,7 @@ static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
  * A single 1MiB destination MUST retain some free space for the
  * blocked foreground write. A lower bound on the relocated object
  * footprint is the sum of raw page bytes or compressed payloads plus
- * V3 descriptors. If even that optimistic lower bound fills the whole
+ * SWZ3 descriptors. If even that optimistic lower bound fills the whole
  * destination, no packing heuristic can produce useful reclaim.
  *
  * This is a necessary condition, NOT a promise that a candidate with

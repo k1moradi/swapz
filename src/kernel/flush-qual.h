@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef SWAPZ_V3_FLUSH_QUAL_H
-#define SWAPZ_V3_FLUSH_QUAL_H
+#ifndef SWAPZ_FLUSH_QUAL_H
+#define SWAPZ_FLUSH_QUAL_H
 
 #ifdef __KERNEL__
 #include <linux/errno.h>

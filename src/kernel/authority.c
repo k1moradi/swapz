@@ -55,7 +55,7 @@ int swapz_authority_init(struct swapz_authority *a,
 }
 
 /*
- * The safe, strictly limited first V3 GC step: reuse only wholly-dead
+ * The safe, strictly limited first swapz GC step: reuse only wholly-dead
  * 1MiB segments.  A live object is NEVER copied or overwritten here.
  *
  * Each candidate is checked against BOTH physical live-record counts and
@@ -309,7 +309,7 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	}
 
 	if (!a->reuse_dead_segments) {
-		/* Frozen append-only behavior used by the original V3 model. */
+		/* Frozen append-only behavior used by the original extent model. */
 		limit = a->physical_blocks - a->reserve_blocks;
 		if (a->next_block > limit ||
 		    blocks - 1U > limit - a->next_block)

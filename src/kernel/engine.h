@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef SWAPZ_V3_EXTENT_ENGINE_H
-#define SWAPZ_V3_EXTENT_ENGINE_H
+#ifndef SWAPZ_EXTENT_ENGINE_H
+#define SWAPZ_EXTENT_ENGINE_H
 #include "authority.h"
 #define SWAPZ_BULK_BLOCKS 64U
 #define SWAPZ_READ_METADATA_CACHE_ENTRIES 64

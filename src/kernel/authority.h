@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef SWAPZ_V3_EXTENT_AUTHORITY_H
-#define SWAPZ_V3_EXTENT_AUTHORITY_H
+#ifndef SWAPZ_EXTENT_AUTHORITY_H
+#define SWAPZ_EXTENT_AUTHORITY_H
 #include "codec.h"
 
 #define SWAPZ_SEGMENT_BLOCKS 256U
@@ -156,7 +156,7 @@ int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx 
 int swapz_abort(struct swapz_authority *authority, const struct swapz_tx *tx);
 /*
  * Raw 4KiB page (LZ4 fallback) occupies a whole aligned block and has no
- * V3 descriptor. The caller must stage exactly one record / one block and
+ * SWZ3 descriptor. The caller must stage exactly one record / one block and
  * only call finish_raw after the WHOLE lower write completes.
  */
 int swapz_finish_raw(struct swapz_authority *authority, const struct swapz_tx *tx,

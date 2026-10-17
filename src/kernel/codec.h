@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef SWAPZ_V3_EXTENT_CODEC_H
-#define SWAPZ_V3_EXTENT_CODEC_H
+#ifndef SWAPZ_EXTENT_CODEC_H
+#define SWAPZ_EXTENT_CODEC_H
 
 /*
  * Experimental VERSIONED 4/8/16 KiB extent FORMAT ONLY.
  *
- * No existing dm-swapz mappings or V2.2 disk records are interpreted as V3.
+ * No existing dm-swapz mappings or V2.2 disk records are interpreted as SWZ3.
  * No extent is authoritative until its containing full-block write has
  * completed and the owning mapping transaction explicitly publishes it.
  * This is a codec, NOT an allocator, write path or GC implementation.

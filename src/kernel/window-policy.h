@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef SWAPZ_V3_WINDOW_POLICY_H
-#define SWAPZ_V3_WINDOW_POLICY_H
+#ifndef SWAPZ_WINDOW_POLICY_H
+#define SWAPZ_WINDOW_POLICY_H
 
 #include "codec.h"
 
