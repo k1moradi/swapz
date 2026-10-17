@@ -246,14 +246,29 @@ lower requests against the last deep-aggregation result, and mixed QD32
 ~88-close cluster. No scheduling evidence may survive a true worker-idle or
 hard ordering boundary.
 
-Demand-driven preparation-wakeup qualification requires the preparation entry
-to be linked before any wake decision, a lone idle-head entry to skip the
-producer wake, second-or-later queued entries or active lower WRITE to wake it,
-and a second guarded wake check immediately before synchronous lower WRITE
-submission. Both wake decisions must share `queue_lock` with producer claim
-and ordered-worker steal. Loaded comparison must verify QD1 latency/throughput
-without losing high-QD `prep_lower_write_overlap_starts`.
+Opposite-end preparation qualification requires source coverage that the
+producer selects the preparation FIFO head only while `lower_write_active`
+is true and otherwise selects the tail. The ordered worker must reserve its
+head under `queue_lock` before kicking the producer for remaining entries.
 
+The map path must leave a lone truly idle preparation un-woken, but wake on
+`lower_write_active`, atomic `ordered_worker_busy`, an older ordinary
+incoming BIO, or an older preparation entry. The producer must also leave a
+singular head untouched when both lower WRITE and the ordered worker are idle.
+`batch_count` must remain worker-owned and must not be used as an
+unsynchronized map-path busy signal.
+
+For asynchronous WRITE consumption, source coverage must show
+`ordered_worker_busy=1` is published under `queue_lock` before the ordered
+worker removes or inspects its head preparation, so producer claim and head
+reservation are atomic with respect to each other. The flag must remain set
+through preparation plus `swapz_process()`, clear afterwards, and initialize
+to zero.
+
+Loaded comparison must verify that QD1 keeps the inline-steal latency benefit
+while QD8/QD32 recover async throughput and retain lower-request aggregation.
+The existing `prep_lower_write_overlap_starts` diagnostic must remain
+meaningful, and all publication/completion/fail-closed invariants are unchanged.
 
 Idempotent metadata-cache invalidation qualification must preserve the existing
 explicit-invalidation and post-write miss tests. Source coverage requires the

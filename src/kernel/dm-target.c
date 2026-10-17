@@ -119,6 +119,12 @@ struct swapz_dm {
 	void *preparation_lz4_workmem;
 	u64 preparation_lz4_wall_ns;
 	atomic_t lower_write_active;
+	/*
+	 * Set only while the ordered worker is actively consuming one accepted
+	 * BIO. ->map reads this atomically to distinguish a truly idle lone head
+	 * from a new follower arriving while inline compression/read service runs.
+	 */
+	atomic_t ordered_worker_busy;
 	u64 prepared_during_lower_write;
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
@@ -567,8 +573,11 @@ static int swapz_copy_bio(struct bio *bio, void *buffer, bool to_bio)
  * completion and is solely responsible for recycling prepared_page.
  *
  * preparation_slots caps resident prepared pages to SWAPZ_MAX_RECORDS even
- * under unlimited incoming BIOs. Waiting for a slot cannot deadlock the
- * consumer: the producer takes entries in the same FIFO admission order.
+ * under unlimited incoming BIOs. The producer never waits for a slot while
+ * holding queue_lock. Tail claims cannot deadlock the FIFO consumer because
+ * the ordered worker can keep stealing unclaimed head entries inline without
+ * consuming preparation slots, then releases prepared slots as it reaches
+ * already-completed entries in admission order.
  */
 static void swapz_preparation_worker(struct work_struct *work)
 {
@@ -587,8 +596,32 @@ static void swapz_preparation_worker(struct work_struct *work)
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			return;
 		}
-		entry = list_first_entry(&ctx->preparation_incoming,
-					struct swapz_bio_ref, preparation_list);
+		/*
+		 * If the ordered worker is sleeping in synchronous lower WRITE I/O,
+		 * prepare the FIFO head it will need next. Otherwise that worker is
+		 * free to steal from the head, so consume the tail and let both CPUs
+		 * meet in the middle instead of convoying on wait_for_completion().
+		 */
+		if (atomic_read(&ctx->lower_write_active)) {
+			entry = list_first_entry(&ctx->preparation_incoming,
+						 struct swapz_bio_ref,
+						 preparation_list);
+		} else {
+			/*
+			 * If the ordered worker has not started yet, preserve the sole
+			 * FIFO head for inline steal. Once that worker is busy on an
+			 * earlier BIO, even a single remaining follower is useful
+			 * parallel work and may be claimed from the tail.
+			 */
+			if (!atomic_read(&ctx->ordered_worker_busy) &&
+			    list_is_singular(&ctx->preparation_incoming)) {
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				return;
+			}
+			entry = list_last_entry(&ctx->preparation_incoming,
+						struct swapz_bio_ref,
+						preparation_list);
+		}
 		list_del_init(&entry->preparation_list);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
@@ -1997,20 +2030,37 @@ static void swapz_worker(struct work_struct *work)
 			    bio_sectors(entry->bio)) {
 				wait_for_preparation = true;
 				spin_lock_irqsave(&ctx->queue_lock, flags);
+				/*
+				 * Publish busy and reserve this FIFO head under the same
+				 * lock used by producer claim. The producer can therefore
+				 * never interpret busy==1 as permission to take THIS head.
+				 */
+				atomic_set(&ctx->ordered_worker_busy, 1);
 				if (!list_empty(&entry->preparation_list)) {
 					list_del_init(&entry->preparation_list);
 					entry->preparation_inline = true;
 					wait_for_preparation = false;
+					/*
+					 * Reserve the FIFO head for this worker first. Any
+					 * remaining preparation can now run in parallel without
+					 * the producer stealing the entry we are about to consume.
+					 */
+					if (!list_empty(&ctx->preparation_incoming))
+						queue_work(ctx->preparation_workqueue,
+							   &ctx->preparation_worker);
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				if (wait_for_preparation)
 					wait_for_completion(&entry->preparation_finished);
+			} else {
+				atomic_set(&ctx->ordered_worker_busy, 1);
 			}
 			ctx->worker_has_immediate_followup =
 				entry->list.next != &local;
 			swapz_refresh_accepted_followup(ctx);
 			list_del_init(&entry->list);
 			swapz_process(ctx, entry->bio);
+			atomic_set(&ctx->ordered_worker_busy, 0);
 
 			/*
 			 * If this was the local tail, BIOs may have been admitted while
@@ -2238,15 +2288,17 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
-		 * Both queues share admission locking. Do not wake an unbound
-		 * producer merely to race the ordered worker for a lone idle-head
-		 * BIO: that worker can steal the still-linked preparation inline.
-		 * Wake as soon as there is real queued parallelism, or immediately
-		 * when a lower WRITE is already providing overlap time.
+		 * Leave a genuinely idle lone head for ordered inline steal. Wake
+		 * parallel preparation as soon as a prior BIO is still queued, the
+		 * ordered worker is actively consuming another BIO, or lower WRITE
+		 * I/O has blocked that worker. ordered_worker_busy is atomic because
+		 * batch_count remains worker-owned and must not become a map-path race.
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
 		if (atomic_read(&ctx->lower_write_active) ||
+		    atomic_read(&ctx->ordered_worker_busy) ||
+		    ctx->incoming.next != &entry->list ||
 		    ctx->preparation_incoming.next != &entry->preparation_list)
 			queue_work(ctx->preparation_workqueue,
 				   &ctx->preparation_worker);
@@ -2452,6 +2504,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker);
 	sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS);
 	atomic_set(&ctx->lower_write_active, 0);
+	atomic_set(&ctx->ordered_worker_busy, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);

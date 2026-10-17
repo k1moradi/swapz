@@ -330,23 +330,38 @@ write-only QD8/QD32 into singleton closes. Publication, FUA/PREFLUSH,
 dependency, discard, shutdown, completion and fail-closed ownership are
 unchanged.
 
-### Demand-driven async preparation wakeups
+### Opposite-end asynchronous preparation
 
-Link every asynchronous WRITE preparation entry under `queue_lock`, but do
-not wake the unbound preparation worker for a lone idle-head entry. The ordered
-worker may steal that still-unclaimed entry inline, avoiding an unnecessary
-cross-CPU wakeup and completion race. Wake the producer when the preparation
-FIFO already contains an older entry, or when a lower WRITE is active and
-therefore supplies real overlap time.
+The ordered worker owns FIFO execution and may atomically reserve an unclaimed
+preparation entry from the head. The asynchronous producer is pure preparation:
+it never publishes mappings, submits lower I/O, changes ordering, or completes
+upper BIOs.
 
-Before each synchronous lower WRITE, after publishing
-`lower_write_active=1`, the ordered worker rechecks
-`preparation_incoming` under the same lock and queues the producer if work is
-waiting. This closes the race where a lone queued preparation was intentionally
-left for inline steal but a lower WRITE begins before the ordered worker reaches
-it. The producer still owns no mapping, lower I/O, publication or BIO
-completion, and producer-claimed entries retain the completion handoff.
+When synchronous lower WRITE I/O is active, the producer prepares from the
+head because the ordered worker is blocked and will need that entry first.
+Otherwise the producer prepares from the tail while the ordered worker steals
+from the head. Out-of-order preparation is permitted because each result is
+private to its BIO and the serialized worker still consumes/completes BIOs in
+admission order.
 
+A lone truly idle head must not wake the unbound producer. The producer itself
+must also leave a singular head untouched while neither lower WRITE nor the
+ordered worker is active. `->map` wakes parallel preparation when a prior BIO
+remains queued, `lower_write_active` is set, or the atomic
+`ordered_worker_busy` flag proves the ordered worker is already consuming
+another BIO.
+
+For an asynchronous WRITE, the ordered worker sets `ordered_worker_busy` and
+removes its own head preparation in the same `queue_lock` critical section.
+Only after that reservation may it kick the producer for remaining entries.
+This prevents a producer that observes the busy flag from racing for the very
+head the FIFO consumer is about to process.
+
+The producer may wait for a bounded preparation slot only after releasing
+`queue_lock`. Tail claiming must never consume completion/publication
+ownership: the FIFO worker can continue inline-stealing unclaimed heads and
+releases prepared slots as it reaches completed tail entries. Separate LZ4
+scratch/work memory remains mandatory for concurrent compression.
 
 ### Idempotent metadata-cache invalidation
 

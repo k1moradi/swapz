@@ -1075,6 +1075,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("mempool_alloc(ctx->preparation_pool, GFP_NOIO)", producer)
         self.assertIn("LZ4_compress_fast(", producer)
         self.assertIn("ctx->preparation_lz4_workmem", producer)
+        self.assertIn("if (atomic_read(&ctx->lower_write_active))", producer)
+        self.assertIn("list_first_entry(&ctx->preparation_incoming", producer)
+        self.assertIn("list_last_entry(&ctx->preparation_incoming", producer)
+        self.assertIn("list_is_singular(&ctx->preparation_incoming)", producer)
+        self.assertIn("!atomic_read(&ctx->ordered_worker_busy)", producer)
         self.assertNotIn("ctx->lz4_workmem", producer)
         self.assertIn("complete(&entry->preparation_finished)", producer)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
@@ -1083,6 +1088,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertNotIn(forbidden, producer)
         self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
         self.assertIn("atomic_read(&ctx->lower_write_active)", mapper)
+        self.assertIn("atomic_read(&ctx->ordered_worker_busy)", mapper)
+        self.assertIn("ctx->incoming.next != &entry->list", mapper)
         self.assertIn("ctx->preparation_incoming.next != &entry->preparation_list",
                       mapper)
         self.assertLess(mapper.index("list_add_tail(&entry->list"),
@@ -1097,6 +1104,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("!list_empty(&entry->preparation_list)", ordered)
         self.assertIn("list_del_init(&entry->preparation_list)", ordered)
         self.assertIn("entry->preparation_inline = true", ordered)
+        self.assertIn("atomic_set(&ctx->ordered_worker_busy, 1)", ordered)
+        self.assertIn("atomic_set(&ctx->ordered_worker_busy, 0)", ordered)
+        busy_set = ordered.index("atomic_set(&ctx->ordered_worker_busy, 1)")
+        prep_lock = ordered.rfind("spin_lock_irqsave(&ctx->queue_lock, flags)",
+                                 0, busy_set)
+        prep_unlock = ordered.index("spin_unlock_irqrestore(&ctx->queue_lock, flags)",
+                                    busy_set)
+        self.assertGreaterEqual(prep_lock, 0)
+        self.assertLess(prep_lock, busy_set)
+        self.assertLess(busy_set, prep_unlock)
+        steal = ordered.index("entry->preparation_inline = true")
+        producer_kick = ordered.index("queue_work(ctx->preparation_workqueue",
+                                      steal)
+        self.assertLess(steal, producer_kick)
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock, flags)", ordered)
         self.assertLess(ordered.index("wait_for_completion("),
                         ordered.index("swapz_process(ctx, entry->bio)"))
@@ -1111,6 +1132,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("up(entry->preparation_slots)", release)
         self.assertIn("atomic_set(&ctx->lower_write_active, 1)", lower)
         self.assertIn("atomic_set(&ctx->lower_write_active, 0)", lower)
+        self.assertIn("atomic_set(&ctx->ordered_worker_busy, 0)", ctor)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))
