@@ -853,6 +853,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         wake = body("swapz_retention_wake")
         process = body("swapz_process")
         worker = body("swapz_worker")
+        flush = body("swapz_flush_window")
         mapping = body("swapz_map")
         drain = body("swapz_drain")
         ctr = body("swapz_ctr")
