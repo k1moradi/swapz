@@ -62,7 +62,7 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `1a3b30da5ad2435e2e174421ef62bc4837b38371` passed the complete current qualification. Its write-only pilot still shows large QD1 loss, QD4/QD8 useful-throughput loss despite request reduction, slow-model QD32 gain and faster-model QD32 loss. The mixed faster-model async arm showed a preliminary gain. None of these one-pair-per-QD pilot results is statistically confirmatory.
+Source `c4539b3afe222372d5266be5a79bb96f23dfdeea` passed the complete current qualification. Its accepted-incoming first-pack tail fix preserved correctness and materially recovered QD8, especially on the faster model, while QD1 remained unchanged and QD4 still lost useful throughput. Slow-model QD32 remained above raw; faster-model write-only QD32 remained below raw and showed reduced packing ratio, while the mixed faster-model async arm retained a preliminary gain. None of the one-pair-per-QD pilot results is statistically confirmatory.
 
 ## Open qualification gaps
 

@@ -108,12 +108,14 @@ resulting contiguity.
 
 ### Retained accepted-burst tails
 
-A retained pack may remain open only for finite BIOs that are already accepted.
+A retained pack may remain open for finite BIOs that are already accepted.
 At the tail of the worker-local snapshot, already-accepted work includes BIOs
-observed in `incoming` while holding `queue_lock`; later arrivals do not justify
-another retention wait. If a useful first pack is deferred solely because such
-accepted work exists, preserve that deferred state until the window flushes and
-close the window as soon as the finite accepted tail is exhausted.
+observed in `incoming` while holding `queue_lock`. A useful first pack at an
+apparent empty tail may receive exactly one zero-delay worker recheck so
+concurrent submitters can become accepted without paying the millisecond
+retention deadline. A second empty observation must close the pack; never turn
+this bounded handoff into a timer loop or repeated admission delay.
 
-This rule does not disable initial singleton retention and does not relax
-PREFLUSH/FUA, dependency, publication, suspend/drain or fail-closed ordering.
+Preserve deferred-first-pack state until the window flushes. This rule does not
+disable initial singleton retention and does not relax PREFLUSH/FUA, dependency,
+publication, suspend/drain or fail-closed ordering.

@@ -198,6 +198,9 @@ struct swapz_dm {
 	 * accepted tail. Close it when the accepted tail is exhausted.
 	 */
 	bool single_pack_deferred;
+	/* One zero-delay worker handoff is the entire grace budget for an
+	 * apparent first-pack tail. Never turn this into a timer loop. */
+	bool single_pack_tail_recheck;
 	bool accepted_burst_pack_ready;
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
@@ -1039,6 +1042,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 * has succeeded through the original publication/completion path. */
 	ctx->packed_burst = false;
 	ctx->single_pack_deferred = false;
+	ctx->single_pack_tail_recheck = false;
 	ctx->accepted_burst_pack_ready = false;
 	if (!count) {
 		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
@@ -1373,18 +1377,15 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					      ctx->batch_count,
 					      ctx->retain_ms,
 					      ctx->engine.max_read_blocks_per_record)) {
-		if (ctx->worker_has_immediate_followup) {
-			/* Another already-accepted BIO will be processed without
-			 * waiting for a timer or a future producer arrival. */
-			ctx->single_pack_deferred = true;
+		/*
+		 * Keep the useful first pack open for accepted work. At an apparent
+		 * queue tail the worker is allowed exactly one zero-delay handoff,
+		 * giving concurrent submitters a scheduling opportunity without
+		 * paying the millisecond retention deadline.
+		 */
+		ctx->single_pack_deferred = true;
+		if (ctx->worker_has_immediate_followup)
 			ctx->single_pack_deferrals++;
-		} else {
-			/* Queue tail: do not pay the retention deadline merely to
-			 * hope for a future arrival. Commit the valid first pack. */
-			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
-			ctx->packed_early_commits++;
-			swapz_flush_window(ctx);
-		}
 	} else if (swapz_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
@@ -1706,16 +1707,14 @@ static void swapz_worker(struct work_struct *work)
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
 			swapz_process(ctx, entry->bio);
-			if ((ctx->accepted_burst_pack_ready ||
-			     ctx->single_pack_deferred) &&
+			if (ctx->accepted_burst_pack_ready &&
 			    !ctx->worker_has_immediate_followup &&
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
 			    !swapz_retention_expired(ctx)) {
 				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 				ctx->packed_early_commits++;
-				if (ctx->accepted_burst_pack_ready)
-					ctx->accepted_burst_tail_flushes++;
+				ctx->accepted_burst_tail_flushes++;
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
@@ -1760,6 +1759,29 @@ static void swapz_worker(struct work_struct *work)
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
+			/*
+			 * A useful first pack at an apparent queue tail gets one,
+			 * and only one, zero-delay worker handoff. This is not a
+			 * new admission timer: the original hard retention deadline
+			 * remains pinned, and the second empty observation closes.
+			 */
+			if (ctx->accepting && !ctx->failed &&
+			    ctx->single_pack_deferred && ctx->batch_count &&
+			    !swapz_retention_expired(ctx)) {
+				if (!ctx->single_pack_tail_recheck) {
+					ctx->single_pack_tail_recheck = true;
+					ctx->worker_requeues++;
+					mod_delayed_work(ctx->workqueue,
+							 &ctx->worker, 0);
+					spin_unlock_irqrestore(&ctx->queue_lock, flags);
+					return;
+				}
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
+				ctx->packed_early_commits++;
+				swapz_flush_window(ctx);
+				return;
+			}
 			/* A useful packed group has already completed in this
 			 * burst. Drain its small compressed tail when no accepted
 			 * BIO can join it now. Completion releases finite-QD

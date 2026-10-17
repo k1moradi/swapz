@@ -8,15 +8,15 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `b666bc6db8e86e1431bb81b2317bf669a40da349` passed all five current qualification stages. Correctness included 64 RAW writes, nine zero elisions, explicit flushes, retained-window suspend/drain with 128-page verification, and synthetic retained WRITE/FLUSH fail-closed phases. This baseline includes the alignment-aware adjacent lower-run planner tie-break.
+Owner-loaded source `c4539b3afe222372d5266be5a79bb96f23dfdeea` passed all five current qualification stages. Correctness included 64 RAW writes, nine zero elisions, explicit flushes, retained-window suspend/drain with 128-page verification, and synthetic retained WRITE/FLUSH fail-closed phases. This baseline includes the alignment-aware adjacent lower-run planner tie-break and accepted-incoming first-pack tail fix.
 
 The write-only pilot produced these directional patterns:
 
 - QD1: no lower-byte/request reduction; swapz remained substantially slower than raw in both models.
-- QD4: lower WRITE requests were roughly halved versus raw, but useful WRITE throughput remained lower.
-- QD8: request reduction remained strong, but useful throughput was still lower.
-- QD32 slow model: swapz exceeded raw useful WRITE throughput.
-- QD32 faster model: swapz remained below raw in the write-only pilot, while the mixed async arm showed a preliminary gain.
+- QD4: lower WRITE requests remained roughly halved versus raw, but useful WRITE throughput remained lower.
+- QD8: the accepted-tail fix removed the prior millisecond-scale stall; slow-model swapz reached about 0.88-0.90x raw and faster-model swapz about 0.61-0.76x raw while retaining strong request reduction.
+- QD32 slow model: swapz remained about 1.27x raw useful WRITE throughput.
+- QD32 faster model: swapz remained about 0.61-0.63x raw and the medium write-only logical/lower ratio fell to about 1.37x, showing that first-pack closure can still fragment a fast finite wave. The mixed async arm retained a preliminary gain.
 
 The pilot used one pair per mode/QD and has no confidence interval.
 
@@ -28,12 +28,12 @@ The pilot used one pair per mode/QD and has no confidence interval.
 - Removed historical compatibility, NBD, recall, pressure and obsolete evidence-model infrastructure from the active working tree.
 - Made implementation/report/workflow terminology version-neutral; SWZ3 remains only the format identity.
 
-These cleanup revisions and the alignment-aware adjacent lower-run tie-break are covered by the owner-loaded `b666bc6...` baseline.
+These cleanup revisions, the alignment-aware adjacent lower-run tie-break and the accepted-incoming first-pack tail fix are covered by the owner-loaded `c4539b3...` baseline.
 
 ## Immediate work queue
 
-1. Qualify the retained first-pack accepted-tail fix: when a useful first pack was deferred only for finite already-accepted work, treat BIOs already queued in `incoming` as part of that accepted tail and close immediately once the tail is consumed. Reject any lower-WRITE byte increase, correctness regression or unacceptable read-tail regression.
-2. Profile the remaining QD1 and QD8 production-C wall time after that policy is stable. Attribute retention wait, LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
+1. Qualify one bounded zero-delay first-pack tail recheck. The hypothesis is that QD4 and fast QD32 submitters often miss the current accepted snapshot by only one scheduler turn: one immediate worker handoff should reduce QD4 lower requests and recover fast-model packing ratio without reintroducing a millisecond retention stall. Reject lower-WRITE byte growth, QD8 regression, correctness loss or unacceptable read-tail regression.
+2. Profile the remaining QD1 production-C wall time after that policy is stable. Attribute retention wait, LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
 3. Expand the write-only saturation study to at least five counterbalanced pairs per mode/QD/regime only after the C policy is stable, then report confidence intervals.
 4. Exercise sustained live GC, reserve rotations, near-full churn, real lower error behavior and resource pressure on owned RAM devices. No observed GC means GC remains unqualified.
 5. Extend read qualification beyond the current small RAM working set with controlled cache state before making cold swap-in claims.

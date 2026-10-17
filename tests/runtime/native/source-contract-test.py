@@ -820,16 +820,28 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("ctx->single_pack_deferred = true", writer)
-        self.assertIn("if ((ctx->accepted_burst_pack_ready ||", worker)
-        self.assertIn("ctx->single_pack_deferred) &&", worker)
+        self.assertIn("if (ctx->accepted_burst_pack_ready &&", worker)
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
         self.assertIn("!swapz_retention_expired(ctx)", worker)
         self.assertLess(worker.index("swapz_process(ctx, entry->bio)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
+        recheck = worker.index("if (!ctx->single_pack_tail_recheck)")
+        mark_recheck = worker.index("ctx->single_pack_tail_recheck = true",
+                                    recheck)
+        requeue = worker.index(
+            "mod_delayed_work(ctx->workqueue,",
+            mark_recheck)
+        recheck_close = worker.index(
+            "ctx->next_window_close = SWAPZ_CLOSE_PACK_READY",
+            requeue)
+        self.assertLess(mark_recheck, requeue)
+        self.assertLess(requeue, recheck_close)
+        self.assertIn("ctx->worker_requeues++", worker[recheck:requeue])
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
         self.assertIn("ctx->single_pack_deferred = false", flush)
+        self.assertIn("ctx->single_pack_tail_recheck = false", flush)
         self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("swapz_flush_window(ctx)", writer)

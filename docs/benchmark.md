@@ -31,15 +31,16 @@ Report process CPU separately from kernel-worker CPU; do not imply one includes 
 
 ## Current directional result
 
-At qualified source `1a3b30da5ad2435e2e174421ef62bc4837b38371`:
+At qualified source `c4539b3afe222372d5266be5a79bb96f23dfdeea`:
 
-- slow-model QD1 was about 0.38x raw; QD4 about 0.60x; QD8 about 0.56x; QD32 about 1.27x;
-- faster-model QD1 was about 0.18–0.20x raw; QD4 about 0.65–0.67x; QD8 about 0.17–0.19x; QD32 about 0.61–0.68x;
-- lower WRITE request savings appeared at QD4+;
-- QD1 had no aggregation benefit;
+- slow-model QD1 was about 0.38x raw; QD4 about 0.60x; QD8 about 0.88–0.90x; QD32 about 1.27x;
+- faster-model QD1 was about 0.19x raw; QD4 about 0.62–0.71x; QD8 about 0.61–0.76x; QD32 about 0.61–0.63x;
+- lower WRITE request savings remained strong at QD4+;
+- QD1 still had no aggregation benefit;
+- the accepted-incoming first-pack tail fix materially recovered QD8 without changing QD1, but fast finite QD4/QD32 still expose first-pack scheduling/packing loss;
 - the mixed faster-model async arm showed a preliminary useful-WRITE gain, while the slow mixed model still lost useful throughput.
 
-Interpretation: lower-request reduction alone is insufficient. Low/medium-QD latency/serialization is the immediate production-C bottleneck to profile. The pilot does not establish significance.
+Interpretation: the full retention deadline was a major QD8 bottleneck, but lower-request reduction alone is still insufficient. The next production-C question is whether one bounded zero-delay first-pack recheck can catch concurrent finite-wave arrivals without sacrificing packing bytes or read tails. The pilot does not establish significance.
 
 ## Confirmation gate
 

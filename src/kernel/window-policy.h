@@ -79,10 +79,11 @@ static inline int swapz_window_extent_fits(
 }
 
 /*
- * Identify the first useful pack. The worker decides whether an already
- * accepted local FIFO successor exists: only that immediate backlog may
- * justify deferring this pack for a second group. This pure geometry helper
- * never inspects queue state or changes the absolute retention deadline.
+ * Identify the first useful pack. The worker may keep it open for finite
+ * already-accepted work and, at an apparent queue tail, one bounded zero-delay
+ * worker recheck so concurrent submitters can become visible without paying
+ * the millisecond retention deadline. This pure geometry helper never inspects
+ * queue state or changes the absolute retention deadline.
  */
 static inline int swapz_window_single_pack_ready(
 		const struct swapz_pending_bio *pending, swapz_u8 count,
