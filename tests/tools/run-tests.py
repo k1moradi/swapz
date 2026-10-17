@@ -67,6 +67,9 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
+PREPARATION_FIELDS = (
+    "prep_producer_head_claims", "prep_producer_tail_claims",
+    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
 SATURATION_WINDOW_FIELDS = (
     "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
     "win9_16", "win17_64", "close_idle", "close_deadline",
@@ -366,7 +369,7 @@ def parse_sessions(output):
                        "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                        "windows", "one_page_windows", "gc_victims",
-                       "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+                       "gc_role_rotations") + PREPARATION_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
             current.setdefault("kernel_status", {})[name] = {
                 key: int(match.group(1))
                 for key in allowed
@@ -490,7 +493,7 @@ def parse_write_saturation(output):
             status_text = line.partition("=")[2]
             parsed = {
                 key: int(match.group(1))
-                for key in SATURATION_WINDOW_FIELDS
+                for key in SATURATION_WINDOW_FIELDS + PREPARATION_FIELDS
                 if (match := re.search(
                     r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", status_text))
             }
@@ -575,7 +578,7 @@ def write_saturation_verdict(sessions):
             if (any(type(before.get(field)) is not int or
                     type(after.get(field)) is not int or
                     after[field] < before[field]
-                    for field in SATURATION_WINDOW_FIELDS) or
+                    for field in SATURATION_WINDOW_FIELDS + PREPARATION_FIELDS) or
                     type(after.get("retained_burst_target")) is not int or
                     not 1 <= after["retained_burst_target"] <= 64):
                 return {"overall": "INCOMPLETE",
@@ -583,6 +586,10 @@ def write_saturation_verdict(sessions):
             row["window_delta"] = {
                 field: after[field] - before[field]
                 for field in SATURATION_WINDOW_FIELDS
+            }
+            row["preparation_delta"] = {
+                field: after[field] - before[field]
+                for field in PREPARATION_FIELDS
             }
             row["retained_burst_target"] = after["retained_burst_target"]
             for arm in row["arms"].values():
@@ -637,6 +644,7 @@ def write_saturation_verdict(sessions):
                 "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
                 "swapz_write_p99_ms": row["arms"]["swapz"]["write_p99_ms"],
                 "window_delta": row["window_delta"],
+                "preparation_delta": row["preparation_delta"],
                 "retained_burst_target": row["retained_burst_target"],
             } for row in rows]
             for regime, rows in regimes.items()
@@ -682,7 +690,7 @@ def benchmark_verdicts(sessions):
                       "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                        "windows",
-                      "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS:
+                      "one_page_windows", "gc_victims") + PREPARATION_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS:
             before = status.get("before", {}).get(field)
             after = status.get("after", {}).get(field)
             if not isinstance(before, int) or not isinstance(after, int) or after < before:
@@ -694,7 +702,7 @@ def benchmark_verdicts(sessions):
                         "single_pack_deferrals", "accepted_burst_extensions",
                         "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                         "windows",
-                        "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+                        "one_page_windows", "gc_victims") + PREPARATION_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
         }
         if sum(row["kernel_counter_delta"][field]
                for field in CLOSE_REASON_FIELDS) != \
@@ -843,6 +851,11 @@ def benchmark_verdicts(sessions):
                             "windows",
                             "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
             },
+            "preparation_counters": {
+                key: statistics.mean(row["kernel_counter_delta"][key]
+                                     for row in rows if row["async_prepare"])
+                for key in PREPARATION_FIELDS
+            },
         }
     return {
         "overall": "PASS_BOUNDED_RAM_MATRIX",
@@ -937,6 +950,13 @@ def print_bench(result):
                   f"packed 4MiB read={crit['packed_4mib_sequential']}")
         print(f"  ASYNC vs SYNC: "
               f"{data['criteria']['async_vs_sync']['write_throughput']}")
+        prep = data["preparation_counters"]
+        print("  Async preparation per-pair mean: "
+              f"producer head={prep['prep_producer_head_claims']:.1f}, "
+              f"tail={prep['prep_producer_tail_claims']:.1f}, "
+              f"ordered inline={prep['prep_ordered_inline']:.1f}, "
+              f"handoffs={prep['prep_ordered_handoffs']:.1f}, "
+              f"blocking waits={prep['prep_ordered_waits']:.1f}")
         kc = data["kernel_counters"]
         print(f"  Packed-window per-pair mean: deferred first packs="
               f"{kc['single_pack_deferrals']:.1f}, "
@@ -1002,6 +1022,15 @@ def print_bench(result):
                     f"17-64={wd['win17_64']} close(pack/deadline/idle)="
                     f"{wd['close_pack_ready']}/{wd['close_deadline']}/"
                     f"{wd['close_idle']} target={point['retained_burst_target']}")
+                if point["mode"] == "async":
+                    prep = point["preparation_delta"]
+                    print(
+                        "        async prep: "
+                        f"producer head={prep['prep_producer_head_claims']} "
+                        f"tail={prep['prep_producer_tail_claims']} "
+                        f"ordered inline={prep['prep_ordered_inline']} "
+                        f"handoffs={prep['prep_ordered_handoffs']} "
+                        f"blocking waits={prep['prep_ordered_waits']}")
         print("  PILOT LIMITATION: one pair per mode/QD; no confidence interval "
               "and no confirmatory performance verdict.")
     else:

@@ -202,3 +202,42 @@ increasing lower WRITE bytes or degrading packed-read tails. QD1 async should
 retain its improved latency/throughput. The one-pair write-only sweep remains
 directional only, and GC remains unqualified unless the loaded run observes
 nonzero victims.
+
+
+### Qualified retained-service/opposite-end result
+
+Source `658f390a03f546b35ba068900d5ec700126b7e99` passed all five
+owner-loaded qualification stages. The retained-window changes restored deep
+write-only aggregation: QD8 used 520 lower WRITE requests in every model/mode,
+and faster QD32 used 147/138 sync/async requests. QD1 async remained
+7.39 MB/s with 0.37 ms p99.
+
+Mixed QD32 also improved. Slow sync/async reached 7.12/7.28 MB/s with about
+544 lower requests. Faster sync/async reached 20.19/22.65 MB/s against
+19.54 MB/s raw, with packed reads faster than raw. Faster worker-empty deadline
+closes fell to about 59 per pair from ~88 at 3e23441, and one-page deadline
+closes fell to 31.5 from ~43.
+
+The source is not promoted. Faster write-only QD8 still showed essentially no
+asynchronous preparation gain: 17.10/17.21 MB/s against about 49.9 MB/s raw,
+despite the correct 520-request geometry. QD4 similarly remained about
+12.85 MB/s. Faster QD32 async reached 33.21 MB/s versus 29.25 sync, showing
+that larger queued bursts can expose some preparation overlap while
+intermediate queue depths still serialize.
+
+The next candidate changes only preparation scheduling and diagnostics. Outside
+synchronous lower WRITE wait, the producer receives one atomic tail-claim
+credit for each ordered BIO that owns real execution time; an asynchronous
+WRITE publishes that credit only after reserving its FIFO head. A normal tail
+claim returns after one prepared BIO instead of draining subsequent entries.
+During lower WRITE wait the producer may still drain head-first. This is
+intended to split QD4/QD8 compression between the ordered worker and producer
+rather than letting the producer claim every next FIFO item and make the
+ordered worker wait for completion.
+
+The official report now attributes producer head/tail claims, ordered inline
+preparations, producer handoffs and actual blocking completion waits. Acceptance
+requires QD1 behavior and QD8/QD32 request geometry to remain intact, QD8 async
+throughput to improve materially without extra lower WRITE bytes or read-tail
+regression, and blocking waits to fall relative to producer handoffs. The
+remaining mixed deadline cluster is a separate later experiment.

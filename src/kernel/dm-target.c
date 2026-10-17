@@ -125,6 +125,18 @@ struct swapz_dm {
 	 * from a new follower arriving while inline compression/read service runs.
 	 */
 	atomic_t ordered_worker_busy;
+	/*
+	 * Outside synchronous lower WRITE wait, the producer may consume one
+	 * tail entry only after the ordered worker has reserved work to execute.
+	 * This one-bit credit prevents producer run-ahead from turning FIFO
+	 * consumption back into a wait_for_completion convoy at QD4/QD8.
+	 */
+	atomic_t preparation_tail_credit;
+	u64 preparation_producer_head_claims;
+	u64 preparation_producer_tail_claims;
+	u64 preparation_ordered_inline;
+	u64 preparation_ordered_handoffs;
+	u64 preparation_ordered_waits;
 	u64 prepared_during_lower_write;
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
@@ -589,6 +601,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 	for (;;) {
 		struct swapz_prepared_page *prepared;
 		u64 section_start;
+		bool tail_claim = false;
 		int error;
 
 		/*
@@ -613,18 +626,25 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * meet in the middle instead of convoying on wait_for_completion().
 		 */
 		if (atomic_read(&ctx->lower_write_active)) {
+			/*
+			 * The ordered worker is blocked in synchronous lower WRITE I/O.
+			 * Drain from the FIFO head while that real overlap interval lasts.
+			 * A prior tail credit is obsolete once lower I/O becomes the owner
+			 * of preparation overlap.
+			 */
+			atomic_set(&ctx->preparation_tail_credit, 0);
 			entry = list_first_entry(&ctx->preparation_incoming,
 						 struct swapz_bio_ref,
 						 preparation_list);
+			ctx->preparation_producer_head_claims++;
 		} else {
 			/*
-			 * If the ordered worker has not started yet, preserve the sole
-			 * FIFO head for inline steal. Once that worker is busy on an
-			 * earlier BIO, even a single remaining follower is useful
-			 * parallel work and may be claimed from the tail.
+			 * Consume at most one opposite-end item for each ordered-work
+			 * credit. Without this gate the producer can claim BIO 2, then 3,
+			 * then 4 before the FIFO worker reaches them, recreating the same
+			 * serial completion convoy that tail selection was meant to avoid.
 			 */
-			if (!atomic_read(&ctx->ordered_worker_busy) &&
-			    list_is_singular(&ctx->preparation_incoming)) {
+			if (!atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
 				return;
@@ -632,6 +652,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			entry = list_last_entry(&ctx->preparation_incoming,
 						struct swapz_bio_ref,
 						preparation_list);
+			tail_claim = true;
+			ctx->preparation_producer_tail_claims++;
 		}
 		list_del_init(&entry->preparation_list);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -641,6 +663,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			entry->preparation_error = -ENOMEM;
 			up(&ctx->preparation_slots);
 			complete(&entry->preparation_finished);
+			if (tail_claim && !atomic_read(&ctx->lower_write_active))
+				return;
 			continue;
 		}
 		error = swapz_copy_bio(entry->bio, ctx->preparation_input_page,
@@ -650,6 +674,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			up(&ctx->preparation_slots);
 			entry->preparation_error = error;
 			complete(&entry->preparation_finished);
+			if (tail_claim && !atomic_read(&ctx->lower_write_active))
+				return;
 			continue;
 		}
 		section_start = ktime_get_ns();
@@ -675,6 +701,10 @@ static void swapz_preparation_worker(struct work_struct *work)
 		entry->prepared_page = prepared;
 		entry->preparation_error = 0;
 		complete(&entry->preparation_finished);
+		/* A normal tail credit is one-for-one with ordered work. If lower
+		 * WRITE began meanwhile, keep draining its head-first overlap window. */
+		if (tail_claim && !atomic_read(&ctx->lower_write_active))
+			return;
 	}
 }
 
@@ -2042,27 +2072,44 @@ static void swapz_worker(struct work_struct *work)
 				spin_lock_irqsave(&ctx->queue_lock, flags);
 				/*
 				 * Publish busy and reserve this FIFO head under the same
-				 * lock used by producer claim. The producer can therefore
-				 * never interpret busy==1 as permission to take THIS head.
+				 * lock used by producer claim. A successful inline steal grants
+				 * exactly one opposite-end producer claim while this BIO executes.
 				 */
 				atomic_set(&ctx->ordered_worker_busy, 1);
+				atomic_set(&ctx->preparation_tail_credit, 0);
 				if (!list_empty(&entry->preparation_list)) {
 					list_del_init(&entry->preparation_list);
 					entry->preparation_inline = true;
 					wait_for_preparation = false;
-					/*
-					 * Reserve the FIFO head for this worker first. Any
-					 * remaining preparation can now run in parallel without
-					 * the producer stealing the entry we are about to consume.
-					 */
+					ctx->preparation_ordered_inline++;
+					atomic_set(&ctx->preparation_tail_credit, 1);
 					if (!list_empty(&ctx->preparation_incoming))
 						queue_work(ctx->preparation_workqueue,
 							   &ctx->preparation_worker);
+				} else {
+					ctx->preparation_ordered_handoffs++;
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				if (wait_for_preparation)
+				if (wait_for_preparation) {
+					if (!completion_done(&entry->preparation_finished))
+						ctx->preparation_ordered_waits++;
 					wait_for_completion(&entry->preparation_finished);
+				}
+			} else if (ctx->async_prepare) {
+				/*
+				 * A READ/barrier can also provide real ordered service time.
+				 * Permit one future WRITE preparation during that BIO, but never
+				 * let the producer chain through the rest of the FIFO.
+				 */
+				spin_lock_irqsave(&ctx->queue_lock, flags);
+				atomic_set(&ctx->ordered_worker_busy, 1);
+				atomic_set(&ctx->preparation_tail_credit, 1);
+				if (!list_empty(&ctx->preparation_incoming))
+					queue_work(ctx->preparation_workqueue,
+						   &ctx->preparation_worker);
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			} else {
+				atomic_set(&ctx->preparation_tail_credit, 0);
 				atomic_set(&ctx->ordered_worker_busy, 1);
 			}
 			ctx->worker_has_immediate_followup =
@@ -2070,6 +2117,8 @@ static void swapz_worker(struct work_struct *work)
 			swapz_refresh_accepted_followup(ctx);
 			list_del_init(&entry->list);
 			swapz_process(ctx, entry->bio);
+			/* Expire any unused credit before advertising an idle ordered worker. */
+			atomic_set(&ctx->preparation_tail_credit, 0);
 			atomic_set(&ctx->ordered_worker_busy, 0);
 
 			/*
@@ -2307,9 +2356,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
 		if (atomic_read(&ctx->lower_write_active) ||
-		    atomic_read(&ctx->ordered_worker_busy) ||
-		    ctx->incoming.next != &entry->list ||
-		    ctx->preparation_incoming.next != &entry->preparation_list)
+		    (atomic_read(&ctx->ordered_worker_busy) &&
+		     atomic_read(&ctx->preparation_tail_credit)))
 			queue_work(ctx->preparation_workqueue,
 				   &ctx->preparation_worker);
 	}
@@ -2515,6 +2563,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS);
 	atomic_set(&ctx->lower_write_active, 0);
 	atomic_set(&ctx->ordered_worker_busy, 0);
+	atomic_set(&ctx->preparation_tail_credit, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
@@ -2759,6 +2808,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
 		       "retain_timer_arm_skips=%llu "
 		       "async_prepare=%u prep_lower_write_overlap_starts=%llu "
+		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
+		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
+		       "prep_ordered_waits=%llu "
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
@@ -2858,6 +2910,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->retain_ms, ctx->retain_worker_passes,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
 		       ctx->async_prepare, ctx->prepared_during_lower_write,
+		       ctx->preparation_producer_head_claims,
+		       ctx->preparation_producer_tail_claims,
+		       ctx->preparation_ordered_inline,
+		       ctx->preparation_ordered_handoffs,
+		       ctx->preparation_ordered_waits,
 		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
 		       ctx->decode_wall_ns,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,

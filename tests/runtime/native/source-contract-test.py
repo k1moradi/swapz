@@ -1084,8 +1084,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("if (atomic_read(&ctx->lower_write_active))", producer)
         self.assertIn("list_first_entry(&ctx->preparation_incoming", producer)
         self.assertIn("list_last_entry(&ctx->preparation_incoming", producer)
-        self.assertIn("list_is_singular(&ctx->preparation_incoming)", producer)
-        self.assertIn("!atomic_read(&ctx->ordered_worker_busy)", producer)
+        self.assertIn("atomic_xchg(&ctx->preparation_tail_credit, 0)", producer)
+        self.assertIn("ctx->preparation_producer_head_claims++", producer)
+        self.assertIn("ctx->preparation_producer_tail_claims++", producer)
+        self.assertIn("if (tail_claim && !atomic_read(&ctx->lower_write_active))",
+                      producer)
         self.assertNotIn("ctx->lz4_workmem", producer)
         self.assertIn("complete(&entry->preparation_finished)", producer)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
@@ -1095,9 +1098,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
         self.assertIn("atomic_read(&ctx->lower_write_active)", mapper)
         self.assertIn("atomic_read(&ctx->ordered_worker_busy)", mapper)
-        self.assertIn("ctx->incoming.next != &entry->list", mapper)
-        self.assertIn("ctx->preparation_incoming.next != &entry->preparation_list",
-                      mapper)
+        self.assertIn("atomic_read(&ctx->preparation_tail_credit)", mapper)
+        self.assertNotIn("ctx->incoming.next != &entry->list", mapper)
+        self.assertNotIn("ctx->preparation_incoming.next != &entry->preparation_list",
+                         mapper)
         self.assertLess(mapper.index("list_add_tail(&entry->list"),
                         mapper.index("queue_work(ctx->preparation_workqueue"))
         self.assertIn("queue_work(ctx->preparation_workqueue", lower)
@@ -1112,6 +1116,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("entry->preparation_inline = true", ordered)
         self.assertIn("atomic_set(&ctx->ordered_worker_busy, 1)", ordered)
         self.assertIn("atomic_set(&ctx->ordered_worker_busy, 0)", ordered)
+        self.assertIn("atomic_set(&ctx->preparation_tail_credit, 1)", ordered)
+        self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ordered)
+        self.assertIn("ctx->preparation_ordered_inline++", ordered)
+        self.assertIn("ctx->preparation_ordered_handoffs++", ordered)
+        self.assertIn("ctx->preparation_ordered_waits++", ordered)
+        self.assertIn("completion_done(&entry->preparation_finished)", ordered)
         busy_set = ordered.index("atomic_set(&ctx->ordered_worker_busy, 1)")
         prep_lock = ordered.rfind("spin_lock_irqsave(&ctx->queue_lock, flags)",
                                  0, busy_set)
@@ -1139,6 +1149,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("atomic_set(&ctx->lower_write_active, 1)", lower)
         self.assertIn("atomic_set(&ctx->lower_write_active, 0)", lower)
         self.assertIn("atomic_set(&ctx->ordered_worker_busy, 0)", ctor)
+        self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ctor)
+        self.assertIn("prep_producer_head_claims=%llu prep_producer_tail_claims=%llu",
+                      status)
+        self.assertIn("prep_ordered_inline=%llu prep_ordered_handoffs=%llu", status)
+        self.assertIn("prep_ordered_waits=%llu", status)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))

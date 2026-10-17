@@ -339,23 +339,27 @@ upper BIOs.
 
 When synchronous lower WRITE I/O is active, the producer prepares from the
 head because the ordered worker is blocked and will need that entry first.
-Otherwise the producer prepares from the tail while the ordered worker steals
-from the head. Out-of-order preparation is permitted because each result is
-private to its BIO and the serialized worker still consumes/completes BIOs in
-admission order.
+Outside lower WRITE wait, tail preparation is explicitly credit-limited: each
+ordered BIO that owns real execution time may grant at most one tail claim, and
+an asynchronous WRITE grants that credit only after the ordered worker has
+atomically reserved its own FIFO head. This prevents the producer from claiming
+BIO 2, then 3, then 4 in succession and recreating a serial
+`wait_for_completion` convoy despite nominal tail-first selection.
 
-A lone truly idle head must not wake the unbound producer. The producer itself
-must also leave a singular head untouched while neither lower WRITE nor the
-ordered worker is active. `->map` wakes parallel preparation when a prior BIO
-remains queued, `lower_write_active` is set, or the atomic
-`ordered_worker_busy` flag proves the ordered worker is already consuming
-another BIO.
+A lone truly idle head must not wake the unbound producer. `->map` wakes
+parallel preparation only for active lower WRITE service or when
+`ordered_worker_busy` and the one-shot `preparation_tail_credit` are both
+published. An already queued multi-BIO burst therefore waits for the ordered
+worker to reserve the first head before producer work can start.
 
-For an asynchronous WRITE, the ordered worker sets `ordered_worker_busy` and
-removes its own head preparation in the same `queue_lock` critical section.
-Only after that reservation may it kick the producer for remaining entries.
-This prevents a producer that observes the busy flag from racing for the very
-head the FIFO consumer is about to process.
+For an asynchronous WRITE, the ordered worker sets `ordered_worker_busy`,
+removes its own head preparation and publishes one tail credit in the same
+`queue_lock` critical section. A producer consumes that credit atomically and
+returns after one tail preparation unless synchronous lower WRITE begins in the
+meantime. READ/barrier execution may likewise grant one tail credit so mixed
+workloads retain bounded preparation overlap without allowing producer run-ahead.
+Out-of-order preparation remains private to each BIO; FIFO publication,
+completion and lower-I/O ownership are unchanged.
 
 The producer may wait for a bounded preparation slot only after releasing
 `queue_lock`. Tail claiming must never consume completion/publication

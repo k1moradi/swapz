@@ -10,23 +10,28 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`3e2344134de2548c5d6f71b48f6e8bbe508bb3df` passed all five stages and
-is qualified exploratory evidence, but is not promoted.
+`658f390a03f546b35ba068900d5ec700126b7e99` passed all five stages and is
+qualified exploratory evidence, but is not promoted.
 
-The demand-gated preparation experiment preserved the slow mixed path at
-7.09/7.21 MB/s sync/async with about 557/560 lower WRITE requests and a 1.47x
-logical/backing ratio. Faster mixed remained competitive at 19.50/21.34 MB/s
-against 19.33 MB/s raw, with packed reads faster than raw and lower READ bytes
-well below raw.
+The retained-service candidate restored the intended write-only geometry.
+QD8 used exactly 520 lower WRITE requests in both modes on both RAM models.
+On the faster model QD32 used 147/138 requests sync/async, back near the prior
+~139-request deep-window result. QD1 async also retained its scheduling result
+at 7.39 MB/s and 0.37 ms p99.
 
-Its attribution exposed two regressions relative to `9f11a1a...`. Faster
-write-only QD8 async fell from 28.39 to 17.31 MB/s while requests rose from
-about 520 to 555, and faster QD32 request counts rose from about 139 to
-241/210 sync/async. The window histogram gained many 2-8-record closes.
-Meanwhile faster mixed still recorded about 88.2 worker-empty deadline closes
-and 43.2 one-page deadline closes per pair. QD1 async did improve to 7.43 MB/s
-with 0.37 ms p99, showing that avoiding the lone-head producer race is useful
-but must not disable high-QD preparation parallelism.
+Mixed behavior improved without changing the lower-byte/read-tail safety gates.
+Slow mixed reached 7.12/7.28 MB/s with about 544 lower WRITE requests. Faster
+mixed reached 20.19/22.65 MB/s against 19.54 MB/s raw, with packed reads faster
+than raw and lower READ bytes below raw. Faster mixed worker-empty deadlines
+fell from about 88 to 59 per pair and one-page deadline closes from about 43 to
+31.5, so the retained-service repair is directionally effective but incomplete.
+
+The remaining rejection signal is asynchronous intermediate-QD throughput.
+Faster write-only QD8 remained 17.10/17.21 MB/s sync/async against about
+49.9 MB/s raw despite the restored 520-request geometry. QD4 likewise remained
+about 12.85 MB/s with no async gain. QD32 async improved over sync
+(33.21 vs 29.25 MB/s) but remained well below raw. This isolates scheduling of
+LZ4 preparation rather than window chopping as the next experiment.
 
 The write-only pilot remains one pair per mode/QD with no confidence interval,
 and the loaded run again reported zero GC victims. Circular GC destination
@@ -45,27 +50,27 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify the retained-service/opposite-end-preparation candidate now on
-   `main`. Tail-width sampling occurs only after a real PACK_READY lower
-   write; target-level admission closure is restored after an accepted-follower
-   refresh, while below-target closure remains worker-tail-only.
-2. Require write-only QD8 to return toward the ~520-request geometry and faster
-   QD32 toward ~139 requests without surrendering the QD1 async improvement.
-   QD8/QD32 async throughput should recover materially from the
-   3e23441 regression while lower WRITE bytes remain unchanged or better.
-3. Require faster mixed QD32 `deadline_worker_empty` and one-page deadline
-   closes to fall materially from ~88 and ~43. Empty read/zero fences must no
-   longer erase retained service state, but hard ordering boundaries and true
-   worker idle must still clear it.
-4. Verify opposite-end asynchronous preparation under bounded capacity:
-   ordered FIFO execution remains head-first, producer preparation is tail-first
-   while the ordered worker runs and head-first during lower WRITE wait, and no
-   producer may block after claiming a BIO. QD1 must keep the idle-head
-   inline-steal benefit.
-5. Keep metadata-LRU invalidation semantics and the circular GC destination
-   probe unchanged. No endurance or sustained-GC claim is permitted unless a
-   loaded run actually exercises GC victims.
-6. After policy stabilizes, add statistically repeated saturation with
+1. Qualify the credited opposite-end preparation candidate now on `main`.
+   Keep the 658f390 retained-window policy and lower-byte geometry unchanged.
+2. Outside synchronous lower WRITE wait, permit only one producer tail claim
+   per ordered-work credit. An inline ordered WRITE reserves the head first;
+   READ/barrier service may grant one bounded credit; producer-owned FIFO heads
+   grant no new credit. This should prevent the producer from serially claiming
+   every next QD4/QD8 BIO and forcing the ordered worker into completion waits.
+3. Require the official report to expose producer head/tail claims, ordered
+   inline/handoff counts and actual blocking waits. QD8 should show work split
+   across ordered-inline and producer-tail preparation with few blocking waits,
+   while QD1 keeps its lone-head behavior.
+4. Preserve write-only QD8 at ~520 lower requests and faster QD32 near ~139.
+   Reject any async-throughput gain that increases lower WRITE bytes, worsens
+   packed-read tails or reintroduces the prior 2-16-record window chopping.
+5. After preparation scheduling is isolated, revisit the residual faster mixed
+   worker-empty deadline cluster (~59 per pair, ~31.5 one-page deadlines).
+   Do not combine another retention-policy change with this scheduling test.
+6. Keep metadata-LRU invalidation and circular GC destination probing unchanged.
+   No endurance or sustained-GC claim is permitted until loaded qualification
+   actually observes GC victims.
+7. After policy stabilizes, add statistically repeated saturation with
    confidence intervals; genuine lower errors, sustained GC, kernel-worker CPU
    attribution and long-run resource pressure remain release gates.
 

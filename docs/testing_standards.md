@@ -246,29 +246,34 @@ lower requests against the last deep-aggregation result, and mixed QD32
 ~88-close cluster. No scheduling evidence may survive a true worker-idle or
 hard ordering boundary.
 
-Opposite-end preparation qualification requires source coverage that the
-producer selects the preparation FIFO head only while `lower_write_active`
-is true and otherwise selects the tail. The ordered worker must reserve its
-head under `queue_lock` before kicking the producer for remaining entries.
+Credited opposite-end preparation qualification requires source coverage that
+the producer selects the FIFO head only while `lower_write_active` is true.
+Otherwise it may select the tail only after atomically consuming
+`preparation_tail_credit`, and one normal tail claim must return rather than
+drain the queue. The ordered worker must reserve its head under `queue_lock`
+before publishing that credit and kicking the producer.
 
-The map path must leave a lone truly idle preparation un-woken, but wake on
-`lower_write_active`, atomic `ordered_worker_busy`, an older ordinary
-incoming BIO, or an older preparation entry. The producer must also leave a
-singular head untouched when both lower WRITE and the ordered worker are idle.
-`batch_count` must remain worker-owned and must not be used as an
-unsynchronized map-path busy signal.
+The map path must leave idle queued work to the ordered worker and wake the
+producer only for active lower WRITE service or the conjunction of atomic
+`ordered_worker_busy` and `preparation_tail_credit`. `batch_count` remains
+worker-owned and must not become a map-path busy signal. READ/barrier execution
+may publish one bounded tail credit while it owns ordered service time.
 
 For asynchronous WRITE consumption, source coverage must show
 `ordered_worker_busy=1` is published under `queue_lock` before the ordered
-worker removes or inspects its head preparation, so producer claim and head
-reservation are atomic with respect to each other. The flag must remain set
-through preparation plus `swapz_process()`, clear afterwards, and initialize
-to zero.
+worker removes or inspects its head preparation. An inline steal increments the
+ordered-inline diagnostic and grants one credit; a producer-owned entry records
+a handoff, and `completion_done()` distinguishes an actual blocking wait from
+an already-complete handoff. Both busy and unused credit clear after
+`swapz_process()`, and both initialize to zero.
 
-Loaded comparison must verify that QD1 keeps the inline-steal latency benefit
-while QD8/QD32 recover async throughput and retain lower-request aggregation.
-The existing `prep_lower_write_overlap_starts` diagnostic must remain
-meaningful, and all publication/completion/fail-closed invariants are unchanged.
+Loaded comparison must report producer head/tail claims plus ordered inline,
+handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
+QD1 must keep the inline-steal latency benefit; QD8 should show substantial
+ordered-inline plus producer-tail work with few blocking waits; QD32 must retain
+deep lower-request aggregation. The existing
+`prep_lower_write_overlap_starts` diagnostic remains meaningful, and all
+publication/completion/fail-closed invariants are unchanged.
 
 Idempotent metadata-cache invalidation qualification must preserve the existing
 explicit-invalidation and post-write miss tests. Source coverage requires the
