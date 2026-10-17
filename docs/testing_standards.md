@@ -8,7 +8,7 @@ Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
 in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
 CI and documentation, before every agent change. Version numbers belong in
 release metadata and source paths, not the project/module/target name. Keep
-`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapzctl`
 utility does not rename the project or module.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
@@ -30,7 +30,7 @@ rather than misreporting a complete test. All previously exposed root targets su
 `verify`, `run`, `deploy`, `v3`, `clean`, `bench-*`
 and `test-*` are **removed and must not be reintroduced**.
 Internal Kbuild/native-suite targets do not count as public root commands.
-Rootless CI runs `tools/test-rootless.sh` without device access; its PASS
+Rootless CI runs `tests/tools/test-rootless.sh` without device access; its PASS
 is not loaded-device evidence. The full `make test` must never silently
 skip a privileged qualification or prompt for a password: it reports
 BLOCKED if safe owned RAM devices or noninteractive privilege are unavailable.
@@ -46,7 +46,7 @@ experimental, DKMS `AUTOINSTALL="no"`, and installation does
 not permit activation, physical devices or existing system swap.
 
 
-**Current testing policy.** Read [README](../README.md), [VISION](../VISION.md), [coding_standards.md](coding_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) at the **start of every agent task**. Tests must prove correctness on actual source, expose false completions and regressions, and ultimately support the project's **real lower-I/O** objective—not maximize test counts.
+**Current testing policy.** Read [README](README.md), [VISION](VISION.md), [coding_standards.md](coding_standards.md), [compile.md](compile.md), and [benchmark.md](benchmark.md) at the **start of every agent task**. Tests must prove correctness on actual source, expose false completions and regressions, and ultimately support the project's **real lower-I/O** objective—not maximize test counts.
 
 Current actionable V3 gaps belong in [the roadmap's open work queue](ROADMAP.md);
 historical validation transcripts belong in the archive indexed by
@@ -71,7 +71,7 @@ Until all gates pass: **PHYSICAL TEST BLOCKED**.
 ## Exact release-version qualification
 
 The rootless source-contract regression requires the README to link to
-`kernel/extent-v3/VERSION` rather than duplicate an alpha literal.
+`src/kernel/VERSION` rather than duplicate an alpha literal.
 Additional tests prove the generated kernel version header and module
 change when VERSION changes, DKMS resolves its installed VERSION,
 and both privileged owned-RAM helpers compare `modinfo -F version`
@@ -114,7 +114,7 @@ Report **PASS, FAIL, MIXED, INCONCLUSIVE, BLOCKED, NOT RUN** with exact Git sour
 
 ## Reusable native C tests: mandatory first choice
 
-**Only one reusable compiled-output tree:** `~/swapz/build/`. Native tests link to **actual** `kernel/extent-v3/{codec,authority,engine}.c` and use semantic names, not newly duplicated version-number frameworks. From the checkout root the **only official test invocation** is:
+**Only one reusable compiled-output tree:** `~/swapz/build/`. Native tests link to **actual** `src/kernel/{codec,authority,engine}.c` and use semantic names, not newly duplicated version-number frameworks. From the checkout root the **only official test invocation** is:
 
 ~~~sh
 make test
@@ -163,7 +163,7 @@ break the legacy standalone internal fallback; private rootless Bash
 syntax/preflight checks still cover both branches.
 
 **Regression maintenance note:** After moving the serial test-phase
-commands into `tools/run-tests.py`, Make API tests must look for those
+commands into `tests/tools/run-tests.py`, Make API tests must look for those
 commands in the runner, not directly in the root Makefile. The Makefile
 continues to expose only the public `make test` entry point.
 
@@ -282,7 +282,7 @@ occurred and the original absolute deadline has not expired, the worker
 must set the ordinary PACK_READY close reason and synchronously flush
 before resetting the local-follow-up snapshot. Any existing boundary
 encountered while walking the accepted burst retains its original drain
-and clears the extension state through `sv3_flush_window`.
+and clears the extension state through `swapz_flush_window`.
 
 Owner qualification at `ed2ea3d` showed that unconstrained replanning
 of these larger windows reduced WRITE requests but caused a material
@@ -336,14 +336,14 @@ owner-loaded `8e21ca7e` proved the resulting 256KiB metadata-only LRU.
 The production read cache remains exactly 64 validated 4KiB block-zero
 slots plus the existing one-extent `read_scratch` fast path. It must not
 cache payload blocks or suppress required payload I/O. Every logical read
-still executes `sv3_peek`, authority/generation/offset/length checks and
+still executes `swapz_peek`, authority/generation/offset/length checks and
 payload CRC validation.
 
 The current production-C read path reuses the descriptor already returned
-by that successful `sv3_peek` after fetching any missing payload blocks.
-`sv3_read_authoritative_peeked` must recheck current volatile authority,
+by that successful `swapz_peek` after fetching any missing payload blocks.
+`swapz_read_authoritative_peeked` must recheck current volatile authority,
 the on-media sequence and payload bounds, then verify payload CRC before
-returning bytes; it must not call `sv3_lookup` or re-run metadata
+returning bytes; it must not call `swapz_lookup` or re-run metadata
 validation over the same worker-owned block-zero scratch. Exact-C coverage
 corrupts payload bytes after a successful peek, forges the decoded generation
 and mutates the sequence, requiring fail-closed rejection in every case.
@@ -364,7 +364,7 @@ status, timed-read schema and rootless fixtures after their decisions.
 Do not pay hot-path diagnostic scan cost after a direction is closed.
 
 Cache residency must still be cleared by
-`sv3_engine_invalidate_read_cache()` on every existing
+`swapz_engine_invalidate_read_cache()` on every existing
 write/GC/discard/barrier fence. A failed, stale or corrupt read must not
 insert/touch a slot or increment `read_meta_lru_hits`. Exact-C coverage
 must prove reuse beyond one entry saves a real lower metadata read,
@@ -415,7 +415,7 @@ legacy loop/error-device fault scripts must not be invoked by `make test`.
 
 For WRITE closure analysis, the status/report layer must carry all sixteen
 `window_close_reasons` deltas and fail closed unless their sum equals
-`windows`. For singleton analysis, `sv3_flush_window()` must increment
+`windows`. For singleton analysis, `swapz_flush_window()` must increment
 exactly one `one_page_close_reasons[reason]` entry whenever `count == 1`;
 those deltas must sum to `one_page_windows`. Rootless synthetic fixtures must exercise both the
 valid joint singleton sum and a mismatched failure case. Source contracts
@@ -488,7 +488,7 @@ disabled by default and all device tests stay owned-RAM-null_blk-only.
 
 ## Latest-only compressed result and official terminal output
 
-The private `tools/run-tests.py` program invoked *only* by root
+The private `tests/tools/run-tests.py` program invoked *only* by root
 `make test` drives five strictly ordered stages: parallel compile
 prerequisites, rootless native/source/safety contracts, W=1 kernel
 build, W=2 kernel build, and privileged owned-RAM smoke plus eight
@@ -773,7 +773,7 @@ Historical test records remain in Git history.
 `make verify` invokes the 14 production-C native tests, the exact
 V3 constructor/source contracts, the safe off/V3 **regular-file**
 replay oracle and shell deployment source checks. CI additionally
-compiles `tools/device-roundtrip.c` with `-Wall -Wextra -Werror`.
+compiles `tests/tools/device-roundtrip.c` with `-Wall -Wextra -Werror`.
 `make deploy` compiles V3 against the **running kernel**, then loads
 the exact built module solely against a **fresh, unique memory-backed
 null_blk**. The ephemeral mapper has its own test UUID, 16MiB logical
@@ -863,7 +863,7 @@ start/middle/end, RAW-to-zero-to-nonzero generation transitions,
 physical liveness retirement, in-flight refusal and overflow fail
 closed. An additional source contract checks that the production
 `dm-target.c` path drains prior writes, invalidates via
-`sv3_discard_page`, maintains FUA flushing and counts only
+`swapz_discard_page`, maintains FUA flushing and counts only
 successfully acknowledged elisions. The host's C roundtrip oracle
 will additionally overwrite multiple pages with exact zero to
 validate loaded readback and O_SYNC/flush behavior.
@@ -936,7 +936,7 @@ claiming a new performance win.
 
 The active V3 version contract must read the canonical root `README.md`
 and compare its advertised revision to the actual
-`kernel/extent-v3/VERSION` and production `SV3_ALPHA_VERSION`.
+`src/kernel/VERSION` and production `SWAPZ_ALPHA_VERSION`.
 Do not require an archived goals document, or recreate a removed root
 `V3_GOALS.md`, to make source qualification green. Path-filtered kernel CI
 must watch the active `docs/ROADMAP.md`, not the former root location.
@@ -1030,7 +1030,7 @@ device cleanup evidence. Preserve that failed CI run.
 ## Alpha.9 exact close-reason telemetry and semantics
 
 Count one primary closing cause per **nonempty**
-`sv3_flush_window()`, including a failed physical commit. An empty
+`swapz_flush_window()`, including a failed physical commit. An empty
 flush increments neither `windows` nor close counts and clears any
 stale provisional reason. The serialized worker assigns capacity,
 duplicate logical WRITE, zero-write fence, FUA, nonbulk RAW fallback,
@@ -1091,7 +1091,7 @@ test harness code changes, no new kernel data-path experiment.
 
 The serialized production-C worker now timestamps the FIRST accepted
 compressed or staged RAW write in an empty window, and at the
-beginning of each nonempty `sv3_flush_window()` captures elapsed
+beginning of each nonempty `swapz_flush_window()` captures elapsed
 monotonic nanoseconds BEFORE planning, lower I/O, verification, FUA,
 or GC. Exactly one bucket <=100us, 101..1000us, >1000us must be
 incremented per nonempty window. No count may be added by an empty
@@ -1171,7 +1171,7 @@ The first alpha.11 direct-main commit (`0a750dcf`) FAILED
 native/source CI because `body()` recognized only `int`/`void`
 helper signatures and the preexisting constructor contract expected
 the obsolete 9-argument limit. Kbuild also FAILED with an implicit
-forward declaration of `sv3_retention_expired` in `sv3_process`.
+forward declaration of `swapz_retention_expired` in `swapz_process`.
 The repair adds a forward prototype, expands source function
 recognition to `bool`/`unsigned long`, updates the constructor
 argument test to `argc<=10`, and accepts both the historical
@@ -1273,9 +1273,9 @@ measured. The rule is strictly disabled when `retain_ms=0`,
 `read_budget>0`, or a batch has fewer/more than eight records,
 RAW, zero or invalid lengths. A FUA write takes its original fence
 before this possible early closure. The exact existing
-`sv3_flush_window()` performs all physical I/O, CRC and mapping
+`swapz_flush_window()` performs all physical I/O, CRC and mapping
 publication and completes accepted BIO owners exactly once.
-The new `SV3_CLOSE_PACK_READY` belongs in window-closure
+The new `SWAPZ_CLOSE_PACK_READY` belongs in window-closure
 conservation. The separate `packed_early_commits` counter reports
 attempted early closures, **not** successful lower I/O savings.
 
@@ -1378,10 +1378,10 @@ with 64 cumulative pack-ready early closures, no GC.
 These were **500 IOPS paced** results. The explicit
 new `make bench-pair-medium-unpaced` was **NOT RUN**.
 
-Production `sv3_flush_window` now avoids calling the
+Production `swapz_flush_window` now avoids calling the
 synchronous `hrtimer_cancel()` for `retain_ms=0`,
 because the only worker timer arming branch is gated
-on `sv3_window_timer_enabled(retain_ms)` and returns
+on `swapz_window_timer_enabled(retain_ms)` and returns
 false when disabled. The nonretained singleton/quantum
 hot path therefore skips an unnecessary timer operation
 at every window closure. When retention is enabled
@@ -1476,7 +1476,7 @@ QD32 **unpaced alpha.16 comparison was NOT RUN**;
 therefore no new high-throughput gain is established.
 
 Alpha.17 optimizes the actual production
-`sv3_order_window` C path. The existing greedy algorithm
+`swapz_order_window` C path. The existing greedy algorithm
 picks the EARLIEST remaining largest compressed record;
 if all payload lengths are equal, it may pair that record
 with the EARLIEST remaining partner fitting the existing
@@ -1486,7 +1486,7 @@ original arrival order, so the worker can emit a linear
 identity mapping instead of rescanning every remaining
 record in O(n^2) greedy selection. The predicate requires
 nonzero record count <=64, valid non-RAW compressed
-lengths 1..SV3_MAX_COMPRESSED and *all equal lengths*.
+lengths 1..SWAPZ_MAX_COMPRESSED and *all equal lengths*.
 Mixed sizes, RAW, invalid, null or empty windows still
 use the unchanged original greedy logic. Direct native
 production-header tests cover singleton, 7 and 64
@@ -1494,7 +1494,7 @@ uniform 2073B records, tiny pairing-capable compressed
 payloads, RAW, mixed length, invalid size and bounds.
 Source contracts require both fast and fallback paths
 join the same `planned` construction and original
-`sv3_engine_write_window_batched` lower-success/
+`swapz_engine_write_window_batched` lower-success/
 mapping-publication path. No changed storage format,
 algorithm, GC, flush, read or upper BIO contract is
 intended. Loaded alpha.17 performance and sustained
@@ -1542,7 +1542,7 @@ take target-status counter differences at validated
 measurement boundaries; until then use only
 cumulative diagnostic ratios with explicit scope.
 
-The production-header `sv3_elapsed_ns` helper
+The production-header `swapz_elapsed_ns` helper
 returns zero for a reversed timestamp rather than
 underflowing an unsigned accumulator. Native tests
 cover zero, forward, backward and boundary samples;
@@ -1591,7 +1591,7 @@ sections. Do NOT sum these or label them CPU cost
 or a direct accounting of the 2.043s replay interval.
 
 Alpha.19 changes only **actual Linux kernel
-`sv3_worker` scheduling**. Previously the worker
+`swapz_worker` scheduling**. Previously the worker
 requeued any newly arrived BIOs, even if its
 current finite 64-BIO work quantum was not spent.
 It now keeps the remaining quantum across inline
@@ -1650,12 +1650,12 @@ off 30.475 MB/s; cross-version differences are not
 statistically conclusive. Do not promote alpha.19.
 
 **Alpha.20 production C correction** reinstates the
-exact alpha.18 serialized `sv3_worker`, including its
+exact alpha.18 serialized `swapz_worker`, including its
 normal-mode FIFO splicing and bounded workqueue requeue
 even when the snapshot has remaining 64-BIO budget;
 on closed admission it loops with `cond_resched` to
 complete all previously accepted BIOs. Remove unused
-`sv3_worker_can_inline_drain`, its native test and
+`swapz_worker_can_inline_drain`, its native test and
 `worker_inline_drains` telemetry. Source qualification
 must reject inline continuation and check requeue,
 64-BIO processing, FIFO, full shutdown drain and
@@ -1751,7 +1751,7 @@ Alpha.21 makes a substantive C write-path policy change
 for **only already opted-in retention**. Previously, a
 7-record group that fit a single 16KiB V3 extent could
 close before the absolute deadline. The actual production
-`sv3_window_pack_ready` now accepts exactly:
+`swapz_window_pack_ready` now accepts exactly:
 - 2 valid non-RAW compressed pages, including 16B
   header plus 2x16B records, fitting 4,096B;
 - 3 such pages plus 16B header and 3x16B records,
@@ -1769,7 +1769,7 @@ oversized, disabled retention, read budget,
 invalid count and NULL rejections. Source
 contracts require FUA precedence, complete
 admission, exact metadata and the unchanged
-`sv3_flush_window` physical-success publication/
+`swapz_flush_window` physical-success publication/
 upper-BIO completion gate. This directly
 addresses earlier closure without relaxing
 ordering, GC, CRC, device ownership or teardown.
@@ -1800,7 +1800,7 @@ counting retired V2.2 rootless PASS results as V3 evidence.
 
 ## Rootless package install/uninstall and production hold
 
-Do not ask the owner to run `make install` or `make uninstall` before V3's production safety gates are accepted. Rootless fake-DKMS tests must run under `build/tests/package-sandbox` and exercise the actual installer, including versioned source installation, the read-only `swapz3ctl` binary, refused activation arguments, ownership checks, double-install prevention, exact uninstall, modified binary refusal, failed DKMS removal quarantine and install rollback. Root execution must reject test-mode overrides. These test results are **not** loaded module correctness, real DKMS compatibility or production readiness. No root Make commands may be added beyond the four owner-approved commands.
+Do not ask the owner to run `make install` or `make uninstall` before V3's production safety gates are accepted. Rootless fake-DKMS tests must run under `build/tests/package-sandbox` and exercise the actual installer, including versioned source installation, the read-only `swapzctl` binary, refused activation arguments, ownership checks, double-install prevention, exact uninstall, modified binary refusal, failed DKMS removal quarantine and install rollback. Root execution must reject test-mode overrides. These test results are **not** loaded module correctness, real DKMS compatibility or production readiness. No root Make commands may be added beyond the four owner-approved commands.
 
 The V3 DKMS script resolves a controlled executable path and invokes `"$dkms_bin" add/build/install/remove`. Policy checks must match those **validated calls**, not a hardcoded bare `dkms add` string; behavioral rootless fake-DKMS tests remain the decisive packaging gate.
 

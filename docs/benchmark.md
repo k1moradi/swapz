@@ -8,13 +8,13 @@ Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
 in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
 CI and documentation, before every agent change. Version numbers belong in
 release metadata and source paths, not the project/module/target name. Keep
-`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapzctl`
 utility does not rename the project or module.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
 
 
-**Mandatory task context:** [README.md](../README.md), [VISION.md](../VISION.md),
+**Mandatory task context:** [README.md](README.md), [VISION.md](VISION.md),
 [coding_standards.md](coding_standards.md),
 [testing_standards.md](testing_standards.md), [compile.md](compile.md),
 and [benchmark.md](benchmark.md).
@@ -551,7 +551,7 @@ new planner diagnostics into per-session deltas, but the per-regime mean
 dictionary still omitted them while `print_bench()` indexed those keys.
 The next correction carried them through the summary means. Final-head CI
 then exposed the remaining ingestion gap: `parse_sessions()` still omitted
-all four from its strict `V3_STATUS_*` allowlist, so otherwise complete
+all four from its strict `SWAPZ_STATUS_*` allowlist, so otherwise complete
 synthetic evidence became `INCOMPLETE`. Mandatory status telemetry must
 survive all three layers—status parsing, per-session delta construction,
 and per-regime summary—before any invariant or printer indexes it. The
@@ -606,7 +606,7 @@ specific blocker. Do not relax it merely to regain WRITE bytes.
 behavior unchanged. Maintain an MRU-first stack of at most 64
 `(start_block, extent_blocks)` identities only; no cached data, no new
 lower callbacks, no skipped callbacks, no allocation in the read path.
-The same `sv3_engine_invalidate_read_cache()` mutation fence clears the
+The same `swapz_engine_invalidate_read_cache()` mutation fence clears the
 stack on writes, GC, discard and barriers. After a *successful fully
 validated* read, update the stack and count whether the prior identity was
 within the most recent 4, 16 or 64 extents. Failed/stale/corrupt reads do
@@ -681,7 +681,7 @@ The identity-only reuse-distance, physical-block and companion probes are
 removed from production C and timed-read reporting after this decision;
 independent lower-device bytes/requests remain the performance authority.
 The block-zero-skip CRC proposal is not part of this experiment. Compressed
-`sv3_read_authoritative()` currently reparses CRC-protected metadata and
+`swapz_read_authoritative()` currently reparses CRC-protected metadata and
 checks the on-media sequence on every read. A volatile payload CRC sidecar
 could validate payload bytes but not metadata-only corruption, so skipping
 block zero would weaken an existing integrity invariant.
@@ -721,7 +721,7 @@ same-source/model/fixture checks pass. One pair per point is explicitly
 confirmatory matrix and cannot establish a material gain.
 
 **Singleton attribution:** add a joint counter for each primary
-`SV3_CLOSE_*` reason when `count == 1`. The sum must equal
+`SWAPZ_CLOSE_*` reason when `count == 1`. The sum must equal
 `one_page_windows`. Only that joint distribution may justify a follow-up
 WRITE admission experiment; separate close-reason and window-size marginals
 are insufficient.
@@ -820,7 +820,7 @@ configured cap is not evidence of saturation or a write-endurance win.
 The full `make test` now invokes the two owned-RAM comparison variants
 twice in counterbalanced order, after rootless and loaded integrity
 checks. It never silently skips these loaded benchmarks. The private
-`tools/test-loaded.sh` uses `sudo -n` only if already authorized,
+`tests/tools/test-loaded.sh` uses `sudo -n` only if already authorized,
 or reports BLOCKED nonzero without a password prompt. CI invokes only
 the rootless half. A successful pair verifies I/O correctness and emits
 measurements; it does not assert a throughput improvement.
@@ -993,7 +993,7 @@ remain version-scoped evidence, not authorization for privileged or
 physical-device tests. Today the sole public testing/benchmark command
 is `make test`; its loaded phase is limited to approved owned-RAM
 `null_blk`. Always obtain the current version from
-[`kernel/extent-v3/VERSION`](../kernel/extent-v3/VERSION).
+[`src/kernel/VERSION`](../src/kernel/VERSION).
 
 ## First confirmed isolated V3 loaded run: October 14, 2026
 
@@ -2265,7 +2265,7 @@ and [swap-file restrictions](https://man7.org/linux/man-pages/man8/swapon.8.html
 
 ## Maintained offline request-size projection
 
-`python3 -B tools/request-plateau.py` models the relationship between
+`python3 -B tests/tools/request-plateau.py` models the relationship between
 fixed per-request latency, payload size and an assumed lower-link
 bandwidth. Its request-size plateau and logical/physical ratio projections
 are **hypothetical**, not observed READ/WRITE counts, actual GC or

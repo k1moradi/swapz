@@ -8,7 +8,7 @@ Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
 in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
 CI and documentation, before every agent change. Version numbers belong in
 release metadata and source paths, not the project/module/target name. Keep
-`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapzctl`
 utility does not rename the project or module.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
@@ -30,7 +30,7 @@ rather than misreporting a complete test. All previously exposed root targets su
 `verify`, `run`, `deploy`, `v3`, `clean`, `bench-*`
 and `test-*` are **removed and must not be reintroduced**.
 Internal Kbuild/native-suite targets do not count as public root commands.
-Rootless CI runs `tools/test-rootless.sh` without device access; its PASS
+Rootless CI runs `tests/tools/test-rootless.sh` without device access; its PASS
 is not loaded-device evidence. The full `make test` must never silently
 skip a privileged qualification or prompt for a password: it reports
 BLOCKED if safe owned RAM devices or noninteractive privilege are unavailable.
@@ -46,7 +46,7 @@ experimental, DKMS `AUTOINSTALL="no"`, and installation does
 not permit activation, physical devices or existing system swap.
 
 
-**Authoritative current policy.** At the start of **every task** read [README](../README.md), [VISION](../VISION.md), [Coding Standards](coding_standards.md), [Testing Standards](testing_standards.md), [Compile](compile.md), and [Benchmark](benchmark.md) from the latest `main`. Agent-specific files are entry-point pointers, not different policy sources.
+**Authoritative current policy.** At the start of **every task** read [README](README.md), [VISION](VISION.md), [Coding Standards](coding_standards.md), [Testing Standards](testing_standards.md), [Compile](compile.md), and [Benchmark](benchmark.md) from the latest `main`. Agent-specific files are entry-point pointers, not different policy sources.
 
 ## North star, Git and engineering priorities
 
@@ -59,7 +59,7 @@ Our criterion is **fewer independently measured, host-visible lower-device READ 
 
 ## Implementation boundaries
 
-**V3 is the only active source target on `main`:** `kernel/extent-v3/{dm-target,engine,authority,codec}.c`, `SWZ3` format, `swapz` DM target. The root `Makefile` builds this V3 module by default, and `dkms.conf` packages it with `AUTOINSTALL="no"`. This is a **development build default, NOT production readiness**. V3 remains **null_blk-only** and no real swap/physical media may be used. Retired V2.2 `kernel/dm-swapz.c`/`SPWZ` is archival source, not an optimization target, default build or benchmark comparator. Never activate both modules together or interpret this change as an in-place format migration.
+**V3 is the only active source target on `main`:** `src/kernel/{dm-target,engine,authority,codec}.c`, `SWZ3` format, `swapz` DM target. The root `Makefile` builds this V3 module by default, and `dkms.conf` packages it with `AUTOINSTALL="no"`. This is a **development build default, NOT production readiness**. V3 remains **null_blk-only** and no real swap/physical media may be used. Retired V2.2 `kernel/dm-swapz.c`/`SPWZ` is archival source, not an optimization target, default build or benchmark comparator. Never activate both modules together or interpret this change as an in-place format migration.
 
 ### Non-negotiable BIO contracts
 
@@ -69,7 +69,7 @@ Our criterion is **fewer independently measured, host-visible lower-device READ 
 4. **Fail-closed:** failed or torn/short lower operations cannot publish mappings or accidentally submit pending unpublished writes after a target failure. Error injection before `dm_io` is a **synthetic pre-submission fault**, not proof of a real device-originated error.
 5. **Bounds and geometry:** validate 4096B logical pages, sector arithmetic, 4/8/16KiB V3 physical extents, headers, CRC, segment live references and lower range limits. Linux stat sectors are **512-byte accounting units**, not necessarily drive logical/physical sectors.
 6. **GC:** relocate only still-live authoritative objects; no premature reserve rotation, overwrite of referenced extents, stale owner reads, unbounded ENOSPC loops or accidental false success. GC lower READ and WRITE cost must be counted.
-7. **Compression:** V3 already calls LZ4 for the 4096B foreground page and stores **whole-page RAW fallback** if compressed output does not fit `SV3_MAX_COMPRESSED=3568`. The DM layer cannot infer original filename/type. Avoid an unsupported entropy/type prefilter; it could turn compressible pages into larger RAW writes and cannot by itself solve singleton write windows.
+7. **Compression:** V3 already calls LZ4 for the 4096B foreground page and stores **whole-page RAW fallback** if compressed output does not fit `SWAPZ_MAX_COMPRESSED=3568`. The DM layer cannot infer original filename/type. Avoid an unsupported entropy/type prefilter; it could turn compressible pages into larger RAW writes and cannot by itself solve singleton write windows.
 8. **Resource accounting:** distinguish compression **attempts** from committed windows/bytes, and front-end `dm_io` calls from actual lower-device requests; avoid unexplained counters.
 
 Historical alpha.8 disjoint-read bypass did not establish a matched-load lower-I/O gain and is not active by default. Prior comparisons are archival diagnostic evidence, not a requirement to benchmark V2.2.
@@ -82,10 +82,10 @@ Start from a real production C defect/bottleneck. Add a discriminating **direct-
 
 ## Canonical project version
 
-`kernel/extent-v3/VERSION` is the only manually edited project version.
+`src/kernel/VERSION` is the only manually edited project version.
 The kernel build generates its version header; `dm-swapz.ko`
 exports `MODULE_VERSION`, DKMS sources the installed VERSION file,
-`swapz3ctl` uses the same string, and CI/loaded safety gates must
+`swapzctl` uses the same string, and CI/loaded safety gates must
 verify consistency. Never pin independent alpha literals in production
 C, `dkms.conf`, helper scripts, Make rules or CI assertions.
 
@@ -119,7 +119,7 @@ reintroduce a branch-prune workflow after main is the sole branch.
 ### Shared utilities and legacy retirement
 
 General-purpose maintained scripts and measurement helpers belong under
-`tools/`, not parallel `bench/` and `scripts/` roots. Fixture-specific
+`tests/tools/`, not parallel `bench/` and `scripts/` roots. Fixture-specific
 regressions remain under `tests/`. The root Make API retains exactly four
 approved commands; moving scripts must not add a fifth public goal.
 Old V2 scripts accepting arbitrary block devices or using the retired
@@ -142,10 +142,10 @@ safety still precede any optimization.
 
 ## Safe module deployment for development
 
-`tools/device-roundtrip.c` is the minimal **compiled C** loaded-I/O
+`tests/tools/device-roundtrip.c` is the minimal **compiled C** loaded-I/O
 oracle for an exact V3 mapping, not a new userspace swap controller.
 It does direct aligned byte-exact reads/writes, overwrites and flushes.
-`tools/deploy-nullblk.sh` is the thin privileged provisioning and
+`tests/tools/deploy-nullblk.sh` is the thin privileged provisioning and
 teardown guard. Only owned RAM-backed configfs null_blk and matching
 DM UUID/major:minor are eligible; never make a deployment helper
 support physical devices or automatically use active Linux swap.
@@ -161,11 +161,11 @@ page. This is legitimate because a read of an invalid map returns
 exactly 4096 zero bytes; **not** because compressible data are
 interchangeable with zero. The kernel first attempts LZ4 as before;
 only if the output is at most 64 bytes does it scan **every input byte**
-with production-C `sv3_page_is_zero`. Nonzero values must use the
+with production-C `swapz_page_is_zero`. Nonzero values must use the
 normal LZ4/RAW path, however small the compressed output is.
 
 **Ordering rule:** drain all pending accepted upper writes, then
-`sv3_discard_page` advances generation and releases old liveness;
+`swapz_discard_page` advances generation and releases old liveness;
 only then acknowledge the logical zero write. PREFLUSH preceding the
 BIO is honored by the worker; for REQ_FUA an actual successful lower
 flush is still required before completion. A failed flush/discard

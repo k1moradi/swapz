@@ -6,9 +6,8 @@ Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`.
 **Never rename or version-suffix these public identities** (for example to
 `swapz3`, `dm-swapz3`, or any other replacement). Enforce the same names
 in production kernel C, Kbuild/DKMS, DM tables, test harnesses, benchmarks,
-CI and documentation, before every agent change. Version numbers belong in
-release metadata and source paths, not the project/module/target name. Keep
-`SWZ3` as the distinct V3 on-disk format; the separate safe `swapz3ctl`
+CI and documentation, before every agent change. Version numbers belong in release metadata, not in project/module/target names, source paths, internal symbol prefixes, workflow names, or utility names. Keep
+`SWZ3` as the distinct V3 on-disk format; the separate safe `swapzctl`
 utility does not rename the project or module.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.

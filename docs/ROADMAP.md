@@ -1,6 +1,6 @@
 # V3 roadmap — measured lower-I/O improvement on main
 
-**Status: ACTIVE — V3 experimental and NOT production-ready (read the current version from [VERSION](../kernel/extent-v3/VERSION)).** V2.2 is retired from active builds and required
+**Status: ACTIVE — V3 experimental and NOT production-ready (read the current version from [VERSION](../src/kernel/VERSION)).** V2.2 is retired from active builds and required
 benchmarks. The bounded dependency-aware pipeline remains **opt-in**.
 Owner-reported owner-run at commit
 `59761be5a2bcb7a8f1b0b9f764c27f0339eac9b4` passed RAM-backed
@@ -114,7 +114,7 @@ Write-only saturation, kernel worker CPU, cold-cache tests and live GC
 remain open.
 
 The authoritative acceptance and engineering rules are
-[vision](../VISION.md), [coding standards](coding_standards.md),
+[vision](VISION.md), [coding standards](coding_standards.md),
 [testing standards](testing_standards.md),
 [compile](compile.md), and [benchmark](benchmark.md).
 Track short, actionable work in the active work queue below; preserve exact
@@ -303,7 +303,7 @@ compilation are not sufficient.
 Prior sustained V3 evidence found frequent **single-page write
 windows**, so a ~2KiB LZ4 payload could still produce a full aligned
 4KiB backing write. In the current production-C
-[`dm-target.c`](../kernel/extent-v3/dm-target.c), `sv3_process()`
+[`dm-target.c`](../src/kernel/dm-target.c), `swapz_process()`
 with retention off, flushes the pending window for **every non-write**
 and at each worker quantum. Alpha.12 positive retention prepares new
 writes promptly and permits only dependency-checked independent reads
@@ -312,12 +312,12 @@ until the original absolute hrtimer deadline. Its synchronous
 Not every such flush is unnecessary: ordering, synchronous writers,
 bounded latency and safety are real constraints.
 
-**Preserve what already exists:** `sv3_order_window()` does
+**Preserve what already exists:** `swapz_order_window()` does
 size-complementary ordering within an admitted window;
-[`engine.c`](../kernel/extent-v3/engine.c) selects 4/8/16KiB
+[`engine.c`](../src/kernel/engine.c) selects 4/8/16KiB
 SWZ3 extents with read-cost constraints and merges contiguous
 compressed + RAW lower runs (up to existing 64 blocks/256KiB, not
-across a 1MiB segment). [`authority.c`](../kernel/extent-v3/authority.c)
+across a 1MiB segment). [`authority.c`](../src/kernel/authority.c)
 stages immutable reservations and publishes mappings **only after
 confirmed lower completion**. Existing exact-zero-write elision,
 CRC/generation validation, GC reserve and fail-close remain required.
@@ -401,7 +401,7 @@ evidence. Do not infer a packing win from this plan alone.
 Implement as **small, independently tested and opt-in steps**, using
 the current V3 format, authority, scratch ownership and
 `null_blk` restriction. Attribute changes first to
-[`dm-target.c`](../kernel/extent-v3/dm-target.c) and its direct
+[`dm-target.c`](../src/kernel/dm-target.c) and its direct
 production-C/source tests; touch the engine or authority only when
 measured evidence and a focused invariant require it.
 
@@ -840,7 +840,7 @@ Make goal is an official alternative.
       kernel CPU and RAM, achieved IOPS, cold read p95/p99 and full
       lower-I/O drain. Repeat runs and preserve negative/inconclusive results.
 - [ ] Decide release readiness only from the gates in
-      [VISION.md](../VISION.md) and the
+      [VISION.md](VISION.md) and the
       [readiness ledger](testing_standards.md);
       V3 remains experimental and null_blk-only.
 - [ ] Owner alpha.20: only after rootless and kernel
@@ -858,7 +858,7 @@ Make goal is an official alternative.
 
 ### Maintenance
 
-- [ ] Resolve inconsistencies between older kernel/extent-v3 alpha
+- [ ] Resolve inconsistencies between older src/kernel alpha
       documents and current V3.0.0-alpha.21 behavior when their claims
       are revisited; do not silently apply superseded host commands.
 - [ ] Keep this checklist short: close verified items with an exact
