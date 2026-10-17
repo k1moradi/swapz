@@ -125,3 +125,10 @@ The same rule applies to mixed compressed/RAW windows: compressed planner
 placement is not an ABI. Differential coverage must preserve RAW CRC/type
 authority, logical generations, exact readback and equal lower bytes rather
 than require identical physical starts or transaction sequence assignment.
+
+
+Source contracts for retained suspend/resume follow the observable safety
+contract and must not resurrect the removed close-reason race. They require an
+observed open retained window, explicit suspend/resume, a nonfailed target and
+the byte-exact lifecycle marker; they explicitly reject a mandatory
+shutdown-close delta.
