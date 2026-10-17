@@ -489,10 +489,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
         worker = body("swapz_worker")
         self.assertIn("SWAPZ_WORK_QUANTUM_BIOS", worker)
-        self.assertIn("if (!--remaining)", worker)
+        self.assertIn("while (remaining && !list_empty(&local))", worker)
+        self.assertIn("remaining--", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
         self.assertIn("cond_resched()", worker)
+        self.assertLess(worker.index("remaining--"),
+                        worker.index("list_splice_init(&local, &ctx->incoming)"))
         self.assertLess(worker.index("swapz_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
 
