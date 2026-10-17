@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 REPORT = ROOT / "build/test_results.json.xz"
 GIT_RESULT = "test_results.json.xz"
 REPO = "k1moradi/swapz"
@@ -1185,12 +1185,12 @@ def main():
     print("  Tests are sequential; independent compilation uses Make jobserver.")
     stages = [
         ("Build module and helpers", ["make"]),
-        ("Native and rootless contracts", ["bash", "tools/test-rootless.sh"]),
-        ("Kernel warnings W=1", ["make", "-C", "kernel/extent-v3",
+        ("Native and rootless contracts", ["bash", "tests/tools/test-rootless.sh"]),
+        ("Kernel warnings W=1", ["make", "-C", "src/kernel",
                                  f"KDIR={args.kdir}", "W=1", "all"]),
-        ("Kernel warnings W=2", ["make", "-C", "kernel/extent-v3",
+        ("Kernel warnings W=2", ["make", "-C", "src/kernel",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
-        ("Owned RAM smoke + mixed/QD pilot", ["bash", "tools/test-loaded.sh"])
+        ("Owned RAM smoke + mixed/QD pilot", ["bash", "tests/tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):

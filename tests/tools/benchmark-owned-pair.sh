@@ -109,9 +109,9 @@ if (( ASYNC_PREPARE || LOWER_MBPS || COMPLETION_NSEC )) &&
     echo 'BLOCKED: async/rate-cap trials require owned medium unpaced QD32' >&2
     exit 2
 fi
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-source "$ROOT/tools/nullblk-identity.sh"
-source "$ROOT/tools/swap-inventory.sh"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+source "$ROOT/tests/tools/nullblk-identity.sh"
+source "$ROOT/tests/tools/swap-inventory.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 CFGBASE=/sys/kernel/config/nullb
@@ -139,10 +139,10 @@ done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
 [[ $(git branch --show-current) == main ]] || fail "main only"
 git diff --quiet && git diff --cached --quiet || fail "dirty tracked sources"
-version="$(cat kernel/extent-v3/VERSION)"
+version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical V3 version"
-grep -Fxq "#define SV3_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
+grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
     fail "built V3 module version does not match canonical VERSION"
@@ -150,7 +150,7 @@ grep -Fxq "#define SV3_ALPHA_VERSION \"$version\"" build/kernel/experimental/swa
     fail "V3 module missing or running-kernel vermagic mismatch"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
             authority.h engine.h flush-qual.h gc-cost.h; do
-    cmp -s "kernel/extent-v3/$file" "build/kernel/experimental/$file" ||
+    cmp -s "src/kernel/$file" "build/kernel/experimental/$file" ||
         fail "staged kernel source mismatch: $file"
 done
 [[ ! -d /sys/module/dm_swapz && -r /proc/swaps ]] ||

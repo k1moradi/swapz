@@ -12,9 +12,9 @@ action="$1"; prefix="$2"
 }
 root="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
-version="$(cat kernel/extent-v3/VERSION)"
+version="$(cat src/kernel/VERSION)"
 # DKMS must resolve the same version from its own installed source tree.
-grep -Fqx 'PACKAGE_VERSION="$(cat "$(dirname "${BASH_SOURCE[0]}")/kernel/extent-v3/VERSION")"' dkms.conf || {
+grep -Fqx 'PACKAGE_VERSION="$(cat "$(dirname "${BASH_SOURCE[0]}")/src/kernel/VERSION")"' dkms.conf || {
   echo "BLOCKED: DKMS config no longer follows canonical VERSION" >&2; exit 1;
 }
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] &&
@@ -41,7 +41,7 @@ else
 fi
 [[ -x "$dkms_bin" ]] || { echo "BLOCKED: no DKMS executable" >&2; exit 1; }
 src="$srcbase/swapz-$version"
-cli_dir="$prefix/sbin"; cli="$cli_dir/swapz3ctl"
+cli_dir="$prefix/sbin"; cli="$cli_dir/swapzctl"
 helper_dir="$prefix/libexec/swapz"; helper="$helper_dir/device-roundtrip"
 marker=".swapz-v3-owned"
 [[ ! -L "$srcbase" && ! -L "$prefix" &&
@@ -69,12 +69,12 @@ cleanup_owned() {
   fi
   rm -f -- "$cli" "$helper"
   rmdir -- "$helper_dir"
-  for file in kernel/extent-v3/Makefile kernel/extent-v3/*.c kernel/extent-v3/*.h; do
-    rm -f -- "$src/kernel/extent-v3/$(basename "$file")"
+  for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
+    rm -f -- "$src/src/kernel/$(basename "$file")"
   done
-  rm -f -- "$src/dkms.conf" "$src/kernel/extent-v3/VERSION" "$src/$marker" \
+  rm -f -- "$src/dkms.conf" "$src/src/kernel/VERSION" "$src/$marker" \
     "$src/.swapz-v3-sources.sha256" "$src/.swapz-v3-binaries.sha256"
-  rmdir -- "$src/kernel/extent-v3" "$src/kernel" "$src"
+  rmdir -- "$src/src/kernel" "$src/kernel" "$src"
 }
 if [[ "$action" == uninstall ]]; then
   verify_owned || { echo "BLOCKED: foreign, absent or modified V3 package" >&2; exit 1; }
@@ -87,7 +87,7 @@ if [[ "$action" == uninstall ]]; then
   echo "Uninstalled owned V3 package without touching swap"
   exit 0
 fi
-[[ -x build/userspace/swapz3ctl && -x build/tests/device-roundtrip ]] || {
+[[ -x build/userspace/swapzctl && -x build/tests/device-roundtrip ]] || {
   echo "BLOCKED: run make before packaging" >&2; exit 1;
 }
 if [[ -z "$test_root" ]]; then
@@ -100,17 +100,17 @@ fi
    ! -e "$helper_dir" && ! -L "$helper_dir" ]] || {
   echo "BLOCKED: existing DKMS source/program; refusing overwrite" >&2; exit 1;
 }
-install -d -m0755 "$src/kernel/extent-v3" "$cli_dir" "$helper_dir"
+install -d -m0755 "$src/src/kernel" "$cli_dir" "$helper_dir"
 install -m0644 dkms.conf "$src/dkms.conf"
-install -m0644 kernel/extent-v3/VERSION "$src/kernel/extent-v3/VERSION"
-for file in kernel/extent-v3/Makefile kernel/extent-v3/*.c kernel/extent-v3/*.h; do
-  install -m0644 "$file" "$src/kernel/extent-v3/$(basename "$file")"
+install -m0644 src/kernel/VERSION "$src/src/kernel/VERSION"
+for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
+  install -m0644 "$file" "$src/src/kernel/$(basename "$file")"
 done
-install -m0755 build/userspace/swapz3ctl "$cli"
+install -m0755 build/userspace/swapzctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
 printf 'swapz-v3:%s\n' "$version" > "$src/$marker"
-(cd "$src" && sha256sum dkms.conf kernel/extent-v3/VERSION kernel/extent-v3/Makefile \
-  kernel/extent-v3/*.c kernel/extent-v3/*.h) > "$src/.swapz-v3-sources.sha256"
+(cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
+  src/kernel/*.c src/kernel/*.h) > "$src/.swapz-v3-sources.sha256"
 sha256sum "$cli" "$helper" > "$src/.swapz-v3-binaries.sha256"
 rollback() {
   rc=$?
@@ -134,4 +134,4 @@ trap rollback ERR
 status="$("$dkms_bin" status -m swapz -v "$version" -k "$(uname -r)")"
 [[ "$status" == *installed* ]]
 trap - ERR
-echo "Installed V3 DKMS, read-only swapz3ctl and helper; module NOT loaded"
+echo "Installed V3 DKMS, read-only swapzctl and helper; module NOT loaded"

@@ -3,10 +3,10 @@
 # NEVER alter current swap, unrelated DM mappings or physical storage.
 set -Eeuo pipefail
 umask 077
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-source "$ROOT/tools/nullblk-identity.sh"
-source "$ROOT/tools/quiet-lower-io.sh"
-source "$ROOT/tools/swap-inventory.sh"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+source "$ROOT/tests/tools/nullblk-identity.sh"
+source "$ROOT/tests/tools/quiet-lower-io.sh"
+source "$ROOT/tests/tools/swap-inventory.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
@@ -34,10 +34,10 @@ done
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
 git diff --quiet && git diff --cached --quiet ||
 	fail "dirty tracked source: preserve and commit changes first"
-version="$(cat kernel/extent-v3/VERSION)"
+version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical V3 version"
-grep -Fxq "#define SV3_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
+grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
     fail "built V3 module version does not match canonical VERSION"
@@ -46,7 +46,7 @@ grep -Fxq "#define SV3_ALPHA_VERSION \"$version\"" build/kernel/experimental/swa
 	fail "V3 vermagic does not match running kernel"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
 	    authority.h engine.h flush-qual.h gc-cost.h; do
-	cmp -s "kernel/extent-v3/$file" "build/kernel/experimental/$file" ||
+	cmp -s "src/kernel/$file" "build/kernel/experimental/$file" ||
 		fail "staged module source mismatch: $file"
 done
 [[ ! -d /sys/module/dm_swapz ]] ||

@@ -5,7 +5,7 @@
 # checks and quarantines unexpectedly busy resources instead of forcing removal.
 set -Eeuo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$ROOT"
 
 if (( EUID == 0 )); then
@@ -23,7 +23,7 @@ fi
 
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$(git rev-parse HEAD)"
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
-"${privileged[@]}" tools/deploy-nullblk.sh
+"${privileged[@]}" tests/tools/deploy-nullblk.sh
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 
 # One deterministic, measured-LZ4 immutable fixture/trace for all four
@@ -107,7 +107,7 @@ for regime in sd_emulated ssd_emulated; do
             arguments+=(--v3-first)
         fi
         printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
-        "${privileged[@]}" tools/benchmark-owned-pair.sh "${arguments[@]}"
+        "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
         printf 'PASS_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
         (( index += 1 ))
     done
@@ -139,7 +139,7 @@ for regime in sd_emulated ssd_emulated; do
                 arguments+=(--v3-first)
             fi
             printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
-            "${privileged[@]}" tools/benchmark-owned-pair.sh "${arguments[@]}"
+            "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
             printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
             (( index += 1 ))
         done
