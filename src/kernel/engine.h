@@ -3,7 +3,7 @@
 #define SWAPZ_EXTENT_ENGINE_H
 #include "authority.h"
 #define SWAPZ_BULK_BLOCKS 64U
-#define SWAPZ_READ_METADATA_CACHE_ENTRIES 64
+#define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int swapz_page_is_zero(const swapz_u8 *page);
@@ -101,10 +101,10 @@ struct swapz_engine {
 	/*
 	 * Owner-preallocated metadata-only cache. Each slot holds exactly the
 	 * immutable SWZ3 block zero for one extent; payload blocks are never
-	 * cached here. The serialized reader scans 64 fixed slots and uses an
-	 * age stamp for exact LRU replacement without moving 4KiB data blocks.
+	 * cached here. The serialized reader scans a fixed bounded table and uses
+	 * an age stamp for exact LRU replacement without moving 4KiB data blocks.
 	 */
-	swapz_u8 *read_metadata_cache; /* 64 * 4096 bytes */
+	swapz_u8 *read_metadata_cache; /* entries * 4096 bytes */
 	swapz_u32 read_metadata_lru_start_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u32 read_metadata_lru_ages[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u8 read_metadata_lru_extent_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];

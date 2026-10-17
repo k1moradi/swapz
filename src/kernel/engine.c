@@ -83,7 +83,8 @@ static int swapz_engine_plan_bounded_policy(
 			    const struct swapz_compressed_page *pages,
 			    swapz_u8 count, swapz_u8 max_read_blocks,
 			    swapz_u8 *classes, swapz_u8 *records_per_extent,
-			    swapz_u8 *extent_count, int prefer_large_ties)
+			    swapz_u8 *extent_count, int prefer_large_ties,
+			    swapz_u32 alignment_cursor)
 {
 	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
@@ -158,9 +159,62 @@ static int swapz_engine_plan_bounded_policy(
 			return -E2BIG;
 	}
 	while (position < count) {
-		classes[out] = selected_class[position];
-		records_per_extent[out] = selected_count[position];
-		position += selected_count[position];
+		swapz_u8 chosen_class = selected_class[position];
+		swapz_u8 chosen_count = selected_count[position];
+
+		/*
+		 * Primary DP objectives are already fixed. The adjacent writer may
+		 * reconstruct only among exactly equivalent candidates using the
+		 * live allocator cursor, so logical/staging/publication order stays
+		 * unchanged and a later failure still describes a true prefix.
+		 */
+		if (prefer_large_ties) {
+			swapz_u32 best_hole = ~(swapz_u32)0;
+			swapz_u8 class_index;
+
+			chosen_class = 0;
+			chosen_count = 0;
+			for (class_index = 0; class_index < 3; ++class_index) {
+				swapz_u8 blocks = (swapz_u8)(1U << class_index);
+				swapz_u32 local_read_blocks;
+				swapz_u8 take = swapz_fit_count(pages, count, position,
+							   blocks, max_read_blocks,
+							   &local_read_blocks);
+				swapz_u32 candidate_bytes, candidate_reads;
+				swapz_u8 candidate_batches;
+				swapz_u32 aligned, hole;
+
+				if (!take)
+					continue;
+				candidate_bytes =
+					(swapz_u32)blocks * SWAPZ_BLOCK_BYTES +
+					costs[position + take];
+				candidate_reads =
+					local_read_blocks + reads[position + take];
+				candidate_batches = batches[position + take] + 1U;
+				if (candidate_bytes != costs[position] ||
+				    candidate_reads != reads[position] ||
+				    candidate_batches != batches[position])
+					continue;
+				aligned = (alignment_cursor + blocks - 1U) &
+					  ~(swapz_u32)(blocks - 1U);
+				hole = aligned - alignment_cursor;
+				if (hole < best_hole ||
+				    (hole == best_hole && blocks > chosen_class)) {
+					best_hole = hole;
+					chosen_class = blocks;
+					chosen_count = take;
+				}
+			}
+			if (!chosen_count)
+				return -EUCLEAN;
+		}
+		classes[out] = chosen_class;
+		records_per_extent[out] = chosen_count;
+		alignment_cursor =
+			((alignment_cursor + chosen_class - 1U) &
+			 ~(swapz_u32)(chosen_class - 1U)) + chosen_class;
+		position += chosen_count;
 		out++;
 	}
 	*extent_count = out;
@@ -174,14 +228,14 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 {
 	return swapz_engine_plan_bounded_policy(pages, count, max_read_blocks,
 					      classes, records_per_extent,
-					      extent_count, 0);
+					      extent_count, 0, 0);
 }
 
 static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
 					swapz_u32 start_block,
 					swapz_u8 extent_blocks)
 {
-	swapz_u8 index;
+	swapz_u16 index;
 
 	if (!engine->read_metadata_cache)
 		return -1;
@@ -199,7 +253,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 					int hit_slot)
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
-	swapz_u8 index, slot = 0;
+	swapz_u16 index, slot = 0;
 	int have_slot = 0;
 
 	if (!engine->read_metadata_cache)
@@ -214,7 +268,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 		hit_slot = -1;
 	}
 	if (hit_slot >= 0) {
-		slot = (swapz_u8)hit_slot;
+		slot = (swapz_u16)hit_slot;
 		have_slot = 1;
 	} else {
 		for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index) {
@@ -531,7 +585,8 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 		error = swapz_engine_plan_bounded_policy(pages, compressed_count,
 					plan_read_blocks,
 					e->plan_classes, e->plan_takes,
-					&extent_count, 1);
+					&extent_count, 1,
+					e->authority->next_block);
 		if (error)
 			return error;
 	}

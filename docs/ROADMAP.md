@@ -33,8 +33,8 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify bounded accepted-burst deadline handling and first-pack follow-up depth. The target is to stop slow independent READ latency from fragmenting already-accepted QD32 writes and to avoid QD4 orphan tails, without changing FUA/dependency ordering or regressing QD1/QD8.
-2. Qualify alignment-aware physical staging for adjacent lower runs and a 512-entry metadata-block LRU. Preserve committed-prefix semantics, zero default padding and exact CRC/generation authority while reducing alignment holes and random-read lower bytes.
+1. Qualify the combined accepted-burst/deadline and engine changes now on main: first-pack deferral requires a second pack's worth of accepted work; expired windows drain finite already-accepted bursts; cursor-aware planner reconstruction avoids equivalent-plan alignment holes without reordering publication; and the metadata-block LRU is 512 entries.
+2. Acceptance requires unchanged loaded correctness, preserved QD1/QD8 behavior, materially better QD4 or slow mixed write efficiency, no extra default lower WRITE bytes, and materially lower random-read lower bytes/tails without unacceptable RAM/CPU cost.
 3. If QD1 remains materially below raw after the retention tax is removed, profile its remaining production-C wall time across LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
 4. Expand the write-only saturation study to at least five counterbalanced pairs per mode/QD/regime only after the C policy is stable, then report confidence intervals.
 5. Exercise sustained live GC, reserve rotations, near-full churn, real lower error behavior and resource pressure on owned RAM devices. No observed GC means GC remains unqualified.

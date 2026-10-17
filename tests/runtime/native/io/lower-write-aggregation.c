@@ -407,6 +407,41 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	return 0;
 }
 
+static int test_alignment_tie_uses_current_cursor_without_padding(void)
+{
+	const swapz_u16 uniform[4] = { 2073, 2073, 2073, 2073 };
+	swapz_u8 raw[SWAPZ_BLOCK_BYTES];
+	struct swapz_tx seed;
+	swapz_u32 seed_page = 80;
+	swapz_u8 seed_done = 0, committed = 0;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	memset(raw, 0x6d, sizeof(raw));
+	CHECK(swapz_stage(&a, &seed_page, 1, 1, &seed) == 0);
+	CHECK(write_extent(NULL, seed.start_block, 1, raw, &seed_done) == 0);
+	CHECK(swapz_finish_raw(&a, &seed, raw, seed_done, 0) == 0);
+	CHECK(a.next_block == 1);
+	extent_calls = 0;
+	lower_written_bytes = 0;
+	for (i = 0; i < 4; ++i) {
+		memset(payloads[i], (int)i + 1, uniform[i]);
+		pages[i].length = uniform[i];
+	}
+	CHECK(swapz_engine_write_window_batched(&e, pages, 4, &committed) == 0);
+	CHECK(committed == 4 && run_calls == 1 && extent_calls == 0);
+	CHECK(lower_written_bytes == 3U * SWAPZ_BLOCK_BYTES);
+	CHECK(e.bulk_padding_blocks == 0);
+	CHECK(a.next_block == 4);
+	CHECK(maps[0].valid && maps[0].start_block == 1);
+	CHECK(maps[1].valid && maps[1].start_block == 2);
+	CHECK(maps[2].start_block == 2 && maps[3].start_block == 2);
+	CHECK(validate_prefix(4) == 0);
+	CHECK(maps[80].valid && maps[80].raw_crc32c ==
+	      swapz_crc32c_bytes(raw, sizeof(raw)));
+	return 0;
+}
+
 static int test_same_input_no_padding_writes_identical_bytes(void)
 {
 	swapz_u8 committed = 0;
@@ -1077,6 +1112,7 @@ int main(void)
 	CHECK(test_same_input_no_padding_writes_identical_bytes() == 0); passed++;
 	CHECK(test_randomized_same_binary_authority_equivalence() == 0); passed++;
 	CHECK(test_padding_option_measures_exact_request_byte_tradeoff() == 0); passed++;
+	CHECK(test_alignment_tie_uses_current_cursor_without_padding() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	CHECK(test_mixed_and_raw_only_share_lower_runs() == 0); passed++;

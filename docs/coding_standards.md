@@ -147,3 +147,24 @@ A valid first compressed pack may be deferred only when at least one second
 pack's worth of BIOs is already accepted in the bounded worker snapshot. This
 prevents a four-BIO medium wave from turning a clean three-record 8KiB pack into
 an 8KiB extent plus an orphan 4KiB tail merely because one extra BIO was visible.
+
+
+### Cursor-aware adjacent-run reconstruction
+
+The adjacent-only bulk writer may use the authority's current physical cursor
+only to choose among planner alternatives already tied on lower bytes, bounded
+cold-read cost and extent count. Keep logical page order, transaction staging
+order and publication order identical; do not physically reorder later planner
+groups ahead of an earlier group because a later lower/publication failure must
+still describe a true committed logical prefix. Among equivalent candidates,
+prefer zero alignment-hole placement first and the larger class only when hole
+cost is equal. Default mode still writes no padding bytes.
+
+### Metadata block LRU bound
+
+The compressed-read metadata LRU contains 512 fixed 4KiB block-zero slots,
+allocated once per target (2MiB payload storage plus bounded side arrays).
+Indices that scan or select cache slots must be at least 16 bits. The cache
+holds validated metadata only, never payload authority, and every existing
+write/GC/discard/barrier mutation fence continues to invalidate residency
+before authority changes.

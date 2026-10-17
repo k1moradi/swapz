@@ -49,3 +49,11 @@ Do not claim a QD performance improvement until each mode/QD/regime has at least
 ## Physical media
 
 No current benchmark authorizes physical storage or active swap. A future real-device study requires separate owner authorization, exact device ownership/alias checks, backup/data-loss acceptance, independent safety review and a pinned source/procedure.
+
+
+The next qualified comparison should specifically report whether the 512-entry
+metadata cache reduces 4MiB seeded-random lower READ bytes/requests and p99, and
+whether accepted-burst deadline handling reduces slow-model
+`deadline_after_read` fragmentation. Cursor-aware planner reconstruction is a
+WRITE-byte-neutral optimization: any increase in default lower WRITE bytes is a
+rejection regardless of request count.
