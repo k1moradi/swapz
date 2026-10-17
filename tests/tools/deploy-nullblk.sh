@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ephemeral deployment of the exact V3 module onto a NEW, RAM-backed null_blk.
+# Ephemeral deployment of the exact swapz module onto a NEW, RAM-backed null_blk.
 # NEVER alter current swap, unrelated DM mappings or physical storage.
 set -Eeuo pipefail
 umask 077
@@ -36,14 +36,14 @@ git diff --quiet && git diff --cached --quiet ||
 	fail "dirty tracked source: preserve and commit changes first"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
-    fail "malformed canonical V3 version"
+    fail "malformed canonical swapz version"
 grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
-    fail "built V3 module version does not match canonical VERSION"
-[[ -s "$MODULE" && -x "$ORACLE" ]] || fail "V3/oracle not compiled"
+    fail "built swapz module version does not match canonical VERSION"
+[[ -s "$MODULE" && -x "$ORACLE" ]] || fail "swapz/oracle not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
-	fail "V3 vermagic does not match running kernel"
+	fail "swapz vermagic does not match running kernel"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
 	    authority.h engine.h flush-qual.h gc-cost.h; do
 	cmp -s "src/kernel/$file" "build/kernel/experimental/$file" ||
@@ -143,7 +143,7 @@ cleanup() {
 		exit 1
 	fi
 	if (( rc == 0 )); then
-		note "PASS: loaded isolated V3 byte-exact I/O, clean teardown"
+		note "PASS: loaded isolated swapz byte-exact I/O, clean teardown"
 	else
 		note "FAIL: test exit $rc; safe teardown attempted"
 	fi
@@ -226,10 +226,10 @@ while read -r SWAP_PATH rest; do
 done < /proc/swaps
 note "OWNED_RAM_LOWER=$LOWER CONFIG=$CONFIG DISK=$DISK DEVICE=$DEVNO UUID=$UUID"
 modprobe dm_mod || fail "device mapper core unavailable"
-insmod "$MODULE" || fail "V3 kernel module rejected"
+insmod "$MODULE" || fail "swapz kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
-	fail "V3 target registration missing"
+	fail "swapz target registration missing"
 # 16 MiB upper table; 9 constructor arguments, no injected errors.
 dmsetup create "$DMNAME" --uuid "$UUID" \
 	--table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 0" ||
@@ -271,7 +271,7 @@ note "QUIESCENT_AFTER=attempt:$SWAPZ_QUIET_ATTEMPTS"
 note "TARGET_STATUS_AFTER=$status_after"
 note "LOWER_STATS=${lower_after[*]}"
 
-# Exact-zero write savings must appear BOTH in V3's completed media
+# Exact-zero write savings must appear BOTH in swapz's completed media
 # counters and in the separate owned lower-device accounting. Reject
 # a future C regression that merely increments a status counter.
 # The fixed C oracle submits 128 initial + 64 overwrite pages; of
@@ -313,8 +313,8 @@ lower_write_bytes="$(((lower_after[6] - lower_before[6]) * 512))"
 (( target_write_bytes <= logical_writes - zero_writes * 4096 )) ||
     fail "zero elisions did not reduce completed lower bytes"
 (( lower_write_bytes == target_write_bytes )) ||
-    fail "independent lower write sectors disagree with V3"
-# Alpha.9 diagnostic conservation: every *nonempty* V3 write window
+    fail "independent lower write sectors disagree with swapz"
+# Alpha.9 diagnostic conservation: every *nonempty* swapz write window
 # increments exactly one primary closing reason. Never sum GC pressure
 # encounters or admission coalescing into this independent invariant.
 close_total=0
@@ -327,17 +327,17 @@ for close_reason in close_unknown close_full close_duplicate close_zero \
 done
 window_delta="$(status_delta windows)"
 (( close_total == window_delta )) ||
-    fail "window close reasons disagree with actual V3 windows: reasons=$close_total windows=$window_delta"
+    fail "window close reasons disagree with actual swapz windows: reasons=$close_total windows=$window_delta"
 note "PASS_WINDOW_CLOSE_REASONS=windows:$window_delta accounted:$close_total gc_pressure:$(status_delta window_gc_pressure)"
 age_total="$(( $(status_delta age_le100us) + $(status_delta age_101_1000us) + $(status_delta age_gt1000us) ))"
 (( age_total == window_delta )) ||
-    fail "window age bins disagree with actual V3 windows: ages=$age_total windows=$window_delta"
+    fail "window age bins disagree with actual swapz windows: ages=$age_total windows=$window_delta"
 note "PASS_WINDOW_OPEN_AGE=windows:$window_delta bins:$age_total sum_ns:$(status_delta age_sum_ns) max_ns:$(status_delta age_max_ns)"
 if (( lower_read_bytes != target_read_bytes )); then
-    # Lower disk stats include readers outside V3; do not assume that an
+    # Lower disk stats include readers outside swapz; do not assume that an
     # 8KiB excess is an innocent probe or allow a hidden tolerance.
     note "UNATTRIBUTED_LOWER_READ=target_bytes:$target_read_bytes lower_bytes:$lower_read_bytes extra_bytes:$((lower_read_bytes-target_read_bytes)) target_reqs:$target_read_reqs lower_reqs:$lower_read_reqs"
-    fail "independent lower read sectors disagree with V3"
+    fail "independent lower read sectors disagree with swapz"
 fi
 (( target_write_reqs > 0 && lower_write_reqs > 0 &&
    target_read_reqs > 0 && lower_read_reqs > 0 )) ||

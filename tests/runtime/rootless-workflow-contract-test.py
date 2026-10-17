@@ -389,21 +389,13 @@ class RootlessWorkflowContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
                     check_workflow(name, source.replace(command, "echo 'kernel range skipped'", 1))
 
-    def test_removed_v3_bundle_binding_execution_is_rejected(self):
-        for name, source in self.sources.items():
-            with self.subTest(workflow=name):
-                command = "timeout 35s python3 -B tests/runtime/legacy/evidence-validation-v3-test.py -v"
-                self.assertIn(command, source)
-                with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
-                    check_workflow(name, source.replace(command, "echo 'V3 bundle not executed'", 1))
-
-    def test_removed_v3_latency_sidecar_execution_is_rejected(self):
+    def test_removed_latency_sidecar_execution_is_rejected(self):
         for name, source in self.sources.items():
             with self.subTest(workflow=name):
                 command = "timeout 35s python3 -B tests/runtime/legacy/latency-quantiles-test.py -v"
                 self.assertIn(command, source)
                 with self.assertRaisesRegex(WorkflowContractError, "missing bounded executable safety gate"):
-                    check_workflow(name, source.replace(command, "echo 'V3 not executed'", 1))
+                    check_workflow(name, source.replace(command, "echo 'latency sidecar not executed'", 1))
 
     def test_removed_denial_telemetry_execution_is_rejected(self):
         for name, source in self.sources.items():

@@ -272,14 +272,17 @@ are still planned.
       1254.5 worker-empty, and SSD 0.8 / 15.0 / 0 / 1186.5. No meaningful
       population has an already-admitted local successor when the hard
       deadline fires, so extending 2ms is not justified.
-      Next, run a bounded write-only saturation pilot at QD1/4/8/32 under
-      both existing capped/timer models. Reuse the immutable medium fixture,
-      0% reads, unpaced finite waves and exact final oracle; omit packed-read
-      work. Run one sync and one async raw/V3 pair per QD/model to establish
-      direction and recurring runtime only. Keep the roadmap item open until
-      >=5 counterbalanced pairs per mode/regime and confidence intervals are
-      implemented.
-      New source **NOT YET OWNER-LOADED**.
+      Owner-loaded exact `8589a010` passed all five stages, including the
+      first bounded write-only QD1/4/8/32 pilot under both existing models.
+      This pilot is directional only: QD1 had no packing and a large latency/
+      throughput loss; QD4/QD8 still lost useful throughput despite fewer
+      lower requests; slow-model QD32 exceeded raw useful WRITE rate, while
+      the faster model remained below raw. Keep this item open until >=5
+      counterbalanced pairs per mode/regime and confidence intervals exist.
+      Before more confirmation runtime, retire the already-rejected cap=3/
+      uncapped planner diagnostics from production and reports. They cannot
+      alter the retained cap=2 layout and only add CPU and maintenance cost.
+      Re-qualify that cleanup before another scheduling-policy change.
 - [ ] Qualify same-page/RAW/barrier/error/suspend cases and sustained live
       GC before promoting retained or concurrent preparation defaults.
       The ordinary loaded oracle already exercises byte-exact overwrite,
@@ -347,7 +350,7 @@ admission rules.
 - Preserve the user-loaded owned RAM-`null_blk` zero-elision evidence:
   source `4c6e29b` passed nine skipped writes and byte-exact
   readback; the strengthened sector/read/write guard passed at
-  `2e21fac5`. Neither is a matched off/V3 performance verdict.
+  `2e21fac5`. Neither is a matched off/swapz performance verdict.
 - Extend lower READ/WRITE/flush device-originated failure coverage,
   overwrite authority, upper BIO exactly-once completion, CRC,
   PREFLUSH/FUA, DISCARD, GC relocation/reserve exhaustion,
@@ -392,7 +395,7 @@ are reported, not hidden. This is not a release or performance gate.
 - Preserve negative and unmatched results. Compare with **off**,
   not retired V2.2 as a required gate.
 
-**Exit:** a reproducible loaded off/V3 lower-I/O result identifies
+**Exit:** a reproducible loaded off/swapz lower-I/O result identifies
 where lost opportunities arise; a negative result is acceptable
 evidence. Do not infer a packing win from this plan alone.
 
@@ -554,7 +557,7 @@ real-device safety. The current `null_blk`-only admission remains unchanged.
       release `VERSION`, exact `.ko` SHA-256/vermagic, Linux kernel and build
       environment. Run the sole public `make test` interface to completion,
       including W=1/W=2, native/source/safety gates, loaded owned-RAM
-      `null_blk` correctness and counterbalanced off/V3 trials. A skipped,
+      `null_blk` correctness and counterbalanced off/swapz trials. A skipped,
       BLOCKED or NOT RUN required stage does not pass this gate.
 - [ ] **Byte-exact loaded correctness under stress:** repeat the full readback
       oracle across zero/compressible/RAW pages, overwrites, competing
@@ -608,7 +611,7 @@ plan; explicit fresh owner approval naming that device and precisely
 which destructive operations are permitted; a fail-closed ordinary
 teardown/quarantine procedure with no force, reboot, or unrelated
 system-swap changes. Confirm controller/queue geometry and compare
-same-input off/V3 under repeatable achieved loads. If any condition is
+same-input off/swapz under repeatable achieved loads. If any condition is
 unknown, report **BLOCKED**, not a physical benchmark PASS.
 
 ## Deferred scope
@@ -661,7 +664,7 @@ GC, CPU profile or fixed-bandwidth validation.
 
 ### Alpha.18 phase attribution before another speculative rewrite
 
-The owner-loaded alpha.17 smoke and paced off/V3
+The owner-loaded alpha.17 smoke and paced off/swapz
 medium comparison at `90c0d5b9` retained 34.81%
 lower WRITE-byte savings with exact readback and safe
 RAM teardown, but WRITE p99 remained 2.742ms against
@@ -845,7 +848,7 @@ Make goal is an official alternative.
       V3 remains experimental and null_blk-only.
 - [ ] Owner alpha.20: only after rootless and kernel
       build pass, run a separately authorized owned-RAM V3 smoke followed by
-      a separately authorized QD32 unpaced owned-RAM off/V3 paired trial with newly
+      a separately authorized QD32 unpaced owned-RAM off/swapz paired trial with newly
       owned RAM/null_blk and unchanged active swaps.
       Record logical WRITE/READ MB/s, independent
       lower READ/WRITE bytes and request counts,
@@ -882,7 +885,7 @@ Make goal is an official alternative.
       order before claiming significant gains.
 - [ ] Owner alpha.21 production-C short packed window qualification:
       run `make test` once; its internal stages cover rootless tests,
-      owned-RAM V3 smoke and counterbalanced unpaced QD32 off/V3
+      owned-RAM V3 smoke and counterbalanced unpaced QD32 off/swapz
       comparisons (retain_ms=2, 16384 measured operations).
       Require the exact full-image oracle, independent
       owned lower-device READ/WRITE bytes and requests,

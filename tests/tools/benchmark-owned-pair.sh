@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Opt-in OFF/V3 comparison on two freshly owned RAM-backed null_blk devices.
+# Opt-in OFF/swapz comparison on two freshly owned RAM-backed null_blk devices.
 # Never touches system swap, physical devices, or unrelated DM resources.
 set -Eeuo pipefail
 umask 077
@@ -101,7 +101,7 @@ if (( WRITE_ONLY_QD )); then
 fi
 if (( REPLAY_SWAPZ_FIRST )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
-    echo 'BLOCKED: V3-first requires owned medium QD32' >&2
+    echo 'BLOCKED: swapz-first requires owned medium QD32' >&2
     exit 2
 fi
 if (( ASYNC_PREPARE || LOWER_MBPS || COMPLETION_NSEC )) &&
@@ -141,13 +141,13 @@ done
 git diff --quiet && git diff --cached --quiet || fail "dirty tracked sources"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
-    fail "malformed canonical V3 version"
+    fail "malformed canonical swapz version"
 grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/swapz-version.h ||
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
-    fail "built V3 module version does not match canonical VERSION"
+    fail "built swapz module version does not match canonical VERSION"
 [[ -s $MODULE && $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
-    fail "V3 module missing or running-kernel vermagic mismatch"
+    fail "swapz module missing or running-kernel vermagic mismatch"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
             authority.h engine.h flush-qual.h gc-cost.h; do
     cmp -s "src/kernel/$file" "build/kernel/experimental/$file" ||
@@ -228,7 +228,7 @@ cleanup() {
         fi
     fi
     if (( OWN_MODULE && !OWN_DM && !QUARANTINE )); then
-        rmmod dm_swapz || { QUARANTINE=1; note 'QUARANTINED: V3 module busy'; }
+        rmmod dm_swapz || { QUARANTINE=1; note 'QUARANTINED: swapz module busy'; }
     fi
     end_swaps="$(cat /proc/swaps)"
     note "HOST_SWAPS_AFTER:"
@@ -341,15 +341,15 @@ create_owned_ram() {
     note "OWNED_RAM[$((COUNT-1))]=$lower DEVICE=$dev"
 }
 create_owned_ram  # bare uncompressed
-create_owned_ram  # V3 backing, separate device
+create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE"
 modprobe dm_mod
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
-    fail 'V3 module insertion rejected'
+    fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
-    fail 'V3 target registration missing'
+    fail 'swapz target registration missing'
 token="$(od -An -N8 -tx1 /dev/urandom | tr -d '[:space:]')"
 [[ $token =~ ^[a-f0-9]{16}$ ]] || fail 'mapper token invalid'
 DMNAME="swapz-demo-$token"
@@ -368,15 +368,15 @@ if ! dmsetup create "$DMNAME" --uuid "$DMUUID" \
     else
         QUARANTINE=1
     fi
-    fail 'V3 DM creation failed'
+    fail 'swapz DM creation failed'
 fi
 OWN_DM=1
 [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" |
       tr -d '[:space:]') == "$DMUUID" ]] || fail 'owned DM UUID mismatch'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:space:]]|$)" ||
-    fail 'unexpected V3 retained policy after owned DM creation'
+    fail 'unexpected swapz retained policy after owned DM creation'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
-    fail 'loaded V3 async preparation does not match selected benchmark arm'
+    fail 'loaded swapz async preparation does not match selected benchmark arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do
@@ -451,7 +451,7 @@ replay_off() {
         --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}" ||
         fail 'uncompressed replay rejected'
 }
-replay_v3() {
+replay_swapz() {
     timeout --signal=TERM --kill-after=5s 120s python3 -B \
         tests/runtime/benchmark/io-replay.py run \
         --fixture "$SESSION/fixture.bin" \
@@ -462,16 +462,16 @@ replay_v3() {
         "${PACKED_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[1]}" \
         --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
-        --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
+        --expected-dm-uuid "$DMUUID" || fail 'swapz replay rejected'
 }
 if (( REPLAY_SWAPZ_FIRST )); then
     note 'REPLAY_ORDER=swapz-first'
-    replay_v3
+    replay_swapz
     replay_off
 else
     note 'REPLAY_ORDER=off-first'
     replay_off
-    replay_v3
+    replay_swapz
 fi
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
@@ -481,7 +481,7 @@ if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
             fail 'async preparation never started while lower WRITE was active'
         note "PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=${BASH_REMATCH[1]}"
     else
-        fail 'loaded V3 did not expose the asynchronous preparation counter'
+        fail 'loaded swapz did not expose the asynchronous preparation counter'
     fi
 fi
 python3 -B tests/runtime/benchmark/io-replay.py compare \
