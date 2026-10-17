@@ -222,3 +222,7 @@ that are macro names in Linux kernel headers. Pack-target closure in
 `swapz_accept_write()` uses the existing admission snapshot; absolute expiry
 remains enforced by the established process/worker deadline gates rather than
 introducing a second pre-definition expiry path.
+
+
+Kernel-header macro hygiene applies to every reference after a parameter rename;
+native and Kbuild warning builds must both compile the exact helper body.

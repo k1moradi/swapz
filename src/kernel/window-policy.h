@@ -147,7 +147,7 @@ static inline swapz_u8 swapz_window_grow_burst_target(
 static inline swapz_u8 swapz_window_shrink_burst_target(
 		swapz_u8 current_target, swapz_u8 observed)
 {
-	if (observed > 1U && observed < current)
+	if (observed > 1U && observed < current_target)
 		return observed;
 	return current_target;
 }
