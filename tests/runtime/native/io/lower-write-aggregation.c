@@ -671,6 +671,8 @@ static int test_mixed_and_raw_only_share_lower_runs(void)
 	return 0;
 }
 
+/* Mixed bulk planning may relocate compressed extents while RAW mappings
+ * retain their own CRC/type authority; physical start identity is not ABI. */
 static int test_mixed_default_equal_bytes_vs_serial_raw_control(void)
 {
 	struct swapz_map combined[40];

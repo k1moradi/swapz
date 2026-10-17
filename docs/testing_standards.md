@@ -119,3 +119,9 @@ byte-exact readback, no authority visibility before lower completion, zero
 default padding, and no increase in lower WRITE bytes. Physical start blocks,
 record indices and extent classes may differ when those changes are the
 mechanism being qualified.
+
+
+The same rule applies to mixed compressed/RAW windows: compressed planner
+placement is not an ABI. Differential coverage must preserve RAW CRC/type
+authority, logical generations, exact readback and equal lower bytes rather
+than require identical physical starts or transaction sequence assignment.
