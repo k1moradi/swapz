@@ -691,7 +691,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_window_shrink_burst_target", policy)
         self.assertIn("swapz_window_burst_close_ready", policy)
         self.assertIn("ctx->retained_chain_completed", flush)
-        self.assertIn("ctx->pack_close_pending_tail_sample = true", flush)
+        self.assertIn("if (chain_continues)", flush)
+        self.assertIn("ctx->pack_close_pending_tail_sample = packed_close", flush)
         self.assertIn("list_for_each_entry(entry, local, list)", sample)
         self.assertIn("list_for_each_entry(entry, &ctx->incoming, list)", sample)
         self.assertLess(sample.index("list_for_each_entry(entry, local, list)"),

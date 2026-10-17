@@ -283,3 +283,11 @@ production implementation work. When an implementation invariant moves between
 owners (for example, PACK_READY closure from write admission to the serialized
 worker), contract assertions must move with that ownership in the same
 standards-backed change rather than preserving historical body-local syntax.
+
+
+Only a successful PACK_READY continuation may arm post-I/O admitted-tail
+sampling. Other retained chain continuations such as duplicate/full or
+already-accepted zero/raw interruption may carry bounded service/count evidence
+within the same worker burst, but must keep
+`pack_close_pending_tail_sample` false so they cannot infer a residual tail
+from a non-PACK close.
