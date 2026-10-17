@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
+      - 'src/kernel/**'
       - 'tests/legacy/kernel/dm-swapz.c'
       - '.github/workflows/rootless-teardown.yml'
       - 'tests/runtime/**'
@@ -13,6 +14,7 @@ on:
     paths:
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
+      - 'src/kernel/**'
       - 'tests/legacy/kernel/dm-swapz.c'
       - '.github/workflows/rootless-teardown.yml'
       - 'tests/runtime/**'
@@ -443,18 +445,12 @@ jobs:
           set -euo pipefail
           python3 -m py_compile tests/runtime/legacy/drain-latency-analysis.py tests/runtime/legacy/drain-latency-analysis-test.py
           timeout 25s python3 -B tests/runtime/legacy/drain-latency-analysis-test.py -v
-      - name: V3 lossless exact-latency sidecar adversarial regression
+      - name: Lossless exact-latency sidecar adversarial regression
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile tests/runtime/legacy/drain-latency-analysis.py tests/runtime/legacy/latency-quantiles-test.py
           timeout 35s python3 -B tests/runtime/legacy/latency-quantiles-test.py -v
-      - name: V3 sidecar-aware measurement bundle binding regression
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m py_compile tests/runtime/legacy/evidence-validation-v3.py tests/runtime/legacy/evidence-validation-v3-test.py
-          timeout 35s python3 -B tests/runtime/legacy/evidence-validation-v3-test.py -v
       - name: Offline V2.2 evidence bundle identity and artifact integrity policy
         shell: bash
         run: |

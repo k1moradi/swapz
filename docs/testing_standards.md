@@ -1920,3 +1920,18 @@ AUTH="I AUTHORIZE swapz V2.2 smoke only on disposable VM $VM_ID with source $SOU
 The current `tests/runtime/virtual-smoke-test.py` verifies only the
 compatibility and safety statements; that rootless gate does not load any
 kernel module and does not establish live kernel or device correctness.
+
+
+## Version-neutral repository layout migration — October 17, 2026
+
+Active product source is rooted at `src/`; production kernel contracts read
+`src/kernel/dm-target.c` and kernel-source workflows trigger on
+`src/kernel/**`. Test-only Python, shell helpers and native fixtures stay
+under `tests/`. Maintained Markdown stays under `docs/`.
+
+Migration checks must not preserve deleted source paths or obsolete
+version-suffixed test identities merely to keep old CI assertions green.
+When a versioned implementation path or test artifact is retired, update the
+source contract and workflow trigger in the same change. Historical on-disk
+`SWZ3` terminology remains format identity, not an implementation-version
+name.

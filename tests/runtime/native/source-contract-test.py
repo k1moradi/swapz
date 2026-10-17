@@ -51,7 +51,7 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
-    def test_separate_target_and_3_0_alpha_version(self):
+    def test_separate_target_and_release_metadata(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz"\)')
         version = (ROOT / "src/kernel/VERSION").read_text().strip()
@@ -502,7 +502,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(worker.index("if (ctx->accepting)"),
                         worker.rindex("cond_resched();"))
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
-        self.assertIn("V3 drain invariant: accepted BIOs remain", drain)
+        self.assertIn("swapz drain invariant: accepted BIOs remain", drain)
         self.assertIn("ctx->authority.batch_pending", drain)
         self.assertIn("ctx->authority.in_flight", drain)
         self.assertIn("swapz_fail(ctx, -EUCLEAN)", drain)

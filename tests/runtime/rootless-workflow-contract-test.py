@@ -36,7 +36,6 @@ MANDATORY_TESTS = (
     "legacy/drain-latency-analysis-test.py",
     "legacy/latency-quantiles-test.py",
     "legacy/evidence-validation-test.py",
-    "legacy/evidence-validation-v3-test.py",
     "swapz-kernel-range-contract-test.py",
     "swapz-gc-source-contract-test.py",
     "swapz-gc-compressed-contract-test.py",
@@ -129,8 +128,8 @@ def check_workflow(name: str, source: str) -> None:
              f"{name}: combined workflow changes cannot trigger the gate")
     _require(".github/workflows/rootless-nbd.yml" in paths,
              f"{name}: standalone NBD workflow edits must trigger the joint safety gate")
-    _require("kernel/dm-swapz.c" in paths,
-             f"{name}: kernel source changes must trigger the rootless range contract")
+    _require("src/kernel/**" in paths,
+             f"{name}: product kernel source changes must trigger the rootless range contract")
 
     # Unlike combined, teardown enumerates each runtime path explicitly.
     # Account for every actual runtime script referred to by the job,
@@ -247,7 +246,7 @@ class RootlessWorkflowContractTests(unittest.TestCase):
     def test_kernel_source_change_must_trigger_both_joint_workflows(self):
         for name, source in self.sources.items():
             with self.subTest(workflow=name):
-                path = "      - 'kernel/dm-swapz.c'\n"
+                path = "      - 'src/kernel/**'\n"
                 self.assertIn(path, source)
                 with self.assertRaisesRegex(WorkflowContractError, "kernel source changes"):
                     check_workflow(name, source.replace(path, "", 1))

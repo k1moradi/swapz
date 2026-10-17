@@ -68,7 +68,7 @@ jobs:
           timeout 20s python3 -B tests/runtime/legacy/strategy-screen-test.py -v
           timeout 5s python3 -B tests/runtime/legacy/strategy-screen.py --plan fast
           timeout 5s python3 -B tests/runtime/legacy/strategy-screen.py --plan full
-      - name: Real fio reader CLAT log and V3 conversion on ordinary file
+      - name: Real fio reader CLAT log and swapz conversion on ordinary file
         run: |
           # No root, /dev, null_blk, Device Mapper, NBD, loop, or swap.
           timeout 45s python3 -B tests/runtime/streaming-benchmark-fio-cli-test.py -v
