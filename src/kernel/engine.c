@@ -587,8 +587,6 @@ retry_stage:
 		if (!staged) {
 			run_start = tx->start_block;
 			run_blocks = 0;
-			memset(e->bulk_scratch, 0,
-			       SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES);
 		}
 		if (tx->start_block < run_start ||
 		    (e->bulk_enabled == 1 && staged &&
@@ -605,6 +603,19 @@ retry_stage:
 			swapz_u16 end = offset + blocks;
 			swapz_u8 *image = e->bulk_scratch +
 					       (size_t)offset * SWAPZ_BLOCK_BYTES;
+
+			/*
+			 * Each extent initializes every byte it owns: swapz_begin()
+			 * clears compressed extents and raw records overwrite one full
+			 * block. Only mode 2 alignment holes become lower-media bytes,
+			 * so clear exactly those holes instead of the whole 256KiB
+			 * scratch buffer for every run.
+			 */
+			if (offset > run_blocks)
+				memset(e->bulk_scratch +
+				       (size_t)run_blocks * SWAPZ_BLOCK_BYTES, 0,
+				       (size_t)(offset - run_blocks) *
+				       SWAPZ_BLOCK_BYTES);
 
 			if (raw) {
 				/* A raw block must not acquire a fake SWZ3 header. */

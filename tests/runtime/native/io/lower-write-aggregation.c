@@ -379,6 +379,10 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	CHECK(committed == 4 && validate_prefix(4) == 0);
 	CHECK(e.bulk_padding_blocks == 1 && run_calls == 1);
 	CHECK(lower_written_bytes == adjacent_bytes + SWAPZ_BLOCK_BYTES);
+	/* The explicit alignment hole is real lower-media padding and must
+	 * be zero even when bulk_scratch contains bytes from an earlier run. */
+	for (i = 0; i < SWAPZ_BLOCK_BYTES; ++i)
+		CHECK(media[SWAPZ_BLOCK_BYTES + i] == 0);
 	return 0;
 }
 

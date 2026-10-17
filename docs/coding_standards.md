@@ -54,3 +54,13 @@ ordinary writes preserve the former zero-delay behavior by queuing one
 immediate worker instance; dependencies and retained writes wake the worker
 immediately. Do not reintroduce an independent admission delay without new
 production evidence and ordering qualification.
+
+
+### Bulk scratch initialization
+
+The grouped lower-write path must not clear the full 256KiB scratch buffer on
+every run. Compressed extents initialize their exact extent image and RAW
+entries overwrite their complete 4KiB block. Only alignment holes that are
+actually submitted by explicit padding mode are zero-filled, and only for the
+exact gap bytes. This keeps the no-padding path free of unrelated memory
+bandwidth while preserving deterministic lower-media contents.
