@@ -802,20 +802,24 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", writer)
         worker = body("swapz_worker")
         self.assertIn("ctx->worker_has_immediate_followup", writer)
-        self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
-        self.assertIn("entry->list.next != &local", worker)
-        local_tail = worker.index("entry->list.next != &local")
-        accepted_incoming = worker.index("!list_empty(&ctx->incoming)",
-                                         local_tail)
-        tail_lock = worker.rfind(
-            "spin_lock_irqsave(&ctx->queue_lock, flags);",
-            local_tail, accepted_incoming)
+        self.assertIn("ctx->worker_followup_bios >= ctx->batch_count", writer)
+        self.assertIn("followup < 4U", worker)
+        self.assertIn("list_for_each(pos, &ctx->incoming)", worker)
+        self.assertIn("ctx->worker_followup_bios = followup", worker)
+        self.assertIn("ctx->worker_has_immediate_followup = followup != 0", worker)
+        self.assertIn("ctx->worker_followup_bios = 0", worker)
+        count_local = worker.index("for (pos = entry->list.next;")
+        tail_lock = worker.index(
+            "spin_lock_irqsave(&ctx->queue_lock, flags);", count_local)
+        count_incoming = worker.index("list_for_each(pos, &ctx->incoming)",
+                                      tail_lock)
         tail_unlock = worker.index(
             "spin_unlock_irqrestore(&ctx->queue_lock, flags);",
-            accepted_incoming)
+            count_incoming)
         list_delete = worker.index("list_del_init(&entry->list)")
-        self.assertGreater(tail_lock, local_tail)
-        self.assertLess(accepted_incoming, tail_unlock)
+        self.assertLess(count_local, tail_lock)
+        self.assertLess(tail_lock, count_incoming)
+        self.assertLess(count_incoming, tail_unlock)
         self.assertLess(tail_unlock, list_delete)
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
@@ -875,8 +879,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                           "ctx->batch", "ctx->authority", "ctx->window_first_ns"):
             self.assertNotIn(forbidden, wake)
         self.assertIn("SWAPZ_CLOSE_DEADLINE", process)
-        self.assertIn("ctx->deadline_before_bio++", process)
-        self.assertIn("ctx->deadline_after_read++", process)
+        before_deadline = process.index("ctx->deadline_before_bio++")
+        before_gate = process.rfind("!ctx->worker_has_immediate_followup",
+                                    0, before_deadline)
+        self.assertGreaterEqual(before_gate, 0)
+        after_deadline = process.index("ctx->deadline_after_read++")
+        after_gate = process.rfind("!ctx->worker_has_immediate_followup",
+                                   before_deadline, after_deadline)
+        self.assertGreater(after_gate, before_deadline)
         self.assertIn("ctx->deadline_worker_with_local++", worker)
         self.assertIn("ctx->deadline_worker_empty++", worker)
         self.assertIn("!list_empty(&local)", worker)

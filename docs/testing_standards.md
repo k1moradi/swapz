@@ -62,7 +62,7 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `c4539b3afe222372d5266be5a79bb96f23dfdeea` is the accepted performance baseline and passed the complete current qualification. Its accepted-incoming first-pack tail fix preserved correctness and materially recovered QD8, especially on the faster model, while QD1 remained unchanged and QD4 still lost useful throughput. Source `cb6cd5a2894f25b8e21addc9c8484f0e7d29e153` also passed the complete suite, but its one-handoff first-pack policy is rejected because QD4 lower-byte efficiency and latency regressed. A qualification PASS does not override the benchmark acceptance criteria for a performance experiment. None of the one-pair-per-QD pilot results is statistically confirmatory.
+Source `45a5ccf09b2a4ce396d891215581476d3ee0dce3` passed the complete current qualification and is the accepted performance baseline. Learned singleton fast-close materially recovered QD1 throughput while preserving one-block/one-request geometry, and the loaded RAW/zero/flush, retained suspend/drain, byte-exact verification and synthetic retained WRITE/FLUSH fail-closed gates all passed. QD4 and faster-model QD32 remain throughput-limited, slow mixed QD32 remains write-limited, random packed reads still amplify lower bytes, and live GC was not exercised. One-pair-per-QD pilot results are not statistically confirmatory.
 
 ## Open qualification gaps
 

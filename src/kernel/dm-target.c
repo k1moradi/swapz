@@ -202,6 +202,9 @@ struct swapz_dm {
 	 * when the local snapshot reaches its tail. Future arrivals do not.
 	 */
 	bool worker_has_immediate_followup;
+	/* Bounded snapshot depth of already-accepted BIOs after the current
+	 * worker-local entry, including incoming under queue_lock. */
+	swapz_u8 worker_followup_bios;
 	/*
 	 * A useful first pack was kept open only to consume that finite
 	 * accepted tail. Close it when the accepted tail is exhausted.
@@ -1394,14 +1397,17 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					      ctx->batch_count,
 					      ctx->retain_ms,
 					      ctx->engine.max_read_blocks_per_record)) {
-		if (ctx->worker_has_immediate_followup) {
-			/* Another already-accepted BIO will be processed without
-			 * waiting for a timer or a future producer arrival. */
+		/*
+		 * Deferring a valid first pack is useful only when a second
+		 * pack's worth of work is already accepted. Otherwise a finite
+		 * QD4 wave turns a clean three-record 8KiB pack into an 8KiB
+		 * extent plus an orphan 4KiB tail.
+		 */
+		if (ctx->worker_has_immediate_followup &&
+		    ctx->worker_followup_bios >= ctx->batch_count) {
 			ctx->single_pack_deferred = true;
 			ctx->single_pack_deferrals++;
 		} else {
-			/* Queue tail: do not pay the retention deadline merely to
-			 * hope for a future arrival. Commit the valid first pack. */
 			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
 			swapz_flush_window(ctx);
@@ -1564,9 +1570,12 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		swapz_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
-	/* The absolute deadline cannot be moved by newly admitted writes,
-	 * reads, or worker rescheduling. Close older windows first. */
+	/* The absolute timestamp never moves, but expiry bounds waiting for
+	 * future arrivals, not draining work that was already accepted before
+	 * the worker observed the deadline. Let that finite burst reach the
+	 * existing pack/order gates first. */
 	if (ctx->batch_count && ctx->retain_ms &&
+	    !ctx->worker_has_immediate_followup &&
 	    swapz_retention_expired(ctx)) {
 		ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 		ctx->deadline_before_bio++;
@@ -1592,8 +1601,11 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		swapz_complete(bio, error);
 		/* A successful independent read is already authoritative.
 		 * Do not add an unrelated lower WRITE's latency/error to its
-		 * completion, but a slow read must not extend the deadline. */
-		if (!error && swapz_retention_expired(ctx)) {
+		 * completion. A slow read may cross the pinned deadline, but
+		 * already-accepted follow-up work is finite and must not be
+		 * fragmented merely because the ordered worker serviced that read. */
+		if (!error && !ctx->worker_has_immediate_followup &&
+		    swapz_retention_expired(ctx)) {
 			ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 			ctx->deadline_after_read++;
 			swapz_flush_window(ctx);
@@ -1708,20 +1720,30 @@ static void swapz_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		list_for_each_entry_safe(entry, next, &local, list) {
+			struct list_head *pos;
+			swapz_u8 followup = 0;
+
 			/*
-			 * Current local work is already accepted. At its tail, BIOs
-			 * already queued in incoming are accepted too; recognize them
-			 * before deciding a ready pack reached its finite tail.
-			 * Arrivals after this observation remain future work.
+			 * Count a bounded snapshot of work already accepted after this
+			 * entry. Local successors are lockless worker-owned state;
+			 * incoming is sampled under the same admission lock as ->map().
+			 * Later arrivals remain future work and never extend this count.
 			 */
-			ctx->worker_has_immediate_followup =
-				entry->list.next != &local;
-			if (!ctx->worker_has_immediate_followup) {
+			for (pos = entry->list.next;
+			     pos != &local && followup < 4U;
+			     pos = pos->next)
+				followup++;
+			if (followup < 4U) {
 				spin_lock_irqsave(&ctx->queue_lock, flags);
-				ctx->worker_has_immediate_followup =
-					!list_empty(&ctx->incoming);
+				list_for_each(pos, &ctx->incoming) {
+					if (followup >= 4U)
+						break;
+					followup++;
+				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			}
+			ctx->worker_followup_bios = followup;
+			ctx->worker_has_immediate_followup = followup != 0;
 			/* Any already-accepted companion disproves isolated QD1-like
 			 * behavior immediately, before this BIO can influence closure. */
 			if (ctx->worker_has_immediate_followup) {
@@ -1746,6 +1768,7 @@ static void swapz_worker(struct work_struct *work)
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
+			ctx->worker_followup_bios = 0;
 			if (!(remaining & 7U))
 				cond_resched();
 			if (!--remaining)

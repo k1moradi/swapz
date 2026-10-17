@@ -31,16 +31,16 @@ Report process CPU separately from kernel-worker CPU; do not imply one includes 
 
 ## Current directional result
 
-At qualified source `c4539b3afe222372d5266be5a79bb96f23dfdeea`:
+At qualified source `45a5ccf09b2a4ce396d891215581476d3ee0dce3`:
 
-- slow-model QD1 was about 0.38x raw; QD4 about 0.60x; QD8 about 0.88–0.90x; QD32 about 1.27x;
-- faster-model QD1 was about 0.19x raw; QD4 about 0.62–0.71x; QD8 about 0.61–0.76x; QD32 about 0.61–0.63x;
-- lower WRITE request savings remained strong at QD4+;
-- QD1 still had no aggregation benefit;
-- the accepted-incoming first-pack tail fix materially recovered QD8 without changing QD1, but fast finite QD4/QD32 still expose first-pack scheduling/packing loss;
-- the mixed faster-model async arm showed a preliminary useful-WRITE gain, while the slow mixed model still lost useful throughput.
+- slow-model QD1 reached about 0.89-0.94x raw and faster-model QD1 about 0.76-0.86x, with unchanged 1.00x logical/lower geometry and 4096 lower requests;
+- QD4 remained about 0.60x raw on the slow model and 0.63-0.70x on the faster model with about 1.33x logical/lower geometry;
+- QD8 remained about 0.89-0.90x raw on the slow model and 0.59-0.76x on the faster model;
+- slow-model QD32 remained about 1.26-1.27x raw, while faster-model QD32 remained about 0.61-0.62x;
+- slow mixed QD32 still lost useful WRITE throughput, and its deadline closures were dominated by `deadline_after_read`;
+- random packed 4MiB reads still transferred roughly 6.2MiB of lower data for 4MiB logical work.
 
-Interpretation: the full retention deadline was a major QD8 bottleneck, but lower-request reduction alone is still insufficient. The later one-handoff first-pack experiment at `cb6cd5a...` is rejected: on the medium QD4 pilot it reduced some request counts while lowering logical/lower byte efficiency and materially worsening latency/throughput, so request merging alone is not a win. The next production-C question is whether repeated worker-empty singleton deadlines can safely disable retention only for demonstrably isolated closed-loop traffic. The pilot does not establish significance.
+Interpretation: learned singleton fast-close removed most of the QD1 retention tax without changing lower geometry. The next production questions are finite-wave first-pack depth, deadline fragmentation caused by already-accepted work behind slow independent reads, alignment holes in adjacent lower-run staging, and metadata-cache thrash on random reads. All QD pilot results remain exploratory.
 
 ## Confirmation gate
 

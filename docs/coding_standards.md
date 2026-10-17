@@ -131,3 +131,19 @@ companion or any multi-record window immediately clears this learned bypass.
 The bypass changes neither one-record lower-byte geometry nor completion
 ownership. PREFLUSH/FUA, dependency, publication, suspend/drain and fail-closed
 ordering remain unchanged.
+
+
+### Already-accepted burst deadline handling
+
+The retained-window timestamp remains pinned to the first admitted record, but
+expiry bounds idle waiting for future arrivals rather than CPU/lower-I/O time
+spent draining a finite set of BIOs already accepted by the worker. A
+`deadline_before_bio` or `deadline_after_read` close must therefore not split a
+window while the current worker snapshot still has accepted follow-up BIOs.
+Dependencies, PREFLUSH/FUA and same-page conflicts still drain through their
+existing ordering gates; no future arrival may refresh or extend the timestamp.
+
+A valid first compressed pack may be deferred only when at least one second
+pack's worth of BIOs is already accepted in the bounded worker snapshot. This
+prevents a four-BIO medium wave from turning a clean three-record 8KiB pack into
+an 8KiB extent plus an orphan 4KiB tail merely because one extra BIO was visible.
