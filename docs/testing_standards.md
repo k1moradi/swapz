@@ -142,3 +142,9 @@ Rootless Make-interface fixtures must emit the same current lifecycle marker as
 the loaded parser. Synthetic fixture text is not a compatibility surface; when
 the report contract changes, stale fixture markers are updated rather than
 keeping parser aliases for removed semantics.
+
+
+The direct production-C zero-elision test includes an intentionally unaligned
+4KiB input view. It must accept an all-zero page, reject a nonzero final byte,
+and never depend on bytes outside the logical page, preserving the exact
+predicate while allowing word-at-a-time implementation.

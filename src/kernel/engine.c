@@ -19,17 +19,21 @@ static int swapz_page_valid(const struct swapz_compressed_page *page)
  * Check a complete logical page only after the caller's cheap LZ4 size
  * admission (<64B). A merely compressible/patterned page is NOT zero;
  * missing even a single nonzero byte would corrupt authoritative data.
- * No temporary allocation, no lower I/O, no unaligned word loads.
+ * Fixed-width memcpy keeps unaligned callers and the shared userspace build
+ * defined while reducing the scan loop from 4096 byte tests to 512 words.
  */
 int swapz_page_is_zero(const swapz_u8 *page)
 {
-	swapz_u32 i;
+	unsigned long long word;
+	swapz_u32 offset;
 
 	if (!page)
 		return 0;
-	for (i = 0; i < SWAPZ_BLOCK_BYTES; ++i)
-		if (page[i])
+	for (offset = 0; offset < SWAPZ_BLOCK_BYTES; offset += sizeof(word)) {
+		memcpy(&word, page + offset, sizeof(word));
+		if (word)
 			return 0;
+	}
 	return 1;
 }
 

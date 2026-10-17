@@ -170,3 +170,13 @@ Indices that scan or select cache slots must be at least 16 bits. The cache
 holds validated metadata only, never payload authority, and every existing
 write/GC/discard/barrier mutation fence continues to invalidate residency
 before authority changes.
+
+
+### Exact zero-page scan
+
+The zero-elision predicate may scan one complete 4KiB page in fixed 64-bit
+chunks, but it must remain byte-exact and safe for unaligned portable callers.
+Load each chunk through `memcpy` rather than casting a byte buffer to a wider
+pointer; do not overread the page, allocate memory, or weaken the rule that any
+single nonzero byte makes the page nonzero. This optimization changes CPU work
+only and never changes lower-I/O or mapping authority semantics.

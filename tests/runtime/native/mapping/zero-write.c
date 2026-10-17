@@ -20,6 +20,7 @@ static struct swapz_map mapping[32];
 static swapz_u16 live[PHYSICAL];
 static swapz_u8 classes[PHYSICAL];
 static swapz_u8 bytes[SWAPZ_BLOCK_BYTES];
+static swapz_u8 unaligned_bytes[SWAPZ_BLOCK_BYTES + 1U];
 
 static int test_byte_exact_zero_detection(void)
 {
@@ -37,6 +38,16 @@ static int test_byte_exact_zero_detection(void)
 	}
 	memset(bytes, 0x7f, sizeof(bytes));
 	CHECK(!swapz_page_is_zero(bytes));
+
+	/* The production predicate is also used by portable native tests and
+	 * must not assume naturally aligned input or read outside one page. */
+	memset(unaligned_bytes, 0, sizeof(unaligned_bytes));
+	unaligned_bytes[0] = 0x5a;
+	CHECK(swapz_page_is_zero(unaligned_bytes + 1));
+	unaligned_bytes[1 + 4095] = 1;
+	CHECK(!swapz_page_is_zero(unaligned_bytes + 1));
+	unaligned_bytes[1 + 4095] = 0;
+	CHECK(swapz_page_is_zero(unaligned_bytes + 1));
 	return 0;
 }
 
