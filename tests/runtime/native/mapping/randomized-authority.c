@@ -182,7 +182,7 @@ int main(void)
 				for (unsigned j = 0; j < length; j++)
 					data_store[i][j] = (swapz_u8)next_random();
 			}
-			result = swapz_engine_write_window(&engine, pages,
+			result = swapz_engine_write_window_batched(&engine, pages,
 							 (swapz_u8)count,
 							 &committed);
 			CHECK(result == 0);
@@ -218,7 +218,7 @@ int main(void)
 			CHECK(swapz_engine_plan_bounded(pages, 2, (swapz_u8)read_cap,
 						      plan, takes, &groups) == 0);
 			CHECK(groups == 2 && takes[0] == 1);
-			CHECK(swapz_engine_write_window(&engine, pages, 2,
+			CHECK(swapz_engine_write_window_batched(&engine, pages, 2,
 						      &committed) == 0);
 			CHECK(committed == 2);
 			update_reference(&pages[1]);
@@ -248,7 +248,7 @@ int main(void)
 			CHECK(groups > 1);
 			prefix = takes[0];
 			disk.fail_on = disk.write_calls + 2;
-			result = swapz_engine_write_window(&engine, pages, 16,
+			result = swapz_engine_write_window_batched(&engine, pages, 16,
 							 &committed);
 			CHECK(result == -EIO);
 			CHECK(committed == prefix);

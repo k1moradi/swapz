@@ -103,7 +103,7 @@ static int test_good_full_readback_publishes(void)
 
 	CHECK(setup() == 0);
 	engine.verify_after_write = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	CHECK(committed == 3 && writes == 1 && reads == 2);
 	CHECK(auth.committed_blocks == 2 && auth.abandoned_blocks == 0);
 	CHECK(engine.completed_blocks == 2 && engine.write_verify_read_blocks == 2);
@@ -123,7 +123,7 @@ static int test_silent_media_corruption_rejected_before_publication(void)
 	CHECK(setup() == 0);
 	engine.verify_after_write = 1;
 	corrupt_after_write = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == -EBADMSG);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == -EBADMSG);
 	CHECK(committed == 0 && writes == 1 && reads == 2);
 	CHECK(engine.completed_blocks == 2 && engine.write_verify_read_blocks == 2);
 	CHECK(!map[0].valid && !map[1].valid && !map[2].valid);
@@ -138,7 +138,7 @@ static int test_readback_io_failure_preserves_unmapped(void)
 	CHECK(setup() == 0);
 	engine.verify_after_write = 1;
 	fail_read = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == -EIO);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == -EIO);
 	CHECK(committed == 0 && writes == 1 && reads == 2);
 	CHECK(engine.completed_blocks == 2 && engine.write_verify_read_blocks == 0);
 	CHECK(!map[0].valid && !map[1].valid && !map[2].valid);
@@ -153,7 +153,7 @@ static int test_unverified_mode_detects_corruption_later(void)
 
 	CHECK(setup() == 0);
 	corrupt_after_write = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	CHECK(committed == 3 && writes == 1 && reads == 0);
 	CHECK(map[0].valid && engine.write_verify_read_blocks == 0);
 	CHECK(swapz_engine_read_page(&engine, 0, result,
@@ -169,7 +169,7 @@ static int test_impossible_completion_never_fakes_write_or_readback(void)
 	CHECK(setup() == 0);
 	engine.verify_after_write = 1;
 	lie_about_completion = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == -EUCLEAN);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == -EUCLEAN);
 	CHECK(committed == 0 && writes == 1 && reads == 0);
 	CHECK(engine.submitted_blocks == 2 && engine.completed_blocks == 0);
 	CHECK(engine.write_verify_read_blocks == 0);
@@ -184,11 +184,11 @@ static int test_preflight_requires_distinct_readback_buffers(void)
 	CHECK(setup() == 0);
 	engine.verify_after_write = 1;
 	engine.read_scratch = engine.write_scratch;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == -EINVAL);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == -EINVAL);
 	CHECK(committed == 0 && writes == 0 && !auth.in_flight);
 	engine.read_scratch = scratch_r;
 	engine.io.read_blocks = NULL;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == -EINVAL);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == -EINVAL);
 	CHECK(committed == 0 && writes == 0 && !auth.in_flight);
 	return 0;
 }
@@ -201,10 +201,10 @@ static int test_failed_overwrite_keeps_prior_generation(void)
 
 	CHECK(setup() == 0);
 	engine.verify_after_write = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	old = map[0];
 	corrupt_after_write = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == -EBADMSG);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == -EBADMSG);
 	CHECK(map[0].start_block == old.start_block &&
 	      map[0].generation == old.generation);
 	CHECK(auth.committed_blocks == 2 && auth.abandoned_blocks == 2);
@@ -227,7 +227,7 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 	unsigned int index;
 
 	CHECK(setup() == 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	CHECK(committed == 3);
 	old_start = map[0].start_block;
 	CHECK(map[1].start_block == old_start &&
@@ -271,7 +271,7 @@ static int test_same_extent_read_cache_reuse_and_fail_closed(void)
 
 	/* A new authoritative generation cannot reuse old metadata. */
 	memset(payloads[0], 0x5a, sizeof(payloads[0]));
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	CHECK(committed == 3 && !engine.read_cache_valid);
 	CHECK(map[0].start_block != old_start && map[0].generation == 2);
 	CHECK(swapz_engine_read_page(&engine, 0, result,
@@ -294,7 +294,7 @@ static int test_one_block_read_budget_remains_selective(void)
 	swapz_u16 size = 0;
 
 	CHECK(setup() == 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	CHECK(committed == 3 && map[0].extent_blocks == 2);
 	/* The fixture's first record spans a second physical block. */
 	engine.max_read_blocks_per_record = 1;
@@ -332,7 +332,7 @@ static int test_two_block_payload_offset_skips_unneeded_second_block(void)
 	swapz_u32 before;
 
 	CHECK(setup() == 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 3, &committed) == 0);
+	CHECK(swapz_engine_write_window_batched(&engine, pages, 3, &committed) == 0);
 	CHECK(committed == 3 && map[2].extent_blocks == 2);
 	CHECK(map[2].payload_offset + map[2].payload_length <=
 	      SWAPZ_BLOCK_BYTES);

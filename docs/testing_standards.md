@@ -90,3 +90,8 @@ Native shell regressions source shared helpers only from `tests/tools/`.
 Current reports, test output and product-facing diagnostics use `swapz`;
 implementation-generation labels are not permitted outside explicit disk-format
 history.
+
+
+Native engine tests call the same batched write entry point as the product.
+Tests that omit bulk callbacks thereby exercise its production sequential
+fallback; no test-only write wrapper is part of the engine API.

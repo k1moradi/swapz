@@ -87,7 +87,7 @@ static int write_one(swapz_u32 logical)
 		.length = 2072,
 	};
 	swapz_u8 complete = 0;
-	int error = swapz_engine_write_window(&e, &p, 1, &complete);
+	int error = swapz_engine_write_window_batched(&e, &p, 1, &complete);
 
 	if (!error && complete != 1)
 		return -EUCLEAN;
@@ -136,7 +136,7 @@ static int evacuate(swapz_u32 victim)
 	}
 	if (!count)
 		return -EUCLEAN;
-	error = swapz_engine_write_window(&e, pages, count, &completed);
+	error = swapz_engine_write_window_batched(&e, pages, count, &completed);
 	if (error)
 		return error;
 	if (completed != count)
@@ -189,7 +189,7 @@ static int test_failed_gc_write_preserves_live_mapping(void)
 		.logical_page = 0, .payload = contents[0], .length = 2072,
 	};
 	fail_write = 1;
-	CHECK(swapz_engine_write_window(&e, &p, 1, &completed) == -EIO);
+	CHECK(swapz_engine_write_window_batched(&e, &p, 1, &completed) == -EIO);
 	CHECK(completed == 0 && maps[0].start_block == previous);
 	CHECK(maps[0].valid && verify_page(0) == 0);
 	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
