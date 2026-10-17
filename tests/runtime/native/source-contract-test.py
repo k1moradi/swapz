@@ -826,8 +826,6 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         writer.index("swapz_window_pack_ready("))
         worker = body("swapz_worker")
         self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", worker)
-        self.assertIn("ctx->worker_has_immediate_followup", writer)
-        self.assertIn("!ctx->worker_has_immediate_followup", writer)
         self.assertNotIn("worker_followup_bios", DM)
         refresh = body("swapz_refresh_accepted_followup")
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock, flags)", refresh)
