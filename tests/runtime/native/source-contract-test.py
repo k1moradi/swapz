@@ -902,10 +902,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
 
     def test_retained_writes_prepare_before_the_deadline(self):
         mapping = body("swapz_map")
-        retained = mapping[mapping.index("} else if (ctx->retain_ms)"):
-                           mapping.index("} else if (queue_delayed_work")]
-        self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", retained)
-        self.assertNotIn("queue_delayed_work", retained)
+        self.assertIn("!bio_sectors(bio) || ctx->retain_ms", mapping)
+        self.assertLess(mapping.index("!bio_sectors(bio) || ctx->retain_ms"),
+                        mapping.index("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)"))
+        self.assertIn("queue_delayed_work(ctx->workqueue, &ctx->worker, 0)", mapping)
+        self.assertNotIn("msecs_to_jiffies", mapping)
         self.assertNotIn("window_first_ns", mapping)
         self.assertNotIn("hrtimer_start", mapping)
 

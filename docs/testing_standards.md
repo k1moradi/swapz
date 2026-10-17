@@ -69,3 +69,9 @@ Later cleanup revisions removed rejected hot-path diagnostics and obsolete repos
 ## Open qualification gaps
 
 Sustained live GC, genuine device-originated/partial lower errors, long-run resource pressure, larger controlled cold-read working sets, kernel-worker CPU attribution and statistically repeated QD saturation remain open. Physical-media testing remains blocked pending separate authorization and safety review.
+
+
+Source contracts should assert retained scheduling semantics rather than a
+particular obsolete branch spelling: retained writes must reach the ordered
+worker immediately, while retention-off ordinary writes retain zero-delay
+single-instance queueing.
