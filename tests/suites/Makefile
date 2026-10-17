@@ -2,7 +2,7 @@
 ROOT := $(abspath $(CURDIR)/../..)
 OUT := $(ROOT)/build/tests/native
 NATIVE := $(ROOT)/tests/runtime/native
-KERNEL := $(ROOT)/kernel/extent-v3
+KERNEL := $(ROOT)/src/kernel
 CODEC := $(KERNEL)/codec.c
 AUTH := $(KERNEL)/authority.c
 ENGINE := $(KERNEL)/engine.c

@@ -3,7 +3,7 @@ name: Rootless kernel source contracts
 on:
   push:
     paths:
-      - 'kernel/dm-swapz.c'
+      - 'tests/legacy/kernel/dm-swapz.c'
       - 'tests/runtime/swapz-kernel-range-contract-test.py'
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'
@@ -21,7 +21,7 @@ on:
       - '.github/workflows/rootless-kernel-source.yml'
   pull_request:
     paths:
-      - 'kernel/dm-swapz.c'
+      - 'tests/legacy/kernel/dm-swapz.c'
       - 'tests/runtime/swapz-kernel-range-contract-test.py'
       - 'tests/runtime/swapz-gc-source-contract-test.py'
       - 'tests/runtime/swapz-gc-compressed-contract-test.py'

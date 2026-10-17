@@ -6,14 +6,14 @@ on:
     paths:
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
-      - 'kernel/dm-swapz.c'
+      - 'tests/legacy/kernel/dm-swapz.c'
       - '.github/workflows/rootless-teardown.yml'
       - 'tests/runtime/**'
   pull_request:
     paths:
       - '.github/workflows/rootless-combined.yml'
       - '.github/workflows/rootless-nbd.yml'
-      - 'kernel/dm-swapz.c'
+      - 'tests/legacy/kernel/dm-swapz.c'
       - '.github/workflows/rootless-teardown.yml'
       - 'tests/runtime/**'
   workflow_dispatch:
@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           echo "COMBINED_TESTED_HEAD=$(git rev-parse HEAD)"
           echo "NBD_BLOB=$(git rev-parse HEAD:tests/runtime/size-aware-nbd.py)"
-          echo "KERNEL_BLOB=$(git rev-parse HEAD:kernel/dm-swapz.c)"
+          echo "KERNEL_BLOB=$(git rev-parse HEAD:tests/legacy/kernel/dm-swapz.c)"
           git status --short
       - name: Refuse captured syscalls before running NBD selftest
         run: |

@@ -20,28 +20,28 @@ CC ?= cc
 # Make can compile independent outputs concurrently (make test -j2).
 # The module recipe always checks running-kernel Kbuild; Kbuild's own
 # incremental dependency logic avoids unchanged .o recompilation.
-all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapz3ctl
+all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapzctl
 
 build/kernel/experimental/dm-swapz.ko:
-	$(MAKE) -C kernel/extent-v3 KDIR="$(KDIR)" all
+	$(MAKE) -C src/kernel KDIR="$(KDIR)" all
 
-build/tests/device-roundtrip: tools/device-roundtrip.c Makefile
+build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-build/userspace/swapz3ctl: userspace/swapz3ctl.c kernel/extent-v3/VERSION Makefile
+build/userspace/swapzctl: src/userspace/swapzctl.c src/kernel/VERSION Makefile
 	@mkdir -p build/userspace
-	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat kernel/extent-v3/VERSION)"' $< -o $@
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror '-DSWAPZ_VERSION="$(shell cat src/kernel/VERSION)"' $< -o $@
 
 install: all
-	@sudo bash tools/package-dkms.sh install "$(PREFIX)"
+	@sudo bash packaging/package-dkms.sh install "$(PREFIX)"
 
 uninstall:
-	@sudo bash tools/package-dkms.sh uninstall "$(PREFIX)"
+	@sudo bash packaging/package-dkms.sh uninstall "$(PREFIX)"
 
 # The only public test goal: all stages are run by the private,
 # bounded reporter, which replaces one XZ result on PASS/FAIL/BLOCKED.
 # The + preserves GNU Make jobserver FDs for parallel compilation;
 # the reporter completes each stage before starting the next.
 test:
-	@+python3 -B tools/run-tests.py --kdir "$(KDIR)"
+	@+python3 -B tests/tools/run-tests.py --kdir "$(KDIR)"

@@ -1,17 +1,17 @@
-name: Experimental V3 production C qualification
+name: Experimental swapz production C qualification
 
 on:
   push:
     branches: [main]
     paths:
-      - 'kernel/extent-v3/**'
+      - 'src/kernel/**'
       - 'tests/suites/**'
       - 'tests/runtime/native/**'
       - 'tests/runtime/benchmark/**'
       - 'Makefile'
-      - 'tools/**'
+      - 'tests/tools/**'
       - 'docs/ROADMAP.md'
-      - '.github/workflows/extent-v3-codec.yml'
+      - '.github/workflows/product-codec.yml'
   workflow_dispatch:
 
 permissions:
@@ -43,26 +43,26 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential linux-headers-generic-hwe-24.04
-      - name: Compile V3 W=1, isolated research smoke W=1, production W=2
+      - name: Compile swapz W=1, isolated research smoke W=1, production W=2
         shell: bash
         run: |
           set -euo pipefail
           KDIR="$(find /usr/src -maxdepth 1 -type d -name 'linux-headers-*-generic' | sort -V | tail -1)"
           test -n "$KDIR"
           echo "SOURCE_SHA=$(git rev-parse HEAD)"
-          echo "TARGET_BLOB=$(git rev-parse HEAD:kernel/extent-v3/dm-target.c)"
-          make -C kernel/extent-v3 KDIR="$KDIR" W=1 -j2 all
+          echo "TARGET_BLOB=$(git rev-parse HEAD:src/kernel/dm-target.c)"
+          make -C src/kernel KDIR="$KDIR" W=1 -j2 all
           test -s build/kernel/w1/dm-swapz.ko
           sha256sum build/kernel/w1/dm-swapz.ko
-          make -C kernel/extent-v3 KDIR="$KDIR" SV3_BUILD_SMOKE=1 W=1 -j2 all
-          test -s build/kernel/research/swapz_extent_v3.ko
-          sha256sum build/kernel/research/swapz_extent_v3.ko
-          make -C kernel/extent-v3 KDIR="$KDIR" W=2 -j2 all
+          make -C src/kernel KDIR="$KDIR" SWAPZ_BUILD_SMOKE=1 W=1 -j2 all
+          test -s build/kernel/research/swapz_extent.ko
+          sha256sum build/kernel/research/swapz_extent.ko
+          make -C src/kernel KDIR="$KDIR" W=2 -j2 all
           test -s build/kernel/w2/dm-swapz.ko
           sha256sum build/kernel/w2/dm-swapz.ko
           # A normal build is deliberately separate from warning variants:
           # it remains the only artifact eligible for owned-RAM loading.
-          make -C kernel/extent-v3 KDIR="$KDIR" -j2 all
+          make -C src/kernel KDIR="$KDIR" -j2 all
           test -s build/kernel/experimental/dm-swapz.ko
           sha256sum build/kernel/experimental/dm-swapz.ko
           echo "COMPILE_ONLY_NO_MODULE_INSERTION"
@@ -70,14 +70,14 @@ jobs:
           {
             echo "git_head=$(git rev-parse HEAD)"
             echo "kernel_headers=$KDIR"
-            echo "version=$(cat kernel/extent-v3/VERSION)"
+            echo "version=$(cat src/kernel/VERSION)"
             sha256sum build/kernel/experimental/dm-swapz.ko
             modinfo -F vermagic build/kernel/experimental/dm-swapz.ko
           } > build/deploy/compiled-module-manifest.txt
       - name: Publish experimental V3 compile-only artifact
         uses: actions/upload-artifact@v4
         with:
-          name: swapz-v3-module-${{ github.sha }}
+          name: swapz-module-${{ github.sha }}
           path: |
             build/kernel/experimental/dm-swapz.ko
             build/deploy/compiled-module-manifest.txt
