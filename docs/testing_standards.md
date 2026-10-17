@@ -253,3 +253,10 @@ explicit-invalidation and post-write miss tests. Source coverage requires the
 clock, with the clock reset inside that guarded block. Native coverage must call
 the mutation fence twice before a reread and still require a lower metadata
 read, proving repeated invalidation changes no observable authority behavior.
+
+
+Source-contract maintenance must follow the same standards co-change rule as
+production implementation work. When an implementation invariant moves between
+owners (for example, PACK_READY closure from write admission to the serialized
+worker), contract assertions must move with that ownership in the same
+standards-backed change rather than preserving historical body-local syntax.

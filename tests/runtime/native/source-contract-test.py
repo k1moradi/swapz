@@ -825,6 +825,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                                      writer.index("ctx->batch_count++")),
                         writer.index("swapz_window_pack_ready("))
         worker = body("swapz_worker")
+        # PACK_READY publication ownership is worker-only; admission records
+        # geometry but never owns the physical close decision.
         self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", worker)
         self.assertNotIn("worker_followup_bios", DM)
         refresh = body("swapz_refresh_accepted_followup")
