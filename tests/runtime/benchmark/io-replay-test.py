@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rootless proof that both labels replay one exact immutable I/O plan.
 
-This does NOT load V3 module: same regular-file replay code tests only
+This does NOT load the swapz module: same regular-file replay code tests only
 the trace contract, oracle, safety guard and fail-closed pair comparator.
 """
 import json
@@ -328,11 +328,12 @@ class PairReplayContract(unittest.TestCase):
         spec.loader.exec_module(module)
         lower = "251:7"
         name = "nullb-swapz-0123456789abcdef"
-        tokens = f"0 32768 swapz {lower} 0 64 0 2 0 0 1 0"
+        tokens = f"0 32768 swapz {lower} 0 64 0 2 0 1 0 0"
         self.assertEqual(module.validate_swapz_table(tokens, 4096, lower, name)["window"], 64)
         self.assertEqual(module.validate_swapz_table(tokens, 4096, lower, name)["retain_ms"], 0)
+        retained = tokens.rsplit(" ", 1)[0] + " 2"
         self.assertEqual(module.validate_swapz_table(
-            tokens + " 2", 4096, lower, name
+            retained, 4096, lower, name
         )["retain_ms"], 2)
         fake_block = SimpleNamespace(st_mode=__import__("stat").S_IFBLK,
                                      st_rdev=os.makedev(251, 7))
@@ -347,11 +348,12 @@ class PairReplayContract(unittest.TestCase):
             tokens.replace("32768", "32760"),
             tokens.replace("swapz", "linear"),
             tokens + "\n" + tokens,
-            tokens + " 0 0",
-            tokens + " 5",
-            tokens + " -1",
-            tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 1 1 0"),
-            tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 0 1 1"),
+            tokens + " 0",
+            tokens.rsplit(" ", 1)[0] + " 5",
+            tokens.rsplit(" ", 1)[0] + " -1",
+            tokens.replace(" 0 64 0 2 0 1 0 0", " 0 64 0 2 1 1 0 0"),
+            tokens.replace(" 0 64 0 2 0 1 0 0", " 0 64 0 2 0 1 1 0"),
+            tokens.replace(" 0 64 0 2 0 1 0 0", " 0 64 0 2 0 3 0 0"),
         ):
             with self.subTest(table=broken), self.assertRaises(ValueError):
                 module.validate_swapz_table(broken, 4096, lower, name)

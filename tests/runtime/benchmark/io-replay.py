@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Immutable trace preparation and owned-device replay for off/V3.
+"""Immutable trace preparation and owned-device replay for off/swapz.
 
 Synthetic BLOCK-PATH experiment, not Linux's actual swapon reclaim policy.
 Generation and rootless replay need no privilege. Block replay refuses unowned
@@ -234,7 +234,7 @@ def resolve_owned_nullblk(name, expected_lower_dev,
 
 
 def validate_swapz_table(table, logical_pages, lower_dev, disk_name):
-    """Qualify exactly one V3 mapping on the pinned RAM null_blk.
+    """Qualify exactly one swapz mapping on the pinned RAM null_blk.
 
     The target emits the original backing token in STATUSTYPE_TABLE,
     which may be either a major:minor or the exact owned /dev/<disk>.
@@ -242,36 +242,33 @@ def validate_swapz_table(table, logical_pages, lower_dev, disk_name):
     """
     rows = table.strip().splitlines()
     if len(rows) != 1:
-        raise ValueError("expected exactly one V3 DM table extent")
+        raise ValueError("expected exactly one swapz DM table extent")
     fields = rows[0].split()
-    if len(fields) not in (12, 13) or fields[:3] != [
+    if len(fields) != 12 or fields[:3] != [
         "0", str(logical_pages * PAGE // 512), "swapz"
     ]:
-        raise ValueError("unexpected V3 DM table geometry or arguments")
+        raise ValueError("unexpected swapz DM table geometry or arguments")
     if fields[3] != lower_dev:
         if fields[3] != f"/dev/{disk_name}":
-            raise ValueError("unowned V3 DM table backing path")
+            raise ValueError("unowned swapz DM table backing path")
         backing = Path(fields[3]).stat()
         if not stat.S_ISBLK(backing.st_mode) or (
             f"{os.major(backing.st_rdev)}:{os.minor(backing.st_rdev)}" != lower_dev
         ):
-            raise ValueError("V3 DM table backing block identity changed")
+            raise ValueError("swapz DM table backing block identity changed")
     if any(re.fullmatch(r"[0-9]+", value) is None for value in fields[4:]):
-        raise ValueError("non-numeric V3 configuration")
-    (read_budget, window, verify, gc_policy, coalesce_ms,
-     flush_fault, lower_bulk, write_fault) = map(int, fields[4:12])
-    retain_ms = int(fields[12]) if len(fields) == 13 else 0
+        raise ValueError("non-numeric swapz configuration")
+    (read_budget, window, verify, gc_policy, flush_fault,
+     lower_bulk, write_fault, retain_ms) = map(int, fields[4:12])
     if not (0 <= read_budget <= 3 and 1 <= window <= 64 and
             0 <= verify <= 1 and 0 <= gc_policy <= 2 and
-            0 <= coalesce_ms <= 4 and 0 <= lower_bulk <= 2 and
-            0 <= retain_ms <= 4):
-        raise ValueError("out-of-policy V3 benchmark geometry")
+            0 <= lower_bulk <= 2 and 0 <= retain_ms <= 4):
+        raise ValueError("out-of-policy swapz benchmark geometry")
     if flush_fault or write_fault:
-        raise ValueError("fault-injected V3 target is not a performance arm")
+        raise ValueError("fault-injected swapz target is not a performance arm")
     return {"read_budget": read_budget, "window": window,
             "verify": verify, "gc_policy": gc_policy,
-            "coalesce_ms": coalesce_ms, "lower_bulk": lower_bulk,
-            "retain_ms": retain_ms}
+            "lower_bulk": lower_bulk, "retain_ms": retain_ms}
 
 
 def check_owned_block(path, st, candidate, args, logical_pages):
@@ -478,13 +475,13 @@ def kernel_read_snapshot(path, identity):
     status = subprocess.run(["dmsetup", "status", str(path)], text=True,
                             capture_output=True, check=False, timeout=8)
     if status.returncode:
-        raise ValueError("owned V3 read telemetry unavailable")
+        raise ValueError("owned swapz read telemetry unavailable")
     counters = {}
     for field in KERNEL_READ_FIELDS:
         match = re.search(r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)",
                           status.stdout)
         if not match:
-            raise ValueError("owned V3 read telemetry missing " + field)
+            raise ValueError("owned swapz read telemetry missing " + field)
         counters[field] = int(match.group(1))
     return counters
 
@@ -493,18 +490,18 @@ def kernel_read_delta(before, after):
     if before is None and after is None:
         return None
     if before is None or after is None:
-        raise ValueError("incomplete V3 read telemetry")
+        raise ValueError("incomplete swapz read telemetry")
     counters = {field: after[field] - before[field]
                 for field in KERNEL_READ_FIELDS}
     if any(value < 0 for value in counters.values()):
-        raise ValueError("V3 read telemetry reset during measurement")
+        raise ValueError("swapz read telemetry reset during measurement")
     # Cache reuse can legitimately reduce metadata requests below payload
     # requests. Only counted payload block quantities must remain consistent.
     if (counters["read_payload_blocks"] < counters["read_payload_reqs"] or
             counters["read_full_extent_reqs"] +
             counters["read_two_block_skips"] > counters["read_meta_reqs"] or
             counters["read_full_cache_hits"] > counters["read_meta_cache_hits"]):
-        raise ValueError("inconsistent V3 read request accounting")
+        raise ValueError("inconsistent swapz read request accounting")
     return counters
 
 
@@ -525,13 +522,13 @@ def kernel_write_snapshot(path, identity):
     status = subprocess.run(["dmsetup", "status", str(path)], text=True,
                             capture_output=True, check=False, timeout=8)
     if status.returncode:
-        raise ValueError("owned V3 write telemetry unavailable")
+        raise ValueError("owned swapz write telemetry unavailable")
     counters = {}
     for field in KERNEL_WRITE_FIELDS:
         match = re.search(r"(?:^|\s)" + field + r"=(\d+)(?:\s|$)",
                           status.stdout)
         if not match:
-            raise ValueError("owned V3 write telemetry missing " + field)
+            raise ValueError("owned swapz write telemetry missing " + field)
         counters[field] = int(match.group(1))
     return counters
 
@@ -540,12 +537,12 @@ def kernel_write_delta(before, after):
     if before is None and after is None:
         return None
     if before is None or after is None:
-        raise ValueError("incomplete V3 write telemetry")
+        raise ValueError("incomplete swapz write telemetry")
     counters = {key: after[key] - before[key] for key in KERNEL_WRITE_FIELDS}
     if any(value < 0 for value in counters.values()):
-        raise ValueError("V3 write telemetry reset during measurement")
+        raise ValueError("swapz write telemetry reset during measurement")
     if sum(counters[key] for key in WRITE_WAIT_BINS) != counters["physical_write_reqs"]:
-        raise ValueError("inconsistent V3 lower write wait histogram")
+        raise ValueError("inconsistent swapz lower write wait histogram")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
@@ -889,7 +886,7 @@ def compare(args):
                 raise ValueError("INVALID COMPARISON: packed READ byte oracle mismatch")
         if packed[1].get("packed_close_delta") is not None and (
                 packed[1]["packed_close_delta"] <= 0):
-            raise ValueError("INVALID COMPARISON: V3 packed write not proven")
+            raise ValueError("INVALID COMPARISON: swapz packed write not proven")
     normalized = sorted(entries, key=lambda entry: CANDIDATES.index(entry["candidate"]))
     first, second = normalized
     identities = [entry.get("device_identity") for entry in normalized]

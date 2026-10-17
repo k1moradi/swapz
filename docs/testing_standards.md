@@ -95,3 +95,11 @@ history.
 Native engine tests call the same batched write entry point as the product.
 Tests that omit bulk callbacks thereby exercise its production sequential
 fallback; no test-only write wrapper is part of the engine API.
+
+
+The owned benchmark table validator must match the current Device Mapper
+constructor exactly. Removed constructor fields are removed from replay parsing
+in the same change; stale positional compatibility parsing is forbidden because
+it can reinterpret ordinary options as fault injection and falsely BLOCK a
+healthy product arm. Benchmark diagnostics and errors use the product name
+`swapz`, never implementation-generation labels.
