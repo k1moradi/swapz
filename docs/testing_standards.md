@@ -220,3 +220,9 @@ low-numbered victim, while preserving the exact reserve count, one-destination
 rule, forbidden open/victim checks, fail-closed handoff, authoritative mapping
 CRC/generation state, and foreground progress. This native evidence does not
 qualify sustained loaded GC; that remains a separate release gate.
+
+
+Engine-level GC rotation follows the same circular destination order as the
+authority test. Compressed relocation coverage must validate byte-exact
+readback and role safety without freezing the retired segment-zero restart
+sequence.

@@ -160,10 +160,10 @@ static int test_compressed_gc_handoff(void)
 	CHECK(write_one(2) == 0);
 	CHECK(verify_page(0) == 0 && verify_page(2) == 0);
 	CHECK(evacuate(1) == 0);
-	CHECK(roles[1] == 0 && roles[0] == 1 && maps[1].start_block == 0);
+	CHECK(roles[1] == 0 && roles[3] == 1 && maps[1].start_block == 768);
 	CHECK(write_one(3) == 0);
 	CHECK(evacuate(2) == 0); /* two survivor pages0 and2 */
-	CHECK(roles[2] == 0 && roles[1] == 1);
+	CHECK(roles[2] == 0 && roles[0] == 1);
 	for (i = 0; i < 4; ++i)
 		CHECK(verify_page(i) == 0);
 	CHECK(write_one(4) == 0 && verify_page(4) == 0);
