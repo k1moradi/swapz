@@ -210,7 +210,13 @@ static int test_full_window_and_selective_reads(void)
 				 (size_t)m->start_block * SWAPZ_BLOCK_BYTES,
 				 m->extent_blocks * SWAPZ_BLOCK_BYTES,
 				 m->record_index, &decoded, &stored) == 0);
-		expected = swapz_record_read_blocks(&decoded);
+		{
+			swapz_u32 first = decoded.payload_offset / SWAPZ_BLOCK_BYTES;
+			swapz_u32 last = ((swapz_u32)decoded.payload_offset +
+				decoded.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+
+			expected = (int)(last - first + 1U + (first ? 1U : 0U));
+		}
 		CHECK(expected >= 1 && expected <= 3);
 		swapz_engine_invalidate_read_cache(&engine);
 		disk.read_blocks = 0;

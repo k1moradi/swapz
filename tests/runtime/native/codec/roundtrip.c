@@ -63,8 +63,6 @@ static int test_class(unsigned int bytes, unsigned int count)
 		CHECK(d.generation == 200 + index);
 		CHECK(d.payload_length == 2072);
 		CHECK(memcmp(readable, inputs[index], 2072) == 0);
-		CHECK(swapz_record_read_blocks(&d) >= 1);
-		CHECK(swapz_record_read_blocks(&d) <= 3);
 	}
 	CHECK(swapz_lookup(extent, bytes, count, &d, &readable) == -ERANGE);
 	CHECK(readable == NULL);
@@ -155,18 +153,12 @@ static int test_read_spans(void)
 	CHECK(swapz_seal(&b) == 0);
 	CHECK(swapz_lookup(extent, SWAPZ_MAX_EXTENT_BYTES, 0, &d, &p) == 0);
 	CHECK(d.payload_offset == 14312);
-	CHECK(swapz_record_read_blocks(&d) == 2); /* metadata + payload block 3 */
 	CHECK(swapz_lookup(extent, SWAPZ_MAX_EXTENT_BYTES, 1, &d, &p) == 0);
 	CHECK(d.payload_offset == 12240);
-	CHECK(swapz_record_read_blocks(&d) == 3); /* metadata + two payload blocks */
 	CHECK(swapz_lookup(extent, SWAPZ_MAX_EXTENT_BYTES, 5, &d, &p) == 0);
 	CHECK(d.payload_offset == 3952);
-	CHECK(swapz_record_read_blocks(&d) == 2); /* payload spans blocks 0-1 */
 	CHECK(swapz_lookup(extent, SWAPZ_MAX_EXTENT_BYTES, 6, &d, &p) == 0);
 	CHECK(d.payload_offset == 1880);
-	CHECK(swapz_record_read_blocks(&d) == 1); /* wholly in metadata block 0 */
-	d.payload_length = 0;
-	CHECK(swapz_record_read_blocks(&d) == -EINVAL);
 	return 0;
 }
 

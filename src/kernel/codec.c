@@ -280,19 +280,3 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	return 0;
 }
 
-int swapz_record_read_blocks(const struct swapz_decoded *record)
-{
-	swapz_u32 first, last;
-
-	if (!record || !record->payload_length ||
-	    record->payload_length > SWAPZ_MAX_COMPRESSED ||
-	    record->payload_offset >= SWAPZ_MAX_EXTENT_BYTES ||
-	    record->payload_length > SWAPZ_MAX_EXTENT_BYTES -
-				     record->payload_offset)
-		return -EINVAL;
-	first = record->payload_offset / SWAPZ_BLOCK_BYTES;
-	last = ((swapz_u32)record->payload_offset +
-		record->payload_length - 1U) / SWAPZ_BLOCK_BYTES;
-	/* Uncached metadata always costs physical 4KiB block zero. */
-	return (int)(last - first + 1U + (first ? 1U : 0U));
-}

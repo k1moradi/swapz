@@ -82,3 +82,8 @@ The authority header exports only implemented, production-used operations.
 The current compressed read path is metadata peek plus
 `swapz_read_authoritative_peeked()`; the older reparsing read wrapper and
 unimplemented range-discard declaration are not retained for test convenience.
+
+
+Codec interfaces likewise remain product-facing. Tests may derive expected
+read-span geometry locally from decoded offsets, but that arithmetic is not a
+reason to export an otherwise unused codec helper.

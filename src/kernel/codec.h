@@ -81,7 +81,6 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	     struct swapz_decoded *out);
 int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	       struct swapz_decoded *out, const swapz_u8 **payload);
-int swapz_record_read_blocks(const struct swapz_decoded *record);
 swapz_u32 swapz_crc32c_bytes(const void *bytes, swapz_u32 length);
 
 #endif
