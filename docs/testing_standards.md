@@ -184,3 +184,11 @@ that admitted-tail evidence observes worker-local FIFO entries before later
 the learned target below the four-record floor. These are scheduling-policy
 checks only; acceptance still depends on useful throughput, lower bytes and
 requests, latency and loaded correctness.
+
+
+Source-contract helpers that extract only a function body must assert only text
+that can actually occur inside that body. Signature parameters belong to a
+full-source/signature assertion, not to a body-only search. When a production
+helper gains parameters, every call-site spelling asserted by source contracts
+must be updated in the same test change; do not keep stale call syntax as a
+compatibility alias.
