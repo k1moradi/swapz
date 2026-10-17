@@ -1,19 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Actual Device Mapper target and research smoke are NEVER linked together.
 ifneq ($(KERNELRELEASE),)
-ifeq ($(SWAPZ_BUILD_SMOKE),1)
-obj-m += swapz_extent.o
-swapz_extent-y := codec.o authority.o engine.o smoke.o
-else
 obj-m += dm-swapz.o
 dm-swapz-y := dm-target.o codec.o authority.o engine.o
-endif
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
 SWAPZ_ROOT := $(abspath $(CURDIR)/../..)
-ifeq ($(SWAPZ_BUILD_SMOKE),1)
-SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/research
-else ifeq ($(W),1)
+ifeq ($(W),1)
 SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/w1
 else ifeq ($(W),2)
 SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/w2
@@ -34,7 +26,7 @@ all:
 	  if ! printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
 	    printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" > "$$header"; \
 	  fi
-	$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" SWAPZ_BUILD_SMOKE="$(SWAPZ_BUILD_SMOKE)" modules
+	$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" modules
 
 clean:
 	@if test -d "$(SWAPZ_STAGE)" && test -f "$(KDIR)/Makefile"; then \

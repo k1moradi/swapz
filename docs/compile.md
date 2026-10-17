@@ -1,4 +1,4 @@
-# Compile — V3-only Active Build
+# Compile — swapz active build
 
 **Immutable naming policy (read before every prompt):** The project is `swapz`;
 the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the
@@ -11,7 +11,7 @@ release metadata and source paths, not the project/module/target name. Keep
 `SWZ3` as the distinct V3 on-disk format; the separate safe `swapzctl`
 utility does not rename the project or module.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/swapz throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
 
 
 **Required per-task context:** [README.md](README.md), [VISION.md](VISION.md),
@@ -31,13 +31,12 @@ All generated software artifacts belong under the **one persistent
 
 | Output | Location |
 |---|---|
-| Active/default V3 module | `build/kernel/experimental/dm-swapz.ko` |
-| V3 research smoke | `build/kernel/research/swapz_extent_v3.ko` |
+| Active/default swapz module | `build/kernel/experimental/dm-swapz.ko` |
 | Native kernel C test binaries | `build/tests/native/` |
 | Optional userspace test cache | `build/python-cache/` |
 | Archival V2.2 module (only if explicitly requested) | `build/kernel/stable/dm-swapz.ko` |
 
-V3 source: `src/kernel/{dm-target,engine,authority,codec}.c`.
+swapz source: `src/kernel/{dm-target,engine,authority,codec}.c`.
 Kbuild stages source in `build/kernel/experimental` (for older kernel
 header compatibility) and writes object/`*.ko` there. `dkms.conf`
 reads the canonical version and retains **`AUTOINSTALL="no"`** to prevent
@@ -63,11 +62,7 @@ build even when no source changed. The staging recipe compares
 content with `cmp -s` before copying Makefile/C/header inputs; it
 **never uses unconditional `cp -f`**, which previously invalidated
 all kernel object timestamps on each test. Kbuild itself decides whether
-an object needs recompilation. Separate staged outputs isolate
-normal `build/kernel/experimental/`, `W=1` at `build/kernel/w1/`,
-`W=2` at `build/kernel/w2/`, and the memory-only research smoke in
-`build/kernel/research/`, preventing warning-flag changes from
-recompiling or replacing the kernel module used for safe loaded tests.
+an object needs recompilation. Separate staged outputs isolate normal `build/kernel/experimental/`, `W=1` at `build/kernel/w1/`, and `W=2` at `build/kernel/w2/`, preventing warning-flag changes from recompiling or replacing the kernel module used for safe loaded tests.
 
 The `test` recipe deliberately has **no `.NOTPARALLEL` directive**.
 Its commands are instead sequential failure gates: prerequisite
@@ -163,7 +158,7 @@ make test        # rootless checks, W=1/W=2, then owned-RAM smoke and paired ben
 native-suite make goals are not a public user interface. Missing kernel
 headers fail the build/test. `make test` runs the rootless gates then
 `tests/tools/test-loaded.sh`, which executes actual owned-RAM kernel smoke and
-eight off/V3 runs: four each at 10 MiB/s plus 1ms completion
+eight off/swapz runs: four each at 10 MiB/s plus 1ms completion
 delay and 80 MiB/s plus 0.15ms completion delay (each ABBA
 sync/async and alternating baseline-first order). The
 loaded phase requires root or previously authorized `sudo -n`; it
@@ -189,7 +184,7 @@ internal rootless test script without privileged device access.
 `.github/workflows/extent-v3-codec.yml`: real V3 production-C
 source/sanitizer contracts and W=1/W=2 builds.
 `.github/workflows/project-goals.yml`: V3 native C and two-arm
-off/V3 fixture/oracle tests; same-commit standards updates and build
+off/swapz fixture/oracle tests; same-commit standards updates and build
 hygiene. The historical V2.2 kernel-geometry workflow is manual-only; combined rootless source-safety tests remain automated for existing invariants, **not** as a V2.2 benchmark requirement. See
 [testing_standards.md](testing_standards.md) for actual loaded-kernel
 gates. Module build PASS ≠ loaded/physical performance.
@@ -237,7 +232,7 @@ cd ~/swapz && git pull --ff-only origin main && make test
 This one supported test invocation first builds the current V3 kernel
 module and userspace oracle, executes production-C, replay/source/safety
 checks and W=1/W=2 builds, then runs an isolated loaded-kernel smoke
-followed by four 20 MiB/s rate-limited off/V3 benchmark pairs
+followed by four 20 MiB/s rate-limited off/swapz benchmark pairs
 (sync/async/async/sync). No separate `make verify`, `make run`,
 `make deploy`, suite-specific Make goal or direct helper invocation is an
 official testing alternative.
@@ -260,7 +255,7 @@ were qualified at their original commits. Any earlier testing Make goals,
 per-suite commands or standalone script invocations mentioned in that
 history have been retired as public interfaces. **Use only `make test`
 for all current testing and benchmarking.** It contains the formerly
-separate native, loaded-smoke and off/V3 benchmark stages.
+separate native, loaded-smoke and off/swapz benchmark stages.
 
 ## 2026-10-14 null_blk configfs naming fix
 
@@ -285,14 +280,14 @@ captures the **before/after** V3 and backing-device write snapshots,
 requires the expected nine all-zero logical page elisions in its fixed
 192-write case, and reconciles target completed bytes with the
 independent 512B-sector delta. This is a regression gate for the
-zero-page optimization, not a replacement for a matched off/V3
+zero-page optimization, not a replacement for a matched off/swapz
 performance benchmark. If it fails, the harness attempts only its
 existing ordinary identity-verified teardown or quarantines resources;
 never changes active swap. Build artifacts remain under `build/`.
 
 ## Owned-RAM benchmark (included in make test)
 
-The full `make test` invocation includes the off/V3 replay after
+The full `make test` invocation includes the off/swapz replay after
 successful rootless contracts, kernel builds and loaded device oracle.
 It creates newly owned RAM-backed devices, verifies the independent
 lower I/O counters and readback, then performs safe teardown or
@@ -331,3 +326,8 @@ Only `make`, `make install`, `make uninstall` and `make test` are permitted at r
 `make` also compiles a genuine V3 **read-only** `swapzctl` (version, status, help) under `build/userspace/`. `make install` is written to stage the versioned DKMS source at `/usr/src/swapz-<version>`, install `swapzctl` into `PREFIX/sbin` (default `/usr/local/sbin`), and the verified owned-device test binary under `PREFIX/libexec/swapz`. It never installs the unsafe retired V2 `swapzctl`, performs activation or enables autoload. `make uninstall` checks installed file hashes, version and ownership, refuses loaded modules and foreign/modified files, and removes only the matching version after successful DKMS removal; partial DKMS failures attempt a safe version-scoped rollback. Rootless `package-dkms-test.py` runs the real packaging script against fake DKMS inside `build/tests/package-sandbox`, including success, failed build rollback, tampering, and failed removal. **No privileged host installation or uninstall has been run.** The owner will not execute either command until production-safety approval; mock success is not system DKMS qualification.
 
 Explicit `make all` and combined invocations such as `make install uninstall` are also **rejected**: `all` is the internal default recipe for `make`, not a fifth public command. CI's Make contract test checks these cases.
+
+
+## Single-product build cleanup
+
+The standalone memory-only kernel smoke module and the retired C++ model have been removed from the working tree. They were neither shipped nor invoked by the official `make test` path, while their separate build switches and artifacts increased maintenance surface. Production codec/authority/engine code is exercised directly by the native C suite and the actual `dm-swapz.ko` W=1/W=2/loaded qualification. Do not recreate a second research module or historical model beside the product; use Git history for archival reproduction.

@@ -124,13 +124,13 @@ regressions remain under `tests/`. The root Make API retains exactly four
 approved commands; moving scripts must not add a fifth public goal.
 Old V2 scripts accepting arbitrary block devices or using the retired
 Device Mapper target remain accessible only from immutable Git history,
-not runnable within current V3 helper entry points.
+not runnable within current swapz helper entry points.
 
 ## Absolute host safety
 
 Never reboot, `swapoff` or `swapon`. Never touch `/dev/sdb1`, `/swapfile`, active swap, physical storage, unrelated DM targets or unowned null_blk. Host tests require exactly owned, uniquely identified **RAM-backed null_blk**, verified major/minor, table UUID and holders, safe ordinary teardown, and quarantine if unresolved I/O remains. Real media experiments are separate owner-authorized future work. Source CI and null_blk results are not physical wear evidence.
 
-## Current V3 development focus (after retirement of V2.2)
+## Current development focus
 
 Prioritize the **C-level singleton write-window bottleneck**, physical
 extent geometry, actual on-device write-byte/request reduction versus
@@ -143,7 +143,7 @@ safety still precede any optimization.
 ## Safe module deployment for development
 
 `tests/tools/device-roundtrip.c` is the minimal **compiled C** loaded-I/O
-oracle for an exact V3 mapping, not a new userspace swap controller.
+oracle for an exact swapz mapping, not a new userspace swap controller.
 It does direct aligned byte-exact reads/writes, overwrites and flushes.
 `tests/tools/deploy-nullblk.sh` is the thin privileged provisioning and
 teardown guard. Only owned RAM-backed configfs null_blk and matching
@@ -180,3 +180,8 @@ LZ4-attempted pages and not observed lower-media erase operations.
 Active product C/C++ and headers live under `src/`; test-only native code, Python and test orchestration live under `tests/`; maintained Markdown lives under `docs/`; non-test packaging helpers live under `packaging/`. Do not recreate top-level `kernel/`, `userspace/`, `tools/`, or component-local Markdown trees.
 
 Implementation paths, symbol prefixes, helper names, benchmark candidates, workflow names and utility names are version-neutral. Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the candidate/product name. `SWZ3` is the explicit exception because it identifies the disk format. Release numbers belong in `src/kernel/VERSION`, not in implementation names.
+
+
+### Dead-code rule
+
+Keep the working tree centered on code that ships or directly qualifies the current product. Once an experiment is rejected and its result is recorded, remove its production branches, telemetry and private build mode unless a current safety invariant still depends on them. Historical reproduction belongs in immutable Git history, not dormant source, alternate modules or unused model targets. Before deleting code, verify all active build, test and CI consumers and preserve equivalent production-C correctness coverage.

@@ -78,7 +78,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 self.assertIn("Device Mapper target is exactly `swapz`",
                               document)
                 self.assertIn("module alias is `dm-swapz`", document)
-        self.assertIn("SWAPZ_BUILD_SMOKE", MK)
+        self.assertNotIn("SWAPZ_BUILD_SMOKE", MK)
+        self.assertNotIn("swapz_extent", MK)
         # A public README must link to the single version source rather
         # than becoming a second, manually edited alpha-number string.
         self.assertIn(
