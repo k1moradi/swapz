@@ -104,7 +104,7 @@ for regime in sd_emulated ssd_emulated; do
         fi
         arguments+=(--shared-plan "$shared_plan")
         if (( index % 2 )); then
-            arguments+=(--v3-first)
+            arguments+=(--swapz-first)
         fi
         printf 'START_OWNED_RAM_PAIR_ASYNC_PREPARE=%s\n' "$async_prepare"
         "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
@@ -136,7 +136,7 @@ for regime in sd_emulated ssd_emulated; do
             fi
             arguments+=(--shared-plan "$shared_plan")
             if (( index % 2 )); then
-                arguments+=(--v3-first)
+                arguments+=(--swapz-first)
             fi
             printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
             "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"

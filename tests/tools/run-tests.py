@@ -84,7 +84,7 @@ def paired_provenance_error(row, label):
     arms = row.get("arms", {})
     for field in BENCHMARK_PROVENANCE_FIELDS:
         values = [arms.get(candidate, {}).get(field)
-                  for candidate in ("off", "v3")]
+                  for candidate in ("off", "swapz")]
         if (any(not isinstance(value, str) or not value for value in values) or
                 len(set(values)) != 1):
             return {"overall": "INCONCLUSIVE",
@@ -229,7 +229,7 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 where = (regime + " " if regime else "")
                 phase = f"owned RAM {where}comparison {pair_number}/8 ({mode})"
             elif (match := re.fullmatch(
-                    r"BENCH_IO_PHASE=(off|v3):(prefill|mixed|packed_read)", line)):
+                    r"BENCH_IO_PHASE=(off|swapz):(prefill|mixed|packed_read)", line)):
                 phase += f" [{match.group(1)} {match.group(2)}]"
             elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
                 phase = f"after completed owned RAM comparison {pair_number}/8"
@@ -355,8 +355,8 @@ def parse_sessions(output):
                     "completion_nsec": int(match.group(2)),
                     "irqmode": int(match.group(3)),
                 }
-        elif current is not None and line.startswith(("V3_STATUS_BEFORE=", "V3_STATUS_AFTER=")):
-            name = "before" if line.startswith("V3_STATUS_BEFORE=") else "after"
+        elif current is not None and line.startswith(("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
+            name = "before" if line.startswith("SWAPZ_STATUS_BEFORE=") else "after"
             status_text = line.partition("=")[2]
             allowed = ("burst_tail_flushes", "packed_early_commits",
                        "single_pack_deferrals", "accepted_burst_extensions",
@@ -386,7 +386,7 @@ def parse_sessions(output):
                 obj = json.loads(line)
             except (ValueError, TypeError):
                 continue
-            if obj.get("candidate") in ("off", "v3") and \
+            if obj.get("candidate") in ("off", "swapz") and \
                     obj.get("verdict") == "PASS":
                 candidate = obj["candidate"]
                 rates = obj.get("throughput_mbps") or {}
@@ -492,7 +492,7 @@ def parse_write_saturation(output):
                 obj = json.loads(line)
             except (ValueError, TypeError):
                 continue
-            if obj.get("candidate") not in ("off", "v3") or obj.get("verdict") != "PASS":
+            if obj.get("candidate") not in ("off", "swapz") or obj.get("verdict") != "PASS":
                 continue
             candidate = obj["candidate"]
             rates = obj.get("throughput_mbps") or {}
@@ -541,13 +541,13 @@ def write_saturation_verdict(sessions):
                     "reason": f"{regime}: QD1/4/8/32 sync+async pilot required"}
         expected = MODEL_SPECS[regime]
         for index, row in enumerate(rows):
-            if row.get("status") != "PASS" or set(row.get("arms", {})) != {"off", "v3"}:
+            if row.get("status") != "PASS" or set(row.get("arms", {})) != {"off", "swapz"}:
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: incomplete write-only pair"}
             provenance_error = paired_provenance_error(row, f"{regime}: write-only")
             if provenance_error is not None:
                 return provenance_error
-            if row.get("order") != ("v3-first" if index % 2 else "off-first"):
+            if row.get("order") != ("swapz-first" if index % 2 else "off-first"):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only replay order mismatch"}
             model = row.get("device_model")
@@ -596,17 +596,17 @@ def write_saturation_verdict(sessions):
                 "qd": row["qd"],
                 "mode": "async" if row["async_prepare"] else "sync",
                 "raw_write_mbps": row["arms"]["off"]["input_write_mbps"],
-                "v3_write_mbps": row["arms"]["v3"]["input_write_mbps"],
-                "v3_to_raw_write_ratio": (
-                    row["arms"]["v3"]["input_write_mbps"] /
+                "swapz_write_mbps": row["arms"]["swapz"]["input_write_mbps"],
+                "swapz_to_raw_write_ratio": (
+                    row["arms"]["swapz"]["input_write_mbps"] /
                     row["arms"]["off"]["input_write_mbps"]),
-                "v3_logical_to_lower_ratio": (
-                    row["arms"]["v3"]["logical_write_bytes"] /
-                    row["arms"]["v3"]["lower_write_bytes"]),
+                "swapz_logical_to_lower_ratio": (
+                    row["arms"]["swapz"]["logical_write_bytes"] /
+                    row["arms"]["swapz"]["lower_write_bytes"]),
                 "raw_lower_write_requests": row["arms"]["off"]["lower_write_requests"],
-                "v3_lower_write_requests": row["arms"]["v3"]["lower_write_requests"],
+                "swapz_lower_write_requests": row["arms"]["swapz"]["lower_write_requests"],
                 "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
-                "v3_write_p99_ms": row["arms"]["v3"]["write_p99_ms"],
+                "swapz_write_p99_ms": row["arms"]["swapz"]["write_p99_ms"],
             } for row in rows]
             for regime, rows in regimes.items()
         },
@@ -625,8 +625,8 @@ def benchmark_verdicts(sessions):
         rows = [s for s in sessions if s.get("regime") == regime]
         if len(rows) != 4 or [s.get("async_prepare") for s in rows] != [0, 1, 1, 0] \
                 or any(s.get("status") != "PASS" or
-                       set(s.get("arms", {})) != {"off", "v3"} or
-                       s.get("order") != ("v3-first" if i % 2 else "off-first")
+                       set(s.get("arms", {})) != {"off", "swapz"} or
+                       s.get("order") != ("swapz-first" if i % 2 else "off-first")
                        for i, s in enumerate(rows)):
             return {"overall": "INCOMPLETE",
                     "reason": f"{regime}: four valid ABBA/ABAB pairs required"}
@@ -732,8 +732,8 @@ def benchmark_verdicts(sessions):
     verdicts = {}
     for regime, rows in regimes.items():
         arms = {"off": [s["arms"]["off"] for s in rows],
-                "sync": [s["arms"]["v3"] for s in rows if not s["async_prepare"]],
-                "async": [s["arms"]["v3"] for s in rows if s["async_prepare"]]}
+                "sync": [s["arms"]["swapz"] for s in rows if not s["async_prepare"]],
+                "async": [s["arms"]["swapz"] for s in rows if s["async_prepare"]]}
         columns = {}
         keys = ("input_write_mbps", "output_lower_write_mbps",
                 "swap_in_read_mbps", "swap_in_read_p99_ms",
@@ -798,7 +798,7 @@ def benchmark_verdicts(sessions):
         criteria = {}
         for mode in ("sync", "async"):
             paired = [s for s in rows if s["async_prepare"] == (mode == "async")]
-            change = [(s["arms"]["v3"]["input_write_mbps"] /
+            change = [(s["arms"]["swapz"]["input_write_mbps"] /
                        s["arms"]["off"]["input_write_mbps"] - 1)
                       for s in paired]
             def decision(vals):
@@ -811,16 +811,16 @@ def benchmark_verdicts(sessions):
                 "lower_write_saved_fraction": (
                     1 - columns[mode]["lower_write_bytes"] / raw["lower_write_bytes"]),
                 "lower_write_savings": (
-                    "PASS" if all(s["arms"]["v3"]["lower_write_bytes"] <
+                    "PASS" if all(s["arms"]["swapz"]["lower_write_bytes"] <
                                   s["arms"]["off"]["lower_write_bytes"]
                                   for s in paired) else "NO_GAIN"),
                 "mixed_read_p99": (
-                    "LOWER" if all(s["arms"]["v3"]["swap_in_read_p99_ms"] <
+                    "LOWER" if all(s["arms"]["swapz"]["swap_in_read_p99_ms"] <
                                    s["arms"]["off"]["swap_in_read_p99_ms"]
                                    for s in paired) else "NOT_LOWER"),
                 "packed_4mib_sequential": (
                     "FASTER" if all(
-                        s["arms"]["v3"]["packed_read"]["passes"]["sequential"]["seconds"] <
+                        s["arms"]["swapz"]["packed_read"]["passes"]["sequential"]["seconds"] <
                         s["arms"]["off"]["packed_read"]["passes"]["sequential"]["seconds"]
                         for s in paired) else "NOT_FASTER"),
             }
@@ -1004,13 +1004,13 @@ def print_bench(result):
             for point in saturation["regimes"][regime]:
                 print(f"  {point['qd']:>2}  {point['mode']:<5} "
                       f"{point['raw_write_mbps']:>10.2f} "
-                      f"{point['v3_write_mbps']:>10.2f} "
-                      f"{point['v3_to_raw_write_ratio']:>8.3f} "
-                      f"{point['v3_logical_to_lower_ratio']:>14.3f} "
+                      f"{point['swapz_write_mbps']:>10.2f} "
+                      f"{point['swapz_to_raw_write_ratio']:>8.3f} "
+                      f"{point['swapz_logical_to_lower_ratio']:>14.3f} "
                       f"{point['raw_lower_write_requests']:>9.0f} "
-                      f"{point['v3_lower_write_requests']:>8.0f} "
+                      f"{point['swapz_lower_write_requests']:>8.0f} "
                       f"{point['raw_write_p99_ms']:>10.2f} "
-                      f"{point['v3_write_p99_ms']:>9.2f}")
+                      f"{point['swapz_write_p99_ms']:>9.2f}")
         print("  PILOT LIMITATION: one pair per mode/QD; no confidence interval "
               "and no confirmatory performance verdict.")
     else:

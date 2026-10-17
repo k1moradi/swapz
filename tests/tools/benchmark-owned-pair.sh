@@ -22,10 +22,10 @@ PACKED_READ=1
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
-REPLAY_V3_FIRST=0
+REPLAY_SWAPZ_FIRST=0
 # The final internal suffix controls safe replay order only.
-if [[ $# -gt 1 && ${!#} == --v3-first ]]; then
-    REPLAY_V3_FIRST=1
+if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
+    REPLAY_SWAPZ_FIRST=1
     set -- "${@:1:$(( $# - 1 ))}"
 fi
 SHARED_PLAN=""
@@ -99,7 +99,7 @@ if (( WRITE_ONLY_QD )); then
     READ_PCT=0
     PACKED_READ=0
 fi
-if (( REPLAY_V3_FIRST )) &&
+if (( REPLAY_SWAPZ_FIRST )) &&
    [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
     echo 'BLOCKED: V3-first requires owned medium QD32' >&2
     exit 2
@@ -435,7 +435,7 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --reader-pages 256 --qd "$QD" --read-pct "$READ_PCT" \
     --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 fi
-note "V3_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
+note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 PACKED_ARGS=()
 (( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
 replay_off() {
@@ -457,15 +457,15 @@ replay_v3() {
         --fixture "$SESSION/fixture.bin" \
         --trace "$SESSION/plan/trace.jsonl" \
         --manifest "$SESSION/plan/manifest.json" \
-        --candidate v3 --source-sha "$SOURCE" \
-        --device "/dev/mapper/$DMNAME" --result "$SESSION/v3.json" \
+        --candidate swapz --source-sha "$SOURCE" \
+        --device "/dev/mapper/$DMNAME" --result "$SESSION/swapz.json" \
         "${PACKED_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[1]}" \
         --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
         --expected-dm-uuid "$DMUUID" || fail 'V3 replay rejected'
 }
-if (( REPLAY_V3_FIRST )); then
-    note 'REPLAY_ORDER=v3-first'
+if (( REPLAY_SWAPZ_FIRST )); then
+    note 'REPLAY_ORDER=swapz-first'
     replay_v3
     replay_off
 else
@@ -473,10 +473,10 @@ else
     replay_off
     replay_v3
 fi
-v3_status_after="$(dmsetup status "$DMNAME")"
-note "V3_STATUS_AFTER=$v3_status_after"
+swapz_status_after="$(dmsetup status "$DMNAME")"
+note "SWAPZ_STATUS_AFTER=$swapz_status_after"
 if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
-    if [[ "$v3_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
+    if [[ "$swapz_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
         (( ${BASH_REMATCH[1]} > 0 )) ||
             fail 'async preparation never started while lower WRITE was active'
         note "PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=${BASH_REMATCH[1]}"
@@ -485,6 +485,6 @@ if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
     fi
 fi
 python3 -B tests/runtime/benchmark/io-replay.py compare \
-    --reports "$SESSION/off.json" "$SESSION/v3.json" |
+    --reports "$SESSION/off.json" "$SESSION/swapz.json" |
     tee "$SESSION/pair.json" || fail 'pair verification rejected'
 note 'PASS: bounded same-work pilot, not sustained GC/CPU/p99 qualification'
