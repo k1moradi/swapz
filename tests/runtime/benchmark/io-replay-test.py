@@ -387,14 +387,14 @@ class PairReplayContract(unittest.TestCase):
                                        "owned_disk": "nullb0",
                                        "lower_major_minor": "251:0",
                                        "dm_uuid": None}}
-            v3 = {**base, "candidate": "swapz", "achieved_iops": 188.0,
+            swapz = {**base, "candidate": "swapz", "achieved_iops": 188.0,
                   "device_identity": {"device": "253:0",
                                       "owned_disk": "nullb1",
                                       "lower_major_minor": "251:1",
                                       "dm_uuid": "SWZTEST-00001"}}
-            paths = [directory / "off.json", directory / "v3.json"]
+            paths = [directory / "off.json", directory / "swapz.json"]
             def compare():
-                for location, report in zip(paths, (off, v3)):
+                for location, report in zip(paths, (off, swapz)):
                     location.write_text(json.dumps(report))
                 output = io.StringIO()
                 with contextlib.redirect_stdout(output):
@@ -411,7 +411,7 @@ class PairReplayContract(unittest.TestCase):
                 self.assertAlmostEqual(rates["lower_write_mbps"], 0.2048)
                 self.assertAlmostEqual(rates["lower_read_mbps"], 0.2048)
                 self.assertEqual(rates["write_input_per_lower_byte"], 1.0)
-            v3["lower_io"] = {**base["lower_io"],
+            swapz["lower_io"] = {**base["lower_io"],
                               "lower_write_bytes": 102400}
             candidate = compare()
             self.assertAlmostEqual(
@@ -423,10 +423,10 @@ class PairReplayContract(unittest.TestCase):
                 2.0
             )
             self.assertAlmostEqual(candidate["lower_write_bytes_saved_fraction"], 0.5)
-            v3["lower_io"] = base["lower_io"]
-            off["iops_requested"] = v3["iops_requested"] = 0
-            v3["achieved_iops"] = 250
-            v3["seconds"] = 0.4
+            swapz["lower_io"] = base["lower_io"]
+            off["iops_requested"] = swapz["iops_requested"] = 0
+            swapz["achieved_iops"] = 250
+            swapz["seconds"] = 0.4
             unpaced = compare()
             self.assertEqual(unpaced["rate_mode"], "unpaced")
             self.assertEqual(unpaced["performance_qualification"],
@@ -436,21 +436,21 @@ class PairReplayContract(unittest.TestCase):
                 unpaced["logical_write_mbps_ratio_swapz_to_off"], 2.5)
             self.assertAlmostEqual(
                 unpaced["lower_write_mbps_ratio_swapz_to_off"], 2.5)
-            off["iops_requested"] = v3["iops_requested"] = 500
-            v3["seconds"] = 1.0
-            v3["achieved_iops"] = 120
+            off["iops_requested"] = swapz["iops_requested"] = 500
+            swapz["seconds"] = 1.0
+            swapz["achieved_iops"] = 120
             self.assertEqual(compare()["performance_qualification"],
                              "INCONCLUSIVE_UNMATCHED_ACHIEVED_LOAD")
-            v3["achieved_iops"] = 188
-            v3["device_identity"]["lower_major_minor"] = "251:0"
+            swapz["achieved_iops"] = 188
+            swapz["device_identity"]["lower_major_minor"] = "251:0"
             with self.assertRaisesRegex(ValueError, "not independent"):
                 compare()
-            v3["device_identity"]["lower_major_minor"] = "251:1"
-            v3["lower_io"] = None
+            swapz["device_identity"]["lower_major_minor"] = "251:1"
+            swapz["lower_io"] = None
             with self.assertRaisesRegex(ValueError, "missing independent"):
                 compare()
-            v3["lower_io"] = base["lower_io"]
-            v3["source_sha"] = "2" * 40
+            swapz["lower_io"] = base["lower_io"]
+            swapz["source_sha"] = "2" * 40
             with self.assertRaisesRegex(ValueError, "revision mismatch"):
                 compare()
 

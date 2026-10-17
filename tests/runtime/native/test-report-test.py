@@ -17,7 +17,7 @@ spec.loader.exec_module(runner)
 
 
 def arm(candidate, *, mode, regime):
-    v3 = candidate == "swapz"
+    swapz = candidate == "swapz"
     raw_mbps = 14 if regime == "sd_emulated" else 32
     cand_mbps = (20 if mode == 0 else 20.01) if regime == "sd_emulated" else (
         24 if mode == 0 else 24.01)
@@ -25,20 +25,20 @@ def arm(candidate, *, mode, regime):
     packed = {
         "logical_bytes": 4194304,
         "logical_image_sha256": "d" * 64,
-        "packed_close_delta": 4 if v3 else None,
-        "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ" if v3
+        "packed_close_delta": 4 if swapz else None,
+        "qualification": ("OWNED_PACK_READY_AND_VERIFIED_4MIB_READ" if swapz
                           else "ROOTLESS_NO_PACK_PROOF"),
         "passes": {
             key: {
                 "logical_bytes": 4194304,
                 "verified_pages": 1024,
                 "verified_image_sha256": "d" * 64,
-                "seconds": raw_read_time * (0.9 if v3 else 1.),
-                "useful_read_mbps": 4.19 if not v3 else 4.65,
-                "read_p99_ms": 2 if v3 else 3,
+                "seconds": raw_read_time * (0.9 if swapz else 1.),
+                "useful_read_mbps": 4.19 if not swapz else 4.65,
+                "read_p99_ms": 2 if swapz else 3,
                 "lower_io": {
-                    "lower_read_bytes": 6291456 if v3 else 4194304,
-                    "lower_read_requests": 1536 if v3 else 1024,
+                    "lower_read_bytes": 6291456 if swapz else 4194304,
+                    "lower_read_requests": 1536 if swapz else 1024,
                 },
                 "kernel_read_path": ({
                     "read_meta_reqs": 1024,
@@ -51,7 +51,7 @@ def arm(candidate, *, mode, regime):
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
-                } if v3 else None),
+                } if swapz else None),
                 "replay_cpu_user_s": .15,
                 "replay_cpu_system_s": .12,
                 "replay_peak_rss_kb": 12000,
@@ -65,19 +65,19 @@ def arm(candidate, *, mode, regime):
         "fixture_sha256": "b" * 64, "trace_sha256": "c" * 64,
         "device_identity": {"device": "PRIVATE_DEVICE_MUST_NOT_ESCAPE"},
         "throughput_mbps": {
-            "logical_write_mbps": cand_mbps if v3 else raw_mbps,
-            "lower_write_mbps": 12 if v3 else 14,
-            "logical_read_mbps": 7 if v3 else 4,
+            "logical_write_mbps": cand_mbps if swapz else raw_mbps,
+            "lower_write_mbps": 12 if swapz else 14,
+            "logical_read_mbps": 7 if swapz else 4,
             "logical_write_bytes": 8000, "logical_read_bytes": 4000,
         },
         "lower_io": {
-            "lower_write_bytes": 5000 if v3 else 8000,
+            "lower_write_bytes": 5000 if swapz else 8000,
             "lower_read_bytes": 4000,
-            "lower_write_requests": 5 if v3 else 8,
+            "lower_write_requests": 5 if swapz else 8,
             "lower_read_requests": 4,
         },
-        "read_p95_ns": 4000000 if v3 else 8000000,
-        "read_p99_ns": 5000000 if v3 else 10000000,
+        "read_p95_ns": 4000000 if swapz else 8000000,
+        "read_p99_ns": 5000000 if swapz else 10000000,
         "write_p99_ns": 2000000,
         "seconds": 2, "verified_pages": 1024,
         "mixed_replay_cpu_user_s": .12,
@@ -94,36 +94,36 @@ def arm(candidate, *, mode, regime):
             "write_wait_le1ms": 2,
             "write_wait_1to4ms": 2,
             "write_wait_gt4ms": 1,
-        } if v3 else None),
+        } if swapz else None),
     }
 
 
 
 def write_arm(candidate, *, qd, regime):
-    v3 = candidate == "swapz"
+    swapz = candidate == "swapz"
     raw = 8.0 if regime == "sd_emulated" else 20.0
     swapz_rate = raw * (0.72 + qd / 200.0)
     logical = 4096 * 4096
-    lower = int(logical / 1.40) if v3 else logical
+    lower = int(logical / 1.40) if swapz else logical
     return {
         "candidate": candidate, "verdict": "PASS",
         "source_sha": "a" * 40,
         "fixture_sha256": "b" * 64,
         "trace_sha256": (f"{qd:x}" * 64)[:64],
         "throughput_mbps": {
-            "logical_write_mbps": swapz_rate if v3 else raw,
-            "lower_write_mbps": (swapz_rate / 1.40) if v3 else raw,
+            "logical_write_mbps": swapz_rate if swapz else raw,
+            "lower_write_mbps": (swapz_rate / 1.40) if swapz else raw,
             "logical_read_mbps": 0.0,
             "logical_write_bytes": logical,
             "logical_read_bytes": 0,
         },
         "lower_io": {
             "lower_write_bytes": lower,
-            "lower_write_requests": 1600 if v3 else 4096,
+            "lower_write_requests": 1600 if swapz else 4096,
             "lower_read_bytes": 0,
             "lower_read_requests": 0,
         },
-        "write_p99_ns": 2500000 if v3 else 1500000,
+        "write_p99_ns": 2500000 if swapz else 1500000,
         "seconds": 2.0,
         "mixed_replay_cpu_user_s": .12,
         "mixed_replay_cpu_system_s": .08,
@@ -143,7 +143,7 @@ def synthetic_log():
         out.append(f"START_OWNED_RAM_REGIME={regime}")
         for i, mode in enumerate((0, 1, 1, 0)):
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
-            out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
+            out.append("REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
             out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0")
             out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1")
@@ -161,7 +161,7 @@ def synthetic_log():
             for mode in (0, 1):
                 out.append(
                     f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
-                out.append("REPLAY_ORDER=v3-first" if index % 2 else
+                out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                            "REPLAY_ORDER=off-first")
                 out.append(
                     "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
@@ -250,7 +250,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual([s["regime"] for s in sessions],
                          [regime for regime in runner.MODEL_ORDER for _ in range(4)])
         self.assertEqual([s["order"] for s in sessions],
-                         ["off-first", "v3-first"] * 4)
+                         ["off-first", "swapz-first"] * 4)
         self.assertTrue(all(s["status"] == "PASS" for s in sessions))
         for j, session in enumerate(sessions):
             self.assertEqual(session["device_model"],
@@ -591,12 +591,12 @@ class ReportContract(unittest.TestCase):
         loaded_subphase = (
             "START_OWNED_RAM_REGIME=sd_emulated\n"
             "START_OWNED_RAM_PAIR_ASYNC_PREPARE=0\n"
-            "BENCH_IO_PHASE=v3:packed_read\n"
+            "BENCH_IO_PHASE=swapz:packed_read\n"
             "FAIL: verified fixed volume was not returned\n"
         )
         phase, reason = runner.failure_context(loaded_subphase)
         self.assertIn("sd_emulated comparison 1/8 (sync)", phase)
-        self.assertIn("[v3 packed_read]", phase)
+        self.assertIn("[swapz packed_read]", phase)
         self.assertIn("verified fixed volume", reason)
 
     def test_non_root_fixture_never_uses_privileged_evidence_directory(self):

@@ -858,7 +858,7 @@ def replay(args):
 def compare(args):
     entries = [safe_load(name) for name in args.reports]
     if set(x["candidate"] for x in entries) != set(CANDIDATES) or len(entries) != 2:
-        raise ValueError("exactly one off and one v3 result required")
+        raise ValueError("exactly one off and one swapz result required")
     immutable = ("fixture_sha256", "trace_sha256", "write_payload_stream_sha256",
                  "prefill_sha256", "expected_post_sha256", "manifest_sha256",
                  "qd", "layout", "seed", "iops_requested", "warmup_ops",
@@ -948,7 +948,7 @@ def compare(args):
         )
         # Same useful completed work; may be paced or unpaced.
         # No inference about a fixed physical-disk bandwidth budget.
-        output["write_input_per_lower_byte_v3"] = (
+        output["write_input_per_lower_byte_swapz"] = (
             throughput[1]["write_input_per_lower_byte"]
         )
         achieved = [entry.get("achieved_iops") for entry in normalized]

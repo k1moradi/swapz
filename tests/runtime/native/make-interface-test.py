@@ -144,14 +144,14 @@ class PublicMakeContract(unittest.TestCase):
                 ["git", "rev-parse", "HEAD"], cwd=ROOT,
                 text=True, timeout=5).strip()
             def mock_arm(candidate):
-                is_v3 = candidate == "swapz"
+                is_swapz = candidate == "swapz"
                 return json.dumps({
                     "candidate": candidate, "verdict": "PASS",
                     "source_sha": mocked_source_sha,
                     "fixture_sha256": "fake-fixture",
                     "trace_sha256": "fake-trace", "verified_pages": 1024,
-                    "read_p95_ns": 4000000 if is_v3 else 8000000,
-                    "read_p99_ns": 5000000 if is_v3 else 10000000,
+                    "read_p95_ns": 4000000 if is_swapz else 8000000,
+                    "read_p99_ns": 5000000 if is_swapz else 10000000,
                     "write_p99_ns": 3000000,
                     "seconds": 2,
                     "mixed_replay_cpu_user_s": 0.12,
@@ -167,19 +167,19 @@ class PublicMakeContract(unittest.TestCase):
                         "write_wait_le1ms": 2,
                         "write_wait_1to4ms": 2,
                         "write_wait_gt4ms": 1,
-                    } if is_v3 else None),
+                    } if is_swapz else None),
                     "packed_read": {
                         "logical_bytes": 4194304,
                         "logical_image_sha256": "m" * 64,
-                        "packed_close_delta": 7 if is_v3 else None,
+                        "packed_close_delta": 7 if is_swapz else None,
                         "passes": {
                             key: {
                                 "logical_bytes": 4194304,
                                 "verified_pages": 1024,
                                 "verified_image_sha256": "m" * 64,
-                                "seconds": 0.6 if is_v3 else 1.,
-                                "useful_read_mbps": 7. if is_v3 else 4.,
-                                "read_p99_ms": 3. if is_v3 else 4.,
+                                "seconds": 0.6 if is_swapz else 1.,
+                                "useful_read_mbps": 7. if is_swapz else 4.,
+                                "read_p99_ms": 3. if is_swapz else 4.,
                                 "lower_io": {
                                     "lower_read_bytes": 4194304,
                                     "lower_read_requests": 1024,
@@ -197,29 +197,29 @@ class PublicMakeContract(unittest.TestCase):
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
-                                } if is_v3 else None),
+                                } if is_swapz else None),
                             }
                             for key in ("sequential", "seeded_random")
                         },
                     },
                     "throughput_mbps": {
-                        "logical_write_mbps": 20 if is_v3 else 14,
-                        "lower_write_mbps": 12 if is_v3 else 14,
-                        "logical_read_mbps": 6 if is_v3 else 4,
+                        "logical_write_mbps": 20 if is_swapz else 14,
+                        "lower_write_mbps": 12 if is_swapz else 14,
+                        "logical_read_mbps": 6 if is_swapz else 4,
                         "logical_read_bytes": 4000,
                         "logical_write_bytes": 8000,
                     },
                     "lower_io": {
-                        "lower_write_bytes": 5000 if is_v3 else 8000,
+                        "lower_write_bytes": 5000 if is_swapz else 8000,
                         "lower_read_bytes": 4000,
-                        "lower_write_requests": 5 if is_v3 else 8,
+                        "lower_write_requests": 5 if is_swapz else 8,
                         "lower_read_requests": 4
                     }
                 }, sort_keys=True)
             def mock_write_arm(candidate, qd):
-                is_v3 = candidate == "swapz"
+                is_swapz = candidate == "swapz"
                 logical = 4096 * 4096
-                lower = int(logical / 1.4) if is_v3 else logical
+                lower = int(logical / 1.4) if is_swapz else logical
                 return json.dumps({
                     "candidate": candidate, "verdict": "PASS",
                     "source_sha": mocked_source_sha,
@@ -231,8 +231,8 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
                     "throughput_mbps": {
-                        "logical_write_mbps": 20 if is_v3 else 14,
-                        "lower_write_mbps": 12 if is_v3 else 14,
+                        "logical_write_mbps": 20 if is_swapz else 14,
+                        "lower_write_mbps": 12 if is_swapz else 14,
                         "logical_read_mbps": 0,
                         "logical_read_bytes": 0,
                         "logical_write_bytes": logical,
@@ -240,7 +240,7 @@ class PublicMakeContract(unittest.TestCase):
                     "lower_io": {
                         "lower_write_bytes": lower,
                         "lower_read_bytes": 0,
-                        "lower_write_requests": 5 if is_v3 else 8,
+                        "lower_write_requests": 5 if is_swapz else 8,
                         "lower_read_requests": 0,
                     },
                 }, sort_keys=True)
@@ -258,7 +258,7 @@ class PublicMakeContract(unittest.TestCase):
                 for i, mode in enumerate((0, 1, 1, 0)):
                     records.extend((
                         f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
-                        "REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first",
+                        "REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first",
                         f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
                         "SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0",
                         "SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1",
@@ -274,7 +274,7 @@ class PublicMakeContract(unittest.TestCase):
                     for mode in (0, 1):
                         records.extend((
                             f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
-                            "REPLAY_ORDER=v3-first" if index % 2 else "REPLAY_ORDER=off-first",
+                            "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
                             f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
                             mock_write_arm("swapz", qd) if index % 2 else mock_write_arm("off", qd),
                             mock_write_arm("off", qd) if index % 2 else mock_write_arm("swapz", qd),
