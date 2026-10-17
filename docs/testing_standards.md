@@ -226,3 +226,13 @@ Engine-level GC rotation follows the same circular destination order as the
 authority test. Compressed relocation coverage must validate byte-exact
 readback and role safety without freezing the retired segment-zero restart
 sequence.
+
+
+Worker-only retained-close qualification requires source coverage that
+`swapz_accept_write()` never emits PACK_READY or calls the retained close
+helper. The worker must sample local then incoming under `queue_lock` before
+the PACK_READY decision. Initial accepted-width sampling must be limited to a
+deferred first pack with no existing one-shot target, and post-pack sampling
+must preserve residual-tail ordering. Service-proven dry closure may accept a
+one-page residue only after prior packed-chain or independent-read service and
+only when no sampled target is active.

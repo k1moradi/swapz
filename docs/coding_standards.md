@@ -300,3 +300,26 @@ This is a wear-distribution rule, not permission to reuse uncertain media.
 A destination still must be entirely non-authoritative and dead, GC still uses
 exactly one reserve per cycle, and a victim becomes reserve only after every
 mapping/refcount validation and successful lower relocation has completed.
+
+
+### Worker-only retained close and accepted-width sampling
+
+Retained-window closure below `max_window` is a worker-tail decision. Write
+admission may mark useful pack geometry, but it must not submit a PACK_READY
+lower write before returning to the serialized worker. The worker first refreshes
+its private FIFO and `incoming` under `queue_lock`, samples any already
+accepted plain-write prefix, and only then evaluates closure. This removes a
+mid-admission race in which a transiently empty `incoming` list could split a
+larger finite wave.
+
+The one-shot retained target may be backed by either a residual admitted tail
+after a completed pack or the total accepted width sampled while the current
+first pack remains open. Both are zero-wait facts about already admitted FIFO
+work; neither permits waiting for a future BIO or refreshing the pinned
+retention deadline.
+
+After a packed lower I/O or an independent retained READ has provided a real
+synchronous service interval, a refreshed dry worker tail may close any
+nonempty residue immediately. A sampled one-shot target is stronger evidence
+and must be honored first. Publication, FUA/PREFLUSH, conflict, discard,
+shutdown, completion and fail-closed ownership are unchanged.
