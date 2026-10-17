@@ -14,41 +14,41 @@
 	return 1; \
 } } while (0)
 
-static struct sv3_authority a;
-static struct sv3_map maps[32];
-static sv3_u16 live[768];
-static sv3_u8 classes[768];
-static sv3_u8 bytes[SV3_BLOCK_BYTES];
-static sv3_u8 data[100];
+static struct swapz_authority a;
+static struct swapz_map maps[32];
+static swapz_u16 live[768];
+static swapz_u8 classes[768];
+static swapz_u8 bytes[SWAPZ_BLOCK_BYTES];
+static swapz_u8 data[100];
 
 static int setup(void)
 {
-	int rc = sv3_authority_init(&a, maps, live, classes, 32, 768);
+	int rc = swapz_authority_init(&a, maps, live, classes, 32, 768);
 	a.reuse_dead_segments = 1;
 	return rc;
 }
 
-static int write_page(sv3_u32 logical)
+static int write_page(swapz_u32 logical)
 {
-	struct sv3_tx tx;
-	struct sv3_builder builder;
+	struct swapz_tx tx;
+	struct swapz_builder builder;
 	int rc;
 
-	rc = sv3_stage(&a, &logical, 1, 1, &tx);
+	rc = swapz_stage(&a, &logical, 1, 1, &tx);
 	if (rc)
 		return rc;
 	memset(data, logical + 1, sizeof(data));
-	rc = sv3_begin(&builder, bytes, SV3_BLOCK_BYTES, tx.sequence);
+	rc = swapz_begin(&builder, bytes, SWAPZ_BLOCK_BYTES, tx.sequence);
 	if (!rc)
-		rc = sv3_append(&builder, logical, tx.records[0].generation,
+		rc = swapz_append(&builder, logical, tx.records[0].generation,
 				data, sizeof(data));
 	if (!rc)
-		rc = sv3_seal(&builder);
+		rc = swapz_seal(&builder);
 	if (rc) {
-		sv3_abort(&a, &tx);
+		swapz_abort(&a, &tx);
 		return rc;
 	}
-	return sv3_finish(&a, &tx, bytes, SV3_BLOCK_BYTES, 1, 0);
+	return swapz_finish(&a, &tx, bytes, SWAPZ_BLOCK_BYTES, 1, 0);
 }
 
 static int test_recycle_wholly_dead_segment(void)
@@ -61,7 +61,7 @@ static int test_recycle_wholly_dead_segment(void)
 	CHECK(a.next_block == 256);
 	CHECK(a.recycled_dead_segments == 0);
 	CHECK(live[255] == 1);
-	CHECK(sv3_discard_page(&a, 0) == 0);
+	CHECK(swapz_discard_page(&a, 0) == 0);
 	CHECK(live[255] == 0 && !maps[0].valid);
 	CHECK(write_page(1) == 0);
 	CHECK(a.recycled_dead_segments == 1);
@@ -85,9 +85,9 @@ static int test_live_segment_is_never_overwritten(void)
 	CHECK(write_page(2) == -ENOSPC);
 	CHECK(a.recycled_dead_segments == 0);
 	CHECK(maps[0].start_block == 0 && live[0] == 1);
-	CHECK(sv3_discard_page(&a, 0) == 0);
+	CHECK(swapz_discard_page(&a, 0) == 0);
 	CHECK(write_page(2) == -ENOSPC); /* still-live page1 */
-	CHECK(sv3_discard_page(&a, 1) == 0);
+	CHECK(swapz_discard_page(&a, 1) == 0);
 	CHECK(write_page(2) == 0);
 	CHECK(a.recycled_dead_segments == 1);
 	return 0;
@@ -111,19 +111,19 @@ static int test_corrupted_liveness_never_reclaims_live_map(void)
 
 static int test_two_block_class_respects_segment_edges(void)
 {
-	sv3_u32 logical = 0;
-	struct sv3_tx tx;
+	swapz_u32 logical = 0;
+	struct swapz_tx tx;
 	int i;
 
 	CHECK(setup() == 0);
 	for (i = 0; i < 254; ++i)
 		CHECK(write_page(0) == 0);
 	/* current NEXT offset is 254, last valid 2block extent 254-255 */
-	CHECK(sv3_stage(&a, &logical, 1, 2, &tx) == 0);
+	CHECK(swapz_stage(&a, &logical, 1, 2, &tx) == 0);
 	CHECK(tx.start_block == 254);
-	CHECK(sv3_abort(&a, &tx) == 0);
+	CHECK(swapz_abort(&a, &tx) == 0);
 	CHECK(write_page(0) == -ENOSPC); /* page 0 remains live at 253 */
-	CHECK(sv3_discard_page(&a, 0) == 0);
+	CHECK(swapz_discard_page(&a, 0) == 0);
 	CHECK(write_page(0) == 0);
 	CHECK(maps[0].start_block == 0 && a.recycled_dead_segments == 1);
 	return 0;
@@ -137,6 +137,6 @@ int main(void)
 	CHECK(test_live_segment_is_never_overwritten() == 0); passed++;
 	CHECK(test_corrupted_liveness_never_reclaims_live_map() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
-	printf("SV3_DEAD_SEGMENT_REUSE_TESTS_PASS=%d\n", passed);
+	printf("SWAPZ_DEAD_SEGMENT_REUSE_TESTS_PASS=%d\n", passed);
 	return 0;
 }
