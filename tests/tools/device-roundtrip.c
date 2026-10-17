@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 	if (private_mode) {
 		if (series(fd, buf, expected, count, round, write_series))
 			goto out;
-		printf("PASS: owned V3 direct %s series count=%u round=%u\n",
+		printf("PASS: owned swapz direct %s series count=%u round=%u\n",
 		       write_series ? "write" : "verify", count, round);
 		rc = 0;
 		goto out;

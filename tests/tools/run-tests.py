@@ -117,7 +117,7 @@ def parse_loaded_correctness(output):
             r"flush_calls:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
-            r"shutdown_windows:(\d+) verified_pages:(\d+)$"),
+            r"observed_open:(\d+) verified_pages:(\d+)$"),
         "write_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) lower_write_delta:(\d+)$"),
@@ -138,13 +138,13 @@ def parse_loaded_correctness(output):
                 "reason": "missing loaded correctness markers: " + ",".join(missing)}
 
     raw_pages, zero_pages, flush_calls = found["oracle"]
-    suspend_retain, shutdown_windows, verified_pages = found["suspend"]
+    suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
     if raw_pages != 64 or zero_pages != 9 or flush_calls < 2:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
-    if suspend_retain != 4 or shutdown_windows < 1 or verified_pages != 128:
+    if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
     if write_retain != 2 or write_injected != 1 or write_lower_delta != 0:
@@ -159,7 +159,7 @@ def parse_loaded_correctness(output):
         "zero_pages": zero_pages,
         "flush_calls": flush_calls,
         "suspend_retain_ms": suspend_retain,
-        "suspend_shutdown_windows": shutdown_windows,
+        "suspend_observed_open": observed_open,
         "suspend_verified_pages": verified_pages,
         "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
         "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
@@ -246,6 +246,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
         reason = None
         for line in reversed(output.splitlines()):
             candidate = line.strip()
+            if candidate == "FAIL: test exit 1; safe teardown attempted":
+                continue
             if candidate.startswith(("BLOCKED: ", "FAIL: ")):
                 msg = candidate.partition(": ")[2]
                 msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
@@ -925,8 +927,8 @@ def print_bench(result):
         print("\n  Loaded lifecycle: "
               f"RAW={loaded['raw_pages']}, zero={loaded['zero_pages']}, "
               f"flushes={loaded['flush_calls']}; retain="
-              f"{loaded['suspend_retain_ms']}ms suspend/drain closed "
-              f"{loaded['suspend_shutdown_windows']} window(s) and verified "
+              f"{loaded['suspend_retain_ms']}ms retained window observed open "
+              f"before suspend/resume; verified "
               f"{loaded['suspend_verified_pages']} pages; retained synthetic "
               "WRITE/FLUSH faults failed closed.")
 

@@ -134,7 +134,7 @@ def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
-           "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 shutdown_windows:1 verified_pages:128",
+           "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
            "PASS_LOADED_OWNED_NULLBLK_SMOKE"]
@@ -225,11 +225,12 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["overall"], "PASS")
         self.assertEqual(loaded["raw_pages"], 64)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
+        self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
         self.assertIn("PRE_SUBMISSION", loaded["retained_write_fault"])
 
         missing = synthetic_log().replace(
-            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 shutdown_windows:1 "
+            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 "
             "verified_pages:128\n", "")
         self.assertEqual(runner.parse_loaded_correctness(missing)["overall"],
                          "INCOMPLETE")

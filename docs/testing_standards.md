@@ -101,3 +101,12 @@ in the same change; stale positional compatibility parsing is forbidden because
 it can reinterpret ordinary options as fault injection and falsely BLOCK a
 healthy product arm. Benchmark diagnostics and errors use the product name
 `swapz`, never implementation-generation labels.
+
+
+The retained suspend/resume oracle gates on observing an open retained window,
+successful suspend/resume, a nonfailed target, and byte-exact verification of
+all accepted pages. It must not require a specific close-reason counter after
+the observation: the maximum supported 4ms deadline can legitimately expire
+between a userspace status sample and the separate suspend request. That race
+is not a drain failure. Loaded failure reporting skips the generic cleanup
+epilogue so the preceding specific sanitized failure remains visible.
