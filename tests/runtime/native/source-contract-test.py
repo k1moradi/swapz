@@ -688,7 +688,6 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_window_burst_close_ready", policy)
         self.assertIn("ctx->retained_chain_completed", flush)
         self.assertIn("ctx->pack_close_pending_tail_sample = true", flush)
-        self.assertIn("struct list_head *local", sample)
         self.assertIn("list_for_each_entry(entry, local, list)", sample)
         self.assertIn("list_for_each_entry(entry, &ctx->incoming, list)", sample)
         self.assertLess(sample.index("list_for_each_entry(entry, local, list)"),
@@ -855,7 +854,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("list_splice_tail_init(&ctx->incoming, &local)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
-        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx)"),
+        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx, &local)"),
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
