@@ -16,77 +16,77 @@
 
 static int test_independent_compressed_and_raw(void)
 {
-	struct sv3_pending_bio pending[3] = {
+	struct swapz_pending_bio pending[3] = {
 		{ .logical = 7, .length = 2073 },
-		{ .logical = 8, .length = SV3_BLOCK_BYTES, .raw = 1 },
+		{ .logical = 8, .length = SWAPZ_BLOCK_BYTES, .raw = 1 },
 		{ .logical = 9, .length = 256 },
 	};
-	struct sv3_pending_bio original[3];
+	struct swapz_pending_bio original[3];
 
 	memcpy(original, pending, sizeof(original));
-	CHECK(sv3_window_read_independent(pending, 3, 6, 2, 0));
-	CHECK(sv3_window_read_independent(pending, 3, 10, 2, 0));
-	CHECK(sv3_window_read_independent(pending, 3, 0, 2, 0));
-	CHECK(sv3_window_read_independent(pending, 3, ~(sv3_u32)0, 2, 0));
+	CHECK(swapz_window_read_independent(pending, 3, 6, 2, 0));
+	CHECK(swapz_window_read_independent(pending, 3, 10, 2, 0));
+	CHECK(swapz_window_read_independent(pending, 3, 0, 2, 0));
+	CHECK(swapz_window_read_independent(pending, 3, ~(swapz_u32)0, 2, 0));
 	CHECK(!memcmp(pending, original, sizeof(pending)));
 	return 0;
 }
 
 static int test_every_pending_slot_fences_read(void)
 {
-	struct sv3_pending_bio pending[SV3_MAX_RECORDS] = { 0 };
-	sv3_u8 index;
+	struct swapz_pending_bio pending[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u8 index;
 
-	for (index = 0; index < SV3_MAX_RECORDS; ++index) {
+	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index) {
 		pending[index].logical = 100 + index;
 		pending[index].raw = index & 1U;
 		pending[index].length = pending[index].raw ?
-			SV3_BLOCK_BYTES : 2073;
+			SWAPZ_BLOCK_BYTES : 2073;
 	}
 	/* Check the first, middle and last slot, including RAW dependencies. */
-	for (index = 0; index < SV3_MAX_RECORDS; ++index)
-		CHECK(!sv3_window_read_independent(pending, SV3_MAX_RECORDS,
+	for (index = 0; index < SWAPZ_MAX_RECORDS; ++index)
+		CHECK(!swapz_window_read_independent(pending, SWAPZ_MAX_RECORDS,
 					pending[index].logical, 2, 0));
-	CHECK(sv3_window_read_independent(pending, SV3_MAX_RECORDS,
+	CHECK(swapz_window_read_independent(pending, SWAPZ_MAX_RECORDS,
 					99, 2, 0));
-	CHECK(sv3_window_read_independent(pending, SV3_MAX_RECORDS,
-					100 + SV3_MAX_RECORDS, 2, 0));
+	CHECK(swapz_window_read_independent(pending, SWAPZ_MAX_RECORDS,
+					100 + SWAPZ_MAX_RECORDS, 2, 0));
 	return 0;
 }
 
 static int test_disabled_empty_and_invalid_window(void)
 {
-	struct sv3_pending_bio pending = { .logical = 4, .length = 2073 };
+	struct swapz_pending_bio pending = { .logical = 4, .length = 2073 };
 
-	CHECK(!sv3_window_read_independent(&pending, 1, 5, 0, 0));
-	CHECK(!sv3_window_read_independent(&pending, 0, 5, 2, 0));
-	CHECK(!sv3_window_read_independent(NULL, 1, 5, 2, 0));
+	CHECK(!swapz_window_read_independent(&pending, 1, 5, 0, 0));
+	CHECK(!swapz_window_read_independent(&pending, 0, 5, 2, 0));
+	CHECK(!swapz_window_read_independent(NULL, 1, 5, 2, 0));
 	/* Invalid count must be rejected before accessing any array element. */
-	CHECK(!sv3_window_read_independent(&pending, SV3_MAX_RECORDS + 1,
+	CHECK(!swapz_window_read_independent(&pending, SWAPZ_MAX_RECORDS + 1,
 					5, 2, 0));
-	CHECK(!sv3_window_read_independent(NULL, SV3_MAX_RECORDS + 1,
+	CHECK(!swapz_window_read_independent(NULL, SWAPZ_MAX_RECORDS + 1,
 					5, 2, 0));
 	return 0;
 }
 
 static int test_caller_fences_override_independence(void)
 {
-	struct sv3_pending_bio pending = { .logical = 4, .length = 2073 };
+	struct swapz_pending_bio pending = { .logical = 4, .length = 2073 };
 	unsigned int fence;
 
 	/* Each of shutdown, failure, inflight, batch publication and flags
 	 * must block independently when the caller supplies its predicate. */
 	for (fence = 1; fence <= 32; fence <<= 1)
-		CHECK(!sv3_window_read_independent(&pending, 1, 5, 2,
+		CHECK(!swapz_window_read_independent(&pending, 1, 5, 2,
 						(int)fence));
-	CHECK(!sv3_window_read_independent(&pending, 1, 5, 2, -1));
-	CHECK(sv3_window_read_independent(&pending, 1, 5, 2, 0));
+	CHECK(!swapz_window_read_independent(&pending, 1, 5, 2, -1));
+	CHECK(swapz_window_read_independent(&pending, 1, 5, 2, 0));
 	return 0;
 }
 
 static int test_pack_ready_waits_for_second_medium_pack(void)
 {
-	struct sv3_pending_bio batch[8] = { 0 };
+	struct swapz_pending_bio batch[8] = { 0 };
 	unsigned int i;
 
 	for (i = 0; i < 8; ++i) {
@@ -96,22 +96,22 @@ static int test_pack_ready_waits_for_second_medium_pack(void)
 	/* Three medium pages fit 8KiB but are deliberately retained.
 	 * Six fit one 16KiB extent: same bytes as two old 8KiB commits,
 	 * one synchronous lower callback. */
-	CHECK(sv3_window_single_pack_ready(batch, 3, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 5, 2, 0));
-	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 7, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 8, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 6, 0, 0));
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 1));
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 3));
-	CHECK(!sv3_window_pack_ready(NULL, 6, 2, 0));
+	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 5, 2, 0));
+	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 7, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 8, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 0, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 1));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 3));
+	CHECK(!swapz_window_pack_ready(NULL, 6, 2, 0));
 	return 0;
 }
 
 static int test_pack_ready_small_and_medium_exact_geometry(void)
 {
-	struct sv3_pending_bio batch[6] = { 0 };
+	struct swapz_pending_bio batch[6] = { 0 };
 	unsigned int i;
 
 	for (i = 0; i < 6; ++i) {
@@ -120,10 +120,10 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	}
 	/* Two medium pages do not fit 4KiB. Three fit 8KiB, but wait for
 	 * a second triplet instead of closing the first pack immediately. */
-	CHECK(!sv3_window_single_pack_ready(batch, 2, 2, 0));
-	CHECK(sv3_window_single_pack_ready(batch, 3, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
-	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(swapz_window_single_pack_ready(batch, 3, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
+	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
 
 	/* Exact 4KiB two-record pack is deferred; two such packs close
 	 * together at the exact 8KiB four-record metadata limit. */
@@ -131,38 +131,38 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 		batch[i].length = 2028;
 	batch[0].length = 2024;
 	batch[1].length = 2024;
-	CHECK(sv3_window_single_pack_ready(batch, 2, 2, 0));
-	CHECK(!sv3_window_single_pack_ready(batch, 3, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 2, 2, 0));
+	CHECK(swapz_window_single_pack_ready(batch, 2, 2, 0));
+	CHECK(!swapz_window_single_pack_ready(batch, 3, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 2, 2, 0));
 	for (i = 0; i < 4; ++i)
 		batch[i].length = 2028;
-	CHECK(sv3_window_pack_ready(batch, 4, 2, 0));
+	CHECK(swapz_window_pack_ready(batch, 4, 2, 0));
 	batch[3].length = 2029;
-	CHECK(!sv3_window_pack_ready(batch, 4, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
 
 	/* Six records have 112 bytes of SWZ3 header/descriptor overhead:
 	 * 6 * 2712 + 112 == 16384 exactly. */
 	for (i = 0; i < 6; ++i)
 		batch[i].length = 2712;
-	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[5].length = 2713;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[5].length = 2712;
 	batch[0].raw = 1;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[0].raw = 0;
 	batch[1].length = 0;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
-	batch[1].length = SV3_MAX_COMPRESSED + 1U;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 1, 2, 0));
-	CHECK(!sv3_window_pack_ready(batch, 3, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
+	batch[1].length = SWAPZ_MAX_COMPRESSED + 1U;
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 1, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 3, 2, 0));
 	return 0;
 }
 
 static int test_pack_ready_rejects_raw_and_unfittable(void)
 {
-	struct sv3_pending_bio batch[6] = { 0 };
+	struct swapz_pending_bio batch[6] = { 0 };
 	unsigned int i;
 
 	for (i = 0; i < 6; ++i) {
@@ -170,173 +170,173 @@ static int test_pack_ready_rejects_raw_and_unfittable(void)
 		batch[i].length = 2073;
 	}
 	batch[4].raw = 1;
-	batch[4].length = SV3_BLOCK_BYTES;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	batch[4].length = SWAPZ_BLOCK_BYTES;
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[4].raw = 0;
 	batch[4].length = 0;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
-	batch[4].length = SV3_MAX_COMPRESSED + 1;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
+	batch[4].length = SWAPZ_MAX_COMPRESSED + 1;
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	batch[4].length = 2073;
-	CHECK(sv3_window_pack_ready(batch, 6, 2, 0));
+	CHECK(swapz_window_pack_ready(batch, 6, 2, 0));
 	for (i = 0; i < 6; ++i)
-		batch[i].length = SV3_MAX_COMPRESSED;
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 0));
+		batch[i].length = SWAPZ_MAX_COMPRESSED;
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 0));
 	for (i = 0; i < 6; ++i)
 		batch[i].length = 2000;
-	CHECK(sv3_window_pack_ready(batch, 6, 1, 0));
+	CHECK(swapz_window_pack_ready(batch, 6, 1, 0));
 	/* The same geometry fails closed when retention/read policy disallows it. */
-	CHECK(!sv3_window_pack_ready(batch, 6, 0, 0));
-	CHECK(!sv3_window_pack_ready(batch, 6, 2, 1));
-	CHECK(!sv3_window_pack_ready(NULL, 6, 2, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 0, 0));
+	CHECK(!swapz_window_pack_ready(batch, 6, 2, 1));
+	CHECK(!swapz_window_pack_ready(NULL, 6, 2, 0));
 	return 0;
 }
 
 static int test_burst_tail_one_two_and_mixed_compressed_records(void)
 {
-	struct sv3_pending_bio tail[2] = {
+	struct swapz_pending_bio tail[2] = {
 		{ .logical = 10, .length = 2073 },
 		{ .logical = 11, .length = 2073 },
 	};
-	struct sv3_pending_bio snapshot[2];
+	struct swapz_pending_bio snapshot[2];
 	unsigned int retain;
 
 	memcpy(snapshot, tail, sizeof(tail));
 	for (retain = 1; retain <= 4; ++retain) {
-		CHECK(sv3_window_burst_tail_ready(tail, 1,
-					(sv3_u8)retain, 0, 1));
-		CHECK(sv3_window_burst_tail_ready(tail, 2,
-					(sv3_u8)retain, 0, 1));
+		CHECK(swapz_window_burst_tail_ready(tail, 1,
+					(swapz_u8)retain, 0, 1));
+		CHECK(swapz_window_burst_tail_ready(tail, 2,
+					(swapz_u8)retain, 0, 1));
 	}
 	CHECK(!memcmp(tail, snapshot, sizeof(tail)));
 	/* The tail rule intentionally admits medium pairs that cannot form
 	 * a useful 4KiB pack; an earlier group earned the burst history. */
-	CHECK(!sv3_window_pack_ready(tail, 2, 2, 0));
-	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	CHECK(!swapz_window_pack_ready(tail, 2, 2, 0));
+	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 	tail[0].length = 1;
-	tail[1].length = SV3_MAX_COMPRESSED;
-	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
-	tail[0].length = SV3_MAX_COMPRESSED;
+	tail[1].length = SWAPZ_MAX_COMPRESSED;
+	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	tail[0].length = SWAPZ_MAX_COMPRESSED;
 	tail[1].length = 1;
-	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 	return 0;
 }
 
 static int test_burst_tail_requires_retention_history_and_safe_bounds(void)
 {
-	struct sv3_pending_bio tail = { .logical = 10, .length = 2073 };
+	struct swapz_pending_bio tail = { .logical = 10, .length = 2073 };
 	unsigned int budget;
 
-	CHECK(!sv3_window_burst_tail_ready(&tail, 1, 0, 0, 1));
-	CHECK(!sv3_window_burst_tail_ready(&tail, 1, 2, 0, 0));
+	CHECK(!swapz_window_burst_tail_ready(&tail, 1, 0, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(&tail, 1, 2, 0, 0));
 	for (budget = 1; budget <= 3; ++budget)
-		CHECK(!sv3_window_burst_tail_ready(&tail, 1, 2,
-					(sv3_u8)budget, 1));
-	CHECK(!sv3_window_burst_tail_ready(NULL, 1, 2, 0, 1));
-	CHECK(!sv3_window_burst_tail_ready(&tail, 0, 2, 0, 1));
+		CHECK(!swapz_window_burst_tail_ready(&tail, 1, 2,
+					(swapz_u8)budget, 1));
+	CHECK(!swapz_window_burst_tail_ready(NULL, 1, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(&tail, 0, 2, 0, 1));
 	/* Bounds rejection must precede any attempted access past tail. */
-	CHECK(!sv3_window_burst_tail_ready(&tail, 3, 2, 0, 1));
-	CHECK(!sv3_window_burst_tail_ready(&tail, SV3_MAX_RECORDS, 2, 0, 1));
-	CHECK(!sv3_window_burst_tail_ready(&tail, SV3_MAX_RECORDS + 1,
+	CHECK(!swapz_window_burst_tail_ready(&tail, 3, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(&tail, SWAPZ_MAX_RECORDS, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(&tail, SWAPZ_MAX_RECORDS + 1,
 					2, 0, 1));
-	CHECK(!sv3_window_burst_tail_ready(NULL, 2, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(NULL, 2, 2, 0, 1));
 	return 0;
 }
 
 static int test_burst_tail_rejects_each_raw_invalid_and_duplicate_record(void)
 {
-	struct sv3_pending_bio tail[2] = {
+	struct swapz_pending_bio tail[2] = {
 		{ .logical = 10, .length = 2073 },
 		{ .logical = 11, .length = 2073 },
 	};
-	sv3_u8 index;
+	swapz_u8 index;
 
 	for (index = 0; index < 2; ++index) {
 		tail[index].raw = 1;
-		tail[index].length = SV3_BLOCK_BYTES;
-		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		tail[index].length = SWAPZ_BLOCK_BYTES;
+		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 		/* A short length must not hide a RAW classification. */
 		tail[index].length = 100;
-		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 		tail[index].raw = 0;
 		tail[index].length = 0;
-		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
-		tail[index].length = SV3_MAX_COMPRESSED + 1U;
-		CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
+		tail[index].length = SWAPZ_MAX_COMPRESSED + 1U;
+		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 		tail[index].length = 2073;
 	}
 	tail[0].raw = 1;
-	CHECK(!sv3_window_burst_tail_ready(tail, 1, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(tail, 1, 2, 0, 1));
 	tail[0].raw = 0;
 	tail[0].length = 0;
-	CHECK(!sv3_window_burst_tail_ready(tail, 1, 2, 0, 1));
-	tail[0].length = SV3_MAX_COMPRESSED + 1U;
-	CHECK(!sv3_window_burst_tail_ready(tail, 1, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(tail, 1, 2, 0, 1));
+	tail[0].length = SWAPZ_MAX_COMPRESSED + 1U;
+	CHECK(!swapz_window_burst_tail_ready(tail, 1, 2, 0, 1));
 	tail[0].length = 2073;
 	tail[1].logical = tail[0].logical;
-	CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 	/* Even extreme valid logical identifiers use exact slot equality. */
-	tail[0].logical = ~(sv3_u32)0;
-	tail[1].logical = ~(sv3_u32)0;
-	CHECK(!sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	tail[0].logical = ~(swapz_u32)0;
+	tail[1].logical = ~(swapz_u32)0;
+	CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 	tail[1].logical = 0;
-	CHECK(sv3_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
 	return 0;
 }
 
 static int test_uniform_compressed_identity_sort_safety(void)
 {
-	struct sv3_pending_bio batch[SV3_MAX_RECORDS] = { 0 };
-	struct sv3_pending_bio snapshot[SV3_MAX_RECORDS];
-	sv3_u8 i;
+	struct swapz_pending_bio batch[SWAPZ_MAX_RECORDS] = { 0 };
+	struct swapz_pending_bio snapshot[SWAPZ_MAX_RECORDS];
+	swapz_u8 i;
 
-	CHECK(!sv3_window_uniform_compressed(NULL, 1));
-	CHECK(!sv3_window_uniform_compressed(batch, 0));
-	CHECK(!sv3_window_uniform_compressed(batch, SV3_MAX_RECORDS + 1));
-	for (i = 0; i < SV3_MAX_RECORDS; ++i) {
+	CHECK(!swapz_window_uniform_compressed(NULL, 1));
+	CHECK(!swapz_window_uniform_compressed(batch, 0));
+	CHECK(!swapz_window_uniform_compressed(batch, SWAPZ_MAX_RECORDS + 1));
+	for (i = 0; i < SWAPZ_MAX_RECORDS; ++i) {
 		batch[i].logical = 100 + i;
 		batch[i].length = 2073;
 	}
 	memcpy(snapshot, batch, sizeof(batch));
-	CHECK(sv3_window_uniform_compressed(batch, 1));
-	CHECK(sv3_window_uniform_compressed(batch, 7));
-	CHECK(sv3_window_uniform_compressed(batch, SV3_MAX_RECORDS));
+	CHECK(swapz_window_uniform_compressed(batch, 1));
+	CHECK(swapz_window_uniform_compressed(batch, 7));
+	CHECK(swapz_window_uniform_compressed(batch, SWAPZ_MAX_RECORDS));
 	CHECK(!memcmp(batch, snapshot, sizeof(batch)));
-	batch[SV3_MAX_RECORDS - 1].length = 2072;
-	CHECK(!sv3_window_uniform_compressed(batch, SV3_MAX_RECORDS));
-	CHECK(sv3_window_uniform_compressed(batch, 7));
-	batch[SV3_MAX_RECORDS - 1].length = 2073;
+	batch[SWAPZ_MAX_RECORDS - 1].length = 2072;
+	CHECK(!swapz_window_uniform_compressed(batch, SWAPZ_MAX_RECORDS));
+	CHECK(swapz_window_uniform_compressed(batch, 7));
+	batch[SWAPZ_MAX_RECORDS - 1].length = 2073;
 	batch[0].raw = 1;
-	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	CHECK(!swapz_window_uniform_compressed(batch, 7));
 	batch[0].raw = 0;
 	batch[3].raw = 1;
-	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	CHECK(!swapz_window_uniform_compressed(batch, 7));
 	batch[3].raw = 0;
 	batch[2].length = 0;
-	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	CHECK(!swapz_window_uniform_compressed(batch, 7));
 	batch[2].length = 2073;
-	batch[0].length = SV3_MAX_COMPRESSED + 1U;
-	CHECK(!sv3_window_uniform_compressed(batch, 7));
+	batch[0].length = SWAPZ_MAX_COMPRESSED + 1U;
+	CHECK(!swapz_window_uniform_compressed(batch, 7));
 	/* Tiny uniform compressed payloads may pair into a 4KiB block;
 	 * the greedy ordering is still first-then-next, i.e. identity. */
-	for (i = 0; i < SV3_MAX_RECORDS; ++i)
+	for (i = 0; i < SWAPZ_MAX_RECORDS; ++i)
 		batch[i].length = 500;
-	CHECK(sv3_window_uniform_compressed(batch, 8));
+	CHECK(swapz_window_uniform_compressed(batch, 8));
 	/* RAW controls and mixed entropy retain the greedy fallback. */
-	batch[4].length = SV3_BLOCK_BYTES;
+	batch[4].length = SWAPZ_BLOCK_BYTES;
 	batch[4].raw = 1;
-	CHECK(!sv3_window_uniform_compressed(batch, 8));
+	CHECK(!swapz_window_uniform_compressed(batch, 8));
 	return 0;
 }
 
 static int test_cap3_pareto_candidate_is_bounded(void)
 {
-	CHECK(!sv3_window_cap3_pareto_candidate(10, 11, 10, 1));
-	CHECK(sv3_window_cap3_pareto_candidate(9, 11, 9, 1));
-	CHECK(!sv3_window_cap3_pareto_candidate(9, 12, 10, 1));
-	CHECK(!sv3_window_cap3_pareto_candidate(9, 12, 9, 2));
-	CHECK(!sv3_window_cap3_pareto_candidate(9, 10, 9, 1));
-	CHECK(!sv3_window_cap3_pareto_candidate(9, 9, 9, 0));
+	CHECK(!swapz_window_cap3_pareto_candidate(10, 11, 10, 1));
+	CHECK(swapz_window_cap3_pareto_candidate(9, 11, 9, 1));
+	CHECK(!swapz_window_cap3_pareto_candidate(9, 12, 10, 1));
+	CHECK(!swapz_window_cap3_pareto_candidate(9, 12, 9, 2));
+	CHECK(!swapz_window_cap3_pareto_candidate(9, 10, 9, 1));
+	CHECK(!swapz_window_cap3_pareto_candidate(9, 9, 9, 0));
 	return 0;
 }
 
@@ -344,9 +344,9 @@ static int test_timer_cancel_only_for_enabled_retention(void)
 {
 	unsigned int retain;
 
-	CHECK(!sv3_window_timer_enabled(0));
+	CHECK(!swapz_window_timer_enabled(0));
 	for (retain = 1; retain <= 4; ++retain)
-		CHECK(sv3_window_timer_enabled((sv3_u8)retain));
+		CHECK(swapz_window_timer_enabled((swapz_u8)retain));
 	return 0;
 }
 
@@ -354,49 +354,49 @@ static int test_timer_rearm_requires_retention_and_unqueued_timer(void)
 {
 	unsigned int retain;
 
-	CHECK(!sv3_retention_timer_needs_arm(0, 0));
-	CHECK(!sv3_retention_timer_needs_arm(0, 1));
+	CHECK(!swapz_retention_timer_needs_arm(0, 0));
+	CHECK(!swapz_retention_timer_needs_arm(0, 1));
 	for (retain = 1; retain <= 4; ++retain) {
-		CHECK(sv3_retention_timer_needs_arm((sv3_u8)retain, 0));
-		CHECK(!sv3_retention_timer_needs_arm((sv3_u8)retain, 1));
+		CHECK(swapz_retention_timer_needs_arm((swapz_u8)retain, 0));
+		CHECK(!swapz_retention_timer_needs_arm((swapz_u8)retain, 1));
 	}
 	/* A dequeued/expired timer may be rearmed to the SAME original
 	 * deadline; it will promptly dispatch the worker if overdue. */
-	CHECK(sv3_retention_timer_needs_arm(2, 0));
+	CHECK(swapz_retention_timer_needs_arm(2, 0));
 	return 0;
 }
 
 static int test_section_wall_ns_never_underflows(void)
 {
-	CHECK(sv3_elapsed_ns(100, 170) == 70ULL);
-	CHECK(sv3_elapsed_ns(100, 100) == 0ULL);
-	CHECK(sv3_elapsed_ns(170, 100) == 0ULL);
-	CHECK(sv3_elapsed_ns(0, ULLONG_MAX) == ULLONG_MAX);
-	CHECK(sv3_elapsed_ns(ULLONG_MAX, 0) == 0ULL);
+	CHECK(swapz_elapsed_ns(100, 170) == 70ULL);
+	CHECK(swapz_elapsed_ns(100, 100) == 0ULL);
+	CHECK(swapz_elapsed_ns(170, 100) == 0ULL);
+	CHECK(swapz_elapsed_ns(0, ULLONG_MAX) == ULLONG_MAX);
+	CHECK(swapz_elapsed_ns(ULLONG_MAX, 0) == 0ULL);
 	return 0;
 }
 
 static int test_disabled_or_missing_timestamp_expires(void)
 {
-	CHECK(sv3_window_retention_expired(1000, 1000, 0));
-	CHECK(sv3_window_retention_expired(0, 0, 2));
-	CHECK(sv3_window_retention_expired(0, 1000, 2));
+	CHECK(swapz_window_retention_expired(1000, 1000, 0));
+	CHECK(swapz_window_retention_expired(0, 0, 2));
+	CHECK(swapz_window_retention_expired(0, 1000, 2));
 	return 0;
 }
 
 static int test_exact_nanosecond_deadline(void)
 {
 	const unsigned long long first = 123456789ULL;
-	sv3_u8 retain;
+	swapz_u8 retain;
 
 	for (retain = 1; retain <= 4; ++retain) {
 		unsigned long long deadline = first +
 			(unsigned long long)retain * 1000000ULL;
 
-		CHECK(!sv3_window_retention_expired(first, first, retain));
-		CHECK(!sv3_window_retention_expired(first, deadline - 1, retain));
-		CHECK(sv3_window_retention_expired(first, deadline, retain));
-		CHECK(sv3_window_retention_expired(first, deadline + 1, retain));
+		CHECK(!swapz_window_retention_expired(first, first, retain));
+		CHECK(!swapz_window_retention_expired(first, deadline - 1, retain));
+		CHECK(swapz_window_retention_expired(first, deadline, retain));
+		CHECK(swapz_window_retention_expired(first, deadline + 1, retain));
 	}
 	return 0;
 }
@@ -410,18 +410,18 @@ static int test_expiry_remains_pinned_after_later_arrivals(void)
 	unsigned int index;
 
 	for (index = 0; index < sizeof(arrivals) / sizeof(arrivals[0]); ++index)
-		CHECK(!sv3_window_retention_expired(first, arrivals[index], 2));
-	CHECK(sv3_window_retention_expired(first, 3000000ULL, 2));
-	CHECK(sv3_window_retention_expired(first, 3000001ULL, 2));
-	CHECK(sv3_window_retention_expired(first, 6000000ULL, 2));
+		CHECK(!swapz_window_retention_expired(first, arrivals[index], 2));
+	CHECK(swapz_window_retention_expired(first, 3000000ULL, 2));
+	CHECK(swapz_window_retention_expired(first, 3000001ULL, 2));
+	CHECK(swapz_window_retention_expired(first, 6000000ULL, 2));
 	return 0;
 }
 
 static int test_backwards_clock_has_zero_age(void)
 {
-	CHECK(!sv3_window_retention_expired(3000000ULL, 2999999ULL, 2));
-	CHECK(!sv3_window_retention_expired(3000000ULL, 0, 2));
-	CHECK(!sv3_window_retention_expired(ULLONG_MAX, 1, 2));
+	CHECK(!swapz_window_retention_expired(3000000ULL, 2999999ULL, 2));
+	CHECK(!swapz_window_retention_expired(3000000ULL, 0, 2));
+	CHECK(!swapz_window_retention_expired(ULLONG_MAX, 1, 2));
 	return 0;
 }
 
@@ -431,13 +431,13 @@ static int test_late_clock_does_not_wrap_remaining_budget(void)
 
 	/* The alpha.11 second clock sample could cross expiry and underflow
 	 * budget-age. Every sample at or after expiry must remain expired. */
-	CHECK(!sv3_window_retention_expired(first, 2000000ULL, 2));
-	CHECK(sv3_window_retention_expired(first, 2000001ULL, 2));
-	CHECK(sv3_window_retention_expired(first, 2000002ULL, 2));
-	CHECK(sv3_window_retention_expired(first, ULLONG_MAX, 2));
-	CHECK(!sv3_window_retention_expired(ULLONG_MAX - 2000000ULL,
+	CHECK(!swapz_window_retention_expired(first, 2000000ULL, 2));
+	CHECK(swapz_window_retention_expired(first, 2000001ULL, 2));
+	CHECK(swapz_window_retention_expired(first, 2000002ULL, 2));
+	CHECK(swapz_window_retention_expired(first, ULLONG_MAX, 2));
+	CHECK(!swapz_window_retention_expired(ULLONG_MAX - 2000000ULL,
 					ULLONG_MAX - 1, 2));
-	CHECK(sv3_window_retention_expired(ULLONG_MAX - 2000000ULL,
+	CHECK(swapz_window_retention_expired(ULLONG_MAX - 2000000ULL,
 					ULLONG_MAX, 2));
 	return 0;
 }
@@ -466,6 +466,6 @@ int main(void)
 	CHECK(test_expiry_remains_pinned_after_later_arrivals() == 0); passed++;
 	CHECK(test_backwards_clock_has_zero_age() == 0); passed++;
 	CHECK(test_late_clock_does_not_wrap_remaining_budget() == 0); passed++;
-	printf("SV3_WINDOW_POLICY_TESTS_PASS=%d\n", passed);
+	printf("SWAPZ_WINDOW_POLICY_TESTS_PASS=%d\n", passed);
 	return 0;
 }

@@ -29,44 +29,44 @@ static int lower_flush(void *p)
 }
 static int test_completed_success(void)
 {
-	struct sv3_flush_meter s = { 0 };
+	struct swapz_flush_meter s = { 0 };
 	struct fake_lower lower = { 0 };
 
-	CHECK(sv3_flush_accounted(&s, lower_flush, &lower) == 0);
+	CHECK(swapz_flush_accounted(&s, lower_flush, &lower) == 0);
 	CHECK(s.attempts == 1 && s.successes == 1 && !s.failures);
 	CHECK(!s.injected && lower.called == 1);
 	return 0;
 }
 static int test_synthetic_failure_before_lower(void)
 {
-	struct sv3_flush_meter s = { .fail_nth = 2 };
+	struct swapz_flush_meter s = { .fail_nth = 2 };
 	struct fake_lower lower = { 0 };
 
-	CHECK(sv3_flush_accounted(&s, lower_flush, &lower) == 0);
-	CHECK(sv3_flush_accounted(&s, lower_flush, &lower) == -EIO);
+	CHECK(swapz_flush_accounted(&s, lower_flush, &lower) == 0);
+	CHECK(swapz_flush_accounted(&s, lower_flush, &lower) == -EIO);
 	CHECK(lower.called == 1 && s.attempts == 2);
 	CHECK(s.failures == 1 && s.injected == 1 && s.successes == 1);
-	CHECK(sv3_flush_accounted(&s, lower_flush, &lower) == 0);
+	CHECK(swapz_flush_accounted(&s, lower_flush, &lower) == 0);
 	CHECK(lower.called == 2 && s.successes == 2 &&
 	      s.failures == 1 && s.attempts == 3 && s.injected == 1);
 	return 0;
 }
 static int test_genuine_lower_error(void)
 {
-	struct sv3_flush_meter s = { 0 };
+	struct swapz_flush_meter s = { 0 };
 	struct fake_lower lower = { .next_error = -EIO };
 
-	CHECK(sv3_flush_accounted(&s, lower_flush, &lower) == -EIO);
+	CHECK(swapz_flush_accounted(&s, lower_flush, &lower) == -EIO);
 	CHECK(s.attempts == 1 && s.failures == 1 && !s.successes);
 	CHECK(!s.injected && lower.called == 1);
 	return 0;
 }
 static int test_null_argument_rejected(void)
 {
-	struct sv3_flush_meter s = { 0 };
+	struct swapz_flush_meter s = { 0 };
 
-	CHECK(sv3_flush_accounted(NULL, lower_flush, NULL) == -EINVAL);
-	CHECK(sv3_flush_accounted(&s, NULL, NULL) == -EINVAL);
+	CHECK(swapz_flush_accounted(NULL, lower_flush, NULL) == -EINVAL);
+	CHECK(swapz_flush_accounted(&s, NULL, NULL) == -EINVAL);
 	CHECK(s.attempts == 0 && !s.successes && !s.failures);
 	return 0;
 }
@@ -78,6 +78,6 @@ int main(void)
 	CHECK(test_synthetic_failure_before_lower() == 0); passed++;
 	CHECK(test_genuine_lower_error() == 0); passed++;
 	CHECK(test_null_argument_rejected() == 0); passed++;
-	printf("SV3_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
+	printf("SWAPZ_FLUSH_ACCOUNTING_TESTS_PASS=%d\n", passed);
 	return 0;
 }
