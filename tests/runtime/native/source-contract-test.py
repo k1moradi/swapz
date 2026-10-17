@@ -581,7 +581,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("payload_lengths[index] = decoded.payload_length", authority)
         self.assertIn(".payload_length = payload_lengths[index]", authority)
         self.assertIn(".payload_length = SWAPZ_BLOCK_BYTES", authority)
-        self.assertIn("decoded->payload_length != current->payload_length", authority)
+        self.assertIn("peeked->payload_length != current->payload_length", authority)
         self.assertIn("ctx->gc_cost_policy", body("swapz_gc_choose_victim"))
         self.assertIn("gc_selected_live_bytes", body("swapz_gc_choose_victim"))
         self.assertNotIn("coalesce", body("swapz_status"))
