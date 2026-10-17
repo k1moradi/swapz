@@ -120,21 +120,10 @@ struct swapz_engine {
 };
 
 /* CPU-only finite-window selection, 4/8/16KiB; output classes 1/2/4. */
-int swapz_engine_plan(const struct swapz_compressed_page *pages, swapz_u8 count,
-		    swapz_u8 *classes, swapz_u8 *records_per_extent,
-		    swapz_u8 *extent_count);
 int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 			    swapz_u8 count, swapz_u8 max_read_blocks,
 			    swapz_u8 *classes, swapz_u8 *records_per_extent,
 			    swapz_u8 *extent_count);
-/*
- * Partial failure returns a nonzero status and sets *committed_pages to
- * exactly the prefix whose complete extents became authoritative. It NEVER
- * reports atomic success for an uncommitted full logical window.
- */
-int swapz_engine_write_window(struct swapz_engine *engine,
-			    const struct swapz_compressed_page *pages,
-			    swapz_u8 count, swapz_u8 *committed_pages);
 /*
  * Optional batched physically adjacent extent/raw writer. Stages multiple
  * logically independent records but publishes no mapping until ONE

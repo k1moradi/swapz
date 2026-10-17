@@ -70,3 +70,9 @@ Repository naming guards must not contain their own banned implementation names
 as literal searchable text. Express self-check patterns without embedding the
 forbidden token verbatim so the guard audits the tree rather than matching
 itself.
+
+
+The public engine surface contains only paths used by the current Device Mapper
+target. Native tests must not keep convenience wrappers alive; they can select
+the production batched writer's sequential fallback or bounded planner
+explicitly when qualifying those behaviors.

@@ -152,15 +152,6 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 	return 0;
 }
 
-int swapz_engine_plan(const struct swapz_compressed_page *pages, swapz_u8 count,
-		    swapz_u8 *classes, swapz_u8 *records_per_extent,
-		    swapz_u8 *extent_count)
-{
-	return swapz_engine_plan_bounded(pages, count, 0,
-				      classes, records_per_extent,
-				      extent_count);
-}
-
 static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
 					swapz_u32 start_block,
 					swapz_u8 extent_blocks)
@@ -352,17 +343,6 @@ abort_transaction:
 		return error;
 	}
 	return 0;
-}
-
-int swapz_engine_write_window(struct swapz_engine *engine,
-			    const struct swapz_compressed_page *pages,
-			    swapz_u8 count, swapz_u8 *committed_pages)
-{
-	if (!engine)
-		return -EINVAL;
-	return swapz_engine_write_window_planned(engine, pages, count,
-					      committed_pages,
-					      engine->max_read_blocks_per_record);
 }
 
 /*

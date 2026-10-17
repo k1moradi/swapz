@@ -114,6 +114,28 @@ static void prepare(struct swapz_compressed_page *pages, swapz_u8 count,
 	}
 }
 
+static int plan_default(const struct swapz_compressed_page *pages,
+			swapz_u8 count, swapz_u8 *classes,
+			swapz_u8 *records_per_extent, swapz_u8 *extent_count)
+{
+	return swapz_engine_plan_bounded(pages, count, 0, classes,
+					 records_per_extent, extent_count);
+}
+
+static int write_window_sequential(const struct swapz_compressed_page *pages,
+				   swapz_u8 count,
+				   swapz_u8 *committed_pages)
+{
+	swapz_u8 bulk = engine.bulk_enabled;
+	int error;
+
+	engine.bulk_enabled = 0;
+	error = swapz_engine_write_window_batched(&engine, pages, count,
+						 committed_pages);
+	engine.bulk_enabled = bulk;
+	return error;
+}
+
 static int test_finite_window_planner(void)
 {
 	struct swapz_compressed_page pages[16];
@@ -123,7 +145,7 @@ static int test_finite_window_planner(void)
 	unsigned int total = 0;
 
 	prepare(pages, 16, 0, 0);
-	CHECK(swapz_engine_plan(pages, 16, classes, takes, &groups) == 0);
+	CHECK(plan_default(pages, 16, classes, takes, &groups) == 0);
 	for (i = 0; i < groups; ++i) {
 		CHECK(classes[i] == 1 || classes[i] == 2 || classes[i] == 4);
 		CHECK(takes[i] && takes[i] <= 7);
@@ -136,11 +158,11 @@ static int test_finite_window_planner(void)
 	CHECK(groups >= 3 && groups <= 5); /* read amplification breaks byte ties */
 
 	pages[0].payload = NULL;
-	CHECK(swapz_engine_plan(pages, 16, classes, takes, &groups) ==
+	CHECK(plan_default(pages, 16, classes, takes, &groups) ==
 	      -EOPNOTSUPP);
 	pages[0].payload = originals[0];
 	pages[0].length = 4096; /* raw cannot masquerade as SWZ3 compressed */
-	CHECK(swapz_engine_plan(pages, 16, classes, takes, &groups) ==
+	CHECK(plan_default(pages, 16, classes, takes, &groups) ==
 	      -EOPNOTSUPP);
 	return 0;
 }
@@ -157,7 +179,7 @@ static int test_full_window_and_selective_reads(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 16, 0, 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 16, &committed) == 0);
+	CHECK(write_window_sequential(pages, 16, &committed) == 0);
 	CHECK(committed == 16 && !authority.in_flight);
 	CHECK(engine.submitted_blocks == 10);
 	CHECK(engine.completed_blocks == 10);
@@ -212,7 +234,7 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	engine.read_metadata_cache = scratch_metadata_cache;
 	engine.max_read_blocks_per_record = 1;
 	prepare(pages, 64, 0, 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 64, &committed) == 0);
+	CHECK(write_window_sequential(pages, 64, &committed) == 0);
 	CHECK(committed == 64);
 
 	/* Five distinct one-block extents evict the real one-entry cache but not
@@ -242,7 +264,7 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	 * The old cached block-zero must never survive a generation change. */
 	prepare(pages, 1, 0, 70);
 	committed = 0;
-	CHECK(swapz_engine_write_window(&engine, pages, 1, &committed) == 0);
+	CHECK(write_window_sequential(pages, 1, &committed) == 0);
 	CHECK(committed == 1 && maps[0].generation == 2);
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
@@ -277,7 +299,7 @@ static int test_full_extent_corruption_rejected(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 7, 0, 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 7, &committed) == 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
 	CHECK(committed == 7);
 	map = maps[6];
 	CHECK(swapz_lookup(disk.storage +
@@ -300,7 +322,7 @@ static int test_torn_extent_quarantined_without_authority(void)
 	CHECK(setup() == 0);
 	prepare(pages, 16, 0, 0);
 	disk.fail_write_on_call = 1;
-	CHECK(swapz_engine_write_window(&engine, pages, 16, &committed) == -EIO);
+	CHECK(write_window_sequential(pages, 16, &committed) == -EIO);
 	CHECK(committed == 0);
 	CHECK(authority.abandoned_blocks >= 2);
 	CHECK(authority.next_block == authority.abandoned_blocks);
@@ -322,10 +344,10 @@ static int test_failure_second_extent_reports_prefix(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 16, 0, 0);
-	CHECK(swapz_engine_plan(pages, 16, chosen, takes, &groups) == 0);
+	CHECK(plan_default(pages, 16, chosen, takes, &groups) == 0);
 	CHECK(groups > 1);
 	disk.fail_write_on_call = 2;
-	CHECK(swapz_engine_write_window(&engine, pages, 16, &committed) == -EIO);
+	CHECK(write_window_sequential(pages, 16, &committed) == -EIO);
 	CHECK(committed == takes[0]);
 	for (index = 0; index < committed; ++index) {
 		CHECK(maps[index].valid);
@@ -347,12 +369,12 @@ static int test_overwrite_old_mapping_survives_failure(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 7, 0, 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 7, &committed) == 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
 	previous = maps[0];
 	prepare(pages, 7, 0, 70);
 	disk.fail_write_on_call = disk.write_calls + 1;
 	committed = 0;
-	CHECK(swapz_engine_write_window(&engine, pages, 7, &committed) == -EIO);
+	CHECK(write_window_sequential(pages, 7, &committed) == -EIO);
 	CHECK(committed == 0);
 	CHECK(maps[0].start_block == previous.start_block &&
 	      maps[0].generation == previous.generation);
@@ -360,7 +382,7 @@ static int test_overwrite_old_mapping_survives_failure(void)
 				   output, sizeof(output), &length) == 0);
 	CHECK(output[0] == 1 && length == 2072);
 	disk.fail_write_on_call = 0;
-	CHECK(swapz_engine_write_window(&engine, pages, 7, &committed) == 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
 	CHECK(committed == 7 && maps[0].generation == 2);
 	CHECK(swapz_engine_read_page(&engine, 0,
 				   output, sizeof(output), &length) == 0);
@@ -376,7 +398,7 @@ static int test_lower_read_failure_does_not_fake_bytes(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 1, 0, 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 1, &committed) == 0);
+	CHECK(write_window_sequential(pages, 1, &committed) == 0);
 	disk.fail_reads = 1;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == -EIO);
@@ -417,7 +439,7 @@ static int test_read_budget_tradeoff_on_uniform_2072(void)
 		}
 		CHECK(j == 16);
 		committed = 99;
-		CHECK(swapz_engine_write_window(&engine, pages, 16,
+		CHECK(write_window_sequential(pages, 16,
 					      &committed) == 0);
 		CHECK(committed == 16);
 		CHECK(disk.write_blocks == class_blocks);
@@ -448,7 +470,7 @@ static int test_mapping_length_mismatch_stops_before_payload_io(void)
 
 	CHECK(setup() == 0);
 	prepare(pages, 7, 0, 0);
-	CHECK(swapz_engine_write_window(&engine, pages, 7, &committed) == 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
 	CHECK(committed == 7 && maps[6].valid);
 	original = maps[6].payload_length;
 	CHECK(original == 2072);
