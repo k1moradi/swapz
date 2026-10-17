@@ -245,3 +245,11 @@ and a second guarded wake check immediately before synchronous lower WRITE
 submission. Both wake decisions must share `queue_lock` with producer claim
 and ordered-worker steal. Loaded comparison must verify QD1 latency/throughput
 without losing high-QD `prep_lower_write_overlap_starts`.
+
+
+Idempotent metadata-cache invalidation qualification must preserve the existing
+explicit-invalidation and post-write miss tests. Source coverage requires the
+512-slot validity clear to remain present but guarded by a nonzero metadata-LRU
+clock, with the clock reset inside that guarded block. Native coverage must call
+the mutation fence twice before a reread and still require a lower metadata
+read, proving repeated invalidation changes no observable authority behavior.

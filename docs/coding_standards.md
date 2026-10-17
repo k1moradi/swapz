@@ -341,3 +341,16 @@ waiting. This closes the race where a lone queued preparation was intentionally
 left for inline steal but a lower WRITE begins before the ordered worker reaches
 it. The producer still owns no mapping, lower I/O, publication or BIO
 completion, and producer-claimed entries retain the completion handoff.
+
+
+### Idempotent metadata-cache invalidation
+
+`read_metadata_lru_clock == 0` is the canonical empty metadata-LRU state.
+A mutation fence must always invalidate the one-entry read cache, but it may
+skip clearing the 512-slot metadata validity array when the clock already
+proves a previous invalidation emptied it. The first invalidation after any
+metadata insertion must still clear all valid slots and reset the clock.
+
+This optimization does not weaken physical-reuse safety or make cached
+metadata survive a write, discard, GC mutation or barrier. It only makes
+back-to-back invalidation calls idempotent in cost as well as semantics.

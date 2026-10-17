@@ -193,6 +193,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine->read_metadata_lru_valid", engine)
         self.assertIn("engine->read_metadata_cache +", engine)
         self.assertIn("memset(engine->read_metadata_lru_valid, 0", engine)
+        invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
+        self.assertIn("if (engine->read_metadata_lru_clock)", invalidate)
+        self.assertLess(invalidate.index("if (engine->read_metadata_lru_clock)"),
+                        invalidate.index("memset(engine->read_metadata_lru_valid, 0"))
         self.assertIn("engine->read_cache_valid = 0", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(engine)", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(e)", engine)

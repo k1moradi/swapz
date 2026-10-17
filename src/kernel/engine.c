@@ -305,9 +305,17 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 	if (engine) {
 		engine->read_cache_valid = 0;
 		engine->read_cached_full = 0;
-		memset(engine->read_metadata_lru_valid, 0,
-		       sizeof(engine->read_metadata_lru_valid));
-		engine->read_metadata_lru_clock = 0;
+		/*
+		 * clock==0 is the canonical empty-LRU state. Writes commonly hit
+		 * this fence more than once (process-level mutation plus physical
+		 * lower WRITE), so do not rescan/clear 512 validity bytes when the
+		 * previous invalidation already made every slot unreachable.
+		 */
+		if (engine->read_metadata_lru_clock) {
+			memset(engine->read_metadata_lru_valid, 0,
+			       sizeof(engine->read_metadata_lru_valid));
+			engine->read_metadata_lru_clock = 0;
+		}
 	}
 }
 

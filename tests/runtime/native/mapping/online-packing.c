@@ -260,6 +260,9 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	/* The ordinary mutation fence clears residency. Re-reading after an
 	 * explicit invalidation must hit the lower device again. */
 	swapz_engine_invalidate_read_cache(&engine);
+	/* Repeated mutation fences on an already-empty metadata LRU are a
+	 * semantic no-op; the optimized invalidation skips redundant clearing. */
+	swapz_engine_invalidate_read_cache(&engine);
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == 0);
