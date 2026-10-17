@@ -704,7 +704,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			 sv3_u8 *payload, sv3_u16 payload_capacity,
 			 sv3_u16 *payload_length)
 {
-	struct sv3_decoded peek, decoded;
+	struct sv3_decoded peek;
 	struct sv3_map observed;
 	const sv3_u8 *stored;
 	sv3_u32 bytes, first, last, start, count;
@@ -812,15 +812,15 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
 	}
-	error = sv3_read_authoritative(engine->authority, logical_page,
-				       &observed, engine->read_scratch,
-				       bytes, &decoded, &stored);
+	error = sv3_read_authoritative_peeked(engine->authority, logical_page,
+					      &observed, engine->read_scratch,
+					      bytes, &peek, &stored);
 	if (error)
 		return error;
-	if (decoded.payload_length > payload_capacity)
+	if (peek.payload_length > payload_capacity)
 		return -ENOSPC;
-	memcpy(payload, stored, decoded.payload_length);
-	*payload_length = decoded.payload_length;
+	memcpy(payload, stored, peek.payload_length);
+	*payload_length = peek.payload_length;
 	/* Publish reusable bytes only after successful authority, generation
 	 * and payload-CRC validation. Any error path leaves the cache invalid. */
 	engine->read_cached_start_block = observed.start_block;

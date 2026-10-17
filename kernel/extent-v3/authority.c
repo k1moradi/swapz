@@ -774,16 +774,15 @@ fail:
 	return error;
 }
 
-int sv3_read_authoritative(const struct sv3_authority *a,
+static int sv3_read_observed_authority(
+			   const struct sv3_authority *a,
 			   sv3_u32 logical_page, const struct sv3_map *observed,
 			   const void *extent, sv3_u32 bytes_total,
-			   struct sv3_decoded *decoded,
-			   const sv3_u8 **payload)
+			   const struct sv3_map **current_out)
 {
 	const struct sv3_map *current;
-	int error;
 
-	if (!a || !observed || !decoded || !payload ||
+	if (!a || !observed || !current_out ||
 	    logical_page >= a->logical_pages)
 		return -EINVAL;
 	current = &a->maps[logical_page];
@@ -801,6 +800,25 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	if (!extent ||
 	    bytes_total != (sv3_u32)current->extent_blocks * SV3_BLOCK_BYTES)
 		return -EINVAL;
+	*current_out = current;
+	return 0;
+}
+
+int sv3_read_authoritative(const struct sv3_authority *a,
+			   sv3_u32 logical_page, const struct sv3_map *observed,
+			   const void *extent, sv3_u32 bytes_total,
+			   struct sv3_decoded *decoded,
+			   const sv3_u8 **payload)
+{
+	const struct sv3_map *current;
+	int error;
+
+	if (!decoded || !payload)
+		return -EINVAL;
+	error = sv3_read_observed_authority(a, logical_page, observed,
+					   extent, bytes_total, &current);
+	if (error)
+		return error;
 	error = sv3_lookup(extent, bytes_total, current->record_index,
 			   decoded, payload);
 	if (error)
@@ -814,5 +832,48 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 		*payload = NULL;
 		return -EUCLEAN;
 	}
+	return 0;
+}
+
+int sv3_read_authoritative_peeked(const struct sv3_authority *a,
+				  sv3_u32 logical_page,
+				  const struct sv3_map *observed,
+				  const void *extent, sv3_u32 bytes_total,
+				  const struct sv3_decoded *peeked,
+				  const sv3_u8 **payload)
+{
+	const struct sv3_map *current;
+	const sv3_u8 *stored;
+	int error;
+
+	if (!peeked || !payload)
+		return -EINVAL;
+	*payload = NULL;
+	error = sv3_read_observed_authority(a, logical_page, observed,
+					   extent, bytes_total, &current);
+	if (error)
+		return error;
+	/*
+	 * sv3_peek() already validated the complete metadata block before the
+	 * engine fetched any missing payload blocks. read_scratch is owned by
+	 * the serialized worker, so only those payload bytes can change before
+	 * this call. Recheck volatile authority and on-media sequence, then
+	 * validate the payload CRC exactly once without reparsing metadata.
+	 */
+	if (peeked->logical_page != logical_page ||
+	    peeked->generation != current->generation ||
+	    peeked->payload_length != current->payload_length ||
+	    peeked->payload_offset != current->payload_offset ||
+	    !peeked->payload_length ||
+	    peeked->payload_length > SV3_MAX_COMPRESSED ||
+	    peeked->payload_offset >= bytes_total ||
+	    peeked->payload_length > bytes_total - peeked->payload_offset ||
+	    sv3_disk_sequence(extent) != current->sequence)
+		return -EUCLEAN;
+	stored = (const sv3_u8 *)extent + peeked->payload_offset;
+	if (sv3_crc32c_bytes(stored, peeked->payload_length) !=
+	    peeked->payload_crc32c)
+		return -EBADMSG;
+	*payload = stored;
 	return 0;
 }

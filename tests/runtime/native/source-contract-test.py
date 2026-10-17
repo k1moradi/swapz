@@ -165,6 +165,13 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_two_block_skips=%u", status)
         self.assertIn("read_two_block_skips++", engine)
         self.assertIn("peek.payload_offset != observed.payload_offset", engine)
+        engine_read = source_body("sv3_engine_read_page", engine)
+        peeked_authority = source_body("sv3_read_authoritative_peeked", AUTH)
+        self.assertIn("sv3_read_authoritative_peeked(", engine_read)
+        self.assertNotIn("sv3_read_authoritative(", engine_read)
+        self.assertIn("sv3_crc32c_bytes(", peeked_authority)
+        self.assertIn("sv3_disk_sequence(", peeked_authority)
+        self.assertNotIn("sv3_lookup(", peeked_authority)
         self.assertIn("payload_offsets[index] = decoded.payload_offset",
                       (ROOT / "kernel/extent-v3/authority.c").read_text())
         self.assertIn("read_full_extent_requests", header)

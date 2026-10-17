@@ -339,6 +339,18 @@ cache payload blocks or suppress required payload I/O. Every logical read
 still executes `sv3_peek`, authority/generation/offset/length checks and
 payload CRC validation.
 
+The current production-C read path reuses the descriptor already returned
+by that successful `sv3_peek` after fetching any missing payload blocks.
+`sv3_read_authoritative_peeked` must recheck current volatile authority,
+the on-media sequence and payload bounds, then verify payload CRC before
+returning bytes; it must not call `sv3_lookup` or re-run metadata
+validation over the same worker-owned block-zero scratch. Exact-C coverage
+corrupts payload bytes after a successful peek, forges the decoded generation
+and mutates the sequence, requiring fail-closed rejection in every case.
+This is a CPU-path optimization only: lower READ request/byte geometry,
+cache size and mapping publication are unchanged. Owner-loaded `make test`
+at this source is **NOT RUN**.
+
 Owner-loaded `be84880c` (report-only `df8ae7d2`) rejected the
 same-memory 64-physical-block alternative: random predicted miss-block
 traffic was 1.4-2.1% higher than the retained metadata-cache traffic, with

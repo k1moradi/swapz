@@ -175,5 +175,16 @@ int sv3_read_authoritative(const struct sv3_authority *authority,
 			   const void *extent, sv3_u32 bytes_total,
 			   struct sv3_decoded *decoded,
 			   const sv3_u8 **payload);
+/*
+ * Fast path after sv3_peek() has validated metadata in worker-owned scratch.
+ * Rechecks current authority/sequence and verifies the payload CRC without
+ * re-running the metadata parser over the same block-zero bytes.
+ */
+int sv3_read_authoritative_peeked(const struct sv3_authority *authority,
+				  sv3_u32 logical_page,
+				  const struct sv3_map *observed,
+				  const void *extent, sv3_u32 bytes_total,
+				  const struct sv3_decoded *peeked,
+				  const sv3_u8 **payload);
 
 #endif

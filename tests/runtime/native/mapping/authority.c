@@ -102,6 +102,48 @@ static int test_full_publish_and_authoritative_reads(void)
 	return 0;
 }
 
+static int test_peeked_authoritative_read_rechecks_payload_and_sequence(void)
+{
+	const sv3_u32 pages[] = {0, 1, 2};
+	struct sv3_tx tx;
+	struct sv3_decoded peeked, forged;
+	struct sv3_map observed;
+	const sv3_u8 *payload = NULL;
+	sv3_u16 offset;
+
+	CHECK(init() == 0);
+	CHECK(sv3_stage(&authority, pages, 3, 2, &tx) == 0);
+	CHECK(encode(&tx) == 0);
+	CHECK(sv3_finish(&authority, &tx, extent, 8192, 2, 0) == 0);
+	observed = maps[1];
+	CHECK(sv3_peek(extent, 8192, observed.record_index, &peeked) == 0);
+	CHECK(sv3_read_authoritative_peeked(&authority, 1, &observed,
+					    extent, 8192,
+					    &peeked, &payload) == 0);
+	CHECK(payload && payload[0] == 2 && payload[2071] == 2);
+
+	offset = peeked.payload_offset;
+	extent[offset] ^= 0x40;
+	payload = (const sv3_u8 *)1;
+	CHECK(sv3_read_authoritative_peeked(&authority, 1, &observed,
+					    extent, 8192,
+					    &peeked, &payload) == -EBADMSG);
+	CHECK(payload == NULL);
+	extent[offset] ^= 0x40;
+
+	forged = peeked;
+	forged.generation++;
+	CHECK(sv3_read_authoritative_peeked(&authority, 1, &observed,
+					    extent, 8192,
+					    &forged, &payload) == -EUCLEAN);
+	extent[8] ^= 0x40; /* sequence bytes are rechecked after the peek */
+	CHECK(sv3_read_authoritative_peeked(&authority, 1, &observed,
+					    extent, 8192,
+					    &peeked, &payload) == -EUCLEAN);
+	extent[8] ^= 0x40;
+	return 0;
+}
+
 static int test_torn_write_no_old_mapping_invalidation(void)
 {
 	const sv3_u32 pages[] = {0, 1, 2};
@@ -294,6 +336,7 @@ int main(void)
 
 	CHECK(test_initial_rejects_unsafe_capacity() == 0); passed++;
 	CHECK(test_full_publish_and_authoritative_reads() == 0); passed++;
+	CHECK(test_peeked_authoritative_read_rechecks_payload_and_sequence() == 0); passed++;
 	CHECK(test_torn_write_no_old_mapping_invalidation() == 0); passed++;
 	CHECK(test_overwrite_generation_and_liveness() == 0); passed++;
 	CHECK(test_last_corrupt_sibling_prevents_all_publication() == 0); passed++;
