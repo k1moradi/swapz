@@ -405,13 +405,6 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("batch_hashes", authority)
         self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("swapz_gc_commit_rotation", authority))
-        stats = source_body("swapz_engine_plan_stats", engine)
-        self.assertIn("swapz_engine_plan_bounded(", stats)
-        self.assertNotIn("io.write_extent", stats)
-        self.assertNotIn("io.write_run", stats)
-        self.assertNotIn("io.read_blocks", stats)
-        self.assertNotIn("kmalloc", stats)
-        self.assertNotIn("vmalloc", stats)
 
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
         engine = (ROOT / "src/kernel/engine.c").read_text()
@@ -667,7 +660,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("drain_workqueue(ctx->workqueue)", body("swapz_drain"))
         self.assertIn("swapz_flush_window(ctx)", worker)
 
-    def test_alpha22_small_packed_burst_tail_drains_outside_admission_lock(self):
+    def test_small_packed_burst_tail_drains_outside_admission_lock(self):
         flush = body("swapz_flush_window")
         worker = body("swapz_worker")
         self.assertIn("bool packed_close = ctx->next_window_close == SWAPZ_CLOSE_PACK_READY",
@@ -831,39 +824,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
         self.assertIn("accepted_burst_tail_flushes=%llu", status)
         self.assertIn("accepted_burst_read_caps=%llu", status)
-        self.assertIn("accepted_burst_cap_extra_blocks=%llu", status)
-        self.assertIn("accepted_burst_cap_extra_gt1_windows=%llu", status)
-        self.assertIn("accepted_burst_four_extents_avoided=%llu", status)
-        self.assertIn("accepted_burst_plan_stats_failures=%llu", status)
-        self.assertIn("accepted_burst_cap3_recovered_blocks=%llu", status)
-        self.assertIn("accepted_burst_cap3_full_recovery_windows=%llu", status)
-        self.assertIn("accepted_burst_cap3_pareto_candidates=%llu", status)
         self.assertIn("bool accepted_burst_extended = ctx->accepted_burst_pack_ready", flush)
         self.assertIn("swapz_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record", flush)
         self.assertIn("if (accepted_burst_extended && !planning_read_cap)", flush)
         self.assertIn("planning_read_cap = 2U", flush)
         self.assertIn("ctx->accepted_burst_read_caps++", flush)
-        self.assertIn("swapz_engine_plan_stats(ctx->planned, compressed_count, 0", flush)
-        self.assertIn("swapz_engine_plan_stats(ctx->planned, compressed_count, 2", flush)
-        self.assertIn("swapz_engine_plan_stats(", flush)
-        self.assertIn("ctx->planned, compressed_count, 3", flush)
-        self.assertIn("swapz_window_cap3_pareto_candidate(", flush)
-        self.assertNotIn("planning_read_cap = 3U", flush)
-        self.assertIn("ctx->accepted_burst_cap3_recovered_blocks +=", flush)
-        self.assertIn("ctx->accepted_burst_cap3_full_recovery_windows++", flush)
-        self.assertIn("ctx->accepted_burst_cap3_pareto_candidates++", flush)
-        self.assertIn("ctx->accepted_burst_cap_extra_blocks += extra", flush)
-        self.assertIn("if (extra > 1)", flush)
-        self.assertLess(flush.index("if (extra > 1)"),
-                        flush.index("ctx->planned, compressed_count, 3"))
-        self.assertIn("ctx->accepted_burst_four_extents_avoided +=", flush)
-        self.assertIn("ctx->accepted_burst_plan_stats_failures++", flush)
-        self.assertLess(flush.index("swapz_order_window(ctx)"),
-                        flush.index("swapz_engine_plan_stats(ctx->planned"))
-        self.assertLess(flush.index("swapz_engine_plan_stats(ctx->planned"),
-                        flush.index("swapz_engine_write_window_batched_read_cap(&ctx->engine"))
         self.assertIn("swapz_engine_write_window_batched_read_cap(&ctx->engine", flush)
         self.assertIn("planning_read_cap);", flush)
+        self.assertNotIn("swapz_engine_plan_stats(", flush)
+        self.assertNotIn("cap3", flush)
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):

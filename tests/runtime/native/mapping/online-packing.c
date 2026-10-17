@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Exercise the EXACT kernel V3 codec + authority + bounded I/O engine C
+ * Exercise the EXACT kernel SWZ3 codec + authority + bounded I/O engine C
  * against a deterministic fault-injectable RAM lower device. No /dev access.
  */
 #include <errno.h>
@@ -139,80 +139,9 @@ static int test_finite_window_planner(void)
 	CHECK(swapz_engine_plan(pages, 16, classes, takes, &groups) ==
 	      -EOPNOTSUPP);
 	pages[0].payload = originals[0];
-	pages[0].length = 4096; /* raw cannot masquerade as V3 compressed */
+	pages[0].length = 4096; /* raw cannot masquerade as SWZ3 compressed */
 	CHECK(swapz_engine_plan(pages, 16, classes, takes, &groups) ==
 	      -EOPNOTSUPP);
-	return 0;
-}
-
-static int test_planner_stats_quantify_cap_tradeoff(void)
-{
-	struct swapz_compressed_page pages[16];
-	swapz_u16 blocks = 99;
-	swapz_u8 extents = 99, four = 99;
-
-	prepare(pages, 16, 0, 0);
-	CHECK(swapz_engine_plan_stats(pages, 16, 0,
-				    &blocks, &extents, &four) == 0);
-	CHECK(blocks == 10);
-	/* Equal-byte plans prefer lower predicted read cost: 3+3+3+7. */
-	CHECK(extents == 4);
-	CHECK(four == 1);
-
-	blocks = 99;
-	extents = four = 99;
-	CHECK(swapz_engine_plan_stats(pages, 16, 2,
-				    &blocks, &extents, &four) == 0);
-	CHECK(blocks == 11);
-	CHECK(extents == 6);
-	CHECK(four == 0);
-
-	blocks = 99;
-	extents = four = 99;
-	CHECK(swapz_engine_plan_stats(pages, 16, 3,
-				    &blocks, &extents, &four) == 0);
-	CHECK(blocks == 10);
-	CHECK(extents == 4);
-	CHECK(four == 1);
-	CHECK(!swapz_window_cap3_pareto_candidate(10, 11, 10, 1));
-
-	blocks = 99;
-	extents = four = 99;
-	CHECK(swapz_engine_plan_stats(pages, 16, 4,
-				    &blocks, &extents, &four) == -EINVAL);
-	CHECK(blocks == 0 && extents == 0 && four == 0);
-	return 0;
-}
-
-static int test_planner_stats_pareto_tail_candidate(void)
-{
-	static const swapz_u16 lengths[13] = {
-		2546, 1813, 2689, 2003, 2975, 2759, 2292,
-		2916, 2922, 2416, 2806, 2912, 2597,
-	};
-	struct swapz_compressed_page pages[13];
-	swapz_u16 uncapped_blocks = 0, cap2_blocks = 0, cap3_blocks = 0;
-	swapz_u8 extents = 0, uncapped_four = 0, cap2_four = 0, cap3_four = 0;
-	swapz_u8 index;
-
-	/* plan_stats validates pointers/lengths but never dereferences payload. */
-	for (index = 0; index < 13; ++index) {
-		pages[index].logical_page = index;
-		pages[index].payload = originals[index];
-		pages[index].length = lengths[index];
-		pages[index].raw = 0;
-	}
-	CHECK(swapz_engine_plan_stats(pages, 13, 0, &uncapped_blocks,
-				    &extents, &uncapped_four) == 0);
-	CHECK(uncapped_blocks == 9 && extents == 4 && uncapped_four == 1);
-	CHECK(swapz_engine_plan_stats(pages, 13, 2, &cap2_blocks,
-				    &extents, &cap2_four) == 0);
-	CHECK(cap2_blocks == 11 && extents == 9 && cap2_four == 0);
-	CHECK(swapz_engine_plan_stats(pages, 13, 3, &cap3_blocks,
-				    &extents, &cap3_four) == 0);
-	CHECK(cap3_blocks == 9 && extents == 4 && cap3_four == 1);
-	CHECK(swapz_window_cap3_pareto_candidate(uncapped_blocks, cap2_blocks,
-				       cap3_blocks, cap3_four));
 	return 0;
 }
 
@@ -544,8 +473,6 @@ int main(void)
 	disk.storage = calloc(PHYSICAL_BLOCKS, SWAPZ_BLOCK_BYTES);
 	CHECK(disk.storage != NULL);
 	CHECK(test_finite_window_planner() == 0); completed++;
-	CHECK(test_planner_stats_quantify_cap_tradeoff() == 0); completed++;
-	CHECK(test_planner_stats_pareto_tail_candidate() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;

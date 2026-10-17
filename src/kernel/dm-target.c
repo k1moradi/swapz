@@ -199,13 +199,6 @@ struct swapz_dm {
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
 	u64 accepted_burst_read_caps;
-	u64 accepted_burst_cap_extra_blocks;
-	u64 accepted_burst_cap_extra_gt1_windows;
-	u64 accepted_burst_four_extents_avoided;
-	u64 accepted_burst_plan_stats_failures;
-	u64 accepted_burst_cap3_recovered_blocks;
-	u64 accepted_burst_cap3_full_recovery_windows;
-	u64 accepted_burst_cap3_pareto_candidates;
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
@@ -1095,69 +1088,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	swapz_order_window(ctx);
 	ctx->window_sort_wall_ns +=
 		swapz_elapsed_ns(section_start, ktime_get_ns());
-	/*
-	 * Keep the owner-qualified real write at cap=2. The rejected cap=3
-	 * Pareto rule selected zero windows in both loaded models, so do not
-	 * widen it or retain an unproven production branch. Preserve the useful
-	 * cap=2 tax diagnostic, and probe cap=3 only for the rare windows whose
-	 * hard cap costs more than one 4KiB block. The probe is CPU-only: it
-	 * performs no allocation, I/O, authority or completion mutation.
-	 */
-	if (accepted_burst_extended &&
-	    !ctx->engine.max_read_blocks_per_record) {
-		swapz_u8 compressed_count = 0;
-		swapz_u8 uncapped_extents = 0, capped_extents = 0;
-		swapz_u8 uncapped_four = 0, capped_four = 0;
-		swapz_u16 uncapped_blocks = 0, capped_blocks = 0;
-		int uncapped_error, capped_error;
-
-		while (compressed_count < count &&
-		       !ctx->planned[compressed_count].raw)
-			compressed_count++;
-		uncapped_error = compressed_count ?
-			swapz_engine_plan_stats(ctx->planned, compressed_count, 0,
-					      &uncapped_blocks, &uncapped_extents,
-					      &uncapped_four) : -EINVAL;
-		capped_error = compressed_count ?
-			swapz_engine_plan_stats(ctx->planned, compressed_count, 2,
-					      &capped_blocks, &capped_extents,
-					      &capped_four) : -EINVAL;
-		if (uncapped_error || capped_error ||
-		    capped_blocks < uncapped_blocks ||
-		    capped_four > uncapped_four) {
-			ctx->accepted_burst_plan_stats_failures++;
-		} else {
-			swapz_u16 extra = capped_blocks - uncapped_blocks;
-
-			ctx->accepted_burst_cap_extra_blocks += extra;
-			ctx->accepted_burst_four_extents_avoided +=
-				uncapped_four - capped_four;
-			if (extra > 1) {
-				swapz_u8 cap3_extents = 0, cap3_four = 0;
-				swapz_u16 cap3_blocks = 0;
-				int cap3_error;
-
-				ctx->accepted_burst_cap_extra_gt1_windows++;
-				cap3_error = swapz_engine_plan_stats(
-					ctx->planned, compressed_count, 3,
-					&cap3_blocks, &cap3_extents, &cap3_four);
-				if (cap3_error ||
-				    cap3_blocks < uncapped_blocks ||
-				    cap3_blocks > capped_blocks) {
-					ctx->accepted_burst_plan_stats_failures++;
-				} else {
-					ctx->accepted_burst_cap3_recovered_blocks +=
-						capped_blocks - cap3_blocks;
-					if (cap3_blocks == uncapped_blocks)
-						ctx->accepted_burst_cap3_full_recovery_windows++;
-					if (swapz_window_cap3_pareto_candidate(
-						    uncapped_blocks, capped_blocks,
-						    cap3_blocks, cap3_four))
-						ctx->accepted_burst_cap3_pareto_candidates++;
-				}
-			}
-		}
-	}
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
@@ -2414,13 +2344,6 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
-		       "accepted_burst_cap_extra_blocks=%llu "
-		       "accepted_burst_cap_extra_gt1_windows=%llu "
-		       "accepted_burst_four_extents_avoided=%llu "
-		       "accepted_burst_plan_stats_failures=%llu "
-		       "accepted_burst_cap3_recovered_blocks=%llu "
-		       "accepted_burst_cap3_full_recovery_windows=%llu "
-		       "accepted_burst_cap3_pareto_candidates=%llu "
 		       "burst_tail_flushes=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
@@ -2524,13 +2447,6 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_burst_extensions,
 		       ctx->accepted_burst_tail_flushes,
 		       ctx->accepted_burst_read_caps,
-		       ctx->accepted_burst_cap_extra_blocks,
-		       ctx->accepted_burst_cap_extra_gt1_windows,
-		       ctx->accepted_burst_four_extents_avoided,
-		       ctx->accepted_burst_plan_stats_failures,
-		       ctx->accepted_burst_cap3_recovered_blocks,
-		       ctx->accepted_burst_cap3_full_recovery_windows,
-		       ctx->accepted_burst_cap3_pareto_candidates,
 		       ctx->burst_tail_flushes,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,

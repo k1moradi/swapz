@@ -127,11 +127,6 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 			    swapz_u8 count, swapz_u8 max_read_blocks,
 			    swapz_u8 *classes, swapz_u8 *records_per_extent,
 			    swapz_u8 *extent_count);
-/* CPU-only summary of the same exact planner; no allocation or I/O. */
-int swapz_engine_plan_stats(const struct swapz_compressed_page *pages,
-			  swapz_u8 count, swapz_u8 max_read_blocks,
-			  swapz_u16 *total_blocks, swapz_u8 *extent_count,
-			  swapz_u8 *four_block_extents);
 /*
  * Partial failure returns a nonzero status and sets *committed_pages to
  * exactly the prefix whose complete extents became authoritative. It NEVER
