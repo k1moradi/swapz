@@ -110,3 +110,12 @@ the observation: the maximum supported 4ms deadline can legitimately expire
 between a userspace status sample and the separate suspend request. That race
 is not a drain failure. Loaded failure reporting skips the generic cleanup
 epilogue so the preceding specific sanitized failure remains visible.
+
+
+Production-C differential tests for the lower-run writer must not freeze an
+old physical extent layout when the experiment intentionally changes planner
+tie ordering. They still require identical useful payloads and generations,
+byte-exact readback, no authority visibility before lower completion, zero
+default padding, and no increase in lower WRITE bytes. Physical start blocks,
+record indices and extent classes may differ when those changes are the
+mechanism being qualified.
