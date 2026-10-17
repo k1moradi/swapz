@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rootless production-C range guards and fail-closed call-order contracts.
+"""Rootless retained-legacy range guards and fail-closed call-order contracts.
 
-Compiles ONLY two pure guard functions extracted verbatim from the production
-Device Mapper target into an ordinary userspace shared object. Never builds/loads a kernel module,
+Compiles ONLY two pure guard functions extracted verbatim from the retained
+legacy test fixture into an ordinary userspace shared object. Never builds/loads a kernel module,
 opens block devices, changes swap, or grants cleanup authority.
 """
 
@@ -19,7 +19,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-KERNEL = ROOT / "src" / "kernel" / "dm-target.c"
+KERNEL = ROOT / "tests" / "legacy" / "kernel" / "dm-swapz.c"
 BLOCK_SECTORS = 8
 U32_MAX = (1 << 32) - 1
 U64_MAX = (1 << 64) - 1
@@ -88,7 +88,7 @@ int audit_discard(uint32_t limit, uint64_t sector, uint64_t sectors) {
     return lib
 
 
-class ExactKernelRangeContractTests(unittest.TestCase):
+class RetainedLegacyKernelRangeContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = KERNEL.read_text(encoding="utf-8")

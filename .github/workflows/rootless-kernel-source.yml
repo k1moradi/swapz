@@ -78,7 +78,7 @@ jobs:
             tests/runtime/swapz-upper-bio-ownership-contract-test.py \
             tests/runtime/swapz-pending-pack-ownership-contract-test.py
 
-      - name: Execute exact production-C range guards
+      - name: Execute retained legacy kernel range guards
         shell: bash
         run: |
           set -euo pipefail

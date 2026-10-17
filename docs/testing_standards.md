@@ -1935,3 +1935,10 @@ When a versioned implementation path or test artifact is retired, update the
 source contract and workflow trigger in the same change. Historical on-disk
 `SWZ3` terminology remains format identity, not an implementation-version
 name.
+
+
+The retained `swapz-kernel-range-contract-test.py` is explicitly a historical
+safety regression over `tests/legacy/kernel/dm-swapz.c`; it is not current
+product source. Current product contracts use `src/kernel/` and the exact
+native production-C suites. Do not repoint legacy helper-extraction tests at
+the current target merely because the repository layout changed.
