@@ -215,3 +215,10 @@ arrivals are never predicted or waited for. A smaller multi-record stream may
 shrink the learned target after one original absolute deadline. Singleton QD1
 adaptation remains separate. The retired one/two-record packed-burst tail
 shortcut must not coexist with this policy.
+
+
+The retained-burst pure policy helpers must avoid identifiers such as `current`
+that are macro names in Linux kernel headers. Pack-target closure in
+`swapz_accept_write()` uses the existing admission snapshot; absolute expiry
+remains enforced by the established process/worker deadline gates rather than
+introducing a second pre-definition expiry path.

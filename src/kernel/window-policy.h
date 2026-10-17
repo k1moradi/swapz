@@ -129,27 +129,27 @@ static inline swapz_u8 swapz_window_initial_burst_target(swapz_u8 max_window)
 	return max_window < 4U ? max_window : 4U;
 }
 static inline swapz_u8 swapz_window_grow_burst_target(
-		swapz_u8 current, swapz_u8 completed, swapz_u8 admitted_tail,
+		swapz_u8 current_target, swapz_u8 completed, swapz_u8 admitted_tail,
 		swapz_u8 max_window)
 {
 	unsigned int observed;
 	if (!max_window)
 		return 0;
-	if (!current)
-		current = swapz_window_initial_burst_target(max_window);
+	if (!current_target)
+		current_target = swapz_window_initial_burst_target(max_window);
 	observed = (unsigned int)completed + admitted_tail;
 	if (observed > max_window)
 		observed = max_window;
-	if (observed > current)
-		current = (swapz_u8)observed;
-	return current;
+	if (observed > current_target)
+		current_target = (swapz_u8)observed;
+	return current_target;
 }
 static inline swapz_u8 swapz_window_shrink_burst_target(
-		swapz_u8 current, swapz_u8 observed)
+		swapz_u8 current_target, swapz_u8 observed)
 {
 	if (observed > 1U && observed < current)
 		return observed;
-	return current;
+	return current_target;
 }
 static inline swapz_u8 swapz_window_effective_burst_target(
 		swapz_u8 learned, swapz_u8 admitted_tail)

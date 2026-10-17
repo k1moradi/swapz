@@ -1483,8 +1483,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			ctx->accepted_burst_extensions++;
 		}
 		if (swapz_retained_pack_close_ready(ctx) &&
-		    !ctx->worker_has_immediate_followup &&
-		    !swapz_retention_expired(ctx)) {
+		    !ctx->worker_has_immediate_followup) {
 			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
 			if (ctx->accepted_burst_pack_ready)
