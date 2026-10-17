@@ -80,7 +80,7 @@ def git_sha():
 
 
 def paired_provenance_error(row, label):
-    """Require exact source/fixture/trace identity within every off/V3 pair."""
+    """Require exact source/fixture/trace identity within every off/swapz pair."""
     arms = row.get("arms", {})
     for field in BENCHMARK_PROVENANCE_FIELDS:
         values = [arms.get(candidate, {}).get(field)
@@ -361,13 +361,6 @@ def parse_sessions(output):
             allowed = ("burst_tail_flushes", "packed_early_commits",
                        "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                       "accepted_burst_cap_extra_blocks",
-                       "accepted_burst_cap_extra_gt1_windows",
-                       "accepted_burst_four_extents_avoided",
-                       "accepted_burst_plan_stats_failures",
-                       "accepted_burst_cap3_pareto_candidates",
-                       "accepted_burst_cap3_recovered_blocks",
-                       "accepted_burst_cap3_full_recovery_windows",
                        "windows", "one_page_windows", "gc_victims",
                        "gc_role_rotations") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
             current.setdefault("kernel_status", {})[name] = {
@@ -650,13 +643,6 @@ def benchmark_verdicts(sessions):
         for field in ("burst_tail_flushes", "packed_early_commits",
                       "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                       "accepted_burst_cap_extra_blocks",
-                       "accepted_burst_cap_extra_gt1_windows",
-                       "accepted_burst_four_extents_avoided",
-                       "accepted_burst_plan_stats_failures",
-                       "accepted_burst_cap3_pareto_candidates",
-                       "accepted_burst_cap3_recovered_blocks",
-                       "accepted_burst_cap3_full_recovery_windows",
                        "windows",
                       "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS:
             before = status.get("before", {}).get(field)
@@ -669,13 +655,6 @@ def benchmark_verdicts(sessions):
             for key in ("burst_tail_flushes", "packed_early_commits",
                         "single_pack_deferrals", "accepted_burst_extensions",
                         "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                        "accepted_burst_cap_extra_blocks",
-                        "accepted_burst_cap_extra_gt1_windows",
-                        "accepted_burst_four_extents_avoided",
-                        "accepted_burst_plan_stats_failures",
-                        "accepted_burst_cap3_pareto_candidates",
-                        "accepted_burst_cap3_recovered_blocks",
-                        "accepted_burst_cap3_full_recovery_windows",
                         "windows",
                         "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
         }
@@ -702,27 +681,6 @@ def benchmark_verdicts(sessions):
                 row["kernel_counter_delta"]["accepted_burst_extensions"]):
             return {"overall": "INCOMPLETE",
                     "reason": "accepted-burst read caps exceed extensions"}
-        if (row["kernel_counter_delta"]["accepted_burst_cap_extra_gt1_windows"] >
-                row["kernel_counter_delta"]["accepted_burst_read_caps"]):
-            return {"overall": "INCOMPLETE",
-                    "reason": "accepted-burst >1-block windows exceed capped windows"}
-        if row["kernel_counter_delta"]["accepted_burst_plan_stats_failures"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "accepted-burst planner telemetry failed"}
-        cap3_recovered = row["kernel_counter_delta"]["accepted_burst_cap3_recovered_blocks"]
-        cap3_full = row["kernel_counter_delta"]["accepted_burst_cap3_full_recovery_windows"]
-        cap3_candidates = row["kernel_counter_delta"]["accepted_burst_cap3_pareto_candidates"]
-        expensive = row["kernel_counter_delta"]["accepted_burst_cap_extra_gt1_windows"]
-        if cap3_full > expensive:
-            return {"overall": "INCOMPLETE",
-                    "reason": "cap=3 full-recovery windows exceed expensive cap=2 tail"}
-        if cap3_candidates > cap3_full:
-            return {"overall": "INCOMPLETE",
-                    "reason": "cap=3 Pareto candidates exceed full-recovery windows"}
-        if cap3_recovered < 2 * cap3_full or \
-                cap3_recovered > row["kernel_counter_delta"]["accepted_burst_cap_extra_blocks"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "cap=3 recovered-block accounting is inconsistent"}
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
         if None in vals or len(set(vals)) != 1:
@@ -756,7 +714,7 @@ def benchmark_verdicts(sessions):
                            record["physical_write_reqs"]
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: missing/inconsistent timed V3 C write counters"}
+                            "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
                 for field in KERNEL_WRITE_FIELDS:
                     columns[name][f"mixed_{field}"] = statistics.mean(
                         record[field] for record in diagnostics)
@@ -784,7 +742,7 @@ def benchmark_verdicts(sessions):
                                record[field] < 0 for field in KERNEL_READ_FIELDS)
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
-                                "reason": f"{regime}: missing measured V3 {mode} C read counters"}
+                                "reason": f"{regime}: missing measured swapz {mode} C read counters"}
                     for field in KERNEL_READ_FIELDS:
                         columns[name][f"{mode}_{field}"] = statistics.mean(
                             record[field] for record in diagnostics)
@@ -838,19 +796,12 @@ def benchmark_verdicts(sessions):
             "columns": columns, "criteria": criteria,
             "device_model": MODEL_SPECS[regime],
             "interpretation": "SYNTHETIC_RAM_MODEL_ONLY_NOT_PHYSICAL_MEDIA",
-            "alpha22_kernel_counters": {
+            "kernel_counters": {
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
                 for key in ("burst_tail_flushes", "packed_early_commits",
                             "single_pack_deferrals", "accepted_burst_extensions",
                             "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                            "accepted_burst_cap_extra_blocks",
-                            "accepted_burst_cap_extra_gt1_windows",
-                            "accepted_burst_four_extents_avoided",
-                            "accepted_burst_plan_stats_failures",
-                            "accepted_burst_cap3_pareto_candidates",
-                            "accepted_burst_cap3_recovered_blocks",
-                            "accepted_burst_cap3_full_recovery_windows",
                             "windows",
                             "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
             },
@@ -913,7 +864,7 @@ def print_bench(result):
                                  ("seeded_random", "random")):
             sync = columns["sync"]
             asynchronous = columns["async"]
-            print(f"  Timed 4MiB {label} V3 READ calls (sync/async): "
+            print(f"  Timed 4MiB {label} swapz READ calls (sync/async): "
                   f"metadata={sync[f'{read_mode}_read_meta_reqs']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_meta_reqs']:.1f}, "
                   f"payload={sync[f'{read_mode}_read_payload_reqs']:.1f}/"
@@ -929,7 +880,7 @@ def print_bench(result):
                   f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
                   f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
         sync, asynchronous = columns["sync"], columns["async"]
-        print("  Timed mixed V3 C WRITE (sync/async; overlapping wall ns): "
+        print("  Timed mixed swapz C WRITE (sync/async; overlapping wall ns): "
               f"LZ4={sync['mixed_lz4_wall_ns']/1e9:.2f}/"
               f"{asynchronous['mixed_lz4_wall_ns']/1e9:.2f}s, "
               f"commit={sync['mixed_window_commit_wall_ns']/1e9:.2f}/"
@@ -948,18 +899,12 @@ def print_bench(result):
                   f"packed 4MiB read={crit['packed_4mib_sequential']}")
         print(f"  ASYNC vs SYNC: "
               f"{data['criteria']['async_vs_sync']['write_throughput']}")
-        kc = data["alpha22_kernel_counters"]
+        kc = data["kernel_counters"]
         print(f"  Packed-window per-pair mean: deferred first packs="
               f"{kc['single_pack_deferrals']:.1f}, "
               f"accepted-burst extensions={kc['accepted_burst_extensions']:.1f}, "
               f"accepted-burst tail closes={kc['accepted_burst_tail_flushes']:.1f}, "
               f"read-capped accepted windows={kc['accepted_burst_read_caps']:.1f}, "
-              f"cap extra 4KiB blocks={kc['accepted_burst_cap_extra_blocks']:.1f}, "
-              f"cap >1-block windows={kc['accepted_burst_cap_extra_gt1_windows']:.1f}, "
-              f"16KiB extents avoided={kc['accepted_burst_four_extents_avoided']:.1f}, "
-              f"cap3 recovered blocks={kc['accepted_burst_cap3_recovered_blocks']:.1f}, "
-              f"cap3 full-recovery windows={kc['accepted_burst_cap3_full_recovery_windows']:.1f}, "
-              f"cap3 Pareto candidates={kc['accepted_burst_cap3_pareto_candidates']:.1f}, "
               f"early pack closes={kc['close_pack_ready']:.1f}, "
               f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
@@ -999,8 +944,8 @@ def print_bench(result):
             cfg = MODEL_SPECS[regime]
             print(f"  {regime.upper()} cap={cfg['cap_mib_s']} MiB/s "
                   f"completion={cfg['completion_nsec']} ns")
-            print("  QD  mode    raw MB/s    V3 MB/s   V3/raw  logical/lower  "
-                  "raw reqs  V3 reqs  raw p99ms  V3 p99ms")
+            print("  QD  mode    raw MB/s    swapz MB/s   swapz/raw  logical/lower  "
+                  "raw reqs  swapz reqs  raw p99ms  swapz p99ms")
             for point in saturation["regimes"][regime]:
                 print(f"  {point['qd']:>2}  {point['mode']:<5} "
                       f"{point['raw_write_mbps']:>10.2f} "

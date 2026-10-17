@@ -145,8 +145,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0")
-            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1")
+            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0")
+            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1")
             for candidate in (("swapz", "off") if i % 2 else ("off", "swapz")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -333,25 +333,18 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
-        self.assertEqual(slow["alpha22_kernel_counters"]["single_pack_deferrals"], 24)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_extensions"], 6)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_tail_flushes"], 5)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_read_caps"], 4)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap_extra_blocks"], 4)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap_extra_gt1_windows"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_four_extents_avoided"], 8)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_plan_stats_failures"], 0)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_pareto_candidates"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_recovered_blocks"], 2)
-        self.assertEqual(slow["alpha22_kernel_counters"]["accepted_burst_cap3_full_recovery_windows"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["windows"], 20)
-        self.assertEqual(slow["alpha22_kernel_counters"]["close_pack_ready"], 18)
-        self.assertEqual(slow["alpha22_kernel_counters"]["close_deadline"], 2)
-        self.assertEqual(slow["alpha22_kernel_counters"]["win1_deadline"], 2)
-        self.assertEqual(slow["alpha22_kernel_counters"]["win1_pack_ready"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["win1_read_unrelated"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["deadline_before_bio"], 1)
-        self.assertEqual(slow["alpha22_kernel_counters"]["deadline_worker_empty"], 1)
+        self.assertEqual(slow["kernel_counters"]["single_pack_deferrals"], 24)
+        self.assertEqual(slow["kernel_counters"]["accepted_burst_extensions"], 6)
+        self.assertEqual(slow["kernel_counters"]["accepted_burst_tail_flushes"], 5)
+        self.assertEqual(slow["kernel_counters"]["accepted_burst_read_caps"], 4)
+        self.assertEqual(slow["kernel_counters"]["windows"], 20)
+        self.assertEqual(slow["kernel_counters"]["close_pack_ready"], 18)
+        self.assertEqual(slow["kernel_counters"]["close_deadline"], 2)
+        self.assertEqual(slow["kernel_counters"]["win1_deadline"], 2)
+        self.assertEqual(slow["kernel_counters"]["win1_pack_ready"], 1)
+        self.assertEqual(slow["kernel_counters"]["win1_read_unrelated"], 1)
+        self.assertEqual(slow["kernel_counters"]["deadline_before_bio"], 1)
+        self.assertEqual(slow["kernel_counters"]["deadline_worker_empty"], 1)
         self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel DM workers", data["cpu_scope"])
@@ -411,28 +404,6 @@ class ReportContract(unittest.TestCase):
         sessions = runner.parse_sessions(synthetic_log())
         sessions[0]["kernel_status"]["after"]["accepted_burst_read_caps"] = 7
         sessions[0]["kernel_status"]["after"]["accepted_burst_extensions"] = 6
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-        sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_cap_extra_gt1_windows"] = 5
-        sessions[0]["kernel_status"]["after"]["accepted_burst_read_caps"] = 4
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-        sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_plan_stats_failures"] = 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-        sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_pareto_candidates"] = 2
-        sessions[0]["kernel_status"]["after"]["accepted_burst_cap_extra_gt1_windows"] = 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-        sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_recovered_blocks"] = 1
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "INCOMPLETE")
-        sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_cap3_full_recovery_windows"] = 2
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 

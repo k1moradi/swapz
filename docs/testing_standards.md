@@ -11,7 +11,7 @@ release metadata and source paths, not the project/module/target name. Keep
 `SWZ3` as the distinct V3 on-disk format; the separate safe `swapzctl`
 utility does not rename the project or module.
 
-**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/V3 throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. This single public entry point runs native production-C/source/safety checks, W=1/W=2 builds, owned RAM-backed loaded correctness, and counterbalanced off/swapz throughput trials. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable, never skip required loaded work while claiming a full PASS. **Do not create, publish, recommend, or document alternative test commands** (including additional Make goals, directly executed test scripts, one-off Python test invocations, and manually invoked loaded-device or benchmark helpers). Private implementation scripts/sub-Make targets and CI jobs may orchestrate individual stages internally, but are not supported operator interfaces; rootless-only CI success is explicitly partial.
 
 
 ## Non-negotiable owner Make API
@@ -23,7 +23,7 @@ to appropriate system locations, without loading or activating swap;
 `make uninstall` reverses only that owned installation; and
 `make test` runs native C, source/fixture/safety contracts,
 W=1/W=2 kernel compilation, **then actual loaded owned-RAM smoke and
-counterbalanced rate-limited off/V3 benchmark pairs**. No interactive
+counterbalanced rate-limited off/swapz benchmark pairs**. No interactive
 sudo is attempted: an ordinary user needs previously authorized
 noninteractive privilege, otherwise the command exits BLOCKED (nonzero)
 rather than misreporting a complete test. All previously exposed root targets such as
@@ -178,7 +178,7 @@ four `sd_emulated` at 10 MiB/s / 1 ms completion and four
 `ssd_emulated` at 80 MiB/s / 0.15 ms completion. These are synthetic
 `null_blk memory_backed=1` models, **not** performance or safety
 claims for actual SD/SSD hardware. Counterbalance sync/async as
-`0,1,1,0` and order raw/V3 as `off,v3,off,v3`. Two paired
+`0,1,1,0` and order raw/swapz as `off,v3,off,v3`. Two paired
 observations per preparation mode and model preserve bounded replication.
 
 The earlier four-regime 16-pair matrix was an exploratory control and
@@ -196,7 +196,7 @@ read back the exact `mbps`, `irqmode`, `completion_nsec` and
 BLOCKED on unsupported kernel features. Verify independent device
 identity, absence from host swap/mounts, unchanged swap inventory,
 safe teardown/quarantine and one exact shared fixture and trace.
-Each raw/V3 pair must carry `source_sha`, `fixture_sha256` and
+Each raw/swapz pair must carry `source_sha`, `fixture_sha256` and
 `trace_sha256` on **both** arm records, and every field must match within
 the pair before aggregation. Missing or divergent arm provenance is
 INCONCLUSIVE; parser order must never overwrite one arm's identity and mask
@@ -373,7 +373,7 @@ worker-empty dominance; a longer retention interval is therefore not
 authorized by this workload. The next write-only pilot must remain under
 the one official `make test` command and may use only owned RAM-backed
 `null_blk`. It must generate exact QD1/4/8/32 immutable 0%-read traces,
-run sync and async raw/V3 pairs separately under both existing model
+run sync and async raw/swapz pairs separately under both existing model
 tuples, omit packed-read work, preserve the ordinary final-image oracle,
 and publish independent lower WRITE bytes/requests plus WRITE p99. The
 pilot has one pair per mode/QD and must label confidence NOT ESTABLISHED;
@@ -597,7 +597,7 @@ For benchmarking and comparative correctness, feed *identical* immutable 4KiB fi
 
 ## Known gaps (do not overclaim)
 
-Owner-loaded bounded off/V3 pilots, including alpha.11 retention at `0a10cbfa`, have passed exact logical-input and readback gates; sustained GC/CPU/tail qualification remains open. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Historical validation and review reports at [the preserved source revision](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606/docs) retain provenance, **not new test requirements**.
+Owner-loaded bounded off/swapz pilots, including alpha.11 retention at `0a10cbfa`, have passed exact logical-input and readback gates; sustained GC/CPU/tail qualification remains open. Genuine device-originated read/write fault coverage is incomplete; kernel-worker CPU attribution, the historical extra backing WRITE request in 120 trials, and generic asynchronous Buffer I/O error attribution are unresolved. The alpha.8 READ-bypass matched-rate result was negative, notwithstanding exercised loaded correctness. Historical validation and review reports at [the preserved source revision](https://github.com/k1moradi/swapz/tree/abbdbce277938f3678a640af93ef066394b44606/docs) retain provenance, **not new test requirements**.
 
 At the end of each implementation task, update this or another of the four standards with learned results, exact tests and PASS/FAIL/BLOCKED, while preserving separate versioned raw report evidence on `main`.
 
@@ -656,7 +656,7 @@ status overlap count as proof of useful throughput or media wear.
 ## Active V3-only default gates
 
 `make test` runs V3 native C suites, source/fixture/safety contracts,
-W=1/W=2 builds, then loaded owned-RAM correctness and off/V3 paired
+W=1/W=2 builds, then loaded owned-RAM correctness and off/swapz paired
 performance in that order. Its private Python replay oracle includes
 bad-input rejection in safe rootless files. Benchmarks require an actual
 loaded V3 module before claiming performance. Without noninteractive
@@ -690,7 +690,7 @@ contract test to `tests/runtime/native/source-contract-test.py`.
 Updated source-relative includes/import paths and active workflow
 references. Deleted old root-level names; historical Git commits
 retain the exact original files. Run the official `make test` pipeline at **final HEAD**; its internal
-stages perform both source contracts and off/V3 replay tests.
+stages perform both source contracts and off/swapz replay tests.
 
 The remaining V2.2/pressure/recall and old-host helpers remain at
 `tests/runtime/` while their sibling imports and literal workflow
@@ -750,7 +750,7 @@ Historical test records remain in Git history.
 ## Automated local deploy-and-verify gate
 
 `make verify` invokes the 14 production-C native tests, the exact
-V3 constructor/source contracts, the safe off/V3 **regular-file**
+V3 constructor/source contracts, the safe off/swapz **regular-file**
 replay oracle and shell deployment source checks. CI additionally
 compiles `tests/tools/device-roundtrip.c` with `-Wall -Wextra -Werror`.
 `make deploy` compiles V3 against the **running kernel**, then loads
@@ -868,7 +868,7 @@ compressed windows all singleton, 64 RAW, no GC rotations or errors.
 The independent 64MiB lower `null_blk` confirmed **183 writes and
 1,464 512B sectors**. This confirms 36 KiB lower-write saving
 **within the synchronous smoke's logical 192-write workload**, not
-a matched off/V3 throughput performance comparison. See
+a matched off/swapz throughput performance comparison. See
 [benchmark.md](benchmark.md) for complete read counters and caveats.
 
 The isolated deployment script's next release now snapshots independent
@@ -928,7 +928,7 @@ change to validated kernel behavior or a claim of loaded qualification.
 
 ## Replaying only on exactly owned modern/legacy null_blk
 
-The off/V3 immutable replay's `--owned-nullblk-name` is the owned
+The off/swapz immutable replay's `--owned-nullblk-name` is the owned
 `nullb-swapz-<16 lowercase hexadecimal>` **configfs** name.
 The kernel disk may have that name or legacy `nullb<index>`; the
 replayer must independently resolve **exactly one**, then check the
@@ -943,7 +943,7 @@ This is a safety-gate repair for Stage 2, not a kernel data-path
 optimization. The rootless mock-sysfs test exercises modern/legacy
 acceptance and rejection on ambiguity, wrong major/minor, unsafe
 naming, non-RAM config and index aliases. No loaded paired
-off/V3 replay, actual physical-media improvement or release
+off/swapz replay, actual physical-media improvement or release
 readiness is claimed.
 
 ### Rootless fixture notation is part of the admission gate
@@ -977,7 +977,7 @@ Record mismatched achieved rates explicitly as **INCONCLUSIVE**
 rather than treating exact logical bytes as a performance win.
 The current declared achieved-rate closeness is at most 5%.
 These are rootless CI acceptance gates, **not a completed loaded
-off/V3 experiment or new V3 production-kernel behavior**.
+off/swapz experiment or new V3 production-kernel behavior**.
 
 ## Isolated paired host-pilot safety contract
 
@@ -1487,7 +1487,7 @@ At exact owner-loaded alpha.17 source `90c0d5b9`,
 module SHA256
 `ae003b83a5e77f8f5888c9ab6477dace4efa91b88d5137603f5057d26e9b7efb`,
 the default 128-page owned-null_blk smoke and distinct
-medium QD8 500-IOPS off/V3 control and retained sessions
+medium QD8 500-IOPS off/swapz control and retained sessions
 passed immutable 4KiB byte-exact oracle, full lower
 READ/WRITE requests+sector reconciliation and ordinary
 teardown without changing system swap. The retained
@@ -1608,7 +1608,7 @@ on alpha.19 exact source `841f5517798fb8ce12ae5699b0729dc15a69b36a`,
 Linux `7.0.0-38-generic`, module SHA-256
 `9ed69e810aa99df66598fd24e81fc42632e9f487db8b8a2cf0fa9d0b4b4c55a9`.
 The loaded 128-page smoke and the QD32 16,384-operation unpaced
-off/V3 trial PASSED full byte-exact readback, unchanged system
+off/swapz trial PASSED full byte-exact readback, unchanged system
 swap, independent separate owned RAM null_blk statistics, and
 ordinary safe teardown. Off completed 10,564.904 IOPS,
 **32.48972 useful logical WRITE MB/s -> 32.48972 lower WRITE
@@ -1759,7 +1759,7 @@ extent. Thus a logical MB/s improvement is
 *not sufficient* if actual lower WRITE bytes,
 requests, READ p99 or FUA cost regress badly.
 Measure the retained 2ms alpha.21 owner-loaded
-same-source off/V3 QD32 trial, with full oracle
+same-source off/swapz QD32 trial, with full oracle
 and independent lower sector/request counters,
 then compare to alpha.20 under repeated
 counterbalanced conditions. Default retention
@@ -1921,3 +1921,9 @@ safety regression over `tests/legacy/kernel/dm-swapz.c`; it is not current
 product source. Current product contracts use `src/kernel/` and the exact
 native production-C suites. Do not repoint legacy helper-extraction tests at
 the current target merely because the repository layout changed.
+
+
+Official human-readable and JSON reports use the product name `swapz`,
+not an implementation-generation label. Report/schema keys must likewise be
+version-neutral; historical release provenance belongs in source/version
+fields or Git history. `SWZ3` is reserved for the on-disk format identity.
