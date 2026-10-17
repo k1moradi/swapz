@@ -230,9 +230,9 @@ insmod "$MODULE" || fail "swapz kernel module rejected"
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
 	fail "swapz target registration missing"
-# 16 MiB upper table; 9 constructor arguments, no injected errors.
+# 16 MiB upper table; current constructor arguments, no injected errors.
 dmsetup create "$DMNAME" --uuid "$UUID" \
-	--table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 0" ||
+	--table "0 32768 swapz $LOWER 0 64 1 2 0 1 0" ||
 	fail "test-only DM mapping creation failed"
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
@@ -371,7 +371,7 @@ dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before li
 OWN_DM=0
 UUID="SWAPZ-TEST-$TOKEN-suspend"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 0 4" ||
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4" ||
     fail "cannot create retained suspend mapping"
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
@@ -434,7 +434,7 @@ OWN_DM=0
 note "START_LOADED_RETAINED_WRITE_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-writefault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 1 2" ||
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 2" ||
     fail "cannot create retained WRITE-fault mapping"
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
@@ -469,7 +469,7 @@ OWN_DM=0
 note "START_LOADED_RETAINED_FLUSH_FAULT"
 UUID="SWAPZ-TEST-$TOKEN-flushfault"
 dmsetup create "$DMNAME" --uuid "$UUID" \
-    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 0 2" ||
+    --table "0 32768 swapz $LOWER 0 64 1 2 1 1 0 2" ||
     fail "cannot create retained FLUSH-fault mapping"
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||

@@ -356,12 +356,12 @@ DMNAME="swapz-demo-$token"
 DMUUID="SWAPZ-TEST-$token"
 [[ ! -e /dev/mapper/$DMNAME ]] || fail 'DM name collision'
 # 4MiB upper (1024 pages), verify=0, gc_policy=2, lower_bulk=1,
-# coalesce=0 and both diagnostic fault knobs disabled.
+# both diagnostic fault knobs disabled.
 # The explicit ninth policy field is 0 for default/control trials.
 # Retained unpaced sessions permit --retain-ms 1 OR 2; only the original
 # paced candidate permits 2. Both are pinned above before any setup.
 if ! dmsetup create "$DMNAME" --uuid "$DMUUID" \
-    --table "0 8192 swapz ${LOWERS[1]} 0 64 0 2 0 0 1 0 $RETAIN_MS"; then
+    --table "0 8192 swapz ${LOWERS[1]} 0 64 0 2 0 1 0 $RETAIN_MS"; then
     if [[ $(dmsetup info -c --noheadings -o uuid "$DMNAME" 2>/dev/null |
              tr -d '[:space:]') == "$DMUUID" ]]; then
         OWN_DM=1

@@ -356,7 +356,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         lower = body("swapz_lower")
         status = body("swapz_status")
         self.assertIn('disk_name, "nullb", 5', ctor)
-        self.assertIn("argc < 1 || argc > 10", ctor)
+        self.assertIn("argc < 1 || argc > 9", ctor)
         self.assertIn("write_fail_nth > 65535U", ctor)
         self.assertIn("ctx->write_fault_nth = write_fail_nth", ctor)
         self.assertIn("op == REQ_OP_WRITE", lower)
@@ -554,14 +554,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         ctor = body("swapz_ctr")
         drain = body("swapz_drain")
         worker = body("swapz_worker")
-        self.assertIn("SWAPZ_MAX_COALESCE_MS", DM)
-        self.assertIn("msecs_to_jiffies(ctx->coalesce_ms)", admitted)
+        self.assertNotIn("msecs_to_jiffies", admitted)
         self.assertIn("REQ_PREFLUSH | REQ_FUA", admitted)
         self.assertIn("bio_op(bio) != REQ_OP_WRITE", admitted)
         self.assertIn("queue_delayed_work(ctx->workqueue", admitted)
         self.assertIn("mod_delayed_work(ctx->workqueue", admitted)
         self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
-        self.assertIn("coalesce > SWAPZ_MAX_COALESCE_MS", ctor)
         self.assertIn("ctx->window_size_counts[count]++", body("swapz_flush_window"))
         self.assertIn("ctx->one_page_close_reasons[close_reason]++",
                       body("swapz_flush_window"))
@@ -586,7 +584,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("decoded->payload_length != current->payload_length", authority)
         self.assertIn("ctx->gc_cost_policy", body("swapz_gc_choose_victim"))
         self.assertIn("gc_selected_live_bytes", body("swapz_gc_choose_victim"))
-        self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("swapz_status"))
+        self.assertNotIn("coalesce", body("swapz_status"))
 
     def test_worker_close_reasons_cover_dependencies_and_control(self):
         flush = body("swapz_flush_window")
@@ -889,7 +887,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("hrtimer_init(&ctx->retention_timer", ctr)
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
-        self.assertIn("argc > 10", ctr)
+        self.assertIn("argc > 9", ctr)
         self.assertIn("retain > SWAPZ_MAX_RETAIN_MS", ctr)
         self.assertIn("ctx->retain_ms = retain", ctr)
         for field in ("retain_ms=%u", "retain_passes=%llu",
@@ -1015,8 +1013,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         # authenticated RAM null_blk lower, not claims about torn/device faults.
         self.assertIn("PASS_RETAINED_SYNTHETIC_WRITE_FAULT=", deploy)
         self.assertIn("PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=", deploy)
-        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 1 2"', deploy)
-        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 0 2"', deploy)
+        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 2"', deploy)
+        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 1 1 0 2"', deploy)
         self.assertIn('status_u64 "$write_fault_status_before" retain_ms', deploy)
         self.assertIn('status_u64 "$flush_fault_status_before" retain_ms', deploy)
         self.assertIn('write_fault_lower_after[6] == write_fault_lower_before[6]',
@@ -1033,7 +1031,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("raw_writes == 64", deploy)
         self.assertIn("flush_ok == flush_calls", deploy)
         self.assertIn("START_LOADED_SUSPEND_DRAIN", deploy)
-        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 0 1 0 4"', deploy)
+        self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4"', deploy)
         self.assertIn("timer_arms > lifecycle_windows", deploy)
         self.assertIn('dmsetup suspend "$DMNAME"', deploy)
         self.assertIn('dmsetup resume "$DMNAME"', deploy)

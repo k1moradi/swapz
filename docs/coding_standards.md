@@ -43,3 +43,14 @@ Every implementation task updates the relevant governing standard in the same co
 ## Host safety
 
 Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or touch physical/unowned devices. Loaded development uses only positively owned RAM-backed `null_blk` with exact identity checks and ordinary teardown/quarantine.
+
+
+### Admission-policy cleanup
+
+The old `coalesce_ms` constructor option is retired. Supported mappings had
+used value zero, and retained writes bypassed it, so nonzero delayed admission
+was a dormant experiment rather than current policy. With retention disabled,
+ordinary writes preserve the former zero-delay behavior by queuing one
+immediate worker instance; dependencies and retained writes wake the worker
+immediately. Do not reintroduce an independent admission delay without new
+production evidence and ordering qualification.

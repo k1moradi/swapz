@@ -2,9 +2,8 @@
 /*
  * dm-swapz - EXPERIMENTAL swapz volatile Device Mapper swap target.
  *
- * First runtime integration of actual SWZ3 4/8/16KiB extents. Uses 4KiB logical
- * pages, LZ4, bounded size-aware write windows and synchronous dm-io through
- * one WQ_MEM_RECLAIM worker. No in-place compatibility with dm-swapz V2.2.
+ * Uses SWZ3 4/8/16KiB extents, 4KiB logical pages, LZ4, bounded
+ * size-aware write windows and synchronous dm-io through one WQ_MEM_RECLAIM worker.
  *
  * IMPORTANT ALPHA LIMIT: GC is experimentally live with rotating reserved
  * segments, but it remains null_blk-only until independently qualified.
@@ -18,7 +17,6 @@
 #include <linux/highmem.h>
 #include <linux/hrtimer.h>
 #include <linux/ioprio.h>
-#include <linux/jiffies.h>
 #include <linux/completion.h>
 #include <linux/mempool.h>
 #include <linux/semaphore.h>
@@ -44,7 +42,6 @@
 #define SWAPZ_BATCH_BYTES (SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES)
 #include "swapz-version.h" /* generated from src/kernel/VERSION */
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
-#define SWAPZ_MAX_COALESCE_MS 4U
 #define SWAPZ_MAX_RETAIN_MS 4U
 
 /*
@@ -173,7 +170,6 @@ struct swapz_dm {
 	swapz_u8 max_window;
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
-	swapz_u8 coalesce_ms;
 	/* Explicitly opt-in, disabled at zero. Worker-owned finite window
 	 * retention only: never changes original physical publication gate. */
 	swapz_u8 retain_ms;
@@ -202,8 +198,6 @@ struct swapz_dm {
 	/* Worker-owned history for one accepted burst, never a BIO owner. */
 	bool packed_burst;
 	u64 burst_tail_flushes;
-	u64 coalesce_deferred;
-	u64 coalesce_urgent;
 	u64 window_records_total;
 	/* Worker-owned telemetry only; status is a diagnostic snapshot. */
 	enum swapz_window_close_reason next_window_close;
@@ -1879,28 +1873,18 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		queue_work(ctx->preparation_workqueue, &ctx->preparation_worker);
 	}
 	/*
-	 * With retention off, the first ordinary WRITE starts one finite
-	 * admission coalescing interval; later writes join without extending
-	 * the deadline. Urgent reads, discard,
-	 * flush/FUA and preflush bypass that wait to preserve swap-in latency
-	 * and ordering. Workqueue is serialized and completes every upper BIO.
-	 * On already-running work, the next work item is queued normally.
+	 * Urgent dependencies wake the ordered worker immediately. Retained
+	 * writes also enter it immediately because their bounded wait begins
+	 * only after preparation. With retention disabled, preserve the prior
+	 * coalesce=0 behavior: queue one immediate finite worker instance and
+	 * let additional writes join while that instance is pending/running.
 	 */
 	if (bio_op(bio) != REQ_OP_WRITE ||
 	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
-	    !bio_sectors(bio)) {
-		ctx->coalesce_urgent++;
+	    !bio_sectors(bio) || ctx->retain_ms)
 		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
-	} else if (ctx->retain_ms) {
-		/* Retention waits AFTER preparation. Ordinary writes must
-		 * reach the open window before its expiry, not queue behind
-		 * a delayed worker or a second admission coalescing timer. */
-		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
-	} else if (queue_delayed_work(ctx->workqueue, &ctx->worker,
-				      msecs_to_jiffies(ctx->coalesce_ms))) {
-		if (ctx->coalesce_ms)
-			ctx->coalesce_deferred++;
-	}
+	else
+		queue_delayed_work(ctx->workqueue, &ctx->worker, 0);
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	return DM_MAPIO_SUBMITTED;
 }
@@ -2031,12 +2015,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct swapz_dm *ctx;
 	u64 logical, physical;
 	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
-	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
+	u32 gc_policy = 2, flush_fail_nth = 0;
 	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
 	int error;
 
-	if (argc < 1 || argc > 10 || ti->len % SWAPZ_SECTORS) {
-		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4 experimental]";
+	if (argc < 1 || argc > 9 || ti->len % SWAPZ_SECTORS) {
+		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
@@ -2049,23 +2033,20 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc > 4 && (kstrtou32(argv[4], 10, &gc_policy) ||
 			 gc_policy > 2U))
 		return -EINVAL;
-	if (argc > 5 && (kstrtou32(argv[5], 10, &coalesce) ||
-			 coalesce > SWAPZ_MAX_COALESCE_MS))
-		return -EINVAL;
-	/* Fault injection is a diagnostic only, restricted by the same
-	 * null_blk admission guard as all live swapz alpha I/O. */
-	if (argc > 6 && (kstrtou32(argv[6], 10, &flush_fail_nth) ||
+	/* Fault injection is test-only and restricted by the same null_blk
+	 * admission guard as all loaded swapz I/O. */
+	if (argc > 5 && (kstrtou32(argv[5], 10, &flush_fail_nth) ||
 			 flush_fail_nth > 64U))
 		return -EINVAL;
-	if (argc > 7 && (kstrtou32(argv[7], 10, &lower_bulk) ||
+	if (argc > 6 && (kstrtou32(argv[6], 10, &lower_bulk) ||
 			 lower_bulk > 2U))
 		return -EINVAL;
 	/* Nth synchronous lower WRITE attempt, regardless of foreground/GC.
 	 * It fails BEFORE dm_io, for isolated fail-closed protocol testing. */
-	if (argc > 8 && (kstrtou32(argv[8], 10, &write_fail_nth) ||
+	if (argc > 7 && (kstrtou32(argv[7], 10, &write_fail_nth) ||
 			 write_fail_nth > 65535U))
 		return -EINVAL;
-	if (argc > 9 && (kstrtou32(argv[9], 10, &retain) ||
+	if (argc > 8 && (kstrtou32(argv[8], 10, &retain) ||
 			 retain > SWAPZ_MAX_RETAIN_MS))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -2075,7 +2056,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->target = ti;
 	ctx->max_window = (swapz_u8)window;
 	ctx->gc_cost_policy = gc_policy;
-	ctx->coalesce_ms = coalesce;
 	ctx->retain_ms = retain;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->write_fault_nth = write_fail_nth;
@@ -2310,10 +2290,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
 		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
-		       "window_records=%llu coalesce_ms=%u "
+		       "window_records=%llu "
 		       "win1=%llu win2=%llu win3_4=%llu win5_8=%llu "
 		       "win9_16=%llu win17_64=%llu "
-		       "coalesce_deferred=%llu coalesce_urgent=%llu "
 		       "close_unknown=%llu close_full=%llu close_duplicate=%llu "
 		       "close_zero=%llu close_fua=%llu close_raw=%llu "
 		       "close_read_conflict=%llu close_read_unrelated=%llu "
@@ -2390,11 +2369,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.bulk_raw_only_runs,
 		       ctx->engine.bulk_raw_entries,
 		       ctx->worker_requeues, ctx->one_page_windows,
-		       ctx->window_records_total, ctx->coalesce_ms,
+		       ctx->window_records_total,
 		       ctx->window_bins[0], ctx->window_bins[1],
 		       ctx->window_bins[2], ctx->window_bins[3],
 		       ctx->window_bins[4], ctx->window_bins[5],
-		       ctx->coalesce_deferred, ctx->coalesce_urgent,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_UNKNOWN],
 		       ctx->window_close_reasons[SWAPZ_CLOSE_FULL],
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DUPLICATE],
@@ -2459,11 +2437,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:
-		DMEMIT("%s %u %u %u %u %u %u %u %u %u", ctx->backing->name,
+		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,
 		       ctx->engine.max_read_blocks_per_record,
 		       ctx->max_window, ctx->engine.verify_after_write,
-		       ctx->gc_cost_policy, ctx->coalesce_ms,
-		       ctx->flush_meter.fail_nth,
+		       ctx->gc_cost_policy, ctx->flush_meter.fail_nth,
 		       ctx->engine.bulk_enabled, ctx->write_fault_nth,
 		       ctx->retain_ms);
 		break;
