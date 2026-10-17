@@ -1064,8 +1064,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                           "swapz_engine_write_window"):
             self.assertNotIn(forbidden, producer)
         self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
+        self.assertIn("atomic_read(&ctx->lower_write_active)", mapper)
+        self.assertIn("ctx->preparation_incoming.next != &entry->preparation_list",
+                      mapper)
         self.assertLess(mapper.index("list_add_tail(&entry->list"),
                         mapper.index("queue_work(ctx->preparation_workqueue"))
+        self.assertIn("queue_work(ctx->preparation_workqueue", lower)
+        self.assertIn("!list_empty(&ctx->preparation_incoming)", lower)
+        self.assertLess(lower.index("atomic_set(&ctx->lower_write_active, 1)"),
+                        lower.index("queue_work(ctx->preparation_workqueue"))
+        self.assertLess(lower.index("queue_work(ctx->preparation_workqueue"),
+                        lower.index("error = dm_io("))
         self.assertIn("wait_for_completion(&entry->preparation_finished)", ordered)
         self.assertIn("!list_empty(&entry->preparation_list)", ordered)
         self.assertIn("list_del_init(&entry->preparation_list)", ordered)

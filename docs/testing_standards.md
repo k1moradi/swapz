@@ -236,3 +236,12 @@ deferred first pack with no existing one-shot target, and post-pack sampling
 must preserve residual-tail ordering. Service-proven dry closure may accept a
 one-page residue only after prior packed-chain or independent-read service and
 only when no sampled target is active.
+
+
+Demand-driven preparation-wakeup qualification requires the preparation entry
+to be linked before any wake decision, a lone idle-head entry to skip the
+producer wake, second-or-later queued entries or active lower WRITE to wake it,
+and a second guarded wake check immediately before synchronous lower WRITE
+submission. Both wake decisions must share `queue_lock` with producer claim
+and ordered-worker steal. Loaded comparison must verify QD1 latency/throughput
+without losing high-QD `prep_lower_write_overlap_starts`.

@@ -323,3 +323,21 @@ synchronous service interval, a refreshed dry worker tail may close any
 nonempty residue immediately. A sampled one-shot target is stronger evidence
 and must be honored first. Publication, FUA/PREFLUSH, conflict, discard,
 shutdown, completion and fail-closed ownership are unchanged.
+
+
+### Demand-driven async preparation wakeups
+
+Link every asynchronous WRITE preparation entry under `queue_lock`, but do
+not wake the unbound preparation worker for a lone idle-head entry. The ordered
+worker may steal that still-unclaimed entry inline, avoiding an unnecessary
+cross-CPU wakeup and completion race. Wake the producer when the preparation
+FIFO already contains an older entry, or when a lower WRITE is active and
+therefore supplies real overlap time.
+
+Before each synchronous lower WRITE, after publishing
+`lower_write_active=1`, the ordered worker rechecks
+`preparation_incoming` under the same lock and queues the producer if work is
+waiting. This closes the race where a lone queued preparation was intentionally
+left for inline steal but a lower WRITE begins before the ordered worker reaches
+it. The producer still owns no mapping, lower I/O, publication or BIO
+completion, and producer-claimed entries retain the completion handoff.

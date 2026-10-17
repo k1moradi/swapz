@@ -392,9 +392,21 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	}
 	section_start = ktime_get_ns();
 	/* The producer observes only this atomic diagnostic; lower I/O
-	 * completion and mapping publication remain owned by this caller. */
-	if (op == REQ_OP_WRITE)
+	 * completion and mapping publication remain owned by this caller.
+	 * If an inline-steal head left preparation work queued, a real lower
+	 * WRITE is the overlap opportunity that should wake the producer. */
+	if (op == REQ_OP_WRITE) {
 		atomic_set(&ctx->lower_write_active, 1);
+		if (ctx->async_prepare) {
+			unsigned long irq_flags;
+
+			spin_lock_irqsave(&ctx->queue_lock, irq_flags);
+			if (!list_empty(&ctx->preparation_incoming))
+				queue_work(ctx->preparation_workqueue,
+					   &ctx->preparation_worker);
+			spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
+		}
+	}
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
 	if (op == REQ_OP_WRITE)
 		atomic_set(&ctx->lower_write_active, 0);
@@ -2122,11 +2134,19 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	}
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
-		/* Both queues share admission locking. The producer can run
-		 * while the ordered worker is blocked on prior lower I/O. */
+		/*
+		 * Both queues share admission locking. Do not wake an unbound
+		 * producer merely to race the ordered worker for a lone idle-head
+		 * BIO: that worker can steal the still-linked preparation inline.
+		 * Wake as soon as there is real queued parallelism, or immediately
+		 * when a lower WRITE is already providing overlap time.
+		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
-		queue_work(ctx->preparation_workqueue, &ctx->preparation_worker);
+		if (atomic_read(&ctx->lower_write_active) ||
+		    ctx->preparation_incoming.next != &entry->preparation_list)
+			queue_work(ctx->preparation_workqueue,
+				   &ctx->preparation_worker);
 	}
 	/*
 	 * Urgent dependencies wake the ordered worker immediately. Retained
