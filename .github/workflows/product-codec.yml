@@ -74,7 +74,7 @@ jobs:
             sha256sum build/kernel/experimental/dm-swapz.ko
             modinfo -F vermagic build/kernel/experimental/dm-swapz.ko
           } > build/deploy/compiled-module-manifest.txt
-      - name: Publish experimental V3 compile-only artifact
+      - name: Publish experimental swapz compile-only artifact
         uses: actions/upload-artifact@v4
         with:
           name: swapz-module-${{ github.sha }}

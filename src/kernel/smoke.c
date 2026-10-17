@@ -97,7 +97,7 @@ static int __init swapz_module_init(void)
 		error = -EUCLEAN;
 		goto out;
 	}
-	pr_info("swapz V3 research: in-memory 16KiB transaction, 7 x 2072B, mapping and CRC32C PASS; NO DM or block I/O\n");
+	pr_info("swapz SWZ3 research: in-memory 16KiB transaction, 7 x 2072B, mapping and CRC32C PASS; NO DM or block I/O\n");
 	error = 0;
 	goto out;
 abort:
@@ -115,11 +115,11 @@ out:
 
 static void __exit swapz_module_exit(void)
 {
-	pr_info("swapz V3 codec/authority research module unloaded\n");
+	pr_info("swapz codec/authority research module unloaded\n");
 }
 
 module_init(swapz_module_init);
 module_exit(swapz_module_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("swapz experimental V3 format + mapping research; no block I/O");
+MODULE_DESCRIPTION("swapz experimental SWZ3 format + mapping research; no block I/O");
 MODULE_AUTHOR("swapz research");

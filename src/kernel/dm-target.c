@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * dm-swapz - EXPERIMENTAL V3.0-alpha volatile Device Mapper swap target.
+ * dm-swapz - EXPERIMENTAL swapz volatile Device Mapper swap target.
  *
- * First runtime integration of actual V3 4/8/16KiB extents. Uses 4KiB logical
+ * First runtime integration of actual SWZ3 4/8/16KiB extents. Uses 4KiB logical
  * pages, LZ4, bounded size-aware write windows and synchronous dm-io through
  * one WQ_MEM_RECLAIM worker. No in-place compatibility with dm-swapz V2.2.
  *
@@ -38,11 +38,11 @@
 #include "window-policy.h"
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
-#error "swapz V3.0-alpha requires 4KiB PAGE_SIZE"
+#error "swapz requires 4KiB PAGE_SIZE"
 #endif
 #define SWAPZ_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
 #define SWAPZ_BATCH_BYTES (SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES)
-#include "swapz-version.h" /* generated from kernel/extent-v3/VERSION */
+#include "swapz-version.h" /* generated from src/kernel/VERSION */
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_MAX_COALESCE_MS 4U
 #define SWAPZ_MAX_RETAIN_MS 4U
@@ -317,7 +317,7 @@ static void swapz_fail(struct swapz_dm *ctx, int error)
 		ctx->failed = true;
 		ctx->last_error = error < 0 ? error : -EIO;
 		ctx->io_failures++;
-		DMERR("V3 alpha: lower or mapping error %d; rejecting subsequent I/O",
+		DMERR("swapz alpha: lower or mapping error %d; rejecting subsequent I/O",
 		      ctx->last_error);
 	}
 }
@@ -325,7 +325,7 @@ static void swapz_fail(struct swapz_dm *ctx, int error)
 /*
  * This adapter reports completed blocks only after SYNCHRONOUS dm_io returns
  * successfully with an empty error bitmap.  No assumed partial completions.
- * On an error, the entire reserved extent is quarantined by the V3 authority.
+ * On an error, the entire reserved extent is quarantined by the swapz authority.
  * Scratch is vmalloc-backed: DM_IO_VMA, never DM_IO_KMEM.
  */
 static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
@@ -629,7 +629,7 @@ static void swapz_order_window_greedy(struct swapz_dm *ctx)
 		ctx->used[largest] = 1;
 		ctx->planned_to_batch[position++] = (u8)largest;
 
-		/* V3 metadata: header(16) + two descriptors(32). */
+		/* SWZ3 metadata: header(16) + two descriptors(32). */
 		for (i = 0; i < ctx->batch_count; ++i) {
 			int remaining;
 
@@ -934,7 +934,7 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 			continue;
 		}
 		/* Existing media bytes remain authoritative until this page's
-		 * full replacement is successfully committed by the V3 engine. */
+		 * full replacement is successfully committed by the swapz engine. */
 		error = swapz_engine_read_page(&ctx->engine, logical,
 						ctx->read_compressed,
 						SWAPZ_BLOCK_BYTES, &length);
@@ -2011,7 +2011,7 @@ static void swapz_drain(struct dm_target *ti)
 	    !list_empty(&ctx->preparation_incoming) || ctx->batch_count ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-		DMERR("V3 drain invariant: accepted BIOs remain after draining");
+		DMERR("swapz drain invariant: accepted BIOs remain after draining");
 		swapz_fail(ctx, -EUCLEAN);
 	} else {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -2123,7 +2123,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			 coalesce > SWAPZ_MAX_COALESCE_MS))
 		return -EINVAL;
 	/* Fault injection is a diagnostic only, restricted by the same
-	 * null_blk admission guard as all live V3 alpha IO. */
+	 * null_blk admission guard as all live swapz alpha I/O. */
 	if (argc > 6 && (kstrtou32(argv[6], 10, &flush_fail_nth) ||
 			 flush_fail_nth > 64U))
 		return -EINVAL;
@@ -2171,13 +2171,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
 			      &ctx->backing);
 	if (error) {
-		ti->error = "Cannot open V3 dedicated backing device";
+		ti->error = "Cannot open swapz dedicated backing device";
 		goto fail;
 	}
 	/*
 	 * Alpha device admission is intentionally stricter than user
 	 * authorization. Only an owned, RAM-backed null_blk node may become
-	 * a live V3 target before fault/reclaim qualification; a physical
+	 * a live swapz target before fault/reclaim qualification; a physical
 	 * SD, HDD or SSD partition must never be selected accidentally.
 	 * Device ownership/UUID checks remain the test harness's duty.
 	 */
@@ -2191,7 +2191,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    bdev_read_only(ctx->backing->bdev) ||
 	    bdev_logical_block_size(ctx->backing->bdev) > SWAPZ_BLOCK_BYTES ||
 	    SWAPZ_BLOCK_BYTES % bdev_logical_block_size(ctx->backing->bdev)) {
-		ti->error = "Unsupported zoned, read-only or unaligned V3 backing";
+		ti->error = "Unsupported zoned, read-only or unaligned swapz backing";
 		error = -EINVAL;
 		goto fail;
 	}
@@ -2200,7 +2200,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	physical = div_u64(physical, SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
 	if (!logical || logical > U32_MAX || physical > U32_MAX ||
 	    physical < 3U * SWAPZ_SEGMENT_BLOCKS) {
-		ti->error = "V3 requires at least three 1MiB physical segments";
+		ti->error = "swapz requires at least three 1MiB physical segments";
 		error = -EINVAL;
 		goto fail;
 	}
@@ -2235,7 +2235,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				  ctx->live_records, ctx->extent_classes,
 				  (u32)logical, (u32)physical);
 	if (error) {
-		ti->error = "Insufficient capacity for uncompressed pages plus V3 reserve";
+		ti->error = "Insufficient capacity for uncompressed pages plus swapz reserve";
 		goto fail;
 	}
 	/* Production allocator exchanges ownership of one GC reserve segment
@@ -2316,7 +2316,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
-	DMINFO("V3 alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
+	DMINFO("swapz alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
 	       SWAPZ_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
 	       ctx->max_window, (unsigned int)budget);
 	return 0;
@@ -2586,6 +2586,6 @@ module_init(swapz_dm_init);
 module_exit(swapz_dm_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("swapz main developer");
-MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC");
+MODULE_DESCRIPTION("swapz size-aware 4/8/16KiB volatile swap target; experimental live GC");
 MODULE_ALIAS("dm-swapz");
 MODULE_VERSION(SWAPZ_ALPHA_VERSION);

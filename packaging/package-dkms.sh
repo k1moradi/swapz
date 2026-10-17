@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# V3 package only: never load modules, create DM devices or activate swap.
+# swapz package only: never load modules, create DM devices or activate swap.
 set -Eeuo pipefail
 umask 022
 [[ $# == 2 && ( $1 == install || $1 == uninstall ) ]] || {
@@ -77,14 +77,14 @@ cleanup_owned() {
   rmdir -- "$src/src/kernel" "$src/src" "$src"
 }
 if [[ "$action" == uninstall ]]; then
-  verify_owned || { echo "BLOCKED: foreign, absent or modified V3 package" >&2; exit 1; }
+  verify_owned || { echo "BLOCKED: foreign, absent or modified swapz package" >&2; exit 1; }
   "$dkms_bin" remove -m swapz -v "$version" --all || {
     echo "BLOCKED: DKMS remove failed; package retained" >&2; exit 1;
   }
   cleanup_owned || {
     echo "BLOCKED: package cleanup incomplete; inspect ownership" >&2; exit 1;
   }
-  echo "Uninstalled owned V3 package without touching swap"
+  echo "Uninstalled owned swapz package without touching swap"
   exit 0
 fi
 [[ -x build/userspace/swapzctl && -x build/tests/device-roundtrip ]] || {
@@ -92,7 +92,7 @@ fi
 }
 if [[ -z "$test_root" ]]; then
   [[ -f build/kernel/experimental/dm-swapz.ko ]] || {
-    echo "BLOCKED: V3 kernel module missing" >&2; exit 1;
+    echo "BLOCKED: swapz kernel module missing" >&2; exit 1;
   }
 fi
 [[ ! -e "$src" && ! -L "$src" &&
@@ -134,4 +134,4 @@ trap rollback ERR
 status="$("$dkms_bin" status -m swapz -v "$version" -k "$(uname -r)")"
 [[ "$status" == *installed* ]]
 trap - ERR
-echo "Installed V3 DKMS, read-only swapzctl and helper; module NOT loaded"
+echo "Installed swapz DKMS, read-only swapzctl and helper; module NOT loaded"

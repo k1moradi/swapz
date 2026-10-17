@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Read-only V3 administrative tool; V3 is experimental and null_blk-only. */
+/* Read-only swapz administrative tool; swapz is experimental and null_blk-only. */
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -11,7 +11,7 @@
 static void usage(FILE *out)
 {
 	fputs("Usage: swapzctl version | status | help\n", out);
-	fputs("EXPERIMENTAL V3: device activation is not supported.\n", out);
+	fputs("EXPERIMENTAL swapz: device activation is not supported.\n", out);
 }
 
 int main(int argc, char **argv)
