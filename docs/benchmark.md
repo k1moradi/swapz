@@ -166,3 +166,39 @@ not trade away the restored ~520-request aggregation; QD1 async should narrow
 its scheduling gap without losing high-QD preparation overlap; lower WRITE
 bytes and read tails remain rejection gates. GC remains unqualified unless a
 loaded run reports nonzero victims.
+
+
+### Qualified demand-gated preparation result
+
+Source `3e2344134de2548c5d6f71b48f6e8bbe508bb3df` passed all five
+owner-loaded qualification stages. Slow mixed QD32 reached 7.09/7.21 MB/s
+sync/async with about 557/559.5 lower WRITE requests. Faster mixed reached
+19.50/21.34 MB/s against 19.33 MB/s raw, with about 1105/1139.5 lower WRITE
+requests, lower READ bytes than raw, and packed read p99 below raw.
+
+The source is not promoted. Faster write-only QD8 async regressed to
+17.31 MB/s from 28.39 MB/s at the prior qualified source and used about
+555 lower requests rather than ~520. Faster QD32 used 241/210 requests rather
+than ~139 and showed many 2-16-record windows. Faster mixed still recorded
+about 88.2 worker-empty deadline closes and 43.2 one-page deadline closes per
+pair. QD1 async improved to 7.43 MB/s with 0.37 ms p99, so the next candidate
+must preserve that lone-head benefit while restoring high-QD parallelism.
+
+The current candidate reverses the two measured causes rather than adding a
+new wait. Pre-write tail sampling is removed; target closure is restored after
+accepted-follower refresh; empty flushes no longer erase ordinary retained
+burst evidence; successful retained READ/fence evidence may release only a
+tiny dry residue; and true idle/hard barriers clear it. Async preparation
+leaves a lone idle head for ordered inline steal, but while the ordered worker
+is active the producer prepares from the opposite queue end, switching to the
+head during synchronous lower WRITE wait. Prepared-page capacity is reserved
+nonblocking before BIO claim so queue depths above the 64-slot bound cannot
+form a semaphore/FIFO deadlock.
+
+Acceptance is simultaneous: QD8 should return toward ~520 lower requests,
+faster QD32 toward ~139, high-QD async throughput should recover materially,
+and the faster mixed worker-empty deadline cluster should shrink without
+increasing lower WRITE bytes or degrading packed-read tails. QD1 async should
+retain its improved latency/throughput. The one-pair write-only sweep remains
+directional only, and GC remains unqualified unless the loaded run observes
+nonzero victims.

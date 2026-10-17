@@ -10,23 +10,23 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`9f11a1a63bc4a3fc447d5ae7be9493b6e690f7ff` passed all five stages and
+`3e2344134de2548c5d6f71b48f6e8bbe508bb3df` passed all five stages and
 is qualified exploratory evidence, but is not promoted.
 
-The worker-tail burst experiment simultaneously preserved mixed QD32 and
-restored deep request aggregation. Slow mixed useful WRITE reached 7.12/7.27
-MB/s sync/async with about 544 lower WRITE requests and a 1.47x
-logical/backing ratio. Faster mixed reached 19.58/22.81 MB/s with about
-1066/951 lower requests, 1.44x logical/backing ratio, and packed reads faster
-than raw. Write-only QD8 returned to roughly 520 requests and QD32 to 139
-requests on the faster model; slow QD32 reached 201/141 requests sync/async.
+The demand-gated preparation experiment preserved the slow mixed path at
+7.09/7.21 MB/s sync/async with about 557/560 lower WRITE requests and a 1.47x
+logical/backing ratio. Faster mixed remained competitive at 19.50/21.34 MB/s
+against 19.33 MB/s raw, with packed reads faster than raw and lower READ bytes
+well below raw.
 
-The remaining rejection signal is useful throughput at intermediate queue
-depth on the faster model: QD8 reached only 17.00/28.39 MB/s against about
-49.9 MB/s raw, and QD4 remained about 13 MB/s against about 22 MB/s raw.
-Mixed faster-model worker-empty deadlines also remained high at about 89.5
-per pair. QD1 async improved materially versus the previous async-preparation
-candidate but still pays avoidable producer wakeup competition.
+Its attribution exposed two regressions relative to `9f11a1a...`. Faster
+write-only QD8 async fell from 28.39 to 17.31 MB/s while requests rose from
+about 520 to 555, and faster QD32 request counts rose from about 139 to
+241/210 sync/async. The window histogram gained many 2-8-record closes.
+Meanwhile faster mixed still recorded about 88.2 worker-empty deadline closes
+and 43.2 one-page deadline closes per pair. QD1 async did improve to 7.43 MB/s
+with 0.37 ms p99, showing that avoiding the lone-head producer race is useful
+but must not disable high-QD preparation parallelism.
 
 The write-only pilot remains one pair per mode/QD with no confidence interval,
 and the loaded run again reported zero GC victims. Circular GC destination
@@ -45,22 +45,25 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify the worker-only retained-close candidate now on `main`.
-   PACK_READY is evaluated only after the serialized worker refreshes local
-   plus incoming; an already-admitted first-wave width may raise the one-shot
-   current target without waiting for future BIOs.
-2. Verify that service-proven dry residues remove the faster mixed
-   `deadline_worker_empty` cluster without increasing lower WRITE bytes,
-   request count or read tails. A packed commit or independent retained read
-   is required before a below-target dry residue may close.
-3. Verify demand-driven asynchronous preparation wakeups: QD1 should avoid
-   producer/inline-steal races, while second-or-later queued writes and active
-   lower WRITE intervals must retain measurable high-QD preparation overlap.
-4. Measure whether idempotent empty-LRU invalidation reduces write-hot-path
-   overhead. Metadata residency semantics remain unchanged; hash indexing and
-   compressed-payload zero-copy are not part of this candidate.
-5. Keep the circular GC destination probe only if loaded correctness remains
-   unchanged. No endurance or sustained-GC claim is permitted unless the
+1. Qualify the retained-service/opposite-end-preparation candidate now on
+   `main`. Tail-width sampling occurs only after a real PACK_READY lower
+   write; target-level admission closure is restored after an accepted-follower
+   refresh, while below-target closure remains worker-tail-only.
+2. Require write-only QD8 to return toward the ~520-request geometry and faster
+   QD32 toward ~139 requests without surrendering the QD1 async improvement.
+   QD8/QD32 async throughput should recover materially from the
+   3e23441 regression while lower WRITE bytes remain unchanged or better.
+3. Require faster mixed QD32 `deadline_worker_empty` and one-page deadline
+   closes to fall materially from ~88 and ~43. Empty read/zero fences must no
+   longer erase retained service state, but hard ordering boundaries and true
+   worker idle must still clear it.
+4. Verify opposite-end asynchronous preparation under bounded capacity:
+   ordered FIFO execution remains head-first, producer preparation is tail-first
+   while the ordered worker runs and head-first during lower WRITE wait, and no
+   producer may block after claiming a BIO. QD1 must keep the idle-head
+   inline-steal benefit.
+5. Keep metadata-LRU invalidation semantics and the circular GC destination
+   probe unchanged. No endurance or sustained-GC claim is permitted unless a
    loaded run actually exercises GC victims.
 6. After policy stabilizes, add statistically repeated saturation with
    confidence intervals; genuine lower errors, sustained GC, kernel-worker CPU
