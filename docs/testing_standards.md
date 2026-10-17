@@ -228,15 +228,23 @@ readback and role safety without freezing the retired segment-zero restart
 sequence.
 
 
-Worker-only retained-close qualification requires source coverage that
-`swapz_accept_write()` never emits PACK_READY or calls the retained close
-helper. The worker must sample local then incoming under `queue_lock` before
-the PACK_READY decision. Initial accepted-width sampling must be limited to a
-deferred first pack with no existing one-shot target, and post-pack sampling
-must preserve residual-tail ordering. Service-proven dry closure may accept a
-one-page residue only after prior packed-chain or independent-read service and
-only when no sampled target is active.
+Retained-target qualification requires source coverage for both closure owners:
+write admission may emit PACK_READY only through the effective target helper
+after refreshing accepted followers, while below-target service-proven closure
+must remain in the worker after local/incoming refresh.
 
+Tail learning must be gated exclusively by
+`pack_close_pending_tail_sample`; pre-PACK sampling from a deferred first
+pack is forbidden. Source coverage must also prove the zero-count flush return
+precedes retained-state clearing, normal and independent retained READs refresh
+accepted followers after synchronous service, and tiny dry-residue closure is
+gated by read/fence evidence rather than a prior packed chain alone.
+
+Loaded qualification must compare write-only QD8/QD32 window histograms and
+lower requests against the last deep-aggregation result, and mixed QD32
+`deadline_worker_empty` plus one-page deadline closes against the prior
+~88-close cluster. No scheduling evidence may survive a true worker-idle or
+hard ordering boundary.
 
 Demand-driven preparation-wakeup qualification requires the preparation entry
 to be linked before any wake decision, a lone idle-head entry to skip the

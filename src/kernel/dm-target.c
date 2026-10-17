@@ -201,9 +201,15 @@ struct swapz_dm {
 	u64 deadline_worker_with_local;
 	u64 deadline_worker_empty;
 	u64 retained_read_bypasses;
-	/* Successful independent reads serviced while the current retained
-	 * write window is open. This is finite accepted-work evidence only. */
+	/*
+	 * Successful retained reads serviced during the current accepted worker
+	 * burst. Intermediate packed/fence commits may carry this finite service
+	 * evidence forward; a true idle or hard ordering boundary clears it.
+	 */
 	swapz_u8 retained_window_read_bypasses;
+	/* A zero/duplicate/raw/read fence interrupted a still-active accepted
+	 * burst. This can release only a tiny dry residue, never predict arrivals. */
+	bool retained_wave_interrupted;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
 	/*
@@ -1068,15 +1074,66 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	enum swapz_window_close_reason close_reason = ctx->next_window_close;
 	swapz_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record;
 	u64 end_ns, open_age_ns, section_start;
+	bool interrupted_close =
+		close_reason == SWAPZ_CLOSE_ZERO ||
+		close_reason == SWAPZ_CLOSE_DUPLICATE ||
+		close_reason == SWAPZ_CLOSE_RAW ||
+		close_reason == SWAPZ_CLOSE_READ_CONFLICT ||
+		close_reason == SWAPZ_CLOSE_READ_UNRELATED;
+	bool hard_boundary =
+		close_reason == SWAPZ_CLOSE_FUA ||
+		close_reason == SWAPZ_CLOSE_PREFLUSH ||
+		close_reason == SWAPZ_CLOSE_DISCARD ||
+		close_reason == SWAPZ_CLOSE_DEADLINE ||
+		close_reason == SWAPZ_CLOSE_IDLE ||
+		close_reason == SWAPZ_CLOSE_QUANTUM ||
+		close_reason == SWAPZ_CLOSE_SHUTDOWN ||
+		close_reason == SWAPZ_CLOSE_OTHER;
+	bool chain_continues;
 	int error = 0;
+
+	/*
+	 * An empty flush is not a committed write window. In particular, a READ
+	 * or zero-page immediately after PACK_READY must not erase the serviced
+	 * chain before the ordered worker can observe already-accepted followers.
+	 * Real ordering barriers still terminate scheduling evidence.
+	 */
+	if (!count) {
+		if (hard_boundary) {
+			ctx->single_pack_deferred = false;
+			ctx->accepted_burst_pack_ready = false;
+			ctx->retained_tail_target = 0;
+			ctx->pack_close_pending_tail_sample = false;
+			ctx->retained_chain_completed = 0;
+			ctx->retained_window_read_bypasses = 0;
+			ctx->retained_wave_interrupted = false;
+		} else if (ctx->retain_ms && interrupted_close &&
+			   ctx->worker_has_immediate_followup) {
+			ctx->retained_wave_interrupted = true;
+		}
+		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
+		ctx->window_first_ns = 0;
+		return 0;
+	}
+
+	/*
+	 * DUPLICATE/FULL flush older writes before the current WRITE continues.
+	 * ZERO/RAW continue a chain only when a later BIO was already accepted.
+	 * PACK_READY is always a serviced chain. Only PACK_READY requests a
+	 * post-I/O admitted-tail sample; the other cases are service evidence,
+	 * not permission to infer a future burst width.
+	 */
+	chain_continues = ctx->retain_ms &&
+		(packed_close ||
+		 close_reason == SWAPZ_CLOSE_DUPLICATE ||
+		 close_reason == SWAPZ_CLOSE_FULL ||
+		 ((close_reason == SWAPZ_CLOSE_ZERO ||
+		   close_reason == SWAPZ_CLOSE_RAW) &&
+		  ctx->worker_has_immediate_followup));
 
 	ctx->single_pack_deferred = false;
 	ctx->accepted_burst_pack_ready = false;
 	ctx->retained_tail_target = 0;
-	if (!packed_close) {
-		ctx->pack_close_pending_tail_sample = false;
-		ctx->retained_chain_completed = 0;
-	}
 	/* A real multi-record window disproves isolated closed-loop behavior.
 	 * Before bypass is learned, any non-deadline singleton also breaks the
 	 * consecutive-deadline evidence chain. Learned singleton fast-close
@@ -1089,13 +1146,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		   !ctx->singleton_fast_close) {
 		ctx->singleton_deadline_streak = 0;
 	}
-	if (!count) {
-		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
-		ctx->window_first_ns = 0;
-		return 0;
-	}
-	/* This evidence belongs only to the window now being committed. */
-	ctx->retained_window_read_bypasses = 0;
 	/* Measure BEFORE any dm_io, GC, verification or lower FUA. */
 	end_ns = ktime_get_ns();
 	/* The timer can only be armed by opted-in retained windows.
@@ -1222,17 +1272,33 @@ accounted:
 	if (error || committed != count) {
 		ctx->retained_chain_completed = 0;
 		ctx->pack_close_pending_tail_sample = false;
+		ctx->retained_window_read_bypasses = 0;
+		ctx->retained_wave_interrupted = false;
 		swapz_fail(ctx, error ? error : -EIO);
 		return error ? error : -EIO;
 	}
-	if (packed_close) {
+	if (chain_continues) {
 		unsigned int chain = (unsigned int)ctx->retained_chain_completed + count;
+
 		ctx->retained_chain_completed = (swapz_u8)min_t(
 			unsigned int, chain, ctx->max_window);
-		ctx->pack_close_pending_tail_sample = true;
+		ctx->pack_close_pending_tail_sample = packed_close;
 	} else {
 		ctx->retained_chain_completed = 0;
 		ctx->pack_close_pending_tail_sample = false;
+	}
+	/*
+	 * Carry read/fence service only across an accepted retained burst.
+	 * Hard barriers and deadline/idle closure end that evidence explicitly;
+	 * an ordinary worker-idle return performs the other reset site.
+	 */
+	if (!ctx->retain_ms || hard_boundary) {
+		ctx->retained_window_read_bypasses = 0;
+		ctx->retained_wave_interrupted = false;
+	} else if (interrupted_close &&
+		   (ctx->worker_has_immediate_followup ||
+		    close_reason == SWAPZ_CLOSE_DUPLICATE)) {
+		ctx->retained_wave_interrupted = true;
 	}
 	return 0;
 }
@@ -1304,30 +1370,21 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 {
 	struct swapz_bio_ref *entry;
 	swapz_u8 tail = 0;
-	swapz_u8 base_completed;
 	swapz_u8 room;
 	bool prefix_open = true;
-	bool after_pack = ctx->pack_close_pending_tail_sample;
 
 	/*
-	 * Two zero-wait observations may grow a retained target:
-	 *
-	 *  1. a completed packed window left an already-admitted residual tail;
-	 *  2. the first useful pack is still open and the worker has just reached
-	 *     its local tail, so local+incoming proves a wider current burst.
-	 *
-	 * Both are finite accepted FIFO evidence. Never wait here for another BIO.
+	 * Sample only after a real PACK_READY lower write. Sampling before the
+	 * first lower I/O observes thread-submission gaps rather than a stable
+	 * accepted tail and can pin QD8/QD32 to a transient four-record prefix.
 	 */
-	if (!after_pack &&
-	    !(ctx->single_pack_deferred && !ctx->retained_tail_target))
+	if (!ctx->pack_close_pending_tail_sample)
 		return;
-	base_completed = after_pack ?
-		ctx->retained_chain_completed : ctx->batch_count;
-	room = base_completed < ctx->max_window ?
-		ctx->max_window - base_completed : 0;
+	room = ctx->retained_chain_completed < ctx->max_window ?
+		ctx->max_window - ctx->retained_chain_completed : 0;
 	/*
 	 * local is older than incoming. Count the complete already-admitted FIFO
-	 * prefix in that order so asynchronous preparation cannot hide accepted
+	 * prefix in that order so asynchronous preparation cannot hide residual
 	 * burst width merely because the worker spliced it out of incoming.
 	 */
 	if (local) {
@@ -1352,21 +1409,16 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	}
 	if (tail) {
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
-			ctx->retained_burst_target, base_completed,
+			ctx->retained_burst_target, ctx->retained_chain_completed,
 			tail, ctx->max_window);
-		/*
-		 * After a commit this is the next residual-window width. Before
-		 * the first commit it is the total accepted width of this window.
-		 * swapz_flush_window() clears the one-shot value before publication.
-		 */
-		ctx->retained_tail_target = after_pack ?
-			tail : (swapz_u8)(base_completed + tail);
-	} else if (after_pack) {
+		ctx->retained_tail_target = tail;
+	} else {
 		ctx->retained_chain_completed = 0;
 		ctx->retained_tail_target = 0;
 	}
 	ctx->pack_close_pending_tail_sample = false;
 }
+
 /*
  * The worker-tail path has refreshed both its local FIFO and incoming under
  * queue_lock. It may close any nonempty residue below the learned target only
@@ -1378,12 +1430,32 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  * discover already-accepted work. A sampled tail is stronger evidence and
  * must still drain to its one-shot target.
  */
+static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
+{
+	return swapz_window_burst_close_ready(
+		ctx->single_pack_deferred, 0,
+		ctx->batch_count, ctx->retained_burst_target,
+		ctx->retained_tail_target);
+}
+
+/*
+ * A serviced useful pack may close below a learned target after the refreshed
+ * accepted queue is dry. Tiny mixed/fence residues are a separate bounded
+ * exception: read service or a forced mid-burst fence may release only 1..3
+ * records. Write-only medium QD8/QD32 therefore cannot cascade into singleton
+ * closes merely because an earlier PACK_READY write completed.
+ */
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 {
 	bool service_proven_dry_pack =
 		!ctx->retained_tail_target && ctx->batch_count &&
-		(ctx->retained_chain_completed ||
-		 ctx->retained_window_read_bypasses);
+		(((ctx->retained_chain_completed ||
+		   ctx->retained_window_read_bypasses) &&
+		  (ctx->single_pack_deferred ||
+		   ctx->accepted_burst_pack_ready)) ||
+		 ((ctx->retained_window_read_bypasses ||
+		   ctx->retained_wave_interrupted) &&
+		  ctx->batch_count < 4U));
 
 	return swapz_window_burst_close_ready(
 		ctx->single_pack_deferred, service_proven_dry_pack,
@@ -1570,10 +1642,18 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			ctx->accepted_burst_extensions++;
 		}
 		/*
-		 * Do not close from inside admission. The worker must first return
-		 * from swapz_process(), refresh local+incoming under queue_lock and
-		 * sample any already-admitted width before deciding the window ends.
+		 * Target closure is safe in admission only after refreshing the
+		 * accepted queue above. Below-target service-proven closure remains a
+		 * worker-tail decision after local+incoming have been refreshed.
 		 */
+		if (swapz_retained_target_close_ready(ctx) &&
+		    !ctx->worker_has_immediate_followup) {
+			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
+			ctx->packed_early_commits++;
+			if (ctx->accepted_burst_pack_ready)
+				ctx->accepted_burst_tail_flushes++;
+			swapz_flush_window(ctx);
+		}
 	}
 	return 0;
 }
@@ -1749,6 +1829,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		if (!error) {
 			u64 read_end_ns = ktime_get_ns();
 
+			/* BIOs may have arrived while synchronous lower READ I/O ran. */
+			swapz_refresh_accepted_followup(ctx);
 			ctx->retained_read_bypasses++;
 			if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
 				ctx->retained_window_read_bypasses++;
@@ -1832,6 +1914,15 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		return;
 	case REQ_OP_READ:
 		error = swapz_read(ctx, bio);
+		if (!error && ctx->retain_ms) {
+			/* A READ with no open batch can still spend real synchronous
+			 * service time while later writes become accepted. Carry that
+			 * evidence only when such a finite follower now exists. */
+			swapz_refresh_accepted_followup(ctx);
+			if (ctx->worker_has_immediate_followup &&
+			    ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
+				ctx->retained_window_read_bypasses++;
+		}
 		break;
 	case REQ_OP_DISCARD:
 		error = swapz_discard(ctx, bio);
@@ -2015,6 +2106,18 @@ static void swapz_worker(struct work_struct *work)
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
+			/*
+			 * With no pending retained window and no accepted FIFO work, this
+			 * invocation has reached a real burst boundary. Do not let read or
+			 * forced-fence service evidence leak into a later unrelated wave.
+			 */
+			if (!ctx->batch_count) {
+				ctx->retained_window_read_bypasses = 0;
+				ctx->retained_wave_interrupted = false;
+				ctx->retained_chain_completed = 0;
+				ctx->retained_tail_target = 0;
+				ctx->pack_close_pending_tail_sample = false;
+			}
 			/*
 			 * Once repeated full-deadline singleton closes prove that no
 			 * companion work arrives, stop charging the same closed-loop

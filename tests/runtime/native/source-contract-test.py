@@ -697,10 +697,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(sample.index("list_for_each_entry(entry, local, list)"),
                         sample.index("list_for_each_entry(entry, &ctx->incoming, list)"))
         self.assertIn("swapz_plain_retained_write(entry->bio)", sample)
-        self.assertIn("base_completed = after_pack ?", sample)
-        self.assertIn("ctx->retained_tail_target = after_pack ?", sample)
-        self.assertIn("(swapz_u8)(base_completed + tail)", sample)
-        self.assertIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
+        self.assertIn("if (!ctx->pack_close_pending_tail_sample)", sample)
+        self.assertNotIn("base_completed", sample)
+        self.assertIn("ctx->retained_tail_target = tail", sample)
+        self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
         self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         self.assertIn("swapz_window_shrink_burst_target(", worker)
         self.assertIn("!ctx->retained_chain_completed", worker)
@@ -708,6 +708,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->batch_count", close_ready)
         self.assertIn("ctx->retained_chain_completed", close_ready)
         self.assertIn("ctx->retained_window_read_bypasses", close_ready)
+        self.assertIn("ctx->retained_wave_interrupted", close_ready)
+        self.assertIn("ctx->batch_count < 4U", close_ready)
         self.assertIn("!ctx->retained_tail_target", close_ready)
         self.assertIn("swapz_window_burst_close_ready(", close_ready)
         self.assertIn("retained_burst_target=%u", status)
@@ -825,8 +827,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                                      writer.index("ctx->batch_count++")),
                         writer.index("swapz_window_pack_ready("))
         worker = body("swapz_worker")
-        # PACK_READY publication ownership is worker-only; admission records
-        # geometry but never owns the physical close decision.
+        # Admission may close exactly at the refreshed effective target;
+        # below-target service-proven closure remains worker-tail owned.
+        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", writer)
         self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", worker)
         self.assertNotIn("worker_followup_bios", DM)
         refresh = body("swapz_refresh_accepted_followup")
@@ -856,8 +859,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("ctx->single_pack_deferred = true", writer)
-        self.assertNotIn("swapz_retained_target_close_ready", DM)
-        self.assertNotIn("SWAPZ_CLOSE_PACK_READY", writer)
+        target_ready = body("swapz_retained_target_close_ready")
+        self.assertIn("ctx->single_pack_deferred, 0", target_ready)
+        self.assertIn("swapz_retained_target_close_ready(ctx)", writer)
+        self.assertIn("!ctx->worker_has_immediate_followup", writer)
         self.assertNotIn("swapz_retained_pack_close_ready(ctx)", writer)
         self.assertIn("swapz_retained_pack_close_ready(ctx)", worker)
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
@@ -873,7 +878,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
         self.assertIn("ctx->single_pack_deferred = false", flush)
         self.assertIn("ctx->single_pack_deferrals++", writer)
+        self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("ctx->packed_early_commits++", worker)
+        self.assertIn("swapz_flush_window(ctx)", writer)
         self.assertIn("swapz_flush_window(ctx)", worker)
         self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
@@ -1023,6 +1030,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                                        deadline_gate)
         self.assertLess(completion, deadline_gate)
         self.assertLess(deadline_gate, deadline_expiry)
+        self.assertLess(flush.index("if (!count)"),
+                        flush.index("ctx->single_pack_deferred = false"))
+        self.assertIn("ctx->retained_wave_interrupted", flush)
+        self.assertIn("swapz_refresh_accepted_followup(ctx)", process)
+        normal_read = process[process.index("case REQ_OP_READ:"):
+                              process.index("case REQ_OP_DISCARD:")]
+        self.assertIn("ctx->retained_window_read_bypasses++", normal_read)
         abort = flush[flush.index("if (ctx->failed)"):
                       flush.index("swapz_order_window(ctx)")]
         self.assertIn("swapz_complete(ctx->batch[index].bio, error)", abort)

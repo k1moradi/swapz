@@ -302,28 +302,33 @@ exactly one reserve per cycle, and a victim becomes reserve only after every
 mapping/refcount validation and successful lower relocation has completed.
 
 
-### Worker-only retained close and accepted-width sampling
+### Retained target closure and serviced-burst evidence
 
-Retained-window closure below `max_window` is a worker-tail decision. Write
-admission may mark useful pack geometry, but it must not submit a PACK_READY
-lower write before returning to the serialized worker. The worker first refreshes
-its private FIFO and `incoming` under `queue_lock`, samples any already
-accepted plain-write prefix, and only then evaluates closure. This removes a
-mid-admission race in which a transiently empty `incoming` list could split a
-larger finite wave.
+Write admission may close PACK_READY only at the refreshed effective
+learned/admitted target and only when no already-accepted follower is visible.
+Below-target closure remains a serialized worker-tail decision after
+`local` and `incoming` have been refreshed. This keeps the target gate fast
+without treating a transient sub-target submission gap as proof that a burst
+ended.
 
-The one-shot retained target may be backed by either a residual admitted tail
-after a completed pack or the total accepted width sampled while the current
-first pack remains open. Both are zero-wait facts about already admitted FIFO
-work; neither permits waiting for a future BIO or refreshing the pinned
-retention deadline.
+A one-shot `retained_tail_target` is sampled only after a real PACK_READY
+lower write. Pre-write sampling is forbidden because it observes userspace
+thread-submission skew before a lower-I/O service interval and can pin a QD8 or
+QD32 wave to a transient short prefix.
 
-After a packed lower I/O or an independent retained READ has provided a real
-synchronous service interval, a refreshed dry worker tail may close any
-nonempty residue immediately. A sampled one-shot target is stronger evidence
-and must be honored first. Publication, FUA/PREFLUSH, conflict, discard,
-shutdown, completion and fail-closed ownership are unchanged.
+An empty `swapz_flush_window()` call is not a committed window and must not
+erase retained-chain/tail evidence for ordinary READ/zero processing. Real
+ordering barriers still terminate that scheduling evidence. Successful
+retained READ service may carry across intermediate packed/fence commits within
+the same accepted worker burst and is cleared at a true idle boundary.
 
+A serviced useful pack may close on a refreshed dry worker tail. A sub-pack
+1..3-record residue may do so only after successful retained READ service or a
+forced zero/duplicate/raw/read interruption in the same accepted burst. This
+exception must not make a prior PACK_READY write alone sufficient to cascade
+write-only QD8/QD32 into singleton closes. Publication, FUA/PREFLUSH,
+dependency, discard, shutdown, completion and fail-closed ownership are
+unchanged.
 
 ### Demand-driven async preparation wakeups
 
