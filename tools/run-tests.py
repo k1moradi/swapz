@@ -85,8 +85,8 @@ def paired_provenance_error(row, label):
     for field in BENCHMARK_PROVENANCE_FIELDS:
         values = [arms.get(candidate, {}).get(field)
                   for candidate in ("off", "v3")]
-        if any(not isinstance(value, str) or not value for value in values) or \\
-                len(set(values)) != 1:
+        if (any(not isinstance(value, str) or not value for value in values) or
+                len(set(values)) != 1):
             return {"overall": "INCONCLUSIVE",
                     "reason": f"{label}: {field} missing or differs within pair"}
         # Preserve the existing pair-level shape only after both arms agree.
