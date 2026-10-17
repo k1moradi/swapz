@@ -361,11 +361,12 @@ workloads retain bounded preparation overlap without allowing producer run-ahead
 Out-of-order preparation remains private to each BIO; FIFO publication,
 completion and lower-I/O ownership are unchanged.
 
-The producer may wait for a bounded preparation slot only after releasing
-`queue_lock`. Tail claiming must never consume completion/publication
-ownership: the FIFO worker can continue inline-stealing unclaimed heads and
-releases prepared slots as it reaches completed tail entries. Separate LZ4
-scratch/work memory remains mandatory for concurrent compression.
+The producer reserves bounded prepared-page capacity nonblocking before taking
+`queue_lock` or claiming a BIO. Tail claiming never consumes
+completion/publication ownership: the FIFO worker can continue inline-stealing
+unclaimed heads and releases prepared slots as it reaches completed tail
+entries. Separate LZ4 scratch/work memory remains mandatory for concurrent
+compression.
 
 ### Idempotent metadata-cache invalidation
 

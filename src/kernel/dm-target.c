@@ -2347,11 +2347,10 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
-		 * Leave a genuinely idle lone head for ordered inline steal. Wake
-		 * parallel preparation as soon as a prior BIO is still queued, the
-		 * ordered worker is actively consuming another BIO, or lower WRITE
-		 * I/O has blocked that worker. ordered_worker_busy is atomic because
-		 * batch_count remains worker-owned and must not become a map-path race.
+		 * A truly idle burst belongs to the ordered worker first. Wake the
+		 * producer only during synchronous lower WRITE overlap or while the
+		 * ordered worker owns a one-shot tail credit. Both signals are atomic;
+		 * batch_count remains worker-owned and never becomes a map-path race.
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
