@@ -105,11 +105,15 @@ healthy product arm. Benchmark diagnostics and errors use the product name
 
 The retained suspend/resume oracle gates on observing an open retained window,
 successful suspend/resume, a nonfailed target, and byte-exact verification of
-all accepted pages. It must not require a specific close-reason counter after
-the observation: the maximum supported 4ms deadline can legitimately expire
-between a userspace status sample and the separate suspend request. That race
-is not a drain failure. Loaded failure reporting skips the generic cleanup
-epilogue so the preceding specific sanitized failure remains visible.
+all accepted pages. Its status sampler starts before the private writer and
+polls without an added sleep so adaptive singleton fast-close cannot hide the
+initial full-retention opportunity behind userspace process-start latency. It
+must still observe `retain_timer_arms > windows`; historical timer activity is
+not a substitute for an actually open window. The maximum supported 4ms
+deadline can legitimately expire between that observation and the separate
+suspend request, so the oracle must not require a specific close-reason counter
+afterwards. Loaded failure reporting skips the generic cleanup epilogue so the
+preceding specific sanitized failure remains visible.
 
 
 Production-C differential tests for the lower-run writer must not freeze an

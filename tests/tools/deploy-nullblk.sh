@@ -380,27 +380,34 @@ suspend_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$suspend_before" retain_ms) == 4 &&
    $(status_u64 "$suspend_before" failed) == 0 )) ||
     fail "retained suspend mapping policy mismatch"
+# Start the sampler before the writer. Learned singleton fast-close can make
+# later writes complete immediately, so qualification must observe one of the
+# initial full-retention opportunities instead of racing process startup.
+lifecycle_probe="$SESSION/retained-open-probe"
+: >"$lifecycle_probe"
+(
+    for i in {1..400}; do
+        lifecycle_status="$(dmsetup status "$DMNAME")" || exit 2
+        timer_arms="$(status_u64 "$lifecycle_status" retain_timer_arms)" || exit 3
+        lifecycle_windows="$(status_u64 "$lifecycle_status" windows)" || exit 4
+        if (( timer_arms > lifecycle_windows )); then
+            printf 'OPEN\n' >"$lifecycle_probe"
+            exit 0
+        fi
+    done
+    exit 1
+) &
+probe_pid=$!
 timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
     "/dev/mapper/$DMNAME" --write-series 128 2 \
     >"$SESSION/suspend-writer.log" 2>&1 &
 writer_pid=$!
+probe_rc=0
+wait "$probe_pid" || probe_rc=$?
 open_window=0
-for i in {1..400}; do
-    if ! kill -0 "$writer_pid" 2>/dev/null; then
-        break
-    fi
-    lifecycle_status="$(dmsetup status "$DMNAME")" ||
-        fail "cannot sample retained lifecycle status"
-    timer_arms="$(status_u64 "$lifecycle_status" retain_timer_arms)" ||
-        fail "retained lifecycle status lacks timer arms"
-    lifecycle_windows="$(status_u64 "$lifecycle_status" windows)" ||
-        fail "retained lifecycle status lacks windows"
-    if (( timer_arms > lifecycle_windows )); then
-        open_window=1
-        break
-    fi
-    sleep 0.001
-done
+if (( probe_rc == 0 )) && [[ $(cat "$lifecycle_probe") == OPEN ]]; then
+    open_window=1
+fi
 if (( !open_window )); then
     wait "$writer_pid" 2>/dev/null || true
     fail "retained lifecycle writer never exposed an open timed window"
