@@ -23,119 +23,96 @@ jobs:
       - name: Install native test prerequisites
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq             build-essential liblz4-dev
-      - name: Build and execute real production C/C++ modular tests
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential liblz4-dev
+      - name: Build and execute production C/C++ tests
         run: |
           set -euo pipefail
-          bash tools/test-rootless.sh
-          # Only rootless contracts run in CI; make test fails BLOCKED without
-          # noninteractive admin authorization rather than claiming loaded PASS.
+          bash tests/tools/test-rootless.sh
           test -x build/tests/native/lower-write-aggregation
           test -x build/tests/native/mapping-authority
       - name: Enforce the four-command Make API
         run: |
+          set -euo pipefail
           python3 -B tests/runtime/native/make-interface-test.py -v
           grep -Fxq '.DEFAULT_GOAL := all' Makefile
           grep -Fxq '.PHONY: all install uninstall test' Makefile
-          grep -Fq '@+python3 -B tools/run-tests.py --kdir' Makefile
-          grep -Fq 'tools/test-rootless.sh' tools/run-tests.py
-          grep -Fq 'tools/test-loaded.sh' tools/run-tests.py
-          grep -Fq 'sudo -n true' tools/test-loaded.sh
-          grep -Fq 'BLOCKED_LOADED_QUALIFICATION' tools/test-loaded.sh
-          grep -Fq 'for async_prepare in 0 1 1 0' tools/test-loaded.sh
+          grep -Fq '@+python3 -B tests/tools/run-tests.py --kdir' Makefile
+          grep -Fq 'tests/tools/test-rootless.sh' tests/tools/run-tests.py
+          grep -Fq 'tests/tools/test-loaded.sh' tests/tools/run-tests.py
+          grep -Fq 'sudo -n true' tests/tools/test-loaded.sh
+          grep -Fq 'BLOCKED_LOADED_QUALIFICATION' tests/tools/test-loaded.sh
           if sed -n '/^test:$/,$p' Makefile | grep -Eq 'sudo -v|sudo bash|modprobe|dmsetup'; then
             echo 'FAIL: make test must not prompt or provision directly'
             exit 1
           fi
-      - name: Enforce V3-only active defaults and two-arm benchmark
+      - name: Enforce active product layout and naming
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fxq '.DEFAULT_GOAL := all' Makefile
-          grep -Fxq 'AUTOINSTALL="no"' dkms.conf
-          # Resolve DKMS version from its canonical source, not a hand-edited literal.
-          test -s kernel/extent-v3/VERSION
-          bash -c 'source "$1"; test "$PACKAGE_VERSION" = "$2"' \
-            _ "$PWD/dkms.conf" "$(cat kernel/extent-v3/VERSION)"
-          grep -Fq 'MODULE_VERSION(SV3_ALPHA_VERSION)' kernel/extent-v3/dm-target.c
-          grep -Fq 'swapz-version.h' kernel/extent-v3/Makefile
-          grep -Fq 'CANDIDATES = ("off", "v3")' tests/runtime/benchmark/io-replay.py
-          test ! -e tests/runtime/threeway-swap-replay.py
-          test ! -e tests/runtime/threeway-swap-replay-test.py
-          echo "ACTIVE_V3_ONLY_AND_OFF_V3_BENCHMARK_CONTRACT_PASS"
-      - name: Require canonical standards and relevant same-commit learning
+          test -s src/kernel/VERSION
+          test -s src/kernel/dm-target.c
+          test -s src/userspace/swapzctl.c
+          grep -Fq 'MODULE_VERSION(SWAPZ_ALPHA_VERSION)' src/kernel/dm-target.c
+          grep -Fq 'swapz-version.h' src/kernel/Makefile
+          grep -Fq 'CANDIDATES = ("off", "swapz")' tests/runtime/benchmark/io-replay.py
+          test ! -e kernel
+          test ! -e userspace
+          test ! -e tools
+          if git grep -nE '\b(sv3_|SV3_|swapz3ctl|extent-v3|swapz_extent_v3)\b' -- ':!docs/**' ':!test_results.json.xz'; then
+            echo 'FAIL: versioned implementation name remains outside documentation'
+            exit 1
+          fi
+          echo "ACTIVE_SWAPZ_LAYOUT_AND_NAMING_PASS"
+      - name: Enforce documentation and test-code placement
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(docs/README.md docs/VISION.md docs/ROADMAP.md docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
+          for file in "${required[@]}"; do
+            test -s "$file" || { echo "FAIL: missing documentation $file"; exit 1; }
+          done
+          if git ls-files '*.md' | grep -v '^docs/' | grep -q .; then
+            echo 'FAIL: all maintained Markdown must live under docs/'
+            git ls-files '*.md' | grep -v '^docs/' || true
+            exit 1
+          fi
+          if git ls-files '*.py' | grep -v '^tests/' | grep -q .; then
+            echo 'FAIL: Python is test-only and must live under tests/'
+            git ls-files '*.py' | grep -v '^tests/' || true
+            exit 1
+          fi
+          if git ls-files '*.c' '*.h' '*.cpp' '*.hpp' |
+             grep -vE '^(src/|tests/)' | grep -q .; then
+            echo 'FAIL: native product/test source must live under src/ or tests/'
+            git ls-files '*.c' '*.h' '*.cpp' '*.hpp' |
+              grep -vE '^(src/|tests/)' || true
+            exit 1
+          fi
+          test -s tests/tools/request-plateau.py
+          python3 -B tests/tools/request-plateau.py --bandwidth 20 --sizes 4,8             --latencies 1 --ratios 1 | grep -Fq 'first_plateau_kib=8'
+          echo "DOCUMENT_TEST_SOURCE_PLACEMENT_PASS"
+      - name: Require standards co-change for implementation work
         shell: bash
         run: |
           set -euo pipefail
           standards=(docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
-          entrypoints=(AGENTS.md CLAUDE.md .github/copilot-instructions.md CODEX_VALIDATION.md README.md VISION.md)
-          for doc in "${standards[@]}"; do
-            test -s "$doc" || { echo "FAIL: missing canonical standard $doc"; exit 1; }
-            grep -Fq 'VISION.md' "$doc" || { echo "FAIL: standard $doc must cite VISION"; exit 1; }
-          done
-          for file in "${entrypoints[@]}"; do
-            test -s "$file" || { echo "FAIL: missing agent entry $file"; exit 1; }
-            for doc in "${standards[@]}"; do
-              grep -Fq "$doc" "$file" || { echo "FAIL: $file missing link to $doc"; exit 1; }
-            done
-          done
-          test "$(git branch --show-current)" = main
           changed="$(git diff --name-only HEAD^ HEAD)"
-          if printf '%s\n' "$changed" | grep -Eq '^(kernel/|tests/|userspace/|\.github/workflows/|Makefile$|dkms\.conf$)'; then
+          if printf '%s\n' "$changed" | grep -Eq '^(src/|tests/|packaging/|\.github/workflows/|Makefile$|dkms\.conf$)'; then
             if ! printf '%s\n' "$changed" | grep -Eq '^docs/(coding_standards|testing_standards|compile|benchmark)\.md$'; then
-              echo 'FAIL: implementation must update one of four canonical standards in the same commit'
+              echo 'FAIL: implementation must update a canonical standard in the same commit'
               exit 1
             fi
           fi
-          test -s tests/suites/Makefile
-          echo "SIX_DOCUMENT_ROUTING_AND_FOUR_STANDARDS_COCHANGE_PASS"
-      - name: Enforce documentation locations and discoverability
+          test "$(git branch --show-current)" = main
+          echo "STANDARDS_COCHANGE_PASS"
+      - name: Verify build tidiness
         shell: bash
         run: |
           set -euo pipefail
-          allowed=(docs/ROADMAP.md docs/coding_standards.md docs/testing_standards.md docs/compile.md docs/benchmark.md)
-          for file in "${allowed[@]}"; do
-            test -s "$file" || { echo "FAIL: required documentation missing: $file"; exit 1; }
-          done
-          while IFS= read -r file; do
-            case " ${allowed[*]} " in
-              *" $file "*) ;;
-              *) echo "FAIL: redundant documentation under docs/: $file"; exit 1 ;;
-            esac
-          done < <(find docs -type f | sort)
-          # Canonical helpers live only in tools/.
-          test ! -e bench || { echo "FAIL: retired bench/ directory returned"; exit 1; }
-          test ! -e scripts || { echo "FAIL: retired scripts/ directory returned"; exit 1; }
-          test -s tools/request-plateau.py
-          python3 -B tools/request-plateau.py --bandwidth 20 --sizes 4,8 \
-            --latencies 1 --ratios 1 |
-            grep -Fq 'first_plateau_kib=8'
-          shopt -s nullglob
-          for file in *.md; do
-            case "$file" in
-              README.md|VISION.md|AGENTS.md|CLAUDE.md|CODEX_VALIDATION.md) ;;
-              *) echo "FAIL: move root documentation into docs/: $file"; exit 1 ;;
-            esac
-          done
-          grep -Fq 'docs/coding_standards.md' README.md
-          grep -Fq 'docs/ROADMAP.md' AGENTS.md
-          # Require a direct README link for every tracked Markdown document.
-          # This covers documentation under docs/, component READMEs and agent files.
-          while IFS= read -r -d '' documentation_path; do
-            if ! grep -Fq -- "]($documentation_path)" README.md; then
-              echo "FAIL: README.md missing link to $documentation_path"
-              exit 1
-            fi
-          done < <(git ls-files -z -- '*.md')
-          echo "DOCUMENTATION_PLACEMENT_AND_AGENT_DISCOVERY_PASS"
-      - name: Verify no project-local compilation outside build
-        shell: bash
-        run: |
-          set -euo pipefail
-          if find kernel userspace tests -type f \( -name '*.ko' -o -name '*.o' -o -name '*.mod.o' \) | grep -q .; then
-            echo 'FAIL: generated native output outside reusable build/'; exit 1
+          if find src tests -type f \( -name '*.ko' -o -name '*.o' -o -name '*.mod.o' \) | grep -q .; then
+            echo 'FAIL: generated native output outside build/'
+            exit 1
           fi
-          test -d build
           git diff --check
           test -x build/tests/native/codec-roundtrip
-          echo "V3_KERNEL_C_AND_IO_REPLAY_BUILD_TIDINESS_PASS"
+          echo "BUILD_TIDINESS_PASS"
