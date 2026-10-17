@@ -10,21 +10,24 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`4529140f689183ead86d94526b9974b875d915f4` passed all five stages and is
-the strongest request-reduction experiment so far, but is not promoted.
+`0d8f7f7ea90c33fbac3a57d95f410e68275c1cea` passed all five stages and
+is qualified exploratory evidence, but is not promoted.
 
-At `4529140...`, write-only QD4 converged to about 1032 lower WRITE requests
-and QD8 to about 520 for 4096 medium writes. Faster-model QD32 reached about
-138-139 requests, and slow async QD32 reached 141. Those are large endurance-
-direction reductions. However, faster-model QD8 useful throughput fell to
-0.35x/0.59x raw sync/async, mixed faster-model QD32 fell to 16.39/18.06 MB/s,
-and mixed faster-model deadline closes rose to about 214 per pair. Slow QD32
-sync also learned an invalidly narrow target of 3, produced 82 deadline closes
-and 209 lower requests. Request reduction without acceptable throughput remains
-diagnostic evidence, not acceptance.
+The dry accepted-pack experiment recovered the mixed path: slow-model useful
+WRITE reached 7.09/7.25 MB/s sync/async with only about 2.8 mean deadline
+closes, while the faster model reached 19.04/22.63 MB/s and retained faster
+packed reads. Random 4MiB lower READ traffic remained strongly below raw.
 
-The write-only pilot is still one pair per mode/QD with no confidence interval,
-and live GC remains unexercised.
+Its write-only attribution exposed a different failure: a complete medium
+second pack could close at six records below learned QD8/QD32 targets. Faster
+QD8 therefore used roughly 1008-1028 lower WRITE requests and faster QD32
+roughly 868-892, with many 1-8-record windows; this surrendered much of the
+request reduction previously demonstrated by `4529140...`. Slow QD8 showed
+the same request fragmentation even though useful throughput remained closer
+to raw. Request reduction and mixed recovery must coexist before promotion.
+
+The write-only pilot remains one pair per mode/QD with no confidence interval,
+and the loaded run still reported zero GC victims.
 
 ## Completed cleanup after that baseline
 
@@ -38,22 +41,23 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify dry accepted-pack closure: once a complete second pack is staged and
-   the finite accepted queue is empty, close it instead of waiting only for a
-   larger learned burst target and burning the absolute deadline.
-2. Preserve learned width from the complete worker-local plus incoming accepted
-   FIFO, and do not let one two/three-record deadline collapse the target below
-   the original four-record anti-chopping floor.
-3. Require the next run to preserve the QD4/QD8/QD32 lower-request gains while
-   recovering mixed faster-model throughput and sharply reducing worker-empty
-   deadline closes.
-4. Keep asynchronous-preparation QD1 scheduling as a separate production-C
-   experiment after burst closure stabilizes.
-5. Revisit GC reserve/probe wear distribution only with direct rotation tests
-   and then sustained loaded GC evidence; current loaded runs exercise no live
-   GC, so do not mix allocator changes into the burst experiment.
-6. Add statistically repeated saturation only after policy stabilizes; genuine
-   lower errors and long-run resource pressure remain open gates.
+1. Qualify the current burst candidate: write admission may close only at the
+   learned/sampled target; below-target useful-pack closure is restricted to a
+   refreshed worker tail with prior packed-chain or independent-read service
+   evidence.
+2. Require QD8/QD32 write-only windows to recover deep-queue aggregation
+   without losing the mixed-path recovery. In particular, compare lower WRITE
+   requests against both `0d8f7f7...` and the earlier request-reduction
+   experiment, while rejecting any increase in lower WRITE bytes.
+3. Qualify ordered-worker stealing of only unstarted asynchronous preparation.
+   QD1 async should narrow its throughput/p99 gap without removing the measured
+   high-QD producer/lower-I/O overlap or weakening completion ownership.
+4. Keep the circular GC destination probe only if direct rotation/engine tests
+   remain exact and loaded correctness is unchanged. No endurance or sustained
+   GC claim is permitted unless the loaded run actually exercises GC victims.
+5. After policy stabilizes, add statistically repeated saturation with
+   confidence intervals; genuine lower errors, sustained GC, kernel-worker CPU
+   attribution and long-run resource pressure remain release gates.
 
 ## Release gates
 

@@ -102,3 +102,33 @@ before `incoming`; and one two/three-record deadline cannot shrink the learned
 target below the original four-record anti-chopping floor. No grace timer or
 future-arrival wait is added. QD1 asynchronous preparation and GC allocation are
 separate experiments.
+
+
+### Qualified dry accepted-pack result
+
+Source `0d8f7f7ea90c33fbac3a57d95f410e68275c1cea` passed all five owner
+qualification stages. Slow mixed QD32 reached 7.09/7.25 MB/s sync/async with
+about 640/635 lower WRITE requests and only 2.8 mean deadline closes. Faster
+mixed QD32 recovered to 19.04/22.63 MB/s with 1236/1043 lower requests and
+faster packed-read latency than raw.
+
+The same source is not promoted. Write-only QD8 was split into many 5-8 plus
+one/two-record windows, using about 1008-1028 requests on the faster model;
+faster QD32 used about 868-892 requests and almost no 17-64-record windows.
+This shows that unconditional dry second-pack closure solved deadline idling
+but overrode the learned burst target too early.
+
+The next candidate separates the two decisions. Admission closes only at the
+effective target. A below-target worker-tail close requires refreshed queue
+state plus service evidence from an earlier packed chain or an independent
+read while the retained window was open. It also allows the ordered worker to
+steal an asynchronous compression only before the producer claims that FIFO
+entry, using distinct producer/ordered LZ4 work memory. GC destination probing
+no longer restarts at segment zero; this is direct wear-distribution logic only
+and remains unqualified by loaded endurance evidence until GC victims occur.
+
+The decisive next comparison is simultaneous preservation: mixed faster-model
+throughput should remain near the qualified recovery, QD8/QD32 lower-request
+counts should move back toward the earlier deep-window result without extra
+lower bytes, QD1 async should improve without losing high-QD overlap, and all
+correctness/lifecycle/read-tail gates must remain intact.
