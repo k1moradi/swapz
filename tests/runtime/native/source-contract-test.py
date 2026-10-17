@@ -813,24 +813,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", writer)
         worker = body("swapz_worker")
         self.assertIn("ctx->worker_has_immediate_followup", writer)
-        self.assertIn("ctx->worker_followup_bios >= ctx->batch_count", writer)
-        self.assertIn("followup < 4U", worker)
-        self.assertIn("list_for_each(pos, &ctx->incoming)", worker)
-        self.assertIn("ctx->worker_followup_bios = followup", worker)
-        self.assertIn("ctx->worker_has_immediate_followup = followup != 0", worker)
-        self.assertIn("ctx->worker_followup_bios = 0", worker)
-        count_local = worker.index("for (pos = entry->list.next;")
+        self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
+        self.assertNotIn("worker_followup_bios", DM)
+        local_successor = worker.index("entry->list.next != &local")
         tail_lock = worker.index(
-            "spin_lock_irqsave(&ctx->queue_lock, flags);", count_local)
-        count_incoming = worker.index("list_for_each(pos, &ctx->incoming)",
-                                      tail_lock)
+            "spin_lock_irqsave(&ctx->queue_lock, flags);", local_successor)
+        accepted_incoming = worker.index("!list_empty(&ctx->incoming)",
+                                         tail_lock)
         tail_unlock = worker.index(
             "spin_unlock_irqrestore(&ctx->queue_lock, flags);",
-            count_incoming)
+            accepted_incoming)
         list_delete = worker.index("list_del_init(&entry->list)")
-        self.assertLess(count_local, tail_lock)
-        self.assertLess(tail_lock, count_incoming)
-        self.assertLess(count_incoming, tail_unlock)
+        self.assertLess(local_successor, tail_lock)
+        self.assertLess(tail_lock, accepted_incoming)
+        self.assertLess(accepted_incoming, tail_unlock)
         self.assertLess(tail_unlock, list_delete)
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
@@ -979,13 +975,22 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         bypass.index("swapz_fail(ctx, error)"))
         self.assertLess(bypass.index("swapz_fail(ctx, error)"),
                         bypass.index("swapz_flush_window(ctx)"))
+        self.assertIn("u64 read_start_ns = ktime_get_ns()", bypass)
+        self.assertIn("u64 read_end_ns = ktime_get_ns()", bypass)
+        self.assertIn("ctx->window_first_ns += read_elapsed", bypass)
+        self.assertIn("ctx->window_first_ns = read_end_ns", bypass)
+        service_shift = bypass.index("ctx->window_first_ns += read_elapsed")
+        completion = bypass.index("swapz_complete(bio, error)")
+        self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
+                        service_shift)
+        self.assertLess(service_shift, completion)
         self.assertIn("if (!error && !ctx->worker_has_immediate_followup &&",
                       bypass)
-        deadline_gate = bypass.index("!ctx->worker_has_immediate_followup")
+        deadline_gate = bypass.index("!ctx->worker_has_immediate_followup",
+                                     completion)
         deadline_expiry = bypass.index("swapz_retention_expired(ctx)",
                                        deadline_gate)
-        self.assertLess(bypass.index("swapz_complete(bio, error)"),
-                        deadline_gate)
+        self.assertLess(completion, deadline_gate)
         self.assertLess(deadline_gate, deadline_expiry)
         abort = flush[flush.index("if (ctx->failed)"):
                       flush.index("swapz_order_window(ctx)")]

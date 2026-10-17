@@ -10,14 +10,14 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `45a5ccf09b2a4ce396d891215581476d3ee0dce3` passed all five qualification stages and is the current accepted performance baseline. Its learned singleton fast-close preserved one-block/one-request QD1 geometry while recovering useful WRITE throughput to about 0.89-0.94x raw on the slow model and 0.76-0.86x raw on the faster model. The loaded RAW/zero/flush, retained suspend/drain, byte-exact verification and synthetic WRITE/FLUSH fail-closed gates also passed.
 
-The write-only pilot remains directional only:
-
-- QD1: logical/lower stayed exactly 1.00x and 4096 requests, while the retention tax fell sharply.
-- QD4: logical/lower stayed about 1.33x and useful throughput remained about 0.60-0.70x raw.
-- QD8: slow-model swapz remained about 0.89-0.90x raw and faster-model async about 0.76x raw.
-- QD32 slow model: swapz remained about 1.26-1.27x raw.
-- QD32 faster model: swapz remained about 0.61-0.62x raw.
-- Slow mixed QD32 still lost useful WRITE throughput, with most deadline closes attributed to `deadline_after_read`.
+The accepted baseline write-only pilot remains directional only. A later fully
+qualified experiment at `fca890520f57af568ac74a626569a1b223a08572`
+materially reduced 4MiB seeded-random lower READ bytes (to roughly 2.37-2.61MiB)
+and improved slow mixed-QD32 useful WRITE throughput to about 6.5-6.6 MB/s, but
+its write-only QD8 pilot regressed to about 0.73-0.74x raw on the slow model and
+about 0.60-0.70x on the faster model with roughly 1536 lower requests. That
+experiment therefore remains qualified correctness evidence, not the accepted
+performance baseline.
 
 The pilot used one pair per mode/QD and has no confidence interval.
 
@@ -33,9 +33,10 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify the combined accepted-burst/deadline and engine changes now on main: first-pack deferral requires a second pack's worth of accepted work; expired windows drain finite already-accepted bursts; cursor-aware planner reconstruction avoids equivalent-plan alignment holes without reordering publication; and the metadata-block LRU is 512 entries.
-2. Acceptance requires unchanged loaded correctness, preserved QD1/QD8 behavior, materially better QD4 or slow mixed write efficiency, no extra default lower WRITE bytes, and materially lower random-read lower bytes/tails without unacceptable RAM/CPU cost.
-3. If QD1 remains materially below raw after the retention tax is removed, profile its remaining production-C wall time across LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
+1. Qualify full finite-snapshot write coalescing: while any successor BIO is already accepted, do not split a useful pack mid-snapshot; flush once that accepted tail is exhausted or an ordering fence requires it.
+2. Exclude successful synchronous independent-read service time from the retained write window's idle budget, while preserving the pinned no-future-arrival rule and all PREFLUSH/FUA/dependency gates.
+3. Keep the qualified 512-entry metadata LRU and cursor-aware planner under observation. The next result must recover the exploratory QD8 request/throughput regression seen at `fca8905...` while retaining its large random-read lower-byte win and slow mixed-QD32 improvement.
+4. If QD1 remains materially below raw after the retention tax is removed, profile its remaining production-C wall time across LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
 4. Expand the write-only saturation study to at least five counterbalanced pairs per mode/QD/regime only after the C policy is stable, then report confidence intervals.
 5. Exercise sustained live GC, reserve rotations, near-full churn, real lower error behavior and resource pressure on owned RAM devices. No observed GC means GC remains unqualified.
 6. Extend read qualification beyond the current small RAM working set with controlled cache state before making cold swap-in claims.

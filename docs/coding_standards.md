@@ -111,14 +111,16 @@ resulting contiguity.
 A retained pack may remain open only for finite BIOs that are already accepted.
 At the tail of the worker-local snapshot, already-accepted work includes BIOs
 observed in `incoming` while holding `queue_lock`; later arrivals do not justify
-another first-pack handoff. If a useful first pack is deferred solely because
-such accepted work exists, preserve that deferred state until the window
-flushes and close the window as soon as the finite accepted tail is exhausted.
+another handoff or refresh the retention budget. If any accepted successor
+exists, a useful first/second pack may stay open while the serialized worker
+drains that finite snapshot, then must close when the accepted tail is
+exhausted or an ordering/dependency fence requires it.
 
-Do not delay a valid three-record medium first pack merely to reduce the number
-of lower requests when a fourth medium record cannot improve lower-byte
-geometry. The rejected zero-delay first-pack recheck reduced some QD4 request
-counts but increased lower bytes and harmed QD4 latency/throughput.
+This is distinct from the rejected zero-delay first-pack recheck: that policy
+waited for a future scheduling turn and could lower byte efficiency. Draining
+BIOs that were already accepted adds no future-arrival wait and lets the
+existing no-padding batched writer combine their independent extents in one
+lower run when physical geometry permits.
 
 ### Learned retained-singleton bypass
 
@@ -135,18 +137,18 @@ ordering remain unchanged.
 
 ### Already-accepted burst deadline handling
 
-The retained-window timestamp remains pinned to the first admitted record, but
-expiry bounds idle waiting for future arrivals rather than CPU/lower-I/O time
-spent draining a finite set of BIOs already accepted by the worker. A
-`deadline_before_bio` or `deadline_after_read` close must therefore not split a
-window while the current worker snapshot still has accepted follow-up BIOs.
-Dependencies, PREFLUSH/FUA and same-page conflicts still drain through their
-existing ordering gates; no future arrival may refresh or extend the timestamp.
+Retention bounds time available to collect companion writes, not time the sole
+ordered worker is synchronously servicing an unrelated committed read. A
+`deadline_before_bio` or `deadline_after_read` close must not split a window
+while the current worker snapshot still has accepted follow-up BIOs. On a
+successful independent-read bypass, advance `window_first_ns` by exactly that
+read's synchronous service interval before re-evaluating expiry. An older
+hrtimer may wake early and is harmless because the worker rechecks the shifted
+origin before closing or rearming.
 
-A valid first compressed pack may be deferred only when at least one second
-pack's worth of BIOs is already accepted in the bounded worker snapshot. This
-prevents a four-BIO medium wave from turning a clean three-record 8KiB pack into
-an 8KiB extent plus an orphan 4KiB tail merely because one extra BIO was visible.
+Future arrivals never refresh this budget. Dependencies, PREFLUSH/FUA,
+same-page conflicts, suspend/drain and fail-closed behavior retain their
+existing ordering gates.
 
 
 ### Cursor-aware adjacent-run reconstruction

@@ -57,3 +57,21 @@ whether accepted-burst deadline handling reduces slow-model
 `deadline_after_read` fragmentation. Cursor-aware planner reconstruction is a
 WRITE-byte-neutral optimization: any increase in default lower WRITE bytes is a
 rejection regardless of request count.
+
+
+### Qualified follow-up experiment
+
+Source `fca890520f57af568ac74a626569a1b223a08572` passed the complete
+qualification. Its 512-entry metadata-block LRU reduced seeded-random 4MiB
+lower READ traffic to roughly 2.37-2.61MiB and eliminated almost all metadata
+lower reads on that pass. Slow mixed-QD32 useful WRITE throughput improved to
+about 6.51-6.61 MB/s with logical/backing WRITE ratio about 1.43x, and
+`deadline_after_read` fell sharply.
+
+It is not the accepted performance baseline because the exploratory write-only
+QD8 pilot regressed materially versus `45a5ccf...`: lower WRITE requests rose
+to about 1536 and slow-model useful throughput fell to about 0.73-0.74x raw.
+The next production experiment must coalesce the complete already-accepted
+worker snapshot before a pack-ready close and exclude synchronous independent
+READ service time from retention's idle budget. These are hypotheses until
+requalified; request-count reductions alone are not acceptance evidence.

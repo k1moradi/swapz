@@ -202,9 +202,6 @@ struct swapz_dm {
 	 * when the local snapshot reaches its tail. Future arrivals do not.
 	 */
 	bool worker_has_immediate_followup;
-	/* Bounded snapshot depth of already-accepted BIOs after the current
-	 * worker-local entry, including incoming under queue_lock. */
-	swapz_u8 worker_followup_bios;
 	/*
 	 * A useful first pack was kept open only to consume that finite
 	 * accepted tail. Close it when the accepted tail is exhausted.
@@ -1398,13 +1395,12 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					      ctx->retain_ms,
 					      ctx->engine.max_read_blocks_per_record)) {
 		/*
-		 * Deferring a valid first pack is useful only when a second
-		 * pack's worth of work is already accepted. Otherwise a finite
-		 * QD4 wave turns a clean three-record 8KiB pack into an 8KiB
-		 * extent plus an orphan 4KiB tail.
+		 * If any successor BIO is already accepted in this finite worker
+		 * snapshot, keep the first useful pack open without another timer
+		 * wait. The worker flushes when that accepted tail is exhausted,
+		 * letting QD4/QD8 waves reach the batched lower-run writer once.
 		 */
-		if (ctx->worker_has_immediate_followup &&
-		    ctx->worker_followup_bios >= ctx->batch_count) {
+		if (ctx->worker_has_immediate_followup) {
 			ctx->single_pack_deferred = true;
 			ctx->single_pack_deferrals++;
 		} else {
@@ -1570,10 +1566,10 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 		swapz_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
-	/* The absolute timestamp never moves, but expiry bounds waiting for
-	 * future arrivals, not draining work that was already accepted before
-	 * the worker observed the deadline. Let that finite burst reach the
-	 * existing pack/order gates first. */
+	/* Future arrivals never refresh the retention budget. Expiry bounds
+	 * idle waiting, not finite already-accepted work or synchronous service
+	 * of an independent read. Let accepted work reach the existing
+	 * pack/order gates before applying the remaining idle budget. */
 	if (ctx->batch_count && ctx->retain_ms &&
 	    !ctx->worker_has_immediate_followup &&
 	    swapz_retention_expired(ctx)) {
@@ -1589,6 +1585,8 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	 * committed authority. Read scratch is separate from batch_bytes;
 	 * one worker still owns every mapping and all lower I/O. */
 	if (op == REQ_OP_READ && swapz_read_is_independent(ctx, bio)) {
+		u64 read_start_ns = ktime_get_ns();
+
 		error = swapz_read(ctx, bio);
 		if (error) {
 			swapz_fail(ctx, error);
@@ -1596,8 +1594,28 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			/* Abort pending owners without submitting their data. */
 			swapz_flush_window(ctx);
 		}
-		if (!error)
+		if (!error) {
+			u64 read_end_ns = ktime_get_ns();
+
 			ctx->retained_read_bypasses++;
+			/*
+			 * Retention measures time available for companion writes, not
+			 * synchronous service of an unrelated committed read. Shift the
+			 * pinned origin by exactly that service interval; because the
+			 * open window predates this read, the resulting deadline remains
+			 * bounded by read_end_ns + retain_ms and future arrivals cannot
+			 * refresh it. An already-armed old hrtimer may wake early; the
+			 * worker rechecks this shifted origin before closing/rearming.
+			 */
+			if (ctx->window_first_ns && read_end_ns > read_start_ns) {
+				u64 read_elapsed = read_end_ns - read_start_ns;
+
+				if (ctx->window_first_ns <= read_start_ns)
+					ctx->window_first_ns += read_elapsed;
+				else
+					ctx->window_first_ns = read_end_ns;
+			}
+		}
 		swapz_complete(bio, error);
 		/* A successful independent read is already authoritative.
 		 * Do not add an unrelated lower WRITE's latency/error to its
@@ -1720,30 +1738,19 @@ static void swapz_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		list_for_each_entry_safe(entry, next, &local, list) {
-			struct list_head *pos;
-			swapz_u8 followup = 0;
-
 			/*
-			 * Count a bounded snapshot of work already accepted after this
-			 * entry. Local successors are lockless worker-owned state;
-			 * incoming is sampled under the same admission lock as ->map().
-			 * Later arrivals remain future work and never extend this count.
+			 * Current local successors are already accepted. At the local
+			 * tail, sample incoming under the same admission lock as ->map().
+			 * Anything arriving after this observation remains future work.
 			 */
-			for (pos = entry->list.next;
-			     pos != &local && followup < 4U;
-			     pos = pos->next)
-				followup++;
-			if (followup < 4U) {
+			ctx->worker_has_immediate_followup =
+				entry->list.next != &local;
+			if (!ctx->worker_has_immediate_followup) {
 				spin_lock_irqsave(&ctx->queue_lock, flags);
-				list_for_each(pos, &ctx->incoming) {
-					if (followup >= 4U)
-						break;
-					followup++;
-				}
+				ctx->worker_has_immediate_followup =
+					!list_empty(&ctx->incoming);
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			}
-			ctx->worker_followup_bios = followup;
-			ctx->worker_has_immediate_followup = followup != 0;
 			/* Any already-accepted companion disproves isolated QD1-like
 			 * behavior immediately, before this BIO can influence closure. */
 			if (ctx->worker_has_immediate_followup) {
@@ -1768,7 +1775,6 @@ static void swapz_worker(struct work_struct *work)
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
-			ctx->worker_followup_bios = 0;
 			if (!(remaining & 7U))
 				cond_resched();
 			if (!--remaining)
