@@ -91,7 +91,6 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 		return -EINVAL;
 
 	memset(builder, 0, sizeof(*builder));
-	memset(bytes, 0, bytes_total);
 	builder->bytes = bytes;
 	builder->bytes_total = bytes_total;
 	builder->payload_start = (swapz_u16)bytes_total;
@@ -159,6 +158,15 @@ int swapz_seal(struct swapz_builder *builder)
 		(swapz_u32)builder->count * sizeof(struct swapz_record);
 	if (metadata_end > builder->payload_start)
 		return -EUCLEAN;
+
+	/*
+	 * Header, descriptors and payloads are all written explicitly. Clear
+	 * only the unused gap before the complete extent can reach lower I/O;
+	 * stale scratch bytes must never escape to media.
+	 */
+	if (metadata_end < builder->payload_start)
+		memset(builder->bytes + metadata_end, 0,
+		       builder->payload_start - metadata_end);
 
 	swapz_get_header(builder->bytes, &header);
 	header.record_count = builder->count;

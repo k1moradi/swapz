@@ -402,7 +402,6 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			 * header, descriptors, padding and sibling payloads.
 			 * Failures abort/quarantine BEFORE any mapping publication.
 			 */
-			memset(engine->read_scratch, 0, bytes);
 			error = engine->io.read_blocks(
 				engine->io.opaque, tx->start_block,
 				blocks, engine->read_scratch);
@@ -797,11 +796,8 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	if (cached_metadata) {
-		if (!cached_full && bytes > SWAPZ_BLOCK_BYTES)
-			memset(engine->read_scratch + SWAPZ_BLOCK_BYTES, 0,
-			       bytes - SWAPZ_BLOCK_BYTES);
+		/* Required payload blocks are overwritten below before use. */
 	} else if (lru_cached_metadata) {
-		memset(engine->read_scratch, 0, bytes);
 		memcpy(engine->read_scratch,
 		       engine->read_metadata_cache +
 		       (size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES,
@@ -812,7 +808,6 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		    (swapz_u32)observed.payload_offset +
 			observed.payload_length > SWAPZ_BLOCK_BYTES)
 			initial_blocks = 2;
-		memset(engine->read_scratch, 0, bytes);
 		error = engine->io.read_blocks(engine->io.opaque,
 					       observed.start_block, initial_blocks,
 					       engine->read_scratch);

@@ -43,7 +43,9 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
    read tails, lifecycle correctness or fail-closed behavior.
 3. Keep the accepted-burst read cap at two for this experiment so any QD4
    request change is attributable to window chopping rather than a changed
-   16KiB/read-amplification tradeoff.
+   16KiB/read-amplification tradeoff. The same candidate removes
+   byte/request-neutral full-buffer clears; monitor CPU/throughput without
+   attributing lower-I/O changes to that scratch optimization.
 4. If QD4 remains split after this worker change, add only the minimum
    write-only window-size/close attribution needed to distinguish pack closure
    from lower-run fragmentation, then remove it after the decision.

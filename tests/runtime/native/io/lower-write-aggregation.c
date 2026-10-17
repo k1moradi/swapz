@@ -131,6 +131,7 @@ static int setup(void)
 	if (error)
 		return error;
 	memset(media, 0, sizeof(media));
+	memset(reader, 0xa5, sizeof(reader));
 	memset(&e, 0, sizeof(e));
 	e.authority = &a;
 	e.io.write_extent = write_extent;

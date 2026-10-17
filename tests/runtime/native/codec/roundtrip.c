@@ -69,6 +69,26 @@ static int test_class(unsigned int bytes, unsigned int count)
 	return 0;
 }
 
+static int test_seal_clears_only_unwritten_gap(void)
+{
+	struct swapz_builder b;
+	unsigned int metadata_end, index;
+
+	memset(extent, 0xa5, sizeof(extent));
+	set_payload(2072, 1);
+	CHECK(swapz_begin(&b, extent, 8192, 19) == 0);
+	CHECK(swapz_append(&b, 7, 3, payload, 2072) == 0);
+	metadata_end = sizeof(struct swapz_header) +
+		b.count * sizeof(struct swapz_record);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(metadata_end < b.payload_start);
+	for (index = metadata_end; index < b.payload_start; ++index)
+		CHECK(extent[index] == 0);
+	CHECK(swapz_validate(extent, 8192) == 0);
+	CHECK(extent[8192] == 0xa5);
+	return 0;
+}
+
 static int test_bad_inputs(void)
 {
 	struct swapz_builder b;
@@ -220,6 +240,7 @@ int main(void)
 	CHECK(test_class(4096, 1) == 0); tests++;
 	CHECK(test_class(8192, 3) == 0); tests++;
 	CHECK(test_class(16384, 7) == 0); tests++;
+	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;
 	CHECK(test_read_spans() == 0); tests++;

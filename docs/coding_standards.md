@@ -185,3 +185,15 @@ Load each chunk through `memcpy` rather than casting a byte buffer to a wider
 pointer; do not overread the page, allocate memory, or weaken the rule that any
 single nonzero byte makes the page nonzero. This optimization changes CPU work
 only and never changes lower-I/O or mapping authority semantics.
+
+
+### Exact scratch initialization
+
+Extent construction must not clear the full 4/8/16KiB scratch image when every
+authoritative header, descriptor and payload byte will be overwritten. The
+codec clears only the final unused gap at seal time before lower submission, so
+no stale scratch byte can reach media. The selective read path likewise does
+not zero blocks it never inspects: block-zero metadata and every requested
+payload block are explicitly populated before validation. Full verify reads
+overwrite the complete compared extent. Native production-C tests poison
+scratch buffers so correctness cannot depend on incidental zero initialization.
