@@ -99,8 +99,9 @@ static int test_raw_descriptor_reads_fail_closed(void)
 	CHECK(init() == 0);
 	CHECK(stage_raw(0, &tx) == 0);
 	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
-	CHECK(swapz_read_authoritative(&a, 0, &maps[0], disk_page, 4096,
-				     &decoded, &payload) == -EOPNOTSUPP);
+	memset(&decoded, 0, sizeof(decoded));
+	CHECK(swapz_read_authoritative_peeked(&a, 0, &maps[0], disk_page, 4096,
+					    &decoded, &payload) == -EOPNOTSUPP);
 	return 0;
 }
 
