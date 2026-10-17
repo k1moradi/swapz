@@ -62,7 +62,13 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `45a5ccf09b2a4ce396d891215581476d3ee0dce3` remains the accepted performance baseline. Source `fca890520f57af568ac74a626569a1b223a08572` passed all five correctness/qualification stages and materially improved packed random-read lower bytes plus slow mixed-QD32 write efficiency, but it is not an accepted performance baseline because the exploratory write-only QD8 pilot regressed materially in throughput and lower request count. A qualification PASS never overrides benchmark acceptance criteria. One-pair-per-QD pilot results are not statistically confirmatory, and live GC remains unexercised.
+Source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` passed all five stages and is
+the accepted directional performance baseline. It preserved byte-exact loaded
+correctness, retained suspend/drain, RAW/zero/flush behavior and synthetic
+WRITE/FLUSH fail-closed checks while retaining the large random-read lower-byte
+reduction and recovering the earlier QD8 regression. Its QD pilot remains
+one-pair exploratory evidence without confidence intervals, and live GC remains
+unexercised.
 
 ## Open qualification gaps
 

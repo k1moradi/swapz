@@ -109,12 +109,17 @@ resulting contiguity.
 ### Retained accepted-burst tails
 
 A retained pack may remain open only for finite BIOs that are already accepted.
-At the tail of the worker-local snapshot, already-accepted work includes BIOs
-observed in `incoming` while holding `queue_lock`; later arrivals do not justify
-another handoff or refresh the retention budget. If any accepted successor
-exists, a useful first/second pack may stay open while the serialized worker
-drains that finite snapshot, then must close when the accepted tail is
-exhausted or an ordering/dependency fence requires it.
+At the tail of the worker-local queue, already-accepted work includes BIOs
+observed in `incoming` while holding `queue_lock`. The worker may append that
+accepted tail to its private local FIFO and continue in the same invocation,
+but only while the existing 64-BIO quantum has capacity. It must never sleep,
+spin or schedule a grace period waiting for a future arrival, and future
+arrivals never refresh the pinned retention budget.
+
+Because asynchronous preparation and synchronous copy/LZ4 work occur after an
+initial queue observation, pack-ready policy must refresh `incoming` after
+that work before deciding that the current pack is isolated. FIFO order,
+dependency fences and the one-completion-owner rule are unchanged.
 
 This is distinct from the rejected zero-delay first-pack recheck: that policy
 waited for a future scheduling turn and could lower byte efficiency. Draining

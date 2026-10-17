@@ -31,16 +31,18 @@ Report process CPU separately from kernel-worker CPU; do not imply one includes 
 
 ## Current directional result
 
-At qualified source `45a5ccf09b2a4ce396d891215581476d3ee0dce3`:
+At qualified source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7`:
 
-- slow-model QD1 reached about 0.89-0.94x raw and faster-model QD1 about 0.76-0.86x, with unchanged 1.00x logical/lower geometry and 4096 lower requests;
-- QD4 remained about 0.60x raw on the slow model and 0.63-0.70x on the faster model with about 1.33x logical/lower geometry;
-- QD8 remained about 0.89-0.90x raw on the slow model and 0.59-0.76x on the faster model;
-- slow-model QD32 remained about 1.26-1.27x raw, while faster-model QD32 remained about 0.61-0.62x;
-- slow mixed QD32 still lost useful WRITE throughput, and its deadline closures were dominated by `deadline_after_read`;
-- random packed 4MiB reads still transferred roughly 6.2MiB of lower data for 4MiB logical work.
+- slow mixed QD32 reached 6.96/7.12 MB/s sync/async with about 763 lower WRITE requests, 1.47x logical/backing ratio and only two mean deadline closes;
+- faster mixed QD32 reached 19.53/22.57 MB/s with about 1400/1248 lower WRITE requests and 1.43-1.44x logical/backing ratio;
+- seeded-random 4MiB lower READ traffic remained about 2.60MiB on the slow model and 2.35-2.39MiB on the faster model;
+- QD1 stayed one block/request per page while reaching about 0.89-0.93x raw;
+- QD8 recovered to about 0.89x raw on the slow model and 0.61-0.77x on the faster model;
+- QD4 still used roughly 2025-2048 lower requests for 4096 medium writes and reached only about 0.60-0.70x raw.
 
-Interpretation: learned singleton fast-close removed most of the QD1 retention tax without changing lower geometry. The next production questions are finite-wave first-pack depth, deadline fragmentation caused by already-accepted work behind slow independent reads, alignment holes in adjacent lower-run staging, and metadata-cache thrash on random reads. All QD pilot results remain exploratory.
+Interpretation: read-service deadline charging and the prior QD8 regression are
+no longer the primary blockers. QD4 now isolates a likely admitted-tail/window
+chopping problem. All write-only QD figures remain exploratory one-pair pilots.
 
 ## Confirmation gate
 
@@ -59,19 +61,14 @@ WRITE-byte-neutral optimization: any increase in default lower WRITE bytes is a
 rejection regardless of request count.
 
 
-### Qualified follow-up experiment
+### Next accepted-tail experiment
 
-Source `fca890520f57af568ac74a626569a1b223a08572` passed the complete
-qualification. Its 512-entry metadata-block LRU reduced seeded-random 4MiB
-lower READ traffic to roughly 2.37-2.61MiB and eliminated almost all metadata
-lower reads on that pass. Slow mixed-QD32 useful WRITE throughput improved to
-about 6.51-6.61 MB/s with logical/backing WRITE ratio about 1.43x, and
-`deadline_after_read` fell sharply.
+The next candidate keeps `f10a1e0...` write/read geometry unchanged. When the
+worker reaches its local tail it may append BIOs already present in `incoming`
+and continue within the same 64-BIO quantum. Pack-ready admission also refreshes
+`incoming` after preparation/copy/LZ4 work so a queue observation taken before
+that work cannot falsely close a pack that already has an admitted successor.
 
-It is not the accepted performance baseline because the exploratory write-only
-QD8 pilot regressed materially versus `45a5ccf...`: lower WRITE requests rose
-to about 1536 and slow-model useful throughput fell to about 0.73-0.74x raw.
-The next production experiment must coalesce the complete already-accepted
-worker snapshot before a pack-ready close and exclude synchronous independent
-READ service time from retention's idle budget. These are hypotheses until
-requalified; request-count reductions alone are not acceptance evidence.
+This experiment adds no waiting interval and does not relax the accepted-burst
+read cap. A QD4 request reduction therefore tests worker/window chopping rather
+than a new lower-byte-versus-read-amplification tradeoff.

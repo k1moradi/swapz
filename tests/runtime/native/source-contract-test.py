@@ -655,7 +655,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("remaining = SWAPZ_WORK_QUANTUM_BIOS;", worker)
         self.assertLess(worker.index("for (;;)"),
                         worker.index("remaining = SWAPZ_WORK_QUANTUM_BIOS;"))
-        self.assertIn("if (!--remaining)", worker)
+        self.assertIn("while (remaining && !list_empty(&local))", worker)
+        self.assertIn("remaining--", worker)
+        self.assertIn("list_splice_tail_init(&ctx->incoming, &local)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
         self.assertIn("if (ctx->accepting) {", worker)
         self.assertIn("ctx->worker_requeues++", worker)
@@ -815,19 +817,26 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->worker_has_immediate_followup", writer)
         self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
         self.assertNotIn("worker_followup_bios", DM)
+        refresh = body("swapz_refresh_accepted_followup")
+        self.assertIn("spin_lock_irqsave(&ctx->queue_lock, flags)", refresh)
+        self.assertIn("!list_empty(&ctx->incoming)", refresh)
+        self.assertIn("ctx->worker_has_immediate_followup = true", refresh)
+        self.assertIn("swapz_refresh_accepted_followup(ctx)", writer)
+        self.assertLess(writer.index("ctx->batch_count++"),
+                        writer.index("swapz_refresh_accepted_followup(ctx)"))
+        self.assertLess(writer.index("swapz_refresh_accepted_followup(ctx)"),
+                        writer.index("swapz_window_single_pack_ready("))
         local_successor = worker.index("entry->list.next != &local")
-        tail_lock = worker.index(
-            "spin_lock_irqsave(&ctx->queue_lock, flags);", local_successor)
-        accepted_incoming = worker.index("!list_empty(&ctx->incoming)",
-                                         tail_lock)
-        tail_unlock = worker.index(
-            "spin_unlock_irqrestore(&ctx->queue_lock, flags);",
-            accepted_incoming)
+        initial_refresh = worker.index("swapz_refresh_accepted_followup(ctx)",
+                                       local_successor)
         list_delete = worker.index("list_del_init(&entry->list)")
-        self.assertLess(local_successor, tail_lock)
-        self.assertLess(tail_lock, accepted_incoming)
-        self.assertLess(accepted_incoming, tail_unlock)
-        self.assertLess(tail_unlock, list_delete)
+        self.assertLess(local_successor, initial_refresh)
+        self.assertLess(initial_refresh, list_delete)
+        post_process = worker.index("swapz_process(ctx, entry->bio)")
+        tail_splice = worker.index(
+            "list_splice_tail_init(&ctx->incoming, &local)", post_process)
+        self.assertLess(post_process, tail_splice)
+        self.assertIn("remaining > 1U", worker[post_process:tail_splice])
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("ctx->single_pack_deferred = true", writer)
@@ -836,6 +845,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
         self.assertIn("!swapz_retention_expired(ctx)", worker)
         self.assertLess(worker.index("swapz_process(ctx, entry->bio)"),
+                        worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
+        self.assertLess(worker.index("list_splice_tail_init(&ctx->incoming, &local)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))

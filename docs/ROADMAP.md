@@ -8,18 +8,20 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `45a5ccf09b2a4ce396d891215581476d3ee0dce3` passed all five qualification stages and is the current accepted performance baseline. Its learned singleton fast-close preserved one-block/one-request QD1 geometry while recovering useful WRITE throughput to about 0.89-0.94x raw on the slow model and 0.76-0.86x raw on the faster model. The loaded RAW/zero/flush, retained suspend/drain, byte-exact verification and synthetic WRITE/FLUSH fail-closed gates also passed.
+Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` passed all
+five qualification stages and is the current accepted directional performance
+baseline. It retained the 512-entry metadata-LRU random-read savings, reduced
+slow mixed-QD32 lower WRITE requests to about 762-764 with only two mean
+deadline closes, and recovered write-only QD8 to about 0.89x raw on the slow
+model and up to 0.77x raw on the faster model. Faster-model async mixed QD32
+reached 22.57 MB/s versus 20.02 MB/s raw in the bounded synthetic model.
 
-The accepted baseline write-only pilot remains directional only. A later fully
-qualified experiment at `fca890520f57af568ac74a626569a1b223a08572`
-materially reduced 4MiB seeded-random lower READ bytes (to roughly 2.37-2.61MiB)
-and improved slow mixed-QD32 useful WRITE throughput to about 6.5-6.6 MB/s, but
-its write-only QD8 pilot regressed to about 0.73-0.74x raw on the slow model and
-about 0.60-0.70x on the faster model with roughly 1536 lower requests. That
-experiment therefore remains qualified correctness evidence, not the accepted
-performance baseline.
-
-The pilot used one pair per mode/QD and has no confidence interval.
+QD4 remains the clearest unresolved write-path loss: roughly 2025-2048 lower
+WRITE requests for 4096 medium writes, about two lower requests per four-write
+wave, with useful throughput only about 0.60-0.70x raw. The write-only pilot is
+one pair per mode/QD and has no confidence interval, so these are directional
+engineering signals, not confirmatory performance claims. Live GC was not
+exercised.
 
 ## Completed cleanup after that baseline
 
@@ -33,13 +35,21 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify full finite-snapshot write coalescing: while any successor BIO is already accepted, do not split a useful pack mid-snapshot; flush once that accepted tail is exhausted or an ordering fence requires it.
-2. Exclude successful synchronous independent-read service time from the retained write window's idle budget, while preserving the pinned no-future-arrival rule and all PREFLUSH/FUA/dependency gates.
-3. Keep the qualified 512-entry metadata LRU and cursor-aware planner under observation. The next result must recover the exploratory QD8 request/throughput regression seen at `fca8905...` while retaining its large random-read lower-byte win and slow mixed-QD32 improvement.
-4. If QD1 remains materially below raw after the retention tax is removed, profile its remaining production-C wall time across LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
-4. Expand the write-only saturation study to at least five counterbalanced pairs per mode/QD/regime only after the C policy is stable, then report confidence intervals.
-5. Exercise sustained live GC, reserve rotations, near-full churn, real lower error behavior and resource pressure on owned RAM devices. No observed GC means GC remains unqualified.
-6. Extend read qualification beyond the current small RAM working set with controlled cache state before making cold swap-in claims.
+1. Qualify same-quantum accepted-tail draining: refresh `incoming` after
+   preparation/compression and append already-admitted tail BIOs to the worker's
+   local FIFO without waiting for future arrivals or exceeding 64 BIOs.
+2. Acceptance requires QD4 lower WRITE requests to fall materially from the
+   current ~2-per-wave shape without regressing QD1/QD8, mixed lower bytes,
+   read tails, lifecycle correctness or fail-closed behavior.
+3. Keep the accepted-burst read cap at two for this experiment so any QD4
+   request change is attributable to window chopping rather than a changed
+   16KiB/read-amplification tradeoff.
+4. If QD4 remains split after this worker change, add only the minimum
+   write-only window-size/close attribution needed to distinguish pack closure
+   from lower-run fragmentation, then remove it after the decision.
+5. Expand the saturation study to at least five counterbalanced pairs only
+   after the C policy stabilizes; separately qualify sustained live GC,
+   real lower-error behavior, resource pressure and larger controlled reads.
 
 ## Release gates
 

@@ -1233,6 +1233,27 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 	return error;
 }
 
+/*
+ * Refresh only from BIOs already admitted under queue_lock. This never waits
+ * for a future arrival and never moves ownership; it closes the stale-snapshot
+ * gap while preparation/copy/LZ4 work was running on the ordered worker.
+ */
+static void swapz_refresh_accepted_followup(struct swapz_dm *ctx)
+{
+	unsigned long flags;
+
+	if (ctx->worker_has_immediate_followup)
+		return;
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (!list_empty(&ctx->incoming))
+		ctx->worker_has_immediate_followup = true;
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	if (ctx->worker_has_immediate_followup) {
+		ctx->singleton_deadline_streak = 0;
+		ctx->singleton_fast_close = false;
+	}
+}
+
 static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
@@ -1386,6 +1407,13 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		.length = (swapz_u16)length,
 	};
 	ctx->batch_count++;
+	/*
+	 * Compression/preparation can take long enough for another upper BIO
+	 * to reach ->map after the worker's initial queue snapshot. Refresh the
+	 * already-admitted tail before deciding that a useful pack is isolated.
+	 */
+	if (!(bio->bi_opf & REQ_FUA) && ctx->retain_ms)
+		swapz_refresh_accepted_followup(ctx);
 	/* FUA remains an immediate drained, lower-flushed fence. */
 	if (bio->bi_opf & REQ_FUA) {
 		ctx->next_window_close = SWAPZ_CLOSE_FUA;
@@ -1737,31 +1765,41 @@ static void swapz_worker(struct work_struct *work)
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
-		list_for_each_entry_safe(entry, next, &local, list) {
+		while (remaining && !list_empty(&local)) {
+			entry = list_first_entry(&local, struct swapz_bio_ref, list);
 			/*
-			 * Current local successors are already accepted. At the local
-			 * tail, sample incoming under the same admission lock as ->map().
-			 * Anything arriving after this observation remains future work.
+			 * Preparation may block while later BIOs enter incoming. Sample
+			 * accepted successors afterwards so pack policy never relies on a
+			 * stale pre-preparation observation.
 			 */
-			ctx->worker_has_immediate_followup =
-				entry->list.next != &local;
-			if (!ctx->worker_has_immediate_followup) {
-				spin_lock_irqsave(&ctx->queue_lock, flags);
-				ctx->worker_has_immediate_followup =
-					!list_empty(&ctx->incoming);
-				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			}
-			/* Any already-accepted companion disproves isolated QD1-like
-			 * behavior immediately, before this BIO can influence closure. */
-			if (ctx->worker_has_immediate_followup) {
-				ctx->singleton_deadline_streak = 0;
-				ctx->singleton_fast_close = false;
-			}
-			list_del_init(&entry->list);
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
+			ctx->worker_has_immediate_followup =
+				entry->list.next != &local;
+			swapz_refresh_accepted_followup(ctx);
+			list_del_init(&entry->list);
 			swapz_process(ctx, entry->bio);
+
+			/*
+			 * If this was the local tail, BIOs may have been admitted while
+			 * swapz_process() copied/compressed the page. Consume only those
+			 * already present now, append them in FIFO order, and stay within
+			 * the same hard 64-BIO quantum. There is no wait for future work.
+			 */
+			if (!ctx->worker_has_immediate_followup &&
+			    remaining > 1U && list_empty(&local)) {
+				spin_lock_irqsave(&ctx->queue_lock, flags);
+				if (!list_empty(&ctx->incoming)) {
+					list_splice_tail_init(&ctx->incoming, &local);
+					ctx->worker_has_immediate_followup = true;
+				}
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				if (ctx->worker_has_immediate_followup) {
+					ctx->singleton_deadline_streak = 0;
+					ctx->singleton_fast_close = false;
+				}
+			}
 			if ((ctx->accepted_burst_pack_ready ||
 			     ctx->single_pack_deferred) &&
 			    !ctx->worker_has_immediate_followup &&
@@ -1777,8 +1815,7 @@ static void swapz_worker(struct work_struct *work)
 			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
 				cond_resched();
-			if (!--remaining)
-				break;
+			remaining--;
 		}
 		/*
 		 * Opt-in 3B: a pending window retains worker-owned copies
