@@ -2,7 +2,7 @@
 # Rootless fixture test: fake sysfs only, no module, block IO or mknod.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "$0")/../../.." && pwd -P)"
-source "$ROOT/tools/nullblk-identity.sh"
+source "$ROOT/tests/tools/nullblk-identity.sh"
 mkdir -p "$ROOT/build/tests"
 TMP="$(mktemp -d "$ROOT/build/tests/nullblk-name.XXXXXXXX")"
 NAME=nullb-swapz-0123456789abcdef
@@ -31,4 +31,4 @@ fi
 if swapz_resolve_owned_disk "$NAME" abc "$TMP" >/dev/null; then
     echo 'FAIL invalid index accepted' >&2; exit 1
 fi
-echo 'PASS: modern and legacy null_blk names, missing/ambiguous refused'
+echo 'PASS: supported null_blk names, missing/ambiguous refused'

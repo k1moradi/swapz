@@ -84,3 +84,9 @@ archiving it is an explicit owner action outside qualification.
 
 
 Rootless incremental-build fixtures mirror the current `src/` and `tests/` layout; they must not recreate removed top-level `tools/` or `userspace/` directories.
+
+
+Native shell regressions source shared helpers only from `tests/tools/`.
+Current reports, test output and product-facing diagnostics use `swapz`;
+implementation-generation labels are not permitted outside explicit disk-format
+history.

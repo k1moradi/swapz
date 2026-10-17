@@ -2,7 +2,7 @@
 # Rootless fake-sysfs test, never invokes a real dmsetup or device.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
-source "$ROOT/tools/quiet-lower-io.sh"
+source "$ROOT/tests/tools/quiet-lower-io.sh"
 mkdir -p "$ROOT/build/tests"
 TMP="$(mktemp -d "$ROOT/build/tests/quiet-io.XXXXXXXX")"
 trap 'rm -f "$TMP/stat" "$TMP/calls"; rmdir "$TMP"' EXIT
@@ -34,7 +34,7 @@ swapz_capture_quiescent_io owned-test-mapper "$STAT" 3 0
    "${SWAPZ_QUIET_LOWER[2]}" == 24 ]]
 mode=target_busy
 if swapz_capture_quiescent_io owned-test-mapper "$STAT" 3 0; then
-    echo 'FAIL: changing V3 counters were accepted' >&2
+    echo 'FAIL: changing swapz counters were accepted' >&2
     exit 1
 fi
 [[ "$(cat "$CALLS")" == 8 ]]
@@ -53,4 +53,4 @@ if swapz_capture_quiescent_io owned-test-mapper "$STAT" 3 0; then
     echo 'FAIL: truncated lower stat accepted' >&2
     exit 1
 fi
-echo 'PASS: stable status, changing V3/lower and truncated stat gates'
+echo 'PASS: stable status, changing swapz/lower and truncated stat gates'

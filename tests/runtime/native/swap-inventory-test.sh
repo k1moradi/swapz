@@ -2,7 +2,7 @@
 # Pure fake /proc/swaps test, no privileged host operations.
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "$0")/../../.." && pwd -P)"
-source "$ROOT/tools/swap-inventory.sh"
+source "$ROOT/tests/tools/swap-inventory.sh"
 mkdir -p "$ROOT/build/tests"
 TMP="$(mktemp -d "$ROOT/build/tests/swap-inventory.XXXXXXXX")"
 trap 'rm -f "$TMP/before" "$TMP/after"; rmdir "$TMP"' EXIT

@@ -5,7 +5,7 @@
 /*
  * Experimental VERSIONED 4/8/16 KiB extent FORMAT ONLY.
  *
- * No existing dm-swapz mappings or V2.2 disk records are interpreted as SWZ3.
+ * Existing mappings or records from other disk formats are not interpreted as SWZ3.
  * No extent is authoritative until its containing full-block write has
  * completed and the owning mapping transaction explicitly publishes it.
  * This is a codec, NOT an allocator, write path or GC implementation.
