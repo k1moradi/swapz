@@ -979,9 +979,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         bypass.index("swapz_fail(ctx, error)"))
         self.assertLess(bypass.index("swapz_fail(ctx, error)"),
                         bypass.index("swapz_flush_window(ctx)"))
-        self.assertIn("if (!error && swapz_retention_expired(ctx))", bypass)
+        self.assertIn("if (!error && !ctx->worker_has_immediate_followup &&",
+                      bypass)
+        deadline_gate = bypass.index("!ctx->worker_has_immediate_followup")
+        deadline_expiry = bypass.index("swapz_retention_expired(ctx)",
+                                       deadline_gate)
         self.assertLess(bypass.index("swapz_complete(bio, error)"),
-                        bypass.index("if (!error && swapz_retention_expired(ctx))"))
+                        deadline_gate)
+        self.assertLess(deadline_gate, deadline_expiry)
         abort = flush[flush.index("if (ctx->failed)"):
                       flush.index("swapz_order_window(ctx)")]
         self.assertIn("swapz_complete(ctx->batch[index].bio, error)", abort)
