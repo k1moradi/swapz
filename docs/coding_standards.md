@@ -374,3 +374,20 @@ metadata insertion must still clear all valid slots and reset the clock.
 This optimization does not weaken physical-reuse safety or make cached
 metadata survive a write, discard, GC mutation or barrier. It only makes
 back-to-back invalidation calls idempotent in cost as well as semantics.
+
+
+### Nonblocking preparation-slot reservation
+
+The asynchronous producer must reserve one bounded prepared-page slot before
+claiming any BIO from `preparation_incoming`. Reservation is nonblocking:
+`down_trylock()` runs before `queue_lock`, and failure returns without
+removing any entry. This is required once producer claims may proceed from the
+tail; blocking after claiming an earlier FIFO entry could otherwise strand the
+ordered consumer behind later prepared entries that own every slot.
+
+If the producer reserves a slot but finds no eligible entry (including a lone
+idle head reserved for inline steal), it must release the slot before
+returning. Once an entry is claimed, exactly one slot is either transferred to
+its prepared page and later released by the ordered consumer, or released on
+producer failure. Queue ownership, BIO completion and map publication remain
+unchanged.

@@ -291,3 +291,13 @@ already-accepted zero/raw interruption may carry bounded service/count evidence
 within the same worker burst, but must keep
 `pack_close_pending_tail_sample` false so they cannot infer a residual tail
 from a non-PACK close.
+
+
+Nonblocking preparation-slot qualification requires the producer to call
+`down_trylock(&ctx->preparation_slots)` before acquiring `queue_lock` or
+removing a preparation entry. No blocking `down()` may remain in the
+producer. Every return after a successful slot reservation but before BIO
+claim must `up()` the slot. Existing producer error paths and ordered
+prepared-page release must continue to return exactly one slot. This prevents
+tail preparation at queue depths above the 64-record bound from creating a
+FIFO/semaphore deadlock.

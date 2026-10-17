@@ -591,9 +591,19 @@ static void swapz_preparation_worker(struct work_struct *work)
 		u64 section_start;
 		int error;
 
+		/*
+		 * Reserve bounded prepared-page capacity before claiming a BIO.
+		 * Never block here: with opposite-end claiming, blocking after
+		 * removing an earlier FIFO entry could deadlock the ordered worker
+		 * behind prepared tail entries that own every slot. If capacity is
+		 * exhausted, leave all remaining entries claimable by inline steal.
+		 */
+		if (down_trylock(&ctx->preparation_slots))
+			return;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			up(&ctx->preparation_slots);
 			return;
 		}
 		/*
@@ -616,6 +626,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			if (!atomic_read(&ctx->ordered_worker_busy) &&
 			    list_is_singular(&ctx->preparation_incoming)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				up(&ctx->preparation_slots);
 				return;
 			}
 			entry = list_last_entry(&ctx->preparation_incoming,
@@ -625,7 +636,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 		list_del_init(&entry->preparation_list);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
-		down(&ctx->preparation_slots);
 		prepared = mempool_alloc(ctx->preparation_pool, GFP_NOIO);
 		if (!prepared) {
 			entry->preparation_error = -ENOMEM;

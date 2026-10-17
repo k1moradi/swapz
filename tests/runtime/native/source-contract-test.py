@@ -1072,8 +1072,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("mempool_create_kmalloc_pool(", ctor)
         self.assertIn("ctx->preparation_lz4_workmem", ctor)
         self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
-        self.assertIn("down(&ctx->preparation_slots)", producer)
+        self.assertIn("down_trylock(&ctx->preparation_slots)", producer)
+        self.assertNotIn("down(&ctx->preparation_slots)", producer)
         self.assertIn("mempool_alloc(ctx->preparation_pool, GFP_NOIO)", producer)
+        self.assertLess(producer.index("down_trylock(&ctx->preparation_slots)"),
+                        producer.index("spin_lock_irqsave(&ctx->queue_lock, flags)"))
+        self.assertLess(producer.index("down_trylock(&ctx->preparation_slots)"),
+                        producer.index("list_del_init(&entry->preparation_list)"))
         self.assertIn("LZ4_compress_fast(", producer)
         self.assertIn("ctx->preparation_lz4_workmem", producer)
         self.assertIn("if (atomic_read(&ctx->lower_write_active))", producer)
