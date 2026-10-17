@@ -1,60 +1,53 @@
 # swapz
 
-swapz is an experimental Linux Device Mapper target for reducing measured lower-device I/O for swap-like workloads while preserving exact data, ordering, completion, and failure semantics.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ3` is reserved for the on-disk format identity.
 
-## Immutable naming policy (read before every prompt)
+**Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
 
-The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`; and the administrative utility is `swapzctl`. Do not encode implementation generations in source directories, symbols, workflow names, binaries, benchmark candidates, or helper names.
+swapz is an experimental Linux Device Mapper target that compresses and packs 4KiB logical pages into 4/8/16KiB SWZ3 physical extents. The project exists to reduce independently measured lower-device READ and WRITE bytes and requests for the same byte-exact logical workload without sacrificing mapping correctness, ordering, integrity, bounded resource use, or acceptable read latency.
 
-`SWZ3` is intentionally retained because it names the on-disk format, not the implementation generation. Release numbers belong only in release metadata. [`src/kernel/VERSION`](../src/kernel/VERSION) is the single source of truth for release metadata.
+There is one product. The active product source is under `src/`; test-only code is under `tests/`; maintained documentation is under `docs/`; packaging support is under `packaging/`. Historical implementations and rejected experiments belong in Git history, not dormant source trees.
+
+## Product identity and version
+
+Public identities are immutable: `swapz`, `dm-swapz.ko`, `dm_swapz`, target `swapz`, alias `dm-swapz`, and the read-only utility `swapzctl`. The SWZ3 name describes the disk format only.
+
+[`src/kernel/VERSION`](../src/kernel/VERSION) is the single source of truth for release metadata. Do not duplicate the release number in source names, reports, workflow names, binaries, or documentation headings.
 
 ## Repository layout
 
-- `src/kernel/` — active product kernel C and headers, Kbuild file, and canonical VERSION.
-- `src/userspace/` — active product userspace source.
-- `tests/` — all test code, Python, test-only C/C++, fixtures, benchmark helpers, and private test orchestration.
-- `packaging/` — installation/packaging helpers that are not test code.
-- `docs/` — all maintained project documentation.
-- `.github/workflows/` — CI configuration only.
-- `build/` — generated output only; never source.
+- `src/kernel/`: production kernel C and private headers.
+- `src/userspace/`: supported product userspace code.
+- `tests/runtime/native/`: direct production-C/source/build/report regressions.
+- `tests/runtime/benchmark/`: deterministic benchmark fixture and replay logic.
+- `tests/tools/`: private qualification orchestration and owned-RAM helpers.
+- `tests/suites/`: native test build rules.
+- `docs/`: current documentation only.
+- `packaging/`: install/uninstall packaging logic.
+- `.github/workflows/product-codec.yml`: production-C and Kbuild qualification.
+- `.github/workflows/project-goals.yml`: project-goal, rootless and governance qualification.
 
-Retired implementation source needed by compatibility tests belongs under `tests/legacy/`, not beside the active product.
+No legacy, recall, NBD, pressure, alternate-module, or historical-model subsystem is part of the working tree. Git history is the archive.
 
-## Single official test command (read before every prompt)
+## Supported commands
 
-Run `make test` at the repository root for every supported swapz test and benchmark. It must report BLOCKED (nonzero) when noninteractive administrator permission or safe isolated devices are unavailable. Do not create, publish, recommend, or document alternative test commands. Private scripts and suite targets under `tests/` are implementation details for CI and the root test runner.
+The root Make interface is exactly `make`, `make install`, `make uninstall`, and `make test`. Installation never activates swap. The module remains limited to positively owned RAM-backed `null_blk` for current loaded qualification. Physical media, active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices are not authorized.
 
-The four supported root Make commands are `make`, `make install`, `make uninstall`, and `make test`.
+## Current evidence
 
-## Safety status
+Owner-loaded qualification at source `8589a010f7c70c4f1f9737e688c434e4a11c9f9c` passed all five stages, including byte-exact owned-RAM correctness, suspend/drain, retained synthetic WRITE/FLUSH fail-closed checks, two modeled QD32 mixed regimes, and the first bounded write-only QD1/4/8/32 pilot.
 
-The current target remains experimental and restricted to owned RAM-backed `null_blk` for loaded qualification. Do not bypass the null-backed admission guard, use active swap partitions, or infer physical-media results from the synthetic RAM models. Physical-media validation requires separate owner authorization and a rollback/recovery plan.
+That pilot is directional, not confirmatory. At QD1 the candidate produced no lower-write aggregation and had a large latency/throughput loss. QD4/QD8 reduced lower requests but still lost useful throughput. In the slow model QD32 exceeded raw useful WRITE throughput; in the faster model QD32 remained below raw. One pair per mode/QD is insufficient for a performance conclusion.
 
-## Engineering objective
+Subsequent source cleanup removed a duplicate read metadata validation, rejected planner diagnostics from the write hot path/report schema, the standalone research module, the retired C++ model, and obsolete compatibility/test infrastructure. These later revisions require a fresh owner-loaded `make test` before performance claims are updated.
 
-The primary success criterion is fewer independently measured host-visible lower READ/WRITE bytes and requests for the same verified logical workload, including GC and flush costs, without unacceptable throughput, swap-in latency, CPU, memory, or correctness regressions. Compression ratio by itself is not a result.
+## Documentation
 
-The detailed acceptance standard is in [VISION.md](VISION.md). Current algorithm work is in [ROADMAP.md](ROADMAP.md).
+- [VISION.md](VISION.md): product objective and non-negotiable constraints.
+- [ROADMAP.md](ROADMAP.md): current work queue only.
+- [coding_standards.md](coding_standards.md): production engineering rules.
+- [testing_standards.md](testing_standards.md): required qualification and evidence.
+- [compile.md](compile.md): build/install/test interface and artifacts.
+- [benchmark.md](benchmark.md): benchmark design, metrics and interpretation.
 
-## Maintained documentation
-
-- [VISION.md](VISION.md) — product success criteria and safety boundary.
-- [ROADMAP.md](ROADMAP.md) — current engineering roadmap and measured evidence.
-- [coding_standards.md](coding_standards.md) — implementation and review rules.
-- [testing_standards.md](testing_standards.md) — test, provenance, failure, and loaded-device rules.
-- [compile.md](compile.md) — build, packaging, and compatibility requirements.
-- [benchmark.md](benchmark.md) — workload, I/O-accounting, and performance methodology.
-
-Historical one-off reports and component-local Markdown are intentionally not retained in the working tree; Git history remains the archive.
-
-## Source architecture
-
-The active kernel implementation in `src/kernel/` contains the Device Mapper target, codec, volatile mapping authority, extent engine, GC policy helpers, and window policy. The public names stay stable while the release evolves. Internal implementation symbols use the `swapz_` / `SWAPZ_` prefixes rather than a release-number prefix.
-
-The active userspace utility in `src/userspace/swapzctl.c` is deliberately read-only for the current experimental target. Packaging installs that utility and the kernel module but does not automatically activate swap.
-
-## Development discipline
-
-Keep changes small, fail closed, preserve exact upper-BIO completion ownership, and test production C directly where possible. Implementation changes must update the relevant canonical standard in the same commit. Never move generated objects into `src/` or test-only Python into the product tree.
-
-All supported development happens on `main`.
+Historical transcripts, rejected designs and old operator procedures are intentionally absent from current documentation; use immutable Git history when forensic provenance is required.
