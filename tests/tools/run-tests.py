@@ -13,8 +13,6 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = ROOT / "build/test_results.json.xz"
-GIT_RESULT = "test_results.json.xz"
-REPO = "k1moradi/swapz"
 COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
@@ -964,148 +962,6 @@ def print_bench(result):
 
 
 
-def code_sha():
-    """Latest commit changing something other than the published report.
-
-    source_sha is always the exact checkout HEAD tested. This extra field
-    keeps identifying the code commit after Git report-only commits.
-    """
-    proc = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", ".",
-         f":(exclude){GIT_RESULT}"],
-        cwd=ROOT, capture_output=True, text=True, check=False, timeout=8)
-    value = proc.stdout.strip()
-    return value if proc.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", value) else git_sha()
-
-
-def git_result(command, *, data=None, timeout=15, env=None):
-    """Never print Git stderr: remote URLs/credential helpers may be private."""
-    try:
-        return subprocess.run(["git", *command], input=data, cwd=ROOT,
-                              capture_output=True, check=False, timeout=timeout,
-                              env=env)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def publish(source_sha):
-    """Git-only, fast-forward report commit without changing local HEAD/index.
-
-    The parent MUST be the same checkout commit used by the benchmark.
-    The push is nonforce and touches only a root-level results blob.
-    Updating the current checkout/ref here would make the user's subsequent
-    loaded safety probes compare against a never-tested commit.
-    """
-    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
-        return "SKIPPED_GIT_SYNC: tested source commit unavailable"
-    if REPORT != ROOT / "build/test_results.json.xz" or not REPORT.is_file():
-        return "SKIPPED_GIT_SYNC: canonical local report missing"
-
-    try:
-        with lzma.open(REPORT, "rt", encoding="utf-8") as stream:
-            contents = json.load(stream)
-        if contents.get("tested_commit_sha") != source_sha or \
-                contents.get("source_sha") != source_sha:
-            return "SKIPPED_GIT_SYNC: report does not match tested Git commit"
-    except (OSError, ValueError, lzma.LZMAError):
-        return "SKIPPED_GIT_SYNC: local compressed result is unreadable"
-
-    def run(*args, data=None, timeout=15):
-        return git_result(list(args), data=data, env=env, timeout=timeout)
-
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GCM_INTERACTIVE"] = "never"
-    env["GIT_ASKPASS"] = "false"
-    env["SSH_ASKPASS"] = "false"
-    env["SSH_ASKPASS_REQUIRE"] = "never"
-    if not env.get("GIT_SSH_COMMAND"):
-        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=8"
-
-    location = run("rev-parse", "--show-toplevel")
-    branch = run("symbolic-ref", "--quiet", "--short", "HEAD")
-    head = run("rev-parse", "HEAD")
-    if any(x is None or x.returncode for x in (location, branch, head)):
-        return "SKIPPED_GIT_SYNC: not an authenticated Git checkout"
-    if Path(os.fsdecode(location.stdout).strip()).resolve() != ROOT or \
-            branch.stdout.strip() != b"main":
-        return "SKIPPED_GIT_SYNC: only the canonical main checkout may publish"
-    if head.stdout.decode("ascii").strip() != source_sha:
-        return "SKIPPED_GIT_SYNC: checkout changed during testing"
-
-    remote = run("remote", "get-url", "--push", "origin")
-    if remote is None or remote.returncode:
-        return "SKIPPED_GIT_SYNC: Git remote origin missing"
-    url = os.fsdecode(remote.stdout).strip()
-    if not re.fullmatch(
-            r"(?:git@github[.]com:|ssh://git@github[.]com/|https://github[.]com/)"
-            r"k1moradi/swapz(?:[.]git)?", url):
-        return "SKIPPED_GIT_SYNC: origin is not k1moradi/swapz"
-
-    tracked = run("status", "--porcelain", "--untracked-files=no")
-    if tracked is None or tracked.returncode or tracked.stdout.strip():
-        return "SKIPPED_GIT_SYNC: tracked working tree/index is not clean"
-    # Never replace an untracked file in the checkout (no checkout writes
-    # happen here anyway). Report-only publication is a separate Git tree.
-    path_state = run("ls-files", "--error-unmatch", "--", GIT_RESULT)
-    if (ROOT / GIT_RESULT).exists() and (
-            path_state is None or path_state.returncode):
-        return "SKIPPED_GIT_SYNC: untracked root result file needs owner review"
-
-    # Check authorization and concurrency BEFORE constructing a commit.
-    upstream = run("ls-remote", "--exit-code", "origin", "refs/heads/main",
-                   timeout=20)
-    if upstream is None or upstream.returncode:
-        return ("SKIPPED_GIT_SYNC: origin/main unreachable or Git credentials "
-                "are unavailable; existing git push access is required")
-    refs = upstream.stdout.decode("utf-8", "replace").strip().split()
-    if len(refs) != 2 or refs != [source_sha, "refs/heads/main"]:
-        return ("SKIPPED_GIT_SYNC: origin/main changed since testing; "
-                "pull the new commit before the next run")
-
-    blob = run("hash-object", "-w", "--no-filters", str(REPORT))
-    ls_tree = run("ls-tree", "-z", source_sha)
-    if any(x is None or x.returncode for x in (blob, ls_tree)):
-        return "GIT_SYNC_FAILED: could not prepare Git object"
-    blob_id = blob.stdout.decode("ascii", "replace").strip()
-    if not re.fullmatch(r"[0-9a-f]{40}", blob_id):
-        return "GIT_SYNC_FAILED: invalid Git report object"
-
-    entries = []
-    for item in ls_tree.stdout.split(b"\0"):
-        if not item:
-            continue
-        try:
-            meta, name = item.split(b"\t", 1)
-        except ValueError:
-            return "GIT_SYNC_FAILED: malformed root Git tree"
-        if name != GIT_RESULT.encode("ascii"):
-            entries.append(item)
-    entries.append(f"100644 blob {blob_id}\t{GIT_RESULT}".encode())
-    entries.sort(key=lambda item: item.split(b"\t", 1)[1])
-    tree = run("mktree", "-z", data=b"\0".join(entries) + b"\0")
-    if tree is None or tree.returncode:
-        return "GIT_SYNC_FAILED: could not assemble report-only tree"
-    tree_id = tree.stdout.decode("ascii", "replace").strip()
-    message = (f"test: latest run for {source_sha[:12]} "
-               "[skip ci]").encode("utf-8")
-    commit = run("commit-tree", tree_id, "-p", source_sha, data=message)
-    if commit is None or commit.returncode:
-        return ("SKIPPED_GIT_SYNC: Git commit identity unavailable "
-                "(configure git user.name/user.email)")
-    report_sha = commit.stdout.decode("ascii", "replace").strip()
-    if not re.fullmatch(r"[0-9a-f]{40}", report_sha):
-        return "GIT_SYNC_FAILED: invalid report commit"
-
-    push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
-    if push is None or push.returncode:
-        return ("GIT_SYNC_FAILED: nonforce push rejected or inaccessible; "
-                "no local branch, index or source files were changed")
-
-    return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
-            f"(report commit {report_sha[:12]}; tested {source_sha[:12]})")
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kdir", required=True)
@@ -1114,7 +970,6 @@ def main():
         "schema": "swapz-test-results-v1",
         "source_sha": git_sha(),
         "tested_commit_sha": git_sha(),
-        "code_commit_sha": code_sha(),
         "kernel_release": os.uname().release,
         "qualification": "RAM_BACKED_NULL_BLK_ONLY",
         "stages": [],
@@ -1172,9 +1027,6 @@ def main():
     print(f"\n  Overall qualification: {result['overall']}")
     print(f"  Report: {REPORT.relative_to(ROOT)} (replaced on every run)")
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
-    print(f"  Code revision: {result['code_commit_sha']}", flush=True)
-    notice = publish(result["tested_commit_sha"])
-    print(f"  Git result: {notice}", flush=True)
     return exit_code
 
 

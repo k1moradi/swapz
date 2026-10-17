@@ -75,3 +75,9 @@ Source contracts should assert retained scheduling semantics rather than a
 particular obsolete branch spelling: retained writes must reach the ordered
 worker immediately, while retention-off ordinary writes retain zero-delay
 single-instance queueing.
+
+
+The canonical report is local evidence at `build/test_results.json.xz`.
+`make test` must not create commits, push Git refs, or alter the checked-out
+source revision. A report describes the exact tested checkout; publishing or
+archiving it is an explicit owner action outside qualification.

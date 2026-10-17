@@ -43,3 +43,8 @@ DKMS uses `AUTOINSTALL="no"`. Installation does not load the module, create a ma
 ## Removed build paths
 
 The standalone memory-only kernel smoke module and retired C++ model are intentionally absent. They were not shipped or part of the official qualification. Historical reproduction belongs in Git history, not a second current build path.
+
+
+The test runner never commits or pushes its generated report. This keeps the
+tested Git revision stable for the entire qualification and avoids report-only
+commits racing subsequent owner runs.

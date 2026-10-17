@@ -30,9 +30,11 @@ class PublicMakeContract(unittest.TestCase):
         reporter = (ROOT / "tests/tools/run-tests.py").read_text()
         for required in ("tests/tools/test-rootless.sh", "tests/tools/test-loaded.sh",
                          "W=1", "W=2", "build/test_results.json.xz",
-                         "tested_commit_sha", "code_commit_sha",
-                         "commit-tree", "mktree", "ls-remote", "push"):
+                         "tested_commit_sha"):
             self.assertIn(required, reporter)
+        for retired in ("code_commit_sha", "commit-tree", "mktree",
+                        "ls-remote", "SYNCED_GIT", "SKIPPED_GIT_SYNC"):
+            self.assertNotIn(retired, reporter)
         self.assertIn("build/tests/device-roundtrip: tests/tools/device-roundtrip.c", MAKE)
         self.assertIn("build/userspace/swapzctl: src/userspace/swapzctl.c "
                       "src/kernel/VERSION", MAKE)
