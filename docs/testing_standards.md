@@ -62,9 +62,7 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `8589a010f7c70c4f1f9737e688c434e4a11c9f9c` passed the complete qualification available at that revision. Its first QD pilot found large QD1 loss, QD4/QD8 useful-throughput loss despite request reduction, slow-model QD32 gain and faster-model QD32 loss. This is not statistically confirmatory.
-
-Later cleanup revisions removed rejected hot-path diagnostics and obsolete repository infrastructure. They require a new complete owner-loaded run before becoming the performance baseline.
+Source `1a3b30da5ad2435e2e174421ef62bc4837b38371` passed the complete current qualification. Its write-only pilot still shows large QD1 loss, QD4/QD8 useful-throughput loss despite request reduction, slow-model QD32 gain and faster-model QD32 loss. The mixed faster-model async arm showed a preliminary gain. None of these one-pair-per-QD pilot results is statistically confirmatory.
 
 ## Open qualification gaps
 

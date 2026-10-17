@@ -87,3 +87,14 @@ unimplemented range-discard declaration are not retained for test convenience.
 Codec interfaces likewise remain product-facing. Tests may derive expected
 read-span geometry locally from decoded offsets, but that arithmetic is not a
 reason to export an otherwise unused codec helper.
+
+
+### Alignment-aware planner ties
+
+The extent planner minimizes lower bytes first, bounded cold-read cost second,
+and extent count third. If those objectives are exactly tied, prefer the larger
+power-of-two extent class first. This does not add a lower byte or relax read
+policy; it moves unavoidable allocator alignment before a run instead of
+between extents, allowing adjacent-only lower aggregation to issue fewer WRITE
+requests. Never trade extra padding bytes for this tie-break in the default
+mode.

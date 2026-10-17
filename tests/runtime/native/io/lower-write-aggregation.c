@@ -346,20 +346,41 @@ static int test_duplicate_slots_use_original_sequential_path(void)
 
 static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 {
-	const swapz_u16 lengths[4] = { 700, 3500, 700, 3500 };
+	const swapz_u16 uniform[4] = { 2073, 2073, 2073, 2073 };
+	const swapz_u16 lengths[4] = { 2000, 2073, 2073, 2000 };
 	swapz_u8 committed = 0;
 	unsigned int adjacent_calls;
 	unsigned long long adjacent_bytes;
 	unsigned int i;
 
+	/*
+	 * Four representative medium pages have two byte/read/extent-count
+	 * equivalent plans: [1,2] and [2,1]. Prefer [2,1] so the same 12KiB
+	 * is one adjacent lower run instead of two requests around an internal
+	 * alignment hole. No padding bytes are written.
+	 */
 	CHECK(setup() == 0);
+	for (i = 0; i < 4; ++i) {
+		memset(payloads[i], (int)i + 1, uniform[i]);
+		pages[i].length = uniform[i];
+	}
+	CHECK(swapz_engine_write_window_batched(&e, pages, 4,
+					     &committed) == 0);
+	CHECK(committed == 4 && run_calls == 1);
+	CHECK(lower_written_bytes == 3U * SWAPZ_BLOCK_BYTES);
+	CHECK(e.bulk_padding_blocks == 0 && validate_prefix(4) == 0);
+
+	/*
+	 * Preserve a non-tied geometry where [1,2] is genuinely required.
+	 * Mode1 skips the internal hole; mode2 may explicitly write it to
+	 * trade one extra 4KiB block for one lower request.
+	 */
+	CHECK(setup() == 0);
+	committed = 0;
 	for (i = 0; i < 4; ++i) {
 		memset(payloads[i], (int)i + 1, lengths[i]);
 		pages[i].length = lengths[i];
 	}
-	/* The real DP plans [1 block x1 record] then [2 blocks x3
-	 * records]. Physical alignment skips block1. Mode1 does not
-	 * overwrite it; mode2 explicitly pads one extra physical block. */
 	CHECK(swapz_engine_write_window_batched(&e, pages, 4,
 					     &committed) == 0);
 	CHECK(committed == 4 && e.bulk_padding_blocks == 0);

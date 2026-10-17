@@ -8,15 +8,15 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `8589a010f7c70c4f1f9737e688c434e4a11c9f9c` passed the complete qualification available at that revision. Correctness included 64 RAW writes, nine zero elisions, explicit flushes, retained-window suspend/drain with 128-page verification, and synthetic retained WRITE/FLUSH fail-closed phases.
+Owner-loaded source `1a3b30da5ad2435e2e174421ef62bc4837b38371` passed all five current qualification stages. Correctness included 64 RAW writes, nine zero elisions, explicit flushes, retained-window suspend/drain with 128-page verification, and synthetic retained WRITE/FLUSH fail-closed phases.
 
 The write-only pilot produced these directional patterns:
 
-- QD1: no packing; swapz was substantially slower than raw in both models.
-- QD4: request reduction appeared, but useful WRITE throughput remained lower.
+- QD1: no lower-byte/request reduction; swapz remained substantially slower than raw in both models.
+- QD4: lower WRITE requests were roughly halved versus raw, but useful WRITE throughput remained lower.
 - QD8: request reduction remained strong, but useful throughput was still lower.
 - QD32 slow model: swapz exceeded raw useful WRITE throughput.
-- QD32 faster model: swapz remained below raw.
+- QD32 faster model: swapz remained below raw in the write-only pilot, while the mixed async arm showed a preliminary gain.
 
 The pilot used one pair per mode/QD and has no confidence interval.
 
@@ -28,17 +28,16 @@ The pilot used one pair per mode/QD and has no confidence interval.
 - Removed historical compatibility, NBD, recall, pressure and obsolete evidence-model infrastructure from the active working tree.
 - Made implementation/report/workflow terminology version-neutral; SWZ3 remains only the format identity.
 
-These cleanup revisions are **NOT YET OWNER-LOADED** as a complete current HEAD.
+These cleanup revisions are now covered by the owner-loaded `1a3b30da...` baseline.
 
 ## Immediate work queue
 
-1. Re-run the sole official `make test` at current `main`. Treat any correctness, build, source-contract, loaded-lifecycle or teardown failure as blocking.
-2. Compare current mixed/QD results with the qualified `8589a010` baseline. The diagnostic-removal patch should not change lower-I/O geometry; unexpected layout/counter changes require investigation.
-3. Profile the production C path at QD1, QD4 and QD8. Attribute wall time to retention wait, LZ4 preparation, ordering/planning, lower WRITE completion, metadata/CRC work and workqueue scheduling. Do not add telemetry that remains permanently after the decision.
-4. Make the smallest C-first optimization supported by that attribution. The strongest open hypothesis is unnecessary fixed-window latency when no useful aggregation is achieved, but do not weaken dependency, FUA, authority or completion guarantees to chase QD1.
-5. Only after the cleanup source is stable, expand the write-only saturation study to at least five counterbalanced pairs per mode/QD/regime and report confidence intervals.
-6. Exercise sustained live GC, reserve rotations, near-full churn, real lower error behavior and resource pressure on owned RAM devices. No observed GC means GC remains unqualified.
-7. Extend read qualification beyond the current small RAM working set with controlled cache state before making cold swap-in claims.
+1. Qualify the alignment-aware planner tie-break that prefers larger equal-cost extents first. The expected QD4 effect is fewer lower WRITE requests with unchanged lower WRITE bytes; any byte increase or read-tail regression rejects it.
+2. If QD4 improves as predicted, fix the retained first-pack tail: after a useful pack was deferred only because one already-accepted successor existed, do not pay the full 2ms deadline once that finite accepted tail is consumed.
+3. Profile the remaining QD1 and QD8 production-C wall time. Attribute retention wait, LZ4 preparation, planning/publication, lower WRITE completion and workqueue scheduling; remove temporary attribution once the decision is made.
+4. Expand the write-only saturation study to at least five counterbalanced pairs per mode/QD/regime only after the C policy is stable, then report confidence intervals.
+5. Exercise sustained live GC, reserve rotations, near-full churn, real lower error behavior and resource pressure on owned RAM devices. No observed GC means GC remains unqualified.
+6. Extend read qualification beyond the current small RAM working set with controlled cache state before making cold swap-in claims.
 
 ## Release gates
 

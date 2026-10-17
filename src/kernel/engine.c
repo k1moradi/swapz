@@ -131,7 +131,20 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 			     candidate_reads < reads[index]) ||
 			    (candidate_bytes == costs[index] &&
 			     candidate_reads == reads[index] &&
-			     candidate_batches < batches[index])) {
+			     candidate_batches < batches[index]) ||
+			    /*
+			     * When bytes, cold-read cost and extent count are
+			     * identical, put the more strictly aligned extent
+			     * first. With power-of-two 4/8/16KiB classes this
+			     * moves an unavoidable alignment hole before the
+			     * lower run instead of between two extents, allowing
+			     * adjacent-only mode to submit one request without
+			     * writing any padding bytes.
+			     */
+			    (candidate_bytes == costs[index] &&
+			     candidate_reads == reads[index] &&
+			     candidate_batches == batches[index] &&
+			     blocks > selected_class[index])) {
 				costs[index] = candidate_bytes;
 				reads[index] = candidate_reads;
 				batches[index] = candidate_batches;

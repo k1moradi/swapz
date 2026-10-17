@@ -31,13 +31,13 @@ Report process CPU separately from kernel-worker CPU; do not imply one includes 
 
 ## Current directional result
 
-At qualified source `8589a010f7c70c4f1f9737e688c434e4a11c9f9c`:
+At qualified source `1a3b30da5ad2435e2e174421ef62bc4837b38371`:
 
-- slow-model QD1 was about 0.38x raw; QD4 about 0.59x; QD8 about 0.55x; QD32 about 1.27x;
-- faster-model QD1 was about 0.19x raw; QD4 about 0.53–0.61x; QD8 about 0.17x; QD32 about 0.67x;
+- slow-model QD1 was about 0.38x raw; QD4 about 0.60x; QD8 about 0.56x; QD32 about 1.27x;
+- faster-model QD1 was about 0.18–0.20x raw; QD4 about 0.65–0.67x; QD8 about 0.17–0.19x; QD32 about 0.61–0.68x;
 - lower WRITE request savings appeared at QD4+;
 - QD1 had no aggregation benefit;
-- the mixed slow model still showed useful-WRITE loss, while faster-model async roughly matched raw in that particular two-observation matrix.
+- the mixed faster-model async arm showed a preliminary useful-WRITE gain, while the slow mixed model still lost useful throughput.
 
 Interpretation: lower-request reduction alone is insufficient. Low/medium-QD latency/serialization is the immediate production-C bottleneck to profile. The pilot does not establish significance.
 
