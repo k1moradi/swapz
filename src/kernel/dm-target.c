@@ -187,10 +187,17 @@ struct swapz_dm {
 	u64 retained_read_bypasses;
 	u64 packed_early_commits;
 	u64 single_pack_deferrals;
-	/* Current worker-local snapshot only: future arrivals never justify
-	 * retention. A pack-ready window may continue through accepted local
-	 * work and must close immediately at that snapshot tail. */
+	/*
+	 * Only finite accepted work can justify extending a ready pack:
+	 * remaining worker-local BIOs or BIOs already present in incoming
+	 * when the local snapshot reaches its tail. Future arrivals do not.
+	 */
 	bool worker_has_immediate_followup;
+	/*
+	 * A useful first pack was kept open only to consume that finite
+	 * accepted tail. Close it when the accepted tail is exhausted.
+	 */
+	bool single_pack_deferred;
 	bool accepted_burst_pack_ready;
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
@@ -1031,6 +1038,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 * Re-enable tail eligibility only after an entire pack-ready window
 	 * has succeeded through the original publication/completion path. */
 	ctx->packed_burst = false;
+	ctx->single_pack_deferred = false;
 	ctx->accepted_burst_pack_ready = false;
 	if (!count) {
 		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
@@ -1368,6 +1376,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		if (ctx->worker_has_immediate_followup) {
 			/* Another already-accepted BIO will be processed without
 			 * waiting for a timer or a future producer arrival. */
+			ctx->single_pack_deferred = true;
 			ctx->single_pack_deferrals++;
 		} else {
 			/* Queue tail: do not pay the retention deadline merely to
@@ -1678,23 +1687,35 @@ static void swapz_worker(struct work_struct *work)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
 		list_for_each_entry_safe(entry, next, &local, list) {
-			/* Only the finite worker-local snapshot can justify more
-			 * batching. A later concurrent arrival is deliberately ignored. */
+			/*
+			 * Current local work is already accepted. At its tail, BIOs
+			 * already queued in incoming are accepted too; recognize them
+			 * before deciding a ready pack reached its finite tail.
+			 * Arrivals after this observation remain future work.
+			 */
 			ctx->worker_has_immediate_followup =
 				entry->list.next != &local;
+			if (!ctx->worker_has_immediate_followup) {
+				spin_lock_irqsave(&ctx->queue_lock, flags);
+				ctx->worker_has_immediate_followup =
+					!list_empty(&ctx->incoming);
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			}
 			list_del_init(&entry->list);
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
 			swapz_process(ctx, entry->bio);
-			if (ctx->accepted_burst_pack_ready &&
+			if ((ctx->accepted_burst_pack_ready ||
+			     ctx->single_pack_deferred) &&
 			    !ctx->worker_has_immediate_followup &&
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
 			    !swapz_retention_expired(ctx)) {
 				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 				ctx->packed_early_commits++;
-				ctx->accepted_burst_tail_flushes++;
+				if (ctx->accepted_burst_pack_ready)
+					ctx->accepted_burst_tail_flushes++;
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;

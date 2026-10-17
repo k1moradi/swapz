@@ -804,11 +804,24 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->worker_has_immediate_followup", writer)
         self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
         self.assertIn("entry->list.next != &local", worker)
-        self.assertLess(worker.index("entry->list.next != &local"),
-                        worker.index("list_del_init(&entry->list)"))
+        local_tail = worker.index("entry->list.next != &local")
+        accepted_incoming = worker.index("!list_empty(&ctx->incoming)",
+                                         local_tail)
+        tail_lock = worker.rfind(
+            "spin_lock_irqsave(&ctx->queue_lock, flags);",
+            local_tail, accepted_incoming)
+        tail_unlock = worker.index(
+            "spin_unlock_irqrestore(&ctx->queue_lock, flags);",
+            accepted_incoming)
+        list_delete = worker.index("list_del_init(&entry->list)")
+        self.assertGreater(tail_lock, local_tail)
+        self.assertLess(accepted_incoming, tail_unlock)
+        self.assertLess(tail_unlock, list_delete)
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
-        self.assertIn("if (ctx->accepted_burst_pack_ready &&", worker)
+        self.assertIn("ctx->single_pack_deferred = true", writer)
+        self.assertIn("if ((ctx->accepted_burst_pack_ready ||", worker)
+        self.assertIn("ctx->single_pack_deferred) &&", worker)
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
         self.assertIn("!swapz_retention_expired(ctx)", worker)
         self.assertLess(worker.index("swapz_process(ctx, entry->bio)"),
@@ -816,6 +829,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
+        self.assertIn("ctx->single_pack_deferred = false", flush)
         self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("swapz_flush_window(ctx)", writer)

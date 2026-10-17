@@ -105,3 +105,15 @@ The public/sequential planner retains its previously qualified deterministic
 tie order, including verify-after-write and other non-bulk paths. A lower-run
 optimization must not perturb layouts in modes that cannot consume the
 resulting contiguity.
+
+### Retained accepted-burst tails
+
+A retained pack may remain open only for finite BIOs that are already accepted.
+At the tail of the worker-local snapshot, already-accepted work includes BIOs
+observed in `incoming` while holding `queue_lock`; later arrivals do not justify
+another retention wait. If a useful first pack is deferred solely because such
+accepted work exists, preserve that deferred state until the window flushes and
+close the window as soon as the finite accepted tail is exhausted.
+
+This rule does not disable initial singleton retention and does not relax
+PREFLUSH/FUA, dependency, publication, suspend/drain or fail-closed ordering.
