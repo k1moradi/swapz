@@ -278,6 +278,14 @@ class PublicMakeContract(unittest.TestCase):
                             f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
                             "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
                             f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
+                            "SWAPZ_STATUS_BEFORE=windows=0 one_page_windows=0 "
+                            "win1=0 win2=0 win3_4=0 win5_8=0 win9_16=0 "
+                            "win17_64=0 close_idle=0 close_deadline=0 "
+                            "close_pack_ready=0 retained_burst_target=4",
+                            "SWAPZ_STATUS_AFTER=windows=20 one_page_windows=4 "
+                            "win1=4 win2=0 win3_4=8 win5_8=8 win9_16=0 "
+                            "win17_64=0 close_idle=4 close_deadline=2 "
+                            f"close_pack_ready=14 retained_burst_target={max(4, qd)}",
                             mock_write_arm("swapz", qd) if index % 2 else mock_write_arm("off", qd),
                             mock_write_arm("off", qd) if index % 2 else mock_write_arm("swapz", qd),
                             f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",

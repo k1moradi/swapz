@@ -167,3 +167,10 @@ Write-only QD qualification records window-size bins and pack-ready/deadline/
 idle close deltas for every QD/mode pair, plus the final learned retained-burst
 target. These are attribution only and cannot substitute for throughput, lower
 bytes, latency or correctness acceptance.
+
+
+Rootless Make-interface fixtures that synthesize the loaded write-only pilot
+must include the same window-size, close-reason and retained-burst-target
+attribution required from the real loaded reporter. Fixture success must not
+bypass a newly required evidence field merely because no kernel device is
+present.
