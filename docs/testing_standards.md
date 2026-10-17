@@ -132,3 +132,9 @@ contract and must not resurrect the removed close-reason race. They require an
 observed open retained window, explicit suspend/resume, a nonfailed target and
 the byte-exact lifecycle marker; they explicitly reject a mandatory
 shutdown-close delta.
+
+
+Rootless Make-interface fixtures must emit the same current lifecycle marker as
+the loaded parser. Synthetic fixture text is not a compatibility surface; when
+the report contract changes, stale fixture markers are updated rather than
+keeping parser aliases for removed semantics.

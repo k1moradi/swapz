@@ -249,7 +249,7 @@ class PublicMakeContract(unittest.TestCase):
 
             records = [
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
-                "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 shutdown_windows:1 verified_pages:128",
+                "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
                 "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
                 "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
             ]
