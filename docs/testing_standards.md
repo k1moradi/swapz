@@ -196,8 +196,13 @@ read back the exact `mbps`, `irqmode`, `completion_nsec` and
 BLOCKED on unsupported kernel features. Verify independent device
 identity, absence from host swap/mounts, unchanged swap inventory,
 safe teardown/quarantine and one exact shared fixture and trace.
-Actual physical media, existing SD swap and `swapon`/`swapoff`
-remain prohibited.
+Each raw/V3 pair must carry `source_sha`, `fixture_sha256` and
+`trace_sha256` on **both** arm records, and every field must match within
+the pair before aggregation. Missing or divergent arm provenance is
+INCONCLUSIVE; parser order must never overwrite one arm's identity and mask
+a mismatch. Cross-pair/regime provenance checks still apply after this
+per-pair gate. Actual physical media, existing SD swap and
+`swapon`/`swapoff` remain prohibited.
 
 **Measured I/O boundaries:**
 

@@ -69,6 +69,7 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
+BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 
 
 
@@ -76,6 +77,21 @@ def git_sha():
     cmd = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
                          text=True, capture_output=True, check=False)
     return cmd.stdout.strip() if cmd.returncode == 0 else "unknown"
+
+
+def paired_provenance_error(row, label):
+    """Require exact source/fixture/trace identity within every off/V3 pair."""
+    arms = row.get("arms", {})
+    for field in BENCHMARK_PROVENANCE_FIELDS:
+        values = [arms.get(candidate, {}).get(field)
+                  for candidate in ("off", "v3")]
+        if any(not isinstance(value, str) or not value for value in values) or \\
+                len(set(values)) != 1:
+            return {"overall": "INCONCLUSIVE",
+                    "reason": f"{label}: {field} missing or differs within pair"}
+        # Preserve the existing pair-level shape only after both arms agree.
+        row[field] = values[0]
+    return None
 
 
 def safe_lines(log):
@@ -374,6 +390,9 @@ def parse_sessions(output):
                 # Only aggregate numeric values; exclude paths, host IDs,
                 # UUIDs, device serials, mounted swap inventory and timing logs.
                 current["arms"][candidate] = {
+                    "source_sha": obj.get("source_sha"),
+                    "fixture_sha256": obj.get("fixture_sha256"),
+                    "trace_sha256": obj.get("trace_sha256"),
                     "input_write_mbps": rates.get("logical_write_mbps"),
                     "output_lower_write_mbps": rates.get("lower_write_mbps"),
                     "swap_in_read_mbps": rates.get("logical_read_mbps"),
@@ -475,6 +494,9 @@ def parse_write_saturation(output):
             rates = obj.get("throughput_mbps") or {}
             lower = obj.get("lower_io") or {}
             current["arms"][candidate] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
                 "input_write_mbps": rates.get("logical_write_mbps"),
                 "output_lower_write_mbps": rates.get("lower_write_mbps"),
                 "logical_write_bytes": rates.get("logical_write_bytes"),
@@ -518,6 +540,9 @@ def write_saturation_verdict(sessions):
             if row.get("status") != "PASS" or set(row.get("arms", {})) != {"off", "v3"}:
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: incomplete write-only pair"}
+            provenance_error = paired_provenance_error(row, f"{regime}: write-only")
+            if provenance_error is not None:
+                return provenance_error
             if row.get("order") != ("v3-first" if index % 2 else "off-first"):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only replay order mismatch"}
@@ -609,6 +634,9 @@ def benchmark_verdicts(sessions):
                     for key in ("cap_mib_s", "completion_nsec", "irqmode")):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: exact owned-RAM bandwidth/timer model was not verified"}
+            provenance_error = paired_provenance_error(row, f"{regime}: benchmark")
+            if provenance_error is not None:
+                return provenance_error
         regimes[regime] = rows
     if len(sessions) != len(MODEL_ORDER) * 4:
         return {"overall": "INCOMPLETE", "reason": "exactly eight modeled RAM-only pairs required"}

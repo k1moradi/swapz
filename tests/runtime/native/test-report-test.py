@@ -278,6 +278,28 @@ class ReportContract(unittest.TestCase):
         broken[0]["arms"]["off"]["logical_read_bytes"] = 4096
         self.assertEqual(runner.write_saturation_verdict(broken)["overall"],
                          "INCOMPLETE")
+        for field, bad_value in (
+                ("source_sha", "b" * 40),
+                ("fixture_sha256", "c" * 64),
+                ("trace_sha256", "d" * 64)):
+            with self.subTest(provenance=field):
+                broken = runner.parse_write_saturation(synthetic_log())
+                broken[0]["arms"]["off"][field] = bad_value
+                self.assertEqual(
+                    runner.write_saturation_verdict(broken)["overall"],
+                    "INCONCLUSIVE")
+
+    def test_paired_benchmark_provenance_mismatch_is_inconclusive(self):
+        for field, bad_value in (
+                ("source_sha", "b" * 40),
+                ("fixture_sha256", "c" * 64),
+                ("trace_sha256", "d" * 64)):
+            with self.subTest(provenance=field):
+                sessions = runner.parse_sessions(synthetic_log())
+                sessions[0]["arms"]["off"][field] = bad_value
+                self.assertEqual(
+                    runner.benchmark_verdicts(sessions)["overall"],
+                    "INCONCLUSIVE")
 
     def test_slow_model_gain_and_fast_model_loss_are_both_visible(self):
         data = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
