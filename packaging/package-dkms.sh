@@ -43,7 +43,7 @@ fi
 src="$srcbase/swapz-$version"
 cli_dir="$prefix/sbin"; cli="$cli_dir/swapzctl"
 helper_dir="$prefix/libexec/swapz"; helper="$helper_dir/device-roundtrip"
-marker=".swapz-v3-owned"
+marker=".swapz-owned"
 [[ ! -L "$srcbase" && ! -L "$prefix" &&
    ! -L "$cli_dir" && ! -L "$helper_dir" ]] || {
   echo "BLOCKED: symlinked package prefix" >&2; exit 1;
@@ -54,12 +54,12 @@ if [[ "$action" == uninstall ]] &&
 fi
 verify_owned() {
   [[ -d "$src" && ! -L "$src" && -f "$src/$marker" &&
-     -f "$src/.swapz-v3-sources.sha256" &&
-     -f "$src/.swapz-v3-binaries.sha256" &&
+     -f "$src/.swapz-sources.sha256" &&
+     -f "$src/.swapz-binaries.sha256" &&
      -f "$cli" && ! -L "$cli" && -f "$helper" && ! -L "$helper" ]] || return 1
-  grep -Fxq "swapz-v3:$version" "$src/$marker" || return 1
-  (cd "$src" && sha256sum --quiet -c .swapz-v3-sources.sha256) || return 1
-  sha256sum --quiet -c "$src/.swapz-v3-binaries.sha256" || return 1
+  grep -Fxq "swapz:$version" "$src/$marker" || return 1
+  (cd "$src" && sha256sum --quiet -c .swapz-sources.sha256) || return 1
+  sha256sum --quiet -c "$src/.swapz-binaries.sha256" || return 1
 }
 cleanup_owned() {
   if [[ -e "$src/build" ]]; then
@@ -73,8 +73,8 @@ cleanup_owned() {
     rm -f -- "$src/src/kernel/$(basename "$file")"
   done
   rm -f -- "$src/dkms.conf" "$src/src/kernel/VERSION" "$src/$marker" \
-    "$src/.swapz-v3-sources.sha256" "$src/.swapz-v3-binaries.sha256"
-  rmdir -- "$src/src/kernel" "$src/kernel" "$src"
+    "$src/.swapz-sources.sha256" "$src/.swapz-binaries.sha256"
+  rmdir -- "$src/src/kernel" "$src/src" "$src"
 }
 if [[ "$action" == uninstall ]]; then
   verify_owned || { echo "BLOCKED: foreign, absent or modified V3 package" >&2; exit 1; }
@@ -108,10 +108,10 @@ for file in src/kernel/Makefile src/kernel/*.c src/kernel/*.h; do
 done
 install -m0755 build/userspace/swapzctl "$cli"
 install -m0755 build/tests/device-roundtrip "$helper"
-printf 'swapz-v3:%s\n' "$version" > "$src/$marker"
+printf 'swapz:%s\n' "$version" > "$src/$marker"
 (cd "$src" && sha256sum dkms.conf src/kernel/VERSION src/kernel/Makefile \
-  src/kernel/*.c src/kernel/*.h) > "$src/.swapz-v3-sources.sha256"
-sha256sum "$cli" "$helper" > "$src/.swapz-v3-binaries.sha256"
+  src/kernel/*.c src/kernel/*.h) > "$src/.swapz-sources.sha256"
+sha256sum "$cli" "$helper" > "$src/.swapz-binaries.sha256"
 rollback() {
   rc=$?
   trap - ERR
