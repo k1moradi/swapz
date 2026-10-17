@@ -833,10 +833,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(local_successor, initial_refresh)
         self.assertLess(initial_refresh, list_delete)
         post_process = worker.index("swapz_process(ctx, entry->bio)")
+        tail_guard = worker.index(
+            "if (remaining > 1U && list_empty(&local))", post_process)
         tail_splice = worker.index(
-            "list_splice_tail_init(&ctx->incoming, &local)", post_process)
-        self.assertLess(post_process, tail_splice)
-        self.assertIn("remaining > 1U", worker[post_process:tail_splice])
+            "list_splice_tail_init(&ctx->incoming, &local)", tail_guard)
+        self.assertLess(post_process, tail_guard)
+        self.assertLess(tail_guard, tail_splice)
+        self.assertNotIn("!ctx->worker_has_immediate_followup",
+                         worker[post_process:tail_guard])
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("ctx->single_pack_deferred = true", writer)

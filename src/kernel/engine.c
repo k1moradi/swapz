@@ -668,11 +668,11 @@ retry_stage:
 					       (size_t)offset * SWAPZ_BLOCK_BYTES;
 
 			/*
-			 * Each extent initializes every byte it owns: swapz_begin()
-			 * clears compressed extents and raw records overwrite one full
-			 * block. Only mode 2 alignment holes become lower-media bytes,
-			 * so clear exactly those holes instead of the whole 256KiB
-			 * scratch buffer for every run.
+			 * Each extent initializes every byte it owns: compressed
+			 * builders clear their final unused gap at seal, while RAW
+			 * records overwrite one full block. Only mode 2 alignment holes
+			 * become lower-media bytes, so clear exactly those holes instead
+			 * of the whole 256KiB scratch buffer for every run.
 			 */
 			if (offset > run_blocks)
 				memset(e->bulk_scratch +
@@ -795,14 +795,12 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
-	if (cached_metadata) {
-		/* Required payload blocks are overwritten below before use. */
-	} else if (lru_cached_metadata) {
+	if (lru_cached_metadata) {
 		memcpy(engine->read_scratch,
 		       engine->read_metadata_cache +
 		       (size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES,
 		       SWAPZ_BLOCK_BYTES);
-	} else {
+	} else if (!cached_metadata) {
 		if (observed.extent_blocks == 2 &&
 		    engine->max_read_blocks_per_record != 1 &&
 		    (swapz_u32)observed.payload_offset +

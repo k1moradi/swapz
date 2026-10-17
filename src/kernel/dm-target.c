@@ -1755,7 +1755,7 @@ static void swapz_worker(struct work_struct *work)
 	struct swapz_dm *ctx =
 		container_of(to_delayed_work(work), struct swapz_dm, worker);
 	LIST_HEAD(local);
-	struct swapz_bio_ref *entry, *next;
+	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	unsigned int remaining;
 
@@ -1787,8 +1787,7 @@ static void swapz_worker(struct work_struct *work)
 			 * already present now, append them in FIFO order, and stay within
 			 * the same hard 64-BIO quantum. There is no wait for future work.
 			 */
-			if (!ctx->worker_has_immediate_followup &&
-			    remaining > 1U && list_empty(&local)) {
+			if (remaining > 1U && list_empty(&local)) {
 				spin_lock_irqsave(&ctx->queue_lock, flags);
 				if (!list_empty(&ctx->incoming)) {
 					list_splice_tail_init(&ctx->incoming, &local);
