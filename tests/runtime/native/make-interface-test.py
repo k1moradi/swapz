@@ -99,7 +99,7 @@ class PublicMakeContract(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="make-incremental-",
                                          dir=build_tests) as directory:
             fixture = pathlib.Path(directory)
-            for part in ("src/kernel", "tools", "userspace",
+            for part in ("src/kernel", "src/userspace", "tests/tools",
                          "fake-headers"):
                 (fixture / part).mkdir(parents=True, exist_ok=True)
 

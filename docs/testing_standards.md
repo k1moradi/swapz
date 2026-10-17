@@ -81,3 +81,6 @@ The canonical report is local evidence at `build/test_results.json.xz`.
 `make test` must not create commits, push Git refs, or alter the checked-out
 source revision. A report describes the exact tested checkout; publishing or
 archiving it is an explicit owner action outside qualification.
+
+
+Rootless incremental-build fixtures mirror the current `src/` and `tests/` layout; they must not recreate removed top-level `tools/` or `userspace/` directories.
