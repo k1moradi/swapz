@@ -79,10 +79,11 @@ static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
 	return included;
 }
 
-int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
+static int swapz_engine_plan_bounded_policy(
+			    const struct swapz_compressed_page *pages,
 			    swapz_u8 count, swapz_u8 max_read_blocks,
 			    swapz_u8 *classes, swapz_u8 *records_per_extent,
-			    swapz_u8 *extent_count)
+			    swapz_u8 *extent_count, int prefer_large_ties)
 {
 	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
@@ -141,7 +142,8 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 			     * adjacent-only mode to submit one request without
 			     * writing any padding bytes.
 			     */
-			    (candidate_bytes == costs[index] &&
+			    (prefer_large_ties &&
+			     candidate_bytes == costs[index] &&
 			     candidate_reads == reads[index] &&
 			     candidate_batches == batches[index] &&
 			     blocks > selected_class[index])) {
@@ -163,6 +165,16 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 	}
 	*extent_count = out;
 	return 0;
+}
+
+int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
+			    swapz_u8 count, swapz_u8 max_read_blocks,
+			    swapz_u8 *classes, swapz_u8 *records_per_extent,
+			    swapz_u8 *extent_count)
+{
+	return swapz_engine_plan_bounded_policy(pages, count, max_read_blocks,
+					      classes, records_per_extent,
+					      extent_count, 0);
 }
 
 static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
@@ -516,10 +528,10 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 	    !e->io.write_run || e->verify_after_write)
 		return -EOPNOTSUPP;
 	if (compressed_count) {
-		error = swapz_engine_plan_bounded(pages, compressed_count,
+		error = swapz_engine_plan_bounded_policy(pages, compressed_count,
 					plan_read_blocks,
 					e->plan_classes, e->plan_takes,
-					&extent_count);
+					&extent_count, 1);
 		if (error)
 			return error;
 	}

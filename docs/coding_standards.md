@@ -98,3 +98,10 @@ policy; it moves unavoidable allocator alignment before a run instead of
 between extents, allowing adjacent-only lower aggregation to issue fewer WRITE
 requests. Never trade extra padding bytes for this tie-break in the default
 mode.
+
+
+Alignment-aware tie-breaking is restricted to the adjacent lower-run writer.
+The public/sequential planner retains its previously qualified deterministic
+tie order, including verify-after-write and other non-bulk paths. A lower-run
+optimization must not perturb layouts in modes that cannot consume the
+resulting contiguity.
