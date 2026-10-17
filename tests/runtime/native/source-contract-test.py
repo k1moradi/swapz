@@ -820,28 +820,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("ctx->single_pack_deferred = true", writer)
-        self.assertIn("if (ctx->accepted_burst_pack_ready &&", worker)
+        self.assertIn("if ((ctx->accepted_burst_pack_ready ||", worker)
+        self.assertIn("ctx->single_pack_deferred) &&", worker)
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
         self.assertIn("!swapz_retention_expired(ctx)", worker)
         self.assertLess(worker.index("swapz_process(ctx, entry->bio)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
-        recheck = worker.index("if (!ctx->single_pack_tail_recheck)")
-        mark_recheck = worker.index("ctx->single_pack_tail_recheck = true",
-                                    recheck)
-        requeue = worker.index(
-            "mod_delayed_work(ctx->workqueue,",
-            mark_recheck)
-        recheck_close = worker.index(
-            "ctx->next_window_close = SWAPZ_CLOSE_PACK_READY",
-            requeue)
-        self.assertLess(mark_recheck, requeue)
-        self.assertLess(requeue, recheck_close)
-        self.assertIn("ctx->worker_requeues++", worker[recheck:requeue])
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
         self.assertIn("ctx->single_pack_deferred = false", flush)
-        self.assertIn("ctx->single_pack_tail_recheck = false", flush)
         self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
         self.assertIn("swapz_flush_window(ctx)", writer)
@@ -891,6 +879,21 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->deadline_worker_with_local++", worker)
         self.assertIn("ctx->deadline_worker_empty++", worker)
         self.assertIn("!list_empty(&local)", worker)
+        self.assertIn("#define SWAPZ_SINGLETON_DEADLINE_STREAK 2U", DM)
+        self.assertIn("ctx->singleton_deadline_streak++", worker)
+        self.assertIn("ctx->singleton_fast_close = true", worker)
+        self.assertIn("ctx->singleton_fast_close = false", worker)
+        self.assertIn("ctx->singleton_fast_close && ctx->batch_count == 1U",
+                      worker)
+        learned_close = worker.index(
+            "ctx->singleton_fast_close && ctx->batch_count == 1U")
+        timer_arm = worker.index("hrtimer_start(&ctx->retention_timer",
+                                 learned_close)
+        self.assertLess(learned_close, timer_arm)
+        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_IDLE",
+                      worker[learned_close:timer_arm])
+        self.assertIn("ctx->singleton_deadline_streak = 0", flush)
+        self.assertIn("ctx->singleton_fast_close = false", flush)
         self.assertIn("swapz_flush_window(ctx)", process)
         self.assertIn("ctx->retain_worker_passes++", worker)
         self.assertIn("ctx->retain_timer_arms++", worker)

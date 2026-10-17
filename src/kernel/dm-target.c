@@ -43,6 +43,7 @@
 #include "swapz-version.h" /* generated from src/kernel/VERSION */
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_MAX_RETAIN_MS 4U
+#define SWAPZ_SINGLETON_DEADLINE_STREAK 2U
 
 /*
  * Experimental opt-in: a separate bounded LZ4 producer may prepare future
@@ -177,6 +178,14 @@ struct swapz_dm {
 	u64 retain_timer_arms;
 	u64 retain_timer_arm_skips;
 	/*
+	 * Adaptive retained-singleton policy. Two consecutive one-page
+	 * worker-empty deadline closes prove that this stream has supplied no
+	 * companion work despite receiving the full retention opportunity.
+	 * Fast-close remains active only until real accepted concurrency appears.
+	 */
+	swapz_u8 singleton_deadline_streak;
+	bool singleton_fast_close;
+	/*
 	 * Diagnostic-only attribution of the hard 2ms retention deadline.
 	 * These four mutually exclusive sites must sum to close_deadline.
 	 */
@@ -198,9 +207,6 @@ struct swapz_dm {
 	 * accepted tail. Close it when the accepted tail is exhausted.
 	 */
 	bool single_pack_deferred;
-	/* One zero-delay worker handoff is the entire grace budget for an
-	 * apparent first-pack tail. Never turn this into a timer loop. */
-	bool single_pack_tail_recheck;
 	bool accepted_burst_pack_ready;
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
@@ -1042,8 +1048,19 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 * has succeeded through the original publication/completion path. */
 	ctx->packed_burst = false;
 	ctx->single_pack_deferred = false;
-	ctx->single_pack_tail_recheck = false;
 	ctx->accepted_burst_pack_ready = false;
+	/* A real multi-record window disproves isolated closed-loop behavior.
+	 * Before bypass is learned, any non-deadline singleton also breaks the
+	 * consecutive-deadline evidence chain. Learned singleton fast-close
+	 * persists across its own ordinary idle closes until concurrency appears. */
+	if (count > 1U) {
+		ctx->singleton_deadline_streak = 0;
+		ctx->singleton_fast_close = false;
+	} else if (count == 1U &&
+		   ctx->next_window_close != SWAPZ_CLOSE_DEADLINE &&
+		   !ctx->singleton_fast_close) {
+		ctx->singleton_deadline_streak = 0;
+	}
 	if (!count) {
 		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
 		ctx->window_first_ns = 0;
@@ -1377,15 +1394,18 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 					      ctx->batch_count,
 					      ctx->retain_ms,
 					      ctx->engine.max_read_blocks_per_record)) {
-		/*
-		 * Keep the useful first pack open for accepted work. At an apparent
-		 * queue tail the worker is allowed exactly one zero-delay handoff,
-		 * giving concurrent submitters a scheduling opportunity without
-		 * paying the millisecond retention deadline.
-		 */
-		ctx->single_pack_deferred = true;
-		if (ctx->worker_has_immediate_followup)
+		if (ctx->worker_has_immediate_followup) {
+			/* Another already-accepted BIO will be processed without
+			 * waiting for a timer or a future producer arrival. */
+			ctx->single_pack_deferred = true;
 			ctx->single_pack_deferrals++;
+		} else {
+			/* Queue tail: do not pay the retention deadline merely to
+			 * hope for a future arrival. Commit the valid first pack. */
+			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
+			ctx->packed_early_commits++;
+			swapz_flush_window(ctx);
+		}
 	} else if (swapz_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
@@ -1702,19 +1722,27 @@ static void swapz_worker(struct work_struct *work)
 					!list_empty(&ctx->incoming);
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			}
+			/* Any already-accepted companion disproves isolated QD1-like
+			 * behavior immediately, before this BIO can influence closure. */
+			if (ctx->worker_has_immediate_followup) {
+				ctx->singleton_deadline_streak = 0;
+				ctx->singleton_fast_close = false;
+			}
 			list_del_init(&entry->list);
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
 			swapz_process(ctx, entry->bio);
-			if (ctx->accepted_burst_pack_ready &&
+			if ((ctx->accepted_burst_pack_ready ||
+			     ctx->single_pack_deferred) &&
 			    !ctx->worker_has_immediate_followup &&
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
 			    !swapz_retention_expired(ctx)) {
 				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 				ctx->packed_early_commits++;
-				ctx->accepted_burst_tail_flushes++;
+				if (ctx->accepted_burst_pack_ready)
+					ctx->accepted_burst_tail_flushes++;
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
@@ -1742,10 +1770,24 @@ static void swapz_worker(struct work_struct *work)
 			else if (ctx->retain_ms &&
 				 swapz_retention_expired(ctx)) {
 				ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
-				if (!list_empty(&local))
+				if (!list_empty(&local)) {
 					ctx->deadline_worker_with_local++;
-				else
+					ctx->singleton_deadline_streak = 0;
+					ctx->singleton_fast_close = false;
+				} else {
 					ctx->deadline_worker_empty++;
+					if (ctx->batch_count == 1U) {
+						if (ctx->singleton_deadline_streak <
+						    SWAPZ_SINGLETON_DEADLINE_STREAK)
+							ctx->singleton_deadline_streak++;
+						if (ctx->singleton_deadline_streak >=
+						    SWAPZ_SINGLETON_DEADLINE_STREAK)
+							ctx->singleton_fast_close = true;
+					} else {
+						ctx->singleton_deadline_streak = 0;
+						ctx->singleton_fast_close = false;
+					}
+				}
 			} else {
 				ctx->next_window_close = !remaining ?
 					SWAPZ_CLOSE_QUANTUM : SWAPZ_CLOSE_IDLE;
@@ -1760,25 +1802,17 @@ static void swapz_worker(struct work_struct *work)
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
 			/*
-			 * A useful first pack at an apparent queue tail gets one,
-			 * and only one, zero-delay worker handoff. This is not a
-			 * new admission timer: the original hard retention deadline
-			 * remains pinned, and the second empty observation closes.
+			 * Once repeated full-deadline singleton closes prove that no
+			 * companion work arrives, stop charging the same closed-loop
+			 * stream another retention deadline. This changes no lower byte
+			 * geometry: a one-record window already occupies one 4KiB block.
+			 * Any accepted concurrency above clears the learned bypass.
 			 */
 			if (ctx->accepting && !ctx->failed &&
-			    ctx->single_pack_deferred && ctx->batch_count &&
-			    !swapz_retention_expired(ctx)) {
-				if (!ctx->single_pack_tail_recheck) {
-					ctx->single_pack_tail_recheck = true;
-					ctx->worker_requeues++;
-					mod_delayed_work(ctx->workqueue,
-							 &ctx->worker, 0);
-					spin_unlock_irqrestore(&ctx->queue_lock, flags);
-					return;
-				}
+			    ctx->singleton_fast_close && ctx->batch_count == 1U &&
+			    ctx->retain_ms && !swapz_retention_expired(ctx)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
-				ctx->packed_early_commits++;
+				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				swapz_flush_window(ctx);
 				return;
 			}

@@ -40,7 +40,7 @@ At qualified source `c4539b3afe222372d5266be5a79bb96f23dfdeea`:
 - the accepted-incoming first-pack tail fix materially recovered QD8 without changing QD1, but fast finite QD4/QD32 still expose first-pack scheduling/packing loss;
 - the mixed faster-model async arm showed a preliminary useful-WRITE gain, while the slow mixed model still lost useful throughput.
 
-Interpretation: the full retention deadline was a major QD8 bottleneck, but lower-request reduction alone is still insufficient. The next production-C question is whether one bounded zero-delay first-pack recheck can catch concurrent finite-wave arrivals without sacrificing packing bytes or read tails. The pilot does not establish significance.
+Interpretation: the full retention deadline was a major QD8 bottleneck, but lower-request reduction alone is still insufficient. The later one-handoff first-pack experiment at `cb6cd5a...` is rejected: on the medium QD4 pilot it reduced some request counts while lowering logical/lower byte efficiency and materially worsening latency/throughput, so request merging alone is not a win. The next production-C question is whether repeated worker-empty singleton deadlines can safely disable retention only for demonstrably isolated closed-loop traffic. The pilot does not establish significance.
 
 ## Confirmation gate
 
