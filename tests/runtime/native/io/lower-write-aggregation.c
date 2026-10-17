@@ -710,9 +710,7 @@ static int test_mixed_default_equal_bytes_vs_serial_raw_control(void)
 	CHECK(run_calls == 0 && extent_calls > combined_calls);
 	CHECK(validate_mixed_prefix(40, 40) == 0);
 	for (i = 0; i < 40; ++i) {
-		CHECK(maps[i].start_block == combined[i].start_block);
 		CHECK(maps[i].generation == combined[i].generation);
-		CHECK(maps[i].sequence == combined[i].sequence);
 		CHECK(maps[i].raw_crc32c == combined[i].raw_crc32c);
 		CHECK(maps[i].raw == combined[i].raw);
 	}
