@@ -174,3 +174,9 @@ may occur on error. The path does not invoke lower WRITE or invent
 on-media persistence for this volatile alpha. The `zero_elided`
 status key counts **successful logical write elisions**, not all
 LZ4-attempted pages and not observed lower-media erase operations.
+
+## Repository layout and implementation naming
+
+Active product C/C++ and headers live under `src/`; test-only native code, Python and test orchestration live under `tests/`; maintained Markdown lives under `docs/`; non-test packaging helpers live under `packaging/`. Do not recreate top-level `kernel/`, `userspace/`, `tools/`, or component-local Markdown trees.
+
+Implementation paths, symbol prefixes, helper names, benchmark candidates, workflow names and utility names are version-neutral. Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the candidate/product name. `SWZ3` is the explicit exception because it identifies the disk format. Release numbers belong in `src/kernel/VERSION`, not in implementation names.

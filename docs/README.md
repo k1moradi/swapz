@@ -6,7 +6,7 @@ swapz is an experimental Linux Device Mapper target for reducing measured lower-
 
 The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`; and the administrative utility is `swapzctl`. Do not encode implementation generations in source directories, symbols, workflow names, binaries, benchmark candidates, or helper names.
 
-`SWZ3` is intentionally retained because it names the on-disk format, not the implementation generation. Release numbers belong only in release metadata, whose canonical source is [`src/kernel/VERSION`](../src/kernel/VERSION).
+`SWZ3` is intentionally retained because it names the on-disk format, not the implementation generation. Release numbers belong only in release metadata. [`src/kernel/VERSION`](../src/kernel/VERSION) is the single source of truth for release metadata.
 
 ## Repository layout
 

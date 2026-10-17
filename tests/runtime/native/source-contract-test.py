@@ -3,7 +3,7 @@
 
 This is not a replacement for live kernel BIO/GC tests. It prevents CI and
 future privileged harnesses from accidentally selecting the old swapz module
-or the standalone memory-only V3 smoke instead of the real DM target.
+or the standalone memory-only research smoke instead of the real DM target.
 """
 from pathlib import Path
 import re
@@ -50,7 +50,7 @@ def source_body(symbol: str, source: str) -> str:
     raise AssertionError("Unclosed source function: " + symbol)
 
 
-class V3ProductionSourceQualification(unittest.TestCase):
+class SwapzProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz"\)')
@@ -257,7 +257,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
 
     def test_identical_off_swapz_replay_contract(self):
         # Rootless regular files exercise the immutable plan and full-image
-        # oracle. They do NOT claim a loaded V3 module test.
+        # oracle. They do NOT claim a loaded swapz module test.
         import subprocess
         import sys
         script = ROOT / "tests/runtime/benchmark/io-replay-test.py"
