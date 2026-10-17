@@ -329,17 +329,6 @@ static int test_uniform_compressed_identity_sort_safety(void)
 	return 0;
 }
 
-static int test_cap3_pareto_candidate_is_bounded(void)
-{
-	CHECK(!swapz_window_cap3_pareto_candidate(10, 11, 10, 1));
-	CHECK(swapz_window_cap3_pareto_candidate(9, 11, 9, 1));
-	CHECK(!swapz_window_cap3_pareto_candidate(9, 12, 10, 1));
-	CHECK(!swapz_window_cap3_pareto_candidate(9, 12, 9, 2));
-	CHECK(!swapz_window_cap3_pareto_candidate(9, 10, 9, 1));
-	CHECK(!swapz_window_cap3_pareto_candidate(9, 9, 9, 0));
-	return 0;
-}
-
 static int test_timer_cancel_only_for_enabled_retention(void)
 {
 	unsigned int retain;
@@ -456,7 +445,6 @@ int main(void)
 	CHECK(test_burst_tail_one_two_and_mixed_compressed_records() == 0); passed++;
 	CHECK(test_burst_tail_requires_retention_history_and_safe_bounds() == 0); passed++;
 	CHECK(test_burst_tail_rejects_each_raw_invalid_and_duplicate_record() == 0); passed++;
-	CHECK(test_cap3_pareto_candidate_is_bounded() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;

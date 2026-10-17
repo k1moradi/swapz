@@ -309,6 +309,7 @@ must not carry the retired cap-extra, four-extent, planner-failure or cap=3
 diagnostic counters. The active write still uses the owner-qualified cap=2
 for accepted-burst extensions; removing the probes changes CPU work only,
 not on-media layout, lower I/O, authority or completion semantics.
+Exact-C coverage must exercise the retained cap=2 planner and write/read authority, not preserve tests for the deleted diagnostic classifier.
 
 Owner-loaded `2619385c` selected 64 metadata entries, and
 owner-loaded `8e21ca7e` proved the resulting 256KiB metadata-only LRU.
