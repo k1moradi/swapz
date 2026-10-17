@@ -487,6 +487,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->gc_allocation = 0", gc)
 
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
+        # Assert the finite-quantum semantics, not one obsolete decrement idiom.
         worker = body("swapz_worker")
         self.assertIn("SWAPZ_WORK_QUANTUM_BIOS", worker)
         self.assertIn("while (remaining && !list_empty(&local))", worker)

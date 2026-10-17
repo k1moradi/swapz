@@ -154,3 +154,10 @@ The direct production-C zero-elision test includes an intentionally unaligned
 4KiB input view. It must accept an all-zero page, reject a nonzero final byte,
 and never depend on bytes outside the logical page, preserving the exact
 predicate while allowing word-at-a-time implementation.
+
+
+Source contracts for the ordered worker assert the active finite-quantum
+semantics rather than one historical loop spelling. A bounded
+`while (remaining && !list_empty(&local))` plus an explicit decrement is
+equivalent evidence to the retired pre-decrement break idiom only when FIFO
+requeue, the hard quantum, and cooperative rescheduling remain asserted.
