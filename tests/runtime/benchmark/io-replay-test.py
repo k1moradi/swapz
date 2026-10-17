@@ -43,7 +43,7 @@ class PairReplayContract(unittest.TestCase):
                          "--warmup-ops", 32, "--measure-ops", 64,
                          "--read-pct", 25, "--iops", 0)
             reports = []
-            for candidate in ("off", "v3"):
+            for candidate in ("off", "swapz"):
                 device = root / f"swapz-replay-{candidate}.bin"
                 with device.open("wb") as fd:
                     fd.truncate(1024 * PAGE)
@@ -82,7 +82,7 @@ class PairReplayContract(unittest.TestCase):
             reports[0].write_text(json.dumps(wrong))
             self.run_cmd("compare", "--reports", *reports, success=False)
 
-    def test_timed_v3_read_counters_fail_closed_and_skip_rootless(self):
+    def test_timed_swapz_read_counters_fail_closed_and_skip_rootless(self):
         import importlib.util
         from unittest.mock import patch
         spec = importlib.util.spec_from_file_location("swapz_read_metrics", SCRIPT)
@@ -134,7 +134,7 @@ class PairReplayContract(unittest.TestCase):
                 module.kernel_read_snapshot(
                     Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"})
 
-    def test_mixed_v3_write_wait_telemetry_is_time_bracketed_and_fail_closed(self):
+    def test_mixed_swapz_write_wait_telemetry_is_time_bracketed_and_fail_closed(self):
         import importlib.util
         from unittest.mock import patch
         spec = importlib.util.spec_from_file_location("swapz_write_metrics", SCRIPT)
@@ -197,7 +197,7 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(manifest["fixture_pages"], 16)
                 self.assertEqual(manifest["measure_ops"], 128)
                 reports = []
-                for candidate in ("off", "v3"):
+                for candidate in ("off", "swapz"):
                     path = root / f"swapz-replay-{candidate}.bin"
                     with path.open("wb") as handle:
                         handle.truncate(64 * PAGE)
@@ -319,7 +319,7 @@ class PairReplayContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing"):
                 resolve()
 
-    def test_exact_v3_table_accepts_only_owned_nonfaulting_backing(self):
+    def test_exact_swapz_table_accepts_only_owned_nonfaulting_backing(self):
         import importlib.util
         from unittest.mock import patch
         from types import SimpleNamespace
@@ -329,16 +329,16 @@ class PairReplayContract(unittest.TestCase):
         lower = "251:7"
         name = "nullb-swapz-0123456789abcdef"
         tokens = f"0 32768 swapz {lower} 0 64 0 2 0 0 1 0"
-        self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["window"], 64)
-        self.assertEqual(module.validate_v3_table(tokens, 4096, lower, name)["retain_ms"], 0)
-        self.assertEqual(module.validate_v3_table(
+        self.assertEqual(module.validate_swapz_table(tokens, 4096, lower, name)["window"], 64)
+        self.assertEqual(module.validate_swapz_table(tokens, 4096, lower, name)["retain_ms"], 0)
+        self.assertEqual(module.validate_swapz_table(
             tokens + " 2", 4096, lower, name
         )["retain_ms"], 2)
         fake_block = SimpleNamespace(st_mode=__import__("stat").S_IFBLK,
                                      st_rdev=os.makedev(251, 7))
         with patch.object(module.Path, "stat", return_value=fake_block):
             path_table = tokens.replace(lower, "/dev/" + name)
-            self.assertEqual(module.validate_v3_table(
+            self.assertEqual(module.validate_swapz_table(
                 path_table, 4096, lower, name
             )["lower_bulk"], 1)
         for broken in (
@@ -354,7 +354,7 @@ class PairReplayContract(unittest.TestCase):
             tokens.replace(" 0 64 0 2 0 0 1 0", " 0 64 0 2 0 0 1 1"),
         ):
             with self.subTest(table=broken), self.assertRaises(ValueError):
-                module.validate_v3_table(broken, 4096, lower, name)
+                module.validate_swapz_table(broken, 4096, lower, name)
 
     def test_loaded_pair_qualification_requires_distinct_backing_and_rate(self):
         import contextlib
@@ -387,7 +387,7 @@ class PairReplayContract(unittest.TestCase):
                                        "owned_disk": "nullb0",
                                        "lower_major_minor": "251:0",
                                        "dm_uuid": None}}
-            v3 = {**base, "candidate": "v3", "achieved_iops": 188.0,
+            v3 = {**base, "candidate": "swapz", "achieved_iops": 188.0,
                   "device_identity": {"device": "253:0",
                                       "owned_disk": "nullb1",
                                       "lower_major_minor": "251:1",
@@ -433,9 +433,9 @@ class PairReplayContract(unittest.TestCase):
                              "UNPACED_THROUGHPUT_MEASUREMENT_ONLY")
             self.assertIsNone(unpaced["allowed_iops_difference_fraction"])
             self.assertAlmostEqual(
-                unpaced["logical_write_mbps_ratio_v3_to_off"], 2.5)
+                unpaced["logical_write_mbps_ratio_swapz_to_off"], 2.5)
             self.assertAlmostEqual(
-                unpaced["lower_write_mbps_ratio_v3_to_off"], 2.5)
+                unpaced["lower_write_mbps_ratio_swapz_to_off"], 2.5)
             off["iops_requested"] = v3["iops_requested"] = 500
             v3["seconds"] = 1.0
             v3["achieved_iops"] = 120
@@ -528,9 +528,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(content, repeat)
         self.assertEqual(manifest, same_manifest)
 
-    def test_owned_v3_uuid_matches_owned_pair_harness(self):
+    def test_owned_swapz_uuid_matches_owned_pair_harness(self):
         self.assertIn('r"SWAPZ-TEST-[a-f0-9]{16}"', SCRIPT.read_text())
-        script = SCRIPT.parents[3] / "tools/benchmark-owned-pair.sh"
+        script = SCRIPT.parents[3] / "tests/tools/benchmark-owned-pair.sh"
         self.assertIn('DMUUID="SWAPZ-TEST-$token"', script.read_text())
 
     def test_protected_regular_file_refused(self):

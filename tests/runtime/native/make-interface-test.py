@@ -25,18 +25,18 @@ class PublicMakeContract(unittest.TestCase):
         self.assertNotIn(".NOTPARALLEL: test", MAKE)
         self.assertIn(".PHONY: build/kernel/experimental/dm-swapz.ko", MAKE)
         self.assertIn("all: build/kernel/experimental/dm-swapz.ko "
-                      "build/tests/device-roundtrip build/userspace/swapz3ctl", MAKE)
-        self.assertIn("@+python3 -B tools/run-tests.py --kdir", MAKE)
-        reporter = (ROOT / "tools/run-tests.py").read_text()
-        for required in ("tools/test-rootless.sh", "tools/test-loaded.sh",
+                      "build/tests/device-roundtrip build/userspace/swapzctl", MAKE)
+        self.assertIn("@+python3 -B tests/tools/run-tests.py --kdir", MAKE)
+        reporter = (ROOT / "tests/tools/run-tests.py").read_text()
+        for required in ("tests/tools/test-rootless.sh", "tests/tools/test-loaded.sh",
                          "W=1", "W=2", "build/test_results.json.xz",
                          "tested_commit_sha", "code_commit_sha",
                          "commit-tree", "mktree", "ls-remote", "push"):
             self.assertIn(required, reporter)
-        self.assertIn("build/tests/device-roundtrip: tools/device-roundtrip.c", MAKE)
-        self.assertIn("build/userspace/swapz3ctl: userspace/swapz3ctl.c "
-                      "kernel/extent-v3/VERSION", MAKE)
-        staged = (ROOT / "kernel/extent-v3/Makefile").read_text()
+        self.assertIn("build/tests/device-roundtrip: tests/tools/device-roundtrip.c", MAKE)
+        self.assertIn("build/userspace/swapzctl: src/userspace/swapzctl.c "
+                      "src/kernel/VERSION", MAKE)
+        staged = (ROOT / "src/kernel/Makefile").read_text()
         self.assertIn('cmp -s "$$src" "$$dst"', staged)
         self.assertIn("build/kernel/w1", staged)
         self.assertIn("build/kernel/w2", staged)
@@ -45,14 +45,14 @@ class PublicMakeContract(unittest.TestCase):
         multi = subprocess.run(["make", "-n", "install", "uninstall"],
                                cwd=ROOT, capture_output=True, text=True, timeout=5)
         self.assertNotEqual(multi.returncode, 0)
-        for forbidden in ("all", "verify", "run", "deploy", "clean", "v3",
+        for forbidden in ("all", "verify", "run", "deploy", "clean", "swapz",
                           "check", "test-codec", "bench-pair-medium"):
             p = subprocess.run(["make", "-n", "--no-print-directory", forbidden],
                                cwd=ROOT, capture_output=True, text=True, timeout=5)
             self.assertNotEqual(p.returncode, 0, forbidden)
 
     def test_make_test_is_only_official_documented_test_command(self):
-        canonical = ("AGENTS.md", "README.md", "VISION.md",
+        canonical = ("docs/README.md", "docs/VISION.md",
                      "docs/coding_standards.md", "docs/testing_standards.md",
                      "docs/compile.md", "docs/benchmark.md")
         policy = "**Single official test command (read before every prompt):**"
@@ -67,20 +67,19 @@ class PublicMakeContract(unittest.TestCase):
 
         testing = (ROOT / "docs/testing_standards.md").read_text()
         self.assertIn("~~~sh\nmake test\n~~~", testing)
-        operator_docs = ("README.md", "docs/testing_standards.md",
-                         "tests/runtime/README.md", "tests/suites/README.md")
+        operator_docs = ("docs/README.md", "docs/testing_standards.md")
         for document in operator_docs:
             with self.subTest(official=document):
                 content = (ROOT / document).read_text()
                 for forbidden in ("make test-codec", "make test-mapping",
                                   "make test-gc", "make test-lower-io",
                                   "make -C tests/suites test-all",
-                                  "sudo bash tools/deploy-nullblk.sh",
-                                  "sudo bash tools/benchmark-owned-pair.sh"):
+                                  "sudo bash tests/tools/deploy-nullblk.sh",
+                                  "sudo bash tests/tools/benchmark-owned-pair.sh"):
                     self.assertNotIn(forbidden, content,
                                      f"Nonofficial test instruction in {document}")
-        self.assertIn("tools/test-rootless.sh", (ROOT / "tools/run-tests.py").read_text())
-        self.assertIn("tools/test-loaded.sh", (ROOT / "tools/run-tests.py").read_text())
+        self.assertIn("tests/tools/test-rootless.sh", (ROOT / "tests/tools/run-tests.py").read_text())
+        self.assertIn("tests/tools/test-loaded.sh", (ROOT / "tests/tools/run-tests.py").read_text())
 
     def test_parallel_build_is_incremental_and_test_stages_stay_ordered(self):
         """Run the REAL root/extent Makefiles using a fake, unprivileged Kbuild.
@@ -98,22 +97,22 @@ class PublicMakeContract(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="make-incremental-",
                                          dir=build_tests) as directory:
             fixture = pathlib.Path(directory)
-            for part in ("kernel/extent-v3", "tools", "userspace",
+            for part in ("src/kernel", "tools", "userspace",
                          "fake-headers"):
                 (fixture / part).mkdir(parents=True, exist_ok=True)
 
             (fixture / "Makefile").write_text(MAKE)
-            (fixture / "kernel/extent-v3/Makefile").write_text(
-                (ROOT / "kernel/extent-v3/Makefile").read_text())
-            (fixture / "kernel/extent-v3/VERSION").write_text(
-                (ROOT / "kernel/extent-v3/VERSION").read_text())
-            kernel_source = fixture / "kernel/extent-v3/dm-target.c"
+            (fixture / "src/kernel/Makefile").write_text(
+                (ROOT / "src/kernel/Makefile").read_text())
+            (fixture / "src/kernel/VERSION").write_text(
+                (ROOT / "src/kernel/VERSION").read_text())
+            kernel_source = fixture / "src/kernel/dm-target.c"
             kernel_source.write_text("int fake_kernel_source = 1;\n")
-            (fixture / "kernel/extent-v3/dummy.h").write_text(
+            (fixture / "src/kernel/dummy.h").write_text(
                 "#define FAKE_KERNEL_SOURCE 1\n")
-            (fixture / "tools/device-roundtrip.c").write_text(
+            (fixture / "tests/tools/device-roundtrip.c").write_text(
                 "int main(void) { return 0; }\n")
-            cli = fixture / "userspace/swapz3ctl.c"
+            cli = fixture / "src/userspace/swapzctl.c"
             cli.write_text("int main(void) { return 0; }\n")
 
             # This Kbuild substitute checks the staged source but
@@ -126,14 +125,14 @@ class PublicMakeContract(unittest.TestCase):
                 "\t@if ! cmp -s '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; "
                 "then cp '$(M)/.module-candidate' '$(M)/dm-swapz.ko'; fi\n"
                 "\t@rm -f '$(M)/.module-candidate'\n")
-            (fixture / "tools/run-tests.py").write_text(
-                (ROOT / "tools/run-tests.py").read_text())
-            (fixture / "tools/test-rootless.sh").write_text(
+            (fixture / "tests/tools/run-tests.py").write_text(
+                (ROOT / "tests/tools/run-tests.py").read_text())
+            (fixture / "tests/tools/test-rootless.sh").write_text(
                 "#!/bin/bash\n"
                 "set -eu\n"
                 "test -f build/kernel/experimental/dm-swapz.ko\n"
                 "test -x build/tests/device-roundtrip\n"
-                "test -x build/userspace/swapz3ctl\n"
+                "test -x build/userspace/swapzctl\n"
                 "printf 'rootless\\n' >> build/order.log\n")
             # Synthetic records model eight latency-modeled RAM-only sessions;
             # mock Kbuild / loaded phase never touch actual host devices.
@@ -145,7 +144,7 @@ class PublicMakeContract(unittest.TestCase):
                 ["git", "rev-parse", "HEAD"], cwd=ROOT,
                 text=True, timeout=5).strip()
             def mock_arm(candidate):
-                is_v3 = candidate == "v3"
+                is_v3 = candidate == "swapz"
                 return json.dumps({
                     "candidate": candidate, "verdict": "PASS",
                     "source_sha": mocked_source_sha,
@@ -218,7 +217,7 @@ class PublicMakeContract(unittest.TestCase):
                     }
                 }, sort_keys=True)
             def mock_write_arm(candidate, qd):
-                is_v3 = candidate == "v3"
+                is_v3 = candidate == "swapz"
                 logical = 4096 * 4096
                 lower = int(logical / 1.4) if is_v3 else logical
                 return json.dumps({
@@ -261,10 +260,10 @@ class PublicMakeContract(unittest.TestCase):
                         f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                         "REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first",
                         f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
-                        "V3_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0",
-                        "V3_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1",
-                        mock_arm("v3") if i % 2 else mock_arm("off"),
-                        mock_arm("off") if i % 2 else mock_arm("v3"),
+                        "SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0",
+                        "SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1",
+                        mock_arm("swapz") if i % 2 else mock_arm("off"),
+                        mock_arm("off") if i % 2 else mock_arm("swapz"),
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
@@ -277,8 +276,8 @@ class PublicMakeContract(unittest.TestCase):
                             f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
                             "REPLAY_ORDER=v3-first" if index % 2 else "REPLAY_ORDER=off-first",
                             f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
-                            mock_write_arm("v3", qd) if index % 2 else mock_write_arm("off", qd),
-                            mock_write_arm("off", qd) if index % 2 else mock_write_arm("v3", qd),
+                            mock_write_arm("swapz", qd) if index % 2 else mock_write_arm("off", qd),
+                            mock_write_arm("off", qd) if index % 2 else mock_write_arm("swapz", qd),
                             f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
                         ))
                         index += 1
@@ -288,7 +287,7 @@ class PublicMakeContract(unittest.TestCase):
                       "printf 'loaded\\n' >> build/order.log\n"
                       "cat <<'MOCK_RECORDS'\n" + "\n".join(records) +
                       "\nMOCK_RECORDS\n")
-            (fixture / "tools/test-loaded.sh").write_text(script)
+            (fixture / "tests/tools/test-loaded.sh").write_text(script)
 
             env = os.environ.copy()
             env.pop("MAKEFLAGS", None)
@@ -316,7 +315,7 @@ class PublicMakeContract(unittest.TestCase):
             w1_staged = fixture / "build/kernel/w1/dm-target.c"
             w2_staged = fixture / "build/kernel/w2/dm-target.c"
             device = fixture / "build/tests/device-roundtrip"
-            cli_out = fixture / "build/userspace/swapz3ctl"
+            cli_out = fixture / "build/userspace/swapzctl"
             execute()
             tracked = (module, w1_module, w2_module, staged,
                        w1_staged, w2_staged, staged_make, device, cli_out)
@@ -348,7 +347,7 @@ class PublicMakeContract(unittest.TestCase):
 
             # Changing only canonical VERSION must regenerate every kernel
             # staging header and dependent module, without editing Kbuild or C.
-            from_version = fixture / "kernel/extent-v3/VERSION"
+            from_version = fixture / "src/kernel/VERSION"
             to_version = "3.0.0-alpha.99\n"
             if from_version.read_text() == to_version:
                 to_version = "3.0.0-alpha.100\n"
@@ -368,14 +367,14 @@ class PublicMakeContract(unittest.TestCase):
                 self.assertGreater(p.stat().st_mtime_ns, old_mtime)
 
     def test_packaging_and_loaded_tests_are_bounded(self):
-        self.assertIn("tools/package-dkms.sh install", MAKE)
-        self.assertIn("tools/package-dkms.sh uninstall", MAKE)
-        self.assertIn("tools/test-rootless.sh", (ROOT / "tools/run-tests.py").read_text())
+        self.assertIn("packaging/package-dkms.sh install", MAKE)
+        self.assertIn("packaging/package-dkms.sh uninstall", MAKE)
+        self.assertIn("tests/tools/test-rootless.sh", (ROOT / "tests/tools/run-tests.py").read_text())
         rootless_test_recipe = MAKE.split("\ntest:\n", 1)[1]
-        self.assertIn("tools/run-tests.py", rootless_test_recipe)
-        reporter = (ROOT / "tools/run-tests.py").read_text()
-        self.assertIn("tools/test-rootless.sh", reporter)
-        self.assertIn("tools/test-loaded.sh", reporter)
+        self.assertIn("tests/tools/run-tests.py", rootless_test_recipe)
+        reporter = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("tests/tools/test-rootless.sh", reporter)
+        self.assertIn("tests/tools/test-loaded.sh", reporter)
         self.assertIn("W=1", reporter)
         self.assertIn("W=2", reporter)
         self.assertLess(reporter.index('"Native and rootless contracts"'),
@@ -384,12 +383,12 @@ class PublicMakeContract(unittest.TestCase):
                         reporter.index('"Owned RAM smoke + mixed/QD pilot"'))
         for privileged in ("sudo -v", "sudo bash", "modprobe", "dmsetup"):
             self.assertNotIn(privileged, rootless_test_recipe)
-        loaded = (ROOT / "tools/test-loaded.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         self.assertIn("sudo -n true", loaded)
         self.assertIn("sudo -n bash", loaded)
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)
-        self.assertIn("tools/deploy-nullblk.sh", loaded)
-        self.assertIn("tools/benchmark-owned-pair.sh", loaded)
+        self.assertIn("tests/tools/deploy-nullblk.sh", loaded)
+        self.assertIn("tests/tools/benchmark-owned-pair.sh", loaded)
         self.assertIn("--lower-mbps 10 --completion-nsec 1000000", loaded)
         self.assertIn("--lower-mbps 80 --completion-nsec 150000", loaded)
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
@@ -398,26 +397,26 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("for qd in 1 4 8 32", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
-        self.assertLess(loaded.index("tools/deploy-nullblk.sh"),
-                        loaded.index("tools/benchmark-owned-pair.sh"))
+        self.assertLess(loaded.index("tests/tools/deploy-nullblk.sh"),
+                        loaded.index("tests/tools/benchmark-owned-pair.sh"))
         self.assertNotIn("swapon ", loaded)
         self.assertNotIn("swapoff ", loaded)
         self.assertIn("--shared-plan", loaded)
-        self.assertIn("--v3-first", loaded)
+        self.assertIn("--swapz-first", loaded)
         self.assertIn("W=1", reporter)
         self.assertIn("W=2", reporter)
-        package = (ROOT / "tools/package-dkms.sh").read_text()
+        package = (ROOT / "packaging/package-dkms.sh").read_text()
         for token in ("AUTOINSTALL", '"$dkms_bin" add', '"$dkms_bin" build',
                       '"$dkms_bin" install', '"$dkms_bin" remove',
-                      "swapz-v3:", "/sys/module/dm_swapz"):
+                      "swapz:", "/sys/module/dm_swapz"):
             self.assertIn(token, package)
         self.assertNotIn("swapon ", package)
         self.assertNotIn("swapoff ", package)
-        self.assertIn("swapz3ctl", package)
-        self.assertIn("userspace/swapz3ctl.c", MAKE)
-        self.assertIn("tests/runtime/native/package-dkms-test.py", (ROOT / "tools/test-rootless.sh").read_text())
+        self.assertIn("swapzctl", package)
+        self.assertIn("src/userspace/swapzctl.c", MAKE)
+        self.assertIn("tests/runtime/native/package-dkms-test.py", (ROOT / "tests/tools/test-rootless.sh").read_text())
         ci = (ROOT / ".github/workflows/project-goals.yml").read_text()
-        self.assertIn("bash tools/test-rootless.sh", ci)
+        self.assertIn("bash tests/tools/test-rootless.sh", ci)
         self.assertNotIn("make verify", ci)
 
 if __name__ == "__main__":

@@ -10,9 +10,9 @@ import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
-DM = (ROOT / "kernel/extent-v3/dm-target.c").read_text()
-AUTH = (ROOT / "kernel/extent-v3/authority.c").read_text()
-MK = (ROOT / "kernel/extent-v3/Makefile").read_text()
+DM = (ROOT / "src/kernel/dm-target.c").read_text()
+AUTH = (ROOT / "src/kernel/authority.c").read_text()
+MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "README.md").read_text()
 
 
@@ -54,17 +54,17 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_separate_target_and_3_0_alpha_version(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz"\)')
-        version = (ROOT / "kernel/extent-v3/VERSION").read_text().strip()
+        version = (ROOT / "src/kernel/VERSION").read_text().strip()
         self.assertRegex(version, r"^3\.0\.0-alpha\.[0-9]+$")
         self.assertIn('#include "swapz-version.h"', DM)
-        self.assertIn("MODULE_VERSION(SV3_ALPHA_VERSION)", DM)
-        self.assertNotIn('#define SV3_ALPHA_VERSION "3.0.0-alpha.', DM)
+        self.assertIn("MODULE_VERSION(SWAPZ_ALPHA_VERSION)", DM)
+        self.assertNotIn('#define SWAPZ_ALPHA_VERSION "3.0.0-alpha.', DM)
         self.assertIn('swapz-version.h', MK)
         self.assertIn('$(CURDIR)/VERSION', MK)
         self.assertIn('^3[.]0[.]0-alpha[.][0-9]+', MK)
         dkms = (ROOT / "dkms.conf").read_text()
         self.assertIn('BASH_SOURCE[0]', dkms)
-        self.assertIn('kernel/extent-v3/VERSION', dkms)
+        self.assertIn('src/kernel/VERSION', dkms)
         self.assertNotIn('PACKAGE_VERSION="' + version + '"', dkms)
         self.assertIn("obj-m += dm-swapz.o", MK)
         self.assertNotIn('"swapz3"', DM)
@@ -78,17 +78,17 @@ class V3ProductionSourceQualification(unittest.TestCase):
                 self.assertIn("Device Mapper target is exactly `swapz`",
                               document)
                 self.assertIn("module alias is `dm-swapz`", document)
-        self.assertIn("SV3_BUILD_SMOKE", MK)
+        self.assertIn("SWAPZ_BUILD_SMOKE", MK)
         # A public README must link to the single version source rather
         # than becoming a second, manually edited alpha-number string.
         self.assertIn(
-            "[`kernel/extent-v3/VERSION`](kernel/extent-v3/VERSION)", README)
+            "[`src/kernel/VERSION`](src/kernel/VERSION)", README)
         self.assertIn("single source of truth", README)
 
     def test_write_saturation_pilot_stays_private_bounded_and_write_only(self):
-        loaded = (ROOT / "tools/test-loaded.sh").read_text()
-        pair = (ROOT / "tools/benchmark-owned-pair.sh").read_text()
-        reporter = (ROOT / "tools/run-tests.py").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        reporter = (ROOT / "tests/tools/run-tests.py").read_text()
         for qd in ("1", "4", "8", "32"):
             self.assertIn("for qd in 1 4 8 32", loaded)
         self.assertIn("--read-pct 0", loaded)
@@ -105,8 +105,8 @@ class V3ProductionSourceQualification(unittest.TestCase):
 
 
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
-        accept = body("sv3_accept_write")
-        status = body("sv3_status")
+        accept = body("swapz_accept_write")
+        status = body("swapz_status")
         self.assertIn("length = LZ4_compress_fast(", accept)
         self.assertIn("ctx->lz4_attempts++", accept)
         self.assertIn("ctx->lz4_size_bins[5]++", accept)
@@ -120,34 +120,34 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("lz4_attempts=%llu lz4_accepted_bytes=%llu", status)
         self.assertIn("lz4_size_3073_3568=%llu lz4_raw_fallback=%llu", status)
         self.assertIn("ctx->lz4_size_bins[5]", status)
-        self.assertNotIn("LZ4_compress_fast(", body("sv3_gc_compact_one"))
+        self.assertNotIn("LZ4_compress_fast(", body("swapz_gc_compact_one"))
 
     def test_exact_zero_write_elides_lower_io_without_losing_ordering(self):
-        accept = body("sv3_accept_write")
-        read = body("sv3_read")
-        status = body("sv3_status")
+        accept = body("swapz_accept_write")
+        read = body("swapz_read")
+        status = body("swapz_status")
         self.assertIn("length > 0 && length <= 64", accept)
-        self.assertIn("sv3_page_is_zero(ctx->input_page)", accept)
-        self.assertIn("sv3_flush_window(ctx)", accept)
-        self.assertIn("sv3_discard_page(&ctx->authority, logical)", accept)
-        self.assertIn("ctx->logical_write_bytes += SV3_BLOCK_BYTES", accept)
+        self.assertIn("swapz_page_is_zero(ctx->input_page)", accept)
+        self.assertIn("swapz_flush_window(ctx)", accept)
+        self.assertIn("swapz_discard_page(&ctx->authority, logical)", accept)
+        self.assertIn("ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES", accept)
         self.assertIn("ctx->zero_elided_pages++", accept)
-        self.assertIn("sv3_complete(bio, error)", accept)
-        self.assertIn("sv3_issue_flush(ctx)", accept)
-        self.assertLess(accept.index("sv3_flush_window(ctx);",
-                                    accept.index("sv3_page_is_zero")),
-                        accept.index("sv3_discard_page(&ctx->authority"))
+        self.assertIn("swapz_complete(bio, error)", accept)
+        self.assertIn("swapz_issue_flush(ctx)", accept)
+        self.assertLess(accept.index("swapz_flush_window(ctx);",
+                                    accept.index("swapz_page_is_zero")),
+                        accept.index("swapz_discard_page(&ctx->authority"))
         self.assertIn("if (!map->valid)", read)
-        self.assertIn("memset(ctx->read_page, 0, SV3_BLOCK_BYTES)", read)
+        self.assertIn("memset(ctx->read_page, 0, SWAPZ_BLOCK_BYTES)", read)
         self.assertIn("zero_elided=%llu", status)
         # The predicate itself is exercised by an actual-C native test.
-        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
-        self.assertIn("int sv3_page_is_zero(", engine)
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+        self.assertIn("int swapz_page_is_zero(", engine)
 
     def test_targeted_read_metadata_and_payload_diagnostics_are_success_only(self):
-        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
-        header = (ROOT / "kernel/extent-v3/engine.h").read_text()
-        status = body("sv3_status")
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+        header = (ROOT / "src/kernel/engine.h").read_text()
+        status = body("swapz_status")
         self.assertIn("read_metadata_requests", header)
         self.assertIn("read_payload_requests", header)
         self.assertIn("read_payload_blocks", header)
@@ -155,7 +155,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine->read_payload_requests++", engine)
         self.assertIn("engine->read_payload_blocks += count", engine)
         self.assertLess(engine.index("error = engine->io.read_blocks(", engine.index(
-            "int sv3_engine_read_page(")),
+            "int swapz_engine_read_page(")),
             engine.index("engine->read_metadata_requests++"))
         self.assertIn("read_meta_reqs=%u read_payload_reqs=%u", status)
         self.assertIn("read_payload_blocks=%u", status)
@@ -165,15 +165,15 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_two_block_skips=%u", status)
         self.assertIn("read_two_block_skips++", engine)
         self.assertIn("peek.payload_offset != observed.payload_offset", engine)
-        engine_read = source_body("sv3_engine_read_page", engine)
-        peeked_authority = source_body("sv3_read_authoritative_peeked", AUTH)
-        self.assertIn("sv3_read_authoritative_peeked(", engine_read)
-        self.assertNotIn("sv3_read_authoritative(", engine_read)
-        self.assertIn("sv3_crc32c_bytes(", peeked_authority)
-        self.assertIn("sv3_disk_sequence(", peeked_authority)
-        self.assertNotIn("sv3_lookup(", peeked_authority)
+        engine_read = source_body("swapz_engine_read_page", engine)
+        peeked_authority = source_body("swapz_read_authoritative_peeked", AUTH)
+        self.assertIn("swapz_read_authoritative_peeked(", engine_read)
+        self.assertNotIn("swapz_read_authoritative(", engine_read)
+        self.assertIn("swapz_crc32c_bytes(", peeked_authority)
+        self.assertIn("swapz_disk_sequence(", peeked_authority)
+        self.assertNotIn("swapz_lookup(", peeked_authority)
         self.assertIn("payload_offsets[index] = decoded.payload_offset",
-                      (ROOT / "kernel/extent-v3/authority.c").read_text())
+                      (ROOT / "src/kernel/authority.c").read_text())
         self.assertIn("read_full_extent_requests", header)
         self.assertIn("read_full_extent_cache_hits", header)
         self.assertIn("engine->read_full_extent_requests++", engine)
@@ -181,24 +181,24 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine->max_read_blocks_per_record != 1", engine)
         self.assertIn("engine->read_metadata_cache_hits++", engine)
         self.assertIn("engine->read_metadata_lru_hits++", engine)
-        self.assertIn("sv3_read_metadata_lru_lookup(", engine)
-        self.assertIn("sv3_read_metadata_lru_commit(", engine)
+        self.assertIn("swapz_read_metadata_lru_lookup(", engine)
+        self.assertIn("swapz_read_metadata_lru_commit(", engine)
         self.assertIn("engine->read_metadata_lru_valid", engine)
         self.assertIn("engine->read_metadata_cache +", engine)
         self.assertIn("memset(engine->read_metadata_lru_valid, 0", engine)
         self.assertIn("engine->read_cache_valid = 0", engine)
-        self.assertIn("sv3_engine_invalidate_read_cache(engine)", engine)
-        self.assertIn("sv3_engine_invalidate_read_cache(e)", engine)
-        self.assertIn("sv3_engine_invalidate_read_cache(&ctx->engine)",
-                      body("sv3_lower"))
-        self.assertIn("sv3_engine_invalidate_read_cache(&ctx->engine)",
-                      body("sv3_process"))
+        self.assertIn("swapz_engine_invalidate_read_cache(engine)", engine)
+        self.assertIn("swapz_engine_invalidate_read_cache(e)", engine)
+        self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
+                      body("swapz_lower"))
+        self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
+                      body("swapz_process"))
         self.assertIn("ctx->engine.read_metadata_cache =",
-                      body("sv3_ctr"))
-        self.assertIn("SV3_READ_METADATA_CACHE_ENTRIES * SV3_BLOCK_BYTES",
-                      body("sv3_ctr"))
+                      body("swapz_ctr"))
+        self.assertIn("SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES",
+                      body("swapz_ctr"))
         self.assertIn("vfree(ctx->engine.read_metadata_cache)",
-                      body("sv3_free"))
+                      body("swapz_free"))
 
     def test_synthetic_anon_fixture_is_deterministic_and_size_exact(self):
         import importlib.util
@@ -255,7 +255,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertGreater(info["lz4_accepted_payload_bytes"], 0)
         self.assertGreater(info["raw_pages"], 0)
 
-    def test_identical_off_v3_replay_contract(self):
+    def test_identical_off_swapz_replay_contract(self):
         # Rootless regular files exercise the immutable plan and full-image
         # oracle. They do NOT claim a loaded V3 module test.
         import subprocess
@@ -268,77 +268,77 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("OK", result.stderr)
 
     def test_alpha_rejects_all_physical_devices(self):
-        ctr = body("sv3_ctr")
+        ctr = body("swapz_ctr")
         self.assertIn('disk_name, "nullb", 5', ctr)
         self.assertIn('swapz alpha accepts null_blk backing only', ctr)
         self.assertIn("goto fail;", ctr)
 
-    def test_real_v3_not_memory_smoke(self):
-        for snippet in ("dm_register_target(&sv3_target)",
+    def test_real_swapz_not_memory_smoke(self):
+        for snippet in ("dm_register_target(&swapz_target)",
                         "LZ4_compress_fast(", "LZ4_decompress_safe(",
-                        "dm_io(&req,", "DM_IO_VMA", "SV3_SECTORS"):
+                        "dm_io(&req,", "DM_IO_VMA", "SWAPZ_SECTORS"):
             self.assertIn(snippet, DM)
 
     def test_allocation_has_gc_reserve_and_fail_closed_reuse(self):
-        self.assertIn("sv3_gc_compact_one(ctx)", body("sv3_flush_window"))
-        self.assertIn("sv3_gc_compact_one(ctx)", body("sv3_raw_write"))
-        self.assertIn("sv3_gc_choose_victim(ctx,", body("sv3_gc_compact_one"))
+        self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_flush_window"))
+        self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_raw_write"))
+        self.assertIn("swapz_gc_choose_victim(ctx,", body("swapz_gc_compact_one"))
         self.assertIn("if (a->live_records[start + off])", AUTH)
-        self.assertIn("if (map->start_block / SV3_SEGMENT_BLOCKS == segment)", AUTH)
-        self.assertIn("cost = sv3_gc_live_byte_cost(m)", DM)
+        self.assertIn("if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment)", AUTH)
+        self.assertIn("cost = swapz_gc_live_byte_cost(m)", DM)
         self.assertIn("ctx->gc_scores[segment] += cost", DM)
-        self.assertIn("sv3_gc_prefer(score, count, best, best_count)", DM)
-        self.assertIn("sv3_engine_read_page(&ctx->engine", body("sv3_gc_compact_one"))
-        self.assertIn("sv3_gc_flush(ctx)", body("sv3_gc_compact_one"))
-        self.assertIn("sv3_finish_raw(&ctx->authority", body("sv3_gc_move_raw"))
-        self.assertIn("if (a->live_records[block])", body("sv3_gc_compact_one"))
+        self.assertIn("swapz_gc_prefer(score, count, best, best_count)", DM)
+        self.assertIn("swapz_engine_read_page(&ctx->engine", body("swapz_gc_compact_one"))
+        self.assertIn("swapz_gc_flush(ctx)", body("swapz_gc_compact_one"))
+        self.assertIn("swapz_finish_raw(&ctx->authority", body("swapz_gc_move_raw"))
+        self.assertIn("if (a->live_records[block])", body("swapz_gc_compact_one"))
 
     def test_discard_validates_entire_range_before_mutating(self):
-        discard = body("sv3_discard")
+        discard = body("swapz_discard")
         self.assertLess(discard.index("while (check_remaining)"),
                         discard.index("while (remaining)"))
         self.assertLess(discard.index("if (m->generation =="),
-                        discard.index("sv3_discard_page(&ctx->authority"))
+                        discard.index("swapz_discard_page(&ctx->authority"))
         self.assertIn("ctx->discard_epoch[start]", discard)
         self.assertIn("ctx->discard_count[start]", discard)
         self.assertIn("ctx->live_records[start]", discard)
         self.assertLess(discard.index("++ctx->discard_count[start]"),
-                        discard.index("sv3_discard_page(&ctx->authority"))
+                        discard.index("swapz_discard_page(&ctx->authority"))
 
     def test_fua_acknowledged_only_after_flush(self):
-        flush = body("sv3_flush_window")
-        self.assertLess(flush.index("sv3_issue_flush(ctx)"),
-                        flush.index("sv3_complete(bio, 0)"))
+        flush = body("swapz_flush_window")
+        self.assertLess(flush.index("swapz_issue_flush(ctx)"),
+                        flush.index("swapz_complete(bio, 0)"))
         self.assertIn("if (error && needs_fua)", flush)
-        self.assertNotIn("DM_MAPIO_KILL; /* Until FUA", body("sv3_map"))
+        self.assertNotIn("DM_MAPIO_KILL; /* Until FUA", body("swapz_map"))
 
     def test_valid_empty_flush_protocol_and_failure_accounting(self):
         # REQ_OP_FLUSH as a BIO is rejected in Linux blk-core itself.
         # The supported upper-bio encoding is zero sector WRITE|PREFLUSH.
-        admitted = body("sv3_map")
-        process = body("sv3_process")
-        lower = body("sv3_issue_flush")
-        raw = body("sv3_accept_write")
-        drain = body("sv3_drain")
+        admitted = body("swapz_map")
+        process = body("swapz_process")
+        lower = body("swapz_issue_flush")
+        raw = body("swapz_accept_write")
+        drain = body("swapz_drain")
         self.assertIn("REQ_OP_WRITE && !count", admitted)
         self.assertIn("bio->bi_opf & REQ_PREFLUSH", admitted)
         self.assertNotIn("bio_op(bio) != REQ_OP_FLUSH", admitted)
         self.assertNotIn("case REQ_OP_FLUSH:", process)
         self.assertIn("if (bio->bi_opf & REQ_PREFLUSH)", process)
-        self.assertIn("sv3_issue_flush(ctx)", process)
-        self.assertIn("sv3_issue_flush(ctx)", raw)
-        self.assertIn("sv3_issue_flush(ctx)", drain)
-        self.assertIn("sv3_flush_accounted(&ctx->flush_meter", lower)
-        self.assertIn("sv3_fail(ctx, error)", lower)
+        self.assertIn("swapz_issue_flush(ctx)", process)
+        self.assertIn("swapz_issue_flush(ctx)", raw)
+        self.assertIn("swapz_issue_flush(ctx)", drain)
+        self.assertIn("swapz_flush_accounted(&ctx->flush_meter", lower)
+        self.assertIn("swapz_fail(ctx, error)", lower)
         self.assertIn("flush_calls=%llu flush_ok=%llu flush_err=%llu", DM)
         self.assertIn("flush_injected=%llu flush_fault_nth=%u", DM)
-        self.assertIn("flush_fail_nth > 64U", body("sv3_ctr"))
-        self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("sv3_ctr"))
+        self.assertIn("flush_fail_nth > 64U", body("swapz_ctr"))
+        self.assertIn("flush_meter.fail_nth = flush_fail_nth", body("swapz_ctr"))
 
     def test_serialized_completed_lower_write_wall_wait_buckets(self):
-        lower = body("sv3_lower")
-        status = body("sv3_status")
-        self.assertIn("elapsed_ns = sv3_elapsed_ns(section_start", lower)
+        lower = body("swapz_lower")
+        status = body("swapz_status")
+        self.assertIn("elapsed_ns = swapz_elapsed_ns(section_start", lower)
         self.assertIn("ctx->lower_write_wall_ns += elapsed_ns", lower)
         self.assertIn("ctx->write_wait_le_1ms++", lower)
         self.assertIn("ctx->write_wait_1_to_4ms++", lower)
@@ -351,9 +351,9 @@ class V3ProductionSourceQualification(unittest.TestCase):
     def test_owned_nullblk_lower_write_fault_is_pre_submission_and_counted(self):
         # This tests fail-closed propagation through the actual dm_io adapter.
         # It cannot model a device-originated partial/torn write.
-        ctor = body("sv3_ctr")
-        lower = body("sv3_lower")
-        status = body("sv3_status")
+        ctor = body("swapz_ctr")
+        lower = body("swapz_lower")
+        status = body("swapz_status")
         self.assertIn('disk_name, "nullb", 5', ctor)
         self.assertIn("argc < 1 || argc > 10", ctor)
         self.assertIn("write_fail_nth > 65535U", ctor)
@@ -366,47 +366,47 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         lower.index("ctx->lower_write_submitted_reqs++"))
         self.assertLess(lower.index("ctx->write_fault_injected++"),
                         lower.index("error = dm_io(&req"))
-        self.assertIn("sv3_lower(ctx, REQ_OP_WRITE", body("sv3_lower_write"))
-        self.assertIn("sv3_lower(ctx, REQ_OP_WRITE", body("sv3_lower_write_run"))
+        self.assertIn("swapz_lower(ctx, REQ_OP_WRITE", body("swapz_lower_write"))
+        self.assertIn("swapz_lower(ctx, REQ_OP_WRITE", body("swapz_lower_write_run"))
         self.assertIn("write_fault_nth=%u write_fault_calls=%llu "
                       "write_fault_injected=%llu", status)
         self.assertIn("ctx->engine.bulk_enabled, ctx->write_fault_nth", status)
 
     def test_bounded_lower_run_aggregation_preserves_commit_gate(self):
-        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
-        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
-        writer = source_body("sv3_engine_write_window_batched_read_cap", engine)
-        flush = source_body("sv3_bulk_flush", engine)
-        pause = source_body("sv3_batch_pause", authority)
-        resume = source_body("sv3_batch_resume", authority)
-        self.assertIn("SV3_BULK_BLOCKS 64U",
-                      (ROOT / "kernel/extent-v3/engine.h").read_text())
-        self.assertIn("sv3_engine_write_window_batched_read_cap(&ctx->engine", DM)
-        self.assertIn("ctx->engine.io.write_run = sv3_lower_write_run", DM)
-        self.assertIn("sv3_batch_pause(e->authority, tx)", writer)
-        self.assertIn("sv3_bulk_flush(e, run_start", writer)
-        self.assertIn("sv3_batch_resume(e->authority, tx)", flush)
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        writer = source_body("swapz_engine_write_window_batched_read_cap", engine)
+        flush = source_body("swapz_bulk_flush", engine)
+        pause = source_body("swapz_batch_pause", authority)
+        resume = source_body("swapz_batch_resume", authority)
+        self.assertIn("SWAPZ_BULK_BLOCKS 64U",
+                      (ROOT / "src/kernel/engine.h").read_text())
+        self.assertIn("swapz_engine_write_window_batched_read_cap(&ctx->engine", DM)
+        self.assertIn("ctx->engine.io.write_run = swapz_lower_write_run", DM)
+        self.assertIn("swapz_batch_pause(e->authority, tx)", writer)
+        self.assertIn("swapz_bulk_flush(e, run_start", writer)
+        self.assertIn("swapz_batch_resume(e->authority, tx)", flush)
         self.assertLess(flush.index("e->io.write_run"),
-                        flush.index("sv3_batch_resume(e->authority, tx)"))
-        self.assertLess(flush.index("sv3_batch_resume(e->authority, tx)"),
-                        flush.index("sv3_finish(e->authority, tx"))
-        self.assertIn("sv3_bulk_abort(e, count, 0)", flush)
+                        flush.index("swapz_batch_resume(e->authority, tx)"))
+        self.assertLess(flush.index("swapz_batch_resume(e->authority, tx)"),
+                        flush.index("swapz_finish(e->authority, tx"))
+        self.assertIn("swapz_bulk_abort(e, count, 0)", flush)
         self.assertIn("a->batch_pending++", pause)
         self.assertIn("a->batch_replaying = 1", resume)
-        self.assertIn("ctx->engine.bulk_writes", body("sv3_status"))
-        self.assertIn("bulk_mode=%u", body("sv3_status"))
-        ctor = body("sv3_ctr")
+        self.assertIn("ctx->engine.bulk_writes", body("swapz_status"))
+        self.assertIn("bulk_mode=%u", body("swapz_status"))
+        ctor = body("swapz_ctr")
         self.assertIn("lower_bulk = 1", ctor)
         self.assertIn("lower_bulk > 2U", ctor)
         self.assertIn("ctx->engine.bulk_enabled = lower_bulk", ctor)
         self.assertIn("e->bulk_enabled == 1", writer)
         self.assertIn("aligned != run_start + run_blocks", writer)
-        self.assertIn("sv3_stage_batch(e->authority", writer)
+        self.assertIn("swapz_stage_batch(e->authority", writer)
         self.assertIn("batch_hashes", authority)
         self.assertIn("batch_stage_allowed", authority)
-        self.assertIn("a->batch_pending", source_body("sv3_gc_commit_rotation", authority))
-        stats = source_body("sv3_engine_plan_stats", engine)
-        self.assertIn("sv3_engine_plan_bounded(", stats)
+        self.assertIn("a->batch_pending", source_body("swapz_gc_commit_rotation", authority))
+        stats = source_body("swapz_engine_plan_stats", engine)
+        self.assertIn("swapz_engine_plan_bounded(", stats)
         self.assertNotIn("io.write_extent", stats)
         self.assertNotIn("io.write_run", stats)
         self.assertNotIn("io.read_blocks", stats)
@@ -414,88 +414,88 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("vmalloc", stats)
 
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
-        engine = (ROOT / "kernel/extent-v3/engine.c").read_text()
-        writer = source_body("sv3_engine_write_window_batched_read_cap", engine)
-        flush = source_body("sv3_bulk_flush", engine)
-        accept = body("sv3_accept_write")
-        complete = body("sv3_flush_window")
-        process = body("sv3_process")
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+        writer = source_body("swapz_engine_write_window_batched_read_cap", engine)
+        flush = source_body("swapz_bulk_flush", engine)
+        accept = body("swapz_accept_write")
+        complete = body("swapz_flush_window")
+        process = body("swapz_process")
         self.assertIn("!ctx->engine.verify_after_write", accept)
         self.assertIn("ctx->engine.bulk_enabled", accept)
         self.assertIn("ctx->batch_count++", accept)
         self.assertIn(".raw = 1", accept)
-        self.assertIn("ctx->batch[index].raw", body("sv3_order_window"))
+        self.assertIn("ctx->batch[index].raw", body("swapz_order_window"))
         self.assertIn("e->bulk_raw[staged] = raw", writer)
-        self.assertIn("sv3_finish_raw(e->authority, tx", flush)
+        self.assertIn("swapz_finish_raw(e->authority, tx", flush)
         self.assertLess(flush.index("e->io.write_run"),
-                        flush.index("sv3_finish_raw(e->authority, tx"))
+                        flush.index("swapz_finish_raw(e->authority, tx"))
         self.assertIn("ctx->planned[index].raw", complete)
-        self.assertIn("bulk_mixed_io=%u", body("sv3_status"))
-        self.assertIn("bulk_raw_only_io=%u", body("sv3_status"))
-        self.assertIn("bulk_raw_entries=%u", body("sv3_status"))
-        self.assertLess(complete.index("sv3_issue_flush(ctx)"),
-                        complete.index("sv3_complete(bio, 0)"))
-        self.assertIn("sv3_flush_window(ctx)", process)
+        self.assertIn("bulk_mixed_io=%u", body("swapz_status"))
+        self.assertIn("bulk_raw_only_io=%u", body("swapz_status"))
+        self.assertIn("bulk_raw_entries=%u", body("swapz_status"))
+        self.assertLess(complete.index("swapz_issue_flush(ctx)"),
+                        complete.index("swapz_complete(bio, 0)"))
+        self.assertIn("swapz_flush_window(ctx)", process)
         self.assertIn("REQ_PREFLUSH", process)
-        self.assertIn("sv3_raw_write(ctx, bio, logical)", accept)
+        self.assertIn("swapz_raw_write(ctx, bio, logical)", accept)
 
     def test_gc_refuses_any_unpublished_lower_group(self):
-        compact = body("sv3_gc_compact_one")
+        compact = body("swapz_gc_compact_one")
         self.assertIn("a->batch_pending", compact)
         self.assertIn("a->batch_replaying", compact)
         self.assertLess(compact.index("a->batch_pending"),
-                        compact.index("sv3_gc_choose_victim(ctx, &victim)"))
-        drain = body("sv3_drain")
+                        compact.index("swapz_gc_choose_victim(ctx, &victim)"))
+        drain = body("swapz_drain")
         self.assertIn("ctx->authority.batch_pending", drain)
         self.assertIn("ctx->authority.in_flight", drain)
 
     def test_gc_large_record_preflight_avoids_pointless_full_relocation(self):
-        choose = body("sv3_gc_choose_victim")
-        cost = (ROOT / "kernel/extent-v3/gc-cost.h").read_text()
-        ctr = body("sv3_ctr")
-        self.assertIn("SV3_GC_UNSHAREABLE_MIN_LENGTH", cost)
-        self.assertIn("sv3_gc_min_live_blocks", cost)
-        self.assertIn("sv3_gc_candidate_can_free_block", cost)
+        choose = body("swapz_gc_choose_victim")
+        cost = (ROOT / "src/kernel/gc-cost.h").read_text()
+        ctr = body("swapz_ctr")
+        self.assertIn("SWAPZ_GC_UNSHAREABLE_MIN_LENGTH", cost)
+        self.assertIn("swapz_gc_min_live_blocks", cost)
+        self.assertIn("swapz_gc_candidate_can_free_block", cost)
         self.assertIn("ctx->gc_min_live_blocks[segment] +=", choose)
-        self.assertIn("sv3_gc_candidate_can_free_block", choose)
+        self.assertIn("swapz_gc_candidate_can_free_block", choose)
         self.assertIn("ctx->gc_no_headroom_skips++", choose)
-        self.assertIn("gc_no_headroom_skips=%llu", body("sv3_status"))
+        self.assertIn("gc_no_headroom_skips=%llu", body("swapz_status"))
         self.assertIn("ctx->gc_min_live_blocks = kvcalloc", ctr)
 
     def test_gc_io_aware_default_retains_old_control_policies(self):
-        choose = body("sv3_gc_choose_victim")
-        ctor = body("sv3_ctr")
+        choose = body("swapz_gc_choose_victim")
+        ctor = body("swapz_ctr")
         self.assertIn("gc_policy = 2", ctor)
         self.assertIn("gc_policy > 2U", ctor)
-        self.assertIn("sv3_gc_estimated_io_cost(m)", choose)
+        self.assertIn("swapz_gc_estimated_io_cost(m)", choose)
         self.assertIn("ctx->gc_io_scores[segment] += io_cost", choose)
         self.assertIn("case 0:", choose)
         self.assertIn("case 1:", choose)
         self.assertIn("score = ctx->gc_io_scores[segment]", choose)
-        self.assertIn("gc_selected_io_estimate", body("sv3_status"))
+        self.assertIn("gc_selected_io_estimate", body("swapz_status"))
 
     def test_gc_does_not_consume_or_complete_upper_bios(self):
-        gc = body("sv3_gc_compact_one")
-        self.assertNotIn("sv3_complete(", gc)
+        gc = body("swapz_gc_compact_one")
+        self.assertNotIn("swapz_complete(", gc)
         self.assertIn("ctx->gc_read_bytes", gc)
         self.assertIn("ctx->gc_write_bytes", gc)
         self.assertIn("a->gc_allocation = 0", gc)
 
     def test_worker_yields_after_finite_window_and_preserves_fifo(self):
-        worker = body("sv3_worker")
-        self.assertIn("SV3_WORK_QUANTUM_BIOS", worker)
+        worker = body("swapz_worker")
+        self.assertIn("SWAPZ_WORK_QUANTUM_BIOS", worker)
         self.assertIn("if (!--remaining)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
         self.assertIn("cond_resched()", worker)
-        self.assertLess(worker.index("sv3_flush_window(ctx)"),
+        self.assertLess(worker.index("swapz_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
 
     def test_shutdown_completes_all_accepted_queued_bios(self):
-        worker = body("sv3_worker")
-        drain = body("sv3_drain")
+        worker = body("swapz_worker")
+        drain = body("swapz_drain")
         self.assertIn("for (;;)", worker)
-        self.assertIn("remaining = SV3_WORK_QUANTUM_BIOS", worker)
+        self.assertIn("remaining = SWAPZ_WORK_QUANTUM_BIOS", worker)
         self.assertIn("if (ctx->accepting)", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
         self.assertIn("cond_resched();", worker)
@@ -505,41 +505,41 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("V3 drain invariant: accepted BIOs remain", drain)
         self.assertIn("ctx->authority.batch_pending", drain)
         self.assertIn("ctx->authority.in_flight", drain)
-        self.assertIn("sv3_fail(ctx, -EUCLEAN)", drain)
+        self.assertIn("swapz_fail(ctx, -EUCLEAN)", drain)
 
     def test_raw_crc_protection_and_gc_relocation(self):
-        auth = (ROOT / "kernel/extent-v3/authority.c").read_text()
-        auth_h = (ROOT / "kernel/extent-v3/authority.h").read_text()
+        auth = (ROOT / "src/kernel/authority.c").read_text()
+        auth_h = (ROOT / "src/kernel/authority.h").read_text()
         self.assertIn("raw_crc32c", auth_h)
-        self.assertIn("sv3_verify_raw(", auth)
-        self.assertIn("sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES)", auth)
-        self.assertIn("sv3_verify_raw(&ctx->authority, logical, ctx->read_page)",
-                      body("sv3_read"))
-        self.assertIn("sv3_verify_raw(&ctx->authority, logical, ctx->input_page)",
-                      body("sv3_gc_move_raw"))
+        self.assertIn("swapz_verify_raw(", auth)
+        self.assertIn("swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES)", auth)
+        self.assertIn("swapz_verify_raw(&ctx->authority, logical, ctx->read_page)",
+                      body("swapz_read"))
+        self.assertIn("swapz_verify_raw(&ctx->authority, logical, ctx->input_page)",
+                      body("swapz_gc_move_raw"))
 
     def test_gc_explicitly_forbids_paused_open_and_victim(self):
-        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
-        gc = body("sv3_gc_compact_one")
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        gc = body("swapz_gc_compact_one")
         for name in ("gc_forbidden_open", "gc_forbidden_victim"):
             self.assertIn(name, authority)
             self.assertIn("a->" + name, gc)
         self.assertIn("segment == a->gc_forbidden_open", authority)
         self.assertIn("segment == a->gc_forbidden_victim", authority)
-        self.assertIn("sv3_gc_begin_rotation(a, victim)", gc)
-        self.assertIn("sv3_gc_commit_rotation(a, victim)", gc)
-        self.assertIn("sv3_enable_segment_rotation(&ctx->authority", body("sv3_ctr"))
-        self.assertIn("!ctx->segment_roles[segment]", body("sv3_gc_choose_victim"))
+        self.assertIn("swapz_gc_begin_rotation(a, victim)", gc)
+        self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
+        self.assertIn("swapz_enable_segment_rotation(&ctx->authority", body("swapz_ctr"))
+        self.assertIn("!ctx->segment_roles[segment]", body("swapz_gc_choose_victim"))
         self.assertIn("a->segment_foreground[dest] = 1", authority)
         self.assertIn("a->segment_foreground[victim] = 0", authority)
 
     def test_optional_write_verify_before_raw_publication(self):
-        ctor = body("sv3_ctr")
-        verifier = body("sv3_verify_raw_write")
-        for name in ("sv3_gc_move_raw", "sv3_raw_write"):
+        ctor = body("swapz_ctr")
+        verifier = body("swapz_verify_raw_write")
+        for name in ("swapz_gc_move_raw", "swapz_raw_write"):
             raw = body(name)
-            self.assertLess(raw.index("sv3_verify_raw_write(ctx"),
-                            raw.index("sv3_finish_raw(&ctx->authority"))
+            self.assertLess(raw.index("swapz_verify_raw_write(ctx"),
+                            raw.index("swapz_finish_raw(&ctx->authority"))
         self.assertIn("engine.verify_after_write = verify", ctor)
         self.assertIn("verify > 1U", ctor)
         self.assertIn("if (!ctx->engine.verify_after_write)", verifier)
@@ -547,73 +547,73 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("-EBADMSG", verifier)
 
     def test_attempted_and_completed_lower_io_are_distinct(self):
-        lower = body("sv3_lower")
+        lower = body("swapz_lower")
         self.assertLess(lower.index("ctx->lower_write_submitted_reqs++"),
                         lower.index("error = dm_io(&req"))
         self.assertLess(lower.index("error = dm_io(&req"),
                         lower.index("ctx->physical_write_reqs++"))
-        self.assertIn("one_page_windows", body("sv3_flush_window"))
-        self.assertIn("worker_requeues", body("sv3_worker"))
+        self.assertIn("one_page_windows", body("swapz_flush_window"))
+        self.assertIn("worker_requeues", body("swapz_worker"))
 
     def test_online_batching_bounded_and_barrier_first(self):
-        admitted = body("sv3_map")
-        ctor = body("sv3_ctr")
-        drain = body("sv3_drain")
-        worker = body("sv3_worker")
-        self.assertIn("SV3_MAX_COALESCE_MS", DM)
+        admitted = body("swapz_map")
+        ctor = body("swapz_ctr")
+        drain = body("swapz_drain")
+        worker = body("swapz_worker")
+        self.assertIn("SWAPZ_MAX_COALESCE_MS", DM)
         self.assertIn("msecs_to_jiffies(ctx->coalesce_ms)", admitted)
         self.assertIn("REQ_PREFLUSH | REQ_FUA", admitted)
         self.assertIn("bio_op(bio) != REQ_OP_WRITE", admitted)
         self.assertIn("queue_delayed_work(ctx->workqueue", admitted)
         self.assertIn("mod_delayed_work(ctx->workqueue", admitted)
         self.assertIn("INIT_DELAYED_WORK(&ctx->worker", ctor)
-        self.assertIn("coalesce > SV3_MAX_COALESCE_MS", ctor)
-        self.assertIn("ctx->window_size_counts[count]++", body("sv3_flush_window"))
+        self.assertIn("coalesce > SWAPZ_MAX_COALESCE_MS", ctor)
+        self.assertIn("ctx->window_size_counts[count]++", body("swapz_flush_window"))
         self.assertIn("ctx->one_page_close_reasons[close_reason]++",
-                      body("sv3_flush_window"))
+                      body("swapz_flush_window"))
         self.assertIn("win1_read_conflict=%llu win1_read_unrelated=%llu",
-                      body("sv3_status"))
+                      body("swapz_status"))
         self.assertIn("win1_deadline=%llu win1_pack_ready=%llu",
-                      body("sv3_status"))
-        self.assertIn("ctx->window_bins[0]++", body("sv3_flush_window"))
-        self.assertIn("ctx->window_bins[5]++", body("sv3_flush_window"))
+                      body("swapz_status"))
+        self.assertIn("ctx->window_bins[0]++", body("swapz_flush_window"))
+        self.assertIn("ctx->window_bins[5]++", body("swapz_flush_window"))
         self.assertIn("gc_read_reqs=%llu gc_write_reqs=%llu", DM)
         self.assertIn("ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs",
-                      body("sv3_gc_compact_one"))
+                      body("swapz_gc_compact_one"))
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
-        self.assertLess(worker.index("sv3_flush_window(ctx)"),
+        self.assertLess(worker.index("swapz_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
 
     def test_gc_uses_committed_actual_payload_lengths(self):
-        authority = (ROOT / "kernel/extent-v3/authority.c").read_text()
+        authority = (ROOT / "src/kernel/authority.c").read_text()
         self.assertIn("payload_lengths[index] = decoded.payload_length", authority)
         self.assertIn(".payload_length = payload_lengths[index]", authority)
-        self.assertIn(".payload_length = SV3_BLOCK_BYTES", authority)
+        self.assertIn(".payload_length = SWAPZ_BLOCK_BYTES", authority)
         self.assertIn("decoded->payload_length != current->payload_length", authority)
-        self.assertIn("ctx->gc_cost_policy", body("sv3_gc_choose_victim"))
-        self.assertIn("gc_selected_live_bytes", body("sv3_gc_choose_victim"))
-        self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("sv3_status"))
+        self.assertIn("ctx->gc_cost_policy", body("swapz_gc_choose_victim"))
+        self.assertIn("gc_selected_live_bytes", body("swapz_gc_choose_victim"))
+        self.assertIn("gc_cost_policy, ctx->coalesce_ms", body("swapz_status"))
 
     def test_worker_close_reasons_cover_dependencies_and_control(self):
-        flush = body("sv3_flush_window")
-        write = body("sv3_accept_write")
-        process = body("sv3_process")
-        worker = body("sv3_worker")
-        status = body("sv3_status")
+        flush = body("swapz_flush_window")
+        write = body("swapz_accept_write")
+        process = body("swapz_process")
+        worker = body("swapz_worker")
+        status = body("swapz_status")
         # The implementation snapshots the primary reason before resetting
         # next_window_close so the singleton cross-tab and legacy marginal
         # counter must index the same captured value.
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
-        self.assertIn("ctx->next_window_close = SV3_CLOSE_UNKNOWN", flush)
+        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN", flush)
         self.assertLess(flush.index("if (!count)"),
                         flush.index("ctx->window_close_reasons[close_reason]++"))
         self.assertIn("ctx->window_gc_pressure++", flush)
         for cause in ("FULL", "DUPLICATE", "ZERO", "FUA", "RAW"):
-            self.assertIn("SV3_CLOSE_" + cause, write)
+            self.assertIn("SWAPZ_CLOSE_" + cause, write)
         for cause in ("PREFLUSH", "READ_CONFLICT", "READ_UNRELATED", "DISCARD"):
-            self.assertIn("SV3_CLOSE_" + cause, process)
+            self.assertIn("SWAPZ_CLOSE_" + cause, process)
         for cause in ("QUANTUM", "IDLE", "SHUTDOWN"):
-            self.assertIn("SV3_CLOSE_" + cause, worker)
+            self.assertIn("SWAPZ_CLOSE_" + cause, worker)
         for status_key in ("close_unknown", "close_full", "close_duplicate",
                            "close_zero", "close_fua", "close_raw",
                            "close_read_conflict", "close_read_unrelated",
@@ -621,21 +621,21 @@ class V3ProductionSourceQualification(unittest.TestCase):
                            "close_idle", "close_shutdown", "close_other",
                            "window_gc_pressure"):
             self.assertIn(status_key + "=%llu", status)
-        self.assertIn("sv3_flush_window(ctx)", process)
-        self.assertIn("sv3_flush_window(ctx)", worker)
+        self.assertIn("swapz_flush_window(ctx)", process)
+        self.assertIn("swapz_flush_window(ctx)", worker)
 
     def test_alpha10_open_age_counts_one_per_window_before_io(self):
-        admitted = body("sv3_window_admit_clock")
-        flush = body("sv3_flush_window")
-        write = body("sv3_accept_write")
-        status = body("sv3_status")
+        admitted = body("swapz_window_admit_clock")
+        flush = body("swapz_flush_window")
+        write = body("swapz_accept_write")
+        status = body("swapz_status")
         self.assertIn("if (!ctx->batch_count)", admitted)
         self.assertIn("ctx->window_first_ns = ktime_get_ns()", admitted)
-        self.assertEqual(write.count("sv3_window_admit_clock(ctx)"), 2)
+        self.assertEqual(write.count("swapz_window_admit_clock(ctx)"), 2)
         self.assertIn("end_ns = ktime_get_ns()", flush)
         self.assertIn("ctx->window_first_ns = 0", flush)
         self.assertLess(flush.index("ctx->window_age_sum_ns += open_age_ns"),
-                        flush.index("sv3_order_window(ctx)"))
+                        flush.index("swapz_order_window(ctx)"))
         for counter in ("window_age_le_100us++",
                         "window_age_101_1000us++", "window_age_gt_1000us++"):
             self.assertIn(counter, flush)
@@ -645,13 +645,13 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("#include <linux/ktime.h>", DM)
 
     def test_alpha20_worker_restores_finite_snapshot_requeue(self):
-        worker = body("sv3_worker")
-        header = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
-        status = body("sv3_status")
+        worker = body("swapz_worker")
+        header = (ROOT / "src/kernel/window-policy.h").read_text()
+        status = body("swapz_status")
         self.assertIn("for (;;)", worker)
-        self.assertIn("remaining = SV3_WORK_QUANTUM_BIOS;", worker)
+        self.assertIn("remaining = SWAPZ_WORK_QUANTUM_BIOS;", worker)
         self.assertLess(worker.index("for (;;)"),
-                        worker.index("remaining = SV3_WORK_QUANTUM_BIOS;"))
+                        worker.index("remaining = SWAPZ_WORK_QUANTUM_BIOS;"))
         self.assertIn("if (!--remaining)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
         self.assertIn("if (ctx->accepting) {", worker)
@@ -660,56 +660,56 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertLess(worker.index("list_splice_init(&local, &ctx->incoming)"),
                         worker.index("ctx->worker_requeues++"))
         self.assertIn("cond_resched();", worker)
-        self.assertNotIn("sv3_worker_can_inline_drain", worker)
-        self.assertNotIn("sv3_worker_can_inline_drain", header)
+        self.assertNotIn("swapz_worker_can_inline_drain", worker)
+        self.assertNotIn("swapz_worker_can_inline_drain", header)
         self.assertNotIn("worker_inline_drains", status)
-        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("sv3_drain"))
-        self.assertIn("drain_workqueue(ctx->workqueue)", body("sv3_drain"))
-        self.assertIn("sv3_flush_window(ctx)", worker)
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("swapz_drain"))
+        self.assertIn("drain_workqueue(ctx->workqueue)", body("swapz_drain"))
+        self.assertIn("swapz_flush_window(ctx)", worker)
 
     def test_alpha22_small_packed_burst_tail_drains_outside_admission_lock(self):
-        flush = body("sv3_flush_window")
-        worker = body("sv3_worker")
-        self.assertIn("bool packed_close = ctx->next_window_close == SV3_CLOSE_PACK_READY",
+        flush = body("swapz_flush_window")
+        worker = body("swapz_worker")
+        self.assertIn("bool packed_close = ctx->next_window_close == SWAPZ_CLOSE_PACK_READY",
                       flush)
         self.assertLess(flush.index("ctx->packed_burst = false"),
                         flush.index("if (!count)"))
         self.assertLess(flush.index("if (error || committed != count)"),
                         flush.index("ctx->packed_burst = packed_close"))
         self.assertLess(worker.index("list_splice_init(&local, &ctx->incoming)"),
-                        worker.index("sv3_window_burst_tail_ready"))
+                        worker.index("swapz_window_burst_tail_ready"))
         idle = worker[worker.index("if (list_empty(&ctx->incoming))"):
-                      worker.index("sv3_window_timer_enabled(ctx->retain_ms)")]
+                      worker.index("swapz_window_timer_enabled(ctx->retain_ms)")]
         self.assertIn("if (ctx->accepting && !ctx->failed &&", idle)
-        self.assertIn("sv3_window_burst_tail_ready(ctx->batch", idle)
+        self.assertIn("swapz_window_burst_tail_ready(ctx->batch", idle)
         self.assertIn("ctx->batch_count, ctx->retain_ms", idle)
         self.assertIn("ctx->engine.max_read_blocks_per_record", idle)
         self.assertIn("ctx->packed_burst", idle)
         self.assertLess(idle.index("spin_unlock_irqrestore(&ctx->queue_lock, flags)"),
-                        idle.index("sv3_flush_window(ctx)"))
-        self.assertIn("ctx->next_window_close = SV3_CLOSE_IDLE", idle)
+                        idle.index("swapz_flush_window(ctx)"))
+        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_IDLE", idle)
         self.assertIn("ctx->burst_tail_flushes++", idle)
         self.assertIn("if (!ctx->batch_count)", idle)
         self.assertIn("ctx->packed_burst = false", idle)
-        self.assertNotIn("ctx->packed_burst", body("sv3_map"))
-        self.assertNotIn("ctx->packed_burst", body("sv3_retention_wake"))
-        self.assertIn("burst_tail_flushes=%llu", body("sv3_status"))
+        self.assertNotIn("ctx->packed_burst", body("swapz_map"))
+        self.assertNotIn("ctx->packed_burst", body("swapz_retention_wake"))
+        self.assertIn("burst_tail_flushes=%llu", body("swapz_status"))
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
-        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
-        lower = body("sv3_lower")
-        accept = body("sv3_accept_write")
-        read = body("sv3_read")
-        flush = body("sv3_flush_window")
-        status = body("sv3_status")
-        self.assertIn("static inline unsigned long long sv3_elapsed_ns", policy)
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        lower = body("swapz_lower")
+        accept = body("swapz_accept_write")
+        read = body("swapz_read")
+        flush = body("swapz_flush_window")
+        status = body("swapz_status")
+        self.assertIn("static inline unsigned long long swapz_elapsed_ns", policy)
         self.assertIn("end_ns >= start_ns ? end_ns - start_ns : 0", policy)
         self.assertIn("section_start = ktime_get_ns();", lower)
         self.assertLess(lower.index("section_start = ktime_get_ns();"),
                         lower.index("error = dm_io("))
         self.assertIn("ctx->lower_read_wall_ns +=", lower)
         self.assertIn("ctx->lower_write_wall_ns +=", lower)
-        self.assertIn("ctx->lz4_wall_ns += sv3_elapsed_ns", accept)
+        self.assertIn("ctx->lz4_wall_ns += swapz_elapsed_ns", accept)
         self.assertLess(accept.index("length = LZ4_compress_fast("),
                         accept.index("ctx->lz4_wall_ns +="))
         self.assertIn("ctx->decode_wall_ns +=", read)
@@ -721,38 +721,38 @@ class V3ProductionSourceQualification(unittest.TestCase):
                     "lower_write_wall_ns", "gc_wall_ns"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
-        self.assertIn("sv3_engine_write_window_batched_read_cap(", flush)
+        self.assertIn("swapz_engine_write_window_batched_read_cap(", flush)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
-        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
-        reorder = body("sv3_order_window")
-        greedy = body("sv3_order_window_greedy")
-        flush = body("sv3_flush_window")
-        self.assertIn("sv3_window_uniform_compressed(", policy)
-        self.assertIn("!pending || !count || count > SV3_MAX_RECORDS", policy)
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        reorder = body("swapz_order_window")
+        greedy = body("swapz_order_window_greedy")
+        flush = body("swapz_flush_window")
+        self.assertIn("swapz_window_uniform_compressed(", policy)
+        self.assertIn("!pending || !count || count > SWAPZ_MAX_RECORDS", policy)
         self.assertIn("pending[0].raw || !pending[0].length", policy)
         self.assertIn("pending[index].raw || pending[index].length != length",
                       policy)
-        self.assertIn("sv3_window_uniform_compressed(ctx->batch", reorder)
+        self.assertIn("swapz_window_uniform_compressed(ctx->batch", reorder)
         self.assertIn("ctx->planned_to_batch[position] = position", reorder)
-        self.assertIn("sv3_order_window_greedy(ctx)", reorder)
-        self.assertLess(reorder.index("sv3_order_window_greedy(ctx)"),
+        self.assertIn("swapz_order_window_greedy(ctx)", reorder)
+        self.assertLess(reorder.index("swapz_order_window_greedy(ctx)"),
                         reorder.index("ctx->planned[position] ="))
         self.assertIn("ctx->used[largest] = 1", greedy)
         self.assertIn("ctx->planned_to_batch[position++] = (u8)largest",
                       greedy)
         self.assertIn("if (index != position)", reorder)
-        self.assertIn("sv3_order_window(ctx)", flush)
-        self.assertIn("sv3_engine_write_window_batched_read_cap", flush)
+        self.assertIn("swapz_order_window(ctx)", flush)
+        self.assertIn("swapz_engine_write_window_batched_read_cap", flush)
 
     def test_alpha16_no_rearm_of_already_queued_retention_timer(self):
-        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
-        worker = body("sv3_worker")
-        status = body("sv3_status")
-        self.assertIn("sv3_retention_timer_needs_arm(", policy)
-        self.assertIn("sv3_window_timer_enabled(retain_ms) && !queued", policy)
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        worker = body("swapz_worker")
+        status = body("swapz_status")
+        self.assertIn("swapz_retention_timer_needs_arm(", policy)
+        self.assertIn("swapz_window_timer_enabled(retain_ms) && !queued", policy)
         self.assertIn("hrtimer_is_queued(&ctx->retention_timer)", worker)
-        self.assertIn("sv3_retention_timer_needs_arm(ctx->retain_ms", worker)
+        self.assertIn("swapz_retention_timer_needs_arm(ctx->retain_ms", worker)
         self.assertLess(worker.index("hrtimer_is_queued(&ctx->retention_timer)"),
                         worker.index("hrtimer_start(&ctx->retention_timer"))
         self.assertIn("ctx->retain_timer_arms++", worker)
@@ -761,54 +761,54 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("HRTIMER_MODE_ABS", worker)
         self.assertIn("retain_timer_arm_skips=%llu", status)
         self.assertIn("ctx->retain_timer_arm_skips", status)
-        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("sv3_drain"))
-        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("sv3_free"))
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("swapz_drain"))
+        self.assertIn("hrtimer_cancel(&ctx->retention_timer)", body("swapz_free"))
 
     def test_alpha15_nonretained_hot_path_skips_unarmed_timer_cancel(self):
-        window = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
-        flush = body("sv3_flush_window")
-        worker = body("sv3_worker")
-        drain = body("sv3_drain")
-        free = body("sv3_free")
-        self.assertIn("static inline int sv3_window_timer_enabled", window)
+        window = (ROOT / "src/kernel/window-policy.h").read_text()
+        flush = body("swapz_flush_window")
+        worker = body("swapz_worker")
+        drain = body("swapz_drain")
+        free = body("swapz_free")
+        self.assertIn("static inline int swapz_window_timer_enabled", window)
         self.assertIn("return retain_ms != 0;", window)
-        self.assertIn("if (sv3_window_timer_enabled(ctx->retain_ms))", flush)
+        self.assertIn("if (swapz_window_timer_enabled(ctx->retain_ms))", flush)
         self.assertIn("hrtimer_cancel(&ctx->retention_timer);", flush)
         self.assertLess(
-            flush.index("if (sv3_window_timer_enabled(ctx->retain_ms))"),
+            flush.index("if (swapz_window_timer_enabled(ctx->retain_ms))"),
             flush.index("hrtimer_cancel(&ctx->retention_timer);"))
-        self.assertIn("sv3_window_timer_enabled(ctx->retain_ms)", worker)
+        self.assertIn("swapz_window_timer_enabled(ctx->retain_ms)", worker)
         self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
         # Drain and free always cancel, even if admission was disabled.
         self.assertIn("hrtimer_cancel(&ctx->retention_timer);", drain)
         self.assertIn("hrtimer_cancel(&ctx->retention_timer);", free)
 
     def test_alpha21_geometry_early_closure_only_after_valid_admission(self):
-        policy = (ROOT / "kernel/extent-v3/window-policy.h").read_text()
-        writer = body("sv3_accept_write")
-        flush = body("sv3_flush_window")
-        status = body("sv3_status")
-        self.assertIn("sv3_window_pack_ready(", policy)
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        writer = body("swapz_accept_write")
+        flush = body("swapz_flush_window")
+        status = body("swapz_status")
+        self.assertIn("swapz_window_pack_ready(", policy)
         self.assertIn("extent_bytes += pending[i].length", policy)
-        self.assertIn("sizeof(struct sv3_header)", policy)
-        self.assertIn("count * sizeof(struct sv3_record)", policy)
+        self.assertIn("sizeof(struct swapz_header)", policy)
+        self.assertIn("count * sizeof(struct swapz_record)", policy)
         for count in (2, 3, 4, 6):
             self.assertIn("count == %dU" % count, policy)
-        self.assertIn("static inline int sv3_window_single_pack_ready(", policy)
-        self.assertIn("static inline int sv3_window_pack_ready(", policy)
-        self.assertIn("sv3_window_extent_fits(", policy)
+        self.assertIn("static inline int swapz_window_single_pack_ready(", policy)
+        self.assertIn("static inline int swapz_window_pack_ready(", policy)
+        self.assertIn("swapz_window_extent_fits(", policy)
         self.assertIn("!retain_ms || read_budget || !pending", policy)
-        self.assertIn("extent_blocks * SV3_BLOCK_BYTES", policy)
+        self.assertIn("extent_blocks * SWAPZ_BLOCK_BYTES", policy)
         self.assertIn("pending[i].raw", policy)
         self.assertLess(writer.index("ctx->batch_count++"),
-                        writer.index("sv3_window_single_pack_ready("))
+                        writer.index("swapz_window_single_pack_ready("))
         self.assertLess(writer.index("ctx->batch_count++"),
-                        writer.index("sv3_window_pack_ready("))
+                        writer.index("swapz_window_pack_ready("))
         self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
                                      writer.index("ctx->batch_count++")),
-                        writer.index("sv3_window_pack_ready("))
-        self.assertIn("ctx->next_window_close = SV3_CLOSE_PACK_READY", writer)
-        worker = body("sv3_worker")
+                        writer.index("swapz_window_pack_ready("))
+        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", writer)
+        worker = body("swapz_worker")
         self.assertIn("ctx->worker_has_immediate_followup", writer)
         self.assertIn("if (ctx->worker_has_immediate_followup)", writer)
         self.assertIn("entry->list.next != &local", worker)
@@ -818,15 +818,15 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("if (ctx->accepted_burst_pack_ready &&", worker)
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
-        self.assertIn("!sv3_retention_expired(ctx)", worker)
-        self.assertLess(worker.index("sv3_process(ctx, entry->bio)"),
+        self.assertIn("!swapz_retention_expired(ctx)", worker)
+        self.assertLess(worker.index("swapz_process(ctx, entry->bio)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)
         self.assertIn("ctx->single_pack_deferrals++", writer)
         self.assertIn("ctx->packed_early_commits++", writer)
-        self.assertIn("sv3_flush_window(ctx)", writer)
+        self.assertIn("swapz_flush_window(ctx)", writer)
         self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
         self.assertIn("accepted_burst_tail_flushes=%llu", status)
@@ -839,15 +839,15 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("accepted_burst_cap3_full_recovery_windows=%llu", status)
         self.assertIn("accepted_burst_cap3_pareto_candidates=%llu", status)
         self.assertIn("bool accepted_burst_extended = ctx->accepted_burst_pack_ready", flush)
-        self.assertIn("sv3_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record", flush)
+        self.assertIn("swapz_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record", flush)
         self.assertIn("if (accepted_burst_extended && !planning_read_cap)", flush)
         self.assertIn("planning_read_cap = 2U", flush)
         self.assertIn("ctx->accepted_burst_read_caps++", flush)
-        self.assertIn("sv3_engine_plan_stats(ctx->planned, compressed_count, 0", flush)
-        self.assertIn("sv3_engine_plan_stats(ctx->planned, compressed_count, 2", flush)
-        self.assertIn("sv3_engine_plan_stats(", flush)
+        self.assertIn("swapz_engine_plan_stats(ctx->planned, compressed_count, 0", flush)
+        self.assertIn("swapz_engine_plan_stats(ctx->planned, compressed_count, 2", flush)
+        self.assertIn("swapz_engine_plan_stats(", flush)
         self.assertIn("ctx->planned, compressed_count, 3", flush)
-        self.assertIn("sv3_window_cap3_pareto_candidate(", flush)
+        self.assertIn("swapz_window_cap3_pareto_candidate(", flush)
         self.assertNotIn("planning_read_cap = 3U", flush)
         self.assertIn("ctx->accepted_burst_cap3_recovered_blocks +=", flush)
         self.assertIn("ctx->accepted_burst_cap3_full_recovery_windows++", flush)
@@ -858,28 +858,28 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         flush.index("ctx->planned, compressed_count, 3"))
         self.assertIn("ctx->accepted_burst_four_extents_avoided +=", flush)
         self.assertIn("ctx->accepted_burst_plan_stats_failures++", flush)
-        self.assertLess(flush.index("sv3_order_window(ctx)"),
-                        flush.index("sv3_engine_plan_stats(ctx->planned"))
-        self.assertLess(flush.index("sv3_engine_plan_stats(ctx->planned"),
-                        flush.index("sv3_engine_write_window_batched_read_cap(&ctx->engine"))
-        self.assertIn("sv3_engine_write_window_batched_read_cap(&ctx->engine", flush)
+        self.assertLess(flush.index("swapz_order_window(ctx)"),
+                        flush.index("swapz_engine_plan_stats(ctx->planned"))
+        self.assertLess(flush.index("swapz_engine_plan_stats(ctx->planned"),
+                        flush.index("swapz_engine_write_window_batched_read_cap(&ctx->engine"))
+        self.assertIn("swapz_engine_write_window_batched_read_cap(&ctx->engine", flush)
         self.assertIn("planning_read_cap);", flush)
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
-        expiry = body("sv3_retention_expired")
-        wake = body("sv3_retention_wake")
-        process = body("sv3_process")
-        worker = body("sv3_worker")
-        mapping = body("sv3_map")
-        drain = body("sv3_drain")
-        ctr = body("sv3_ctr")
-        status = body("sv3_status")
+        expiry = body("swapz_retention_expired")
+        wake = body("swapz_retention_wake")
+        process = body("swapz_process")
+        worker = body("swapz_worker")
+        mapping = body("swapz_map")
+        drain = body("swapz_drain")
+        ctr = body("swapz_ctr")
+        status = body("swapz_status")
         self.assertIn("ctx->window_first_ns", expiry)
-        self.assertIn("sv3_window_retention_expired", expiry)
+        self.assertIn("swapz_window_retention_expired", expiry)
         self.assertIn("ktime_get_ns(), ctx->retain_ms", expiry)
         self.assertNotIn("nsecs_to_jiffies64", DM)
-        self.assertNotIn("sv3_retention_delay", DM)
+        self.assertNotIn("swapz_retention_delay", DM)
         self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
         self.assertIn("ctx->window_first_ns +", worker)
         self.assertIn("ctx->retain_ms * 1000000ULL", worker)
@@ -888,19 +888,19 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("if (ctx->accepting)", wake)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", wake)
         self.assertIn("return HRTIMER_NORESTART", wake)
-        for forbidden in ("sv3_flush_window(", "sv3_complete(", "sv3_lower(",
+        for forbidden in ("swapz_flush_window(", "swapz_complete(", "swapz_lower(",
                           "ctx->batch", "ctx->authority", "ctx->window_first_ns"):
             self.assertNotIn(forbidden, wake)
-        self.assertIn("SV3_CLOSE_DEADLINE", process)
+        self.assertIn("SWAPZ_CLOSE_DEADLINE", process)
         self.assertIn("ctx->deadline_before_bio++", process)
         self.assertIn("ctx->deadline_after_read++", process)
         self.assertIn("ctx->deadline_worker_with_local++", worker)
         self.assertIn("ctx->deadline_worker_empty++", worker)
         self.assertIn("!list_empty(&local)", worker)
-        self.assertIn("sv3_flush_window(ctx)", process)
+        self.assertIn("swapz_flush_window(ctx)", process)
         self.assertIn("ctx->retain_worker_passes++", worker)
         self.assertIn("ctx->retain_timer_arms++", worker)
-        self.assertIn("SV3_CLOSE_SHUTDOWN", worker)
+        self.assertIn("SWAPZ_CLOSE_SHUTDOWN", worker)
         self.assertIn("ctx->batch_count >= ctx->max_window", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", mapping)
         self.assertIn("WRITE_ONCE(ctx->accepting, false)", drain)
@@ -910,7 +910,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
                         drain.index("hrtimer_cancel(&ctx->retention_timer)"))
         self.assertLess(drain.index("hrtimer_cancel(&ctx->retention_timer)"),
                         drain.index("flush_delayed_work(&ctx->worker)"))
-        freeing = body("sv3_free")
+        freeing = body("swapz_free")
         self.assertLess(freeing.index("hrtimer_cancel(&ctx->retention_timer)"),
                         freeing.index("destroy_workqueue(ctx->workqueue)"))
         self.assertLess(ctr.index("hrtimer_setup(&ctx->retention_timer"),
@@ -920,7 +920,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertIn("drain_workqueue(ctx->workqueue)", drain)
         self.assertIn("argc > 10", ctr)
-        self.assertIn("retain > SV3_MAX_RETAIN_MS", ctr)
+        self.assertIn("retain > SWAPZ_MAX_RETAIN_MS", ctr)
         self.assertIn("ctx->retain_ms = retain", ctr)
         for field in ("retain_ms=%u", "retain_passes=%llu",
                       "retain_timer_arms=%llu", "close_deadline=%llu",
@@ -929,11 +929,11 @@ class V3ProductionSourceQualification(unittest.TestCase):
                       "deadline_worker_with_local=%llu",
                       "deadline_worker_empty=%llu"):
             self.assertIn(field, status)
-        self.assertIn("SV3_CLOSE_DEADLINE", DM)
-        self.assertIn("if (bio->bi_opf & REQ_FUA)", body("sv3_accept_write"))
+        self.assertIn("SWAPZ_CLOSE_DEADLINE", DM)
+        self.assertIn("if (bio->bi_opf & REQ_FUA)", body("swapz_accept_write"))
 
     def test_retained_writes_prepare_before_the_deadline(self):
-        mapping = body("sv3_map")
+        mapping = body("swapz_map")
         retained = mapping[mapping.index("} else if (ctx->retain_ms)"):
                            mapping.index("} else if (queue_delayed_work")]
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", retained)
@@ -942,77 +942,77 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("hrtimer_start", mapping)
 
     def test_retained_reads_require_independence_and_abort_on_failure(self):
-        independent = body("sv3_read_is_independent")
-        process = body("sv3_process")
-        flush = body("sv3_flush_window")
+        independent = body("swapz_read_is_independent")
+        process = body("swapz_process")
+        flush = body("swapz_flush_window")
         for fence in ("!READ_ONCE(ctx->accepting)", "ctx->failed",
                       "ctx->authority.in_flight", "ctx->authority.batch_pending",
                       "REQ_PREFLUSH | REQ_FUA"):
             self.assertIn(fence, independent)
-        self.assertIn("sv3_window_read_independent(ctx->batch, ctx->batch_count",
+        self.assertIn("swapz_window_read_independent(ctx->batch, ctx->batch_count",
                       independent)
         self.assertIn("logical, ctx->retain_ms, blocked", independent)
         bypass = process[process.index("if (op == REQ_OP_READ &&"):
                          process.index("if (op != REQ_OP_WRITE ||")]
-        self.assertIn("sv3_read_is_independent(ctx, bio)", bypass)
-        self.assertLess(bypass.index("error = sv3_read(ctx, bio)"),
-                        bypass.index("sv3_fail(ctx, error)"))
-        self.assertLess(bypass.index("sv3_fail(ctx, error)"),
-                        bypass.index("sv3_flush_window(ctx)"))
-        self.assertIn("if (!error && sv3_retention_expired(ctx))", bypass)
-        self.assertLess(bypass.index("sv3_complete(bio, error)"),
-                        bypass.index("if (!error && sv3_retention_expired(ctx))"))
+        self.assertIn("swapz_read_is_independent(ctx, bio)", bypass)
+        self.assertLess(bypass.index("error = swapz_read(ctx, bio)"),
+                        bypass.index("swapz_fail(ctx, error)"))
+        self.assertLess(bypass.index("swapz_fail(ctx, error)"),
+                        bypass.index("swapz_flush_window(ctx)"))
+        self.assertIn("if (!error && swapz_retention_expired(ctx))", bypass)
+        self.assertLess(bypass.index("swapz_complete(bio, error)"),
+                        bypass.index("if (!error && swapz_retention_expired(ctx))"))
         abort = flush[flush.index("if (ctx->failed)"):
-                      flush.index("sv3_order_window(ctx)")]
-        self.assertIn("sv3_complete(ctx->batch[index].bio, error)", abort)
+                      flush.index("swapz_order_window(ctx)")]
+        self.assertIn("swapz_complete(ctx->batch[index].bio, error)", abort)
         self.assertIn("goto accounted;", abort)
         self.assertNotIn("planned_to_batch", abort)
-        self.assertNotIn("sv3_engine_write", abort)
+        self.assertNotIn("swapz_engine_write", abort)
         self.assertLess(flush.index("accounted:"), flush.index("ctx->batch_count = 0"))
-        self.assertIn("retained_read_bypasses=%llu", body("sv3_status"))
+        self.assertIn("retained_read_bypasses=%llu", body("swapz_status"))
 
     def test_gc_status_is_truthful(self):
-        self.assertIn("mode=alpha-live-gc", body("sv3_status"))
-        self.assertNotIn("mode=alpha-no-gc", body("sv3_status"))
+        self.assertIn("mode=alpha-live-gc", body("swapz_status"))
+        self.assertNotIn("mode=alpha-no-gc", body("swapz_status"))
         self.assertIn("experimental live GC", DM)
 
     def test_async_lz4_preparation_overlaps_lower_io_without_publication(self):
-        producer = body("sv3_preparation_worker")
-        accept = body("sv3_accept_write")
-        mapper = body("sv3_map")
-        ordered = body("sv3_worker")
-        lower = body("sv3_lower")
-        finish = body("sv3_complete")
-        release = body("sv3_release_prepared")
-        ctor = body("sv3_ctr")
-        drain = body("sv3_drain")
-        freeing = body("sv3_free")
-        status = body("sv3_status")
-        benchmark = (ROOT / "tools/benchmark-owned-pair.sh").read_text()
+        producer = body("swapz_preparation_worker")
+        accept = body("swapz_accept_write")
+        mapper = body("swapz_map")
+        ordered = body("swapz_worker")
+        lower = body("swapz_lower")
+        finish = body("swapz_complete")
+        release = body("swapz_release_prepared")
+        ctor = body("swapz_ctr")
+        drain = body("swapz_drain")
+        freeing = body("swapz_free")
+        status = body("swapz_status")
+        benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
 
         self.assertIn("module_param_named(async_prepare", DM)
-        self.assertIn("ctx->async_prepare = sv3_async_prepare", ctor)
+        self.assertIn("ctx->async_prepare = swapz_async_prepare", ctor)
         self.assertIn("WQ_MEM_RECLAIM | WQ_UNBOUND", ctor)
         self.assertIn("mempool_create_kmalloc_pool(", ctor)
-        self.assertIn("sema_init(&ctx->preparation_slots, SV3_MAX_RECORDS)", ctor)
+        self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
         self.assertIn("down(&ctx->preparation_slots)", producer)
         self.assertIn("mempool_alloc(ctx->preparation_pool, GFP_NOIO)", producer)
         self.assertIn("LZ4_compress_fast(", producer)
         self.assertIn("complete(&entry->preparation_finished)", producer)
-        for forbidden in ("sv3_complete(", "sv3_finish(", "sv3_stage(",
-                          "sv3_flush_window(", "dm_io(", "bio_endio(",
-                          "sv3_engine_write_window"):
+        for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
+                          "swapz_flush_window(", "dm_io(", "bio_endio(",
+                          "swapz_engine_write_window"):
             self.assertNotIn(forbidden, producer)
         self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
         self.assertLess(mapper.index("list_add_tail(&entry->list"),
                         mapper.index("queue_work(ctx->preparation_workqueue"))
         self.assertIn("wait_for_completion(&entry->preparation_finished)", ordered)
         self.assertLess(ordered.index("wait_for_completion("),
-                        ordered.index("sv3_process(ctx, entry->bio)"))
+                        ordered.index("swapz_process(ctx, entry->bio)"))
         self.assertIn("entry->prepared_page->bytes", accept)
-        self.assertIn("sv3_release_prepared(bio)", accept)
-        self.assertIn("sv3_release_prepared(bio)", finish)
-        self.assertLess(finish.index("sv3_release_prepared(bio)"),
+        self.assertIn("swapz_release_prepared(bio)", accept)
+        self.assertIn("swapz_release_prepared(bio)", finish)
+        self.assertLess(finish.index("swapz_release_prepared(bio)"),
                         finish.index("bio_endio(bio)"))
         self.assertIn("mempool_free(", release)
         self.assertIn("up(entry->preparation_slots)", release)
@@ -1040,7 +1040,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
 
     def test_owned_nullblk_smoke_qualifies_retained_synthetic_faults(self):
-        deploy = (ROOT / "tools/deploy-nullblk.sh").read_text()
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         # These are deliberately pre-submission injections on the already
         # authenticated RAM null_blk lower, not claims about torn/device faults.
         self.assertIn("PASS_RETAINED_SYNTHETIC_WRITE_FAULT=", deploy)
@@ -1072,7 +1072,7 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertIn("SUSPENDED=0", deploy)
         self.assertNotIn("dmsetup remove -f", deploy)
         self.assertNotIn("dmsetup remove --force", deploy)
-        oracle = (ROOT / "tools/device-roundtrip.c").read_text()
+        oracle = (ROOT / "tests/tools/device-roundtrip.c").read_text()
         self.assertIn("--write-series", oracle)
         self.assertIn("--verify-series", oracle)
         self.assertIn("open_flags &= ~O_SYNC", oracle)
@@ -1081,17 +1081,17 @@ class V3ProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("tests/runtime/read-fault.sh", deploy)
 
     def test_map_and_teardown_are_owned(self):
-        admitted = body("sv3_map")
-        drained = body("sv3_drain")
+        admitted = body("swapz_map")
+        drained = body("swapz_drain")
         self.assertIn("dm_per_bio_data(", admitted)
-        self.assertIn("WQ_MEM_RECLAIM", body("sv3_ctr"))
+        self.assertIn("WQ_MEM_RECLAIM", body("swapz_ctr"))
         self.assertIn("drain_workqueue(ctx->workqueue)", drained)
         self.assertLess(drained.index("mod_delayed_work(ctx->workqueue"),
                         drained.index("flush_delayed_work(&ctx->worker)"))
         self.assertLess(drained.index("flush_delayed_work(&ctx->worker)"),
                         drained.index("drain_workqueue(ctx->workqueue)"))
-        self.assertIn("cancel_delayed_work_sync(&ctx->worker)", body("sv3_free"))
-        self.assertIn("destroy_workqueue(ctx->workqueue)", body("sv3_free"))
+        self.assertIn("cancel_delayed_work_sync(&ctx->worker)", body("swapz_free"))
+        self.assertIn("destroy_workqueue(ctx->workqueue)", body("swapz_free"))
         self.assertLess(admitted.index("spin_lock_irqsave(&ctx->queue_lock"),
                         admitted.index("if (!ctx->accepting)"))
         self.assertLess(admitted.index("if (!ctx->accepting)"),

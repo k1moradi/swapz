@@ -27,7 +27,7 @@ from pathlib import Path
 
 PAGE = 4096
 SCHEMA = 1
-CANDIDATES = ("off", "v3")
+CANDIDATES = ("off", "swapz")
 
 
 def sha(data):
@@ -233,7 +233,7 @@ def resolve_owned_nullblk(name, expected_lower_dev,
     return disk.name, disk_dev
 
 
-def validate_v3_table(table, logical_pages, lower_dev, disk_name):
+def validate_swapz_table(table, logical_pages, lower_dev, disk_name):
     """Qualify exactly one V3 mapping on the pinned RAM null_blk.
 
     The target emits the original backing token in STATUSTYPE_TABLE,
@@ -308,7 +308,7 @@ def check_owned_block(path, st, candidate, args, logical_pages):
         table = subprocess.run(["dmsetup", "table", dm_name],
                                check=True, capture_output=True, text=True,
                                timeout=10).stdout
-        v3_config = validate_v3_table(
+        swapz_config = validate_swapz_table(
             table, logical_pages, null_dev, disk_name
         )
     for line in Path("/proc/swaps").read_text().splitlines()[1:]:
@@ -329,7 +329,7 @@ def check_owned_block(path, st, candidate, args, logical_pages):
     return {"device": actual, "owned_nullblk": args.owned_nullblk_name,
             "owned_disk": disk_name, "lower_major_minor": null_dev,
             "dm_uuid": args.expected_dm_uuid if candidate != "off" else None,
-            "v3_config": v3_config if candidate == "v3" else None}
+            "swapz_config": swapz_config if candidate == "swapz" else None}
 
 
 def check_device(args, logical_pages):
@@ -942,9 +942,9 @@ def compare(args):
             ):
                 raise ValueError("INVALID COMPARISON: missing independent lower I/O")
         off_bytes = first["lower_io"]["lower_write_bytes"]
-        v3_bytes = second["lower_io"]["lower_write_bytes"]
+        swapz_bytes = second["lower_io"]["lower_write_bytes"]
         output["lower_write_bytes_saved_fraction"] = (
-            (off_bytes - v3_bytes) / off_bytes if off_bytes else None
+            (off_bytes - swapz_bytes) / off_bytes if off_bytes else None
         )
         # Same useful completed work; may be paced or unpaced.
         # No inference about a fixed physical-disk bandwidth budget.
@@ -959,11 +959,11 @@ def compare(args):
         # gate, never proof that matching rates imply matching BIO arrivals.
         mismatch = abs(achieved[0] - achieved[1]) / max(achieved)
         output["achieved_iops_difference_fraction"] = mismatch
-        output["logical_write_mbps_ratio_v3_to_off"] = (
+        output["logical_write_mbps_ratio_swapz_to_off"] = (
             throughput[1]["logical_write_mbps"] / throughput[0]["logical_write_mbps"]
             if throughput[0]["logical_write_mbps"] > 0 else None
         )
-        output["lower_write_mbps_ratio_v3_to_off"] = (
+        output["lower_write_mbps_ratio_swapz_to_off"] = (
             throughput[1]["lower_write_mbps"] / throughput[0]["lower_write_mbps"]
             if throughput[0]["lower_write_mbps"] > 0 else None
         )

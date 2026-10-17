@@ -8,8 +8,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 BASE = ROOT / "build/tests/package-sandbox"
-VERSION = (ROOT / "kernel/extent-v3/VERSION").read_text().strip()
-SCRIPT = ROOT / "tools/package-dkms.sh"
+VERSION = (ROOT / "src/kernel/VERSION").read_text().strip()
+SCRIPT = ROOT / "packaging/package-dkms.sh"
 
 class PackageLifecycle(unittest.TestCase):
     def setUp(self):
@@ -37,10 +37,10 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                         '-DSWAPZ_VERSION="' + VERSION + '"',
-                        str(ROOT / "userspace/swapz3ctl.c"), "-o",
-                        str(ROOT / "build/userspace/swapz3ctl")], check=True)
+                        str(ROOT / "src/userspace/swapzctl.c"), "-o",
+                        str(ROOT / "build/userspace/swapzctl")], check=True)
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                        str(ROOT / "tools/device-roundtrip.c"), "-o",
+                        str(ROOT / "tests/tools/device-roundtrip.c"), "-o",
                         str(ROOT / "build/tests/device-roundtrip")], check=True)
 
     def invoke(self, command, extra=None):
@@ -53,13 +53,13 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
     def test_install_uninstall_versions_and_safe_cli(self):
         r = self.invoke("install")
         self.assertEqual(r.returncode, 0, r.stderr)
-        binary = self.prefix / "sbin/swapz3ctl"
+        binary = self.prefix / "sbin/swapzctl"
         self.assertTrue(binary.is_file())
         version = subprocess.run([binary, "version"], capture_output=True, text=True)
         self.assertIn(VERSION, version.stdout)
         self.assertEqual(subprocess.run([binary, "status"], capture_output=True).returncode, 0)
         installed_source = self.home / "usr/src" / ("swapz-" + VERSION)
-        self.assertEqual((installed_source / "kernel/extent-v3/VERSION").read_text().strip(), VERSION)
+        self.assertEqual((installed_source / "src/kernel/VERSION").read_text().strip(), VERSION)
         version_from_dkms = subprocess.run(
             ["bash", "-c", 'source "$1"; printf "%s" "$PACKAGE_VERSION"',
              "_", str(installed_source / "dkms.conf")],
@@ -80,9 +80,9 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
         # A future release updates VERSION only: DKMS must read that new
         # value without a matching hand-edit to dkms.conf or package code.
         other = self.home / "synthetic-release"
-        (other / "kernel/extent-v3").mkdir(parents=True)
+        (other / "src/kernel").mkdir(parents=True)
         (other / "dkms.conf").write_bytes((ROOT / "dkms.conf").read_bytes())
-        (other / "kernel/extent-v3/VERSION").write_text("3.0.0-alpha.99\n")
+        (other / "src/kernel/VERSION").write_text("3.0.0-alpha.99\n")
         run = subprocess.run(
             ["bash", "-c", 'source "$1"; printf "%s" "$PACKAGE_VERSION"',
              "_", str(other / "dkms.conf")],
@@ -91,7 +91,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
 
     def test_tamper_and_dkms_failure_keep_owned_files(self):
         self.assertEqual(self.invoke("install").returncode, 0)
-        binary = self.prefix / "sbin/swapz3ctl"
+        binary = self.prefix / "sbin/swapzctl"
         original = binary.read_bytes()
         binary.write_bytes(b"tampered")
         self.assertNotEqual(self.invoke("uninstall").returncode, 0)
@@ -103,7 +103,7 @@ if [[ "$1" == status ]]; then echo 'swapz fake: installed'; fi
     def test_failed_dkms_build_rolls_back(self):
         r = self.invoke("install", {"SWAPZ_FAKE_FAIL_AT": "build"})
         self.assertNotEqual(r.returncode, 0)
-        self.assertFalse((self.prefix / "sbin/swapz3ctl").exists())
+        self.assertFalse((self.prefix / "sbin/swapzctl").exists())
         self.assertFalse((self.home / "usr/src" / ("swapz-" + VERSION)).exists())
         self.assertIn("remove", self.log.read_text().splitlines())
 

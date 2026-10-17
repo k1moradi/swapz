@@ -11,13 +11,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location("swapz_private_test_runner",
-                                               ROOT / "tools/run-tests.py")
+                                               ROOT / "tests/tools/run-tests.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
 def arm(candidate, *, mode, regime):
-    v3 = candidate == "v3"
+    v3 = candidate == "swapz"
     raw_mbps = 14 if regime == "sd_emulated" else 32
     cand_mbps = (20 if mode == 0 else 20.01) if regime == "sd_emulated" else (
         24 if mode == 0 else 24.01)
@@ -100,9 +100,9 @@ def arm(candidate, *, mode, regime):
 
 
 def write_arm(candidate, *, qd, regime):
-    v3 = candidate == "v3"
+    v3 = candidate == "swapz"
     raw = 8.0 if regime == "sd_emulated" else 20.0
-    v3_rate = raw * (0.72 + qd / 200.0)
+    swapz_rate = raw * (0.72 + qd / 200.0)
     logical = 4096 * 4096
     lower = int(logical / 1.40) if v3 else logical
     return {
@@ -111,8 +111,8 @@ def write_arm(candidate, *, qd, regime):
         "fixture_sha256": "b" * 64,
         "trace_sha256": (f"{qd:x}" * 64)[:64],
         "throughput_mbps": {
-            "logical_write_mbps": v3_rate if v3 else raw,
-            "lower_write_mbps": (v3_rate / 1.40) if v3 else raw,
+            "logical_write_mbps": swapz_rate if v3 else raw,
+            "lower_write_mbps": (swapz_rate / 1.40) if v3 else raw,
             "logical_read_mbps": 0.0,
             "logical_write_bytes": logical,
             "logical_read_bytes": 0,
@@ -145,9 +145,9 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=v3-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("V3_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0")
-            out.append("V3_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1")
-            for candidate in (("v3", "off") if i % 2 else ("off", "v3")):
+            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0")
+            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1")
+            for candidate in (("swapz", "off") if i % 2 else ("off", "swapz")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
                 out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
@@ -166,7 +166,7 @@ def synthetic_log():
                 out.append(
                     "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
                     "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-                for candidate in (("v3", "off") if index % 2 else ("off", "v3")):
+                for candidate in (("swapz", "off") if index % 2 else ("off", "swapz")):
                     out.append(json.dumps(write_arm(
                         candidate, qd=qd, regime=regime)))
                 out.append(
@@ -180,7 +180,7 @@ class ReportContract(unittest.TestCase):
     def test_unsupported_owned_storage_delay_tuples_fail_before_privilege(self):
         """Reject arbitrary timer or cap input BEFORE touching host devices."""
         import subprocess
-        script = ROOT / "tools/benchmark-owned-pair.sh"
+        script = ROOT / "tests/tools/benchmark-owned-pair.sh"
         common = ["bash", str(script), "--run-owned-ram-pair",
                   "--profile", "medium", "--retain-ms", "2", "--unpaced"]
         forbidden = (
@@ -212,7 +212,7 @@ class ReportContract(unittest.TestCase):
                      "READY_COUNT=0", "COUNT != READY_COUNT",
                      "--expected-dm-uuid", "timeout --signal=TERM"):
             self.assertIn(gate, source)
-        loaded = (ROOT / "tools/test-loaded.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
         self.assertIn("--write-only-qd", loaded)
@@ -392,15 +392,15 @@ class ReportContract(unittest.TestCase):
 
     def test_mixed_write_diagnostics_missing_or_inconsistent_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["arms"]["v3"]["kernel_write_path"] = None
+        sessions[0]["arms"]["swapz"]["kernel_write_path"] = None
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[3]["arms"]["v3"]["kernel_write_path"]["write_wait_gt4ms"] = 2
+        sessions[3]["arms"]["swapz"]["kernel_write_path"]["write_wait_gt4ms"] = 2
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[2]["arms"]["v3"]["kernel_write_path"]["lz4_wall_ns"] = -1
+        sessions[2]["arms"]["swapz"]["kernel_write_path"]["lz4_wall_ns"] = -1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
@@ -463,11 +463,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCONCLUSIVE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[6]["arms"]["v3"]["packed_read"]["packed_close_delta"] = 0
+        sessions[6]["arms"]["swapz"]["packed_read"]["packed_close_delta"] = 0
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[6]["arms"]["v3"]["packed_read"]["passes"]["sequential"][
+        sessions[6]["arms"]["swapz"]["packed_read"]["passes"]["sequential"][
             "logical_bytes"] = 0
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
@@ -600,8 +600,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("verified fixed volume", reason)
 
     def test_non_root_fixture_never_uses_privileged_evidence_directory(self):
-        loaded = (ROOT / "tools/test-loaded.sh").read_text()
-        private = (ROOT / "tools/benchmark-owned-pair.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        private = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         self.assertIn('mkdir -p "$ROOT/build/tests"', loaded)
         self.assertIn('mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX"', loaded)
         self.assertIn('"$ROOT/build/tests/benchmark-plan."*', loaded)
