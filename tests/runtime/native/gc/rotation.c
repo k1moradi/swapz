@@ -17,59 +17,59 @@
 	return 1; \
 } } while (0)
 
-#define NPHYS (4U * SV3_SEGMENT_BLOCKS)
-static struct sv3_authority a;
-static struct sv3_map maps[16];
-static sv3_u16 live[NPHYS];
-static sv3_u8 classes[NPHYS];
-static sv3_u8 roles[4];
-static sv3_u8 raw[SV3_BLOCK_BYTES];
+#define NPHYS (4U * SWAPZ_SEGMENT_BLOCKS)
+static struct swapz_authority a;
+static struct swapz_map maps[16];
+static swapz_u16 live[NPHYS];
+static swapz_u8 classes[NPHYS];
+static swapz_u8 roles[4];
+static swapz_u8 raw[SWAPZ_BLOCK_BYTES];
 
 static int setup(void)
 {
-	int error = sv3_authority_init(&a, maps, live, classes, 16, NPHYS);
+	int error = swapz_authority_init(&a, maps, live, classes, 16, NPHYS);
 
 	if (error)
 		return error;
 	a.reuse_dead_segments = 1;
 	memset(raw, 0xa5, sizeof(raw));
-	return sv3_enable_segment_rotation(&a, roles, 4);
+	return swapz_enable_segment_rotation(&a, roles, 4);
 }
 
-static int write_raw(sv3_u32 page)
+static int write_raw(swapz_u32 page)
 {
-	struct sv3_tx tx;
-	int error = sv3_stage(&a, &page, 1, 1, &tx);
+	struct swapz_tx tx;
+	int error = swapz_stage(&a, &page, 1, 1, &tx);
 
 	if (error)
 		return error;
-	return sv3_finish_raw(&a, &tx, raw, 1, 0);
+	return swapz_finish_raw(&a, &tx, raw, 1, 0);
 }
 
 /* A small exact-authority mock of an owned lower completion. The payload
  * stays byte-identical and the new generation publishes only after 1/1
  * successful completion. The final role swap validates all mapping refs. */
-static int relocate_all_live_pages(sv3_u32 victim)
+static int relocate_all_live_pages(swapz_u32 victim)
 {
-	struct sv3_tx tx;
-	sv3_u32 page;
+	struct swapz_tx tx;
+	swapz_u32 page;
 	int error;
 
-	error = sv3_gc_begin_rotation(&a, victim);
+	error = swapz_gc_begin_rotation(&a, victim);
 	if (error)
 		return error;
 	for (page = 0; page < 16; ++page) {
 		if (!maps[page].valid ||
-		    maps[page].start_block / SV3_SEGMENT_BLOCKS != victim)
+		    maps[page].start_block / SWAPZ_SEGMENT_BLOCKS != victim)
 			continue;
-		error = sv3_stage(&a, &page, 1, 1, &tx);
+		error = swapz_stage(&a, &page, 1, 1, &tx);
 		if (error)
 			return error;
-		error = sv3_finish_raw(&a, &tx, raw, 1, 0);
+		error = swapz_finish_raw(&a, &tx, raw, 1, 0);
 		if (error)
 			return error;
 	}
-	return sv3_gc_commit_rotation(&a, victim);
+	return swapz_gc_commit_rotation(&a, victim);
 }
 
 static int test_three_rotations_and_foreground_progress(void)
@@ -80,17 +80,17 @@ static int test_three_rotations_and_foreground_progress(void)
 	CHECK(roles[0] == 1 && roles[1] == 1);
 	CHECK(roles[2] == 0 && roles[3] == 0);
 	/* Fill foreground segment 0; retain one live record. */
-	for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 		CHECK(write_raw(0) == 0);
 	CHECK(a.open_segment == 0 && a.next_block == 256);
 	/* Fill segment 1; retain one live record. */
-	for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 		CHECK(write_raw(1) == 0);
 	CHECK(a.open_segment == 1 && a.next_block == 512);
 	CHECK(a.maps[0].start_block == 255 && a.maps[1].start_block == 511);
 	CHECK(write_raw(2) == -ENOSPC);
 	/* GC cannot pick a reserved victim: src must be eligible foreground. */
-	CHECK(sv3_gc_begin_rotation(&a, 2) == -EINVAL);
+	CHECK(swapz_gc_begin_rotation(&a, 2) == -EINVAL);
 	CHECK(relocate_all_live_pages(0) == 0);
 	CHECK(roles[0] == 0 && roles[2] == 1);
 	CHECK(a.open_segment == 2 && a.maps[0].start_block == 512);
@@ -114,7 +114,7 @@ static int test_three_rotations_and_foreground_progress(void)
 	for (cycle = 0; cycle < 4; ++cycle) {
 		CHECK(write_raw(4) == 0);
 		CHECK(maps[4].valid && maps[4].raw_crc32c ==
-		      sv3_crc32c_bytes(raw, sizeof(raw)));
+		      swapz_crc32c_bytes(raw, sizeof(raw)));
 	}
 	CHECK(roles[3] == 0); /* permanent second reserve was untouched */
 	return 0;
@@ -122,26 +122,26 @@ static int test_three_rotations_and_foreground_progress(void)
 
 static int test_failed_handoff_does_not_change_roles(void)
 {
-	struct sv3_tx tx;
-	sv3_u32 page = 1;
-	sv3_u32 saved;
+	struct swapz_tx tx;
+	swapz_u32 page = 1;
+	swapz_u32 saved;
 
 	CHECK(setup() == 0);
-	for (unsigned int i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+	for (unsigned int i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 		CHECK(write_raw(0) == 0);
 	CHECK(write_raw(1) == 0);
 	saved = maps[0].start_block;
-	CHECK(sv3_gc_begin_rotation(&a, 1) == -EINVAL); /* OPEN protected */
+	CHECK(swapz_gc_begin_rotation(&a, 1) == -EINVAL); /* OPEN protected */
 	/* Normal writes never enter segments2/3 when they are reserved. */
 	CHECK(a.next_block == 257);
 	/* Start GC of foreground segment0 but do NOT relocate its live
 	 * page0. Even a staged/aborted reserve write cannot permit the
 	 * source victim to become foreground reusable. */
-	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
-	CHECK(sv3_stage(&a, &page, 1, 1, &tx) == 0);
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+	CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
 	CHECK(tx.start_block >= 512 && tx.start_block < 768);
-	CHECK(sv3_abort(&a, &tx) == 0);
-	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
 	CHECK(roles[0] == 1 && roles[2] == 0);
 	CHECK(maps[0].start_block == saved && live[saved]);
 	return 0;
@@ -153,76 +153,76 @@ static int test_failed_handoff_does_not_change_roles(void)
  * foreground evacuations; a static reserve-tail design fails by relocating
  * live records between segment30 and segment31 without freeing foreground.
  */
-static struct sv3_authority large_a;
-static struct sv3_map large_maps[1024];
-static sv3_u16 large_live[32U * SV3_SEGMENT_BLOCKS];
-static sv3_u8 large_classes[32U * SV3_SEGMENT_BLOCKS];
-static sv3_u8 large_roles[32];
+static struct swapz_authority large_a;
+static struct swapz_map large_maps[1024];
+static swapz_u16 large_live[32U * SWAPZ_SEGMENT_BLOCKS];
+static swapz_u8 large_classes[32U * SWAPZ_SEGMENT_BLOCKS];
+static swapz_u8 large_roles[32];
 
-static int large_write(sv3_u32 page)
+static int large_write(swapz_u32 page)
 {
-	struct sv3_tx tx;
-	int error = sv3_stage(&large_a, &page, 1, 1, &tx);
+	struct swapz_tx tx;
+	int error = swapz_stage(&large_a, &page, 1, 1, &tx);
 
 	if (error)
 		return error;
-	return sv3_finish_raw(&large_a, &tx, raw, 1, 0);
+	return swapz_finish_raw(&large_a, &tx, raw, 1, 0);
 }
 
-static int large_relocate(sv3_u32 segment)
+static int large_relocate(swapz_u32 segment)
 {
-	struct sv3_tx tx;
-	sv3_u32 page;
-	int error = sv3_gc_begin_rotation(&large_a, segment);
+	struct swapz_tx tx;
+	swapz_u32 page;
+	int error = swapz_gc_begin_rotation(&large_a, segment);
 
 	if (error)
 		return error;
 	for (page = 0; page < 1024; ++page) {
 		if (!large_maps[page].valid ||
-		    large_maps[page].start_block / SV3_SEGMENT_BLOCKS != segment)
+		    large_maps[page].start_block / SWAPZ_SEGMENT_BLOCKS != segment)
 			continue;
-		error = sv3_stage(&large_a, &page, 1, 1, &tx);
+		error = swapz_stage(&large_a, &page, 1, 1, &tx);
 		if (error)
 			return error;
-		error = sv3_finish_raw(&large_a, &tx, raw, 1, 0);
+		error = swapz_finish_raw(&large_a, &tx, raw, 1, 0);
 		if (error)
 			return error;
 	}
-	return sv3_gc_commit_rotation(&large_a, segment);
+	return swapz_gc_commit_rotation(&large_a, segment);
 }
 
 static int test_exact_32mib_foreground_progress(void)
 {
-	sv3_u32 segment, i, rotation, reserve_count;
+	swapz_u32 segment, i, rotation, reserve_count;
 
-	CHECK(sv3_authority_init(&large_a, large_maps, large_live,
+	CHECK(swapz_authority_init(&large_a, large_maps, large_live,
 				large_classes, 1024,
-				32U * SV3_SEGMENT_BLOCKS) == 0);
+				32U * SWAPZ_SEGMENT_BLOCKS) == 0);
 	large_a.reuse_dead_segments = 1;
-	CHECK(sv3_enable_segment_rotation(&large_a, large_roles, 32) == 0);
+	CHECK(swapz_enable_segment_rotation(&large_a, large_roles, 32) == 0);
 	for (segment = 0; segment < 30; ++segment)
-		for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+		for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 			CHECK(large_write(segment) == 0);
-	CHECK(large_a.next_block == 30U * SV3_SEGMENT_BLOCKS);
+	CHECK(large_a.next_block == 30U * SWAPZ_SEGMENT_BLOCKS);
 	CHECK(large_write(100) == -ENOSPC);
 	for (rotation = 0; rotation < 8; ++rotation) {
-		sv3_u32 dest;
+		swapz_u32 dest;
 
 		/* Every old foreground victim has one correct live raw page. */
 		CHECK(large_relocate(rotation) == 0);
 		dest = large_maps[rotation].start_block /
-		       SV3_SEGMENT_BLOCKS;
+		       SWAPZ_SEGMENT_BLOCKS;
 		CHECK(dest < 32 && large_roles[dest] == 1);
 		CHECK(large_roles[rotation] == 0);
 		CHECK(large_a.open_segment == dest);
 		CHECK(large_write(100 + rotation) == 0);
 		CHECK(large_maps[100 + rotation].start_block /
-		      SV3_SEGMENT_BLOCKS == dest);
+		      SWAPZ_SEGMENT_BLOCKS == dest);
 		for (i = 0; i <= rotation; ++i)
 			CHECK(large_maps[i].valid &&
 			      large_live[large_maps[i].start_block] &&
 			      large_maps[i].raw_crc32c ==
-			      sv3_crc32c_bytes(raw, sizeof(raw)));
+			      swapz_crc32c_bytes(raw, sizeof(raw)));
 		reserve_count = 0;
 		for (i = 0; i < 32; ++i)
 			if (!large_roles[i])
@@ -242,30 +242,30 @@ static int test_exact_32mib_foreground_progress(void)
  */
 static int test_full_destination_is_not_gc_progress(void)
 {
-	sv3_u32 page;
+	swapz_u32 page;
 
-	CHECK(sv3_authority_init(&large_a, large_maps, large_live,
+	CHECK(swapz_authority_init(&large_a, large_maps, large_live,
 				large_classes, 1024,
-				32U * SV3_SEGMENT_BLOCKS) == 0);
+				32U * SWAPZ_SEGMENT_BLOCKS) == 0);
 	large_a.reuse_dead_segments = 1;
-	CHECK(sv3_enable_segment_rotation(&large_a, large_roles, 32) == 0);
-	for (page = 0; page < SV3_SEGMENT_BLOCKS; ++page)
+	CHECK(swapz_enable_segment_rotation(&large_a, large_roles, 32) == 0);
+	for (page = 0; page < SWAPZ_SEGMENT_BLOCKS; ++page)
 		CHECK(large_write(page) == 0);
 	/* Keep the foreground OPEN segment1 while evacuating segment0. */
 	CHECK(large_write(800) == 0);
 	CHECK(large_a.open_segment == 1);
-	CHECK(sv3_gc_begin_rotation(&large_a, 0) == 0);
+	CHECK(swapz_gc_begin_rotation(&large_a, 0) == 0);
 	CHECK(large_a.gc_destination == 30);
-	for (page = 0; page < SV3_SEGMENT_BLOCKS; ++page)
+	for (page = 0; page < SWAPZ_SEGMENT_BLOCKS; ++page)
 		CHECK(large_write(page) == 0);
-	CHECK(large_a.next_block == 31U * SV3_SEGMENT_BLOCKS);
-	CHECK(sv3_gc_commit_rotation(&large_a, 0) == -ENOSPC);
+	CHECK(large_a.next_block == 31U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(swapz_gc_commit_rotation(&large_a, 0) == -ENOSPC);
 	CHECK(large_roles[0] == 1 && large_roles[30] == 0 &&
 	      large_roles[31] == 0);
-	for (page = 0; page < SV3_SEGMENT_BLOCKS; ++page)
+	for (page = 0; page < SWAPZ_SEGMENT_BLOCKS; ++page)
 		CHECK(large_maps[page].valid &&
 		      large_maps[page].start_block ==
-			      30U * SV3_SEGMENT_BLOCKS + page &&
+			      30U * SWAPZ_SEGMENT_BLOCKS + page &&
 		      large_live[large_maps[page].start_block] == 1);
 	return 0;
 }
@@ -276,41 +276,41 @@ static int test_empty_gc_destination_cannot_rotate_roles(void)
 	/* Calling GC on an otherwise empty foreground source is invalid
 	 * as a progress action: do not turn an untouched empty reserve into
 	 * foreground without actually relocating any survivor. */
-	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
 	CHECK(a.gc_destination == 2 && a.next_block == 512);
-	CHECK(sv3_gc_commit_rotation(&a, 0) == -EUCLEAN);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -EUCLEAN);
 	CHECK(roles[0] == 1 && roles[2] == 0);
 	return 0;
 }
 
 static int test_gc_cannot_spill_into_second_reserve(void)
 {
-	struct sv3_tx tx;
-	sv3_u32 page = 7;
+	struct swapz_tx tx;
+	swapz_u32 page = 7;
 	unsigned int i;
 
 	CHECK(setup() == 0);
 	/* Segment0 remains live while foreground moves to segment1. */
-	for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 		CHECK(write_raw(0) == 0);
 	CHECK(write_raw(1) == 0);
-	CHECK(sv3_gc_begin_rotation(&a, 0) == 0);
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
 	CHECK(a.gc_destination == 2);
 	/* Deliberately consume the WHOLE single GC destination without
 	 * evacuating the source page0. An unsafe collector would spill
 	 * into reserve3, then claim false foreground reclaim progress. */
-	for (i = 0; i < SV3_SEGMENT_BLOCKS; ++i)
+	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS; ++i)
 		CHECK(write_raw(page) == 0);
 	CHECK(a.next_block == 768 && a.open_segment == 2);
-	CHECK(sv3_stage(&a, &page, 1, 1, &tx) == -ENOSPC);
+	CHECK(swapz_stage(&a, &page, 1, 1, &tx) == -ENOSPC);
 	/* A full destination now fails on lack of foreground capacity,
 	 * before the remaining-source-mappings validation. Both reject. */
-	CHECK(sv3_gc_commit_rotation(&a, 0) == -ENOSPC);
+	CHECK(swapz_gc_commit_rotation(&a, 0) == -ENOSPC);
 	CHECK(roles[0] == 1 && roles[1] == 1);
 	CHECK(roles[2] == 0 && roles[3] == 0);
 	CHECK(maps[0].valid && maps[0].start_block == 255);
 	CHECK(live[255] == 1 && maps[0].raw_crc32c ==
-	      sv3_crc32c_bytes(raw, SV3_BLOCK_BYTES));
+	      swapz_crc32c_bytes(raw, SWAPZ_BLOCK_BYTES));
 	CHECK(a.gc_destination == 2); /* fail-closed, not committed */
 	return 0;
 }
@@ -325,6 +325,6 @@ int main(void)
 	CHECK(test_empty_gc_destination_cannot_rotate_roles() == 0); passed++;
 	CHECK(test_gc_cannot_spill_into_second_reserve() == 0); passed++;
 	CHECK(test_full_destination_is_not_gc_progress() == 0); passed++;
-	printf("SV3_ROTATING_GC_TESTS_PASS=%d\n", passed);
+	printf("SWAPZ_ROTATING_GC_TESTS_PASS=%d\n", passed);
 	return 0;
 }

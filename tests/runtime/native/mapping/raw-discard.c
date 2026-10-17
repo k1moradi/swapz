@@ -12,63 +12,63 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: %s\n", \
 	__FILE__, __LINE__, #x); return 1; } } while (0)
 #define NPHYS 1024U
-static struct sv3_authority a;
-static struct sv3_map maps[32];
-static sv3_u16 live[NPHYS];
-static sv3_u8 classes[NPHYS];
-static sv3_u8 disk_page[SV3_BLOCK_BYTES];
+static struct swapz_authority a;
+static struct swapz_map maps[32];
+static swapz_u16 live[NPHYS];
+static swapz_u8 classes[NPHYS];
+static swapz_u8 disk_page[SWAPZ_BLOCK_BYTES];
 
 static int init(void)
 {
-	return sv3_authority_init(&a, maps, live, classes, 32, NPHYS);
+	return swapz_authority_init(&a, maps, live, classes, 32, NPHYS);
 }
 
-static int stage_raw(sv3_u32 page, struct sv3_tx *tx)
+static int stage_raw(swapz_u32 page, struct swapz_tx *tx)
 {
-	return sv3_stage(&a, &page, 1, 1, tx);
+	return swapz_stage(&a, &page, 1, 1, tx);
 }
 
 static int test_raw_write_publish_and_overwrite(void)
 {
-	struct sv3_tx tx;
-	struct sv3_map first;
+	struct swapz_tx tx;
+	struct swapz_map first;
 
 	CHECK(init() == 0);
 	CHECK(stage_raw(2, &tx) == 0);
 	CHECK(tx.start_block == 0 && tx.records[0].generation == 1);
 	memset(disk_page, 0xa5, sizeof(disk_page));
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
 	CHECK(maps[2].valid && maps[2].raw && maps[2].extent_blocks == 1);
 	CHECK(maps[2].generation == 1 && live[0] == 1 && classes[0] == 1);
 	first = maps[2];
 	CHECK(stage_raw(2, &tx) == 0);
 	CHECK(tx.start_block == 1 && tx.records[0].generation == 2);
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
 	CHECK(maps[2].valid && maps[2].raw && maps[2].generation == 2);
 	CHECK(maps[2].start_block == 1 && !live[first.start_block]);
 	CHECK(live[1] == 1 && classes[1] == 1);
-	CHECK(sv3_discard_page(&a, 2) == 0);
+	CHECK(swapz_discard_page(&a, 2) == 0);
 	CHECK(!maps[2].valid && maps[2].generation == 3 && !live[1]);
 	return 0;
 }
 
 static int test_short_write_does_not_publish(void)
 {
-	struct sv3_tx tx;
-	struct sv3_map old;
+	struct swapz_tx tx;
+	struct swapz_map old;
 
 	CHECK(init() == 0);
 	CHECK(stage_raw(3, &tx) == 0);
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
 	old = maps[3];
 	CHECK(stage_raw(3, &tx) == 0);
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 0, -EIO) == -EIO);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 0, -EIO) == -EIO);
 	CHECK(maps[3].start_block == old.start_block);
 	CHECK(maps[3].generation == old.generation && live[old.start_block] == 1);
 	CHECK(!live[tx.start_block] && a.abandoned_blocks == 1);
 	CHECK(stage_raw(3, &tx) == 0);
 	CHECK(tx.start_block == 2);
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 0, 0) == -EIO);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 0, 0) == -EIO);
 	CHECK(maps[3].start_block == old.start_block &&
 	      maps[3].generation == old.generation);
 	CHECK(a.abandoned_blocks == 2 && !a.in_flight);
@@ -77,29 +77,29 @@ static int test_short_write_does_not_publish(void)
 
 static int test_mutated_raw_token_does_not_publish(void)
 {
-	struct sv3_tx tx;
+	struct swapz_tx tx;
 
 	CHECK(init() == 0);
 	CHECK(stage_raw(0, &tx) == 0);
 	tx.records[0].logical_page = 1;
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 1, 0) == -ESTALE);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == -ESTALE);
 	CHECK(a.in_flight && !maps[0].valid && !maps[1].valid);
 	tx.records[0].logical_page = 0;
-	CHECK(sv3_abort(&a, &tx) == 0);
+	CHECK(swapz_abort(&a, &tx) == 0);
 	CHECK(!a.in_flight);
 	return 0;
 }
 
 static int test_raw_descriptor_reads_fail_closed(void)
 {
-	struct sv3_tx tx;
-	struct sv3_decoded decoded;
-	const sv3_u8 *payload;
+	struct swapz_tx tx;
+	struct swapz_decoded decoded;
+	const swapz_u8 *payload;
 
 	CHECK(init() == 0);
 	CHECK(stage_raw(0, &tx) == 0);
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
-	CHECK(sv3_read_authoritative(&a, 0, &maps[0], disk_page, 4096,
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	CHECK(swapz_read_authoritative(&a, 0, &maps[0], disk_page, 4096,
 				     &decoded, &payload) == -EOPNOTSUPP);
 	return 0;
 }
@@ -108,41 +108,41 @@ static int test_discard_generation_overflow_fails_without_mutation(void)
 {
 	CHECK(init() == 0);
 	maps[0].generation = UINT32_MAX;
-	CHECK(sv3_discard_page(&a, 0) == -EOVERFLOW);
+	CHECK(swapz_discard_page(&a, 0) == -EOVERFLOW);
 	CHECK(maps[0].generation == UINT32_MAX && !maps[0].valid);
 	return 0;
 }
 
 static int test_raw_page_crc_rejects_silent_corruption(void)
 {
-	struct sv3_tx tx;
-	sv3_u32 original_crc;
+	struct swapz_tx tx;
+	swapz_u32 original_crc;
 
 	CHECK(init() == 0);
 	memset(disk_page, 0x51, sizeof(disk_page));
 	CHECK(stage_raw(4, &tx) == 0);
-	CHECK(sv3_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
-	CHECK(sv3_verify_raw(&a, 4, disk_page) == 0);
+	CHECK(swapz_finish_raw(&a, &tx, disk_page, 1, 0) == 0);
+	CHECK(swapz_verify_raw(&a, 4, disk_page) == 0);
 	original_crc = maps[4].raw_crc32c;
-	CHECK(original_crc == sv3_crc32c_bytes(disk_page, 4096));
+	CHECK(original_crc == swapz_crc32c_bytes(disk_page, 4096));
 	disk_page[317] ^= 0x80;
-	CHECK(sv3_verify_raw(&a, 4, disk_page) == -EBADMSG);
+	CHECK(swapz_verify_raw(&a, 4, disk_page) == -EBADMSG);
 	CHECK(maps[4].valid && maps[4].generation == 1 &&
 	      maps[4].raw_crc32c == original_crc);
 	disk_page[317] ^= 0x80;
-	CHECK(sv3_verify_raw(&a, 4, disk_page) == 0);
-	CHECK(sv3_discard_page(&a, 4) == 0);
-	CHECK(sv3_verify_raw(&a, 4, disk_page) == -EUCLEAN);
+	CHECK(swapz_verify_raw(&a, 4, disk_page) == 0);
+	CHECK(swapz_discard_page(&a, 4) == 0);
+	CHECK(swapz_verify_raw(&a, 4, disk_page) == -EUCLEAN);
 	return 0;
 }
 
 static int test_missing_raw_buffer_fails_closed(void)
 {
-	struct sv3_tx tx;
+	struct swapz_tx tx;
 
 	CHECK(init() == 0);
 	CHECK(stage_raw(5, &tx) == 0);
-	CHECK(sv3_finish_raw(&a, &tx, NULL, 1, 0) == -EINVAL);
+	CHECK(swapz_finish_raw(&a, &tx, NULL, 1, 0) == -EINVAL);
 	CHECK(!a.in_flight && !maps[5].valid && a.abandoned_blocks == 1);
 	return 0;
 }
@@ -158,6 +158,6 @@ int main(void)
 	CHECK(test_discard_generation_overflow_fails_without_mutation() == 0); passed++;
 	CHECK(test_raw_page_crc_rejects_silent_corruption() == 0); passed++;
 	CHECK(test_missing_raw_buffer_fails_closed() == 0); passed++;
-	printf("SV3_RAW_DISCARD_AUTHORITY_TESTS_PASS=%d\n", passed);
+	printf("SWAPZ_RAW_DISCARD_AUTHORITY_TESTS_PASS=%d\n", passed);
 	return 0;
 }
