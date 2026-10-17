@@ -824,8 +824,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(writer.index("if (bio->bi_opf & REQ_FUA)",
                                      writer.index("ctx->batch_count++")),
                         writer.index("swapz_window_pack_ready("))
-        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", writer)
         worker = body("swapz_worker")
+        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_PACK_READY", worker)
         self.assertIn("ctx->worker_has_immediate_followup", writer)
         self.assertIn("!ctx->worker_has_immediate_followup", writer)
         self.assertNotIn("worker_followup_bios", DM)
