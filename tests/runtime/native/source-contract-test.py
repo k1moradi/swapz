@@ -676,33 +676,24 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("drain_workqueue(ctx->workqueue)", body("swapz_drain"))
         self.assertIn("swapz_flush_window(ctx)", worker)
 
-    def test_small_packed_burst_tail_drains_outside_admission_lock(self):
+    def test_retained_burst_target_learns_only_from_admitted_tail(self):
         flush = body("swapz_flush_window")
         worker = body("swapz_worker")
-        self.assertIn("bool packed_close = ctx->next_window_close == SWAPZ_CLOSE_PACK_READY",
-                      flush)
-        self.assertLess(flush.index("ctx->packed_burst = false"),
-                        flush.index("if (!count)"))
-        self.assertLess(flush.index("if (error || committed != count)"),
-                        flush.index("ctx->packed_burst = packed_close"))
-        self.assertLess(worker.index("list_splice_init(&local, &ctx->incoming)"),
-                        worker.index("swapz_window_burst_tail_ready"))
-        idle = worker[worker.index("if (list_empty(&ctx->incoming))"):
-                      worker.index("swapz_window_timer_enabled(ctx->retain_ms)")]
-        self.assertIn("if (ctx->accepting && !ctx->failed &&", idle)
-        self.assertIn("swapz_window_burst_tail_ready(ctx->batch", idle)
-        self.assertIn("ctx->batch_count, ctx->retain_ms", idle)
-        self.assertIn("ctx->engine.max_read_blocks_per_record", idle)
-        self.assertIn("ctx->packed_burst", idle)
-        self.assertLess(idle.index("spin_unlock_irqrestore(&ctx->queue_lock, flags)"),
-                        idle.index("swapz_flush_window(ctx)"))
-        self.assertIn("ctx->next_window_close = SWAPZ_CLOSE_IDLE", idle)
-        self.assertIn("ctx->burst_tail_flushes++", idle)
-        self.assertIn("if (!ctx->batch_count)", idle)
-        self.assertIn("ctx->packed_burst = false", idle)
-        self.assertNotIn("ctx->packed_burst", body("swapz_map"))
-        self.assertNotIn("ctx->packed_burst", body("swapz_retention_wake"))
-        self.assertIn("burst_tail_flushes=%llu", body("swapz_status"))
+        sample = body("swapz_sample_pack_tail_locked")
+        status = body("swapz_status")
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        self.assertIn("swapz_window_initial_burst_target", policy)
+        self.assertIn("swapz_window_grow_burst_target", policy)
+        self.assertIn("swapz_window_shrink_burst_target", policy)
+        self.assertIn("swapz_window_burst_close_ready", policy)
+        self.assertIn("ctx->retained_chain_completed", flush)
+        self.assertIn("ctx->pack_close_pending_tail_sample = true", flush)
+        self.assertIn("list_for_each_entry(entry, &ctx->incoming, list)", sample)
+        self.assertIn("swapz_plain_retained_write(entry->bio)", sample)
+        self.assertIn("ctx->retained_tail_target = tail", sample)
+        self.assertIn("swapz_sample_pack_tail_locked(ctx)", worker)
+        self.assertIn("swapz_window_shrink_burst_target(", worker)
+        self.assertIn("retained_burst_target=%u", status)
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -848,14 +839,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->accepted_burst_pack_ready = true", writer)
         self.assertIn("ctx->accepted_burst_extensions++", writer)
         self.assertIn("ctx->single_pack_deferred = true", writer)
-        self.assertIn("if ((ctx->accepted_burst_pack_ready ||", worker)
-        self.assertIn("ctx->single_pack_deferred) &&", worker)
+        self.assertIn("swapz_retained_pack_close_ready(ctx)", writer)
+        self.assertIn("swapz_retained_pack_close_ready(ctx)", worker)
         self.assertIn("!ctx->worker_has_immediate_followup", worker)
         self.assertIn("!swapz_retention_expired(ctx)", worker)
         self.assertLess(worker.index("swapz_process(ctx, entry->bio)"),
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("list_splice_tail_init(&ctx->incoming, &local)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
+        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx)"),
+                        worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
         self.assertIn("ctx->accepted_burst_pack_ready = false", flush)

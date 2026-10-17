@@ -197,3 +197,21 @@ not zero blocks it never inspects: block-zero metadata and every requested
 payload block are explicitly populated before validation. Full verify reads
 overwrite the complete compared extent. Native production-C tests poison
 scratch buffers so correctness cannot depend on incidental zero initialization.
+
+
+### Adaptive retained-burst width
+
+A momentarily empty `incoming` list is not sufficient evidence that a retained
+closed-loop write burst ended. The worker starts with a four-record close target
+and marks useful pack geometry without immediately closing it. A later BIO still
+wakes the worker immediately through normal admission; no microsecond grace
+timer, scheduler handoff, spin or sleep is added.
+
+After a successful pack-ready lower write, the worker scans at most
+`max_window` FIFO entries already present in `incoming` under `queue_lock`.
+Only a contiguous prefix of ordinary writes counts. That finite admitted tail
+raises the learned target and supplies a one-shot residual target. Future
+arrivals are never predicted or waited for. A smaller multi-record stream may
+shrink the learned target after one original absolute deadline. Singleton QD1
+adaptation remains separate. The retired one/two-record packed-burst tail
+shortcut must not coexist with this policy.

@@ -61,7 +61,13 @@ WRITE-byte-neutral optimization: any increase in default lower WRITE bytes is a
 rejection regardless of request count.
 
 
-### Next accepted-tail experiment
+### Qualified admitted-tail result and next experiment
+
+Source `b35a72cb5cc92bbb3bbe58b58a031985b62595a4` passed all five
+qualification stages. Same-quantum admitted-tail draining preserved QD8,
+mixed/read behavior and materially reduced async QD4 requests, but faster-model
+async QD4 useful throughput regressed, so it is not promoted over
+`f10a1e0...`.
 
 The next candidate keeps `f10a1e0...` write/read geometry unchanged. When the
 worker reaches its local tail it may append BIOs already present in `incoming`
@@ -72,3 +78,14 @@ that work cannot falsely close a pack that already has an admitted successor.
 This experiment adds no waiting interval and does not relax the accepted-burst
 read cap. A QD4 request reduction therefore tests worker/window chopping rather
 than a new lower-byte-versus-read-amplification tradeoff.
+
+
+### Adaptive retained-burst attribution
+
+The next experiment keeps the accepted-burst cold-read cap at two and does not
+change extent planning. It begins with a four-record target, learns larger
+targets only from ordinary write BIOs already queued when a successful
+pack-ready lower write returns, and allows one smaller multi-record deadline to
+adapt downward. No grace timer or future-arrival wait is added. The write-only
+pilot reports window bins and pack/deadline/idle closures so request changes can
+be attributed to window coalescing rather than planner geometry.

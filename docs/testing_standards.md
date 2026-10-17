@@ -161,3 +161,9 @@ semantics rather than one historical loop spelling. A bounded
 `while (remaining && !list_empty(&local))` plus an explicit decrement is
 equivalent evidence to the retired pre-decrement break idiom only when FIFO
 requeue, the hard quantum, and cooperative rescheduling remain asserted.
+
+
+Write-only QD qualification records window-size bins and pack-ready/deadline/
+idle close deltas for every QD/mode pair, plus the final learned retained-burst
+target. These are attribution only and cannot substitute for throughput, lower
+bytes, latency or correctness acceptance.

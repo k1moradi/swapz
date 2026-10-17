@@ -192,95 +192,30 @@ static int test_pack_ready_rejects_raw_and_unfittable(void)
 	return 0;
 }
 
-static int test_burst_tail_one_two_and_mixed_compressed_records(void)
+static int test_retained_burst_target_adapts_from_finite_evidence(void)
 {
-	struct swapz_pending_bio tail[2] = {
-		{ .logical = 10, .length = 2073 },
-		{ .logical = 11, .length = 2073 },
-	};
-	struct swapz_pending_bio snapshot[2];
-	unsigned int retain;
-
-	memcpy(snapshot, tail, sizeof(tail));
-	for (retain = 1; retain <= 4; ++retain) {
-		CHECK(swapz_window_burst_tail_ready(tail, 1,
-					(swapz_u8)retain, 0, 1));
-		CHECK(swapz_window_burst_tail_ready(tail, 2,
-					(swapz_u8)retain, 0, 1));
-	}
-	CHECK(!memcmp(tail, snapshot, sizeof(tail)));
-	/* The tail rule intentionally admits medium pairs that cannot form
-	 * a useful 4KiB pack; an earlier group earned the burst history. */
-	CHECK(!swapz_window_pack_ready(tail, 2, 2, 0));
-	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-	tail[0].length = 1;
-	tail[1].length = SWAPZ_MAX_COMPRESSED;
-	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-	tail[0].length = SWAPZ_MAX_COMPRESSED;
-	tail[1].length = 1;
-	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	swapz_u8 target = swapz_window_initial_burst_target(SWAPZ_MAX_RECORDS);
+	CHECK(swapz_window_initial_burst_target(0) == 0);
+	CHECK(swapz_window_initial_burst_target(3) == 3);
+	CHECK(target == 4);
+	CHECK(swapz_window_grow_burst_target(target, 4, 4, SWAPZ_MAX_RECORDS) == 8);
+	CHECK(swapz_window_grow_burst_target(8, 8, 8, SWAPZ_MAX_RECORDS) == 16);
+	CHECK(swapz_window_grow_burst_target(48, 48, 32, SWAPZ_MAX_RECORDS) == SWAPZ_MAX_RECORDS);
+	CHECK(swapz_window_shrink_burst_target(32, 8) == 8);
+	CHECK(swapz_window_shrink_burst_target(4, 3) == 3);
+	CHECK(swapz_window_shrink_burst_target(4, 1) == 4);
 	return 0;
 }
-
-static int test_burst_tail_requires_retention_history_and_safe_bounds(void)
+static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 {
-	struct swapz_pending_bio tail = { .logical = 10, .length = 2073 };
-	unsigned int budget;
-
-	CHECK(!swapz_window_burst_tail_ready(&tail, 1, 0, 0, 1));
-	CHECK(!swapz_window_burst_tail_ready(&tail, 1, 2, 0, 0));
-	for (budget = 1; budget <= 3; ++budget)
-		CHECK(!swapz_window_burst_tail_ready(&tail, 1, 2,
-					(swapz_u8)budget, 1));
-	CHECK(!swapz_window_burst_tail_ready(NULL, 1, 2, 0, 1));
-	CHECK(!swapz_window_burst_tail_ready(&tail, 0, 2, 0, 1));
-	/* Bounds rejection must precede any attempted access past tail. */
-	CHECK(!swapz_window_burst_tail_ready(&tail, 3, 2, 0, 1));
-	CHECK(!swapz_window_burst_tail_ready(&tail, SWAPZ_MAX_RECORDS, 2, 0, 1));
-	CHECK(!swapz_window_burst_tail_ready(&tail, SWAPZ_MAX_RECORDS + 1,
-					2, 0, 1));
-	CHECK(!swapz_window_burst_tail_ready(NULL, 2, 2, 0, 1));
-	return 0;
-}
-
-static int test_burst_tail_rejects_each_raw_invalid_and_duplicate_record(void)
-{
-	struct swapz_pending_bio tail[2] = {
-		{ .logical = 10, .length = 2073 },
-		{ .logical = 11, .length = 2073 },
-	};
-	swapz_u8 index;
-
-	for (index = 0; index < 2; ++index) {
-		tail[index].raw = 1;
-		tail[index].length = SWAPZ_BLOCK_BYTES;
-		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-		/* A short length must not hide a RAW classification. */
-		tail[index].length = 100;
-		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-		tail[index].raw = 0;
-		tail[index].length = 0;
-		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-		tail[index].length = SWAPZ_MAX_COMPRESSED + 1U;
-		CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-		tail[index].length = 2073;
-	}
-	tail[0].raw = 1;
-	CHECK(!swapz_window_burst_tail_ready(tail, 1, 2, 0, 1));
-	tail[0].raw = 0;
-	tail[0].length = 0;
-	CHECK(!swapz_window_burst_tail_ready(tail, 1, 2, 0, 1));
-	tail[0].length = SWAPZ_MAX_COMPRESSED + 1U;
-	CHECK(!swapz_window_burst_tail_ready(tail, 1, 2, 0, 1));
-	tail[0].length = 2073;
-	tail[1].logical = tail[0].logical;
-	CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-	/* Even extreme valid logical identifiers use exact slot equality. */
-	tail[0].logical = ~(swapz_u32)0;
-	tail[1].logical = ~(swapz_u32)0;
-	CHECK(!swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
-	tail[1].logical = 0;
-	CHECK(swapz_window_burst_tail_ready(tail, 2, 2, 0, 1));
+	CHECK(!swapz_window_burst_close_ready(0, 3, 4, 0));
+	CHECK(!swapz_window_burst_close_ready(1, 3, 4, 0));
+	CHECK(swapz_window_burst_close_ready(1, 4, 4, 0));
+	CHECK(!swapz_window_burst_close_ready(1, 7, 8, 0));
+	CHECK(swapz_window_burst_close_ready(1, 8, 8, 0));
+	CHECK(swapz_window_burst_close_ready(0, 1, 8, 1));
+	CHECK(!swapz_window_burst_close_ready(0, 2, 8, 3));
+	CHECK(swapz_window_burst_close_ready(0, 3, 8, 3));
 	return 0;
 }
 
@@ -442,9 +377,8 @@ int main(void)
 	CHECK(test_pack_ready_waits_for_second_medium_pack() == 0); passed++;
 	CHECK(test_pack_ready_small_and_medium_exact_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
-	CHECK(test_burst_tail_one_two_and_mixed_compressed_records() == 0); passed++;
-	CHECK(test_burst_tail_requires_retention_history_and_safe_bounds() == 0); passed++;
-	CHECK(test_burst_tail_rejects_each_raw_invalid_and_duplicate_record() == 0); passed++;
+	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
+	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_rearm_requires_retention_and_unqueued_timer() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;

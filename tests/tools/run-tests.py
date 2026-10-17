@@ -67,6 +67,10 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
+SATURATION_WINDOW_FIELDS = (
+    "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
+    "win9_16", "win17_64", "close_idle", "close_deadline",
+    "close_pack_ready")
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 
 
@@ -358,7 +362,7 @@ def parse_sessions(output):
         elif current is not None and line.startswith(("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
             name = "before" if line.startswith("SWAPZ_STATUS_BEFORE=") else "after"
             status_text = line.partition("=")[2]
-            allowed = ("burst_tail_flushes", "packed_early_commits",
+            allowed = ("packed_early_commits",
                        "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                        "windows", "one_page_windows", "gc_victims",
@@ -480,6 +484,22 @@ def parse_write_saturation(output):
                     "completion_nsec": int(match.group(2)),
                     "irqmode": int(match.group(3)),
                 }
+        elif current is not None and line.startswith(
+                ("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
+            name = "before" if line.startswith("SWAPZ_STATUS_BEFORE=") else "after"
+            status_text = line.partition("=")[2]
+            parsed = {
+                key: int(match.group(1))
+                for key in SATURATION_WINDOW_FIELDS
+                if (match := re.search(
+                    r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", status_text))
+            }
+            target = re.search(
+                r"(?:^|\s)retained_burst_target=(\d+)(?:\s|$)",
+                status_text)
+            if target:
+                parsed["retained_burst_target"] = int(target.group(1))
+            current.setdefault("kernel_status", {})[name] = parsed
         elif current is not None and line.startswith("{"):
             try:
                 obj = json.loads(line)
@@ -549,6 +569,22 @@ def write_saturation_verdict(sessions):
                     for key in ("cap_mib_s", "completion_nsec", "irqmode")):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only device model mismatch"}
+            status = row.get("kernel_status", {})
+            before = status.get("before", {})
+            after = status.get("after", {})
+            if (any(type(before.get(field)) is not int or
+                    type(after.get(field)) is not int or
+                    after[field] < before[field]
+                    for field in SATURATION_WINDOW_FIELDS) or
+                    type(after.get("retained_burst_target")) is not int or
+                    not 1 <= after["retained_burst_target"] <= 64):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: write-only window attribution missing"}
+            row["window_delta"] = {
+                field: after[field] - before[field]
+                for field in SATURATION_WINDOW_FIELDS
+            }
+            row["retained_burst_target"] = after["retained_burst_target"]
             for arm in row["arms"].values():
                 required = ("input_write_mbps", "output_lower_write_mbps",
                             "logical_write_bytes", "logical_read_bytes",
@@ -600,6 +636,8 @@ def write_saturation_verdict(sessions):
                 "swapz_lower_write_requests": row["arms"]["swapz"]["lower_write_requests"],
                 "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
                 "swapz_write_p99_ms": row["arms"]["swapz"]["write_p99_ms"],
+                "window_delta": row["window_delta"],
+                "retained_burst_target": row["retained_burst_target"],
             } for row in rows]
             for regime, rows in regimes.items()
         },
@@ -640,7 +678,7 @@ def benchmark_verdicts(sessions):
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
         status = row.get("kernel_status", {})
-        for field in ("burst_tail_flushes", "packed_early_commits",
+        for field in ("packed_early_commits",
                       "single_pack_deferrals", "accepted_burst_extensions",
                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                        "windows",
@@ -652,7 +690,7 @@ def benchmark_verdicts(sessions):
                         "reason": "missing or invalid kernel packed/GC counters"}
         row["kernel_counter_delta"] = {
             key: status["after"][key] - status["before"][key]
-            for key in ("burst_tail_flushes", "packed_early_commits",
+            for key in ("packed_early_commits",
                         "single_pack_deferrals", "accepted_burst_extensions",
                         "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                         "windows",
@@ -799,7 +837,7 @@ def benchmark_verdicts(sessions):
             "kernel_counters": {
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
-                for key in ("burst_tail_flushes", "packed_early_commits",
+                for key in ("packed_early_commits",
                             "single_pack_deferrals", "accepted_burst_extensions",
                             "accepted_burst_tail_flushes", "accepted_burst_read_caps",
                             "windows",
@@ -906,7 +944,6 @@ def print_bench(result):
               f"accepted-burst tail closes={kc['accepted_burst_tail_flushes']:.1f}, "
               f"read-capped accepted windows={kc['accepted_burst_read_caps']:.1f}, "
               f"early pack closes={kc['close_pack_ready']:.1f}, "
-              f"burst tails={kc['burst_tail_flushes']:.1f}, "
               f"one-page windows={kc['one_page_windows']:.1f}, "
               f"GC victims={kc['gc_victims']:.1f}")
         closes = ", ".join(
@@ -956,6 +993,15 @@ def print_bench(result):
                       f"{point['swapz_lower_write_requests']:>8.0f} "
                       f"{point['raw_write_p99_ms']:>10.2f} "
                       f"{point['swapz_write_p99_ms']:>9.2f}")
+            for point in saturation["regimes"][regime]:
+                wd = point["window_delta"]
+                print(
+                    f"      QD{point['qd']} {point['mode']} windows: "
+                    f"1={wd['win1']} 2={wd['win2']} 3-4={wd['win3_4']} "
+                    f"5-8={wd['win5_8']} 9-16={wd['win9_16']} "
+                    f"17-64={wd['win17_64']} close(pack/deadline/idle)="
+                    f"{wd['close_pack_ready']}/{wd['close_deadline']}/"
+                    f"{wd['close_idle']} target={point['retained_burst_target']}")
         print("  PILOT LIMITATION: one pair per mode/QD; no confidence interval "
               "and no confirmatory performance verdict.")
     else:

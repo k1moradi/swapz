@@ -203,17 +203,18 @@ struct swapz_dm {
 	 */
 	bool worker_has_immediate_followup;
 	/*
-	 * A useful first pack was kept open only to consume that finite
-	 * accepted tail. Close it when the accepted tail is exhausted.
+	 * Useful pack geometry remains open until the learned retained-burst
+	 * width. A one-shot tail target drains only already-admitted BIOs.
 	 */
 	bool single_pack_deferred;
 	bool accepted_burst_pack_ready;
 	u64 accepted_burst_extensions;
 	u64 accepted_burst_tail_flushes;
 	u64 accepted_burst_read_caps;
-	/* Worker-owned history for one accepted burst, never a BIO owner. */
-	bool packed_burst;
-	u64 burst_tail_flushes;
+	swapz_u8 retained_burst_target;
+	swapz_u8 retained_tail_target;
+	swapz_u8 retained_chain_completed;
+	bool pack_close_pending_tail_sample;
 	u64 window_records_total;
 	/* Worker-owned telemetry only; status is a diagnostic snapshot. */
 	enum swapz_window_close_reason next_window_close;
@@ -1043,12 +1044,13 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	u64 end_ns, open_age_ns, section_start;
 	int error = 0;
 
-	/* Empty fences, deadline, failure and ordinary closures end a burst.
-	 * Re-enable tail eligibility only after an entire pack-ready window
-	 * has succeeded through the original publication/completion path. */
-	ctx->packed_burst = false;
 	ctx->single_pack_deferred = false;
 	ctx->accepted_burst_pack_ready = false;
+	ctx->retained_tail_target = 0;
+	if (!packed_close) {
+		ctx->pack_close_pending_tail_sample = false;
+		ctx->retained_chain_completed = 0;
+	}
 	/* A real multi-record window disproves isolated closed-loop behavior.
 	 * Before bypass is learned, any non-deadline singleton also breaks the
 	 * consecutive-deadline evidence chain. Learned singleton fast-close
@@ -1190,10 +1192,20 @@ accounted:
 	}
 	ctx->batch_count = 0;
 	if (error || committed != count) {
+		ctx->retained_chain_completed = 0;
+		ctx->pack_close_pending_tail_sample = false;
 		swapz_fail(ctx, error ? error : -EIO);
 		return error ? error : -EIO;
 	}
-	ctx->packed_burst = packed_close;
+	if (packed_close) {
+		unsigned int chain = (unsigned int)ctx->retained_chain_completed + count;
+		ctx->retained_chain_completed = (swapz_u8)min_t(
+			unsigned int, chain, ctx->max_window);
+		ctx->pack_close_pending_tail_sample = true;
+	} else {
+		ctx->retained_chain_completed = 0;
+		ctx->pack_close_pending_tail_sample = false;
+	}
 	return 0;
 }
 
@@ -1252,6 +1264,45 @@ static void swapz_refresh_accepted_followup(struct swapz_dm *ctx)
 		ctx->singleton_deadline_streak = 0;
 		ctx->singleton_fast_close = false;
 	}
+}
+
+static bool swapz_plain_retained_write(const struct bio *bio)
+{
+	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
+		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
+}
+static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx)
+{
+	struct swapz_bio_ref *entry;
+	swapz_u8 tail = 0;
+	swapz_u8 room;
+	if (!ctx->pack_close_pending_tail_sample)
+		return;
+	room = ctx->retained_chain_completed < ctx->max_window ?
+		ctx->max_window - ctx->retained_chain_completed : 0;
+	list_for_each_entry(entry, &ctx->incoming, list) {
+		if (!room || !swapz_plain_retained_write(entry->bio))
+			break;
+		tail++;
+		room--;
+	}
+	if (tail) {
+		ctx->retained_burst_target = swapz_window_grow_burst_target(
+			ctx->retained_burst_target, ctx->retained_chain_completed,
+			tail, ctx->max_window);
+		ctx->retained_tail_target = tail;
+	} else {
+		ctx->retained_chain_completed = 0;
+		ctx->retained_tail_target = 0;
+	}
+	ctx->pack_close_pending_tail_sample = false;
+}
+static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
+{
+	return swapz_window_burst_close_ready(
+		ctx->single_pack_deferred || ctx->accepted_burst_pack_ready,
+		ctx->batch_count, ctx->retained_burst_target,
+		ctx->retained_tail_target);
 }
 
 static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
@@ -1418,36 +1469,26 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	if (bio->bi_opf & REQ_FUA) {
 		ctx->next_window_close = SWAPZ_CLOSE_FUA;
 		swapz_flush_window(ctx);
-	} else if (swapz_window_single_pack_ready(ctx->batch,
-					      ctx->batch_count,
-					      ctx->retain_ms,
-					      ctx->engine.max_read_blocks_per_record)) {
-		/*
-		 * If any successor BIO is already accepted in this finite worker
-		 * snapshot, keep the first useful pack open without another timer
-		 * wait. The worker flushes when that accepted tail is exhausted,
-		 * letting QD4/QD8 waves reach the batched lower-run writer once.
-		 */
-		if (ctx->worker_has_immediate_followup) {
+	} else {
+		if (swapz_window_single_pack_ready(ctx->batch, ctx->batch_count,
+				ctx->retain_ms, ctx->engine.max_read_blocks_per_record) &&
+		    !ctx->single_pack_deferred) {
 			ctx->single_pack_deferred = true;
 			ctx->single_pack_deferrals++;
-		} else {
-			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
-			ctx->packed_early_commits++;
-			swapz_flush_window(ctx);
 		}
-	} else if (swapz_window_pack_ready(ctx->batch, ctx->batch_count,
-					ctx->retain_ms,
-					ctx->engine.max_read_blocks_per_record)) {
-		/* Once a second pack exists, consume only work already accepted
-		 * in this worker-local snapshot. This adds no timer wait and lets
-		 * the existing no-padding bulk writer see a larger batch. */
-		if (ctx->worker_has_immediate_followup) {
+		if (swapz_window_pack_ready(ctx->batch, ctx->batch_count,
+				ctx->retain_ms, ctx->engine.max_read_blocks_per_record) &&
+		    !ctx->accepted_burst_pack_ready) {
 			ctx->accepted_burst_pack_ready = true;
 			ctx->accepted_burst_extensions++;
-		} else {
+		}
+		if (swapz_retained_pack_close_ready(ctx) &&
+		    !ctx->worker_has_immediate_followup &&
+		    !swapz_retention_expired(ctx)) {
 			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
+			if (ctx->accepted_burst_pack_ready)
+				ctx->accepted_burst_tail_flushes++;
 			swapz_flush_window(ctx);
 		}
 	}
@@ -1789,6 +1830,7 @@ static void swapz_worker(struct work_struct *work)
 			 */
 			if (remaining > 1U && list_empty(&local)) {
 				spin_lock_irqsave(&ctx->queue_lock, flags);
+				swapz_sample_pack_tail_locked(ctx);
 				if (!list_empty(&ctx->incoming)) {
 					list_splice_tail_init(&ctx->incoming, &local);
 					ctx->worker_has_immediate_followup = true;
@@ -1799,8 +1841,7 @@ static void swapz_worker(struct work_struct *work)
 					ctx->singleton_fast_close = false;
 				}
 			}
-			if ((ctx->accepted_burst_pack_ready ||
-			     ctx->single_pack_deferred) &&
+			if (swapz_retained_pack_close_ready(ctx) &&
 			    !ctx->worker_has_immediate_followup &&
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
@@ -1851,6 +1892,13 @@ static void swapz_worker(struct work_struct *work)
 					} else {
 						ctx->singleton_deadline_streak = 0;
 						ctx->singleton_fast_close = false;
+						if ((ctx->single_pack_deferred ||
+						     ctx->accepted_burst_pack_ready) &&
+						    !ctx->retained_tail_target)
+							ctx->retained_burst_target =
+								swapz_window_shrink_burst_target(
+									ctx->retained_burst_target,
+									ctx->batch_count);
 					}
 				}
 			} else {
@@ -1863,6 +1911,7 @@ static void swapz_worker(struct work_struct *work)
 		}
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
+		swapz_sample_pack_tail_locked(ctx);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
@@ -1881,30 +1930,6 @@ static void swapz_worker(struct work_struct *work)
 				swapz_flush_window(ctx);
 				return;
 			}
-			/* A useful packed group has already completed in this
-			 * burst. Drain its small compressed tail when no accepted
-			 * BIO can join it now. Completion releases finite-QD
-			 * issuers to submit more work without a full timer wait.
-			 * Keep initial singleton retention and larger/RAW tails.
-			 * The local remainder was spliced above: BOTH queues
-			 * are empty under the same admission lock as ->map(). */
-			if (ctx->accepting && !ctx->failed &&
-			    swapz_window_burst_tail_ready(ctx->batch,
-				ctx->batch_count, ctx->retain_ms,
-				ctx->engine.max_read_blocks_per_record,
-				ctx->packed_burst)) {
-				ctx->packed_burst = false;
-				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
-				ctx->burst_tail_flushes++;
-				/* Flush cancels the timer and completes owners;
-				 * never run it while holding queue_lock. New
-				 * arrivals remain scheduled for a later pass. */
-				swapz_flush_window(ctx);
-				return;
-			}
-			if (!ctx->batch_count)
-				ctx->packed_burst = false;
 			if (ctx->batch_count &&
 			    swapz_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
@@ -2197,6 +2222,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ti->private = ctx;
 	ctx->target = ti;
 	ctx->max_window = (swapz_u8)window;
+	ctx->retained_burst_target =
+		swapz_window_initial_burst_target(ctx->max_window);
 	ctx->gc_cost_policy = gc_policy;
 	ctx->retain_ms = retain;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
@@ -2465,7 +2492,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
-		       "burst_tail_flushes=%llu "
+		       "retained_burst_target=%u "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_meta_lru_hits=%u "
@@ -2567,7 +2594,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_burst_extensions,
 		       ctx->accepted_burst_tail_flushes,
 		       ctx->accepted_burst_read_caps,
-		       ctx->burst_tail_flushes,
+		       ctx->retained_burst_target,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,
 		       ctx->engine.read_payload_blocks,

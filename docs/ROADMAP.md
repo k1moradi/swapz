@@ -8,9 +8,12 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` passed all
-five qualification stages and is the current accepted directional performance
-baseline. It retained the 512-entry metadata-LRU random-read savings, reduced
+Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
+accepted directional performance baseline. Source
+`b35a72cb5cc92bbb3bbe58b58a031985b62595a4` also passed all five stages and
+is useful exploratory evidence, but is not promoted: QD4 requests fell
+materially in async mode while faster-model async QD4 useful throughput also
+fell, so request reduction alone does not satisfy acceptance. It retained the 512-entry metadata-LRU random-read savings, reduced
 slow mixed-QD32 lower WRITE requests to about 762-764 with only two mean
 deadline closes, and recovered write-only QD8 to about 0.89x raw on the slow
 model and up to 0.77x raw on the faster model. Faster-model async mixed QD32
@@ -35,23 +38,19 @@ These cleanup revisions, the alignment-aware adjacent lower-run tie-break and th
 
 ## Immediate work queue
 
-1. Qualify same-quantum accepted-tail draining: refresh `incoming` after
-   preparation/compression and append already-admitted tail BIOs to the worker's
-   local FIFO without waiting for future arrivals or exceeding 64 BIOs.
-2. Acceptance requires QD4 lower WRITE requests to fall materially from the
-   current ~2-per-wave shape without regressing QD1/QD8, mixed lower bytes,
-   read tails, lifecycle correctness or fail-closed behavior.
-3. Keep the accepted-burst read cap at two for this experiment so any QD4
-   request change is attributable to window chopping rather than a changed
-   16KiB/read-amplification tradeoff. The same candidate removes
-   byte/request-neutral full-buffer clears; monitor CPU/throughput without
-   attributing lower-I/O changes to that scratch optimization.
-4. If QD4 remains split after this worker change, add only the minimum
-   write-only window-size/close attribution needed to distinguish pack closure
-   from lower-run fragmentation, then remove it after the decision.
-5. Expand the saturation study to at least five counterbalanced pairs only
-   after the C policy stabilizes; separately qualify sustained live GC,
-   real lower-error behavior, resource pressure and larger controlled reads.
+1. Qualify adaptive retained-burst width learned only from finite admitted
+   tails observed after synchronous lower writes, with one-deadline downward
+   adaptation for a smaller multi-record stream.
+2. Report write-only QD window bins plus pack/deadline/idle closures. Accept
+   request reductions only when they come with acceptable useful throughput,
+   lower bytes, QD1/QD8 behavior, read tails and correctness.
+3. Keep the accepted-burst planner read cap at two and physical layout policy
+   unchanged. If large windows still issue multiple requests, then investigate
+   lower-run/allocator geometry separately.
+4. Keep asynchronous-preparation QD1 scheduling as a separate experiment after
+   burst closure stabilizes.
+5. Add statistically repeated saturation only after policy stabilizes; keep
+   sustained live GC, genuine lower errors and resource pressure as open gates.
 
 ## Release gates
 

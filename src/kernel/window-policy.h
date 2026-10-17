@@ -116,29 +116,54 @@ static inline int swapz_window_pack_ready(
 }
 
 /*
- * Once this accepted burst has already committed a useful packed group,
- * an idle worker may finish its one/two compressed records without another
- * retention wait. Initial lone writes retain their ordinary opportunity
- * to collect companions. The serialized caller supplies packed_burst only
- * after a successful packed commit and owns all idle/dependency fences.
- * This predicate neither establishes that history nor completes a BIO.
+ * Retained windows learn only from closed-loop evidence already observable
+ * without waiting for a future arrival. Start at four records. A successful
+ * pack-ready close may expose a finite admitted tail accumulated while lower
+ * I/O was in flight; that tail raises the learned target, capped by max_window.
+ * A later smaller multi-record deadline may shrink it. QD1 remains separate.
  */
-static inline int swapz_window_burst_tail_ready(
-		const struct swapz_pending_bio *pending, swapz_u8 count,
-		swapz_u8 retain_ms, swapz_u8 read_budget, int packed_burst)
+static inline swapz_u8 swapz_window_initial_burst_target(swapz_u8 max_window)
 {
-	swapz_u8 index;
-
-	if (!retain_ms || read_budget || !packed_burst || !pending ||
-	    !count || count > 2U)
+	if (!max_window)
 		return 0;
-	for (index = 0; index < count; ++index)
-		if (pending[index].raw || !pending[index].length ||
-		    pending[index].length > SWAPZ_MAX_COMPRESSED)
-			return 0;
-	if (count == 2U && pending[0].logical == pending[1].logical)
+	return max_window < 4U ? max_window : 4U;
+}
+static inline swapz_u8 swapz_window_grow_burst_target(
+		swapz_u8 current, swapz_u8 completed, swapz_u8 admitted_tail,
+		swapz_u8 max_window)
+{
+	unsigned int observed;
+	if (!max_window)
 		return 0;
-	return 1;
+	if (!current)
+		current = swapz_window_initial_burst_target(max_window);
+	observed = (unsigned int)completed + admitted_tail;
+	if (observed > max_window)
+		observed = max_window;
+	if (observed > current)
+		current = (swapz_u8)observed;
+	return current;
+}
+static inline swapz_u8 swapz_window_shrink_burst_target(
+		swapz_u8 current, swapz_u8 observed)
+{
+	if (observed > 1U && observed < current)
+		return observed;
+	return current;
+}
+static inline swapz_u8 swapz_window_effective_burst_target(
+		swapz_u8 learned, swapz_u8 admitted_tail)
+{
+	return admitted_tail ? admitted_tail : learned;
+}
+static inline int swapz_window_burst_close_ready(
+		int pack_seen, swapz_u8 count, swapz_u8 learned_target,
+		swapz_u8 admitted_tail_target)
+{
+	swapz_u8 target = swapz_window_effective_burst_target(
+		learned_target, admitted_tail_target);
+	return count && target && count >= target &&
+		(pack_seen || admitted_tail_target);
 }
 
 /*
