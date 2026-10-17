@@ -211,3 +211,12 @@ removal under `queue_lock`, an explicit inline marker, distinct producer LZ4
 work memory, no producer use of the ordered worker's work memory, and combined
 reporting from separately written timing accumulators. Drain and teardown must
 still empty both queues and free all bounded producer resources.
+
+
+Circular GC-probe qualification must prove destination selection does not
+restart at segment zero on each collection. Direct authority tests must show an
+untouched later reserve is selected before wraparound to an evacuated
+low-numbered victim, while preserving the exact reserve count, one-destination
+rule, forbidden open/victim checks, fail-closed handoff, authoritative mapping
+CRC/generation state, and foreground progress. This native evidence does not
+qualify sustained loaded GC; that remains a separate release gate.

@@ -98,25 +98,27 @@ static int test_three_rotations_and_foreground_progress(void)
 	/* Foreground must use the GC destination's remaining space rather
 	 * than restoring cursor to the previously exhausted segment 1. */
 	CHECK(write_raw(2) == 0 && a.maps[2].start_block == 513);
-	/* First free reserve is now the *old* foreground victim 0. */
+	/* Preserve the circular probe: after destination2, the untouched
+	 * reserve3 is selected before wrapping to the evacuated victim0. */
 	CHECK(relocate_all_live_pages(1) == 0);
-	CHECK(roles[1] == 0 && roles[0] == 1);
-	CHECK(a.open_segment == 0 && a.maps[1].start_block == 0);
-	CHECK(write_raw(3) == 0 && a.maps[3].start_block == 1);
-	/* Rotate a third time, now from the formerly reserved segment2.
-	 * Neither reserve segment3 nor another reserve may be a victim. */
+	CHECK(roles[1] == 0 && roles[3] == 1);
+	CHECK(a.open_segment == 3 && a.maps[1].start_block == 768);
+	CHECK(write_raw(3) == 0 && a.maps[3].start_block == 769);
+	/* Rotate a third time from the formerly reserved segment2. The probe
+	 * now wraps to reserve0; reserve1 becomes the newly evacuated spare. */
 	CHECK(relocate_all_live_pages(2) == 0);
-	CHECK(roles[2] == 0 && roles[1] == 1);
-	CHECK(a.open_segment == 1 && a.maps[0].start_block == 256);
-	CHECK(a.maps[1].valid && a.maps[1].start_block == 0);
-	CHECK(a.maps[2].valid && a.maps[2].start_block == 257); /* moved with victim 2 */
-	CHECK(a.maps[3].valid && a.maps[3].start_block == 1);
+	CHECK(roles[2] == 0 && roles[0] == 1);
+	CHECK(a.open_segment == 0 && a.maps[0].start_block == 0);
+	CHECK(a.maps[1].valid && a.maps[1].start_block == 768);
+	CHECK(a.maps[2].valid && a.maps[2].start_block == 1); /* moved with victim 2 */
+	CHECK(a.maps[3].valid && a.maps[3].start_block == 769);
+	CHECK(a.next_segment_probe == 3);
 	for (cycle = 0; cycle < 4; ++cycle) {
 		CHECK(write_raw(4) == 0);
 		CHECK(maps[4].valid && maps[4].raw_crc32c ==
 		      swapz_crc32c_bytes(raw, sizeof(raw)));
 	}
-	CHECK(roles[3] == 0); /* permanent second reserve was untouched */
+	CHECK(roles[1] == 0 && roles[2] == 0);
 	return 0;
 }
 

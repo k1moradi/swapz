@@ -195,7 +195,11 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
 	a->gc_forbidden_victim = victim;
 	a->gc_destination = ~(swapz_u32)0;
 	a->open_segment = ~(swapz_u32)0;
-	a->next_segment_probe = 0;
+	/*
+	 * Keep the circular probe inherited from foreground allocation and the
+	 * previous committed rotation. Resetting it to segment zero on every
+	 * collection biases destination reuse toward low-numbered reserves.
+	 */
 	error = swapz_pick_dead_segment(a);
 	if (error) {
 		/* Caller will restore the saved foreground cursor. */

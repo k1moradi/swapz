@@ -284,3 +284,19 @@ Producer and ordered timing accumulation must also remain single-writer and may
 be summed only for reporting. Prepared-page mempool/semaphore ownership applies
 only to producer-prepared entries; inline entries allocate no prepared page and
 must not release a slot they never acquired.
+
+
+### Circular GC destination probe
+
+Rotating GC destination selection must preserve the authority's circular
+`next_segment_probe`; collection must not reset the probe to segment zero.
+The dead-segment picker remains responsible for scanning from that cursor,
+skipping the open foreground segment, victim, foreground roles and any second
+reserve after one destination has been selected. Successful role handoff may
+advance the cursor according to the existing committed rotation rule, and any
+failed collection must restore the caller-saved foreground cursor and probe.
+
+This is a wear-distribution rule, not permission to reuse uncertain media.
+A destination still must be entirely non-authoritative and dead, GC still uses
+exactly one reserve per cycle, and a victim becomes reserve only after every
+mapping/refcount validation and successful lower relocation has completed.
