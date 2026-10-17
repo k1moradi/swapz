@@ -9,10 +9,10 @@
 #include <string.h>
 #endif
 
-static int sv3_page_valid(const struct sv3_compressed_page *page)
+static int swapz_page_valid(const struct swapz_compressed_page *page)
 {
 	return page && !page->raw && page->payload && page->length > 0 &&
-		page->length <= SV3_MAX_COMPRESSED;
+		page->length <= SWAPZ_MAX_COMPRESSED;
 }
 
 /*
@@ -21,35 +21,35 @@ static int sv3_page_valid(const struct sv3_compressed_page *page)
  * missing even a single nonzero byte would corrupt authoritative data.
  * No temporary allocation, no lower I/O, no unaligned word loads.
  */
-int sv3_page_is_zero(const sv3_u8 *page)
+int swapz_page_is_zero(const swapz_u8 *page)
 {
-	sv3_u32 i;
+	swapz_u32 i;
 
 	if (!page)
 		return 0;
-	for (i = 0; i < SV3_BLOCK_BYTES; ++i)
+	for (i = 0; i < SWAPZ_BLOCK_BYTES; ++i)
 		if (page[i])
 			return 0;
 	return 1;
 }
 
 /* How many *ordered* records fit the size class, without duplicate slots. */
-static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
-			   sv3_u8 count, sv3_u8 start, sv3_u8 blocks,
-			   sv3_u8 max_read_blocks, sv3_u32 *read_blocks)
+static swapz_u8 swapz_fit_count(const struct swapz_compressed_page *pages,
+			   swapz_u8 count, swapz_u8 start, swapz_u8 blocks,
+			   swapz_u8 max_read_blocks, swapz_u32 *read_blocks)
 {
-	sv3_u32 payload_start = (sv3_u32)blocks * SV3_BLOCK_BYTES;
-	sv3_u8 included = 0;
-	sv3_u8 index;
+	swapz_u32 payload_start = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES;
+	swapz_u8 included = 0;
+	swapz_u8 index;
 
 	*read_blocks = 0;
 	for (index = start; index < count; ++index) {
-		sv3_u8 earlier;
-		sv3_u32 offset;
-		sv3_u32 first, last, record_reads;
-		const struct sv3_compressed_page *page = &pages[index];
+		swapz_u8 earlier;
+		swapz_u32 offset;
+		swapz_u32 first, last, record_reads;
+		const struct swapz_compressed_page *page = &pages[index];
 
-		if (included == SV3_MAX_RECORDS)
+		if (included == SWAPZ_MAX_RECORDS)
 			break;
 		for (earlier = start; earlier < index; ++earlier) {
 			if (page->logical_page == pages[earlier].logical_page)
@@ -58,12 +58,12 @@ static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
 		if (payload_start < page->length)
 			break;
 		offset = payload_start - page->length;
-		if (offset < sizeof(struct sv3_header) +
-			     ((sv3_u32)included + 1U) *
-			     sizeof(struct sv3_record))
+		if (offset < sizeof(struct swapz_header) +
+			     ((swapz_u32)included + 1U) *
+			     sizeof(struct swapz_record))
 			break;
-		first = offset / SV3_BLOCK_BYTES;
-		last = (payload_start - 1U) / SV3_BLOCK_BYTES;
+		first = offset / SWAPZ_BLOCK_BYTES;
+		last = (payload_start - 1U) / SWAPZ_BLOCK_BYTES;
 		record_reads = last - first + 1U + (first ? 1U : 0U);
 		/*
 		 * Full logical record must fit both geometry and read budget.
@@ -79,50 +79,50 @@ static sv3_u8 sv3_fit_count(const struct sv3_compressed_page *pages,
 	return included;
 }
 
-int sv3_engine_plan_bounded(const struct sv3_compressed_page *pages,
-			    sv3_u8 count, sv3_u8 max_read_blocks,
-			    sv3_u8 *classes, sv3_u8 *records_per_extent,
-			    sv3_u8 *extent_count)
+int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
+			    swapz_u8 count, swapz_u8 max_read_blocks,
+			    swapz_u8 *classes, swapz_u8 *records_per_extent,
+			    swapz_u8 *extent_count)
 {
-	sv3_u32 costs[SV3_MAX_RECORDS + 1U];
-	sv3_u32 reads[SV3_MAX_RECORDS + 1U];
-	sv3_u8 batches[SV3_MAX_RECORDS + 1U];
-	sv3_u8 selected_class[SV3_MAX_RECORDS];
-	sv3_u8 selected_count[SV3_MAX_RECORDS];
+	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
+	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
+	swapz_u8 batches[SWAPZ_MAX_RECORDS + 1U];
+	swapz_u8 selected_class[SWAPZ_MAX_RECORDS];
+	swapz_u8 selected_count[SWAPZ_MAX_RECORDS];
 	int index;
-	sv3_u8 out = 0;
-	sv3_u8 position = 0;
+	swapz_u8 out = 0;
+	swapz_u8 position = 0;
 
 	if (!pages || !classes || !records_per_extent || !extent_count ||
-	    !count || count > SV3_MAX_RECORDS || max_read_blocks > 3U)
+	    !count || count > SWAPZ_MAX_RECORDS || max_read_blocks > 3U)
 		return -EINVAL;
 	*extent_count = 0;
 	for (index = 0; index < count; ++index) {
-		if (!sv3_page_valid(&pages[index]))
+		if (!swapz_page_valid(&pages[index]))
 			return -EOPNOTSUPP; /* raw fallback belongs to later I/O path */
 	}
 	costs[count] = 0;
 	reads[count] = 0;
 	batches[count] = 0;
 	for (index = (int)count - 1; index >= 0; --index) {
-		sv3_u8 class_index;
+		swapz_u8 class_index;
 
-		costs[index] = ~(sv3_u32)0;
-		reads[index] = ~(sv3_u32)0;
-		batches[index] = SV3_MAX_RECORDS;
+		costs[index] = ~(swapz_u32)0;
+		reads[index] = ~(swapz_u32)0;
+		batches[index] = SWAPZ_MAX_RECORDS;
 		selected_count[index] = 0;
 		for (class_index = 0; class_index < 3; ++class_index) {
-			sv3_u8 blocks = (sv3_u8)(1U << class_index);
-			sv3_u32 local_read_blocks;
-			sv3_u8 take = sv3_fit_count(pages, count, index, blocks,
+			swapz_u8 blocks = (swapz_u8)(1U << class_index);
+			swapz_u32 local_read_blocks;
+			swapz_u8 take = swapz_fit_count(pages, count, index, blocks,
 						   max_read_blocks,
 						   &local_read_blocks);
-			sv3_u32 candidate_bytes, candidate_reads;
-			sv3_u8 candidate_batches;
+			swapz_u32 candidate_bytes, candidate_reads;
+			swapz_u8 candidate_batches;
 
 			if (!take)
 				continue;
-			candidate_bytes = (sv3_u32)blocks * SV3_BLOCK_BYTES +
+			candidate_bytes = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES +
 				costs[index + take];
 			candidate_reads = local_read_blocks + reads[index + take];
 			candidate_batches = batches[index + take] + 1U;
@@ -152,25 +152,25 @@ int sv3_engine_plan_bounded(const struct sv3_compressed_page *pages,
 	return 0;
 }
 
-int sv3_engine_plan(const struct sv3_compressed_page *pages, sv3_u8 count,
-		    sv3_u8 *classes, sv3_u8 *records_per_extent,
-		    sv3_u8 *extent_count)
+int swapz_engine_plan(const struct swapz_compressed_page *pages, swapz_u8 count,
+		    swapz_u8 *classes, swapz_u8 *records_per_extent,
+		    swapz_u8 *extent_count)
 {
-	return sv3_engine_plan_bounded(pages, count, 0,
+	return swapz_engine_plan_bounded(pages, count, 0,
 				      classes, records_per_extent,
 				      extent_count);
 }
 
-int sv3_engine_plan_stats(const struct sv3_compressed_page *pages,
-			  sv3_u8 count, sv3_u8 max_read_blocks,
-			  sv3_u16 *total_blocks, sv3_u8 *extent_count,
-			  sv3_u8 *four_block_extents)
+int swapz_engine_plan_stats(const struct swapz_compressed_page *pages,
+			  swapz_u8 count, swapz_u8 max_read_blocks,
+			  swapz_u16 *total_blocks, swapz_u8 *extent_count,
+			  swapz_u8 *four_block_extents)
 {
-	sv3_u8 classes[SV3_MAX_RECORDS];
-	sv3_u8 takes[SV3_MAX_RECORDS];
-	sv3_u8 groups = 0, group;
-	sv3_u16 blocks = 0;
-	sv3_u8 fours = 0;
+	swapz_u8 classes[SWAPZ_MAX_RECORDS];
+	swapz_u8 takes[SWAPZ_MAX_RECORDS];
+	swapz_u8 groups = 0, group;
+	swapz_u16 blocks = 0;
+	swapz_u8 fours = 0;
 	int error;
 
 	if (!total_blocks || !extent_count || !four_block_extents)
@@ -178,7 +178,7 @@ int sv3_engine_plan_stats(const struct sv3_compressed_page *pages,
 	*total_blocks = 0;
 	*extent_count = 0;
 	*four_block_extents = 0;
-	error = sv3_engine_plan_bounded(pages, count, max_read_blocks,
+	error = swapz_engine_plan_bounded(pages, count, max_read_blocks,
 					classes, takes, &groups);
 	if (error)
 		return error;
@@ -193,15 +193,15 @@ int sv3_engine_plan_stats(const struct sv3_compressed_page *pages,
 	return 0;
 }
 
-static int sv3_read_metadata_lru_lookup(const struct sv3_engine *engine,
-					sv3_u32 start_block,
-					sv3_u8 extent_blocks)
+static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
+					swapz_u32 start_block,
+					swapz_u8 extent_blocks)
 {
-	sv3_u8 index;
+	swapz_u8 index;
 
 	if (!engine->read_metadata_cache)
 		return -1;
-	for (index = 0; index < SV3_READ_METADATA_CACHE_ENTRIES; ++index)
+	for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index)
 		if (engine->read_metadata_lru_valid[index] &&
 		    engine->read_metadata_lru_start_blocks[index] == start_block &&
 		    engine->read_metadata_lru_extent_blocks[index] == extent_blocks)
@@ -209,13 +209,13 @@ static int sv3_read_metadata_lru_lookup(const struct sv3_engine *engine,
 	return -1;
 }
 
-static void sv3_read_metadata_lru_commit(struct sv3_engine *engine,
-					sv3_u32 start_block,
-					sv3_u8 extent_blocks,
+static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
+					swapz_u32 start_block,
+					swapz_u8 extent_blocks,
 					int hit_slot)
 {
-	sv3_u32 oldest_age = ~(sv3_u32)0;
-	sv3_u8 index, slot = 0;
+	swapz_u32 oldest_age = ~(swapz_u32)0;
+	swapz_u8 index, slot = 0;
 	int have_slot = 0;
 
 	if (!engine->read_metadata_cache)
@@ -230,10 +230,10 @@ static void sv3_read_metadata_lru_commit(struct sv3_engine *engine,
 		hit_slot = -1;
 	}
 	if (hit_slot >= 0) {
-		slot = (sv3_u8)hit_slot;
+		slot = (swapz_u8)hit_slot;
 		have_slot = 1;
 	} else {
-		for (index = 0; index < SV3_READ_METADATA_CACHE_ENTRIES; ++index) {
+		for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index) {
 			if (!engine->read_metadata_lru_valid[index]) {
 				slot = index;
 				have_slot = 1;
@@ -250,15 +250,15 @@ static void sv3_read_metadata_lru_commit(struct sv3_engine *engine,
 		return;
 	if (hit_slot < 0)
 		memcpy(engine->read_metadata_cache +
-		       (size_t)slot * SV3_BLOCK_BYTES,
-		       engine->read_scratch, SV3_BLOCK_BYTES);
+		       (size_t)slot * SWAPZ_BLOCK_BYTES,
+		       engine->read_scratch, SWAPZ_BLOCK_BYTES);
 	engine->read_metadata_lru_start_blocks[slot] = start_block;
 	engine->read_metadata_lru_extent_blocks[slot] = extent_blocks;
 	engine->read_metadata_lru_ages[slot] = engine->read_metadata_lru_clock;
 	engine->read_metadata_lru_valid[slot] = 1;
 }
 
-void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
+void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 {
 	if (engine) {
 		engine->read_cache_valid = 0;
@@ -269,13 +269,13 @@ void sv3_engine_invalidate_read_cache(struct sv3_engine *engine)
 	}
 }
 
-static int sv3_engine_write_window_planned(struct sv3_engine *engine,
-			    const struct sv3_compressed_page *pages,
-			    sv3_u8 count, sv3_u8 *committed_pages,
-			    sv3_u8 plan_read_blocks)
+static int swapz_engine_write_window_planned(struct swapz_engine *engine,
+			    const struct swapz_compressed_page *pages,
+			    swapz_u8 count, swapz_u8 *committed_pages,
+			    swapz_u8 plan_read_blocks)
 {
-	struct sv3_tx *tx;
-	sv3_u8 extent_count, entry = 0, group;
+	struct swapz_tx *tx;
+	swapz_u8 extent_count, entry = 0, group;
 	int error;
 
 	if (!engine || !engine->authority || !engine->write_scratch ||
@@ -283,7 +283,7 @@ static int sv3_engine_write_window_planned(struct sv3_engine *engine,
 		return -EINVAL;
 	*committed_pages = 0;
 	/* Even a failed/torn write must never leave reusable old metadata. */
-	sv3_engine_invalidate_read_cache(engine);
+	swapz_engine_invalidate_read_cache(engine);
 	/*
 	 * Never stage or submit a potentially destructive extent if the
 	 * requested read-after-write guard cannot run with isolated scratch.
@@ -294,41 +294,41 @@ static int sv3_engine_write_window_planned(struct sv3_engine *engine,
 		return -EINVAL;
 	if (plan_read_blocks > 3U)
 		return -EINVAL;
-	error = sv3_engine_plan_bounded(pages, count, plan_read_blocks,
+	error = swapz_engine_plan_bounded(pages, count, plan_read_blocks,
 					engine->plan_classes,
 					engine->plan_takes, &extent_count);
 	if (error)
 		return error;
 
 	for (group = 0; group < extent_count; ++group) {
-		struct sv3_builder builder;
-		sv3_u8 completed = 0;
-		sv3_u8 j;
-		const sv3_u8 blocks = engine->plan_classes[group];
-		const sv3_u8 take = engine->plan_takes[group];
-		const sv3_u32 bytes = (sv3_u32)blocks * SV3_BLOCK_BYTES;
+		struct swapz_builder builder;
+		swapz_u8 completed = 0;
+		swapz_u8 j;
+		const swapz_u8 blocks = engine->plan_classes[group];
+		const swapz_u8 take = engine->plan_takes[group];
+		const swapz_u32 bytes = (swapz_u32)blocks * SWAPZ_BLOCK_BYTES;
 
 		tx = &engine->pending;
 		for (j = 0; j < take; ++j)
 			engine->logical_scratch[j] = pages[entry + j].logical_page;
-		error = sv3_stage(engine->authority, engine->logical_scratch,
+		error = swapz_stage(engine->authority, engine->logical_scratch,
 				  take, blocks, tx);
 		if (error)
 			return error;
-		error = sv3_begin(&builder, engine->write_scratch,
+		error = swapz_begin(&builder, engine->write_scratch,
 				  bytes, tx->sequence);
 		if (error)
 			goto abort_transaction;
 		for (j = 0; j < take; ++j) {
-			const struct sv3_compressed_page *page = &pages[entry + j];
+			const struct swapz_compressed_page *page = &pages[entry + j];
 
-			error = sv3_append(&builder, page->logical_page,
+			error = swapz_append(&builder, page->logical_page,
 					   tx->records[j].generation,
 					   page->payload, page->length);
 			if (error)
 				goto abort_transaction;
 		}
-		error = sv3_seal(&builder);
+		error = swapz_seal(&builder);
 		if (error)
 			goto abort_transaction;
 
@@ -345,7 +345,7 @@ static int sv3_engine_write_window_planned(struct sv3_engine *engine,
 			/*
 			 * A lower callback claiming impossible completion counts
 			 * is not trustworthy: do not count any validated blocks.
-			 * sv3_finish() quarantines the whole allocated extent.
+			 * swapz_finish() quarantines the whole allocated extent.
 			 */
 			completed = 0;
 			error = -EUCLEAN;
@@ -371,7 +371,7 @@ static int sv3_engine_write_window_planned(struct sv3_engine *engine,
 					error = -EBADMSG;
 			}
 		}
-		error = sv3_finish(engine->authority, tx,
+		error = swapz_finish(engine->authority, tx,
 				   engine->write_scratch, bytes,
 				   completed, error);
 		if (error)
@@ -380,19 +380,19 @@ static int sv3_engine_write_window_planned(struct sv3_engine *engine,
 		*committed_pages = entry;
 		continue;
 abort_transaction:
-		sv3_abort(engine->authority, tx);
+		swapz_abort(engine->authority, tx);
 		return error;
 	}
 	return 0;
 }
 
-int sv3_engine_write_window(struct sv3_engine *engine,
-			    const struct sv3_compressed_page *pages,
-			    sv3_u8 count, sv3_u8 *committed_pages)
+int swapz_engine_write_window(struct swapz_engine *engine,
+			    const struct swapz_compressed_page *pages,
+			    swapz_u8 count, swapz_u8 *committed_pages)
 {
 	if (!engine)
 		return -EINVAL;
-	return sv3_engine_write_window_planned(engine, pages, count,
+	return swapz_engine_write_window_planned(engine, pages, count,
 					      committed_pages,
 					      engine->max_read_blocks_per_record);
 }
@@ -402,39 +402,39 @@ int sv3_engine_write_window(struct sv3_engine *engine,
  * blocks), WITHOUT changing the independent on-disk SWZ3 extents.
  *
  * Stage each extent and leave its mapping UNPUBLISHED. Consecutive
- * transaction snapshots are replayed through the original sv3_finish()
+ * transaction snapshots are replayed through the original swapz_finish()
  * only after the ONE combined lower I/O has completed successfully.
  * This preserves the original committed-prefix semantics on a failed
  * group, and prevents false acknowledgement of durable media.
  */
-static int sv3_bulk_abort(struct sv3_engine *e, sv3_u8 count,
-			  sv3_u8 first)
+static int swapz_bulk_abort(struct swapz_engine *e, swapz_u8 count,
+			  swapz_u8 first)
 {
-	sv3_u8 i;
+	swapz_u8 i;
 	int error;
 
 	for (i = first; i < count; ++i) {
-		error = sv3_batch_resume(e->authority, &e->bulk_txs[i]);
+		error = swapz_batch_resume(e->authority, &e->bulk_txs[i]);
 		if (error)
 			return error;
-		error = sv3_abort(e->authority, &e->bulk_txs[i]);
+		error = swapz_abort(e->authority, &e->bulk_txs[i]);
 		if (error)
 			return error;
 	}
 	return 0;
 }
 
-static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
-			  sv3_u16 blocks, sv3_u8 count,
-			  sv3_u8 *committed_pages)
+static int swapz_bulk_flush(struct swapz_engine *e, swapz_u32 start,
+			  swapz_u16 blocks, swapz_u8 count,
+			  swapz_u8 *committed_pages)
 {
-	sv3_u16 completed = 0;
-	sv3_u8 i, raw_entries = 0;
+	swapz_u16 completed = 0;
+	swapz_u8 i, raw_entries = 0;
 	int error;
 
 	if (!count)
 		return 0;
-	if (!blocks || blocks > SV3_BULK_BLOCKS)
+	if (!blocks || blocks > SWAPZ_BULK_BLOCKS)
 		return -EUCLEAN;
 	e->submitted_blocks += blocks;
 	error = e->io.write_run(e->io.opaque, start, blocks,
@@ -451,7 +451,7 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 	 * and preserve prior authoritative generations.
 	 */
 	if (error) {
-		int cleanup = sv3_bulk_abort(e, count, 0);
+		int cleanup = swapz_bulk_abort(e, count, 0);
 
 		return cleanup ? cleanup : error;
 	}
@@ -459,30 +459,30 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 	e->bulk_writes++;
 	e->bulk_extents += count;
 	for (i = 0; i < count; ++i) {
-		struct sv3_tx *tx = &e->bulk_txs[i];
-		sv3_u16 offset = e->bulk_offsets[i];
+		struct swapz_tx *tx = &e->bulk_txs[i];
+		swapz_u16 offset = e->bulk_offsets[i];
 
-		error = sv3_batch_resume(e->authority, tx);
+		error = swapz_batch_resume(e->authority, tx);
 		if (error) {
-			int cleanup = sv3_bulk_abort(e, count, i);
+			int cleanup = swapz_bulk_abort(e, count, i);
 
 			return cleanup ? cleanup : error;
 		}
 		/* Same lower completion, but distinct CRC/mapping publication:
 		 * raw blocks carry no SWZ3 metadata on physical media. */
 		if (e->bulk_raw[i])
-			error = sv3_finish_raw(e->authority, tx,
+			error = swapz_finish_raw(e->authority, tx,
 				e->bulk_scratch +
-					(size_t)offset * SV3_BLOCK_BYTES,
+					(size_t)offset * SWAPZ_BLOCK_BYTES,
 				tx->extent_blocks, 0);
 		else
-			error = sv3_finish(e->authority, tx,
+			error = swapz_finish(e->authority, tx,
 				   e->bulk_scratch +
-					(size_t)offset * SV3_BLOCK_BYTES,
-				   (sv3_u32)tx->extent_blocks * SV3_BLOCK_BYTES,
+					(size_t)offset * SWAPZ_BLOCK_BYTES,
+				   (swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES,
 				   tx->extent_blocks, 0);
 		if (error) {
-			int cleanup = sv3_bulk_abort(e, count, i + 1);
+			int cleanup = swapz_bulk_abort(e, count, i + 1);
 
 			return cleanup ? cleanup : error;
 		}
@@ -500,37 +500,37 @@ static int sv3_bulk_flush(struct sv3_engine *e, sv3_u32 start,
 	return 0;
 }
 
-int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
-				   const struct sv3_compressed_page *pages,
-				   sv3_u8 count, sv3_u8 *committed_pages,
-				   sv3_u8 plan_read_blocks)
+int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
+				   const struct swapz_compressed_page *pages,
+				   swapz_u8 count, swapz_u8 *committed_pages,
+				   swapz_u8 plan_read_blocks)
 {
-	sv3_u8 extent_count = 0, compressed_count = 0, raw_count = 0;
-	sv3_u8 entry = 0, group, staged = 0;
-	sv3_u32 run_start = 0;
-	sv3_u16 run_blocks = 0;
+	swapz_u8 extent_count = 0, compressed_count = 0, raw_count = 0;
+	swapz_u8 entry = 0, group, staged = 0;
+	swapz_u32 run_start = 0;
+	swapz_u16 run_blocks = 0;
 	int error;
 
 	if (!e || !e->authority || !committed_pages || plan_read_blocks > 3U)
 		return -EINVAL;
 	*committed_pages = 0;
-	sv3_engine_invalidate_read_cache(e);
-	if (!pages || !count || count > SV3_MAX_RECORDS)
+	swapz_engine_invalidate_read_cache(e);
+	if (!pages || !count || count > SWAPZ_MAX_RECORDS)
 		return -EINVAL;
 	/* Validate every record BEFORE reserving any physical blocks. The
 	 * worker sorts compressed records first and appends the raw tail.
 	 * Malformed or duplicate mixed input must not fall into the old
 	 * SWZ3-only path, which cannot interpret raw data. */
 	for (group = 0; group < count; ++group) {
-		sv3_u8 j;
+		swapz_u8 j;
 
 		if (pages[group].raw) {
 			if (!pages[group].payload ||
-			    pages[group].length != SV3_BLOCK_BYTES)
+			    pages[group].length != SWAPZ_BLOCK_BYTES)
 				return -EINVAL;
 			raw_count++;
 		} else {
-			if (raw_count || !sv3_page_valid(&pages[group]))
+			if (raw_count || !swapz_page_valid(&pages[group]))
 				return -EINVAL;
 			compressed_count++;
 		}
@@ -538,7 +538,7 @@ int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
 			if (pages[group].logical_page == pages[j].logical_page) {
 				if (raw_count)
 					return -EEXIST;
-				return sv3_engine_write_window_planned(e, pages, count,
+				return swapz_engine_write_window_planned(e, pages, count,
 							      committed_pages,
 							      plan_read_blocks);
 			}
@@ -546,7 +546,7 @@ int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
 	if (!raw_count && (!e->bulk_enabled || !e->bulk_scratch ||
 	    !e->bulk_txs || !e->io.write_run || e->verify_after_write ||
 	    count <= 1))
-		return sv3_engine_write_window_planned(e, pages, count,
+		return swapz_engine_write_window_planned(e, pages, count,
 					      committed_pages,
 					      plan_read_blocks);
 	/* Raw admission stays serialized in lower_bulk=0/verify mode.
@@ -555,7 +555,7 @@ int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
 	    !e->io.write_run || e->verify_after_write)
 		return -EOPNOTSUPP;
 	if (compressed_count) {
-		error = sv3_engine_plan_bounded(pages, compressed_count,
+		error = swapz_engine_plan_bounded(pages, compressed_count,
 					plan_read_blocks,
 					e->plan_classes, e->plan_takes,
 					&extent_count);
@@ -563,12 +563,12 @@ int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
 			return error;
 	}
 	for (group = 0; group < extent_count + raw_count; ++group) {
-		struct sv3_builder builder;
-		struct sv3_tx *tx;
-		const sv3_u8 raw = group >= extent_count;
-		sv3_u8 blocks = raw ? 1 : e->plan_classes[group];
-		sv3_u8 take = raw ? 1 : e->plan_takes[group], j;
-		sv3_u32 aligned;
+		struct swapz_builder builder;
+		struct swapz_tx *tx;
+		const swapz_u8 raw = group >= extent_count;
+		swapz_u8 blocks = raw ? 1 : e->plan_classes[group];
+		swapz_u8 take = raw ? 1 : e->plan_takes[group], j;
+		swapz_u32 aligned;
 
 		/*
 		 * Flush the old run BEFORE trying to move the authority
@@ -578,14 +578,14 @@ int sv3_engine_write_window_batched_read_cap(struct sv3_engine *e,
 		 */
 		if (staged) {
 			aligned = (e->authority->next_block + blocks - 1U) &
-				  ~(sv3_u32)(blocks - 1U);
-			if (aligned / SV3_SEGMENT_BLOCKS !=
-					run_start / SV3_SEGMENT_BLOCKS ||
+				  ~(swapz_u32)(blocks - 1U);
+			if (aligned / SWAPZ_SEGMENT_BLOCKS !=
+					run_start / SWAPZ_SEGMENT_BLOCKS ||
 			    aligned < run_start ||
 			    (e->bulk_enabled == 1 &&
 			     aligned != run_start + run_blocks) ||
-			    aligned - run_start + blocks > SV3_BULK_BLOCKS) {
-				error = sv3_bulk_flush(e, run_start, run_blocks,
+			    aligned - run_start + blocks > SWAPZ_BULK_BLOCKS) {
+				error = swapz_bulk_flush(e, run_start, run_blocks,
 						       staged, committed_pages);
 				if (error)
 					return error;
@@ -596,10 +596,10 @@ retry_stage:
 		tx = &e->bulk_txs[staged];
 		for (j = 0; j < take; ++j)
 			e->logical_scratch[j] = pages[entry + j].logical_page;
-		error = sv3_stage_batch(e->authority, e->logical_scratch,
+		error = swapz_stage_batch(e->authority, e->logical_scratch,
 					take, blocks, tx);
 		if (error == -EAGAIN && staged) {
-			error = sv3_bulk_flush(e, run_start, run_blocks,
+			error = swapz_bulk_flush(e, run_start, run_blocks,
 					       staged, committed_pages);
 			if (error)
 				return error;
@@ -608,7 +608,7 @@ retry_stage:
 		}
 		if (error) {
 			if (staged) {
-				int flushed = sv3_bulk_flush(e, run_start,
+				int flushed = swapz_bulk_flush(e, run_start,
 						run_blocks, staged, committed_pages);
 
 				if (flushed)
@@ -620,48 +620,48 @@ retry_stage:
 			run_start = tx->start_block;
 			run_blocks = 0;
 			memset(e->bulk_scratch, 0,
-			       SV3_BULK_BLOCKS * SV3_BLOCK_BYTES);
+			       SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES);
 		}
 		if (tx->start_block < run_start ||
 		    (e->bulk_enabled == 1 && staged &&
 		     tx->start_block != run_start + run_blocks) ||
-		    tx->start_block - run_start + blocks > SV3_BULK_BLOCKS ||
-		    tx->start_block / SV3_SEGMENT_BLOCKS !=
-					run_start / SV3_SEGMENT_BLOCKS) {
-			sv3_abort(e->authority, tx);
+		    tx->start_block - run_start + blocks > SWAPZ_BULK_BLOCKS ||
+		    tx->start_block / SWAPZ_SEGMENT_BLOCKS !=
+					run_start / SWAPZ_SEGMENT_BLOCKS) {
+			swapz_abort(e->authority, tx);
 			error = -EUCLEAN;
 			goto abort_group;
 		}
 		{
-			sv3_u16 offset = tx->start_block - run_start;
-			sv3_u16 end = offset + blocks;
-			sv3_u8 *image = e->bulk_scratch +
-					       (size_t)offset * SV3_BLOCK_BYTES;
+			swapz_u16 offset = tx->start_block - run_start;
+			swapz_u16 end = offset + blocks;
+			swapz_u8 *image = e->bulk_scratch +
+					       (size_t)offset * SWAPZ_BLOCK_BYTES;
 
 			if (raw) {
 				/* A raw block must not acquire a fake SWZ3 header. */
-				memcpy(image, pages[entry].payload, SV3_BLOCK_BYTES);
+				memcpy(image, pages[entry].payload, SWAPZ_BLOCK_BYTES);
 			} else {
-				error = sv3_begin(&builder, image,
-					  (sv3_u32)blocks * SV3_BLOCK_BYTES,
+				error = swapz_begin(&builder, image,
+					  (swapz_u32)blocks * SWAPZ_BLOCK_BYTES,
 					  tx->sequence);
 				if (error)
 					goto abort_current;
 				for (j = 0; j < take; ++j) {
-					const struct sv3_compressed_page *p =
+					const struct swapz_compressed_page *p =
 							&pages[entry + j];
 
-					error = sv3_append(&builder, p->logical_page,
+					error = swapz_append(&builder, p->logical_page,
 						   tx->records[j].generation,
 						   p->payload, p->length);
 					if (error)
 						goto abort_current;
 				}
-				error = sv3_seal(&builder);
+				error = swapz_seal(&builder);
 				if (error)
 					goto abort_current;
 			}
-			error = sv3_batch_pause(e->authority, tx);
+			error = swapz_batch_pause(e->authority, tx);
 			if (error)
 				goto abort_current;
 			e->bulk_offsets[staged] = offset;
@@ -675,40 +675,40 @@ retry_stage:
 		}
 		continue;
 abort_current:
-		sv3_abort(e->authority, tx);
+		swapz_abort(e->authority, tx);
 abort_group:
 		if (staged) {
-			int cleanup = sv3_bulk_abort(e, staged, 0);
+			int cleanup = swapz_bulk_abort(e, staged, 0);
 
 			if (cleanup)
 				return cleanup;
 		}
 		return error;
 	}
-	return sv3_bulk_flush(e, run_start, run_blocks, staged,
+	return swapz_bulk_flush(e, run_start, run_blocks, staged,
 			      committed_pages);
 }
 
-int sv3_engine_write_window_batched(struct sv3_engine *e,
-				   const struct sv3_compressed_page *pages,
-				   sv3_u8 count, sv3_u8 *committed_pages)
+int swapz_engine_write_window_batched(struct swapz_engine *e,
+				   const struct swapz_compressed_page *pages,
+				   swapz_u8 count, swapz_u8 *committed_pages)
 {
 	if (!e)
 		return -EINVAL;
-	return sv3_engine_write_window_batched_read_cap(e, pages, count,
+	return swapz_engine_write_window_batched_read_cap(e, pages, count,
 						committed_pages,
 						e->max_read_blocks_per_record);
 }
 
-int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
-			 sv3_u8 *payload, sv3_u16 payload_capacity,
-			 sv3_u16 *payload_length)
+int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
+			 swapz_u8 *payload, swapz_u16 payload_capacity,
+			 swapz_u16 *payload_length)
 {
-	struct sv3_decoded peek;
-	struct sv3_map observed;
-	const sv3_u8 *stored;
-	sv3_u32 bytes, first, last, start, count;
-	sv3_u8 initial_blocks = 1;
+	struct swapz_decoded peek;
+	struct swapz_map observed;
+	const swapz_u8 *stored;
+	swapz_u32 bytes, first, last, start, count;
+	swapz_u8 initial_blocks = 1;
 	int error;
 	int cached_metadata, cached_full, lru_cached_metadata;
 	int metadata_lru_slot;
@@ -720,18 +720,18 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	*payload_length = 0;
 	observed = engine->authority->maps[logical_page];
 	if (!observed.valid || !observed.extent_blocks ||
-	    observed.extent_blocks > SV3_MAX_BLOCKS ||
+	    observed.extent_blocks > SWAPZ_MAX_BLOCKS ||
 	    observed.start_block >= engine->authority->physical_blocks ||
 	    observed.extent_blocks >
 			engine->authority->physical_blocks - observed.start_block ||
 	    !observed.payload_length ||
 	    observed.payload_offset >=
-		(sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES ||
+		(swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES ||
 	    observed.payload_length >
-		(sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES -
+		(swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES -
 		observed.payload_offset)
 		return -ESTALE;
-	bytes = (sv3_u32)observed.extent_blocks * SV3_BLOCK_BYTES;
+	bytes = (swapz_u32)observed.extent_blocks * SWAPZ_BLOCK_BYTES;
 	/*
 	 * Two-block extent: the bounded one-request read trades up to one
 	 * extra 4KiB block for avoiding a second synchronous lower callback.
@@ -747,27 +747,27 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_cached_start_block == observed.start_block &&
 		engine->read_cached_extent_blocks == observed.extent_blocks;
 	cached_full = cached_metadata && engine->read_cached_full;
-	metadata_lru_slot = sv3_read_metadata_lru_lookup(engine,
+	metadata_lru_slot = swapz_read_metadata_lru_lookup(engine,
 						 observed.start_block,
 						 observed.extent_blocks);
 	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	if (cached_metadata) {
-		if (!cached_full && bytes > SV3_BLOCK_BYTES)
-			memset(engine->read_scratch + SV3_BLOCK_BYTES, 0,
-			       bytes - SV3_BLOCK_BYTES);
+		if (!cached_full && bytes > SWAPZ_BLOCK_BYTES)
+			memset(engine->read_scratch + SWAPZ_BLOCK_BYTES, 0,
+			       bytes - SWAPZ_BLOCK_BYTES);
 	} else if (lru_cached_metadata) {
 		memset(engine->read_scratch, 0, bytes);
 		memcpy(engine->read_scratch,
 		       engine->read_metadata_cache +
-		       (size_t)metadata_lru_slot * SV3_BLOCK_BYTES,
-		       SV3_BLOCK_BYTES);
+		       (size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES,
+		       SWAPZ_BLOCK_BYTES);
 	} else {
 		if (observed.extent_blocks == 2 &&
 		    engine->max_read_blocks_per_record != 1 &&
-		    (sv3_u32)observed.payload_offset +
-			observed.payload_length > SV3_BLOCK_BYTES)
+		    (swapz_u32)observed.payload_offset +
+			observed.payload_length > SWAPZ_BLOCK_BYTES)
 			initial_blocks = 2;
 		memset(engine->read_scratch, 0, bytes);
 		error = engine->io.read_blocks(engine->io.opaque,
@@ -783,7 +783,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			 engine->max_read_blocks_per_record != 1)
 			engine->read_two_block_skips++;
 	}
-	error = sv3_peek(engine->read_scratch, bytes,
+	error = swapz_peek(engine->read_scratch, bytes,
 			 observed.record_index, &peek);
 	if (error)
 		return error;
@@ -792,9 +792,9 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 	    peek.payload_length != observed.payload_length ||
 	    peek.payload_offset != observed.payload_offset)
 		return -EUCLEAN;
-	first = peek.payload_offset / SV3_BLOCK_BYTES;
-	last = ((sv3_u32)peek.payload_offset +
-		peek.payload_length - 1U) / SV3_BLOCK_BYTES;
+	first = peek.payload_offset / SWAPZ_BLOCK_BYTES;
+	last = ((swapz_u32)peek.payload_offset +
+		peek.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
 	/* Both blocks are already present after full prefetch or a
 	 * successful same-extent reuse; never issue a duplicate payload I/O. */
 	start = (cached_full || initial_blocks == 2) ?
@@ -805,14 +805,14 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 			return -EUCLEAN;
 		error = engine->io.read_blocks(engine->io.opaque,
 			observed.start_block + start, count,
-			engine->read_scratch + start * SV3_BLOCK_BYTES);
+			engine->read_scratch + start * SWAPZ_BLOCK_BYTES);
 		if (error)
 			return error;
 		engine->physical_read_blocks += count;
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
 	}
-	error = sv3_read_authoritative_peeked(engine->authority, logical_page,
+	error = swapz_read_authoritative_peeked(engine->authority, logical_page,
 					      &observed, engine->read_scratch,
 					      bytes, &peek, &stored);
 	if (error)
@@ -833,7 +833,7 @@ int sv3_engine_read_page(struct sv3_engine *engine, sv3_u32 logical_page,
 		engine->read_full_extent_cache_hits++;
 	if (lru_cached_metadata)
 		engine->read_metadata_lru_hits++;
-	sv3_read_metadata_lru_commit(engine, observed.start_block,
+	swapz_read_metadata_lru_commit(engine, observed.start_block,
 				     observed.extent_blocks,
 				     metadata_lru_slot);
 	return 0;

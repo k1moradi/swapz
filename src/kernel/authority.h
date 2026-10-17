@@ -3,7 +3,7 @@
 #define SWAPZ_V3_EXTENT_AUTHORITY_H
 #include "codec.h"
 
-#define SV3_SEGMENT_BLOCKS 256U
+#define SWAPZ_SEGMENT_BLOCKS 256U
 
 /*
  * Experimental worker-owned volatile mapping authority. Caller provisions
@@ -11,45 +11,45 @@
  * an allocated extent is permanently abandoned: NEVER reuse a possibly
  * partially written location before a separately verified reclaim path.
  */
-struct sv3_map {
-	sv3_u32 start_block;
-	sv3_u32 sequence;
-	sv3_u32 generation;
+struct swapz_map {
+	swapz_u32 start_block;
+	swapz_u32 sequence;
+	swapz_u32 generation;
 	/* Volatile sidecar integrity for a full raw 4KiB fallback page.
 	 * Raw has no space for an on-media CRC without another physical block. */
-	sv3_u32 raw_crc32c;
+	swapz_u32 raw_crc32c;
 	/* Volatile compressed payload bytes (4096 for raw). Required for
 	 * real live-byte GC victim selection without reading every extent. */
-	sv3_u16 payload_length;
+	swapz_u16 payload_length;
 	/* Validated at publication; read hint only, cross-checked against the
 	 * on-media CRC-protected record before trusting returned payload. */
-	sv3_u16 payload_offset;
-	sv3_u8 extent_blocks;
-	sv3_u8 record_index;
-	sv3_u8 raw;
-	sv3_u8 valid;
+	swapz_u16 payload_offset;
+	swapz_u8 extent_blocks;
+	swapz_u8 record_index;
+	swapz_u8 raw;
+	swapz_u8 valid;
 };
 
-struct sv3_tx_record {
-	sv3_u32 logical_page;
-	sv3_u32 generation;
+struct swapz_tx_record {
+	swapz_u32 logical_page;
+	swapz_u32 generation;
 };
 
-struct sv3_tx {
-	sv3_u32 start_block;
-	sv3_u32 sequence;
-	sv3_u8 extent_blocks;
-	sv3_u8 count;
-	struct sv3_tx_record records[SV3_MAX_RECORDS];
+struct swapz_tx {
+	swapz_u32 start_block;
+	swapz_u32 sequence;
+	swapz_u8 extent_blocks;
+	swapz_u8 count;
+	struct swapz_tx_record records[SWAPZ_MAX_RECORDS];
 };
 
-struct sv3_authority {
-	struct sv3_map *maps;		/* [logical_pages] */
-	sv3_u16 *live_records;		/* [physical_blocks]; extent START */
-	sv3_u8 *extent_classes;		/* [physical_blocks]; extent START */
-	sv3_u32 logical_pages;
-	sv3_u32 physical_blocks;
-	sv3_u32 reserve_blocks;
+struct swapz_authority {
+	struct swapz_map *maps;		/* [logical_pages] */
+	swapz_u16 *live_records;		/* [physical_blocks]; extent START */
+	swapz_u8 *extent_classes;		/* [physical_blocks]; extent START */
+	swapz_u32 logical_pages;
+	swapz_u32 physical_blocks;
+	swapz_u32 reserve_blocks;
 	/*
 	 * Optional production GC segment roles: one byte per 1MiB segment.
 	 * 1 = foreground writable; 0 = reserved GC destination. Roles are
@@ -57,37 +57,37 @@ struct sv3_authority {
 	 * numeric "reserve tail" is not sustainable across GC cycles.
 	 * NULL retains the original research allocator/test behavior.
 	 */
-	sv3_u8 *segment_foreground;
-	sv3_u32 segment_count;
-	sv3_u32 gc_destination;
-	sv3_u32 next_block;
-	sv3_u32 open_segment;		/* UINT32_MAX before the first allocation */
-	sv3_u32 next_segment_probe;
-	sv3_u32 recycled_dead_segments;
+	swapz_u8 *segment_foreground;
+	swapz_u32 segment_count;
+	swapz_u32 gc_destination;
+	swapz_u32 next_block;
+	swapz_u32 open_segment;		/* UINT32_MAX before the first allocation */
+	swapz_u32 next_segment_probe;
+	swapz_u32 recycled_dead_segments;
 	/*
 	 * Runtime-only opt-in. Preserves old research append-only semantics by
 	 * default; the separately reviewed Device Mapper target enables this.
 	 */
-	sv3_u8 reuse_dead_segments;
+	swapz_u8 reuse_dead_segments;
 	/* Only the serialized GC worker may set this, never foreground. */
-	sv3_u8 gc_allocation;
+	swapz_u8 gc_allocation;
 	/* GC may NOT allocate into the paused foreground OPEN segment or
 	 * the victim being relocated, even if its current live count is zero. */
-	sv3_u32 gc_forbidden_open;
-	sv3_u32 gc_forbidden_victim;
-	sv3_u32 next_sequence;
-	sv3_u32 abandoned_blocks;
-	sv3_u32 committed_blocks;
-	sv3_u32 active_start;
-	sv3_u32 active_sequence;
-	sv3_u8 active_blocks;
-	sv3_u8 active_count;
+	swapz_u32 gc_forbidden_open;
+	swapz_u32 gc_forbidden_victim;
+	swapz_u32 next_sequence;
+	swapz_u32 abandoned_blocks;
+	swapz_u32 committed_blocks;
+	swapz_u32 active_start;
+	swapz_u32 active_sequence;
+	swapz_u8 active_blocks;
+	swapz_u8 active_count;
 	/*
 	 * Worker-owned immutable staged descriptor snapshot. The caller may
-	 * retain or mutate its returned sv3_tx, but publication must never trust
+	 * retain or mutate its returned swapz_tx, but publication must never trust
 	 * caller-supplied record identities or generations absent this match.
 	 */
-	struct sv3_tx active_tx;
+	struct swapz_tx active_tx;
 	int in_flight;
 	/*
 	 * Bounded writer-only group: immutable transactions are kept in the
@@ -95,16 +95,16 @@ struct sv3_authority {
 	 * Unlike in_flight, batch_pending can represent up to 64 RESERVED
 	 * extents in ONE physical segment, but zero committed mappings.
 	 */
-	sv3_u8 batch_pending;
-	sv3_u8 batch_replaying;
-	sv3_u8 batch_stage_allowed;
-	sv3_u8 batch_consumed;
-	sv3_u32 batch_segment;
-	sv3_u32 batch_first_sequence;
+	swapz_u8 batch_pending;
+	swapz_u8 batch_replaying;
+	swapz_u8 batch_stage_allowed;
+	swapz_u8 batch_consumed;
+	swapz_u32 batch_segment;
+	swapz_u32 batch_first_sequence;
 	/* CRC of the exact immutable staged transaction snapshots,
 	 * including record identities and generations. A forged caller
 	 * snapshot can never publish an unrelated page into a batch. */
-	sv3_u32 batch_hashes[SV3_MAX_RECORDS];
+	swapz_u32 batch_hashes[SWAPZ_MAX_RECORDS];
 };
 
 /*
@@ -113,78 +113,78 @@ struct sv3_authority {
  * Initially first physical-reserve segments are foreground and the tail
  * is reserve; after successful GC, victim and destination exchange roles.
  */
-int sv3_enable_segment_rotation(struct sv3_authority *authority,
-				sv3_u8 *segment_roles,
-				sv3_u32 segment_count);
+int swapz_enable_segment_rotation(struct swapz_authority *authority,
+				swapz_u8 *segment_roles,
+				swapz_u32 segment_count);
 /* Begin GC into ONE entirely dead reserve segment (not a foreground one).
  * Caller preserves the foreground cursor until commit; no nested GC. */
-int sv3_gc_begin_rotation(struct sv3_authority *authority, sv3_u32 victim);
+int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim);
 /* Swap physical roles ONLY after the source victim is wholly dead.
  * Leaves foreground cursor inside new (formerly reserve) destination. */
-int sv3_gc_commit_rotation(struct sv3_authority *authority, sv3_u32 victim);
+int swapz_gc_commit_rotation(struct swapz_authority *authority, swapz_u32 victim);
 
 /* Returns -ENOSPC unless capacity supports logical pages plus GC reserve. */
-int sv3_authority_init(struct sv3_authority *authority,
-		       struct sv3_map *maps, sv3_u16 *live_records,
-		       sv3_u8 *extent_classes, sv3_u32 logical_pages,
-		       sv3_u32 physical_blocks);
+int swapz_authority_init(struct swapz_authority *authority,
+		       struct swapz_map *maps, swapz_u16 *live_records,
+		       swapz_u8 *extent_classes, swapz_u32 logical_pages,
+		       swapz_u32 physical_blocks);
 /* Reserves aligned physical blocks; single worker, one pending transaction. */
-int sv3_stage(struct sv3_authority *authority, const sv3_u32 *logical_pages,
-	      sv3_u8 count, sv3_u8 blocks, struct sv3_tx *out);
+int swapz_stage(struct swapz_authority *authority, const swapz_u32 *logical_pages,
+	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out);
 /*
  * IMPORTANT: success requires full extent I/O completion (not submission).
  * The caller must provide the exact completed on-media bytes. Verify all
  * record CRC32Cs and old-authority invariants BEFORE publishing any mapping.
  */
-int sv3_finish(struct sv3_authority *authority, const struct sv3_tx *tx,
-	       const void *extent, sv3_u32 bytes_total,
-	       sv3_u8 completed_blocks, int io_error);
+int swapz_finish(struct swapz_authority *authority, const struct swapz_tx *tx,
+	       const void *extent, swapz_u32 bytes_total,
+	       swapz_u8 completed_blocks, int io_error);
 /*
  * Serialized batched-lower-write transition: transfer the active stage
- * to a caller-owned immutable sv3_tx snapshot without publishing mappings.
+ * to a caller-owned immutable swapz_tx snapshot without publishing mappings.
  * Stage further extents ONLY inside the same physical segment. On lower
- * completion restore snapshots in sequence and use normal sv3_finish().
+ * completion restore snapshots in sequence and use normal swapz_finish().
  * Failed lower writes require resume+abort of every snapshot. No upper BIO
  * may be acknowledged during this protocol.
  */
-int sv3_stage_batch(struct sv3_authority *authority,
-		    const sv3_u32 *logical_pages, sv3_u8 count,
-		    sv3_u8 blocks, struct sv3_tx *out);
-int sv3_batch_pause(struct sv3_authority *authority, const struct sv3_tx *tx);
-int sv3_batch_resume(struct sv3_authority *authority, const struct sv3_tx *tx);
+int swapz_stage_batch(struct swapz_authority *authority,
+		    const swapz_u32 *logical_pages, swapz_u8 count,
+		    swapz_u8 blocks, struct swapz_tx *out);
+int swapz_batch_pause(struct swapz_authority *authority, const struct swapz_tx *tx);
+int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx *tx);
 /* Cancel an abandoned physical region; old mappings remain authoritative. */
-int sv3_abort(struct sv3_authority *authority, const struct sv3_tx *tx);
+int swapz_abort(struct swapz_authority *authority, const struct swapz_tx *tx);
 /*
  * Raw 4KiB page (LZ4 fallback) occupies a whole aligned block and has no
  * V3 descriptor. The caller must stage exactly one record / one block and
  * only call finish_raw after the WHOLE lower write completes.
  */
-int sv3_finish_raw(struct sv3_authority *authority, const struct sv3_tx *tx,
-		   const void *raw_page, sv3_u8 completed_blocks, int io_error);
+int swapz_finish_raw(struct swapz_authority *authority, const struct swapz_tx *tx,
+		   const void *raw_page, swapz_u8 completed_blocks, int io_error);
 /* Check raw payload integrity against volatile authoritative CRC. */
-int sv3_verify_raw(const struct sv3_authority *authority,
-		   sv3_u32 logical_page, const void *raw_page);
+int swapz_verify_raw(const struct swapz_authority *authority,
+		   swapz_u32 logical_page, const void *raw_page);
 /* Serialized explicit logical discard: invalidate and advance generation. */
-int sv3_discard_page(struct sv3_authority *authority, sv3_u32 logical_page);
+int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical_page);
 /* Fail-closed multi-page discard: prevalidate entire range before mutation. */
-int sv3_discard_range(struct sv3_authority *authority,
-		      sv3_u32 first_page, sv3_u32 page_count);
+int swapz_discard_range(struct swapz_authority *authority,
+		      swapz_u32 first_page, swapz_u32 page_count);
 /* Binds on-media readback to current in-memory mapping and generation. */
-int sv3_read_authoritative(const struct sv3_authority *authority,
-			   sv3_u32 logical_page, const struct sv3_map *observed,
-			   const void *extent, sv3_u32 bytes_total,
-			   struct sv3_decoded *decoded,
-			   const sv3_u8 **payload);
+int swapz_read_authoritative(const struct swapz_authority *authority,
+			   swapz_u32 logical_page, const struct swapz_map *observed,
+			   const void *extent, swapz_u32 bytes_total,
+			   struct swapz_decoded *decoded,
+			   const swapz_u8 **payload);
 /*
- * Fast path after sv3_peek() has validated metadata in worker-owned scratch.
+ * Fast path after swapz_peek() has validated metadata in worker-owned scratch.
  * Rechecks current authority/sequence and verifies the payload CRC without
  * re-running the metadata parser over the same block-zero bytes.
  */
-int sv3_read_authoritative_peeked(const struct sv3_authority *authority,
-				  sv3_u32 logical_page,
-				  const struct sv3_map *observed,
-				  const void *extent, sv3_u32 bytes_total,
-				  const struct sv3_decoded *peeked,
-				  const sv3_u8 **payload);
+int swapz_read_authoritative_peeked(const struct swapz_authority *authority,
+				  swapz_u32 logical_page,
+				  const struct swapz_map *observed,
+				  const void *extent, swapz_u32 bytes_total,
+				  const struct swapz_decoded *peeked,
+				  const swapz_u8 **payload);
 
 #endif

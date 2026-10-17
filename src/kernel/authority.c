@@ -9,28 +9,28 @@
 #include <string.h>
 #endif
 
-static int sv3_legal_class(sv3_u8 blocks)
+static int swapz_legal_class(swapz_u8 blocks)
 {
 	return blocks == 1U || blocks == 2U || blocks == 4U;
 }
 
-int sv3_authority_init(struct sv3_authority *a,
-		       struct sv3_map *maps, sv3_u16 *live_records,
-		       sv3_u8 *extent_classes, sv3_u32 logical_pages,
-		       sv3_u32 physical_blocks)
+int swapz_authority_init(struct swapz_authority *a,
+		       struct swapz_map *maps, swapz_u16 *live_records,
+		       swapz_u8 *extent_classes, swapz_u32 logical_pages,
+		       swapz_u32 physical_blocks)
 {
-	sv3_u32 reserve;
+	swapz_u32 reserve;
 
 	if (!a || !maps || !live_records || !extent_classes ||
-	    !logical_pages || physical_blocks < 3U * SV3_SEGMENT_BLOCKS ||
-	    physical_blocks % SV3_SEGMENT_BLOCKS)
+	    !logical_pages || physical_blocks < 3U * SWAPZ_SEGMENT_BLOCKS ||
+	    physical_blocks % SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
 	reserve = (logical_pages / 4U) + (logical_pages % 4U != 0);
-	if (reserve < 2U * SV3_SEGMENT_BLOCKS)
-		reserve = 2U * SV3_SEGMENT_BLOCKS;
+	if (reserve < 2U * SWAPZ_SEGMENT_BLOCKS)
+		reserve = 2U * SWAPZ_SEGMENT_BLOCKS;
 	if (reserve >= physical_blocks ||
 	    logical_pages > ((physical_blocks - reserve) /
-			     SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS)
+			     SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS)
 		return -ENOSPC;
 
 	memset(a, 0, sizeof(*a));
@@ -45,11 +45,11 @@ int sv3_authority_init(struct sv3_authority *a,
 	a->logical_pages = logical_pages;
 	a->physical_blocks = physical_blocks;
 	a->reserve_blocks = reserve;
-	a->open_segment = ~(sv3_u32)0;
-	a->gc_forbidden_open = ~(sv3_u32)0;
-	a->gc_forbidden_victim = ~(sv3_u32)0;
-	a->gc_destination = ~(sv3_u32)0;
-	a->batch_segment = ~(sv3_u32)0;
+	a->open_segment = ~(swapz_u32)0;
+	a->gc_forbidden_open = ~(swapz_u32)0;
+	a->gc_forbidden_victim = ~(swapz_u32)0;
+	a->gc_destination = ~(swapz_u32)0;
+	a->batch_segment = ~(swapz_u32)0;
 	a->next_sequence = 1;
 	return 0;
 }
@@ -63,22 +63,22 @@ int sv3_authority_init(struct sv3_authority *a,
  * silent live-data overwrite.  No segment in the fixed reserve tail is used.
  * One ordered worker owns maps, segment metadata and the active write.
  */
-static int sv3_pick_dead_segment(struct sv3_authority *a)
+static int swapz_pick_dead_segment(struct swapz_authority *a)
 {
-	sv3_u32 count = a->segment_foreground ?
+	swapz_u32 count = a->segment_foreground ?
 			a->segment_count :
 			(a->gc_allocation ?
 			 a->physical_blocks :
 			 a->physical_blocks - a->reserve_blocks) /
-			SV3_SEGMENT_BLOCKS;
-	sv3_u32 scan;
+			SWAPZ_SEGMENT_BLOCKS;
+	swapz_u32 scan;
 
 	if (!count)
 		return -ENOSPC;
 	for (scan = 0; scan < count; ++scan) {
-		sv3_u32 segment = (a->next_segment_probe + scan) % count;
-		sv3_u32 start = segment * SV3_SEGMENT_BLOCKS;
-		sv3_u32 off, logical;
+		swapz_u32 segment = (a->next_segment_probe + scan) % count;
+		swapz_u32 start = segment * SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 off, logical;
 		int used = 0, blocked = 0;
 
 		/*
@@ -102,10 +102,10 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 		if (a->segment_foreground &&
 		    (a->gc_allocation ?
 		     (a->segment_foreground[segment] ||
-		      a->gc_destination != ~(sv3_u32)0) :
+		      a->gc_destination != ~(swapz_u32)0) :
 		     !a->segment_foreground[segment]))
 			continue;
-		for (off = 0; off < SV3_SEGMENT_BLOCKS; ++off) {
+		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
 			if (a->live_records[start + off]) {
 				blocked = 1;
 				break;
@@ -116,13 +116,13 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 		if (blocked)
 			continue;
 		for (logical = 0; logical < a->logical_pages; ++logical) {
-			const struct sv3_map *map = &a->maps[logical];
+			const struct swapz_map *map = &a->maps[logical];
 
 			if (!map->valid)
 				continue;
 			if (map->start_block >= a->physical_blocks)
 				return -EUCLEAN;
-			if (map->start_block / SV3_SEGMENT_BLOCKS == segment) {
+			if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment) {
 				blocked = 1;
 				break;
 			}
@@ -135,9 +135,9 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
 		 * data. Reuse the WHOLE segment; stage never crosses its edge.
 		 */
 		memset(a->live_records + start, 0,
-		       SV3_SEGMENT_BLOCKS * sizeof(*a->live_records));
+		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->live_records));
 		memset(a->extent_classes + start, 0,
-		       SV3_SEGMENT_BLOCKS * sizeof(*a->extent_classes));
+		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->extent_classes));
 		if (used)
 			a->recycled_dead_segments++;
 		a->next_block = start;
@@ -154,25 +154,25 @@ static int sv3_pick_dead_segment(struct sv3_authority *a)
  * persistent per-segment role array so GC can exchange its just-evacuated
  * foreground victim with its fully written reserved destination.
  */
-int sv3_enable_segment_rotation(struct sv3_authority *a,
-				sv3_u8 *roles, sv3_u32 count)
+int swapz_enable_segment_rotation(struct swapz_authority *a,
+				swapz_u8 *roles, swapz_u32 count)
 {
-	sv3_u32 i, foreground;
+	swapz_u32 i, foreground;
 
 	if (!a || !a->maps || !roles || a->segment_foreground ||
 	    a->in_flight || a->gc_allocation || a->next_sequence != 1 ||
-	    a->next_block || a->open_segment != ~(sv3_u32)0 ||
-	    count != a->physical_blocks / SV3_SEGMENT_BLOCKS)
+	    a->next_block || a->open_segment != ~(swapz_u32)0 ||
+	    count != a->physical_blocks / SWAPZ_SEGMENT_BLOCKS)
 		return -EINVAL;
 	foreground = (a->physical_blocks - a->reserve_blocks) /
-		     SV3_SEGMENT_BLOCKS;
+		     SWAPZ_SEGMENT_BLOCKS;
 	if (foreground < 1 || count - foreground < 2)
 		return -ENOSPC;
 	for (i = 0; i < count; ++i)
 		roles[i] = i < foreground ? 1 : 0;
 	a->segment_foreground = roles;
 	a->segment_count = count;
-	a->gc_destination = ~(sv3_u32)0;
+	a->gc_destination = ~(swapz_u32)0;
 	return 0;
 }
 
@@ -181,7 +181,7 @@ int sv3_enable_segment_rotation(struct sv3_authority *a,
  * the foreground cursor here: the sole DM worker saves it before GC and
  * restores it on any failure. No lower I/O has occurred if this fails.
  */
-int sv3_gc_begin_rotation(struct sv3_authority *a, sv3_u32 victim)
+int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
 {
 	int error;
 
@@ -193,15 +193,15 @@ int sv3_gc_begin_rotation(struct sv3_authority *a, sv3_u32 victim)
 	a->gc_allocation = 1;
 	a->gc_forbidden_open = a->open_segment;
 	a->gc_forbidden_victim = victim;
-	a->gc_destination = ~(sv3_u32)0;
-	a->open_segment = ~(sv3_u32)0;
+	a->gc_destination = ~(swapz_u32)0;
+	a->open_segment = ~(swapz_u32)0;
 	a->next_segment_probe = 0;
-	error = sv3_pick_dead_segment(a);
+	error = swapz_pick_dead_segment(a);
 	if (error) {
 		/* Caller will restore the saved foreground cursor. */
 		a->gc_allocation = 0;
-		a->gc_forbidden_open = ~(sv3_u32)0;
-		a->gc_forbidden_victim = ~(sv3_u32)0;
+		a->gc_forbidden_open = ~(swapz_u32)0;
+		a->gc_forbidden_victim = ~(swapz_u32)0;
 		return error;
 	}
 	a->gc_destination = a->open_segment;
@@ -214,9 +214,9 @@ int sv3_gc_begin_rotation(struct sv3_authority *a, sv3_u32 victim)
  * completed before this function is invoked by the sole DM worker.
  * A failed validation must NEVER change roles or re-enable unsafe reuse.
  */
-int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
+int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 {
-	sv3_u32 dest, logical, block;
+	swapz_u32 dest, logical, block;
 
 	if (!a || !a->segment_foreground || !a->gc_allocation ||
 	    a->in_flight || a->batch_pending || victim >= a->segment_count ||
@@ -228,8 +228,8 @@ int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
 	    a->segment_foreground[dest] || dest == victim ||
 	    dest == a->gc_forbidden_open ||
 	    a->open_segment != dest ||
-	    a->next_block <= dest * SV3_SEGMENT_BLOCKS ||
-	    a->next_block > (dest + 1U) * SV3_SEGMENT_BLOCKS)
+	    a->next_block <= dest * SWAPZ_SEGMENT_BLOCKS ||
+	    a->next_block > (dest + 1U) * SWAPZ_SEGMENT_BLOCKS)
 		return -EUCLEAN;
 	/*
 	 * GC is invoked because foreground allocation needs capacity.
@@ -238,45 +238,45 @@ int sv3_gc_commit_rotation(struct sv3_authority *a, sv3_u32 victim)
 	 * foreground: no new foreground write could succeed. Fail closed
 	 * with no role exchange rather than reporting false GC progress.
 	 */
-	if (a->next_block == (dest + 1U) * SV3_SEGMENT_BLOCKS)
+	if (a->next_block == (dest + 1U) * SWAPZ_SEGMENT_BLOCKS)
 		return -ENOSPC;
 	for (logical = 0; logical < a->logical_pages; ++logical) {
-		const struct sv3_map *m = &a->maps[logical];
+		const struct swapz_map *m = &a->maps[logical];
 
 		if (m->valid && (m->start_block >= a->physical_blocks ||
-		    m->start_block / SV3_SEGMENT_BLOCKS == victim))
+		    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim))
 			return -EUCLEAN;
 	}
-	for (block = victim * SV3_SEGMENT_BLOCKS;
-	     block < (victim + 1U) * SV3_SEGMENT_BLOCKS; ++block)
+	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
+	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
 		if (a->live_records[block])
 			return -EUCLEAN;
 	/* Commit both roles without further lower I/O or fallible work. */
 	a->segment_foreground[dest] = 1;
 	a->segment_foreground[victim] = 0;
 	a->gc_allocation = 0;
-	a->gc_forbidden_open = ~(sv3_u32)0;
-	a->gc_forbidden_victim = ~(sv3_u32)0;
-	a->gc_destination = ~(sv3_u32)0;
+	a->gc_forbidden_open = ~(swapz_u32)0;
+	a->gc_forbidden_victim = ~(swapz_u32)0;
+	a->gc_destination = ~(swapz_u32)0;
 	a->next_segment_probe = (victim + 1U) % a->segment_count;
 	/* Deliberately leave OPEN and next_block pointing at GC destination:
 	 * subsequent foreground writes use the *same* compacted segment. */
 	return 0;
 }
 
-int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
-	      sv3_u8 count, sv3_u8 blocks, struct sv3_tx *out)
+int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
+	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out)
 {
-	sv3_u32 limit, start;
-	sv3_u8 index;
+	swapz_u32 limit, start;
+	swapz_u8 index;
 
 	if (!a || !a->maps || !pages || !out ||
-	    !sv3_legal_class(blocks) || !count || count > SV3_MAX_RECORDS)
+	    !swapz_legal_class(blocks) || !count || count > SWAPZ_MAX_RECORDS)
 		return -EINVAL;
 	if (a->in_flight ||
 	    (a->batch_pending && !a->batch_stage_allowed))
 		return -EBUSY;
-	if (!a->next_sequence || a->next_sequence == ~(sv3_u32)0)
+	if (!a->next_sequence || a->next_sequence == ~(swapz_u32)0)
 		return -EOVERFLOW;
 	/*
 	 * A lower-write group has already RESERVED physical extents but none
@@ -284,23 +284,23 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	 * the combined IO; the engine flushes the group on -EAGAIN and retries.
 	 */
 	if (a->batch_pending) {
-		sv3_u32 aligned = (a->next_block + blocks - 1U) &
-				  ~(sv3_u32)(blocks - 1U);
+		swapz_u32 aligned = (a->next_block + blocks - 1U) &
+				  ~(swapz_u32)(blocks - 1U);
 		if (!a->reuse_dead_segments ||
 		    a->open_segment != a->batch_segment ||
 		    aligned >= a->physical_blocks ||
 		    blocks > a->physical_blocks - aligned ||
-		    aligned / SV3_SEGMENT_BLOCKS != a->batch_segment ||
-		    aligned % SV3_SEGMENT_BLOCKS + blocks >
-					SV3_SEGMENT_BLOCKS)
+		    aligned / SWAPZ_SEGMENT_BLOCKS != a->batch_segment ||
+		    aligned % SWAPZ_SEGMENT_BLOCKS + blocks >
+					SWAPZ_SEGMENT_BLOCKS)
 			return -EAGAIN;
 	}
 	for (index = 0; index < count; ++index) {
-		sv3_u8 earlier;
+		swapz_u8 earlier;
 
 		if (pages[index] >= a->logical_pages)
 			return -ERANGE;
-		if (a->maps[pages[index]].generation == ~(sv3_u32)0)
+		if (a->maps[pages[index]].generation == ~(swapz_u32)0)
 			return -EOVERFLOW;
 		for (earlier = 0; earlier < index; ++earlier) {
 			if (pages[earlier] == pages[index])
@@ -315,16 +315,16 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 		    blocks - 1U > limit - a->next_block)
 			return -ENOSPC;
 		start = (a->next_block + blocks - 1U) &
-			~(sv3_u32)(blocks - 1U);
+			~(swapz_u32)(blocks - 1U);
 		if (start > limit || blocks > limit - start ||
-		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
+		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -ENOSPC;
 	} else {
 		limit = a->segment_foreground ? a->physical_blocks :
 			((a->gc_allocation ?
 			  a->physical_blocks :
 			  a->physical_blocks - a->reserve_blocks) /
-			 SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
+			 SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
 		/*
 		 * Reuse the OPEN segment only while the entire aligned extent fits.
 		 * A crossed segment edge MUST run the mapped-record liveness scan;
@@ -332,24 +332,24 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 		 * after physical cursor wrap.
 		 */
 		start = a->next_block;
-		if (a->open_segment == ~(sv3_u32)0 ||
+		if (a->open_segment == ~(swapz_u32)0 ||
 		    start >= limit || blocks - 1U > limit - start ||
-		    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) >
+		    ((start + blocks - 1U) & ~(swapz_u32)(blocks - 1U)) >
 				limit - blocks ||
-		    (((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) /
-		     SV3_SEGMENT_BLOCKS) != a->open_segment ||
-		    ((start + blocks - 1U) & ~(sv3_u32)(blocks - 1U)) %
-				SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS) {
-			int error = sv3_pick_dead_segment(a);
+		    (((start + blocks - 1U) & ~(swapz_u32)(blocks - 1U)) /
+		     SWAPZ_SEGMENT_BLOCKS) != a->open_segment ||
+		    ((start + blocks - 1U) & ~(swapz_u32)(blocks - 1U)) %
+				SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS) {
+			int error = swapz_pick_dead_segment(a);
 
 			if (error)
 				return error;
 			start = a->next_block;
 		}
-		start = (start + blocks - 1U) & ~(sv3_u32)(blocks - 1U);
+		start = (start + blocks - 1U) & ~(swapz_u32)(blocks - 1U);
 		if (start >= limit || blocks > limit - start ||
-		    start / SV3_SEGMENT_BLOCKS != a->open_segment ||
-		    start % SV3_SEGMENT_BLOCKS + blocks > SV3_SEGMENT_BLOCKS)
+		    start / SWAPZ_SEGMENT_BLOCKS != a->open_segment ||
+		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -EUCLEAN;
 
 	}
@@ -378,10 +378,10 @@ int sv3_stage(struct sv3_authority *a, const sv3_u32 *pages,
 	return 0;
 }
 
-static int sv3_is_active(const struct sv3_authority *a,
-			 const struct sv3_tx *tx)
+static int swapz_is_active(const struct swapz_authority *a,
+			 const struct swapz_tx *tx)
 {
-	sv3_u8 index;
+	swapz_u8 index;
 
 	if (!a || !tx || !a->in_flight ||
 	    tx->start_block != a->active_start ||
@@ -392,8 +392,8 @@ static int sv3_is_active(const struct sv3_authority *a,
 	    tx->sequence != a->active_tx.sequence ||
 	    tx->extent_blocks != a->active_tx.extent_blocks ||
 	    tx->count != a->active_tx.count ||
-	    !sv3_legal_class(tx->extent_blocks) ||
-	    !tx->count || tx->count > SV3_MAX_RECORDS)
+	    !swapz_legal_class(tx->extent_blocks) ||
+	    !tx->count || tx->count > SWAPZ_MAX_RECORDS)
 		return 0;
 
 	/* Compare fields, not padding, and NEVER trust a caller-mutated
@@ -421,27 +421,27 @@ static int sv3_is_active(const struct sv3_authority *a,
  * snapshots exist. The engine calls this explicit serialized wrapper
  * for the second and later reservation of an unpublished group.
  */
-int sv3_stage_batch(struct sv3_authority *a, const sv3_u32 *pages,
-		    sv3_u8 count, sv3_u8 blocks, struct sv3_tx *tx)
+int swapz_stage_batch(struct swapz_authority *a, const swapz_u32 *pages,
+		    swapz_u8 count, swapz_u8 blocks, struct swapz_tx *tx)
 {
 	int error;
 
 	if (!a || a->batch_stage_allowed || a->batch_replaying)
 		return -EBUSY;
 	a->batch_stage_allowed = 1;
-	error = sv3_stage(a, pages, count, blocks, tx);
+	error = swapz_stage(a, pages, count, blocks, tx);
 	a->batch_stage_allowed = 0;
 	return error;
 }
 
-int sv3_batch_pause(struct sv3_authority *a, const struct sv3_tx *tx)
+int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 {
-	sv3_u32 segment;
+	swapz_u32 segment;
 
-	if (!sv3_is_active(a, tx) || !a->reuse_dead_segments ||
-	    a->batch_replaying || a->batch_pending >= SV3_MAX_RECORDS)
+	if (!swapz_is_active(a, tx) || !a->reuse_dead_segments ||
+	    a->batch_replaying || a->batch_pending >= SWAPZ_MAX_RECORDS)
 		return -EINVAL;
-	segment = tx->start_block / SV3_SEGMENT_BLOCKS;
+	segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
 	if (a->batch_pending) {
 		if (segment != a->batch_segment ||
 		    tx->sequence != a->batch_first_sequence + a->batch_pending)
@@ -452,7 +452,7 @@ int sv3_batch_pause(struct sv3_authority *a, const struct sv3_tx *tx)
 		a->batch_consumed = 0;
 	}
 	a->batch_hashes[a->batch_pending] =
-		sv3_crc32c_bytes(tx, sizeof(*tx));
+		swapz_crc32c_bytes(tx, sizeof(*tx));
 	a->batch_pending++;
 	a->in_flight = 0;
 	a->active_sequence = 0;
@@ -465,23 +465,23 @@ int sv3_batch_pause(struct sv3_authority *a, const struct sv3_tx *tx)
 /* A saved snapshot can only be rearmed in exactly increasing staged
  * sequence order. Reusing a stage never fabricates physical completion.
  * The caller MUST subsequently finish/abort the rearmed transaction. */
-int sv3_batch_resume(struct sv3_authority *a, const struct sv3_tx *tx)
+int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 {
-	sv3_u8 i;
+	swapz_u8 i;
 
 	if (!a || !tx || a->in_flight || !a->batch_pending ||
 	    a->batch_replaying || tx->sequence != a->batch_first_sequence ||
-	    tx->start_block / SV3_SEGMENT_BLOCKS != a->batch_segment ||
+	    tx->start_block / SWAPZ_SEGMENT_BLOCKS != a->batch_segment ||
 	    (tx->extent_blocks != 1 && tx->extent_blocks != 2 &&
 	     tx->extent_blocks != 4) ||
-	    !tx->count || tx->count > SV3_MAX_RECORDS ||
+	    !tx->count || tx->count > SWAPZ_MAX_RECORDS ||
 	    tx->start_block % tx->extent_blocks ||
 	    tx->start_block >= a->physical_blocks ||
 	    tx->extent_blocks > a->physical_blocks - tx->start_block ||
 	    tx->start_block + tx->extent_blocks > a->next_block ||
-	    a->batch_consumed >= SV3_MAX_RECORDS ||
+	    a->batch_consumed >= SWAPZ_MAX_RECORDS ||
 	    a->batch_hashes[a->batch_consumed] !=
-				sv3_crc32c_bytes(tx, sizeof(*tx)))
+				swapz_crc32c_bytes(tx, sizeof(*tx)))
 		return -ESTALE;
 	for (i = 0; i < tx->count; ++i)
 		if (tx->records[i].logical_page >= a->logical_pages ||
@@ -498,7 +498,7 @@ int sv3_batch_resume(struct sv3_authority *a, const struct sv3_tx *tx)
 	return 0;
 }
 
-static void sv3_forget_active(struct sv3_authority *a, int published)
+static void swapz_forget_active(struct swapz_authority *a, int published)
 {
 	if (a->batch_replaying) {
 		a->batch_replaying = 0;
@@ -506,7 +506,7 @@ static void sv3_forget_active(struct sv3_authority *a, int published)
 		a->batch_first_sequence++;
 		a->batch_consumed++;
 		if (!a->batch_pending) {
-			a->batch_segment = ~(sv3_u32)0;
+			a->batch_segment = ~(swapz_u32)0;
 			a->batch_consumed = 0;
 		}
 	}
@@ -521,11 +521,11 @@ static void sv3_forget_active(struct sv3_authority *a, int published)
 	memset(&a->active_tx, 0, sizeof(a->active_tx));
 }
 
-int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
+int swapz_abort(struct swapz_authority *a, const struct swapz_tx *tx)
 {
-	if (!sv3_is_active(a, tx))
+	if (!swapz_is_active(a, tx))
 		return -ESTALE;
-	sv3_forget_active(a, 0);
+	swapz_forget_active(a, 0);
 	return 0;
 }
 
@@ -534,14 +534,14 @@ int sv3_abort(struct sv3_authority *a, const struct sv3_tx *tx)
  * Raw writes never publish on short or failed lower I/O.  The raw marker is
  * held exclusively in volatile mappings, NEVER guessed from media content.
  */
-int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
-		   const void *raw_page, sv3_u8 completed_blocks, int io_error)
+int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
+		   const void *raw_page, swapz_u8 completed_blocks, int io_error)
 {
-	struct sv3_map *old;
-	sv3_u32 page;
+	struct swapz_map *old;
+	swapz_u32 page;
 	int error;
 
-	if (!sv3_is_active(a, tx))
+	if (!swapz_is_active(a, tx))
 		return -ESTALE;
 	if (tx->count != 1 || tx->extent_blocks != 1) {
 		error = -EINVAL;
@@ -561,7 +561,7 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 		goto fail;
 	}
 	old = &a->maps[page];
-	if (old->generation == ~(sv3_u32)0 ||
+	if (old->generation == ~(swapz_u32)0 ||
 	    old->generation + 1U != tx->records[0].generation ||
 	    a->live_records[tx->start_block] ||
 	    a->extent_classes[tx->start_block]) {
@@ -570,7 +570,7 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 	}
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
-	     !sv3_legal_class(old->extent_blocks) ||
+	     !swapz_legal_class(old->extent_blocks) ||
 	     a->extent_classes[old->start_block] != old->extent_blocks ||
 	     !a->live_records[old->start_block])) {
 		error = -EUCLEAN;
@@ -580,21 +580,21 @@ int sv3_finish_raw(struct sv3_authority *a, const struct sv3_tx *tx,
 	a->extent_classes[tx->start_block] = 1;
 	if (old->valid)
 		a->live_records[old->start_block]--;
-	*old = (struct sv3_map){
+	*old = (struct swapz_map){
 		.start_block = tx->start_block,
 		.sequence = tx->sequence,
 		.generation = tx->records[0].generation,
-		.raw_crc32c = sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES),
-		.payload_length = SV3_BLOCK_BYTES,
+		.raw_crc32c = swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES),
+		.payload_length = SWAPZ_BLOCK_BYTES,
 		.extent_blocks = 1,
 		.record_index = 0,
 		.raw = 1,
 		.valid = 1,
 	};
-	sv3_forget_active(a, 1);
+	swapz_forget_active(a, 1);
 	return 0;
 fail:
-	sv3_forget_active(a, 0);
+	swapz_forget_active(a, 0);
 	return error;
 }
 
@@ -604,40 +604,40 @@ fail:
  * mapping authority retains the CRC32C instead. This is NOT persistent
  * metadata and does not provide crash recovery.
  */
-int sv3_verify_raw(const struct sv3_authority *a, sv3_u32 logical_page,
+int swapz_verify_raw(const struct swapz_authority *a, swapz_u32 logical_page,
 		   const void *raw_page)
 {
-	const struct sv3_map *m;
+	const struct swapz_map *m;
 
 	if (!a || !a->maps || !raw_page || logical_page >= a->logical_pages)
 		return -EINVAL;
 	m = &a->maps[logical_page];
 	if (!m->valid || !m->raw || m->extent_blocks != 1 ||
-	    m->payload_length != SV3_BLOCK_BYTES ||
+	    m->payload_length != SWAPZ_BLOCK_BYTES ||
 	    m->start_block >= a->physical_blocks ||
 	    a->extent_classes[m->start_block] != 1 ||
 	    !a->live_records[m->start_block])
 		return -EUCLEAN;
-	if (sv3_crc32c_bytes(raw_page, SV3_BLOCK_BYTES) != m->raw_crc32c)
+	if (swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES) != m->raw_crc32c)
 		return -EBADMSG;
 	return 0;
 }
 
-int sv3_discard_page(struct sv3_authority *a, sv3_u32 logical_page)
+int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 {
-	struct sv3_map *old;
-	sv3_u32 generation;
+	struct swapz_map *old;
+	swapz_u32 generation;
 
 	if (!a || !a->maps || logical_page >= a->logical_pages)
 		return -EINVAL;
 	if (a->in_flight || a->batch_pending)
 		return -EBUSY;
 	old = &a->maps[logical_page];
-	if (old->generation == ~(sv3_u32)0)
+	if (old->generation == ~(swapz_u32)0)
 		return -EOVERFLOW;
 	if (old->valid &&
 	    (old->start_block >= a->physical_blocks ||
-	     !sv3_legal_class(old->extent_blocks) ||
+	     !swapz_legal_class(old->extent_blocks) ||
 	     a->extent_classes[old->start_block] != old->extent_blocks ||
 	     !a->live_records[old->start_block]))
 		return -EUCLEAN;
@@ -649,35 +649,35 @@ int sv3_discard_page(struct sv3_authority *a, sv3_u32 logical_page)
 	return 0;
 }
 
-static sv3_u32 sv3_disk_sequence(const sv3_u8 *bytes)
+static swapz_u32 swapz_disk_sequence(const swapz_u8 *bytes)
 {
 	/* Sequence bytes 8-11, always LE, no unaligned u32 access. */
-	return (sv3_u32)bytes[8] | ((sv3_u32)bytes[9] << 8) |
-		((sv3_u32)bytes[10] << 16) | ((sv3_u32)bytes[11] << 24);
+	return (swapz_u32)bytes[8] | ((swapz_u32)bytes[9] << 8) |
+		((swapz_u32)bytes[10] << 16) | ((swapz_u32)bytes[11] << 24);
 }
 
-int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
-	       const void *extent, sv3_u32 bytes_total,
-	       sv3_u8 completed_blocks, int io_error)
+int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
+	       const void *extent, swapz_u32 bytes_total,
+	       swapz_u8 completed_blocks, int io_error)
 {
-	const sv3_u8 *image = extent;
-	sv3_u16 payload_lengths[SV3_MAX_RECORDS] = { 0 };
-	sv3_u16 payload_offsets[SV3_MAX_RECORDS] = { 0 };
-	sv3_u8 index;
+	const swapz_u8 *image = extent;
+	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u8 index;
 	int error = 0;
 
-	if (!sv3_is_active(a, tx))
+	if (!swapz_is_active(a, tx))
 		return -ESTALE;
 	if (io_error || completed_blocks != tx->extent_blocks ||
-	    bytes_total != (sv3_u32)tx->extent_blocks * SV3_BLOCK_BYTES ||
+	    bytes_total != (swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES ||
 	    !image) {
 		error = io_error < 0 ? io_error : -EIO;
 		goto fail;
 	}
-	error = sv3_validate(image, bytes_total);
+	error = swapz_validate(image, bytes_total);
 	if (error)
 		goto fail;
-	if (image[7] != tx->count || sv3_disk_sequence(image) != tx->sequence) {
+	if (image[7] != tx->count || swapz_disk_sequence(image) != tx->sequence) {
 		error = -EUCLEAN;
 		goto fail;
 	}
@@ -687,20 +687,20 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 	 * validated. No map is mutated during this pass.
 	 */
 	for (index = 0; index < tx->count; ++index) {
-		struct sv3_decoded decoded;
-		const sv3_u8 *payload;
-		const struct sv3_map *old;
-		sv3_u32 logical = tx->records[index].logical_page;
-		sv3_u8 prior = 0;
-		sv3_u8 j;
+		struct swapz_decoded decoded;
+		const swapz_u8 *payload;
+		const struct swapz_map *old;
+		swapz_u32 logical = tx->records[index].logical_page;
+		swapz_u8 prior = 0;
+		swapz_u8 j;
 
-		error = sv3_lookup(image, bytes_total, index, &decoded, &payload);
+		error = swapz_lookup(image, bytes_total, index, &decoded, &payload);
 		if (error)
 			goto fail;
 		payload_lengths[index] = decoded.payload_length;
 		payload_offsets[index] = decoded.payload_offset;
 		if (!payload_lengths[index] ||
-		    payload_lengths[index] > SV3_MAX_COMPRESSED) {
+		    payload_lengths[index] > SWAPZ_MAX_COMPRESSED) {
 			error = -EUCLEAN;
 			goto fail;
 		}
@@ -711,7 +711,7 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 			goto fail;
 		}
 		old = &a->maps[logical];
-		if (old->generation == ~(sv3_u32)0 ||
+		if (old->generation == ~(swapz_u32)0 ||
 		    old->generation + 1U != decoded.generation) {
 			error = -ESTALE;
 			goto fail;
@@ -719,13 +719,13 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 		if (!old->valid)
 			continue;
 		if (old->start_block >= a->physical_blocks ||
-		    !sv3_legal_class(old->extent_blocks) ||
+		    !swapz_legal_class(old->extent_blocks) ||
 		    a->extent_classes[old->start_block] != old->extent_blocks) {
 			error = -EUCLEAN;
 			goto fail;
 		}
 		for (j = 0; j <= index; ++j) {
-			const struct sv3_map *earlier_old =
+			const struct swapz_map *earlier_old =
 				&a->maps[tx->records[j].logical_page];
 
 			if (earlier_old->valid &&
@@ -751,12 +751,12 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 	a->live_records[tx->start_block] = tx->count;
 	a->extent_classes[tx->start_block] = tx->extent_blocks;
 	for (index = 0; index < tx->count; ++index) {
-		sv3_u32 logical = tx->records[index].logical_page;
-		struct sv3_map *entry = &a->maps[logical];
+		swapz_u32 logical = tx->records[index].logical_page;
+		struct swapz_map *entry = &a->maps[logical];
 
 		if (entry->valid)
 			a->live_records[entry->start_block]--;
-		*entry = (struct sv3_map){
+		*entry = (struct swapz_map){
 			.start_block = tx->start_block,
 			.sequence = tx->sequence,
 			.generation = tx->records[index].generation,
@@ -767,20 +767,20 @@ int sv3_finish(struct sv3_authority *a, const struct sv3_tx *tx,
 			.valid = 1,
 		};
 	}
-	sv3_forget_active(a, 1);
+	swapz_forget_active(a, 1);
 	return 0;
 fail:
-	sv3_forget_active(a, 0);
+	swapz_forget_active(a, 0);
 	return error;
 }
 
-static int sv3_read_observed_authority(
-			   const struct sv3_authority *a,
-			   sv3_u32 logical_page, const struct sv3_map *observed,
-			   const void *extent, sv3_u32 bytes_total,
-			   const struct sv3_map **current_out)
+static int swapz_read_observed_authority(
+			   const struct swapz_authority *a,
+			   swapz_u32 logical_page, const struct swapz_map *observed,
+			   const void *extent, swapz_u32 bytes_total,
+			   const struct swapz_map **current_out)
 {
-	const struct sv3_map *current;
+	const struct swapz_map *current;
 
 	if (!a || !observed || !current_out ||
 	    logical_page >= a->logical_pages)
@@ -798,28 +798,28 @@ static int sv3_read_observed_authority(
 	if (current->raw)
 		return -EOPNOTSUPP;
 	if (!extent ||
-	    bytes_total != (sv3_u32)current->extent_blocks * SV3_BLOCK_BYTES)
+	    bytes_total != (swapz_u32)current->extent_blocks * SWAPZ_BLOCK_BYTES)
 		return -EINVAL;
 	*current_out = current;
 	return 0;
 }
 
-int sv3_read_authoritative(const struct sv3_authority *a,
-			   sv3_u32 logical_page, const struct sv3_map *observed,
-			   const void *extent, sv3_u32 bytes_total,
-			   struct sv3_decoded *decoded,
-			   const sv3_u8 **payload)
+int swapz_read_authoritative(const struct swapz_authority *a,
+			   swapz_u32 logical_page, const struct swapz_map *observed,
+			   const void *extent, swapz_u32 bytes_total,
+			   struct swapz_decoded *decoded,
+			   const swapz_u8 **payload)
 {
-	const struct sv3_map *current;
+	const struct swapz_map *current;
 	int error;
 
 	if (!decoded || !payload)
 		return -EINVAL;
-	error = sv3_read_observed_authority(a, logical_page, observed,
+	error = swapz_read_observed_authority(a, logical_page, observed,
 					   extent, bytes_total, &current);
 	if (error)
 		return error;
-	error = sv3_lookup(extent, bytes_total, current->record_index,
+	error = swapz_lookup(extent, bytes_total, current->record_index,
 			   decoded, payload);
 	if (error)
 		return error;
@@ -827,34 +827,34 @@ int sv3_read_authoritative(const struct sv3_authority *a,
 	    decoded->generation != current->generation ||
 	    decoded->payload_length != current->payload_length ||
 	    decoded->payload_offset != current->payload_offset ||
-	    sv3_disk_sequence(extent) != current->sequence) {
-		*decoded = (struct sv3_decoded){ 0 };
+	    swapz_disk_sequence(extent) != current->sequence) {
+		*decoded = (struct swapz_decoded){ 0 };
 		*payload = NULL;
 		return -EUCLEAN;
 	}
 	return 0;
 }
 
-int sv3_read_authoritative_peeked(const struct sv3_authority *a,
-				  sv3_u32 logical_page,
-				  const struct sv3_map *observed,
-				  const void *extent, sv3_u32 bytes_total,
-				  const struct sv3_decoded *peeked,
-				  const sv3_u8 **payload)
+int swapz_read_authoritative_peeked(const struct swapz_authority *a,
+				  swapz_u32 logical_page,
+				  const struct swapz_map *observed,
+				  const void *extent, swapz_u32 bytes_total,
+				  const struct swapz_decoded *peeked,
+				  const swapz_u8 **payload)
 {
-	const struct sv3_map *current;
-	const sv3_u8 *stored;
+	const struct swapz_map *current;
+	const swapz_u8 *stored;
 	int error;
 
 	if (!peeked || !payload)
 		return -EINVAL;
 	*payload = NULL;
-	error = sv3_read_observed_authority(a, logical_page, observed,
+	error = swapz_read_observed_authority(a, logical_page, observed,
 					   extent, bytes_total, &current);
 	if (error)
 		return error;
 	/*
-	 * sv3_peek() already validated the complete metadata block before the
+	 * swapz_peek() already validated the complete metadata block before the
 	 * engine fetched any missing payload blocks. read_scratch is owned by
 	 * the serialized worker, so only those payload bytes can change before
 	 * this call. Recheck volatile authority and on-media sequence, then
@@ -865,13 +865,13 @@ int sv3_read_authoritative_peeked(const struct sv3_authority *a,
 	    peeked->payload_length != current->payload_length ||
 	    peeked->payload_offset != current->payload_offset ||
 	    !peeked->payload_length ||
-	    peeked->payload_length > SV3_MAX_COMPRESSED ||
+	    peeked->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    peeked->payload_offset >= bytes_total ||
 	    peeked->payload_length > bytes_total - peeked->payload_offset ||
-	    sv3_disk_sequence(extent) != current->sequence)
+	    swapz_disk_sequence(extent) != current->sequence)
 		return -EUCLEAN;
-	stored = (const sv3_u8 *)extent + peeked->payload_offset;
-	if (sv3_crc32c_bytes(stored, peeked->payload_length) !=
+	stored = (const swapz_u8 *)extent + peeked->payload_offset;
+	if (swapz_crc32c_bytes(stored, peeked->payload_length) !=
 	    peeked->payload_crc32c)
 		return -EBADMSG;
 	*payload = stored;
