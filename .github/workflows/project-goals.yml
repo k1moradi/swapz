@@ -58,7 +58,7 @@ jobs:
           test ! -e kernel
           test ! -e userspace
           test ! -e tools
-          if git grep -nE '\b(sv3_|SV3_|swapz3ctl|extent-v3|swapz_extent_v3)\b' -- ':!docs/**' ':!test_results.json.xz'; then
+          if git grep -nE '\b([s]v3_|[S]V3_|swapz[3]ctl|extent-v[3]|swapz_extent_v[3])\b' -- ':!docs/**' ':!test_results.json.xz'; then
             echo 'FAIL: versioned implementation name remains outside documentation'
             exit 1
           fi

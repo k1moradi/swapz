@@ -64,3 +64,9 @@ entries overwrite their complete 4KiB block. Only alignment holes that are
 actually submitted by explicit padding mode are zero-filled, and only for the
 exact gap bytes. This keeps the no-padding path free of unrelated memory
 bandwidth while preserving deterministic lower-media contents.
+
+
+Repository naming guards must not contain their own banned implementation names
+as literal searchable text. Express self-check patterns without embedding the
+forbidden token verbatim so the guard audits the tree rather than matching
+itself.
