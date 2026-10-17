@@ -19,7 +19,7 @@
  * closed. Injection tests the upper propagation/ordering path; it does
  * not substitute for an independent device-originated flush failure.
  */
-struct sv3_flush_meter {
+struct swapz_flush_meter {
 	unsigned long long attempts;
 	unsigned long long successes;
 	unsigned long long failures;
@@ -27,7 +27,7 @@ struct sv3_flush_meter {
 	unsigned int fail_nth;
 };
 
-static inline int sv3_flush_accounted(struct sv3_flush_meter *meter,
+static inline int swapz_flush_accounted(struct swapz_flush_meter *meter,
 				     int (*lower_flush)(void *), void *opaque)
 {
 	int error;

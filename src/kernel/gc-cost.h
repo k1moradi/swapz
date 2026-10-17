@@ -11,17 +11,17 @@
  * packing fragmentation and lower read amplification are not predicted.
  * Actual GC lower bytes are separately measured after relocation.
  */
-static inline sv3_u32 sv3_gc_live_byte_cost(const struct sv3_map *m)
+static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 {
 	if (!m || !m->valid)
 		return 0;
 	if (m->raw)
 		return m->extent_blocks == 1 &&
-			m->payload_length == SV3_BLOCK_BYTES ?
-			SV3_BLOCK_BYTES : 0;
-	if (!m->payload_length || m->payload_length > SV3_MAX_COMPRESSED)
+			m->payload_length == SWAPZ_BLOCK_BYTES ?
+			SWAPZ_BLOCK_BYTES : 0;
+	if (!m->payload_length || m->payload_length > SWAPZ_MAX_COMPRESSED)
 		return 0;
-	return (sv3_u32)m->payload_length + sizeof(struct sv3_record);
+	return (swapz_u32)m->payload_length + sizeof(struct swapz_record);
 }
 
 /*
@@ -37,16 +37,16 @@ static inline sv3_u32 sv3_gc_live_byte_cost(const struct sv3_map *m)
  * Explicitly penalizing PER-RECORD reads corrects the 3 tiny records
  * versus 1 large record counterexample found by loaded alpha.4 tests.
  */
-static inline sv3_u32 sv3_gc_estimated_io_cost(const struct sv3_map *m)
+static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
 {
-	sv3_u32 bytes = sv3_gc_live_byte_cost(m);
-	sv3_u32 reads;
+	swapz_u32 bytes = swapz_gc_live_byte_cost(m);
+	swapz_u32 reads;
 
 	if (!bytes || (m->extent_blocks != 1 && m->extent_blocks != 2 &&
 		       m->extent_blocks != 4))
 		return 0;
 	reads = m->extent_blocks == 4 ? 3 : m->extent_blocks;
-	return bytes + reads * SV3_BLOCK_BYTES;
+	return bytes + reads * SWAPZ_BLOCK_BYTES;
 }
 
 /*
@@ -59,10 +59,10 @@ static inline sv3_u32 sv3_gc_estimated_io_cost(const struct sv3_map *m)
  * This is a necessary condition, NOT a promise that a candidate with
  * less data fits after 4/8/16KiB extent/header fragmentation.
  */
-static inline int sv3_gc_has_possible_headroom(sv3_u32 live_bytes)
+static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
 {
 	return live_bytes && live_bytes <
-	       SV3_SEGMENT_BLOCKS * SV3_BLOCK_BYTES;
+	       SWAPZ_SEGMENT_BLOCKS * SWAPZ_BLOCK_BYTES;
 }
 
 /*
@@ -80,32 +80,32 @@ static inline int sv3_gc_has_possible_headroom(sv3_u32 live_bytes)
  * solely to reject victims with a provably full GC destination before
  * performing potentially 2MiB of wasted relocation I/O.
  */
-#define SV3_GC_UNSHAREABLE_MIN_LENGTH \
-	((SV3_MAX_EXTENT_BYTES - sizeof(struct sv3_header) - \
-	  5U * sizeof(struct sv3_record)) / 5U + 1U)
+#define SWAPZ_GC_UNSHAREABLE_MIN_LENGTH \
+	((SWAPZ_MAX_EXTENT_BYTES - sizeof(struct swapz_header) - \
+	  5U * sizeof(struct swapz_record)) / 5U + 1U)
 
-static inline sv3_u8 sv3_gc_min_live_blocks(const struct sv3_map *m)
+static inline swapz_u8 swapz_gc_min_live_blocks(const struct swapz_map *m)
 {
 	if (!m || !m->valid)
 		return 0;
 	if (m->raw)
-		return m->payload_length == SV3_BLOCK_BYTES &&
+		return m->payload_length == SWAPZ_BLOCK_BYTES &&
 		       m->extent_blocks == 1 ? 1 : 0;
-	return m->payload_length >= SV3_GC_UNSHAREABLE_MIN_LENGTH &&
-	       m->payload_length <= SV3_MAX_COMPRESSED ? 1 : 0;
+	return m->payload_length >= SWAPZ_GC_UNSHAREABLE_MIN_LENGTH &&
+	       m->payload_length <= SWAPZ_MAX_COMPRESSED ? 1 : 0;
 }
 
-static inline int sv3_gc_candidate_can_free_block(sv3_u32 live_bytes,
-						  sv3_u16 min_live_blocks)
+static inline int swapz_gc_candidate_can_free_block(swapz_u32 live_bytes,
+						  swapz_u16 min_live_blocks)
 {
-	return sv3_gc_has_possible_headroom(live_bytes) &&
-	       min_live_blocks < SV3_SEGMENT_BLOCKS;
+	return swapz_gc_has_possible_headroom(live_bytes) &&
+	       min_live_blocks < SWAPZ_SEGMENT_BLOCKS;
 }
 
 /* For the selected policy choose lower relocation cost, then fewer
  * records. Stable segment scan order breaks remaining ties. */
-static inline int sv3_gc_prefer(sv3_u32 score, sv3_u16 count,
-			       sv3_u32 best, sv3_u16 best_count)
+static inline int swapz_gc_prefer(swapz_u32 score, swapz_u16 count,
+			       swapz_u32 best, swapz_u16 best_count)
 {
 	return count && (score < best ||
 			 (score == best && count < best_count));

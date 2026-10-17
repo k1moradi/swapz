@@ -10,7 +10,7 @@
 
 static void usage(FILE *out)
 {
-	fputs("Usage: swapz3ctl version | status | help\n", out);
+	fputs("Usage: swapzctl version | status | help\n", out);
 	fputs("EXPERIMENTAL V3: device activation is not supported.\n", out);
 }
 
@@ -27,7 +27,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	if (!strcmp(argv[1], "version") || !strcmp(argv[1], "--version")) {
-		printf("swapz3ctl %s (EXPERIMENTAL, null_blk-only)\n",
+		printf("swapzctl %s (EXPERIMENTAL, null_blk-only)\n",
 		       SWAPZ_VERSION);
 		return 0;
 	}

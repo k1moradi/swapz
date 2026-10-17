@@ -11,23 +11,23 @@
 #include <linux/string.h>
 #include "authority.h"
 
-static int __init sv3_module_init(void)
+static int __init swapz_module_init(void)
 {
-	struct sv3_authority *authority = NULL;
-	struct sv3_builder builder;
-	struct sv3_tx tx;
-	struct sv3_decoded decoded;
-	struct sv3_map *maps = NULL;
-	sv3_u16 *live = NULL;
-	sv3_u8 *classes = NULL;
-	sv3_u8 *extent = NULL;
-	sv3_u8 *compressed = NULL;
-	const sv3_u8 *stored;
-	sv3_u32 pages[7];
-	sv3_u32 index;
+	struct swapz_authority *authority = NULL;
+	struct swapz_builder builder;
+	struct swapz_tx tx;
+	struct swapz_decoded decoded;
+	struct swapz_map *maps = NULL;
+	swapz_u16 *live = NULL;
+	swapz_u8 *classes = NULL;
+	swapz_u8 *extent = NULL;
+	swapz_u8 *compressed = NULL;
+	const swapz_u8 *stored;
+	swapz_u32 pages[7];
+	swapz_u32 index;
 	int error;
 
-	extent = kvzalloc(SV3_MAX_EXTENT_BYTES, GFP_KERNEL);
+	extent = kvzalloc(SWAPZ_MAX_EXTENT_BYTES, GFP_KERNEL);
 	compressed = kmalloc(2072, GFP_KERNEL);
 	maps = kvcalloc(16, sizeof(*maps), GFP_KERNEL);
 	live = kvcalloc(1024, sizeof(*live), GFP_KERNEL);
@@ -38,21 +38,21 @@ static int __init sv3_module_init(void)
 		error = -ENOMEM;
 		goto out;
 	}
-	error = sv3_authority_init(authority, maps, live, classes, 16, 1024);
+	error = swapz_authority_init(authority, maps, live, classes, 16, 1024);
 	if (error)
 		goto out;
 	for (index = 0; index < ARRAY_SIZE(pages); ++index)
 		pages[index] = index;
-	error = sv3_stage(authority, pages, ARRAY_SIZE(pages), 4, &tx);
+	error = swapz_stage(authority, pages, ARRAY_SIZE(pages), 4, &tx);
 	if (error)
 		goto out;
-	error = sv3_begin(&builder, extent, SV3_MAX_EXTENT_BYTES,
+	error = swapz_begin(&builder, extent, SWAPZ_MAX_EXTENT_BYTES,
 			  tx.sequence);
 	if (error)
 		goto abort;
 	for (index = 0; index < ARRAY_SIZE(pages); ++index) {
 		memset(compressed, (u8)(index + 1U), 2072);
-		error = sv3_append(&builder, tx.records[index].logical_page,
+		error = swapz_append(&builder, tx.records[index].logical_page,
 				   tx.records[index].generation,
 				   compressed, 2072);
 		if (error)
@@ -60,20 +60,20 @@ static int __init sv3_module_init(void)
 	}
 	/* Exact 16KiB full class packs 7 records but NOT an eighth. */
 	memset(compressed, 0x7f, 2072);
-	if (sv3_append(&builder, 7, 1, compressed, 2072) != -ENOSPC) {
+	if (swapz_append(&builder, 7, 1, compressed, 2072) != -ENOSPC) {
 		error = -EUCLEAN;
 		goto abort;
 	}
-	error = sv3_seal(&builder);
+	error = swapz_seal(&builder);
 	if (error)
 		goto abort;
 	/* The complete extent write has been simulated IN MEMORY. */
-	error = sv3_finish(authority, &tx, extent, SV3_MAX_EXTENT_BYTES, 4, 0);
+	error = swapz_finish(authority, &tx, extent, SWAPZ_MAX_EXTENT_BYTES, 4, 0);
 	if (error)
 		goto out;
 	for (index = 0; index < ARRAY_SIZE(pages); ++index) {
-		error = sv3_read_authoritative(authority, index, &maps[index],
-					       extent, SV3_MAX_EXTENT_BYTES,
+		error = swapz_read_authoritative(authority, index, &maps[index],
+					       extent, SWAPZ_MAX_EXTENT_BYTES,
 					       &decoded, &stored);
 		if (error)
 			goto out;
@@ -91,8 +91,8 @@ static int __init sv3_module_init(void)
 	}
 	/* CRC32C corruption is rejected by the authoritative read path. */
 	extent[decoded.payload_offset] ^= 0x40;
-	if (sv3_read_authoritative(authority, 6, &maps[6], extent,
-				   SV3_MAX_EXTENT_BYTES, &decoded,
+	if (swapz_read_authoritative(authority, 6, &maps[6], extent,
+				   SWAPZ_MAX_EXTENT_BYTES, &decoded,
 				   &stored) != -EBADMSG) {
 		error = -EUCLEAN;
 		goto out;
@@ -102,7 +102,7 @@ static int __init sv3_module_init(void)
 	goto out;
 abort:
 	/* On every pre-submission failure the reserved range stays quarantined. */
-	sv3_abort(authority, &tx);
+	swapz_abort(authority, &tx);
 out:
 	kvfree(extent);
 	kfree(compressed);
@@ -113,13 +113,13 @@ out:
 	return error;
 }
 
-static void __exit sv3_module_exit(void)
+static void __exit swapz_module_exit(void)
 {
 	pr_info("swapz V3 codec/authority research module unloaded\n");
 }
 
-module_init(sv3_module_init);
-module_exit(sv3_module_exit);
+module_init(swapz_module_init);
+module_exit(swapz_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("swapz experimental V3 format + mapping research; no block I/O");
 MODULE_AUTHOR("swapz research");

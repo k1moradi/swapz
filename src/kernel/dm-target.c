@@ -37,33 +37,33 @@
 #include "flush-qual.h"
 #include "window-policy.h"
 
-#if PAGE_SIZE != SV3_BLOCK_BYTES
+#if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz V3.0-alpha requires 4KiB PAGE_SIZE"
 #endif
-#define SV3_SECTORS (SV3_BLOCK_BYTES >> SECTOR_SHIFT)
-#define SV3_BATCH_BYTES (SV3_MAX_RECORDS * SV3_BLOCK_BYTES)
+#define SWAPZ_SECTORS (SWAPZ_BLOCK_BYTES >> SECTOR_SHIFT)
+#define SWAPZ_BATCH_BYTES (SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES)
 #include "swapz-version.h" /* generated from kernel/extent-v3/VERSION */
-#define SV3_WORK_QUANTUM_BIOS 64U
-#define SV3_MAX_COALESCE_MS 4U
-#define SV3_MAX_RETAIN_MS 4U
+#define SWAPZ_WORK_QUANTUM_BIOS 64U
+#define SWAPZ_MAX_COALESCE_MS 4U
+#define SWAPZ_MAX_RETAIN_MS 4U
 
 /*
  * Experimental opt-in: a separate bounded LZ4 producer may prepare future
  * writes while the existing ordered commit worker waits on lower dm_io.
  * The physical I/O and mapping authority remain single-thread owned.
  */
-static bool sv3_async_prepare;
-module_param_named(async_prepare, sv3_async_prepare, bool, 0444);
+static bool swapz_async_prepare;
+module_param_named(async_prepare, swapz_async_prepare, bool, 0444);
 MODULE_PARM_DESC(async_prepare,
 		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O");
 
-struct sv3_prepared_page {
+struct swapz_prepared_page {
 	int length;
 	bool zero;
-	u8 bytes[SV3_BLOCK_BYTES];
+	u8 bytes[SWAPZ_BLOCK_BYTES];
 };
 
-struct sv3_bio_ref {
+struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
 	/* Both lists refer to this dm_per_bio_data object. The ordered worker
@@ -71,34 +71,34 @@ struct sv3_bio_ref {
 	 * Only the ordered worker returns a prepared buffer to its pool. */
 	struct list_head preparation_list;
 	struct completion preparation_finished;
-	struct sv3_prepared_page *prepared_page;
+	struct swapz_prepared_page *prepared_page;
 	mempool_t *preparation_pool;
 	struct semaphore *preparation_slots;
 	int preparation_error;
 };
 
 /* The worker attributes exactly one primary reason to each real window. */
-enum sv3_window_close_reason {
-	SV3_CLOSE_UNKNOWN,
-	SV3_CLOSE_FULL,
-	SV3_CLOSE_DUPLICATE,
-	SV3_CLOSE_ZERO,
-	SV3_CLOSE_FUA,
-	SV3_CLOSE_RAW,
-	SV3_CLOSE_READ_CONFLICT,
-	SV3_CLOSE_READ_UNRELATED,
-	SV3_CLOSE_DISCARD,
-	SV3_CLOSE_PREFLUSH,
-	SV3_CLOSE_QUANTUM,
-	SV3_CLOSE_IDLE,
-	SV3_CLOSE_DEADLINE,
-	SV3_CLOSE_PACK_READY,
-	SV3_CLOSE_SHUTDOWN,
-	SV3_CLOSE_OTHER,
-	SV3_CLOSE_REASON_COUNT,
+enum swapz_window_close_reason {
+	SWAPZ_CLOSE_UNKNOWN,
+	SWAPZ_CLOSE_FULL,
+	SWAPZ_CLOSE_DUPLICATE,
+	SWAPZ_CLOSE_ZERO,
+	SWAPZ_CLOSE_FUA,
+	SWAPZ_CLOSE_RAW,
+	SWAPZ_CLOSE_READ_CONFLICT,
+	SWAPZ_CLOSE_READ_UNRELATED,
+	SWAPZ_CLOSE_DISCARD,
+	SWAPZ_CLOSE_PREFLUSH,
+	SWAPZ_CLOSE_QUANTUM,
+	SWAPZ_CLOSE_IDLE,
+	SWAPZ_CLOSE_DEADLINE,
+	SWAPZ_CLOSE_PACK_READY,
+	SWAPZ_CLOSE_SHUTDOWN,
+	SWAPZ_CLOSE_OTHER,
+	SWAPZ_CLOSE_REASON_COUNT,
 };
 
-struct sv3_dm {
+struct swapz_dm {
 	struct dm_target *target;
 	struct dm_dev *backing;
 	struct dm_io_client *io_client;
@@ -123,60 +123,60 @@ struct sv3_dm {
 	bool failed;
 	int last_error;
 
-	struct sv3_authority authority;
-	struct sv3_engine engine;
-	struct sv3_map *maps;
-	sv3_u16 *live_records;
-	sv3_u8 *extent_classes;
+	struct swapz_authority authority;
+	struct swapz_engine engine;
+	struct swapz_map *maps;
+	swapz_u16 *live_records;
+	swapz_u8 *extent_classes;
 	/* Per-discard epoch/delta scratch validates shared-extent liveness
 	 * before any mapping or generation is mutated. */
-	sv3_u32 *discard_epoch;
-	sv3_u16 *discard_count;
-	sv3_u32 discard_serial;
-	sv3_u32 physical_blocks;
-	sv3_u32 logical_pages;
+	swapz_u32 *discard_epoch;
+	swapz_u16 *discard_count;
+	swapz_u32 discard_serial;
+	swapz_u32 physical_blocks;
+	swapz_u32 logical_pages;
 
 	/* Serialized, entirely preallocated normal reclaim path. */
-	struct sv3_pending_bio batch[SV3_MAX_RECORDS];
-	struct sv3_compressed_page planned[SV3_MAX_RECORDS];
-	sv3_u8 planned_to_batch[SV3_MAX_RECORDS];
-	sv3_u8 used[SV3_MAX_RECORDS];
+	struct swapz_pending_bio batch[SWAPZ_MAX_RECORDS];
+	struct swapz_compressed_page planned[SWAPZ_MAX_RECORDS];
+	swapz_u8 planned_to_batch[SWAPZ_MAX_RECORDS];
+	swapz_u8 used[SWAPZ_MAX_RECORDS];
 	/* Separate GC metadata and compressed record storage. Foreground upper
 	 * BIO descriptors/data stay immutable throughout an emergency cleaning. */
-	struct sv3_pending_bio gc_pending[SV3_MAX_RECORDS];
-	struct sv3_compressed_page gc_planned[SV3_MAX_RECORDS];
-	sv3_u8 gc_to_pending[SV3_MAX_RECORDS];
-	sv3_u8 gc_used[SV3_MAX_RECORDS];
-	sv3_u8 gc_count;
+	struct swapz_pending_bio gc_pending[SWAPZ_MAX_RECORDS];
+	struct swapz_compressed_page gc_planned[SWAPZ_MAX_RECORDS];
+	swapz_u8 gc_to_pending[SWAPZ_MAX_RECORDS];
+	swapz_u8 gc_used[SWAPZ_MAX_RECORDS];
+	swapz_u8 gc_count;
 	u8 *gc_bytes_store;
-	sv3_u32 *gc_scores;  /* authoritative payload+descriptor bytes */
-	sv3_u32 *gc_io_scores; /* conservative read+write cost per victim */
-	sv3_u16 *gc_live_counts; /* count for ties/control comparison */
-	sv3_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
-	sv3_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
-	sv3_u32 segment_count;
-	sv3_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
+	swapz_u32 *gc_scores;  /* authoritative payload+descriptor bytes */
+	swapz_u32 *gc_io_scores; /* conservative read+write cost per victim */
+	swapz_u16 *gc_live_counts; /* count for ties/control comparison */
+	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
+	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
+	swapz_u32 segment_count;
+	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
 	u64 gc_selected_io_cost;
 	u64 gc_no_headroom_skips;
 	u64 gc_selected_live_bytes;
 	u64 gc_selected_live_records;
 	u64 gc_victims;
 	u64 gc_role_rotations;
-	sv3_u32 last_gc_victim;
-	sv3_u32 last_gc_destination;
+	swapz_u32 last_gc_victim;
+	swapz_u32 last_gc_destination;
 	u64 gc_pages;
 	u64 gc_read_bytes;
 	u64 gc_write_bytes;
 	u64 gc_read_reqs;
 	u64 gc_write_reqs;
-	sv3_u8 batch_count;
-	sv3_u8 max_window;
+	swapz_u8 batch_count;
+	swapz_u8 max_window;
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
-	sv3_u8 coalesce_ms;
+	swapz_u8 coalesce_ms;
 	/* Explicitly opt-in, disabled at zero. Worker-owned finite window
 	 * retention only: never changes original physical publication gate. */
-	sv3_u8 retain_ms;
+	swapz_u8 retain_ms;
 	u64 retain_worker_passes;
 	u64 retain_timer_arms;
 	u64 retain_timer_arm_skips;
@@ -213,10 +213,10 @@ struct sv3_dm {
 	u64 coalesce_urgent;
 	u64 window_records_total;
 	/* Worker-owned telemetry only; status is a diagnostic snapshot. */
-	enum sv3_window_close_reason next_window_close;
-	u64 window_close_reasons[SV3_CLOSE_REASON_COUNT];
+	enum swapz_window_close_reason next_window_close;
+	u64 window_close_reasons[SWAPZ_CLOSE_REASON_COUNT];
 	/* Joint diagnostic: which primary closure actually produced win1. */
-	u64 one_page_close_reasons[SV3_CLOSE_REASON_COUNT];
+	u64 one_page_close_reasons[SWAPZ_CLOSE_REASON_COUNT];
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -225,7 +225,7 @@ struct sv3_dm {
 	u64 window_age_le_100us;
 	u64 window_age_101_1000us;
 	u64 window_age_gt_1000us;
-	u64 window_size_counts[SV3_MAX_RECORDS + 1];
+	u64 window_size_counts[SWAPZ_MAX_RECORDS + 1];
 	u64 window_bins[6]; /* 1,2,3-4,5-8,9-16,17-64 */
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
 	u8 *input_page;        /* VMALLOC: 4KiB copy from upper bio */
@@ -249,7 +249,7 @@ struct sv3_dm {
 	u64 write_fault_injected;
 	u64 lower_read_submitted_bytes;
 	u64 lower_read_submitted_reqs;
-	struct sv3_flush_meter flush_meter;
+	struct swapz_flush_meter flush_meter;
 	u64 worker_requeues;
 	u64 one_page_windows;
 	u64 compressed_pages;
@@ -262,7 +262,7 @@ struct sv3_dm {
 	 * this histogram; GC copies, verification and synthetic readback do
 	 * not. Samples can include later failed / aborted windows.
 	 * Index 0..4: successful LZ4 <=256/1024/2048/3072/3568 bytes;
-	 * index 5: LZ4 did not fit SV3_MAX_COMPRESSED -> raw fallback.
+	 * index 5: LZ4 did not fit SWAPZ_MAX_COMPRESSED -> raw fallback.
 	 */
 	u64 lz4_attempts;
 	/* Cumulative monotonic wall-time diagnostics; includes warmup and
@@ -292,9 +292,9 @@ struct sv3_dm {
  * Release before bio_endio(), which can invalidate dm_per_bio_data.
  * Early release after copying into batch_bytes bounds producer memory.
  */
-static void sv3_release_prepared(struct bio *bio)
+static void swapz_release_prepared(struct bio *bio)
 {
-	struct sv3_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 
 	if (!entry->prepared_page)
 		return;
@@ -303,15 +303,15 @@ static void sv3_release_prepared(struct bio *bio)
 	up(entry->preparation_slots);
 }
 
-static void sv3_complete(struct bio *bio, int error)
+static void swapz_complete(struct bio *bio, int error)
 {
-	sv3_release_prepared(bio);
+	swapz_release_prepared(bio);
 	if (error)
 		bio->bi_status = errno_to_blk_status(error);
 	bio_endio(bio);
 }
 
-static void sv3_fail(struct sv3_dm *ctx, int error)
+static void swapz_fail(struct swapz_dm *ctx, int error)
 {
 	if (!ctx->failed) {
 		ctx->failed = true;
@@ -328,8 +328,8 @@ static void sv3_fail(struct sv3_dm *ctx, int error)
  * On an error, the entire reserved extent is quarantined by the V3 authority.
  * Scratch is vmalloc-backed: DM_IO_VMA, never DM_IO_KMEM.
  */
-static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
-		     sv3_u16 blocks, u8 *bytes)
+static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
+		     swapz_u16 blocks, u8 *bytes)
 {
 	struct dm_io_region region;
 	struct dm_io_request req = {
@@ -350,8 +350,8 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	    blocks > ctx->physical_blocks - block)
 		return -ERANGE;
 	region.bdev = ctx->backing->bdev;
-	region.sector = (sector_t)block * SV3_SECTORS;
-	region.count = (sector_t)blocks * SV3_SECTORS;
+	region.sector = (sector_t)block * SWAPZ_SECTORS;
+	region.count = (sector_t)blocks * SWAPZ_SECTORS;
 	/* Inject at the common physical WRITE boundary, including foreground
 	 * mixed runs, serialized controls and GC relocation. Never count this
 	 * synthetic rejection as submitted/completed lower-device I/O. */
@@ -363,14 +363,14 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	/* Cover direct RAW writes and GC relocation as well as engine writes.
 	 * The synchronous lower worker exclusively owns read_scratch. */
 	if (op == REQ_OP_WRITE)
-		sv3_engine_invalidate_read_cache(&ctx->engine);
+		swapz_engine_invalidate_read_cache(&ctx->engine);
 	if (op == REQ_OP_READ) {
 		ctx->lower_read_submitted_bytes +=
-			(u64)blocks * SV3_BLOCK_BYTES;
+			(u64)blocks * SWAPZ_BLOCK_BYTES;
 		ctx->lower_read_submitted_reqs++;
 	} else {
 		ctx->lower_write_submitted_bytes +=
-			(u64)blocks * SV3_BLOCK_BYTES;
+			(u64)blocks * SWAPZ_BLOCK_BYTES;
 		ctx->lower_write_submitted_reqs++;
 	}
 	section_start = ktime_get_ns();
@@ -381,7 +381,7 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
 	if (op == REQ_OP_WRITE)
 		atomic_set(&ctx->lower_write_active, 0);
-	elapsed_ns = sv3_elapsed_ns(section_start, ktime_get_ns());
+	elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
 	if (op == REQ_OP_READ)
 		ctx->lower_read_wall_ns += elapsed_ns;
 	else
@@ -399,10 +399,10 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
 			ctx->write_wait_gt_4ms++;
 	}
 	if (op == REQ_OP_READ) {
-		ctx->physical_read_bytes += (u64)blocks * SV3_BLOCK_BYTES;
+		ctx->physical_read_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 		ctx->physical_read_reqs++;
 	} else {
-		ctx->physical_write_bytes += (u64)blocks * SV3_BLOCK_BYTES;
+		ctx->physical_write_bytes += (u64)blocks * SWAPZ_BLOCK_BYTES;
 		ctx->physical_write_reqs++;
 	}
 	return 0;
@@ -417,31 +417,31 @@ static int sv3_lower(struct sv3_dm *ctx, enum req_op op, sv3_u32 block,
  * physical read/write traffic. A controlled, *pre-submission* failure is
  * supported only for owned null_blk alpha qualification.
  */
-static int sv3_kernel_lower_flush(void *opaque)
+static int swapz_kernel_lower_flush(void *opaque)
 {
-	struct sv3_dm *ctx = opaque;
+	struct swapz_dm *ctx = opaque;
 
 	return blkdev_issue_flush(ctx->backing->bdev);
 }
 
-static int sv3_issue_flush(struct sv3_dm *ctx)
+static int swapz_issue_flush(struct swapz_dm *ctx)
 {
-	int error = sv3_flush_accounted(&ctx->flush_meter,
-				      sv3_kernel_lower_flush, ctx);
+	int error = swapz_flush_accounted(&ctx->flush_meter,
+				      swapz_kernel_lower_flush, ctx);
 
 	if (error)
-		sv3_fail(ctx, error);
+		swapz_fail(ctx, error);
 	return error;
 }
 
-static int sv3_lower_write(void *opaque, sv3_u32 block, sv3_u8 blocks,
-			   const sv3_u8 *bytes, sv3_u8 *completed)
+static int swapz_lower_write(void *opaque, swapz_u32 block, swapz_u8 blocks,
+			   const swapz_u8 *bytes, swapz_u8 *completed)
 {
-	struct sv3_dm *ctx = opaque;
+	struct swapz_dm *ctx = opaque;
 	int error;
 
 	*completed = 0;
-	error = sv3_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
+	error = swapz_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
 	if (!error)
 		*completed = blocks;
 	return error;
@@ -454,36 +454,36 @@ static int sv3_lower_write(void *opaque, sv3_u32 block, sv3_u8 blocks,
  * dm_io request count is NOT guaranteed to equal block-queue request
  * count after bio splitting/merging; independent null_blk stat is needed.
  */
-static int sv3_lower_write_run(void *opaque, sv3_u32 block,
-			      sv3_u16 blocks, const sv3_u8 *bytes,
-			      sv3_u16 *completed)
+static int swapz_lower_write_run(void *opaque, swapz_u32 block,
+			      swapz_u16 blocks, const swapz_u8 *bytes,
+			      swapz_u16 *completed)
 {
-	struct sv3_dm *ctx = opaque;
+	struct swapz_dm *ctx = opaque;
 	int error;
 
 	*completed = 0;
-	if (!blocks || blocks > SV3_BULK_BLOCKS)
+	if (!blocks || blocks > SWAPZ_BULK_BLOCKS)
 		return -ERANGE;
-	error = sv3_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
+	error = swapz_lower(ctx, REQ_OP_WRITE, block, blocks, (u8 *)bytes);
 	if (!error)
 		*completed = blocks;
 	return error;
 }
 
-static int sv3_lower_read(void *opaque, sv3_u32 block, sv3_u8 blocks,
-			  sv3_u8 *destination)
+static int swapz_lower_read(void *opaque, swapz_u32 block, swapz_u8 blocks,
+			  swapz_u8 *destination)
 {
-	return sv3_lower(opaque, REQ_OP_READ, block, blocks, destination);
+	return swapz_lower(opaque, REQ_OP_READ, block, blocks, destination);
 }
 
 /*
  * Optional diagnostic verification for raw pages, matching the compressed
  * engine's verify-after-write behavior. The raw page has no spare on-media
  * bytes for CRC, so compare a fresh complete lower read to the original
- * data BEFORE sv3_finish_raw publishes mapping authority. This is not an
+ * data BEFORE swapz_finish_raw publishes mapping authority. This is not an
  * fsync/power-loss guarantee. Disabled in the default performance policy.
  */
-static int sv3_verify_raw_write(struct sv3_dm *ctx, sv3_u32 block,
+static int swapz_verify_raw_write(struct swapz_dm *ctx, swapz_u32 block,
 				const u8 *original)
 {
 	int error;
@@ -492,15 +492,15 @@ static int sv3_verify_raw_write(struct sv3_dm *ctx, sv3_u32 block,
 		return 0;
 	if (!original || ctx->read_page == original)
 		return -EINVAL;
-	error = sv3_lower_read(ctx, block, 1, ctx->read_page);
+	error = swapz_lower_read(ctx, block, 1, ctx->read_page);
 	if (error)
 		return error;
 	ctx->engine.write_verify_read_blocks++;
-	return memcmp(ctx->read_page, original, SV3_BLOCK_BYTES) ?
+	return memcmp(ctx->read_page, original, SWAPZ_BLOCK_BYTES) ?
 		-EBADMSG : 0;
 }
 
-static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
+static int swapz_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 {
 	struct bio_vec vec;
 	struct bvec_iter iter;
@@ -509,7 +509,7 @@ static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 	bio_for_each_segment(vec, bio, iter) {
 		void *mapped;
 
-		if (vec.bv_len > SV3_BLOCK_BYTES - offset)
+		if (vec.bv_len > SWAPZ_BLOCK_BYTES - offset)
 			return -EINVAL;
 		mapped = kmap_local_page(vec.bv_page);
 		if (to_bio)
@@ -521,7 +521,7 @@ static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 		kunmap_local(mapped);
 		offset += vec.bv_len;
 	}
-	return offset == SV3_BLOCK_BYTES ? 0 : -EINVAL;
+	return offset == SWAPZ_BLOCK_BYTES ? 0 : -EINVAL;
 }
 
 /*
@@ -531,19 +531,19 @@ static int sv3_copy_bio(struct bio *bio, void *buffer, bool to_bio)
  * read its still-pinned upper BIO data. The ordered consumer waits on its
  * completion and is solely responsible for recycling prepared_page.
  *
- * preparation_slots caps resident prepared pages to SV3_MAX_RECORDS even
+ * preparation_slots caps resident prepared pages to SWAPZ_MAX_RECORDS even
  * under unlimited incoming BIOs. Waiting for a slot cannot deadlock the
  * consumer: the producer takes entries in the same FIFO admission order.
  */
-static void sv3_preparation_worker(struct work_struct *work)
+static void swapz_preparation_worker(struct work_struct *work)
 {
-	struct sv3_dm *ctx =
-		container_of(work, struct sv3_dm, preparation_worker);
-	struct sv3_bio_ref *entry;
+	struct swapz_dm *ctx =
+		container_of(work, struct swapz_dm, preparation_worker);
+	struct swapz_bio_ref *entry;
 	unsigned long flags;
 
 	for (;;) {
-		struct sv3_prepared_page *prepared;
+		struct swapz_prepared_page *prepared;
 		u64 section_start;
 		int error;
 
@@ -553,7 +553,7 @@ static void sv3_preparation_worker(struct work_struct *work)
 			return;
 		}
 		entry = list_first_entry(&ctx->preparation_incoming,
-					struct sv3_bio_ref, preparation_list);
+					struct swapz_bio_ref, preparation_list);
 		list_del_init(&entry->preparation_list);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
@@ -565,7 +565,7 @@ static void sv3_preparation_worker(struct work_struct *work)
 			complete(&entry->preparation_finished);
 			continue;
 		}
-		error = sv3_copy_bio(entry->bio, ctx->preparation_input_page,
+		error = swapz_copy_bio(entry->bio, ctx->preparation_input_page,
 				    false);
 		if (error) {
 			mempool_free(prepared, ctx->preparation_pool);
@@ -581,16 +581,16 @@ static void sv3_preparation_worker(struct work_struct *work)
 			ctx->prepared_during_lower_write++;
 		prepared->length = LZ4_compress_fast(
 					ctx->preparation_input_page,
-					prepared->bytes, SV3_BLOCK_BYTES,
-					SV3_MAX_COMPRESSED, 1,
+					prepared->bytes, SWAPZ_BLOCK_BYTES,
+					SWAPZ_MAX_COMPRESSED, 1,
 					ctx->lz4_workmem);
-		ctx->lz4_wall_ns += sv3_elapsed_ns(section_start, ktime_get_ns());
+		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start, ktime_get_ns());
 		prepared->zero = prepared->length > 0 &&
 				 prepared->length <= 64 &&
-				 sv3_page_is_zero(ctx->preparation_input_page);
+				 swapz_page_is_zero(ctx->preparation_input_page);
 		if (prepared->length <= 0)
 			memcpy(prepared->bytes, ctx->preparation_input_page,
-			       SV3_BLOCK_BYTES);
+			       SWAPZ_BLOCK_BYTES);
 		/* Release ordering: complete() wakes the sole consumer. Do not
 		 * touch entry again after signaling: it may be bio_endio'd. */
 		entry->prepared_page = prepared;
@@ -607,15 +607,15 @@ static void sv3_preparation_worker(struct work_struct *work)
  *
  * NEVER reorder across flush/FUA, discard, dependent reads or duplicate slots.
  */
-static void sv3_order_window_greedy(struct sv3_dm *ctx)
+static void swapz_order_window_greedy(struct swapz_dm *ctx)
 {
-	sv3_u8 position = 0;
+	swapz_u8 position = 0;
 
 	memset(ctx->used, 0, sizeof(ctx->used));
 	while (position < ctx->batch_count) {
 		int largest = -1, partner = -1;
 		int best_slack = INT_MAX;
-		sv3_u8 i;
+		swapz_u8 i;
 
 		for (i = 0; i < ctx->batch_count; ++i)
 			if (!ctx->used[i] && !ctx->batch[i].raw &&
@@ -635,7 +635,7 @@ static void sv3_order_window_greedy(struct sv3_dm *ctx)
 
 			if (ctx->used[i] || ctx->batch[i].raw)
 				continue;
-			remaining = SV3_BLOCK_BYTES - 48 -
+			remaining = SWAPZ_BLOCK_BYTES - 48 -
 				ctx->batch[largest].length - ctx->batch[i].length;
 			if (remaining >= 0 && remaining < best_slack) {
 				best_slack = remaining;
@@ -649,7 +649,7 @@ static void sv3_order_window_greedy(struct sv3_dm *ctx)
 	}
 	/* The unsorted tail contains raw pages in their original order. */
 	{
-		sv3_u8 index;
+		swapz_u8 index;
 
 		for (index = 0; index < ctx->batch_count; ++index)
 			if (!ctx->used[index])
@@ -657,11 +657,11 @@ static void sv3_order_window_greedy(struct sv3_dm *ctx)
 	}
 }
 
-static void sv3_order_window(struct sv3_dm *ctx)
+static void swapz_order_window(struct swapz_dm *ctx)
 {
-	sv3_u8 position;
+	swapz_u8 position;
 
-	if (sv3_window_uniform_compressed(ctx->batch, ctx->batch_count)) {
+	if (swapz_window_uniform_compressed(ctx->batch, ctx->batch_count)) {
 		/* Equal compressed lengths imply stable greedy identity order,
 		 * regardless of whether two records share a 4KiB extent.
 		 * Avoid scanning every already-consumed record at every step.
@@ -669,16 +669,16 @@ static void sv3_order_window(struct sv3_dm *ctx)
 		for (position = 0; position < ctx->batch_count; ++position)
 			ctx->planned_to_batch[position] = position;
 	} else {
-		sv3_order_window_greedy(ctx);
+		swapz_order_window_greedy(ctx);
 	}
 	for (position = 0; position < ctx->batch_count; ++position) {
-		sv3_u8 index = ctx->planned_to_batch[position];
+		swapz_u8 index = ctx->planned_to_batch[position];
 
 		if (index != position)
 			ctx->reordered_records++;
-		ctx->planned[position] = (struct sv3_compressed_page) {
+		ctx->planned[position] = (struct swapz_compressed_page) {
 			.logical_page = ctx->batch[index].logical,
-			.payload = ctx->batch_bytes + (size_t)index * SV3_BLOCK_BYTES,
+			.payload = ctx->batch_bytes + (size_t)index * SWAPZ_BLOCK_BYTES,
 			.length = ctx->batch[index].length,
 			.raw = ctx->batch[index].raw,
 		};
@@ -693,9 +693,9 @@ static void sv3_order_window(struct sv3_dm *ctx)
  * the normal allocator reuse it. All callbacks are synchronous, under one
  * serialized worker; NO recursive GC calls can occur.
  */
-static void sv3_gc_sort(struct sv3_dm *ctx)
+static void swapz_gc_sort(struct swapz_dm *ctx)
 {
-	sv3_u8 position = 0, i;
+	swapz_u8 position = 0, i;
 
 	memset(ctx->gc_used, 0, sizeof(ctx->gc_used));
 	while (position < ctx->gc_count) {
@@ -713,7 +713,7 @@ static void sv3_gc_sort(struct sv3_dm *ctx)
 
 			if (ctx->gc_used[i])
 				continue;
-			slack = SV3_BLOCK_BYTES - 48 -
+			slack = SWAPZ_BLOCK_BYTES - 48 -
 				ctx->gc_pending[largest].length -
 				ctx->gc_pending[i].length;
 			if (slack >= 0 && slack < slack_best) {
@@ -727,57 +727,57 @@ static void sv3_gc_sort(struct sv3_dm *ctx)
 		}
 	}
 	for (position = 0; position < ctx->gc_count; ++position) {
-		sv3_u8 index = ctx->gc_to_pending[position];
+		swapz_u8 index = ctx->gc_to_pending[position];
 
-		ctx->gc_planned[position] = (struct sv3_compressed_page) {
+		ctx->gc_planned[position] = (struct swapz_compressed_page) {
 			.logical_page = ctx->gc_pending[index].logical,
 			.payload = ctx->gc_bytes_store +
-				(size_t)index * SV3_BLOCK_BYTES,
+				(size_t)index * SWAPZ_BLOCK_BYTES,
 			.length = ctx->gc_pending[index].length,
 		};
 	}
 }
 
-static int sv3_gc_flush(struct sv3_dm *ctx)
+static int swapz_gc_flush(struct swapz_dm *ctx)
 {
-	sv3_u8 completed = 0;
+	swapz_u8 completed = 0;
 	int error;
 
 	if (!ctx->gc_count)
 		return 0;
-	sv3_gc_sort(ctx);
-	error = sv3_engine_write_window_batched(&ctx->engine, ctx->gc_planned,
+	swapz_gc_sort(ctx);
+	error = swapz_engine_write_window_batched(&ctx->engine, ctx->gc_planned,
 					 ctx->gc_count, &completed);
 	ctx->gc_pages += completed;
 	ctx->gc_count = 0;
 	return error;
 }
 
-static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
-			   const struct sv3_map *old)
+static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
+			   const struct swapz_map *old)
 {
-	struct sv3_tx tx;
-	sv3_u8 completed = 0;
+	struct swapz_tx tx;
+	swapz_u8 completed = 0;
 	int error;
 
 	if (old->extent_blocks != 1 || old->start_block >= ctx->physical_blocks)
 		return -EUCLEAN;
-	error = sv3_lower_read(ctx, old->start_block, 1, ctx->input_page);
+	error = swapz_lower_read(ctx, old->start_block, 1, ctx->input_page);
 	if (error)
 		return error;
 	/* Never propagate a corrupted raw page into a new GC location. */
-	error = sv3_verify_raw(&ctx->authority, logical, ctx->input_page);
+	error = swapz_verify_raw(&ctx->authority, logical, ctx->input_page);
 	if (error)
 		return error;
-	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
 	if (error)
 		return error;
-	error = sv3_lower_write(ctx, tx.start_block, 1,
+	error = swapz_lower_write(ctx, tx.start_block, 1,
 				ctx->input_page, &completed);
 	if (!error && completed == 1)
-		error = sv3_verify_raw_write(ctx, tx.start_block,
+		error = swapz_verify_raw_write(ctx, tx.start_block,
 					   ctx->input_page);
-	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
+	error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error)
 		ctx->gc_pages++;
 	return error;
@@ -790,11 +790,11 @@ static int sv3_gc_move_raw(struct sv3_dm *ctx, sv3_u32 logical,
  * optimizer's final physical extent count or actual read amplification.
  * It can be switched to the old count heuristic for matched benchmarks.
  */
-static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
+static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 {
-	sv3_u32 logical, segment, selected = ~(sv3_u32)0;
-	sv3_u32 best = ~(sv3_u32)0;
-	sv3_u16 best_count = ~(sv3_u16)0;
+	swapz_u32 logical, segment, selected = ~(swapz_u32)0;
+	swapz_u32 best = ~(swapz_u32)0;
+	swapz_u16 best_count = ~(swapz_u16)0;
 
 	memset(ctx->gc_scores, 0,
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
@@ -806,31 +806,31 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 	       (size_t)ctx->segment_count *
 			       sizeof(*ctx->gc_min_live_blocks));
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		const struct sv3_map *m = &ctx->maps[logical];
-		sv3_u32 cost, io_cost;
+		const struct swapz_map *m = &ctx->maps[logical];
+		swapz_u32 cost, io_cost;
 
 		if (!m->valid)
 			continue;
 		if (m->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
-		cost = sv3_gc_live_byte_cost(m);
-		io_cost = sv3_gc_estimated_io_cost(m);
+		cost = swapz_gc_live_byte_cost(m);
+		io_cost = swapz_gc_estimated_io_cost(m);
 		if (!cost || !io_cost)
 			return -EUCLEAN;
-		segment = m->start_block / SV3_SEGMENT_BLOCKS;
-		if (ctx->gc_scores[segment] > ~(sv3_u32)0 - cost ||
-		    ctx->gc_io_scores[segment] > ~(sv3_u32)0 - io_cost ||
-		    ctx->gc_live_counts[segment] == ~(sv3_u16)0)
+		segment = m->start_block / SWAPZ_SEGMENT_BLOCKS;
+		if (ctx->gc_scores[segment] > ~(swapz_u32)0 - cost ||
+		    ctx->gc_io_scores[segment] > ~(swapz_u32)0 - io_cost ||
+		    ctx->gc_live_counts[segment] == ~(swapz_u16)0)
 			return -EOVERFLOW;
 		ctx->gc_scores[segment] += cost;
 		ctx->gc_io_scores[segment] += io_cost;
 		ctx->gc_min_live_blocks[segment] +=
-					sv3_gc_min_live_blocks(m);
+					swapz_gc_min_live_blocks(m);
 		ctx->gc_live_counts[segment]++;
 	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
-		sv3_u16 count = ctx->gc_live_counts[segment];
-		sv3_u32 score;
+		swapz_u16 count = ctx->gc_live_counts[segment];
+		swapz_u32 score;
 
 		/* GC must create *foreground usable* space. Evacuating a
 		 * reserve segment only moves survivors between GC reserves
@@ -841,7 +841,7 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 		/* Reject a provably non-reclaimable full victim BEFORE paying
 		 * for up to 1MiB of GC reads/writes. Such an eviction could
 		 * only fill its sole reserve destination and return ENOSPC. */
-		if (!sv3_gc_candidate_can_free_block(ctx->gc_scores[segment],
+		if (!swapz_gc_candidate_can_free_block(ctx->gc_scores[segment],
 					      ctx->gc_min_live_blocks[segment])) {
 			ctx->gc_no_headroom_skips++;
 			continue;
@@ -857,13 +857,13 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 			score = ctx->gc_io_scores[segment];
 			break;
 		}
-		if (sv3_gc_prefer(score, count, best, best_count)) {
+		if (swapz_gc_prefer(score, count, best, best_count)) {
 			best = score;
 			best_count = count;
 			selected = segment;
 		}
 	}
-	if (selected == ~(sv3_u32)0)
+	if (selected == ~(swapz_u32)0)
 		return -ENOSPC;
 	*victim = selected;
 	ctx->gc_selected_live_bytes += ctx->gc_scores[selected];
@@ -872,10 +872,10 @@ static int sv3_gc_choose_victim(struct sv3_dm *ctx, sv3_u32 *victim)
 	return 0;
 }
 
-static int sv3_gc_compact_one(struct sv3_dm *ctx)
+static int swapz_gc_compact_one(struct swapz_dm *ctx)
 {
-	struct sv3_authority *a = &ctx->authority;
-	sv3_u32 old_next, old_open, old_probe, victim, logical, block;
+	struct swapz_authority *a = &ctx->authority;
+	swapz_u32 old_next, old_open, old_probe, victim, logical, block;
 	u64 before_read, before_write;
 	u64 before_read_reqs, before_write_reqs;
 	int error;
@@ -890,7 +890,7 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	if (a->in_flight || a->batch_pending || a->batch_replaying ||
 	    a->gc_allocation)
 		return -EBUSY;
-	error = sv3_gc_choose_victim(ctx, &victim);
+	error = swapz_gc_choose_victim(ctx, &victim);
 	if (error)
 		return error;
 	old_next = a->next_block;
@@ -907,14 +907,14 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	 * destination. This replenishes the reserve rather than gradually
 	 * filling a fixed tail or cycling between two reserve segments.
 	 */
-	error = sv3_gc_begin_rotation(a, victim);
+	error = swapz_gc_begin_rotation(a, victim);
 	if (error)
 		goto out;
 	ctx->gc_count = 0;
 
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		struct sv3_map snapshot = ctx->maps[logical];
-		sv3_u16 length;
+		struct swapz_map snapshot = ctx->maps[logical];
+		swapz_u16 length;
 
 		/* GC can scan a large volatile map while the worker owns it.
 		 * Yield CPU periodically without permitting another mapping
@@ -922,44 +922,44 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 		if (!(logical & 63U))
 			cond_resched();
 		if (!snapshot.valid ||
-		    snapshot.start_block / SV3_SEGMENT_BLOCKS != victim)
+		    snapshot.start_block / SWAPZ_SEGMENT_BLOCKS != victim)
 			continue;
 		if (snapshot.raw) {
-			error = sv3_gc_flush(ctx);
+			error = swapz_gc_flush(ctx);
 			if (error)
 				goto out;
-			error = sv3_gc_move_raw(ctx, logical, &snapshot);
+			error = swapz_gc_move_raw(ctx, logical, &snapshot);
 			if (error)
 				goto out;
 			continue;
 		}
 		/* Existing media bytes remain authoritative until this page's
 		 * full replacement is successfully committed by the V3 engine. */
-		error = sv3_engine_read_page(&ctx->engine, logical,
+		error = swapz_engine_read_page(&ctx->engine, logical,
 						ctx->read_compressed,
-						SV3_BLOCK_BYTES, &length);
+						SWAPZ_BLOCK_BYTES, &length);
 		if (error)
 			goto out;
-		if (!length || length > SV3_MAX_COMPRESSED) {
+		if (!length || length > SWAPZ_MAX_COMPRESSED) {
 			error = -EUCLEAN;
 			goto out;
 		}
 		memcpy(ctx->gc_bytes_store +
-		       (size_t)ctx->gc_count * SV3_BLOCK_BYTES,
+		       (size_t)ctx->gc_count * SWAPZ_BLOCK_BYTES,
 		       ctx->read_compressed, length);
 		ctx->gc_pending[ctx->gc_count++] =
-			(struct sv3_pending_bio) {
+			(struct swapz_pending_bio) {
 				.bio = NULL,
 				.logical = logical,
 				.length = length,
 			};
-		if (ctx->gc_count == SV3_MAX_RECORDS) {
-			error = sv3_gc_flush(ctx);
+		if (ctx->gc_count == SWAPZ_MAX_RECORDS) {
+			error = swapz_gc_flush(ctx);
 			if (error)
 				goto out;
 		}
 	}
-	error = sv3_gc_flush(ctx);
+	error = swapz_gc_flush(ctx);
 	if (error)
 		goto out;
 
@@ -970,16 +970,16 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	 * return an error without recycling any physical bytes.
 	 */
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		const struct sv3_map *m = &ctx->maps[logical];
+		const struct swapz_map *m = &ctx->maps[logical];
 
 		if (m->valid &&
-		    m->start_block / SV3_SEGMENT_BLOCKS == victim) {
+		    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim) {
 			error = -EUCLEAN;
 			goto out;
 		}
 	}
-	for (block = victim * SV3_SEGMENT_BLOCKS;
-	     block < (victim + 1) * SV3_SEGMENT_BLOCKS; ++block) {
+	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
+	     block < (victim + 1) * SWAPZ_SEGMENT_BLOCKS; ++block) {
 		if (a->live_records[block]) {
 			error = -EUCLEAN;
 			goto out;
@@ -988,9 +988,9 @@ static int sv3_gc_compact_one(struct sv3_dm *ctx)
 	/* Atomically exchange reserve/foreground ownership only after ALL
 	 * authoritative mappings and live refcounts vacate the victim. */
 	{
-		sv3_u32 destination = a->gc_destination;
+		swapz_u32 destination = a->gc_destination;
 
-		error = sv3_gc_commit_rotation(a, victim);
+		error = swapz_gc_commit_rotation(a, victim);
 		if (error)
 			goto out;
 		ctx->last_gc_victim = victim;
@@ -1010,9 +1010,9 @@ out:
 		 * still live in its reserved destination. Fail closed rather
 		 * than treating that reserve as freely overwritable. */
 		a->gc_allocation = 0;
-		a->gc_forbidden_open = ~(sv3_u32)0;
-		a->gc_forbidden_victim = ~(sv3_u32)0;
-		a->gc_destination = ~(sv3_u32)0;
+		a->gc_forbidden_open = ~(swapz_u32)0;
+		a->gc_forbidden_victim = ~(swapz_u32)0;
+		a->gc_destination = ~(swapz_u32)0;
 		a->next_block = old_next;
 		a->open_segment = old_open;
 		a->next_segment_probe = old_probe;
@@ -1021,22 +1021,22 @@ out:
 }
 
 
-static void sv3_window_admit_clock(struct sv3_dm *ctx)
+static void swapz_window_admit_clock(struct swapz_dm *ctx)
 {
 	/* Serialized worker: do not refresh the start for later records. */
 	if (!ctx->batch_count)
 		ctx->window_first_ns = ktime_get_ns();
 }
 
-static int sv3_flush_window(struct sv3_dm *ctx)
+static int swapz_flush_window(struct swapz_dm *ctx)
 {
-	sv3_u8 committed = 0, index, count = ctx->batch_count;
-	sv3_u8 gc_attempts = 0;
+	swapz_u8 committed = 0, index, count = ctx->batch_count;
+	swapz_u8 gc_attempts = 0;
 	bool needs_fua = false;
-	bool packed_close = ctx->next_window_close == SV3_CLOSE_PACK_READY;
+	bool packed_close = ctx->next_window_close == SWAPZ_CLOSE_PACK_READY;
 	bool accepted_burst_extended = ctx->accepted_burst_pack_ready;
-	enum sv3_window_close_reason close_reason = ctx->next_window_close;
-	sv3_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record;
+	enum swapz_window_close_reason close_reason = ctx->next_window_close;
+	swapz_u8 planning_read_cap = ctx->engine.max_read_blocks_per_record;
 	u64 end_ns, open_age_ns, section_start;
 	int error = 0;
 
@@ -1046,7 +1046,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	ctx->packed_burst = false;
 	ctx->accepted_burst_pack_ready = false;
 	if (!count) {
-		ctx->next_window_close = SV3_CLOSE_UNKNOWN;
+		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
 		ctx->window_first_ns = 0;
 		return 0;
 	}
@@ -1058,7 +1058,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	 * With retention enabled, cancellation remains synchronous and
 	 * outside queue_lock because the callback takes that lock.
 	 * Shutdown/free retain unconditional cancellation. */
-	if (sv3_window_timer_enabled(ctx->retain_ms))
+	if (swapz_window_timer_enabled(ctx->retain_ms))
 		hrtimer_cancel(&ctx->retention_timer);
 	open_age_ns = ctx->window_first_ns && end_ns >= ctx->window_first_ns ?
 		end_ns - ctx->window_first_ns : 0;
@@ -1073,14 +1073,14 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	else
 		ctx->window_age_gt_1000us++;
 	ctx->window_close_reasons[close_reason]++;
-	ctx->next_window_close = SV3_CLOSE_UNKNOWN;
+	ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
 	/* An independent READ can fail while older writes are only prepared.
 	 * Complete their original owners once, without ordering/staging or
 	 * submitting any unpublished bytes after the target has failed. */
 	if (ctx->failed) {
 		error = ctx->last_error ? ctx->last_error : -EIO;
 		for (index = 0; index < count; ++index)
-			sv3_complete(ctx->batch[index].bio, error);
+			swapz_complete(ctx->batch[index].bio, error);
 		goto accounted;
 	}
 	/* The accepted-burst experiment may aggregate many logical records
@@ -1092,9 +1092,9 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		ctx->accepted_burst_read_caps++;
 	}
 	section_start = ktime_get_ns();
-	sv3_order_window(ctx);
+	swapz_order_window(ctx);
 	ctx->window_sort_wall_ns +=
-		sv3_elapsed_ns(section_start, ktime_get_ns());
+		swapz_elapsed_ns(section_start, ktime_get_ns());
 	/*
 	 * Keep the owner-qualified real write at cap=2. The rejected cap=3
 	 * Pareto rule selected zero windows in both loaded models, so do not
@@ -1105,21 +1105,21 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	 */
 	if (accepted_burst_extended &&
 	    !ctx->engine.max_read_blocks_per_record) {
-		sv3_u8 compressed_count = 0;
-		sv3_u8 uncapped_extents = 0, capped_extents = 0;
-		sv3_u8 uncapped_four = 0, capped_four = 0;
-		sv3_u16 uncapped_blocks = 0, capped_blocks = 0;
+		swapz_u8 compressed_count = 0;
+		swapz_u8 uncapped_extents = 0, capped_extents = 0;
+		swapz_u8 uncapped_four = 0, capped_four = 0;
+		swapz_u16 uncapped_blocks = 0, capped_blocks = 0;
 		int uncapped_error, capped_error;
 
 		while (compressed_count < count &&
 		       !ctx->planned[compressed_count].raw)
 			compressed_count++;
 		uncapped_error = compressed_count ?
-			sv3_engine_plan_stats(ctx->planned, compressed_count, 0,
+			swapz_engine_plan_stats(ctx->planned, compressed_count, 0,
 					      &uncapped_blocks, &uncapped_extents,
 					      &uncapped_four) : -EINVAL;
 		capped_error = compressed_count ?
-			sv3_engine_plan_stats(ctx->planned, compressed_count, 2,
+			swapz_engine_plan_stats(ctx->planned, compressed_count, 2,
 					      &capped_blocks, &capped_extents,
 					      &capped_four) : -EINVAL;
 		if (uncapped_error || capped_error ||
@@ -1127,18 +1127,18 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		    capped_four > uncapped_four) {
 			ctx->accepted_burst_plan_stats_failures++;
 		} else {
-			sv3_u16 extra = capped_blocks - uncapped_blocks;
+			swapz_u16 extra = capped_blocks - uncapped_blocks;
 
 			ctx->accepted_burst_cap_extra_blocks += extra;
 			ctx->accepted_burst_four_extents_avoided +=
 				uncapped_four - capped_four;
 			if (extra > 1) {
-				sv3_u8 cap3_extents = 0, cap3_four = 0;
-				sv3_u16 cap3_blocks = 0;
+				swapz_u8 cap3_extents = 0, cap3_four = 0;
+				swapz_u16 cap3_blocks = 0;
 				int cap3_error;
 
 				ctx->accepted_burst_cap_extra_gt1_windows++;
-				cap3_error = sv3_engine_plan_stats(
+				cap3_error = swapz_engine_plan_stats(
 					ctx->planned, compressed_count, 3,
 					&cap3_blocks, &cap3_extents, &cap3_four);
 				if (cap3_error ||
@@ -1150,7 +1150,7 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 						capped_blocks - cap3_blocks;
 					if (cap3_blocks == uncapped_blocks)
 						ctx->accepted_burst_cap3_full_recovery_windows++;
-					if (sv3_window_cap3_pareto_candidate(
+					if (swapz_window_cap3_pareto_candidate(
 						    uncapped_blocks, capped_blocks,
 						    cap3_blocks, cap3_four))
 						ctx->accepted_burst_cap3_pareto_candidates++;
@@ -1162,15 +1162,15 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
 	while (committed < count) {
-		sv3_u8 succeeded = 0;
+		swapz_u8 succeeded = 0;
 
 		section_start = ktime_get_ns();
-		error = sv3_engine_write_window_batched_read_cap(&ctx->engine,
+		error = swapz_engine_write_window_batched_read_cap(&ctx->engine,
 				ctx->planned + committed,
 				count - committed, &succeeded,
 				planning_read_cap);
 		ctx->window_commit_wall_ns +=
-			sv3_elapsed_ns(section_start, ktime_get_ns());
+			swapz_elapsed_ns(section_start, ktime_get_ns());
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -1184,9 +1184,9 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 			 * Retry ONLY the remaining logical records afterwards.
 			 */
 			section_start = ktime_get_ns();
-			error = sv3_gc_compact_one(ctx);
+			error = swapz_gc_compact_one(ctx);
 			ctx->gc_wall_ns +=
-				sv3_elapsed_ns(section_start, ktime_get_ns());
+				swapz_elapsed_ns(section_start, ktime_get_ns());
 			if (!error)
 				continue;
 		}
@@ -1198,21 +1198,21 @@ static int sv3_flush_window(struct sv3_dm *ctx)
 	 * the newly published RAM mapping must not be trusted after -EIO.
 	 */
 	if (!error && committed == count && needs_fua)
-		error = sv3_issue_flush(ctx);
+		error = swapz_issue_flush(ctx);
 	if (error && needs_fua)
-		sv3_fail(ctx, error);
+		swapz_fail(ctx, error);
 	for (index = 0; index < count; ++index) {
 		struct bio *bio = ctx->batch[ctx->planned_to_batch[index]].bio;
 
 		if (index < committed && !ctx->failed) {
-			ctx->logical_write_bytes += SV3_BLOCK_BYTES;
+			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			if (ctx->planned[index].raw)
 				ctx->raw_pages++;
 			else
 				ctx->compressed_pages++;
-			sv3_complete(bio, 0);
+			swapz_complete(bio, 0);
 		} else {
-			sv3_complete(bio, error ? error : -EIO);
+			swapz_complete(bio, error ? error : -EIO);
 		}
 	}
 accounted:
@@ -1237,69 +1237,69 @@ accounted:
 	}
 	ctx->batch_count = 0;
 	if (error || committed != count) {
-		sv3_fail(ctx, error ? error : -EIO);
+		swapz_fail(ctx, error ? error : -EIO);
 		return error ? error : -EIO;
 	}
 	ctx->packed_burst = packed_close;
 	return 0;
 }
 
-static int sv3_raw_write(struct sv3_dm *ctx, struct bio *bio, sv3_u32 logical)
+static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logical)
 {
-	struct sv3_tx tx;
-	sv3_u8 completed = 0;
+	struct swapz_tx tx;
+	swapz_u8 completed = 0;
 	int error;
 
-	error = sv3_copy_bio(bio, ctx->input_page, false);
+	error = swapz_copy_bio(bio, ctx->input_page, false);
 	if (error)
 		return error;
-	error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+	error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
 	if (error == -ENOSPC) {
 		/* GC may use input_page, so recopy the still-owned upper BIO
 		 * after victim relocation, before writing a raw replacement. */
-		error = sv3_gc_compact_one(ctx);
+		error = swapz_gc_compact_one(ctx);
 		if (error)
 			return error;
-		error = sv3_copy_bio(bio, ctx->input_page, false);
+		error = swapz_copy_bio(bio, ctx->input_page, false);
 		if (error)
 			return error;
-		error = sv3_stage(&ctx->authority, &logical, 1, 1, &tx);
+		error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
 	}
 	if (error)
 		return error;
-	error = sv3_lower_write(ctx, tx.start_block, 1, ctx->input_page,
+	error = swapz_lower_write(ctx, tx.start_block, 1, ctx->input_page,
 				&completed);
 	if (!error && completed == 1)
-		error = sv3_verify_raw_write(ctx, tx.start_block,
+		error = swapz_verify_raw_write(ctx, tx.start_block,
 					   ctx->input_page);
-	error = sv3_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
+	error = swapz_finish_raw(&ctx->authority, &tx, ctx->input_page, completed, error);
 	if (!error) {
 		ctx->raw_pages++;
-		ctx->logical_write_bytes += SV3_BLOCK_BYTES;
+		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 	}
 	return error;
 }
 
-static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
+static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 {
-	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
-	struct sv3_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
-	sv3_u8 i;
+	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
+	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	swapz_u8 i;
 	u64 section_start;
 	int length;
 	int error;
 
 	for (i = 0; i < ctx->batch_count; ++i)
 		if (ctx->batch[i].logical == logical) {
-			ctx->next_window_close = SV3_CLOSE_DUPLICATE;
-			error = sv3_flush_window(ctx);
+			ctx->next_window_close = SWAPZ_CLOSE_DUPLICATE;
+			error = swapz_flush_window(ctx);
 			if (error)
 				return error;
 			break;
 		}
 	if (ctx->batch_count == ctx->max_window) {
-		ctx->next_window_close = SV3_CLOSE_FULL;
-		error = sv3_flush_window(ctx);
+		ctx->next_window_close = SWAPZ_CLOSE_FULL;
+		error = swapz_flush_window(ctx);
 		if (error)
 			return error;
 	}
@@ -1307,7 +1307,7 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	if (ctx->async_prepare) {
 		/*
 		 * The producer has completed before the ordered worker entered
-		 * sv3_process(). Only this worker may consume/release the slot.
+		 * swapz_process(). Only this worker may consume/release the slot.
 		 * The input page and LZ4 work memory belong to the producer.
 		 */
 		if (entry->preparation_error || !entry->prepared_page)
@@ -1316,19 +1316,19 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		length = entry->prepared_page->length;
 		if (length > 0)
 			memcpy(ctx->batch_bytes +
-			       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
+			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
 			       entry->prepared_page->bytes, (size_t)length);
 	} else {
-		error = sv3_copy_bio(bio, ctx->input_page, false);
+		error = swapz_copy_bio(bio, ctx->input_page, false);
 		if (error)
 			return error;
 		section_start = ktime_get_ns();
 		length = LZ4_compress_fast(ctx->input_page,
 				ctx->batch_bytes +
-					(size_t)ctx->batch_count * SV3_BLOCK_BYTES,
-				SV3_BLOCK_BYTES, SV3_MAX_COMPRESSED, 1,
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED, 1,
 				ctx->lz4_workmem);
-		ctx->lz4_wall_ns += sv3_elapsed_ns(section_start,
+		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start,
 						   ktime_get_ns());
 	}
 	/* Account for compressibility as the kernel itself observes it.
@@ -1359,27 +1359,27 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 	 * payload; never mistake ordinary compressible data for zero.
 	 *
 	 * Any earlier accepted upper writes must be physically committed
-	 * before invalidating this mapping. sv3_discard_page advances its
+	 * before invalidating this mapping. swapz_discard_page advances its
 	 * generation and releases prior liveness without a lower WRITE.
-	 * PREFLUSH was already honored in sv3_process(); FUA still requires
+	 * PREFLUSH was already honored in swapz_process(); FUA still requires
 	 * the lower flush before this upper BIO completes.
 	 */
 	if (length > 0 && length <= 64 &&
 	    (ctx->async_prepare ? entry->prepared_page->zero :
-	     sv3_page_is_zero(ctx->input_page))) {
-		ctx->next_window_close = SV3_CLOSE_ZERO;
-		error = sv3_flush_window(ctx);
+	     swapz_page_is_zero(ctx->input_page))) {
+		ctx->next_window_close = SWAPZ_CLOSE_ZERO;
+		error = swapz_flush_window(ctx);
 		if (!error)
-			error = sv3_discard_page(&ctx->authority, logical);
+			error = swapz_discard_page(&ctx->authority, logical);
 		if (!error && (bio->bi_opf & REQ_FUA))
-			error = sv3_issue_flush(ctx);
+			error = swapz_issue_flush(ctx);
 		if (error) {
-			sv3_fail(ctx, error);
+			swapz_fail(ctx, error);
 		} else {
-			ctx->logical_write_bytes += SV3_BLOCK_BYTES;
+			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			ctx->zero_elided_pages++;
 		}
-		sv3_complete(bio, error);
+		swapz_complete(bio, error);
 		return 0;
 	}
 	if (length <= 0 && ctx->engine.bulk_enabled &&
@@ -1389,55 +1389,55 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		 * CRC authority is published only after the shared lower write. */
 		if (ctx->async_prepare)
 			memcpy(ctx->batch_bytes +
-			       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
-			       entry->prepared_page->bytes, SV3_BLOCK_BYTES);
+			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+			       entry->prepared_page->bytes, SWAPZ_BLOCK_BYTES);
 		else
 			memcpy(ctx->batch_bytes +
-			       (size_t)ctx->batch_count * SV3_BLOCK_BYTES,
-			       ctx->input_page, SV3_BLOCK_BYTES);
-		sv3_release_prepared(bio);
-		sv3_window_admit_clock(ctx);
-		ctx->batch[ctx->batch_count++] = (struct sv3_pending_bio) {
+			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+			       ctx->input_page, SWAPZ_BLOCK_BYTES);
+		swapz_release_prepared(bio);
+		swapz_window_admit_clock(ctx);
+		ctx->batch[ctx->batch_count++] = (struct swapz_pending_bio) {
 			.bio = bio,
 			.logical = logical,
-			.length = SV3_BLOCK_BYTES,
+			.length = SWAPZ_BLOCK_BYTES,
 			.raw = 1,
 		};
 		if (bio->bi_opf & REQ_FUA) {
-			ctx->next_window_close = SV3_CLOSE_FUA;
-			sv3_flush_window(ctx);
+			ctx->next_window_close = SWAPZ_CLOSE_FUA;
+			swapz_flush_window(ctx);
 		}
 		return 0;
 	}
 	if (length <= 0) {
-		ctx->next_window_close = SV3_CLOSE_RAW;
-		error = sv3_flush_window(ctx);
+		ctx->next_window_close = SWAPZ_CLOSE_RAW;
+		error = swapz_flush_window(ctx);
 		if (error)
 			return error;
-		error = sv3_raw_write(ctx, bio, logical);
+		error = swapz_raw_write(ctx, bio, logical);
 		if (!error && (bio->bi_opf & REQ_FUA))
-			error = sv3_issue_flush(ctx);
+			error = swapz_issue_flush(ctx);
 		if (error)
-			sv3_fail(ctx, error);
-		sv3_complete(bio, error);
+			swapz_fail(ctx, error);
+		swapz_complete(bio, error);
 		return 0;
 	}
 
 	/* batch_bytes now owns an immutable copy; release producer capacity
 	 * before waiting for a packed window's synchronous lower I/O. */
-	sv3_release_prepared(bio);
-	sv3_window_admit_clock(ctx);
-	ctx->batch[ctx->batch_count] = (struct sv3_pending_bio) {
+	swapz_release_prepared(bio);
+	swapz_window_admit_clock(ctx);
+	ctx->batch[ctx->batch_count] = (struct swapz_pending_bio) {
 		.bio = bio,
 		.logical = logical,
-		.length = (sv3_u16)length,
+		.length = (swapz_u16)length,
 	};
 	ctx->batch_count++;
 	/* FUA remains an immediate drained, lower-flushed fence. */
 	if (bio->bi_opf & REQ_FUA) {
-		ctx->next_window_close = SV3_CLOSE_FUA;
-		sv3_flush_window(ctx);
-	} else if (sv3_window_single_pack_ready(ctx->batch,
+		ctx->next_window_close = SWAPZ_CLOSE_FUA;
+		swapz_flush_window(ctx);
+	} else if (swapz_window_single_pack_ready(ctx->batch,
 					      ctx->batch_count,
 					      ctx->retain_ms,
 					      ctx->engine.max_read_blocks_per_record)) {
@@ -1448,11 +1448,11 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 		} else {
 			/* Queue tail: do not pay the retention deadline merely to
 			 * hope for a future arrival. Commit the valid first pack. */
-			ctx->next_window_close = SV3_CLOSE_PACK_READY;
+			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
-			sv3_flush_window(ctx);
+			swapz_flush_window(ctx);
 		}
-	} else if (sv3_window_pack_ready(ctx->batch, ctx->batch_count,
+	} else if (swapz_window_pack_ready(ctx->batch, ctx->batch_count,
 					ctx->retain_ms,
 					ctx->engine.max_read_blocks_per_record)) {
 		/* Once a second pack exists, consume only work already accepted
@@ -1462,37 +1462,37 @@ static int sv3_accept_write(struct sv3_dm *ctx, struct bio *bio)
 			ctx->accepted_burst_pack_ready = true;
 			ctx->accepted_burst_extensions++;
 		} else {
-			ctx->next_window_close = SV3_CLOSE_PACK_READY;
+			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
-			sv3_flush_window(ctx);
+			swapz_flush_window(ctx);
 		}
 	}
 	return 0;
 }
 
-static int sv3_read(struct sv3_dm *ctx, struct bio *bio)
+static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 {
-	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
-	const struct sv3_map *map = &ctx->maps[logical];
-	sv3_u16 payload_bytes = 0;
+	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
+	const struct swapz_map *map = &ctx->maps[logical];
+	swapz_u16 payload_bytes = 0;
 	u64 section_start;
 	int error, decompressed;
 
 	if (!map->valid) {
-		memset(ctx->read_page, 0, SV3_BLOCK_BYTES);
+		memset(ctx->read_page, 0, SWAPZ_BLOCK_BYTES);
 	} else if (map->raw) {
 		if (map->extent_blocks != 1 ||
 		    map->start_block >= ctx->physical_blocks)
 			return -EUCLEAN;
-		error = sv3_lower_read(ctx, map->start_block, 1, ctx->read_page);
+		error = swapz_lower_read(ctx, map->start_block, 1, ctx->read_page);
 		if (error)
 			return error;
-		error = sv3_verify_raw(&ctx->authority, logical, ctx->read_page);
+		error = swapz_verify_raw(&ctx->authority, logical, ctx->read_page);
 		if (error)
 			return error;
 	} else {
-		error = sv3_engine_read_page(&ctx->engine, logical,
-				ctx->read_compressed, SV3_BLOCK_BYTES,
+		error = swapz_engine_read_page(&ctx->engine, logical,
+				ctx->read_compressed, SWAPZ_BLOCK_BYTES,
 				&payload_bytes);
 		if (error)
 			return error;
@@ -1500,28 +1500,28 @@ static int sv3_read(struct sv3_dm *ctx, struct bio *bio)
 		decompressed = LZ4_decompress_safe(ctx->read_compressed,
 						  ctx->read_page,
 						  payload_bytes,
-						  SV3_BLOCK_BYTES);
+						  SWAPZ_BLOCK_BYTES);
 		ctx->decode_wall_ns +=
-			sv3_elapsed_ns(section_start, ktime_get_ns());
-		if (decompressed != SV3_BLOCK_BYTES)
+			swapz_elapsed_ns(section_start, ktime_get_ns());
+		if (decompressed != SWAPZ_BLOCK_BYTES)
 			return -EBADMSG;
 	}
-	error = sv3_copy_bio(bio, ctx->read_page, true);
+	error = swapz_copy_bio(bio, ctx->read_page, true);
 	if (!error)
-		ctx->logical_read_bytes += SV3_BLOCK_BYTES;
+		ctx->logical_read_bytes += SWAPZ_BLOCK_BYTES;
 	return error;
 }
 
-static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
+static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 {
 	sector_t sector = bio->bi_iter.bi_sector;
 	sector_t remaining = bio_sectors(bio);
 	int error;
 
-	if (sector % SV3_SECTORS || remaining % SV3_SECTORS ||
-	    sector / SV3_SECTORS >= ctx->logical_pages ||
-	    remaining / SV3_SECTORS >
-			ctx->logical_pages - sector / SV3_SECTORS)
+	if (sector % SWAPZ_SECTORS || remaining % SWAPZ_SECTORS ||
+	    sector / SWAPZ_SECTORS >= ctx->logical_pages ||
+	    remaining / SWAPZ_SECTORS >
+			ctx->logical_pages - sector / SWAPZ_SECTORS)
 		return -ERANGE;
 	/*
 	 * The discard must be all-or-nothing on any detectable mapping,
@@ -1531,7 +1531,7 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 	{
 		sector_t check_sector = sector;
 		sector_t check_remaining = remaining;
-		sv3_u32 epoch = ++ctx->discard_serial;
+		swapz_u32 epoch = ++ctx->discard_serial;
 
 		if (!epoch) {
 			memset(ctx->discard_epoch, 0,
@@ -1540,13 +1540,13 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 			epoch = ++ctx->discard_serial;
 		}
 		while (check_remaining) {
-			sv3_u32 logical = (sv3_u32)(check_sector / SV3_SECTORS);
-			const struct sv3_map *m = &ctx->maps[logical];
+			swapz_u32 logical = (swapz_u32)(check_sector / SWAPZ_SECTORS);
+			const struct swapz_map *m = &ctx->maps[logical];
 
-			if (m->generation == ~(sv3_u32)0)
+			if (m->generation == ~(swapz_u32)0)
 				return -EOVERFLOW;
 			if (m->valid) {
-				sv3_u32 start = m->start_block;
+				swapz_u32 start = m->start_block;
 
 				if (start >= ctx->physical_blocks ||
 				    (m->extent_blocks != 1 &&
@@ -1568,36 +1568,36 @@ static int sv3_discard(struct sv3_dm *ctx, struct bio *bio)
 				    ctx->live_records[start])
 					return -EUCLEAN;
 			}
-			check_sector += SV3_SECTORS;
-			check_remaining -= SV3_SECTORS;
+			check_sector += SWAPZ_SECTORS;
+			check_remaining -= SWAPZ_SECTORS;
 		}
 	}
 	while (remaining) {
-		error = sv3_discard_page(&ctx->authority,
-				       (sv3_u32)(sector / SV3_SECTORS));
+		error = swapz_discard_page(&ctx->authority,
+				       (swapz_u32)(sector / SWAPZ_SECTORS));
 		if (error)
 			return error;
 		ctx->discard_pages++;
-		sector += SV3_SECTORS;
-		remaining -= SV3_SECTORS;
+		sector += SWAPZ_SECTORS;
+		remaining -= SWAPZ_SECTORS;
 	}
 	return 0;
 }
 
-static bool sv3_retention_expired(struct sv3_dm *ctx);
+static bool swapz_retention_expired(struct swapz_dm *ctx);
 
-static bool sv3_read_is_independent(struct sv3_dm *ctx, struct bio *bio)
+static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
-	sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector / SV3_SECTORS);
+	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	bool blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
 		ctx->authority.in_flight || ctx->authority.batch_pending ||
 		(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
 
-	return sv3_window_read_independent(ctx->batch, ctx->batch_count,
+	return swapz_window_read_independent(ctx->batch, ctx->batch_count,
 					 logical, ctx->retain_ms, blocked);
 }
 
-static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
+static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 {
 	int error = 0;
 	const enum req_op op = bio_op(bio);
@@ -1605,106 +1605,106 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
 	/* Invalidate even when a discard/flush changes authority without
 	 * writing any lower blocks. READ-only runs may reuse one metadata page. */
 	if (op != REQ_OP_READ || (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
-		sv3_engine_invalidate_read_cache(&ctx->engine);
+		swapz_engine_invalidate_read_cache(&ctx->engine);
 	if (ctx->failed) {
-		sv3_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
+		swapz_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
 		return;
 	}
 	/* The absolute deadline cannot be moved by newly admitted writes,
 	 * reads, or worker rescheduling. Close older windows first. */
 	if (ctx->batch_count && ctx->retain_ms &&
-	    sv3_retention_expired(ctx)) {
-		ctx->next_window_close = SV3_CLOSE_DEADLINE;
+	    swapz_retention_expired(ctx)) {
+		ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 		ctx->deadline_before_bio++;
-		error = sv3_flush_window(ctx);
+		error = swapz_flush_window(ctx);
 		if (error) {
-			sv3_complete(bio, error);
+			swapz_complete(bio, error);
 			return;
 		}
 	}
 	/* Only the opt-in retained stream can service a disjoint READ from
 	 * committed authority. Read scratch is separate from batch_bytes;
 	 * one worker still owns every mapping and all lower I/O. */
-	if (op == REQ_OP_READ && sv3_read_is_independent(ctx, bio)) {
-		error = sv3_read(ctx, bio);
+	if (op == REQ_OP_READ && swapz_read_is_independent(ctx, bio)) {
+		error = swapz_read(ctx, bio);
 		if (error) {
-			sv3_fail(ctx, error);
-			ctx->next_window_close = SV3_CLOSE_OTHER;
+			swapz_fail(ctx, error);
+			ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 			/* Abort pending owners without submitting their data. */
-			sv3_flush_window(ctx);
+			swapz_flush_window(ctx);
 		}
 		if (!error)
 			ctx->retained_read_bypasses++;
-		sv3_complete(bio, error);
+		swapz_complete(bio, error);
 		/* A successful independent read is already authoritative.
 		 * Do not add an unrelated lower WRITE's latency/error to its
 		 * completion, but a slow read must not extend the deadline. */
-		if (!error && sv3_retention_expired(ctx)) {
-			ctx->next_window_close = SV3_CLOSE_DEADLINE;
+		if (!error && swapz_retention_expired(ctx)) {
+			ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 			ctx->deadline_after_read++;
-			sv3_flush_window(ctx);
+			swapz_flush_window(ctx);
 		}
 		return;
 	}
 	/* Dependencies and barriers drain in original admission order. */
 	if (op != REQ_OP_WRITE || (bio->bi_opf & REQ_PREFLUSH)) {
 		if (bio->bi_opf & REQ_PREFLUSH) {
-			ctx->next_window_close = SV3_CLOSE_PREFLUSH;
+			ctx->next_window_close = SWAPZ_CLOSE_PREFLUSH;
 		} else if (op == REQ_OP_READ) {
-			sv3_u32 logical = (sv3_u32)(bio->bi_iter.bi_sector /
-						      SV3_SECTORS);
-			sv3_u8 index;
+			swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector /
+						      SWAPZ_SECTORS);
+			swapz_u8 index;
 
-			ctx->next_window_close = SV3_CLOSE_READ_UNRELATED;
+			ctx->next_window_close = SWAPZ_CLOSE_READ_UNRELATED;
 			for (index = 0; index < ctx->batch_count; ++index) {
 				if (ctx->batch[index].logical == logical) {
-					ctx->next_window_close = SV3_CLOSE_READ_CONFLICT;
+					ctx->next_window_close = SWAPZ_CLOSE_READ_CONFLICT;
 					break;
 				}
 			}
 		} else if (op == REQ_OP_DISCARD) {
-			ctx->next_window_close = SV3_CLOSE_DISCARD;
+			ctx->next_window_close = SWAPZ_CLOSE_DISCARD;
 		} else {
-			ctx->next_window_close = SV3_CLOSE_OTHER;
+			ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 		}
-		error = sv3_flush_window(ctx);
+		error = swapz_flush_window(ctx);
 		if (error) {
-			sv3_complete(bio, error);
+			swapz_complete(bio, error);
 			return;
 		}
 	}
 	if (bio->bi_opf & REQ_PREFLUSH) {
-		error = sv3_issue_flush(ctx);
+		error = swapz_issue_flush(ctx);
 		if (error) {
-			sv3_fail(ctx, error);
-			sv3_complete(bio, error);
+			swapz_fail(ctx, error);
+			swapz_complete(bio, error);
 			return;
 		}
 		if (op == REQ_OP_WRITE && !bio_sectors(bio)) {
-			sv3_complete(bio, 0);
+			swapz_complete(bio, 0);
 			return;
 		}
 	}
 	switch (op) {
 	case REQ_OP_WRITE:
 		/* A write BIO is completed by raw_write or flush_window. */
-		error = sv3_accept_write(ctx, bio);
+		error = swapz_accept_write(ctx, bio);
 		if (error)
-			sv3_complete(bio, error);
+			swapz_complete(bio, error);
 		return;
 	case REQ_OP_READ:
-		error = sv3_read(ctx, bio);
+		error = swapz_read(ctx, bio);
 		break;
 	case REQ_OP_DISCARD:
-		error = sv3_discard(ctx, bio);
+		error = swapz_discard(ctx, bio);
 		break;
 	default:
 		error = -EOPNOTSUPP;
 		break;
 	}
 	if (error && error != -EOPNOTSUPP)
-		sv3_fail(ctx, error);
-	sv3_complete(bio, error);
+		swapz_fail(ctx, error);
+	swapz_complete(bio, error);
 }
 
 /*
@@ -1718,15 +1718,15 @@ static void sv3_process(struct sv3_dm *ctx, struct bio *bio)
  * Computing the remaining time on each rearm avoids extending it when
  * additional incoming writes arrive before the next worker invocation.
  * All calls are from the one serialized worker, never the ->map path. */
-static bool sv3_retention_expired(struct sv3_dm *ctx)
+static bool swapz_retention_expired(struct swapz_dm *ctx)
 {
-	return sv3_window_retention_expired(ctx->window_first_ns,
+	return swapz_window_retention_expired(ctx->window_first_ns,
 					    ktime_get_ns(), ctx->retain_ms);
 }
 
-static enum hrtimer_restart sv3_retention_wake(struct hrtimer *timer)
+static enum hrtimer_restart swapz_retention_wake(struct hrtimer *timer)
 {
-	struct sv3_dm *ctx = container_of(timer, struct sv3_dm, retention_timer);
+	struct swapz_dm *ctx = container_of(timer, struct swapz_dm, retention_timer);
 	unsigned long flags;
 
 	/* No batch/map accesses or sleeping I/O in timer context. The same
@@ -1738,17 +1738,17 @@ static enum hrtimer_restart sv3_retention_wake(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static void sv3_worker(struct work_struct *work)
+static void swapz_worker(struct work_struct *work)
 {
-	struct sv3_dm *ctx =
-		container_of(to_delayed_work(work), struct sv3_dm, worker);
+	struct swapz_dm *ctx =
+		container_of(to_delayed_work(work), struct swapz_dm, worker);
 	LIST_HEAD(local);
-	struct sv3_bio_ref *entry, *next;
+	struct swapz_bio_ref *entry, *next;
 	unsigned long flags;
 	unsigned int remaining;
 
 	for (;;) {
-		remaining = SV3_WORK_QUANTUM_BIOS;
+		remaining = SWAPZ_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -1762,16 +1762,16 @@ static void sv3_worker(struct work_struct *work)
 			if (ctx->async_prepare && bio_op(entry->bio) == REQ_OP_WRITE &&
 			    bio_sectors(entry->bio))
 				wait_for_completion(&entry->preparation_finished);
-			sv3_process(ctx, entry->bio);
+			swapz_process(ctx, entry->bio);
 			if (ctx->accepted_burst_pack_ready &&
 			    !ctx->worker_has_immediate_followup &&
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
-			    !sv3_retention_expired(ctx)) {
-				ctx->next_window_close = SV3_CLOSE_PACK_READY;
+			    !swapz_retention_expired(ctx)) {
+				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 				ctx->packed_early_commits++;
 				ctx->accepted_burst_tail_flushes++;
-				sv3_flush_window(ctx);
+				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
@@ -1789,24 +1789,24 @@ static void sv3_worker(struct work_struct *work)
 		    (!ctx->retain_ms || ctx->failed ||
 		     !READ_ONCE(ctx->accepting) ||
 		     ctx->batch_count >= ctx->max_window ||
-		     sv3_retention_expired(ctx))) {
+		     swapz_retention_expired(ctx))) {
 			if (!READ_ONCE(ctx->accepting))
-				ctx->next_window_close = SV3_CLOSE_SHUTDOWN;
+				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
 			else if (ctx->retain_ms &&
 				 ctx->batch_count >= ctx->max_window)
-				ctx->next_window_close = SV3_CLOSE_FULL;
+				ctx->next_window_close = SWAPZ_CLOSE_FULL;
 			else if (ctx->retain_ms &&
-				 sv3_retention_expired(ctx)) {
-				ctx->next_window_close = SV3_CLOSE_DEADLINE;
+				 swapz_retention_expired(ctx)) {
+				ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 				if (!list_empty(&local))
 					ctx->deadline_worker_with_local++;
 				else
 					ctx->deadline_worker_empty++;
 			} else {
 				ctx->next_window_close = !remaining ?
-					SV3_CLOSE_QUANTUM : SV3_CLOSE_IDLE;
+					SWAPZ_CLOSE_QUANTUM : SWAPZ_CLOSE_IDLE;
 			}
-			sv3_flush_window(ctx);
+			swapz_flush_window(ctx);
 		} else if (ctx->batch_count) {
 			ctx->retain_worker_passes++;
 		}
@@ -1823,24 +1823,24 @@ static void sv3_worker(struct work_struct *work)
 			 * The local remainder was spliced above: BOTH queues
 			 * are empty under the same admission lock as ->map(). */
 			if (ctx->accepting && !ctx->failed &&
-			    sv3_window_burst_tail_ready(ctx->batch,
+			    swapz_window_burst_tail_ready(ctx->batch,
 				ctx->batch_count, ctx->retain_ms,
 				ctx->engine.max_read_blocks_per_record,
 				ctx->packed_burst)) {
 				ctx->packed_burst = false;
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				ctx->next_window_close = SV3_CLOSE_IDLE;
+				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				ctx->burst_tail_flushes++;
 				/* Flush cancels the timer and completes owners;
 				 * never run it while holding queue_lock. New
 				 * arrivals remain scheduled for a later pass. */
-				sv3_flush_window(ctx);
+				swapz_flush_window(ctx);
 				return;
 			}
 			if (!ctx->batch_count)
 				ctx->packed_burst = false;
 			if (ctx->batch_count &&
-			    sv3_window_timer_enabled(ctx->retain_ms) &&
+			    swapz_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
 				/* The first record pins the deadline. A queued
 				 * timer already carries that identical expiry;
@@ -1849,7 +1849,7 @@ static void sv3_worker(struct work_struct *work)
 				 * may have dequeued; in that case safely rearm
 				 * at the SAME pinned deadline. All decisions
 				 * here are under admission queue_lock. */
-				if (sv3_retention_timer_needs_arm(ctx->retain_ms,
+				if (swapz_retention_timer_needs_arm(ctx->retain_ms,
 					hrtimer_is_queued(&ctx->retention_timer))) {
 					ctx->retain_timer_arms++;
 					hrtimer_start(&ctx->retention_timer,
@@ -1864,8 +1864,8 @@ static void sv3_worker(struct work_struct *work)
 			}
 			if (ctx->batch_count && !ctx->accepting) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				ctx->next_window_close = SV3_CLOSE_SHUTDOWN;
-				sv3_flush_window(ctx);
+				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
+				swapz_flush_window(ctx);
 				return;
 			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -1891,10 +1891,10 @@ static void sv3_worker(struct work_struct *work)
 	}
 }
 
-static int sv3_map(struct dm_target *ti, struct bio *bio)
+static int swapz_map(struct dm_target *ti, struct bio *bio)
 {
-	struct sv3_dm *ctx = ti->private;
-	struct sv3_bio_ref *entry;
+	struct swapz_dm *ctx = ti->private;
+	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	sector_t sector = bio->bi_iter.bi_sector;
 	sector_t count = bio_sectors(bio);
@@ -1905,15 +1905,15 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 		if ((bio_op(bio) == REQ_OP_WRITE && !count &&
 		     (bio->bi_opf & REQ_PREFLUSH))) {
 			/* empty flush represented as PREFLUSH|WRITE */
-		} else if (sector % SV3_SECTORS || count != SV3_SECTORS ||
-			   sector / SV3_SECTORS >= ctx->logical_pages) {
+		} else if (sector % SWAPZ_SECTORS || count != SWAPZ_SECTORS ||
+			   sector / SWAPZ_SECTORS >= ctx->logical_pages) {
 			return DM_MAPIO_KILL;
 		}
 	} else if (bio_op(bio) == REQ_OP_DISCARD) {
-		if (sector % SV3_SECTORS || count % SV3_SECTORS ||
-		    sector / SV3_SECTORS >= ctx->logical_pages ||
-		    count / SV3_SECTORS >
-				ctx->logical_pages - sector / SV3_SECTORS)
+		if (sector % SWAPZ_SECTORS || count % SWAPZ_SECTORS ||
+		    sector / SWAPZ_SECTORS >= ctx->logical_pages ||
+		    count / SWAPZ_SECTORS >
+				ctx->logical_pages - sector / SWAPZ_SECTORS)
 			return DM_MAPIO_KILL;
 	} else {
 		/* A REQ_OP_FLUSH upper BIO is invalid on Linux: blk-core
@@ -1975,9 +1975,9 @@ static int sv3_map(struct dm_target *ti, struct bio *bio)
 	return DM_MAPIO_SUBMITTED;
 }
 
-static void sv3_drain(struct dm_target *ti)
+static void swapz_drain(struct dm_target *ti)
 {
-	struct sv3_dm *ctx = ti->private;
+	struct swapz_dm *ctx = ti->private;
 
 	unsigned long flags;
 
@@ -2012,22 +2012,22 @@ static void sv3_drain(struct dm_target *ti)
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("V3 drain invariant: accepted BIOs remain after draining");
-		sv3_fail(ctx, -EUCLEAN);
+		swapz_fail(ctx, -EUCLEAN);
 	} else {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
 	/* Every admitted BIO was queued under the same lock before this drain. */
 	if (!ctx->failed) {
-		int error = sv3_issue_flush(ctx);
+		int error = swapz_issue_flush(ctx);
 
 		if (error)
-			sv3_fail(ctx, error);
+			swapz_fail(ctx, error);
 	}
 }
 
-static void sv3_resume(struct dm_target *ti)
+static void swapz_resume(struct dm_target *ti)
 {
-	struct sv3_dm *ctx = ti->private;
+	struct swapz_dm *ctx = ti->private;
 	unsigned long flags;
 
 	spin_lock_irqsave(&ctx->queue_lock, flags);
@@ -2036,7 +2036,7 @@ static void sv3_resume(struct dm_target *ti)
 	spin_unlock_irqrestore(&ctx->queue_lock, flags);
 }
 
-static void sv3_free(struct sv3_dm *ctx)
+static void swapz_free(struct swapz_dm *ctx)
 {
 	if (!ctx)
 		return;
@@ -2085,34 +2085,34 @@ static void sv3_free(struct sv3_dm *ctx)
 	kfree(ctx);
 }
 
-static void sv3_dtr(struct dm_target *ti)
+static void swapz_dtr(struct dm_target *ti)
 {
-	struct sv3_dm *ctx = ti->private;
+	struct swapz_dm *ctx = ti->private;
 
 	if (!ctx)
 		return;
-	sv3_drain(ti);
-	sv3_free(ctx);
+	swapz_drain(ti);
+	swapz_free(ctx);
 	ti->private = NULL;
 }
 
-static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
+static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
-	struct sv3_dm *ctx;
+	struct swapz_dm *ctx;
 	u64 logical, physical;
-	u32 budget = 0, window = SV3_MAX_RECORDS, verify = 0;
+	u32 budget = 0, window = SWAPZ_MAX_RECORDS, verify = 0;
 	u32 gc_policy = 2, coalesce = 0, flush_fail_nth = 0;
 	u32 lower_bulk = 1, write_fail_nth = 0, retain = 0;
 	int error;
 
-	if (argc < 1 || argc > 10 || ti->len % SV3_SECTORS) {
+	if (argc < 1 || argc > 10 || ti->len % SWAPZ_SECTORS) {
 		ti->error = "Usage: <owned null_blk backing> [read_blocks 0..3] [window 1..64] [verify 0|1] [gc 0=count|1=bytes|2=io] [coalesce_ms 0..4] [test_fail_flush_nth 0..64] [lower_bulk 0=off|1=adjacent|2=allow-padding] [test_fail_write_nth 0..65535] [retain_ms 0..4 experimental]";
 		return -EINVAL;
 	}
 	if (argc > 1 && (kstrtou32(argv[1], 10, &budget) || budget > 3))
 		return -EINVAL;
 	if (argc > 2 && (kstrtou32(argv[2], 10, &window) ||
-			 window < 1 || window > SV3_MAX_RECORDS))
+			 window < 1 || window > SWAPZ_MAX_RECORDS))
 		return -EINVAL;
 	if (argc > 3 && (kstrtou32(argv[3], 10, &verify) || verify > 1U))
 		return -EINVAL;
@@ -2120,7 +2120,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			 gc_policy > 2U))
 		return -EINVAL;
 	if (argc > 5 && (kstrtou32(argv[5], 10, &coalesce) ||
-			 coalesce > SV3_MAX_COALESCE_MS))
+			 coalesce > SWAPZ_MAX_COALESCE_MS))
 		return -EINVAL;
 	/* Fault injection is a diagnostic only, restricted by the same
 	 * null_blk admission guard as all live V3 alpha IO. */
@@ -2136,36 +2136,36 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			 write_fail_nth > 65535U))
 		return -EINVAL;
 	if (argc > 9 && (kstrtou32(argv[9], 10, &retain) ||
-			 retain > SV3_MAX_RETAIN_MS))
+			 retain > SWAPZ_MAX_RETAIN_MS))
 		return -EINVAL;
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
 		return -ENOMEM;
 	ti->private = ctx;
 	ctx->target = ti;
-	ctx->max_window = (sv3_u8)window;
+	ctx->max_window = (swapz_u8)window;
 	ctx->gc_cost_policy = gc_policy;
 	ctx->coalesce_ms = coalesce;
 	ctx->retain_ms = retain;
 	ctx->flush_meter.fail_nth = flush_fail_nth;
 	ctx->write_fault_nth = write_fail_nth;
-	ctx->engine.max_read_blocks_per_record = (sv3_u8)budget;
+	ctx->engine.max_read_blocks_per_record = (swapz_u8)budget;
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
-	ctx->async_prepare = sv3_async_prepare;
+	ctx->async_prepare = swapz_async_prepare;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
-	INIT_DELAYED_WORK(&ctx->worker, sv3_worker);
-	INIT_WORK(&ctx->preparation_worker, sv3_preparation_worker);
-	sema_init(&ctx->preparation_slots, SV3_MAX_RECORDS);
+	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
+	INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker);
+	sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS);
 	atomic_set(&ctx->lower_write_active, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
-	hrtimer_setup(&ctx->retention_timer, sv3_retention_wake,
+	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 #else
 	hrtimer_init(&ctx->retention_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	ctx->retention_timer.function = sv3_retention_wake;
+	ctx->retention_timer.function = swapz_retention_wake;
 #endif
 
 	error = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
@@ -2189,24 +2189,24 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	if (bdev_is_zoned(ctx->backing->bdev) ||
 	    bdev_read_only(ctx->backing->bdev) ||
-	    bdev_logical_block_size(ctx->backing->bdev) > SV3_BLOCK_BYTES ||
-	    SV3_BLOCK_BYTES % bdev_logical_block_size(ctx->backing->bdev)) {
+	    bdev_logical_block_size(ctx->backing->bdev) > SWAPZ_BLOCK_BYTES ||
+	    SWAPZ_BLOCK_BYTES % bdev_logical_block_size(ctx->backing->bdev)) {
 		ti->error = "Unsupported zoned, read-only or unaligned V3 backing";
 		error = -EINVAL;
 		goto fail;
 	}
-	logical = div_u64(ti->len, SV3_SECTORS);
-	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SV3_SECTORS);
-	physical = div_u64(physical, SV3_SEGMENT_BLOCKS) * SV3_SEGMENT_BLOCKS;
+	logical = div_u64(ti->len, SWAPZ_SECTORS);
+	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
+	physical = div_u64(physical, SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
 	if (!logical || logical > U32_MAX || physical > U32_MAX ||
-	    physical < 3U * SV3_SEGMENT_BLOCKS) {
+	    physical < 3U * SWAPZ_SEGMENT_BLOCKS) {
 		ti->error = "V3 requires at least three 1MiB physical segments";
 		error = -EINVAL;
 		goto fail;
 	}
 	ctx->logical_pages = logical;
 	ctx->physical_blocks = physical;
-	ctx->segment_count = physical / SV3_SEGMENT_BLOCKS;
+	ctx->segment_count = physical / SWAPZ_SEGMENT_BLOCKS;
 	ctx->gc_scores = kvcalloc(ctx->segment_count,
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
 	ctx->gc_io_scores = kvcalloc(ctx->segment_count,
@@ -2231,7 +2231,7 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = -ENOMEM;
 		goto fail;
 	}
-	error = sv3_authority_init(&ctx->authority, ctx->maps,
+	error = swapz_authority_init(&ctx->authority, ctx->maps,
 				  ctx->live_records, ctx->extent_classes,
 				  (u32)logical, (u32)physical);
 	if (error) {
@@ -2241,23 +2241,23 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Production allocator exchanges ownership of one GC reserve segment
 	 * and one fully evacuated foreground victim every completed cycle. */
 	ctx->authority.reuse_dead_segments = 1;
-	error = sv3_enable_segment_rotation(&ctx->authority,
+	error = swapz_enable_segment_rotation(&ctx->authority,
 					  ctx->segment_roles, ctx->segment_count);
 	if (error) {
 		ti->error = "Cannot initialize rotating GC reserve roles";
 		goto fail;
 	}
-	ctx->batch_bytes = vzalloc(SV3_BATCH_BYTES);
-	ctx->gc_bytes_store = vzalloc(SV3_BATCH_BYTES);
-	ctx->input_page = vzalloc(SV3_BLOCK_BYTES);
-	ctx->read_page = vzalloc(SV3_BLOCK_BYTES);
-	ctx->read_compressed = vzalloc(SV3_BLOCK_BYTES);
-	ctx->engine.write_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
-	ctx->engine.read_scratch = vzalloc(SV3_MAX_EXTENT_BYTES);
+	ctx->batch_bytes = vzalloc(SWAPZ_BATCH_BYTES);
+	ctx->gc_bytes_store = vzalloc(SWAPZ_BATCH_BYTES);
+	ctx->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
+	ctx->read_page = vzalloc(SWAPZ_BLOCK_BYTES);
+	ctx->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
+	ctx->engine.write_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
+	ctx->engine.read_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
 	ctx->engine.read_metadata_cache =
-		vzalloc(SV3_READ_METADATA_CACHE_ENTRIES * SV3_BLOCK_BYTES);
-	ctx->engine.bulk_scratch = vzalloc(SV3_BULK_BLOCKS * SV3_BLOCK_BYTES);
-	ctx->engine.bulk_txs = kvcalloc(SV3_MAX_RECORDS,
+		vzalloc(SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES);
+	ctx->engine.bulk_scratch = vzalloc(SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES);
+	ctx->engine.bulk_txs = kvcalloc(SWAPZ_MAX_RECORDS,
 				       sizeof(*ctx->engine.bulk_txs),
 				       GFP_KERNEL);
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
@@ -2273,9 +2273,9 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	ctx->engine.authority = &ctx->authority;
 	ctx->engine.io.opaque = ctx;
-	ctx->engine.io.write_extent = sv3_lower_write;
-	ctx->engine.io.write_run = sv3_lower_write_run;
-	ctx->engine.io.read_blocks = sv3_lower_read;
+	ctx->engine.io.write_extent = swapz_lower_write;
+	ctx->engine.io.write_run = swapz_lower_write_run;
+	ctx->engine.io.read_blocks = swapz_lower_read;
 	ctx->io_client = dm_io_client_create();
 	if (IS_ERR(ctx->io_client)) {
 		error = PTR_ERR(ctx->io_client);
@@ -2290,10 +2290,10 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (ctx->async_prepare) {
 		/* 64 preallocated producer pages, a semaphore enforcing the
 		 * same hard bound, and no dynamic allocations in ->map. */
-		ctx->preparation_input_page = vzalloc(SV3_BLOCK_BYTES);
+		ctx->preparation_input_page = vzalloc(SWAPZ_BLOCK_BYTES);
 		ctx->preparation_pool = mempool_create_kmalloc_pool(
-					SV3_MAX_RECORDS,
-					sizeof(struct sv3_prepared_page));
+					SWAPZ_MAX_RECORDS,
+					sizeof(struct swapz_prepared_page));
 		if (!ctx->preparation_input_page || !ctx->preparation_pool) {
 			error = -ENOMEM;
 			goto fail;
@@ -2306,51 +2306,51 @@ static int sv3_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			goto fail;
 		}
 	}
-	ti->per_io_data_size = sizeof(struct sv3_bio_ref);
+	ti->per_io_data_size = sizeof(struct swapz_bio_ref);
 	ti->num_flush_bios = 1;
 	ti->flush_supported = true;
 	ti->num_discard_bios = 1;
 	ti->discards_supported = true;
 	ti->limit_swap_bios = true;
-	error = dm_set_target_max_io_len(ti, SV3_SECTORS);
+	error = dm_set_target_max_io_len(ti, SWAPZ_SECTORS);
 	if (error)
 		goto fail;
 	WRITE_ONCE(ctx->accepting, true);
 	DMINFO("V3 alpha %s logical_pages=%u physical_blocks=%u window=%u read_cap=%u LIVE GC EXPERIMENTAL",
-	       SV3_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
+	       SWAPZ_ALPHA_VERSION, ctx->logical_pages, ctx->physical_blocks,
 	       ctx->max_window, (unsigned int)budget);
 	return 0;
 fail:
-	sv3_free(ctx);
+	swapz_free(ctx);
 	ti->private = NULL;
 	return error;
 }
 
-static int sv3_iterate_devices(struct dm_target *ti,
+static int swapz_iterate_devices(struct dm_target *ti,
 			      iterate_devices_callout_fn fn, void *data)
 {
-	struct sv3_dm *ctx = ti->private;
+	struct swapz_dm *ctx = ti->private;
 
 	return fn(ti, ctx->backing, 0,
-		  (sector_t)ctx->physical_blocks * SV3_SECTORS, data);
+		  (sector_t)ctx->physical_blocks * SWAPZ_SECTORS, data);
 }
 
-static void sv3_io_hints(struct dm_target *ti, struct queue_limits *limits)
+static void swapz_io_hints(struct dm_target *ti, struct queue_limits *limits)
 {
 	(void)ti;
-	limits->logical_block_size = SV3_BLOCK_BYTES;
+	limits->logical_block_size = SWAPZ_BLOCK_BYTES;
 	limits->physical_block_size = max(limits->physical_block_size,
-					  (unsigned int)SV3_BLOCK_BYTES);
-	limits->io_min = SV3_BLOCK_BYTES;
-	limits->discard_granularity = SV3_BLOCK_BYTES;
+					  (unsigned int)SWAPZ_BLOCK_BYTES);
+	limits->io_min = SWAPZ_BLOCK_BYTES;
+	limits->discard_granularity = SWAPZ_BLOCK_BYTES;
 	limits->max_hw_discard_sectors = UINT_MAX;
 	limits->max_discard_sectors = UINT_MAX;
 }
 
-static void sv3_status(struct dm_target *ti, status_type_t type,
+static void swapz_status(struct dm_target *ti, status_type_t type,
 		       unsigned int flags, char *result, unsigned int maxlen)
 {
-	struct sv3_dm *ctx = ti->private;
+	struct swapz_dm *ctx = ti->private;
 	unsigned int sz = 0;
 
 	(void)flags;
@@ -2428,7 +2428,7 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
 		       "read_two_block_skips=%u "
 		       "failed=%u error=%d",
-		       SV3_ALPHA_VERSION, ctx->logical_write_bytes,
+		       SWAPZ_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
 		       ctx->physical_write_reqs, ctx->physical_read_bytes,
 		       ctx->physical_read_reqs, ctx->compressed_pages,
@@ -2472,36 +2472,36 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_bins[2], ctx->window_bins[3],
 		       ctx->window_bins[4], ctx->window_bins[5],
 		       ctx->coalesce_deferred, ctx->coalesce_urgent,
-		       ctx->window_close_reasons[SV3_CLOSE_UNKNOWN],
-		       ctx->window_close_reasons[SV3_CLOSE_FULL],
-		       ctx->window_close_reasons[SV3_CLOSE_DUPLICATE],
-		       ctx->window_close_reasons[SV3_CLOSE_ZERO],
-		       ctx->window_close_reasons[SV3_CLOSE_FUA],
-		       ctx->window_close_reasons[SV3_CLOSE_RAW],
-		       ctx->window_close_reasons[SV3_CLOSE_READ_CONFLICT],
-		       ctx->window_close_reasons[SV3_CLOSE_READ_UNRELATED],
-		       ctx->window_close_reasons[SV3_CLOSE_DISCARD],
-		       ctx->window_close_reasons[SV3_CLOSE_PREFLUSH],
-		       ctx->window_close_reasons[SV3_CLOSE_QUANTUM],
-		       ctx->window_close_reasons[SV3_CLOSE_IDLE],
-		       ctx->window_close_reasons[SV3_CLOSE_SHUTDOWN],
-		       ctx->window_close_reasons[SV3_CLOSE_OTHER],
-		       ctx->one_page_close_reasons[SV3_CLOSE_UNKNOWN],
-		       ctx->one_page_close_reasons[SV3_CLOSE_FULL],
-		       ctx->one_page_close_reasons[SV3_CLOSE_DUPLICATE],
-		       ctx->one_page_close_reasons[SV3_CLOSE_ZERO],
-		       ctx->one_page_close_reasons[SV3_CLOSE_FUA],
-		       ctx->one_page_close_reasons[SV3_CLOSE_RAW],
-		       ctx->one_page_close_reasons[SV3_CLOSE_READ_CONFLICT],
-		       ctx->one_page_close_reasons[SV3_CLOSE_READ_UNRELATED],
-		       ctx->one_page_close_reasons[SV3_CLOSE_DISCARD],
-		       ctx->one_page_close_reasons[SV3_CLOSE_PREFLUSH],
-		       ctx->one_page_close_reasons[SV3_CLOSE_QUANTUM],
-		       ctx->one_page_close_reasons[SV3_CLOSE_IDLE],
-		       ctx->one_page_close_reasons[SV3_CLOSE_SHUTDOWN],
-		       ctx->one_page_close_reasons[SV3_CLOSE_OTHER],
-		       ctx->one_page_close_reasons[SV3_CLOSE_DEADLINE],
-		       ctx->one_page_close_reasons[SV3_CLOSE_PACK_READY],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_UNKNOWN],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_FULL],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_DUPLICATE],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_ZERO],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_FUA],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_RAW],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_READ_CONFLICT],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_READ_UNRELATED],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_DISCARD],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_PREFLUSH],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_QUANTUM],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_IDLE],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_SHUTDOWN],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_OTHER],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_UNKNOWN],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_FULL],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_DUPLICATE],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_ZERO],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_FUA],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_RAW],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_READ_CONFLICT],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_READ_UNRELATED],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_DISCARD],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_PREFLUSH],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_QUANTUM],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_IDLE],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_SHUTDOWN],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_OTHER],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_DEADLINE],
+		       ctx->one_page_close_reasons[SWAPZ_CLOSE_PACK_READY],
 		       ctx->window_gc_pressure,
 		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
 		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,
@@ -2514,11 +2514,11 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
-		       ctx->window_close_reasons[SV3_CLOSE_DEADLINE],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
 		       ctx->deadline_before_bio, ctx->deadline_after_read,
 		       ctx->deadline_worker_with_local, ctx->deadline_worker_empty,
 		       ctx->retained_read_bypasses,
-		       ctx->window_close_reasons[SV3_CLOSE_PACK_READY],
+		       ctx->window_close_reasons[SWAPZ_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,
@@ -2557,35 +2557,35 @@ static void sv3_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
-static struct target_type sv3_target = {
+static struct target_type swapz_target = {
 	.name = "swapz",
 	.version = {3, 0, 0},
 	.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE,
 	.module = THIS_MODULE,
-	.ctr = sv3_ctr,
-	.dtr = sv3_dtr,
-	.map = sv3_map,
-	.presuspend = sv3_drain,
-	.resume = sv3_resume,
-	.iterate_devices = sv3_iterate_devices,
-	.io_hints = sv3_io_hints,
-	.status = sv3_status,
+	.ctr = swapz_ctr,
+	.dtr = swapz_dtr,
+	.map = swapz_map,
+	.presuspend = swapz_drain,
+	.resume = swapz_resume,
+	.iterate_devices = swapz_iterate_devices,
+	.io_hints = swapz_io_hints,
+	.status = swapz_status,
 };
 
-static int __init sv3_dm_init(void)
+static int __init swapz_dm_init(void)
 {
-	return dm_register_target(&sv3_target);
+	return dm_register_target(&swapz_target);
 }
 
-static void __exit sv3_dm_exit(void)
+static void __exit swapz_dm_exit(void)
 {
-	dm_unregister_target(&sv3_target);
+	dm_unregister_target(&swapz_target);
 }
 
-module_init(sv3_dm_init);
-module_exit(sv3_dm_exit);
+module_init(swapz_dm_init);
+module_exit(swapz_dm_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("swapz main developer");
 MODULE_DESCRIPTION("V3.0-alpha size-aware 4/8/16KiB volatile swap target; experimental live GC");
 MODULE_ALIAS("dm-swapz");
-MODULE_VERSION(SV3_ALPHA_VERSION);
+MODULE_VERSION(SWAPZ_ALPHA_VERSION);

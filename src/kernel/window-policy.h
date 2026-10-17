@@ -7,12 +7,12 @@
 struct bio;
 
 /* Prepared bytes and upper completion ownership remain with the worker. */
-struct sv3_pending_bio {
+struct swapz_pending_bio {
 	struct bio *bio;
-	sv3_u32 logical;
-	sv3_u16 length;
+	swapz_u32 logical;
+	swapz_u16 length;
 	/* True only for the complete 4KiB incompressible fallback. */
-	sv3_u8 raw;
+	swapz_u8 raw;
 };
 
 /*
@@ -20,13 +20,13 @@ struct sv3_pending_bio {
  * This predicate only proves that a READ cannot observe any staged slot;
  * it never publishes a write or changes the pending BIOs' ownership.
  */
-static inline int sv3_window_read_independent(
-		const struct sv3_pending_bio *pending, sv3_u8 count,
-		sv3_u32 logical, sv3_u8 retain_ms, int blocked)
+static inline int swapz_window_read_independent(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u32 logical, swapz_u8 retain_ms, int blocked)
 {
-	sv3_u8 index;
+	swapz_u8 index;
 
-	if (!retain_ms || !count || count > SV3_MAX_RECORDS ||
+	if (!retain_ms || !count || count > SWAPZ_MAX_RECORDS ||
 	    !pending || blocked)
 		return 0;
 	for (index = 0; index < count; ++index)
@@ -55,27 +55,27 @@ static inline int sv3_window_read_independent(
  * success. Restricted read budgets, RAW records and invalid inputs fail
  * closed.
  */
-static inline int sv3_window_extent_fits(
-		const struct sv3_pending_bio *pending, sv3_u8 count,
-		sv3_u8 retain_ms, sv3_u8 read_budget, sv3_u8 extent_blocks)
+static inline int swapz_window_extent_fits(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 retain_ms, swapz_u8 read_budget, swapz_u8 extent_blocks)
 {
-	sv3_u32 extent_bytes;
-	sv3_u8 i;
+	swapz_u32 extent_bytes;
+	swapz_u8 i;
 
 	if (!retain_ms || read_budget || !pending || !count ||
-	    count > SV3_MAX_RECORDS ||
+	    count > SWAPZ_MAX_RECORDS ||
 	    (extent_blocks != 1U && extent_blocks != 2U &&
 	     extent_blocks != 4U))
 		return 0;
-	extent_bytes = sizeof(struct sv3_header) +
-		(sv3_u32)count * sizeof(struct sv3_record);
+	extent_bytes = sizeof(struct swapz_header) +
+		(swapz_u32)count * sizeof(struct swapz_record);
 	for (i = 0; i < count; ++i) {
 		if (pending[i].raw || !pending[i].length ||
-		    pending[i].length > SV3_MAX_COMPRESSED)
+		    pending[i].length > SWAPZ_MAX_COMPRESSED)
 			return 0;
 		extent_bytes += pending[i].length;
 	}
-	return extent_bytes <= (sv3_u32)extent_blocks * SV3_BLOCK_BYTES;
+	return extent_bytes <= (swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES;
 }
 
 /*
@@ -84,33 +84,33 @@ static inline int sv3_window_extent_fits(
  * justify deferring this pack for a second group. This pure geometry helper
  * never inspects queue state or changes the absolute retention deadline.
  */
-static inline int sv3_window_single_pack_ready(
-		const struct sv3_pending_bio *pending, sv3_u8 count,
-		sv3_u8 retain_ms, sv3_u8 read_budget)
+static inline int swapz_window_single_pack_ready(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 retain_ms, swapz_u8 read_budget)
 {
 	if (count == 2U)
-		return sv3_window_extent_fits(pending, count, retain_ms,
+		return swapz_window_extent_fits(pending, count, retain_ms,
 					     read_budget, 1U);
 	if (count == 3U) {
 		/* A two-record 4KiB first pack was already counted at count=2. */
-		if (sv3_window_extent_fits(pending, 2U, retain_ms,
+		if (swapz_window_extent_fits(pending, 2U, retain_ms,
 					   read_budget, 1U))
 			return 0;
-		return sv3_window_extent_fits(pending, count, retain_ms,
+		return swapz_window_extent_fits(pending, count, retain_ms,
 					     read_budget, 2U);
 	}
 	return 0;
 }
 
-static inline int sv3_window_pack_ready(
-		const struct sv3_pending_bio *pending, sv3_u8 count,
-		sv3_u8 retain_ms, sv3_u8 read_budget)
+static inline int swapz_window_pack_ready(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 retain_ms, swapz_u8 read_budget)
 {
 	if (count == 4U)
-		return sv3_window_extent_fits(pending, count, retain_ms,
+		return swapz_window_extent_fits(pending, count, retain_ms,
 					     read_budget, 2U);
 	if (count == 6U)
-		return sv3_window_extent_fits(pending, count, retain_ms,
+		return swapz_window_extent_fits(pending, count, retain_ms,
 					     read_budget, 4U);
 	return 0;
 }
@@ -123,18 +123,18 @@ static inline int sv3_window_pack_ready(
  * after a successful packed commit and owns all idle/dependency fences.
  * This predicate neither establishes that history nor completes a BIO.
  */
-static inline int sv3_window_burst_tail_ready(
-		const struct sv3_pending_bio *pending, sv3_u8 count,
-		sv3_u8 retain_ms, sv3_u8 read_budget, int packed_burst)
+static inline int swapz_window_burst_tail_ready(
+		const struct swapz_pending_bio *pending, swapz_u8 count,
+		swapz_u8 retain_ms, swapz_u8 read_budget, int packed_burst)
 {
-	sv3_u8 index;
+	swapz_u8 index;
 
 	if (!retain_ms || read_budget || !packed_burst || !pending ||
 	    !count || count > 2U)
 		return 0;
 	for (index = 0; index < count; ++index)
 		if (pending[index].raw || !pending[index].length ||
-		    pending[index].length > SV3_MAX_COMPRESSED)
+		    pending[index].length > SWAPZ_MAX_COMPRESSED)
 			return 0;
 	if (count == 2U && pending[0].logical == pending[1].logical)
 		return 0;
@@ -150,9 +150,9 @@ static inline int sv3_window_burst_tail_ready(
  * and contain at most one 16KiB extent. This helper performs no I/O and does
  * not choose the real planner cap.
  */
-static inline int sv3_window_cap3_pareto_candidate(
-		sv3_u16 uncapped_blocks, sv3_u16 cap2_blocks,
-		sv3_u16 cap3_blocks, sv3_u8 cap3_four_extents)
+static inline int swapz_window_cap3_pareto_candidate(
+		swapz_u16 uncapped_blocks, swapz_u16 cap2_blocks,
+		swapz_u16 cap3_blocks, swapz_u8 cap3_four_extents)
 {
 	return cap2_blocks > uncapped_blocks &&
 		cap2_blocks - uncapped_blocks > 1 &&
@@ -172,15 +172,15 @@ static inline int sv3_window_cap3_pareto_candidate(
  * preparing this bounded window. RAW or invalid lengths use the original
  * general sorting path, not an assumed compressed record.
  */
-static inline int sv3_window_uniform_compressed(
-		const struct sv3_pending_bio *pending, sv3_u8 count)
+static inline int swapz_window_uniform_compressed(
+		const struct swapz_pending_bio *pending, swapz_u8 count)
 {
-	sv3_u16 length;
-	sv3_u8 index;
+	swapz_u16 length;
+	swapz_u8 index;
 
-	if (!pending || !count || count > SV3_MAX_RECORDS ||
+	if (!pending || !count || count > SWAPZ_MAX_RECORDS ||
 	    pending[0].raw || !pending[0].length ||
-	    pending[0].length > SV3_MAX_COMPRESSED)
+	    pending[0].length > SWAPZ_MAX_COMPRESSED)
 		return 0;
 	length = pending[0].length;
 	for (index = 1; index < count; ++index)
@@ -196,7 +196,7 @@ static inline int sv3_window_uniform_compressed(
  * The drain/free path must still unconditionally cancel to handle any
  * previously armed callback during teardown and avoid use-after-free.
  */
-static inline int sv3_window_timer_enabled(sv3_u8 retain_ms)
+static inline int swapz_window_timer_enabled(swapz_u8 retain_ms)
 {
 	return retain_ms != 0;
 }
@@ -210,9 +210,9 @@ static inline int sv3_window_timer_enabled(sv3_u8 retain_ms)
  * remains permitted; that callback may also schedule another worker.
  * Never skip the FIRST timer arm of a new retained window.
  */
-static inline int sv3_retention_timer_needs_arm(sv3_u8 retain_ms, int queued)
+static inline int swapz_retention_timer_needs_arm(swapz_u8 retain_ms, int queued)
 {
-	return sv3_window_timer_enabled(retain_ms) && !queued;
+	return swapz_window_timer_enabled(retain_ms) && !queued;
 }
 
 /*
@@ -221,7 +221,7 @@ static inline int sv3_retention_timer_needs_arm(sv3_u8 retain_ms, int queued)
  * and must not underflow an unsigned counter. This does not measure CPU
  * cycles, host device saturation, or upper BIO queueing/retention wait.
  */
-static inline unsigned long long sv3_elapsed_ns(unsigned long long start_ns,
+static inline unsigned long long swapz_elapsed_ns(unsigned long long start_ns,
 						unsigned long long end_ns)
 {
 	return end_ns >= start_ns ? end_ns - start_ns : 0;
@@ -232,8 +232,8 @@ static inline unsigned long long sv3_elapsed_ns(unsigned long long start_ns,
  * Compare elapsed time, never subtract it from an unsigned remaining
  * budget: a crossed deadline must expire instead of wrapping the delay.
  */
-static inline int sv3_window_retention_expired(unsigned long long first_ns,
-		unsigned long long now_ns, sv3_u8 retain_ms)
+static inline int swapz_window_retention_expired(unsigned long long first_ns,
+		unsigned long long now_ns, swapz_u8 retain_ms)
 {
 	if (!retain_ms || !first_ns)
 		return 1;

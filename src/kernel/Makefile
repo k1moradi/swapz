@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Actual Device Mapper target and research smoke are NEVER linked together.
 ifneq ($(KERNELRELEASE),)
-ifeq ($(SV3_BUILD_SMOKE),1)
-obj-m += swapz_extent_v3.o
-swapz_extent_v3-y := codec.o authority.o engine.o smoke.o
+ifeq ($(SWAPZ_BUILD_SMOKE),1)
+obj-m += swapz_extent.o
+swapz_extent-y := codec.o authority.o engine.o smoke.o
 else
 obj-m += dm-swapz.o
 dm-swapz-y := dm-target.o codec.o authority.o engine.o
@@ -11,7 +11,7 @@ endif
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
 SWAPZ_ROOT := $(abspath $(CURDIR)/../..)
-ifeq ($(SV3_BUILD_SMOKE),1)
+ifeq ($(SWAPZ_BUILD_SMOKE),1)
 SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/research
 else ifeq ($(W),1)
 SWAPZ_STAGE := $(SWAPZ_ROOT)/build/kernel/w1
@@ -31,10 +31,10 @@ all:
 	  printf '%s\n' "$$version" | grep -Eq '^3[.]0[.]0-alpha[.][0-9]+$$' || \
 	    { echo "BLOCKED: invalid canonical VERSION" >&2; exit 1; }; \
 	  header="$(SWAPZ_STAGE)/swapz-version.h"; \
-	  if ! printf '#define SV3_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
-	    printf '#define SV3_ALPHA_VERSION "%s"\n' "$$version" > "$$header"; \
+	  if ! printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" | cmp -s - "$$header"; then \
+	    printf '#define SWAPZ_ALPHA_VERSION "%s"\n' "$$version" > "$$header"; \
 	  fi
-	$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" SV3_BUILD_SMOKE="$(SV3_BUILD_SMOKE)" modules
+	$(MAKE) -C "$(KDIR)" M="$(SWAPZ_STAGE)" SWAPZ_BUILD_SMOKE="$(SWAPZ_BUILD_SMOKE)" modules
 
 clean:
 	@if test -d "$(SWAPZ_STAGE)" && test -f "$(KDIR)/Makefile"; then \
