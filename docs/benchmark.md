@@ -132,3 +132,37 @@ throughput should remain near the qualified recovery, QD8/QD32 lower-request
 counts should move back toward the earlier deep-window result without extra
 lower bytes, QD1 async should improve without losing high-QD overlap, and all
 correctness/lifecycle/read-tail gates must remain intact.
+
+
+### Qualified worker-tail aggregation result
+
+Source `9f11a1a63bc4a3fc447d5ae7be9493b6e690f7ff` passed all five
+owner-loaded qualification stages. It resolved the request-fragmentation
+regression while preserving the mixed-path recovery: slow mixed QD32 reached
+7.12/7.27 MB/s sync/async with about 543.5 lower WRITE requests; faster mixed
+reached 19.58/22.81 MB/s with about 1066/950.5 requests and packed reads faster
+than raw. Write-only QD8 used about 520 lower requests and faster QD32 about
+139, restoring the intended deep-window geometry.
+
+The source is not promoted over the accepted directional baseline because
+faster-model intermediate-QD useful throughput remains weak: QD8 sync/async
+reached 17.00/28.39 MB/s against about 49.9 MB/s raw, while QD4 remained about
+13 MB/s. Faster mixed still recorded about 89.5 worker-empty deadline closes
+and about 40 one-page deadline closes per pair. The write-only sweep remains a
+one-pair exploratory pilot.
+
+The next candidate makes PACK_READY worker-only, samples already-admitted
+first-wave width before closure, permits any nonempty residue to close on a
+refreshed dry worker tail only after real packed/read service evidence, gates
+the asynchronous producer wake to actual overlap opportunity, and skips
+redundant 512-byte metadata-LRU validity clears when the LRU is already empty.
+It does not change extent planning, the accepted-burst read cap, mapping
+publication, lower-byte geometry, cache authority semantics, or GC victim
+selection.
+
+Acceptance requires the mixed faster-model deadline cluster to shrink while
+retaining the 9f11 mixed throughput/request result; QD8 useful throughput must
+not trade away the restored ~520-request aggregation; QD1 async should narrow
+its scheduling gap without losing high-QD preparation overlap; lower WRITE
+bytes and read tails remain rejection gates. GC remains unqualified unless a
+loaded run reports nonzero victims.
