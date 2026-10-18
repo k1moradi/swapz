@@ -441,9 +441,22 @@ producer failure. Queue ownership, BIO completion and map publication remain
 unchanged.
 
 
-Scheduler-accounted worker CPU diagnostics must use an exported kernel API,
-not direct reads of scheduler-private accounting fields. Sample task cputime at
-workqueue callback entry and every callback return, then accumulate the
-monotonic delta in the target context. The metric is task CPU accounting, not
-wall time; it may overlap all phase wall counters and must never participate in
-ordering, timeout or scheduling policy.
+Exact short-callback worker CPU is not available through a portable exported
+module API on every supported kernel accounting configuration. Do not read
+`current->se.sum_exec_runtime` directly and do not label
+`task_cputime_adjusted()` callback deltas as exact CPU time. Portable
+diagnostics may instead record callback-active wall upper bounds, subtracting
+only independently measured synchronous waits. Such bounds can include
+preemption and must never participate in ordering, timeout or scheduling policy.
+
+Foreground compressed payload CRC may be computed immediately after LZ4 and
+carried with the immutable prepared/batch descriptor. A prehashed append may use
+that value to avoid rescanning the source payload during pack, but the final
+`bulk_scratch` image must still pass normal post-I/O metadata and payload CRC
+validation before any mapping is published. Never let a precomputed source CRC
+replace final-image verification.
+
+Fine-grained timing fields are nested diagnostic subsets. Stage/pause/hole are
+inside commit non-I/O; resume and publish validation/mutation are inside publish;
+batch hash time is inside pause/resume; lookup is inside publish phase 1.
+Nested counters must not be added as independent elapsed time.
