@@ -1363,6 +1363,18 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 			goto out;
 		ctx->last_gc_victim = victim;
 		ctx->last_gc_destination = destination;
+		if (!ctx->gc_victim_hits[victim])
+			ctx->gc_victim_unique++;
+		ctx->gc_victim_hits[victim]++;
+		if (ctx->gc_victim_hits[victim] > ctx->gc_victim_max_hits)
+			ctx->gc_victim_max_hits = ctx->gc_victim_hits[victim];
+		if (!ctx->gc_destination_hits[destination])
+			ctx->gc_destination_unique++;
+		ctx->gc_destination_hits[destination]++;
+		if (ctx->gc_destination_hits[destination] >
+		    ctx->gc_destination_max_hits)
+			ctx->gc_destination_max_hits =
+				ctx->gc_destination_hits[destination];
 		ctx->gc_role_rotations++;
 	}
 	ctx->gc_victims++;
@@ -1540,6 +1552,10 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		u64 plan_before = ctx->engine.plan_wall_ns;
 		u64 pack_before = ctx->engine.pack_wall_ns;
 		u64 publish_before = ctx->engine.publish_wall_ns;
+		u64 stage_before = ctx->engine.stage_wall_ns;
+		u64 pause_before = ctx->engine.pause_wall_ns;
+		u64 resume_before = ctx->engine.resume_wall_ns;
+		u64 hole_before = ctx->engine.hole_clear_wall_ns;
 		u64 commit_elapsed;
 		u64 lower_write_elapsed;
 
@@ -1560,6 +1576,14 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->engine.pack_wall_ns - pack_before;
 		ctx->engine_publish_wall_ns +=
 			ctx->engine.publish_wall_ns - publish_before;
+		ctx->engine_stage_wall_ns +=
+			ctx->engine.stage_wall_ns - stage_before;
+		ctx->engine_pause_wall_ns +=
+			ctx->engine.pause_wall_ns - pause_before;
+		ctx->engine_resume_wall_ns +=
+			ctx->engine.resume_wall_ns - resume_before;
+		ctx->engine_hole_clear_wall_ns +=
+			ctx->engine.hole_clear_wall_ns - hole_before;
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -2536,6 +2560,17 @@ static void swapz_worker(struct work_struct *work)
 				if (!list_empty(&ctx->incoming)) {
 					list_splice_tail_init(&ctx->incoming, &local);
 					ctx->worker_has_immediate_followup = true;
+				} else if (swapz_retained_pack_close_ready(ctx) &&
+					   ctx->batch_count && !ctx->failed &&
+					   READ_ONCE(ctx->accepting) &&
+					   !swapz_retention_expired(ctx)) {
+					/*
+					 * This is the exact queue-locked observation that
+					 * permits a service-proven dry PACK_READY close.
+					 * The next admission consumes the marker and tells
+					 * us whether a companion arrived just after it.
+					 */
+					ctx->dry_pack_probe_ns = ktime_get_ns();
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				if (ctx->worker_has_immediate_followup) {
@@ -2752,6 +2787,28 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		return DM_MAPIO_KILL;
 	}
+	if (ctx->dry_pack_probe_ns) {
+		if (swapz_plain_retained_write(bio)) {
+			u64 now_ns = ktime_get_ns();
+			u64 gap_ns = swapz_elapsed_ns(ctx->dry_pack_probe_ns, now_ns);
+
+			ctx->dry_pack_gap_samples++;
+			ctx->dry_pack_gap_sum_ns += gap_ns;
+			if (gap_ns > ctx->dry_pack_gap_max_ns)
+				ctx->dry_pack_gap_max_ns = gap_ns;
+			if (gap_ns <= 50000ULL)
+				ctx->dry_pack_gap_le50us++;
+			else if (gap_ns <= 100000ULL)
+				ctx->dry_pack_gap_51_100us++;
+			else if (gap_ns <= 500000ULL)
+				ctx->dry_pack_gap_101_500us++;
+			else
+				ctx->dry_pack_gap_gt500us++;
+		}
+		/* The first later admission, write or otherwise, consumes the
+		 * observation so an unrelated future wave cannot be credited. */
+		ctx->dry_pack_probe_ns = 0;
+	}
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
@@ -2864,6 +2921,10 @@ static void swapz_free(struct swapz_dm *ctx)
 		drain_workqueue(ctx->preparation_workqueue);
 		destroy_workqueue(ctx->preparation_workqueue);
 	}
+	if (ctx->cpu_trace_registered) {
+		unregister_trace_sched_switch(swapz_sched_switch_probe, ctx);
+		ctx->cpu_trace_registered = false;
+	}
 	if (ctx->preparation_pool)
 		mempool_destroy(ctx->preparation_pool);
 	kfree(ctx->preparation_lz4_workmem);
@@ -2884,6 +2945,8 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->gc_live_counts);
 	kvfree(ctx->gc_min_live_blocks);
 	kvfree(ctx->segment_roles);
+	kvfree(ctx->gc_victim_hits);
+	kvfree(ctx->gc_destination_hits);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -2963,6 +3026,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
 	spin_lock_init(&ctx->queue_lock);
+	raw_spin_lock_init(&ctx->cpu_trace_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
@@ -3028,6 +3092,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 					  GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
+	ctx->gc_victim_hits = kvcalloc(ctx->segment_count,
+				      sizeof(*ctx->gc_victim_hits), GFP_KERNEL);
+	ctx->gc_destination_hits = kvcalloc(ctx->segment_count,
+					   sizeof(*ctx->gc_destination_hits),
+					   GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
@@ -3037,7 +3106,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->discard_epoch || !ctx->discard_count ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
-	    !ctx->segment_roles) {
+	    !ctx->segment_roles || !ctx->gc_victim_hits ||
+	    !ctx->gc_destination_hits) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -3119,6 +3189,14 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -ENOMEM;
 			goto fail;
 		}
+	}
+	if (swapz_cpu_trace) {
+		error = register_trace_sched_switch(swapz_sched_switch_probe, ctx);
+		if (error) {
+			ti->error = "Cannot register diagnostic sched_switch tracepoint";
+			goto fail;
+		}
+		ctx->cpu_trace_registered = true;
 	}
 	ti->per_io_data_size = sizeof(struct swapz_bio_ref);
 	ti->num_flush_bios = 1;
