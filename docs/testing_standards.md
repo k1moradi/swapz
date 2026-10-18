@@ -512,3 +512,11 @@ successive prepare/complete cycles until the complete logical window is
 published, while each individual prepared prefix remains immutable and
 unpublished until its own lower completion. A failed first prefix must publish
 nothing and quarantine all reservations belonging to that prefix.
+
+
+Source contracts for the immutable-run split must assert semantic ownership,
+not retired helper names. The prepare function may test whether a synchronous
+write callback is configured, but it must not invoke that callback. Lower I/O
+submission remains in the synchronous wrapper until the target-side async
+candidate is enabled; transaction replay and publish timing belong to the new
+completion function.
