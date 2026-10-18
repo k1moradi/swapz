@@ -10,6 +10,7 @@ source "$ROOT/tests/tools/swap-inventory.sh"
 cd "$ROOT"
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
+GC_ORACLE="$ROOT/build/tests/gc-pressure"
 CONFIG=""
 CONFIGNAME=""
 DISK=""
@@ -41,7 +42,8 @@ grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/s
     fail "staged kernel version header does not match canonical VERSION"
 [[ "$(modinfo -F version "$MODULE")" == "$version" ]] ||
     fail "built swapz module version does not match canonical VERSION"
-[[ -s "$MODULE" && -x "$ORACLE" ]] || fail "swapz/oracle not compiled"
+[[ -s "$MODULE" && -x "$ORACLE" && -x "$GC_ORACLE" ]] ||
+    fail "swapz/oracles not compiled"
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
 	fail "swapz vermagic does not match running kernel"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
@@ -504,4 +506,70 @@ read -r -a flush_fault_lower_after < "/sys/block/$DISK/stat"
 note "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1"
 
 dmsetup remove "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
+OWN_DM=0
+
+# Sustained copying-GC qualification. The same positively identified 64MiB
+# RAM lower is reused only after all earlier mappings are gone. A 48MiB upper
+# leaves the constructor's rotating reserve but little foreground headroom.
+# The oracle keeps one old RAW page live per 1MiB logical stripe while
+# rewriting every companion, so whole old segments cannot simply become dead.
+note "START_LOADED_GC_PRESSURE"
+UUID="SWAPZ-TEST-$TOKEN-gc"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 98304 swapz $LOWER 0 64 0 2 0 1 0 0" ||
+    fail "cannot create owned GC-pressure mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "GC-pressure DM UUID mismatch"
+dmsetup table "$DMNAME" | grep -Eq '^0 98304 swapz ' ||
+    fail "GC-pressure DM table unexpected"
+for i in {1..50}; do
+    [[ -b "/dev/mapper/$DMNAME" ]] && break
+    sleep 0.1
+done
+[[ -b "/dev/mapper/$DMNAME" ]] || fail "GC-pressure DM device node absent"
+gc_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$gc_before" failed) == 0 &&
+   $(status_u64 "$gc_before" gc_victims) == 0 )) ||
+    fail "GC-pressure mapping did not start clean"
+timeout --signal=TERM --kill-after=5s 180s "$GC_ORACLE" "/dev/mapper/$DMNAME" ||
+    fail "owned GC-pressure oracle failed or timed out"
+gc_after="$(dmsetup status "$DMNAME")"
+gc_failed="$(status_u64 "$gc_after" failed)" ||
+    fail "GC-pressure status lacks fail state"
+gc_victims="$(status_u64 "$gc_after" gc_victims)" ||
+    fail "GC-pressure status lacks victims"
+gc_rotations="$(status_u64 "$gc_after" gc_role_rotations)" ||
+    fail "GC-pressure status lacks rotations"
+gc_pages="$(status_u64 "$gc_after" gc_pages)" ||
+    fail "GC-pressure status lacks moved pages"
+gc_read="$(status_u64 "$gc_after" gc_read)" ||
+    fail "GC-pressure status lacks read bytes"
+gc_write="$(status_u64 "$gc_after" gc_write)" ||
+    fail "GC-pressure status lacks write bytes"
+gc_read_reqs="$(status_u64 "$gc_after" gc_read_reqs)" ||
+    fail "GC-pressure status lacks read requests"
+gc_write_reqs="$(status_u64 "$gc_after" gc_write_reqs)" ||
+    fail "GC-pressure status lacks write requests"
+gc_victim_unique="$(status_u64 "$gc_after" gc_victim_unique)" ||
+    fail "GC-pressure status lacks victim distribution"
+gc_destination_unique="$(status_u64 "$gc_after" gc_destination_unique)" ||
+    fail "GC-pressure status lacks destination distribution"
+gc_victim_max="$(status_u64 "$gc_after" gc_victim_max_hits)" ||
+    fail "GC-pressure status lacks victim max"
+gc_destination_max="$(status_u64 "$gc_after" gc_destination_max_hits)" ||
+    fail "GC-pressure status lacks destination max"
+gc_last_victim="$(status_u64 "$gc_after" last_gc_victim)" ||
+    fail "GC-pressure status lacks last victim"
+gc_last_destination="$(status_u64 "$gc_after" last_gc_destination)" ||
+    fail "GC-pressure status lacks last destination"
+(( gc_failed == 0 && gc_victims > 0 &&
+   gc_rotations == gc_victims && gc_pages > 0 &&
+   gc_read > 0 && gc_write > 0 &&
+   gc_read_reqs > 0 && gc_write_reqs > 0 &&
+   gc_victim_unique > 0 && gc_destination_unique > 0 &&
+   gc_last_victim != gc_last_destination )) ||
+    fail "live copying GC did not produce verified rotating-victim evidence"
+note "PASS_LOADED_GC_PRESSURE=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write victim_unique:$gc_victim_unique destination_unique:$gc_destination_unique victim_max:$gc_victim_max destination_max:$gc_destination_max"
+dmsetup remove "$DMNAME" || fail "cannot remove GC-pressure mapping"
 OWN_DM=0
