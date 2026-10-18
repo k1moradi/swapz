@@ -95,8 +95,8 @@ for regime in sd_emulated ssd_emulated; do
         arguments=(--run-owned-ram-pair --profile medium
                    --retain-ms 2 --unpaced)
         case "$regime" in
-            sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
-            ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
+            sd_emulated) arguments+=(--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000) ;;
+            ssd_emulated) arguments+=(--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000) ;;
             *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
         esac
         if (( async_prepare )); then
@@ -126,8 +126,8 @@ for regime in sd_emulated ssd_emulated; do
             arguments=(--run-owned-ram-pair --profile medium
                        --retain-ms 2 --unpaced)
             case "$regime" in
-                sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
-                ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
+                sd_emulated) arguments+=(--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000) ;;
+                ssd_emulated) arguments+=(--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000) ;;
                 *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
             esac
             arguments+=(--write-only-qd "$qd")

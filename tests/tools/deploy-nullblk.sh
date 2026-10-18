@@ -181,13 +181,20 @@ UUID="SWAPZ-TEST-$TOKEN"
 mkdir "$CONFIG" || fail "cannot create owned null_blk"
 OWN_NULL=1
 note "OWNED_CONFIG=$CONFIG UUID=$UUID"
-for attr in size memory_backed blocksize power index; do
+for attr in size memory_backed blocksize power index queue_mode submit_queues hw_queue_depth; do
 	[[ -e "$CONFIG/$attr" ]] || fail "missing configfs attribute $attr"
 done
 # Linux null_blk configfs size unit is MiB. Never use the module default!
 echo 64 > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"
 echo 1 > "$CONFIG/memory_backed"
+echo 2 > "$CONFIG/queue_mode"
+echo 1 > "$CONFIG/submit_queues"
+echo 1 > "$CONFIG/hw_queue_depth"
+[[ "$(cat "$CONFIG/queue_mode")" == 2 &&
+   "$(cat "$CONFIG/submit_queues")" == 1 &&
+   "$(cat "$CONFIG/hw_queue_depth")" == 1 ]] ||
+    fail "owned RAM serial queue geometry rejected"
 echo 1 > "$CONFIG/power"
 [[ "$(cat "$CONFIG/memory_backed")" == 1 ]] && [[ "$(cat "$CONFIG/power")" == 1 ]] ||
 	fail "RAM backing not active"

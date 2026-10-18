@@ -1219,6 +1219,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("wait_for_completion(&ctx->inflight_write.lower_done)", drain)
         self.assertIn("READ_ONCE(ctx->inflight_write.active)", drain)
 
+    def test_bvec_iterator_is_not_double_advanced_for_folio_slices(self):
+        copy = body("swapz_copy_bio")
+        direct = body("swapz_map_single_bio_input")
+        self.assertIn("bio_for_each_segment(vec, bio, iter)", copy)
+        self.assertIn("kmap_local_page(vec.bv_page)", copy)
+        self.assertNotIn("nth_page(", copy)
+        self.assertIn("bio_for_each_segment(vec, bio, iter)", direct)
+        self.assertNotIn("nth_page(", direct)
+
     def test_async_lz4_preparation_overlaps_lower_io_without_publication(self):
         producer = body("swapz_preparation_worker")
         accept = body("swapz_accept_write")
@@ -1374,10 +1383,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         # The mandatory run now has exactly TWO delay-modeled owned-RAM
         # environments, not the historical bandwidth/uncapped controls.
         self.assertIn("LOWER_MBPS=0", benchmark)
-        self.assertIn("10:1000000|80:150000", benchmark)
+        self.assertIn("10:1000000:1|80:150000:64", benchmark)
         self.assertIn('echo "$LOWER_MBPS" > "$config/mbps"', benchmark)
         self.assertIn('echo "$COMPLETION_NSEC" > "$config/completion_nsec"', benchmark)
         self.assertIn('echo "$IRQMODE" > "$config/irqmode"', benchmark)
+        self.assertIn('echo "$QUEUE_MODE" > "$config/queue_mode"', benchmark)
+        self.assertIn('echo "$SUBMIT_QUEUES" > "$config/submit_queues"', benchmark)
+        self.assertIn('echo "$HW_QUEUE_DEPTH" > "$config/hw_queue_depth"', benchmark)
         self.assertIn("PASS_RAM_MODEL_LOWER_MBPS=", benchmark)
         self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
 
@@ -1397,6 +1409,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         # These are deliberately pre-submission injections on the already
         # authenticated RAM null_blk lower, not claims about torn/device faults.
+        self.assertIn('echo 2 > "$CONFIG/queue_mode"', deploy)
+        self.assertIn('echo 1 > "$CONFIG/submit_queues"', deploy)
+        self.assertIn('echo 1 > "$CONFIG/hw_queue_depth"', deploy)
         self.assertIn("PASS_RETAINED_SYNTHETIC_WRITE_FAULT=", deploy)
         self.assertIn("PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=", deploy)
         self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 1 2"', deploy)

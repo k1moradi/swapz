@@ -22,6 +22,9 @@ PACKED_READ=1
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
+QUEUE_MODE=2
+SUBMIT_QUEUES=1
+HW_QUEUE_DEPTH=0
 REPLAY_SWAPZ_FIRST=0
 # The final internal suffix controls safe replay order only.
 if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
@@ -54,13 +57,18 @@ if [[ $# -ge 3 && ${@: -2:1} == --completion-nsec &&
     IRQMODE=2
     set -- "${@:1:$(( $# - 2 ))}"
 fi
+if [[ $# -ge 3 && ${@: -2:1} == --hw-queue-depth &&
+      ( ${!#} == 1 || ${!#} == 64 ) ]]; then
+    HW_QUEUE_DEPTH="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
 if [[ $# -ge 3 && ${@: -2:1} == --lower-mbps &&
       ( ${!#} == 10 || ${!#} == 80 ) ]]; then
     LOWER_MBPS="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
-case "$LOWER_MBPS:$COMPLETION_NSEC" in
-    10:1000000|80:150000) ;;
+case "$LOWER_MBPS:$COMPLETION_NSEC:$HW_QUEUE_DEPTH" in
+    10:1000000:1|80:150000:64) ;;
     *) echo 'BLOCKED: unsupported owned-RAM model/cap/latency tuple' >&2; exit 2 ;;
 esac
 if [[ $# == 1 && $1 == --run-owned-ram-pair ]]; then
@@ -294,7 +302,7 @@ create_owned_ram() {
     # All model parameters are applied to the newly owned RAM instance
     # BEFORE power=1, and reread afterwards. A host without timer mode
     # is BLOCKED, never silently degraded into uncapped low-latency RAM.
-    for attr in mbps irqmode completion_nsec; do
+    for attr in mbps irqmode completion_nsec queue_mode submit_queues hw_queue_depth; do
         [[ -e "$config/$attr" ]] ||
             fail "owned RAM lacks verifiable $attr config"
     done
@@ -304,16 +312,25 @@ create_owned_ram() {
         fail 'owned RAM rejected completion delay'
     echo "$IRQMODE" > "$config/irqmode" ||
         fail 'owned RAM rejected completion mode'
+    echo "$QUEUE_MODE" > "$config/queue_mode" || fail 'owned RAM rejected queue mode'
+    echo "$SUBMIT_QUEUES" > "$config/submit_queues" || fail 'owned RAM rejected submission queue count'
+    echo "$HW_QUEUE_DEPTH" > "$config/hw_queue_depth" || fail 'owned RAM rejected hardware queue depth'
     [[ $(cat "$config/mbps") == "$LOWER_MBPS" &&
        $(cat "$config/completion_nsec") == "$COMPLETION_NSEC" &&
-       $(cat "$config/irqmode") == "$IRQMODE" ]] ||
+       $(cat "$config/irqmode") == "$IRQMODE" &&
+       $(cat "$config/queue_mode") == "$QUEUE_MODE" &&
+       $(cat "$config/submit_queues") == "$SUBMIT_QUEUES" &&
+       $(cat "$config/hw_queue_depth") == "$HW_QUEUE_DEPTH" ]] ||
         fail 'owned RAM storage-model settings differ from request'
     echo 1 > "$config/power"
     [[ $(cat "$config/memory_backed") == 1 && $(cat "$config/power") == 1 ]] ||
         fail 'RAM backing is not active'
     [[ $(cat "$config/mbps") == "$LOWER_MBPS" &&
        $(cat "$config/completion_nsec") == "$COMPLETION_NSEC" &&
-       $(cat "$config/irqmode") == "$IRQMODE" ]] ||
+       $(cat "$config/irqmode") == "$IRQMODE" &&
+       $(cat "$config/queue_mode") == "$QUEUE_MODE" &&
+       $(cat "$config/submit_queues") == "$SUBMIT_QUEUES" &&
+       $(cat "$config/hw_queue_depth") == "$HW_QUEUE_DEPTH" ]] ||
         fail 'owned RAM powered model settings mismatch'
     index="$(cat "$config/index")"
     [[ $index =~ ^(0|[1-9][0-9]*)$ ]] || fail 'configfs index invalid'
@@ -351,7 +368,7 @@ create_owned_ram() {
 create_owned_ram  # bare uncompressed
 create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
-note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE"
+note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
 insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
     fail 'swapz module insertion rejected'

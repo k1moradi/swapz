@@ -539,3 +539,22 @@ This forbids optional index refresh/locking during root-side `git branch`,
 qualification from replacing the operator-owned `.git/index` with a
 root-owned file. Privileged helpers must never stage, refresh, rewrite, or
 otherwise own the checkout index.
+
+
+### Explicit lower queue geometry
+
+Performance null_blk models pin and reread queue geometry before power-on. The
+slow profile is blk-mq queue_mode=2, submit_queues=1, hw_queue_depth=1. The
+fast profile is queue_mode=2, submit_queues=1, hw_queue_depth=64. The report
+records these values with bandwidth and timer latency; mismatch is incomplete.
+Loaded correctness smoke also uses depth 1. These are synthetic queue models,
+not literal SD/HDD/SSD/NVMe protocol emulation.
+
+### Compound/folio bvec iteration
+
+Do not apply nth_page() to a bvec returned by bio_for_each_segment() merely
+because its stored source bvec may span a folio. Linux bvec iteration advances
+the page and normalizes the iterator offset to a single-page segment. The copy
+path therefore maps vec.bv_page and uses its page-local vec.bv_offset. A
+page-aligned 4KiB folio slice can already reach the direct single-segment path;
+multi-segment slices retain the copy fallback.

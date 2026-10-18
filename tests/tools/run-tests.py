@@ -20,9 +20,11 @@ COLUMNS = ("off", "sync", "async")
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
 MODEL_SPECS = {
     "sd_emulated": {"cap_mib_s": 10, "completion_nsec": 1000000, "irqmode": 2,
-                    "purpose": "SYNTHETIC_LOW_BANDWIDTH_HIGH_DELAY"},
+                    "queue_mode": 2, "submit_queues": 1, "hw_queue_depth": 1,
+                    "purpose": "SYNTHETIC_LOW_BANDWIDTH_HIGH_DELAY_SERIAL_DEPTH1"},
     "ssd_emulated": {"cap_mib_s": 80, "completion_nsec": 150000, "irqmode": 2,
-                     "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY"},
+                     "queue_mode": 2, "submit_queues": 1, "hw_queue_depth": 64,
+                     "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY_QUEUED_DEPTH64"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
 CLOSE_REASON_LABELS = (
@@ -432,13 +434,16 @@ def parse_sessions(output):
             current["order"] = line.partition("=")[2].strip()
         elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
             match = re.fullmatch(
-                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+)",
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
                 line)
             if match:
                 current["device_model"] = {
                     "cap_mib_s": int(match.group(1)),
                     "completion_nsec": int(match.group(2)),
                     "irqmode": int(match.group(3)),
+                    "queue_mode": int(match.group(4)),
+                    "submit_queues": int(match.group(5)),
+                    "hw_queue_depth": int(match.group(6)),
                 }
         elif current is not None and line.startswith(("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
             name = "before" if line.startswith("SWAPZ_STATUS_BEFORE=") else "after"
@@ -647,7 +652,7 @@ def write_saturation_verdict(sessions):
             model = row.get("device_model")
             if not isinstance(model, dict) or any(
                     model.get(key) != expected[key]
-                    for key in ("cap_mib_s", "completion_nsec", "irqmode")):
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode", "queue_mode", "submit_queues", "hw_queue_depth")):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only device model mismatch"}
             status = row.get("kernel_status", {})
@@ -752,7 +757,7 @@ def benchmark_verdicts(sessions):
             actual = row.get("device_model")
             if not isinstance(actual, dict) or any(
                     actual.get(key) != expected[key]
-                    for key in ("cap_mib_s", "completion_nsec", "irqmode")):
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode", "queue_mode", "submit_queues", "hw_queue_depth")):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: exact owned-RAM bandwidth/timer model was not verified"}
             provenance_error = paired_provenance_error(row, f"{regime}: benchmark")
@@ -1003,7 +1008,8 @@ def print_bench(result):
         counters = data["kernel_counters"]
 
         print(f"\n  {regime.upper()} QD32 mixed — synthetic RAM model "
-              f"{cfg['cap_mib_s']} MiB/s, {cfg['completion_nsec']} ns")
+              f"{cfg['cap_mib_s']} MiB/s, {cfg['completion_nsec']} ns, "
+              f"hwq={cfg['hw_queue_depth']}")
         print("  Throughput MB/s; p99 ms. Sync stays as the scheduling control.")
         print_table(
             ("mode", "W", "lower W", "W req", "R", "R p99"),
@@ -1168,7 +1174,7 @@ def print_bench(result):
                 by_qd.setdefault(point["qd"], {})[point["mode"]] = point
 
             print(f"\n  {regime.upper()} — {cfg['cap_mib_s']} MiB/s, "
-                  f"{cfg['completion_nsec']} ns")
+                  f"{cfg['completion_nsec']} ns, hwq={cfg['hw_queue_depth']}")
             throughput_rows = []
             prep_rows = []
             window_rows = []
