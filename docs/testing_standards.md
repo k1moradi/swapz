@@ -310,15 +310,15 @@ Qualification must therefore compare mixed throughput, lower WRITE requests,
 worker-empty deadlines and packed-read p99 against the qualified head-cushion
 source, while QD8/QD32 preserve deep-window aggregation and low blocking waits.
 Mixed QD32 must also report one-page PACK_READY closes so dry-tail evidence
-consumption can be rejected if it merely moves fragmentation elsewhere. For the
-CPU-local preparation experiment, faster-model mixed QD32 must preserve the
-accepted-wave result near 23.74 MB/s, 875 lower WRITE requests and ~60
-worker-empty deadlines; full LZ4-in-lower-WRITE overlap should rise above the
-3.8 ms qualified result without a material increase in the 0.58 ms ordered
-preparation wait. Write-only QD1 must remain producer-free, QD8/QD32 must keep
-~520/~139 lower WRITE requests, and lower-byte/read-tail gates remain hard.
-The existing `prep_lower_write_overlap_starts` diagnostic remains meaningful,
-and all publication/completion/fail-closed invariants are unchanged.
+consumption can be rejected if it merely moves fragmentation elsewhere.
+Kernel-C attribution must report explicit WRITE-copy wall/bytes, READ-copy
+wall/bytes, write-engine commit time excluding synchronous lower WRITE, and
+read-engine time excluding synchronous lower READ. Non-I/O commit time must
+never exceed total commit time. Write-only QD1 must remain producer-free,
+QD8/QD32 must keep ~520/~139 lower WRITE requests, and lower-byte/read-tail
+gates remain hard. The existing `prep_lower_write_overlap_starts` diagnostic
+remains meaningful, and all publication/completion/fail-closed invariants are
+unchanged.
 
 Idempotent metadata-cache invalidation qualification must preserve the existing
 explicit-invalidation and post-write miss tests. Source coverage requires the
