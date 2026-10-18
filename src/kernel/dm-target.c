@@ -329,8 +329,16 @@ struct swapz_dm {
 	/* Engine commit wall time with synchronous lower-WRITE wait removed. */
 	u64 window_commit_nonio_wall_ns;
 	u64 engine_plan_wall_ns;
+	u64 engine_stage_wall_ns;
 	u64 engine_pack_wall_ns;
+	u64 engine_hole_clear_wall_ns;
+	u64 engine_batch_pause_wall_ns;
+	u64 engine_batch_resume_wall_ns;
 	u64 engine_publish_wall_ns;
+	u64 publish_metadata_validate_wall_ns;
+	u64 publish_payload_verify_wall_ns;
+	u64 publish_liveness_wall_ns;
+	u64 publish_apply_wall_ns;
 	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
 	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
@@ -1444,8 +1452,19 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 
 		u64 lower_write_before = ctx->lower_write_wall_ns;
 		u64 plan_before = ctx->engine.plan_wall_ns;
+		u64 stage_before = ctx->engine.stage_wall_ns;
 		u64 pack_before = ctx->engine.pack_wall_ns;
+		u64 hole_clear_before = ctx->engine.hole_clear_wall_ns;
+		u64 batch_pause_before = ctx->engine.batch_pause_wall_ns;
+		u64 batch_resume_before = ctx->engine.batch_resume_wall_ns;
 		u64 publish_before = ctx->engine.publish_wall_ns;
+		u64 publish_metadata_before =
+			ctx->authority.finish_metadata_validate_wall_ns;
+		u64 publish_payload_before =
+			ctx->authority.finish_payload_verify_wall_ns;
+		u64 publish_liveness_before =
+			ctx->authority.finish_liveness_wall_ns;
+		u64 publish_apply_before = ctx->authority.finish_apply_wall_ns;
 		u64 commit_elapsed;
 		u64 lower_write_elapsed;
 
@@ -1462,10 +1481,29 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 				commit_elapsed - lower_write_elapsed;
 		ctx->engine_plan_wall_ns +=
 			ctx->engine.plan_wall_ns - plan_before;
+		ctx->engine_stage_wall_ns +=
+			ctx->engine.stage_wall_ns - stage_before;
 		ctx->engine_pack_wall_ns +=
 			ctx->engine.pack_wall_ns - pack_before;
+		ctx->engine_hole_clear_wall_ns +=
+			ctx->engine.hole_clear_wall_ns - hole_clear_before;
+		ctx->engine_batch_pause_wall_ns +=
+			ctx->engine.batch_pause_wall_ns - batch_pause_before;
+		ctx->engine_batch_resume_wall_ns +=
+			ctx->engine.batch_resume_wall_ns - batch_resume_before;
 		ctx->engine_publish_wall_ns +=
 			ctx->engine.publish_wall_ns - publish_before;
+		ctx->publish_metadata_validate_wall_ns +=
+			ctx->authority.finish_metadata_validate_wall_ns -
+			publish_metadata_before;
+		ctx->publish_payload_verify_wall_ns +=
+			ctx->authority.finish_payload_verify_wall_ns -
+			publish_payload_before;
+		ctx->publish_liveness_wall_ns +=
+			ctx->authority.finish_liveness_wall_ns -
+			publish_liveness_before;
+		ctx->publish_apply_wall_ns +=
+			ctx->authority.finish_apply_wall_ns - publish_apply_before;
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -3174,8 +3212,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
-		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
+		       "engine_plan_wall_ns=%llu engine_stage_wall_ns=%llu "
+		       "engine_pack_wall_ns=%llu engine_hole_clear_wall_ns=%llu "
+		       "engine_batch_pause_wall_ns=%llu engine_batch_resume_wall_ns=%llu "
 		       "engine_publish_wall_ns=%llu engine_prehashed_records=%u "
+		       "publish_metadata_validate_wall_ns=%llu "
+		       "publish_payload_verify_wall_ns=%llu publish_liveness_wall_ns=%llu "
+		       "publish_apply_wall_ns=%llu "
 		       "prep_crc_wall_ns=%llu ordered_crc_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
@@ -3299,8 +3342,14 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
-		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
+		       ctx->engine_plan_wall_ns, ctx->engine_stage_wall_ns,
+		       ctx->engine_pack_wall_ns, ctx->engine_hole_clear_wall_ns,
+		       ctx->engine_batch_pause_wall_ns,
+		       ctx->engine_batch_resume_wall_ns,
 		       ctx->engine_publish_wall_ns, ctx->engine.prehashed_records,
+		       ctx->publish_metadata_validate_wall_ns,
+		       ctx->publish_payload_verify_wall_ns,
+		       ctx->publish_liveness_wall_ns, ctx->publish_apply_wall_ns,
 		       ctx->preparation_crc_wall_ns, ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
