@@ -361,14 +361,60 @@ flush_injected="$(status_delta flush_injected)"
     fail "loaded oracle flush/barrier accounting changed"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
+# Force real loaded GC before lifecycle/fault phases. Recreate authority on
+# the same positively identified RAM lower, then write five complete logical
+# generations while preserving one old survivor per 1MiB logical stripe.
+# With 64MiB physical backing and two reserve segments this must create live
+# victims rather than qualifying only dead-segment reuse.
+note "START_LOADED_LIVE_GC"
+dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before GC phase"
+OWN_DM=0
+UUID="SWAPZ-TEST-$TOKEN-gc"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0 2" ||
+    fail "cannot create live-GC qualification mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "live-GC DM UUID mismatch"
+gc_before="$(dmsetup status "$DMNAME")"
+timeout --signal=TERM --kill-after=5s 90s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --gc-stress 5 ||
+    fail "loaded live-GC stress or byte-exact verification failed"
+gc_after="$(dmsetup status "$DMNAME")"
+gc_victims="$(status_u64 "$gc_after" gc_victims)" ||
+    fail "live-GC status lacks victim count"
+gc_rotations="$(status_u64 "$gc_after" gc_role_rotations)" ||
+    fail "live-GC status lacks role rotations"
+gc_pages="$(status_u64 "$gc_after" gc_pages)" ||
+    fail "live-GC status lacks relocated page count"
+gc_read="$(status_u64 "$gc_after" gc_read)" ||
+    fail "live-GC status lacks read bytes"
+gc_write="$(status_u64 "$gc_after" gc_write)" ||
+    fail "live-GC status lacks write bytes"
+gc_read_reqs="$(status_u64 "$gc_after" gc_read_reqs)" ||
+    fail "live-GC status lacks read requests"
+gc_write_reqs="$(status_u64 "$gc_after" gc_write_reqs)" ||
+    fail "live-GC status lacks write requests"
+gc_victim="$(status_u64 "$gc_after" last_gc_victim)" ||
+    fail "live-GC status lacks last victim"
+gc_destination="$(status_u64 "$gc_after" last_gc_destination)" ||
+    fail "live-GC status lacks last destination"
+(( $(status_u64 "$gc_after" failed) == 0 &&
+   gc_victims >= 2 && gc_rotations == gc_victims &&
+   gc_pages > 0 && gc_read > 0 && gc_write > 0 &&
+   gc_read_reqs > 0 && gc_write_reqs > 0 &&
+   gc_victim != gc_destination )) ||
+    fail "loaded live-GC did not prove repeated live evacuation and rotation"
+note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs last:$gc_victim->$gc_destination verified_pages:4096"
+dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
+OWN_DM=0
+
 # Retained lifecycle qualification. Use the maximum already-supported
 # retention interval only to make the drain-path race observable; the real
 # performance policy remains owner-qualified retain_ms=2. The private writer
 # deliberately omits O_SYNC/FUA so a successful timer arm can represent a
 # genuinely retained upper write.
 note "START_LOADED_SUSPEND_DRAIN"
-dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before lifecycle phase"
-OWN_DM=0
 UUID="SWAPZ-TEST-$TOKEN-suspend"
 dmsetup create "$DMNAME" --uuid "$UUID" \
     --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4" ||
