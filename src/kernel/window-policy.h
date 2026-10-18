@@ -10,7 +10,9 @@ struct bio;
 struct swapz_pending_bio {
 	struct bio *bio;
 	swapz_u32 logical;
+	swapz_u32 payload_crc32c;
 	swapz_u16 length;
+	swapz_u8 payload_crc32c_valid;
 	/* True only for the complete 4KiB incompressible fallback. */
 	swapz_u8 raw;
 };
