@@ -69,6 +69,38 @@ static int test_class(unsigned int bytes, unsigned int count)
 	return 0;
 }
 
+static int test_prehashed_append_and_validated_lookup(void)
+{
+	struct swapz_builder regular_builder, prehashed_builder;
+	struct swapz_decoded decoded;
+	const uint8_t *readable;
+	uint8_t regular[8192], prehashed[8192];
+	swapz_u32 crc;
+
+	set_payload(2072, 41);
+	crc = swapz_crc32c_bytes(payload, 2072);
+	CHECK(swapz_begin(&regular_builder, regular, sizeof(regular), 91) == 0);
+	CHECK(swapz_append(&regular_builder, 17, 33, payload, 2072) == 0);
+	CHECK(swapz_seal(&regular_builder) == 0);
+	CHECK(swapz_begin(&prehashed_builder, prehashed, sizeof(prehashed), 91) == 0);
+	CHECK(swapz_append_prehashed(&prehashed_builder, 17, 33,
+				     payload, 2072, crc) == 0);
+	CHECK(swapz_seal(&prehashed_builder) == 0);
+	CHECK(memcmp(regular, prehashed, sizeof(regular)) == 0);
+
+	/* The authority's optimized path validates metadata once, then each
+	 * sibling still verifies its payload CRC over the final sealed image. */
+	CHECK(swapz_validate(prehashed, sizeof(prehashed)) == 0);
+	CHECK(swapz_lookup_validated(prehashed, sizeof(prehashed), 0,
+				    &decoded, &readable) == 0);
+	CHECK(decoded.logical_page == 17 && decoded.generation == 33);
+	CHECK(memcmp(readable, payload, 2072) == 0);
+	prehashed[decoded.payload_offset] ^= 0x40;
+	CHECK(swapz_lookup_validated(prehashed, sizeof(prehashed), 0,
+				    &decoded, &readable) == -EBADMSG);
+	return 0;
+}
+
 static int test_seal_clears_only_unwritten_gap(void)
 {
 	struct swapz_builder b;
@@ -240,6 +272,7 @@ int main(void)
 	CHECK(test_class(4096, 1) == 0); tests++;
 	CHECK(test_class(8192, 3) == 0); tests++;
 	CHECK(test_class(16384, 7) == 0); tests++;
+	CHECK(test_prehashed_append_and_validated_lookup() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;
