@@ -1501,6 +1501,16 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		u64 plan_before = ctx->engine.plan_wall_ns;
 		u64 pack_before = ctx->engine.pack_wall_ns;
 		u64 publish_before = ctx->engine.publish_wall_ns;
+		u64 stage_before = ctx->engine.stage_wall_ns;
+		u64 pause_before = ctx->engine.pause_wall_ns;
+		u64 hole_before = ctx->engine.hole_clear_wall_ns;
+		u64 resume_before = ctx->engine.resume_wall_ns;
+		u64 validate_before = ctx->authority.finish_initial_validate_wall_ns;
+		u64 phase1_before = ctx->authority.finish_phase1_wall_ns;
+		u64 lookup_before = ctx->authority.finish_lookup_wall_ns;
+		u64 mutation_before = ctx->authority.finish_mutation_wall_ns;
+		u64 pause_hash_before = ctx->authority.batch_pause_hash_wall_ns;
+		u64 resume_hash_before = ctx->authority.batch_resume_hash_wall_ns;
 		u64 commit_elapsed;
 		u64 lower_write_elapsed;
 
@@ -1521,6 +1531,23 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->engine.pack_wall_ns - pack_before;
 		ctx->engine_publish_wall_ns +=
 			ctx->engine.publish_wall_ns - publish_before;
+		ctx->engine_stage_wall_ns += ctx->engine.stage_wall_ns - stage_before;
+		ctx->engine_pause_wall_ns += ctx->engine.pause_wall_ns - pause_before;
+		ctx->engine_hole_clear_wall_ns +=
+			ctx->engine.hole_clear_wall_ns - hole_before;
+		ctx->engine_resume_wall_ns += ctx->engine.resume_wall_ns - resume_before;
+		ctx->publish_initial_validate_wall_ns +=
+			ctx->authority.finish_initial_validate_wall_ns - validate_before;
+		ctx->publish_phase1_wall_ns +=
+			ctx->authority.finish_phase1_wall_ns - phase1_before;
+		ctx->publish_lookup_wall_ns +=
+			ctx->authority.finish_lookup_wall_ns - lookup_before;
+		ctx->publish_mutation_wall_ns +=
+			ctx->authority.finish_mutation_wall_ns - mutation_before;
+		ctx->publish_pause_hash_wall_ns +=
+			ctx->authority.batch_pause_hash_wall_ns - pause_hash_before;
+		ctx->publish_resume_hash_wall_ns +=
+			ctx->authority.batch_resume_hash_wall_ns - resume_hash_before;
 		committed += succeeded;
 		if (!error)
 			continue;
