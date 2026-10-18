@@ -463,8 +463,9 @@ def packed_closes(path, identity):
 # C READ callback diagnostics: capture outside the READ stopwatch.
 KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_payload_blocks", "lower_read_wall_ns",
-                      "decode_wall_ns", "read_meta_cache_hits",
-                      "read_meta_lru_hits",
+                      "decode_wall_ns", "read_copy_wall_ns",
+                      "read_copy_bytes", "read_engine_nonio_wall_ns",
+                      "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
 
@@ -508,7 +509,9 @@ def kernel_read_delta(before, after):
 # Timed MIXED-workload write diagnosis; dmsetup is sampled outside the
 # stopwatch. All values are C kernel target counters, never CPU time.
 KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
+                       "write_copy_wall_ns", "write_copy_bytes",
                        "window_sort_wall_ns", "window_commit_wall_ns",
+                       "window_commit_nonio_wall_ns",
                        "lower_write_wall_ns", "prep_wait_wall_ns",
                        "prep_lower_write_overlap_ns", "windows",
                        "write_wait_le1ms", "write_wait_1to4ms",
