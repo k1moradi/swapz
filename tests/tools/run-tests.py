@@ -946,18 +946,33 @@ def print_bench(result):
                     f"{columns[mode][f'{read_mode}_read_p99_ms']:.2f}",
                 ))
         print_table(("read", "lower KiB", "req", "p99"), read_rows)
+        print("  Packed-read C attribution — wall ms; engine excludes lower READ.")
+        print_table(
+            ("read", "lower", "engine", "LZ4", "copy"),
+            [
+                (label,
+                 f"{asynchronous[f'{mode}_lower_read_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous[f'{mode}_read_engine_nonio_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous[f'{mode}_decode_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous[f'{mode}_read_copy_wall_ns'] / 1e6:.1f}")
+                for label, mode in (("seq", "sequential"),
+                                    ("rnd", "seeded_random"))
+            ])
 
-        print("  Async pipeline — per-pair wall counters overlap; do not add rows.")
+        print("  Async pipeline — wall counters overlap only where labeled.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
             [
                 ("LZ4",
                  f"{asynchronous['mixed_lz4_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} IO"),
+                ("RAM copies",
+                 f"{asynchronous['mixed_write_copy_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_write_copy_bytes'] / 1048576:.1f} MiB"),
+                ("commit non-I/O",
+                 f"{asynchronous['mixed_window_commit_nonio_wall_ns'] / 1e6:.1f}", "-"),
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
-                ("window commit",
-                 f"{asynchronous['mixed_window_commit_wall_ns'] / 1e6:.1f}", "-"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
