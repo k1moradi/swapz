@@ -1119,7 +1119,7 @@ def print_bench(result):
             ("write-only", "one pair/QD; directional only"),
             ("CPU", "replay CPU only; worker active-wall upper bounds are not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
-            ("GC", "live victims not exercised"),
+            ("GC", "mixed benchmark may show 0; owned smoke separately requires live rotations"),
             ("Full telemetry", "build/test_results.json.xz"),
         ])
 
