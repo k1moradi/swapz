@@ -350,7 +350,6 @@ struct swapz_dm {
 	u64 dry_pack_close_events;
 	u64 dry_pack_followup_events;
 	u64 dry_pack_followup_sum_ns;
-	u64 dry_pack_followup_max_ns;
 	u64 dry_pack_followup_le10us;
 	u64 dry_pack_followup_11_50us;
 	u64 dry_pack_followup_51_200us;
@@ -1744,8 +1743,6 @@ static void swapz_note_dry_pack_followup_locked(struct swapz_dm *ctx, u64 now_ns
 	delta = now_ns - close_ns;
 	ctx->dry_pack_followup_events++;
 	ctx->dry_pack_followup_sum_ns += delta;
-	if (delta > ctx->dry_pack_followup_max_ns)
-		ctx->dry_pack_followup_max_ns = delta;
 	if (delta <= 10000ULL)
 		ctx->dry_pack_followup_le10us++;
 	else if (delta <= 50000ULL)
@@ -3184,7 +3181,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "ordered_worker_wall_ns=%llu prep_worker_wall_ns=%llu "
 		       "dry_pack_close_events=%llu dry_pack_followup_events=%llu "
-		       "dry_pack_followup_sum_ns=%llu dry_pack_followup_max_ns=%llu "
+		       "dry_pack_followup_sum_ns=%llu "
 		       "dry_pack_followup_le10us=%llu dry_pack_followup_11_50us=%llu "
 		       "dry_pack_followup_51_200us=%llu dry_pack_followup_gt200us=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
@@ -3310,7 +3307,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->ordered_worker_wall_ns,
 		       ctx->preparation_worker_wall_ns,
 		       ctx->dry_pack_close_events, ctx->dry_pack_followup_events,
-		       ctx->dry_pack_followup_sum_ns, ctx->dry_pack_followup_max_ns,
+		       ctx->dry_pack_followup_sum_ns,
 		       ctx->dry_pack_followup_le10us,
 		       ctx->dry_pack_followup_11_50us,
 		       ctx->dry_pack_followup_51_200us,
