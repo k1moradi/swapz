@@ -387,6 +387,21 @@ processing also records wall time with synchronous lower-I/O wait subtracted.
 Do not infer copy/CRC/packing cost from userspace elapsed time, and do not add
 overlapping wall counters together.
 
+For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
+with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan
+input. The mapping must be released before the BIO can be completed or ownership
+can change. Multi-bvec BIOs retain the copy fallback. An incompressible RAW page
+must still be copied into worker-owned staging before unmapping because retained
+window lifetime exceeds the temporary mapping. Direct mapping is an input-copy
+optimization only; compressed output ownership, publication and lower-I/O
+semantics are unchanged.
+
+Engine write attribution separates planner, pack and publish phases. Pack
+includes SWZ3 begin/append/seal work, including payload memcpy and first CRC.
+Publish includes batch resume plus authoritative finish/revalidation after lower
+completion. These diagnostics must not be used to skip CRC, generation or
+transaction-snapshot validation without a separately qualified replacement.
+
 The producer reserves bounded prepared-page capacity nonblocking before taking
 `queue_lock` or claiming a BIO. Tail claiming never consumes
 completion/publication ownership: the FIFO worker can continue inline-stealing
