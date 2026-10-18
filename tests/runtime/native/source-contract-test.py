@@ -1068,7 +1068,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
 
         self.assertIn("module_param_named(async_prepare", DM)
         self.assertIn("ctx->async_prepare = swapz_async_prepare", ctor)
-        self.assertIn("WQ_MEM_RECLAIM | WQ_UNBOUND", ctor)
+        self.assertIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1', ctor)
+        self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
         self.assertIn("mempool_create_kmalloc_pool(", ctor)
         self.assertIn("ctx->preparation_lz4_workmem", ctor)
         self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
@@ -1087,8 +1088,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("atomic_xchg(&ctx->preparation_tail_credit, 0)", producer)
         self.assertIn("ctx->preparation_producer_head_claims++", producer)
         self.assertIn("ctx->preparation_producer_tail_claims++", producer)
-        self.assertIn("if (tail_claim && !atomic_read(&ctx->lower_write_active))",
+        self.assertIn("if (tail_claim && !atomic_read(&ctx->lower_write_active) &&",
                       producer)
+        self.assertIn("!atomic_read(&ctx->preparation_tail_credit)", producer)
         self.assertNotIn("ctx->lz4_workmem", producer)
         self.assertIn("complete(&entry->preparation_finished)", producer)
         for forbidden in ("swapz_complete(", "swapz_finish(", "swapz_stage(",
@@ -1097,8 +1099,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertNotIn(forbidden, producer)
         self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
         self.assertIn("atomic_read(&ctx->lower_write_active)", mapper)
-        self.assertIn("atomic_read(&ctx->ordered_worker_busy)", mapper)
         self.assertIn("atomic_read(&ctx->preparation_tail_credit)", mapper)
+        self.assertNotIn("atomic_read(&ctx->ordered_worker_busy)", mapper)
+        self.assertNotIn("ctx->batch_count", mapper)
         self.assertNotIn("ctx->incoming.next != &entry->list", mapper)
         self.assertNotIn("ctx->preparation_incoming.next != &entry->preparation_list",
                          mapper)
@@ -1118,6 +1121,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("atomic_set(&ctx->ordered_worker_busy, 0)", ordered)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 1)", ordered)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ordered)
+        self.assertIn("bool inline_preparation = false", ordered)
+        self.assertIn("inline_preparation = true", ordered)
+        self.assertIn("!ctx->batch_count", ordered)
+        self.assertIn("ctx->singleton_fast_close", ordered)
         self.assertIn("ctx->preparation_ordered_inline++", ordered)
         self.assertIn("ctx->preparation_ordered_handoffs++", ordered)
         self.assertIn("ctx->preparation_ordered_waits++", ordered)
@@ -1148,6 +1155,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("up(entry->preparation_slots)", release)
         self.assertIn("atomic_set(&ctx->lower_write_active, 1)", lower)
         self.assertIn("atomic_set(&ctx->lower_write_active, 0)", lower)
+        flush = body("swapz_flush_window")
+        count_return = flush.index("if (!count)")
+        credit_reset = flush.index("atomic_set(&ctx->preparation_tail_credit, 0)")
+        self.assertLess(count_return, credit_reset)
         self.assertIn("atomic_set(&ctx->ordered_worker_busy, 0)", ctor)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ctor)
         self.assertIn("prep_producer_head_claims=%llu prep_producer_tail_claims=%llu",

@@ -249,23 +249,30 @@ hard ordering boundary.
 Credited opposite-end preparation qualification requires source coverage that
 the producer selects the FIFO head only while `lower_write_active` is true.
 Otherwise it may select the tail only after atomically consuming
-`preparation_tail_credit`, and one normal tail claim must return rather than
-drain the queue. The ordered worker must reserve its head under `queue_lock`
-before publishing that credit and kicking the producer.
+`preparation_tail_credit`. The ordered worker must reserve its head under
+`queue_lock` before publishing that credit.
 
-The map path must leave idle queued work to the ordered worker and wake the
-producer only for active lower WRITE service or the conjunction of atomic
-`ordered_worker_busy` and `preparation_tail_credit`. `batch_count` remains
-worker-owned and must not become a map-path busy signal. READ/barrier execution
-may publish one bounded tail credit while it owns ordered service time.
+The map path must leave a cold idle head to the ordered worker and wake the
+producer only for active lower WRITE service or an already-earned atomic tail
+credit. `batch_count` remains worker-owned and must never become a map-path
+signal; `ordered_worker_busy` is not required for a credit that legitimately
+survives the inter-BIO gap of an open retained window.
 
 For asynchronous WRITE consumption, source coverage must show
 `ordered_worker_busy=1` is published under `queue_lock` before the ordered
 worker removes or inspects its head preparation. An inline steal increments the
-ordered-inline diagnostic and grants one credit; a producer-owned entry records
+ordered-inline diagnostic and grants one token; a producer-owned entry records
 a handoff, and `completion_done()` distinguishes an actual blocking wait from
-an already-complete handoff. Both busy and unused credit clear after
-`swapz_process()`, and both initialize to zero.
+an already-complete handoff. The producer may continue after one tail item only
+when a fresh token was earned while it ran. The worker must clear an unused
+token when no retained batch remains, and every nonempty window close must clear
+the token after the existing zero-count early-return path.
+
+Source coverage must also require both the ordered `swapz` workqueue and the
+`swapz-lz4` preparation workqueue to use
+`WQ_MEM_RECLAIM | WQ_UNBOUND` with one active worker. This changes scheduling
+placement only; FIFO ordering and sole publication/completion ownership remain
+serialized.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.

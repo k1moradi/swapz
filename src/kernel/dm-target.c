@@ -3,7 +3,8 @@
  * dm-swapz - EXPERIMENTAL swapz volatile Device Mapper swap target.
  *
  * Uses SWZ3 4/8/16KiB extents, 4KiB logical pages, LZ4, bounded
- * size-aware write windows and synchronous dm-io through one WQ_MEM_RECLAIM worker.
+ * size-aware write windows and synchronous dm-io through one serialized
+ * WQ_MEM_RECLAIM | WQ_UNBOUND worker.
  *
  * IMPORTANT ALPHA LIMIT: GC is experimentally live with rotating reserved
  * segments, but it remains null_blk-only until independently qualified.
@@ -121,15 +122,16 @@ struct swapz_dm {
 	atomic_t lower_write_active;
 	/*
 	 * Set only while the ordered worker is actively consuming one accepted
-	 * BIO. ->map reads this atomically to distinguish a truly idle lone head
-	 * from a new follower arriving while inline compression/read service runs.
+	 * BIO. This remains coordination/diagnostic state; ->map does not depend
+	 * on its instantaneous lifetime.
 	 */
 	atomic_t ordered_worker_busy;
 	/*
-	 * Outside synchronous lower WRITE wait, the producer may consume one
-	 * tail entry only after the ordered worker has reserved work to execute.
-	 * This one-bit credit prevents producer run-ahead from turning FIFO
-	 * consumption back into a wait_for_completion convoy at QD4/QD8.
+	 * One opposite-end preparation token earned by ordered inline WRITE work.
+	 * For a retained window the token may outlive swapz_process() and bridge
+	 * the inter-BIO admission gap until the producer consumes it or the
+	 * worker closes the window. This preserves one-for-one pacing without
+	 * exposing worker-owned batch_count to ->map.
 	 */
 	atomic_t preparation_tail_credit;
 	u64 preparation_producer_head_claims;
@@ -663,7 +665,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			entry->preparation_error = -ENOMEM;
 			up(&ctx->preparation_slots);
 			complete(&entry->preparation_finished);
-			if (tail_claim && !atomic_read(&ctx->lower_write_active))
+			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
+			    !atomic_read(&ctx->preparation_tail_credit))
 				return;
 			continue;
 		}
@@ -674,7 +677,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			up(&ctx->preparation_slots);
 			entry->preparation_error = error;
 			complete(&entry->preparation_finished);
-			if (tail_claim && !atomic_read(&ctx->lower_write_active))
+			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
+			    !atomic_read(&ctx->preparation_tail_credit))
 				return;
 			continue;
 		}
@@ -701,9 +705,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 		entry->prepared_page = prepared;
 		entry->preparation_error = 0;
 		complete(&entry->preparation_finished);
-		/* A normal tail credit is one-for-one with ordered work. If lower
-		 * WRITE began meanwhile, keep draining its head-first overlap window. */
-		if (tail_claim && !atomic_read(&ctx->lower_write_active))
+		/*
+		 * A tail claim consumes one token. If ordered inline work earned a
+		 * fresh token while this page was being prepared, stay on this
+		 * already-running worker and consume that token on the next loop.
+		 * Otherwise stop; the producer never drains uncredited tail work.
+		 */
+		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
+		    !atomic_read(&ctx->preparation_tail_credit))
 			return;
 	}
 }
@@ -1188,6 +1197,13 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->window_first_ns = 0;
 		return 0;
 	}
+
+	/*
+	 * A real nonempty window close ends any unconsumed preparation token
+	 * earned by that window. Lower-WRITE overlap below has its own explicit
+	 * head-first producer wake and does not depend on this tail credit.
+	 */
+	atomic_set(&ctx->preparation_tail_credit, 0);
 
 	/*
 	 * DUPLICATE/FULL flush older writes before the current WRITE continues.
@@ -2057,6 +2073,7 @@ static void swapz_worker(struct work_struct *work)
 
 		while (remaining && !list_empty(&local)) {
 			bool wait_for_preparation = false;
+			bool inline_preparation = false;
 
 			entry = list_first_entry(&local, struct swapz_bio_ref, list);
 			/*
@@ -2080,6 +2097,7 @@ static void swapz_worker(struct work_struct *work)
 				if (!list_empty(&entry->preparation_list)) {
 					list_del_init(&entry->preparation_list);
 					entry->preparation_inline = true;
+					inline_preparation = true;
 					wait_for_preparation = false;
 					ctx->preparation_ordered_inline++;
 					atomic_set(&ctx->preparation_tail_credit, 1);
@@ -2117,8 +2135,19 @@ static void swapz_worker(struct work_struct *work)
 			swapz_refresh_accepted_followup(ctx);
 			list_del_init(&entry->list);
 			swapz_process(ctx, entry->bio);
-			/* Expire any unused credit before advertising an idle ordered worker. */
-			atomic_set(&ctx->preparation_tail_credit, 0);
+			/*
+			 * An inline WRITE earns one producer token. Keep an unconsumed
+			 * token across the inter-BIO gap only while this worker still owns
+			 * an open retained window. A nonempty flush clears it in
+			 * swapz_flush_window(); all other paths expire it here.
+			 *
+			 * Use the local flag: swapz_process() may complete the BIO, so the
+			 * dm_per_bio_data entry must not be dereferenced afterwards.
+			 */
+			if (!inline_preparation || !ctx->retain_ms ||
+			    !ctx->batch_count || ctx->singleton_fast_close ||
+			    ctx->failed || !READ_ONCE(ctx->accepting))
+				atomic_set(&ctx->preparation_tail_credit, 0);
 			atomic_set(&ctx->ordered_worker_busy, 0);
 
 			/*
@@ -2347,16 +2376,16 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
-		 * A truly idle burst belongs to the ordered worker first. Wake the
-		 * producer only during synchronous lower WRITE overlap or while the
-		 * ordered worker owns a one-shot tail credit. Both signals are atomic;
-		 * batch_count remains worker-owned and never becomes a map-path race.
+		 * A cold lone head belongs to the ordered worker first. A retained
+		 * inline WRITE may leave one earned tail token alive after that worker
+		 * goes idle; the next admitted companion can therefore wake the
+		 * producer without reading worker-owned batch_count. A real lower
+		 * WRITE remains the independent head-first overlap signal.
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
 		if (atomic_read(&ctx->lower_write_active) ||
-		    (atomic_read(&ctx->ordered_worker_busy) &&
-		     atomic_read(&ctx->preparation_tail_credit)))
+		    atomic_read(&ctx->preparation_tail_credit))
 			queue_work(ctx->preparation_workqueue,
 				   &ctx->preparation_worker);
 	}
@@ -2685,7 +2714,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ctx->io_client = NULL;
 		goto fail;
 	}
-	ctx->workqueue = alloc_workqueue("swapz", WQ_MEM_RECLAIM, 1);
+	ctx->workqueue = alloc_workqueue(
+				"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
 	if (!ctx->workqueue) {
 		error = -ENOMEM;
 		goto fail;

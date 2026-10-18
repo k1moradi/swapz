@@ -10,69 +10,59 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`658f390a03f546b35ba068900d5ec700126b7e99` passed all five stages and is
+`44363933e9e401ccaf3a3af6c1fa42b2878d2bab` passed all five stages and is
 qualified exploratory evidence, but is not promoted.
 
-The retained-service candidate restored the intended write-only geometry.
-QD8 used exactly 520 lower WRITE requests in both modes on both RAM models.
-On the faster model QD32 used 147/138 requests sync/async, back near the prior
-~139-request deep-window result. QD1 async also retained its scheduling result
-at 7.39 MB/s and 0.37 ms p99.
+The credited-preparation run preserved the deep write-only geometry: QD8 used
+520 lower WRITE requests in async mode on both RAM models, and faster-model
+QD32 async used 139 requests. QD1 async remained a lone-head path with zero
+producer claims and 0.37 ms p99.
 
-Mixed behavior improved without changing the lower-byte/read-tail safety gates.
-Slow mixed reached 7.12/7.28 MB/s with about 544 lower WRITE requests. Faster
-mixed reached 20.19/22.65 MB/s against 19.54 MB/s raw, with packed reads faster
-than raw and lower READ bytes below raw. Faster mixed worker-empty deadlines
-fell from about 88 to 59 per pair and one-page deadline closes from about 43 to
-31.5, so the retained-service repair is directionally effective but incomplete.
+The new preparation counters rejected the one-shot execution-time credit
+hypothesis for write-only bursts. On the faster model QD8 async recorded only
+one producer tail claim against 5366 ordered-inline preparations; QD32 recorded
+two tail claims against 5350 ordered-inline preparations. Useful throughput
+therefore showed no asynchronous gain: 17.32 MB/s at QD8 and 31.15 MB/s at
+QD32, approximately equal to sync.
 
-The remaining rejection signal is asynchronous intermediate-QD throughput.
-Faster write-only QD8 remained 17.10/17.21 MB/s sync/async against about
-49.9 MB/s raw despite the restored 520-request geometry. QD4 likewise remained
-about 12.85 MB/s with no async gain. QD32 async improved over sync
-(33.21 vs 29.25 MB/s) but remained well below raw. This isolates scheduling of
-LZ4 preparation rather than window chopping as the next experiment.
+Mixed QD32 did expose producer work because its longer ordered service intervals
+kept credits consumable: slow async averaged 5023.5 producer-tail claims and
+82.5 blocking waits, while faster async averaged 5464 tail claims and 275
+blocking waits. Mixed throughput was 7.14 MB/s on the slow model and
+20.49 MB/s on the faster model, with lower WRITE savings preserved. Faster
+mixed still recorded about 70 worker-empty deadline closes, but retention
+policy is not part of the next scheduling experiment.
 
 The write-only pilot remains one pair per mode/QD with no confidence interval,
-and the loaded run again reported zero GC victims. Circular GC destination
-probing therefore has direct native correctness evidence only, not loaded
-endurance qualification.
-
-## Completed cleanup after that baseline
-
-- Removed duplicate metadata parsing/CRC work from the compressed read path while retaining current authority, sequence and payload CRC checks.
-- Removed the rejected cap=3/uncapped planner-stat diagnostics from the production write hot path, status and official report schema. The accepted-burst production planner remains capped at two cold read blocks per record.
-- Removed the standalone research kernel module and retired C++ model.
-- Removed historical compatibility, NBD, recall, pressure and obsolete evidence-model infrastructure from the active working tree.
-- Made implementation/report/workflow terminology version-neutral; SWZ3 remains only the format identity.
-
-These cleanup revisions, the alignment-aware adjacent lower-run tie-break and the accepted-incoming first-pack tail fix are covered by the owner-loaded `c4539b3...` baseline.
+and the loaded run again reported zero GC victims. No physical-media or
+endurance claim is permitted.
 
 ## Immediate work queue
 
-1. Qualify the credited opposite-end preparation candidate now on `main`.
-   Keep the 658f390 retained-window policy and lower-byte geometry unchanged.
-2. Outside synchronous lower WRITE wait, permit only one producer tail claim
-   per ordered-work credit. An inline ordered WRITE reserves the head first;
-   READ/barrier service may grant one bounded credit; producer-owned FIFO heads
-   grant no new credit. This should prevent the producer from serially claiming
-   every next QD4/QD8 BIO and forcing the ordered worker into completion waits.
-3. Require the official report to expose producer head/tail claims, ordered
-   inline/handoff counts and actual blocking waits. QD8 should show work split
-   across ordered-inline and producer-tail preparation with few blocking waits,
-   while QD1 keeps its lone-head behavior.
-4. Preserve write-only QD8 at ~520 lower requests and faster QD32 near ~139.
-   Reject any async-throughput gain that increases lower WRITE bytes, worsens
-   packed-read tails or reintroduces the prior 2-16-record window chopping.
-5. After preparation scheduling is isolated, revisit the residual faster mixed
-   worker-empty deadline cluster (~59 per pair, ~31.5 one-page deadlines).
-   Do not combine another retention-policy change with this scheduling test.
-6. Keep metadata-LRU invalidation and circular GC destination probing unchanged.
-   No endurance or sustained-GC claim is permitted until loaded qualification
-   actually observes GC victims.
-7. After policy stabilizes, add statistically repeated saturation with
-   confidence intervals; genuine lower errors, sustained GC, kernel-worker CPU
-   attribution and long-run resource pressure remain release gates.
+1. Qualify a scheduling-only successor to `4436393`. Keep retained-window,
+   extent-planning, lower-byte, read-tail and GC policy unchanged.
+2. Define `preparation_tail_credit` as one token earned by ordered inline
+   WRITE work in the currently open retained burst. Permit that token to survive
+   the end of the individual `swapz_process()` call until the producer
+   consumes it or the nonempty window closes.
+3. Let an already-running producer consume a newly earned token without forcing
+   a workqueue return/re-wake between every prepared page. Never permit
+   uncredited tail draining.
+4. Keep `batch_count` worker-private. The map path wakes preparation only for
+   `lower_write_active` or an earned atomic tail token; it must not depend on
+   `ordered_worker_busy` to bridge an inter-BIO gap.
+5. Run the ordered Device Mapper worker on a serialized
+   `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueue so copy/LZ4 execution is not
+   forced onto the submitting CPU. Publication and lower-I/O ownership remain
+   single-threaded.
+6. Acceptance requires QD1 to retain zero producer claims, QD8/QD32 lower
+   requests to stay near 520/~139, and write-only async producer-tail work to
+   become substantial without blocking waits turning into a convoy. Reject any
+   throughput gain that raises lower WRITE bytes or regresses packed-read tails.
+7. Revisit the residual faster mixed worker-empty deadline cluster only after
+   preparation scheduling is isolated. Sustained GC, genuine lower errors,
+   kernel-worker CPU attribution and statistically repeated saturation remain
+   release gates.
 
 ## Release gates
 

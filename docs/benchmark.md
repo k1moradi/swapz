@@ -241,3 +241,39 @@ requires QD1 behavior and QD8/QD32 request geometry to remain intact, QD8 async
 throughput to improve materially without extra lower WRITE bytes or read-tail
 regression, and blocking waits to fall relative to producer handoffs. The
 remaining mixed deadline cluster is a separate later experiment.
+
+
+### Qualified credited-preparation result and scheduling-only successor
+
+Source `44363933e9e401ccaf3a3af6c1fa42b2878d2bab` passed all five
+owner-loaded qualification stages. It preserved write-only aggregation:
+async QD8 used exactly 520 lower WRITE requests on both RAM models and
+faster-model async QD32 used 139. QD1 async remained 7.12 MB/s with 0.37 ms
+p99 and recorded zero producer head/tail claims.
+
+The one-shot ordered-execution credit did not restore write-only asynchronous
+preparation. Faster QD8 async reached 17.32 MB/s versus 17.71 sync while its
+diagnostics showed producer head=9, tail=1, ordered inline=5366. Faster QD32
+async reached 31.15 MB/s versus 31.29 sync with producer head=24, tail=2,
+ordered inline=5350. In contrast, faster mixed QD32 averaged 5464 producer-tail
+claims, showing that the mechanism works when ordered service intervals are long
+enough for the producer to consume the token.
+
+The next candidate changes scheduling only. An inline ordered WRITE may leave
+one earned tail token alive across the inter-BIO gap of an open retained
+window; the next admitted companion can wake the producer from that atomic
+token without reading worker-owned `batch_count`. The producer remains
+one-for-one paced but may consume a fresh token earned while it is already
+running. Any nonempty window close clears the unused token.
+
+The serialized ordered workqueue also becomes
+`WQ_MEM_RECLAIM | WQ_UNBOUND`, matching the preparation worker's unbound
+placement while preserving one active ordered worker, FIFO execution,
+publication authority and synchronous lower-I/O ownership. Retention/window
+policy, extent planning, lower-byte gates, read policy and GC are unchanged.
+
+Acceptance is directional until repeated pairs exist: QD1 must keep zero
+producer claims, QD8/QD32 request geometry must stay near 520/~139, write-only
+producer-tail claims must become substantial, and blocking waits must not
+become a serial handoff convoy. Lower WRITE bytes and packed-read tails remain
+hard rejection gates.

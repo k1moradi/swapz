@@ -339,27 +339,29 @@ upper BIOs.
 
 When synchronous lower WRITE I/O is active, the producer prepares from the
 head because the ordered worker is blocked and will need that entry first.
-Outside lower WRITE wait, tail preparation is explicitly credit-limited: each
-ordered BIO that owns real execution time may grant at most one tail claim, and
-an asynchronous WRITE grants that credit only after the ordered worker has
-atomically reserved its own FIFO head. This prevents the producer from claiming
-BIO 2, then 3, then 4 in succession and recreating a serial
-`wait_for_completion` convoy despite nominal tail-first selection.
+Outside lower WRITE wait, tail preparation is credit-limited: each ordered
+inline WRITE may leave at most one unconsumed tail token. The token is earned
+only after the ordered worker atomically reserves its own FIFO head.
 
-A lone truly idle head must not wake the unbound producer. `->map` wakes
-parallel preparation only for active lower WRITE service or when
-`ordered_worker_busy` and the one-shot `preparation_tail_credit` are both
-published. An already queued multi-BIO burst therefore waits for the ordered
-worker to reserve the first head before producer work can start.
+For a retained window, an earned `preparation_tail_credit` may survive the end
+of that individual `swapz_process()` call. This bridges the admission gap
+between companion BIOs without exposing worker-owned `batch_count` to
+`->map`. The producer atomically consumes the token when it claims a tail
+entry. If ordered inline work earns a fresh token while the producer is already
+running, the producer may continue for that new token; it must stop when no
+token remains. A nonempty window close clears any unused token.
 
-For an asynchronous WRITE, the ordered worker sets `ordered_worker_busy`,
-removes its own head preparation and publishes one tail credit in the same
-`queue_lock` critical section. A producer consumes that credit atomically and
-returns after one tail preparation unless synchronous lower WRITE begins in the
-meantime. READ/barrier execution may likewise grant one tail credit so mixed
-workloads retain bounded preparation overlap without allowing producer run-ahead.
-Out-of-order preparation remains private to each BIO; FIFO publication,
-completion and lower-I/O ownership are unchanged.
+A cold lone head has no token and therefore does not wake the producer.
+`->map` may wake parallel preparation only for active lower WRITE service or
+an already-earned atomic tail credit. It must not read `batch_count` or depend
+on the instantaneous `ordered_worker_busy` interval. READ/barrier execution
+may still grant one bounded token while it owns ordered service time.
+
+The ordered Device Mapper worker and preparation worker both use serialized
+`WQ_MEM_RECLAIM | WQ_UNBOUND` workqueues. The ordered worker remains
+non-reentrant and single-active, while unbound placement avoids forcing its
+copy/LZ4 work onto the submitting CPU. This changes placement, not FIFO,
+publication, completion or lower-I/O ownership.
 
 The producer reserves bounded prepared-page capacity nonblocking before taking
 `queue_lock` or claiming a BIO. Tail claiming never consumes
