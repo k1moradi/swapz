@@ -109,7 +109,9 @@ static void prepare(struct swapz_compressed_page *pages, swapz_u8 count,
 		       sizeof(originals[index]));
 		pages[index].logical_page = base + index;
 		pages[index].payload = originals[index];
+		pages[index].payload_crc32c = 0;
 		pages[index].length = sizeof(originals[index]);
+		pages[index].payload_crc_valid = 0;
 		pages[index].raw = 0;
 	}
 }
