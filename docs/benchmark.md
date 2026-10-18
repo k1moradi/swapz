@@ -438,12 +438,21 @@ single absolute async point was 21.80 MB/s versus 29.75 MB/s in the preceding
 run. Because both sync and async moved and there is one pair per point, this is
 not confirmatory evidence by itself. QD1 still recorded zero producer claims.
 
-The next candidate keeps every accepted-wave ownership rule but changes the
-preparation workqueue from unbound to CPU-local `WQ_MEM_RECLAIM`. The ordered
-worker remains unbound. For the lower-WRITE wake, the issuing context is the
-ordered kworker, so the intended effect is for queued preparation to use that
-CPU when synchronous lower WRITE makes it sleep, rather than immediately
-competing on another CPU. Acceptance requires more proven
-LZ4-in-lower-WRITE overlap while preserving
-mixed throughput/request geometry, low ordered wait time, QD1 zero producer
-claims, QD8/QD32 deep aggregation, lower-byte savings and packed-read tails.
+Source `e199ac5399808fbf3dcf470989eb3a71a43e92` qualified the CPU-local
+preparation experiment and rejected it on useful behavior. Faster-model proven
+LZ4-inside-lower-WRITE overlap increased from 3.8 ms to 6.4 ms and ordered
+preparation wait fell from 0.58 ms to 0.01 ms, but async mixed WRITE fell from
+23.74 to 20.37 MB/s, lower WRITE requests rose from 874.5 to 1055, and
+worker-empty deadline closes rose from 60.5 to 72.5. Faster write-only QD8
+preserved 520 lower requests but async reached 19.32 MB/s versus 20.49 sync.
+The experiment therefore improved overlap while regressing the product metric;
+bound preparation placement is removed rather than layered with another
+scheduling heuristic.
+
+The next candidate restores the accepted unbound preparation workqueue and adds
+kernel-C attribution for explicit RAM-copy wall time/bytes. It also measures
+write-engine commit time and targeted-read engine time with synchronous lower-I/O
+wait subtracted. This is diagnostic instrumentation, not a new I/O/layout
+policy. If copy time is material, the next optimization can target direct
+single-BIO LZ4 input/output; if non-I/O engine time dominates, packing/CRC and
+authority work become the next profiling target.
