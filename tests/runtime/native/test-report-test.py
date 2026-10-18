@@ -418,9 +418,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["win1_read_unrelated"], 1)
         self.assertEqual(slow["kernel_counters"]["deadline_before_bio"], 1)
         self.assertEqual(slow["kernel_counters"]["deadline_worker_empty"], 1)
-        self.assertEqual(data["gc"][:13], "NOT_EXERCISED")
+        self.assertEqual(data["gc"], "LIVE_VICTIMS_EXERCISED_OWNED_RAM")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
-        self.assertIn("kernel DM workers", data["cpu_scope"])
+        self.assertIn("kernel callback wall is not CPU time", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
 
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
