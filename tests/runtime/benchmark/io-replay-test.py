@@ -148,14 +148,53 @@ class PairReplayContract(unittest.TestCase):
         self.assertIsNone(module.kernel_write_snapshot(
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_write_delta(None, None))
-        before = dict(zip(module.KERNEL_WRITE_FIELDS,
-                          (2, 100, 30, 4096, 1, 20, 400, 100,
-                           10, 20, 30, 300, 40, 50, 10, 20,
-                           1, 1, 1, 0)))
-        after = dict(zip(module.KERNEL_WRITE_FIELDS,
-                         (7, 50100, 1030, 8192, 5, 1020, 70400, 10100,
-                          1010, 2020, 3030, 60300, 5040, 4050, 510, 5020,
-                          4, 3, 3, 1)))
+        before = {field: 0 for field in module.KERNEL_WRITE_FIELDS}
+        before.update({
+            "physical_write_reqs": 2,
+            "write_wait_le1ms": 1,
+            "write_wait_1to4ms": 1,
+        })
+        after = dict(before)
+        after.update({
+            "physical_write_reqs": 7,
+            "lz4_wall_ns": 50000,
+            "write_copy_wall_ns": 1000,
+            "write_copy_bytes": 4096,
+            "direct_lz4_input_pages": 4,
+            "payload_crc_wall_ns": 800,
+            "payload_crc_bytes": 4096,
+            "window_sort_wall_ns": 1000,
+            "window_commit_wall_ns": 70000,
+            "window_commit_nonio_wall_ns": 10000,
+            "engine_plan_wall_ns": 1000,
+            "engine_pack_wall_ns": 2000,
+            "engine_publish_wall_ns": 3000,
+            "engine_stage_wall_ns": 1000,
+            "engine_pause_wall_ns": 1000,
+            "engine_hole_clear_wall_ns": 500,
+            "engine_resume_wall_ns": 500,
+            "publish_initial_validate_wall_ns": 300,
+            "publish_phase1_wall_ns": 1000,
+            "publish_lookup_wall_ns": 600,
+            "publish_mutation_wall_ns": 400,
+            "batch_pause_hash_wall_ns": 500,
+            "batch_resume_hash_wall_ns": 200,
+            "lower_write_wall_ns": 60000,
+            "ordered_active_wall_ns": 5000,
+            "prep_active_wall_ns": 4000,
+            "prep_wait_wall_ns": 500,
+            "prep_lower_write_overlap_ns": 5000,
+            "dry_close_samples": 4,
+            "dry_close_next_sum_ns": 100000,
+            "dry_next_le10us": 1,
+            "dry_next_11_50us": 1,
+            "dry_next_51_200us": 1,
+            "dry_next_gt200us": 1,
+            "windows": 3,
+            "write_wait_le1ms": 3,
+            "write_wait_1to4ms": 3,
+            "write_wait_gt4ms": 1,
+        })
         fake = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -169,13 +208,16 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["write_copy_wall_ns"], 1000)
         self.assertEqual(delta["write_copy_bytes"], 4096)
         self.assertEqual(delta["direct_lz4_input_pages"], 4)
+        self.assertEqual(delta["payload_crc_wall_ns"], 800)
+        self.assertEqual(delta["payload_crc_bytes"], 4096)
         self.assertEqual(delta["window_commit_nonio_wall_ns"], 10000)
         self.assertEqual(delta["engine_plan_wall_ns"], 1000)
         self.assertEqual(delta["engine_pack_wall_ns"], 2000)
         self.assertEqual(delta["engine_publish_wall_ns"], 3000)
         self.assertEqual(delta["lower_write_wall_ns"], 60000)
-        self.assertEqual(delta["ordered_worker_cpu_ns"], 5000)
-        self.assertEqual(delta["prep_worker_cpu_ns"], 4000)
+        self.assertEqual(delta["ordered_active_wall_ns"], 5000)
+        self.assertEqual(delta["prep_active_wall_ns"], 4000)
+        self.assertEqual(delta["dry_close_samples"], 4)
         self.assertEqual(delta["prep_wait_wall_ns"], 500)
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
         with self.assertRaisesRegex(ValueError, "reset"):
