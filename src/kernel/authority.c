@@ -817,27 +817,27 @@ static int swapz_read_observed_authority(
 			   const void *extent, swapz_u32 bytes_total,
 			   const struct swapz_map **current_out)
 {
-	const struct swapz_map *current;
+	const struct swapz_map *current_map;
 
 	if (!a || !observed || !current_out ||
 	    logical_page >= a->logical_pages)
 		return -EINVAL;
-	current = &a->maps[logical_page];
-	if (!current->valid || !observed->valid ||
-	    current->start_block != observed->start_block ||
-	    current->sequence != observed->sequence ||
-	    current->generation != observed->generation ||
-	    current->extent_blocks != observed->extent_blocks ||
-	    current->record_index != observed->record_index ||
-	    current->payload_length != observed->payload_length ||
-	    current->payload_offset != observed->payload_offset)
+	current_map = &a->maps[logical_page];
+	if (!current_map->valid || !observed->valid ||
+	    current_map->start_block != observed->start_block ||
+	    current_map->sequence != observed->sequence ||
+	    current_map->generation != observed->generation ||
+	    current_map->extent_blocks != observed->extent_blocks ||
+	    current_map->record_index != observed->record_index ||
+	    current_map->payload_length != observed->payload_length ||
+	    current_map->payload_offset != observed->payload_offset)
 		return -ESTALE;
-	if (current->raw)
+	if (current_map->raw)
 		return -EOPNOTSUPP;
 	if (!extent ||
-	    bytes_total != (swapz_u32)current->extent_blocks * SWAPZ_BLOCK_BYTES)
+	    bytes_total != (swapz_u32)current_map->extent_blocks * SWAPZ_BLOCK_BYTES)
 		return -EINVAL;
-	*current_out = current;
+	*current_out = current_map;
 	return 0;
 }
 
@@ -848,7 +848,7 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 				  const struct swapz_decoded *peeked,
 				  const swapz_u8 **payload)
 {
-	const struct swapz_map *current;
+	const struct swapz_map *current_map;
 	const swapz_u8 *stored;
 	int error;
 
@@ -856,7 +856,7 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 		return -EINVAL;
 	*payload = NULL;
 	error = swapz_read_observed_authority(a, logical_page, observed,
-					   extent, bytes_total, &current);
+					   extent, bytes_total, &current_map);
 	if (error)
 		return error;
 	/*
@@ -867,14 +867,14 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 	 * validate the payload CRC exactly once without reparsing metadata.
 	 */
 	if (peeked->logical_page != logical_page ||
-	    peeked->generation != current->generation ||
-	    peeked->payload_length != current->payload_length ||
-	    peeked->payload_offset != current->payload_offset ||
+	    peeked->generation != current_map->generation ||
+	    peeked->payload_length != current_map->payload_length ||
+	    peeked->payload_offset != current_map->payload_offset ||
 	    !peeked->payload_length ||
 	    peeked->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    peeked->payload_offset >= bytes_total ||
 	    peeked->payload_length > bytes_total - peeked->payload_offset ||
-	    swapz_disk_sequence(extent) != current->sequence)
+	    swapz_disk_sequence(extent) != current_map->sequence)
 		return -EUCLEAN;
 	stored = (const swapz_u8 *)extent + peeked->payload_offset;
 	if (swapz_crc32c_bytes(stored, peeked->payload_length) !=

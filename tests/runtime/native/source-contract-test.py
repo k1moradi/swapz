@@ -800,16 +800,19 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "window_sort_wall_ns", "window_commit_wall_ns",
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
                     "engine_pack_wall_ns", "engine_publish_wall_ns",
+                    "engine_publish_crc_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
                     "ordered_worker_wall_ns", "gc_wall_ns",
                     "ordered_crc_wall_ns",
-                    "dry_pack_close_events", "dry_pack_followup_events",
-                    "dry_pack_followup_sum_ns",
-                    "dry_pack_followup_le10us", "dry_pack_followup_11_50us",
-                    "dry_pack_followup_51_200us",
-                    "dry_pack_followup_gt200us"):
+                    "prep_lower_write_samples",
+                    "prep_lower_write_start_queued",
+                    "prep_lower_write_start_nonempty",
+                    "prep_lower_write_end_queued",
+                    "prep_lower_write_end_nonempty"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
+        self.assertIn("engine_publish_auth_wall_ns=%llu", status)
+        self.assertIn("engine_publish_auth_wall_ns", status)
         self.assertIn("prep_crc_wall_ns=%llu", status)
         self.assertIn("ctx->preparation_crc_wall_ns", status)
         self.assertIn("prep_worker_wall_ns=%llu", status)
@@ -821,12 +824,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         authority = (ROOT / "src/kernel/authority.c").read_text()
         self.assertIn("swapz_append_prehashed(", codec)
         self.assertIn("swapz_lookup_validated(", codec)
-        self.assertIn("swapz_lookup_validated(image, bytes_total, index",
+        self.assertIn("swapz_lookup_validated_descriptor(", codec)
+        self.assertIn("swapz_lookup_validated_descriptor(image, bytes_total, index",
+                      authority)
+        self.assertIn("swapz_publish_crc32c(a, payload, decoded.payload_length)",
                       authority)
         self.assertIn("swapz_crc32c_bytes(prepared->bytes", producer)
         self.assertIn("payload_crc32c_valid", accept)
-        self.assertIn("swapz_note_dry_pack_close(ctx)", worker)
-        self.assertIn("swapz_note_dry_pack_followup_locked", DM)
+        self.assertNotIn("swapz_note_dry_pack_close", DM)
+        self.assertNotIn("swapz_note_dry_pack_followup_locked", DM)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -1205,7 +1211,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(mapper.index("list_add_tail(&entry->list"),
                         mapper.index("queue_work(ctx->preparation_workqueue"))
         self.assertIn("queue_work(ctx->preparation_workqueue", lower)
-        self.assertIn("!list_empty(&ctx->preparation_incoming)", lower)
+        self.assertIn("ctx->preparation_queued", lower)
+        self.assertIn("ctx->prep_lower_write_start_queued", lower)
+        self.assertIn("ctx->prep_lower_write_end_queued", lower)
         self.assertLess(lower.index("atomic_set(&ctx->lower_write_active, 1)"),
                         lower.index("queue_work(ctx->preparation_workqueue"))
         self.assertLess(lower.index("queue_work(ctx->preparation_workqueue"),
