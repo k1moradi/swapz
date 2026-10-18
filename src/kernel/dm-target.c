@@ -3023,6 +3023,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
+		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
+		       "engine_publish_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
@@ -3140,6 +3142,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
+		       ctx->engine.plan_wall_ns, ctx->engine.pack_wall_ns,
+		       ctx->engine.publish_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
