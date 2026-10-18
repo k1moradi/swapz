@@ -3,6 +3,7 @@
 import argparse
 import json
 import lzma
+import math
 import os
 import re
 from pathlib import Path
@@ -247,12 +248,12 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 pair_number += 1
                 mode = "async" if line.rstrip().endswith("=1") else "sync"
                 where = (regime + " " if regime else "")
-                phase = f"owned RAM {where}comparison {pair_number}/8 ({mode})"
+                phase = f"owned RAM {where}comparison {pair_number}/20 ({mode})"
             elif (match := re.fullmatch(
                     r"BENCH_IO_PHASE=(off|swapz):(prefill|mixed|packed_read)", line)):
                 phase += f" [{match.group(1)} {match.group(2)}]"
             elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
-                phase = f"after completed owned RAM comparison {pair_number}/8"
+                phase = f"after completed owned RAM comparison {pair_number}/20"
 
     unittest_failure = None
     if not loaded:
@@ -684,17 +685,18 @@ def mean(items, key):
 
 
 def benchmark_verdicts(sessions):
-    """Validate 8 loaded sessions; keep capped/uncapped conclusions separate."""
+    """Validate 20 loaded sessions; five paired observations per mode/regime."""
     regimes = {}
     for regime in MODEL_ORDER:
         rows = [s for s in sessions if s.get("regime") == regime]
-        if len(rows) != 4 or [s.get("async_prepare") for s in rows] != [0, 1, 1, 0] \
+        expected_modes = [0, 1, 1, 0, 0, 1, 1, 0, 0, 1]
+        if len(rows) != 10 or [s.get("async_prepare") for s in rows] != expected_modes \
                 or any(s.get("status") != "PASS" or
                        set(s.get("arms", {})) != {"off", "swapz"} or
                        s.get("order") != ("swapz-first" if i % 2 else "off-first")
                        for i, s in enumerate(rows)):
             return {"overall": "INCOMPLETE",
-                    "reason": f"{regime}: four valid ABBA/ABAB pairs required"}
+                    "reason": f"{regime}: ten valid counterbalanced pairs required"}
         expected = MODEL_SPECS[regime]
         for row in rows:
             actual = row.get("device_model")
@@ -707,8 +709,8 @@ def benchmark_verdicts(sessions):
             if provenance_error is not None:
                 return provenance_error
         regimes[regime] = rows
-    if len(sessions) != len(MODEL_ORDER) * 4:
-        return {"overall": "INCOMPLETE", "reason": "exactly eight modeled RAM-only pairs required"}
+    if len(sessions) != len(MODEL_ORDER) * 10:
+        return {"overall": "INCOMPLETE", "reason": "exactly twenty modeled RAM-only pairs required"}
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
         status = row.get("kernel_status", {})
@@ -758,6 +760,15 @@ def benchmark_verdicts(sessions):
         if None in vals or len(set(vals)) != 1:
             return {"overall": "INCONCLUSIVE",
                     "reason": f"benchmark {digest} differs across regimes"}
+
+    def paired_ci95(values):
+        mean_value = statistics.mean(values)
+        if len(values) < 2:
+            return (mean_value, mean_value)
+        # Mandatory mixed qualification has n=5 paired observations per mode.
+        # Student-t two-sided 95% critical value for df=4.
+        half = 2.7764451051977987 * statistics.stdev(values) / math.sqrt(len(values))
+        return (mean_value - half, mean_value + half)
 
     verdicts = {}
     for regime, rows in regimes.items():
@@ -857,6 +868,7 @@ def benchmark_verdicts(sessions):
             criteria[mode] = {
                 "throughput_vs_raw": decision(change),
                 "paired_write_gain_fraction": change,
+                "paired_write_gain_ci95": paired_ci95(change),
                 "lower_write_saved_fraction": (
                     1 - columns[mode]["lower_write_bytes"] / raw["lower_write_bytes"]),
                 "lower_write_savings": (
@@ -881,7 +893,7 @@ def benchmark_verdicts(sessions):
                 "PRELIMINARY_5PCT_GAIN" if delta >= .05 else
                 "PRELIMINARY_5PCT_LOSS" if delta <= -.05 else
                 "NO_SIGNIFICANT_ASYNC_GAIN"),
-            "caution": "Only two observations per mode; no confidence interval",
+            "caution": "Five observations per mode; async/sync delta is mean-only",
         }
         verdicts[regime] = {
             "columns": columns, "criteria": criteria,
@@ -910,7 +922,7 @@ def benchmark_verdicts(sessions):
         "gc": "NOT_EXERCISED unless separate live-GC evidence exists",
         "cpu_scope": "replay userspace process and threads; kernel DM workers NOT ATTRIBUTED",
         "physical_media": "NOT_TESTED",
-        "statistical_confidence": "EXPLORATORY: two pairs per mode/regime, materiality 5%, no CI",
+        "statistical_confidence": "FIVE_PAIRED_OBSERVATIONS_PER_MODE: 95% t CI reported for raw-relative write gain",
         "real_swap_device": "NOT_AUTHORIZED_NOT_TESTED",
     }
 
@@ -1102,9 +1114,9 @@ def print_bench(result):
         ("scope", "value"),
         [
             ("media", "synthetic RAM only"),
-            ("mixed statistics", "two pairs/mode; no confidence interval"),
+            ("mixed statistics", "five pairs/mode; paired raw-gain 95% t CI"),
             ("write-only", "one pair/QD; directional only"),
-            ("CPU", "replay + ordered/prep worker task CPU; IRQ/device CPU excluded"),
+            ("CPU", "replay CPU; worker on-CPU trace is separate diagnostic"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims not exercised"),
             ("Full telemetry", "build/test_results.json.xz"),
