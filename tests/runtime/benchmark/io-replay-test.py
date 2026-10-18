@@ -159,9 +159,17 @@ class PairReplayContract(unittest.TestCase):
             "window_commit_wall_ns": 400,
             "window_commit_nonio_wall_ns": 100,
             "engine_plan_wall_ns": 10,
+            "engine_stage_wall_ns": 5,
             "engine_pack_wall_ns": 20,
+            "engine_hole_clear_wall_ns": 1,
+            "engine_batch_pause_wall_ns": 2,
+            "engine_batch_resume_wall_ns": 1,
             "engine_publish_wall_ns": 30,
             "engine_prehashed_records": 1,
+            "publish_metadata_validate_wall_ns": 3,
+            "publish_payload_verify_wall_ns": 5,
+            "publish_liveness_wall_ns": 4,
+            "publish_apply_wall_ns": 2,
             "prep_crc_wall_ns": 5,
             "ordered_crc_wall_ns": 7,
             "lower_write_wall_ns": 300,
@@ -188,9 +196,17 @@ class PairReplayContract(unittest.TestCase):
             "window_commit_wall_ns": 70400,
             "window_commit_nonio_wall_ns": 10100,
             "engine_plan_wall_ns": 1010,
+            "engine_stage_wall_ns": 405,
             "engine_pack_wall_ns": 2020,
+            "engine_hole_clear_wall_ns": 101,
+            "engine_batch_pause_wall_ns": 202,
+            "engine_batch_resume_wall_ns": 201,
             "engine_publish_wall_ns": 3030,
             "engine_prehashed_records": 101,
+            "publish_metadata_validate_wall_ns": 403,
+            "publish_payload_verify_wall_ns": 805,
+            "publish_liveness_wall_ns": 604,
+            "publish_apply_wall_ns": 302,
             "prep_crc_wall_ns": 505,
             "ordered_crc_wall_ns": 707,
             "lower_write_wall_ns": 60300,
@@ -223,8 +239,16 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["direct_lz4_input_pages"], 4)
         self.assertEqual(delta["window_commit_nonio_wall_ns"], 10000)
         self.assertEqual(delta["engine_plan_wall_ns"], 1000)
+        self.assertEqual(delta["engine_stage_wall_ns"], 400)
         self.assertEqual(delta["engine_pack_wall_ns"], 2000)
+        self.assertEqual(delta["engine_hole_clear_wall_ns"], 100)
+        self.assertEqual(delta["engine_batch_pause_wall_ns"], 200)
+        self.assertEqual(delta["engine_batch_resume_wall_ns"], 200)
         self.assertEqual(delta["engine_publish_wall_ns"], 3000)
+        self.assertEqual(delta["publish_metadata_validate_wall_ns"], 400)
+        self.assertEqual(delta["publish_payload_verify_wall_ns"], 800)
+        self.assertEqual(delta["publish_liveness_wall_ns"], 600)
+        self.assertEqual(delta["publish_apply_wall_ns"], 300)
         self.assertEqual(delta["lower_write_wall_ns"], 60000)
         self.assertEqual(delta["ordered_worker_wall_ns"], 70000)
         self.assertEqual(delta["prep_worker_wall_ns"], 4000)
@@ -246,6 +270,12 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "engine phase"):
             module.kernel_write_delta(
                 before, dict(after, engine_publish_wall_ns=15000))
+        with self.assertRaisesRegex(ValueError, "engine residual"):
+            module.kernel_write_delta(
+                before, dict(after, engine_stage_wall_ns=10000))
+        with self.assertRaisesRegex(ValueError, "publish subphase"):
+            module.kernel_write_delta(
+                before, dict(after, publish_liveness_wall_ns=5000))
         with self.assertRaisesRegex(ValueError, "dry-pack"):
             module.kernel_write_delta(
                 before, dict(after, dry_pack_followup_gt200us=1))
