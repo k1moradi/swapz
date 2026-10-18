@@ -1134,7 +1134,7 @@ def print_bench(result):
             ("CPU", "replay CPU only; kernel callback wall is not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
-            ("Full telemetry", "build/test_results.json.xz"),
+            ("Full telemetry", "test_results.json.xz"),
         ])
 
     saturation = result["benchmarks"].get("write_saturation", {})

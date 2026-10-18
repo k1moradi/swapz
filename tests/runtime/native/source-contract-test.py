@@ -1276,6 +1276,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PASS_RAM_MODEL_LOWER_MBPS=", benchmark)
         self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
 
+    def test_loaded_dirty_source_gate_ignores_only_canonical_report(self):
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        pathspec = "' :(exclude)test_results.json.xz'".replace("' :", "':")
+        for script in (deploy, benchmark):
+            self.assertIn("git diff --quiet -- . " + pathspec, script)
+            self.assertIn("git diff --cached --quiet -- . " + pathspec, script)
+            self.assertNotIn("git diff --quiet && git diff --cached --quiet", script)
+
     def test_owned_nullblk_smoke_qualifies_retained_synthetic_faults(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         # These are deliberately pre-submission injections on the already

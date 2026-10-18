@@ -56,3 +56,10 @@ tested revision; publication is refused if origin/main moved or unrelated
 tracked/index state is dirty. After a successful push the local main ref/index
 is advanced to the same report commit, so the operator does not accumulate a
 dirty report file or need a separate pull solely for generated evidence.
+
+
+Because the root `test_results.json.xz` is generated evidence, its local
+working-tree/index state is excluded from the privileged loaded-source
+cleanliness gate. No other tracked path is exempt. The report is atomically
+replaced only after qualification stops and publication then reconciles the
+local main/index on success.

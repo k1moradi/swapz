@@ -138,7 +138,11 @@ for program in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
 done
 [[ $(id -u) == 0 ]] || fail "root required for isolated RAM devices"
 [[ $(git branch --show-current) == main ]] || fail "main only"
-git diff --quiet && git diff --cached --quiet || fail "dirty tracked sources"
+# The canonical report is generated evidence, not tested source. Ignore only
+# that path; every other tracked/staged change still blocks loaded qualification.
+git diff --quiet -- . ':(exclude)test_results.json.xz' &&
+    git diff --cached --quiet -- . ':(exclude)test_results.json.xz' ||
+    fail "dirty tracked sources"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
     fail "malformed canonical swapz version"

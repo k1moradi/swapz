@@ -32,7 +32,10 @@ for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
-git diff --quiet && git diff --cached --quiet ||
+# test_results.json.xz is the one generated, overwriteable evidence file.
+# It is not source and may contain the previous run until this run finishes.
+git diff --quiet -- . ':(exclude)test_results.json.xz' &&
+	git diff --cached --quiet -- . ':(exclude)test_results.json.xz' ||
 	fail "dirty tracked source: preserve and commit changes first"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||

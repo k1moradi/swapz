@@ -459,7 +459,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)
-        self.assertIn("build/test_results.json.xz", rendered)
+        self.assertIn("test_results.json.xz", rendered)
         self.assertNotIn("All-window close reasons per-pair mean", rendered)
         self.assertNotIn("Timed 4MiB", rendered)
         self.assertNotIn("QD4 sync windows:", rendered)

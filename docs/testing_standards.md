@@ -431,3 +431,13 @@ follow-up histogram must sum exactly to the follow-up-event delta, but the
 delta is not required to have at least as many new dry closes: the matching
 close may lie immediately before the measurement boundary. Causal
 `followups <= closes` validation belongs to the cumulative endpoint snapshots.
+
+
+### Generated report versus tracked source cleanliness
+
+`test_results.json.xz` is the one generated overwriteable evidence file and is
+not tested source. Privileged loaded qualification therefore excludes only that
+exact root path from its tracked/staged source-cleanliness check. This permits a
+previous local report to remain until the current run finishes, including after
+an earlier publication failure. Every other tracked or staged change still
+blocks loaded qualification before module/device work.
