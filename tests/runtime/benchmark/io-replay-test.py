@@ -92,8 +92,10 @@ class PairReplayContract(unittest.TestCase):
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
-        before = dict(zip(fields, (10, 4, 5, 3000, 100, 2, 1, 1, 1, 0)))
+        before = dict(zip(fields, (10, 4, 5, 3000, 100, 50, 4096, 200,
+                                   2, 1, 1, 1, 0)))
         after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
+                                  100050, 4198400, 500200,
                                   402, 102, 321, 201, 200)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
@@ -105,6 +107,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_meta_reqs"], 1024)
         self.assertEqual(measured["read_payload_reqs"], 512)
         self.assertEqual(measured["read_payload_blocks"], 512)
+        self.assertEqual(measured["read_copy_wall_ns"], 100000)
+        self.assertEqual(measured["read_copy_bytes"], 4194304)
+        self.assertEqual(measured["read_engine_nonio_wall_ns"], 500000)
         self.assertEqual(measured["read_meta_cache_hits"], 400)
         self.assertEqual(measured["read_meta_lru_hits"], 101)
         self.assertEqual(measured["read_full_extent_reqs"], 320)
@@ -144,10 +149,11 @@ class PairReplayContract(unittest.TestCase):
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_write_delta(None, None))
         before = dict(zip(module.KERNEL_WRITE_FIELDS,
-                          (2, 100, 20, 400, 300, 10, 20, 1, 1, 1, 0)))
+                          (2, 100, 30, 4096, 20, 400, 100, 300,
+                           10, 20, 1, 1, 1, 0)))
         after = dict(zip(module.KERNEL_WRITE_FIELDS,
-                         (7, 50100, 1020, 70400, 60300, 510, 5020,
-                          4, 3, 3, 1)))
+                         (7, 50100, 1030, 8192, 1020, 70400, 10100, 60300,
+                          510, 5020, 4, 3, 3, 1)))
         fake = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -158,6 +164,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["physical_write_reqs"], 5)
         self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
                          [2, 2, 1])
+        self.assertEqual(delta["write_copy_wall_ns"], 1000)
+        self.assertEqual(delta["write_copy_bytes"], 4096)
+        self.assertEqual(delta["window_commit_nonio_wall_ns"], 10000)
         self.assertEqual(delta["lower_write_wall_ns"], 60000)
         self.assertEqual(delta["prep_wait_wall_ns"], 500)
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
