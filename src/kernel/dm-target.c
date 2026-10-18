@@ -362,6 +362,8 @@ struct swapz_dm {
 	u64 engine_hole_clear_wall_ns;
 	u64 preparation_crc_wall_ns;
 	u64 ordered_crc_wall_ns;
+	u64 preparation_crc_pages;
+	u64 ordered_crc_pages;
 	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
 	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
@@ -937,6 +939,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 						   prepared->length);
 			ctx->preparation_crc_wall_ns += swapz_elapsed_ns(
 				section_start, ktime_get_ns());
+			ctx->preparation_crc_pages++;
 			prepared->payload_crc_valid = true;
 		} else if (prepared->length <= 0) {
 			swapz_memcpy_accounted(prepared->bytes, input,
@@ -1937,6 +1940,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				(swapz_u32)length);
 			ctx->ordered_crc_wall_ns += swapz_elapsed_ns(
 				section_start, ktime_get_ns());
+			ctx->ordered_crc_pages++;
 			payload_crc_valid = true;
 		}
 		/*
@@ -3299,7 +3303,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
-		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
+		       "lz4_wall_ns=%llu ordered_lz4_wall_ns=%llu "
+		       "prep_lz4_wall_ns=%llu payload_crc_wall_ns=%llu "
+		       "payload_crc_pages=%llu decode_wall_ns=%llu "
 		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
 		       "direct_lz4_input_pages=%llu "
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
@@ -3309,7 +3315,6 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "engine_publish_wall_ns=%llu "
 		       "engine_stage_wall_ns=%llu engine_pause_wall_ns=%llu "
 		       "engine_resume_wall_ns=%llu engine_hole_clear_wall_ns=%llu "
-		       "payload_crc_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "cpu_trace=%u ordered_worker_oncpu_ns=%llu "
@@ -3425,6 +3430,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->preparation_ordered_waits,
 		       ctx->preparation_ordered_wait_wall_ns,
 		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
+		       ctx->lz4_wall_ns, ctx->preparation_lz4_wall_ns,
+		       ctx->preparation_crc_wall_ns + ctx->ordered_crc_wall_ns,
+		       ctx->preparation_crc_pages + ctx->ordered_crc_pages,
 		       ctx->decode_wall_ns,
 		       ctx->preparation_copy_wall_ns +
 			       ctx->ordered_write_copy_wall_ns,
@@ -3439,7 +3447,6 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine_publish_wall_ns,
 		       ctx->engine_stage_wall_ns, ctx->engine_pause_wall_ns,
 		       ctx->engine_resume_wall_ns, ctx->engine_hole_clear_wall_ns,
-		       ctx->preparation_crc_wall_ns + ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->cpu_trace_registered,
