@@ -2110,7 +2110,13 @@ static void swapz_worker(struct work_struct *work)
 					wait_for_preparation = false;
 					ctx->preparation_ordered_inline++;
 					atomic_set(&ctx->preparation_tail_credit, 1);
-					if (!list_empty(&ctx->preparation_incoming))
+					/*
+					 * A lone unclaimed entry is still the FIFO head:
+					 * the producer would reject it without consuming
+					 * this credit. Wait until a true tail exists.
+					 */
+					if (!list_empty(&ctx->preparation_incoming) &&
+					    !list_is_singular(&ctx->preparation_incoming))
 						queue_work(ctx->preparation_workqueue,
 							   &ctx->preparation_worker);
 				} else {
@@ -2385,16 +2391,20 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
-		 * A cold lone head belongs to the ordered worker first. A retained
-		 * inline WRITE may leave one earned tail token alive after that worker
-		 * goes idle; the next admitted companion can therefore wake the
-		 * producer without reading worker-owned batch_count. A real lower
-		 * WRITE remains the independent head-first overlap signal.
+		 * A cold lone head belongs to the ordered worker first. Retained
+		 * inline WRITE credit bridges an inter-BIO gap, but a one-entry
+		 * preparation list has no eligible opposite-end tail: waking the
+		 * producer would just acquire queue_lock and return. The next map
+		 * admission can wake it once two unclaimed entries exist. A real
+		 * lower WRITE still wakes for head-first overlap, even with one.
+		 * The list check is safe here under queue_lock; batch_count remains
+		 * worker-private.
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
 		if (atomic_read(&ctx->lower_write_active) ||
-		    atomic_read(&ctx->preparation_tail_credit))
+		    (atomic_read(&ctx->preparation_tail_credit) &&
+		     !list_is_singular(&ctx->preparation_incoming)))
 			queue_work(ctx->preparation_workqueue,
 				   &ctx->preparation_worker);
 	}

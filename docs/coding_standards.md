@@ -353,15 +353,22 @@ between companion BIOs without exposing worker-owned `batch_count` to
 `preparation_incoming` is singular: on a one-entry list the nominal tail is
 also the FIFO head, so claiming it forces an avoidable ordered completion wait.
 The sole head and its token remain intact until a true tail exists behind it.
-If ordered inline work earns a fresh token while the producer is already
-running, the producer may continue for that new token; it must stop when no
-eligible credited tail remains. A nonempty window close clears any unused token.
+Both `->map` admission and inline-WRITE grant may check the
+`preparation_incoming` list under `queue_lock` to avoid scheduling a producer
+that is certain to reject a singular head. The companion arrival is the next
+kick opportunity; synchronous lower WRITE independently wakes the producer for
+head-first service even on a singular list. If ordered inline work earns a fresh
+token while the producer is already running, the producer may continue for that
+new token; it must stop when no eligible credited tail remains. A nonempty
+window close clears any unused token.
 
 A cold lone head has no token and therefore does not wake the producer.
 `->map` may wake parallel preparation only for active lower WRITE service or
-an already-earned atomic tail credit. It must not read `batch_count` or depend
-on the instantaneous `ordered_worker_busy` interval. READ/barrier execution
-may still grant one bounded token while it owns ordered service time.
+an already-earned atomic tail credit with a genuine two-entry preparation
+head/tail split. It may inspect that list only under `queue_lock`, never
+worker-private `batch_count` or the instantaneous `ordered_worker_busy`
+interval. READ/barrier execution may still grant one bounded token while it
+owns ordered service time, subject to the same true-tail eligibility rule.
 
 The ordered Device Mapper worker and preparation worker both use serialized
 `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueues. The ordered worker remains

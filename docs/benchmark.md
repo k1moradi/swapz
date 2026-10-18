@@ -311,3 +311,37 @@ QD1 to retain zero producer claims, QD8/QD32 request geometry to remain near
 async lower WRITE requests/one-page PACK_READY closes to fall without increasing
 lower WRITE bytes or regressing packed-read tails. The write-only sweep remains
 directional until statistically repeated pairs exist.
+
+
+### Qualified head-cushion result and singular-wake avoidance
+
+Source `6642e7ebfce3255267f51fe99b66114122bda7e0` passed all five
+owner-loaded qualification stages. The singular-head guard removed the
+preparation convoy: SSD-model QD4/QD8/QD32 write-only async blocking waits
+became zero instead of 943/1373/1941 at `6330cb5`. It also reduced
+producer-tail claims to 16/14/0, demonstrating that staggered submissions
+rarely leave two unclaimed entries for opposite-end preparation.
+
+SSD-model QD8 async reached 26.24 MB/s versus 19.58 sync while keeping 520
+lower WRITE requests; QD32 async reached 46.87 MB/s versus 46.01 sync
+with 138/139 lower requests. These are single-pair pilots without confidence
+intervals, not established advantages. Mixed SSD-model async reached 21.80
+MB/s with 1007 lower WRITE requests, 26.5 blocking waits per pair, 136
+one-page PACK_READY closes, and packed read tails below raw. The slow-model
+mixed async remained 7.09 MB/s with 544.5 requests and packed read tails
+worse than raw. Loaded GC victims remained zero.
+
+The next candidate is intentionally narrower than reclaiming parallel
+compression: do not wake a producer whose only unclaimed entry is the FIFO
+head, because it cannot consume the retained tail token on a singular list.
+The inline-WRITE and map-admission wake sites both check the protected
+preparation-list topology under `queue_lock`. Active lower WRITE continues to
+wake head-first without a two-entry requirement. No accepted BIO is skipped,
+no credit is consumed by a rejected singular case, and no retention or
+physical-byte policy changes.
+
+Acceptance requires unchanged correctness, QD1 zero producer claims,
+write-only QD8/QD32 requests near 520/~138, no reintroduced blocking waits,
+and preserved mixed lower WRITE savings/read tails. An exploratory throughput
+change alone is not grounds to claim a performance improvement; the project
+still requires repeated counterbalanced pairs and confidence intervals.

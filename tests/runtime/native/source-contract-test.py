@@ -1110,6 +1110,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("queue_work(ctx->preparation_workqueue", mapper)
         self.assertIn("atomic_read(&ctx->lower_write_active)", mapper)
         self.assertIn("atomic_read(&ctx->preparation_tail_credit)", mapper)
+        self.assertIn("!list_is_singular(&ctx->preparation_incoming)", mapper)
+        self.assertLess(mapper.index("list_add_tail(&entry->preparation_list"),
+                        mapper.index("!list_is_singular(&ctx->preparation_incoming)"))
+        self.assertLess(mapper.index("!list_is_singular(&ctx->preparation_incoming)"),
+                        mapper.index("queue_work(ctx->preparation_workqueue"))
         self.assertNotIn("atomic_read(&ctx->ordered_worker_busy)", mapper)
         self.assertNotIn("ctx->batch_count", mapper)
         self.assertNotIn("ctx->incoming.next != &entry->list", mapper)
@@ -1151,6 +1156,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         producer_kick = ordered.index("queue_work(ctx->preparation_workqueue",
                                       steal)
         self.assertLess(steal, producer_kick)
+        inline_kick = ordered[steal:producer_kick]
+        self.assertIn("!list_empty(&ctx->preparation_incoming)", inline_kick)
+        self.assertIn("!list_is_singular(&ctx->preparation_incoming)",
+                      inline_kick)
+        # READ/barrier service and synchronous lower WRITE retain their own
+        # wake paths; only ordinary inline-WRITE tail kicks need a cushion.
+        self.assertIn("atomic_set(&ctx->preparation_tail_credit, 1)", ordered)
+        self.assertIn("queue_work(ctx->preparation_workqueue", lower)
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock, flags)", ordered)
         self.assertLess(ordered.index("wait_for_completion("),
                         ordered.index("swapz_process(ctx, entry->bio)"))

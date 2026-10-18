@@ -10,56 +10,55 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`6330cb5d264a7cf563f4a161c29ac9ccd1d3e08b` passed all five stages and is
-qualified exploratory evidence, but is not promoted.
+`6642e7ebfce3255267f51fe99b66114122bda7e0` passed all five owner-loaded
+qualification stages and is qualified exploratory evidence, not promoted.
 
-The persistent preparation-credit experiment solved producer starvation without
-damaging write-only geometry. QD1 async still recorded zero producer claims.
-On the faster model QD4/QD8/QD32 producer-tail claims rose to
-2026/2071/2142, while QD8 retained 520 lower WRITE requests and QD32 retained
-138. Faster QD32 sync also improved to 45.45 MB/s after moving the serialized
-ordered worker to `WQ_UNBOUND`.
+The singular-head guard eliminated the `6330cb5` preparation convoy while
+preserving write-only request aggregation and improving the mixed faster model.
+Faster-model QD4/QD8/QD32 async blocking waits fell to zero, but tail
+preparations fell to only 16/14/0. QD8 retained 520 lower WRITE requests and
+QD32 retained 138, with QD1 still at zero producer claims. Faster-model
+write-only QD8 async reached 26.24 MB/s versus 19.58 sync; QD32 async reached
+46.87 MB/s versus 46.01 sync. Those one-pair results are directional only and
+do not establish a reproducible gain.
 
-The remaining preparation problem is now directly measured as head collision.
-Faster-model blocking waits were 943/1373/1941 against
-2029/2074/2164 handoffs at QD4/QD8/QD32: roughly 46%/66%/90%. A nominal tail
-claim on a singular preparation list is the FIFO head, so staggered arrivals
-turn the intended two-ended scheme into ordered-worker completion waits.
+Mixed faster-model async reached 21.80 MB/s with 1007 lower WRITE requests,
+26.5 preparation blocking waits, 136 one-page PACK_READY closes, 59.5
+worker-empty deadlines and packed read p99 below raw. Slow mixed remained
+7.09 MB/s async with 544.5 lower WRITE requests and 12.0 blocking waits.
+The lower-WRITE byte savings and existing read-tail limitations are still gates.
 
-Mixed behavior exposes a second bounded issue. Slow mixed remained efficient at
-about 544.5 async lower WRITE requests with only 4.0 worker-empty deadlines.
-Faster mixed async rose to 1155 lower WRITE requests, 77.8 worker-empty
-deadlines and 160.2 one-page PACK_READY closes, while useful WRITE throughput
-was 20.40 MB/s. Read/fence evidence is therefore surviving a dry-tail nonempty
-close long enough to authorize later singleton closes in the same worker pass.
+The qualified result shows that a one-entry preparation queue is too shallow
+for useful opposite-end stealing under staggered write-only admission: the
+guard eliminates harmful overlap but its repeated producer wake/return cycles
+are scheduling overhead. There is not yet evidence that another eligibility
+relaxation would improve actual throughput rather than rebuild the convoy.
 
-The write-only pilot remains one pair per mode/QD with no confidence interval,
-and the loaded run again reported zero GC victims. No physical-media or
-endurance claim is permitted.
+The loaded run again recorded zero GC victims, so no physical-media or
+endurance claim is permitted. Write-only saturation remains one pair per
+mode/QD with no confidence interval.
 
 ## Immediate work queue
 
-1. Keep the `6330cb5` credit lifetime, unbound worker placement, retained
-   targets, extent planning, lower-byte policy, read policy and GC unchanged.
-2. Outside `lower_write_active`, never consume a preparation token when
-   `preparation_incoming` is singular. Leave the sole FIFO head and its credit
-   for ordered inline steal; claim only a true tail behind at least one head.
-3. Preserve the credit when the producer rejects a singular queue so the next
-   admitted companion can create an eligible two-entry head/tail split.
-4. Consume `retained_window_read_bypasses` and
-   `retained_wave_interrupted` after a PACK_READY close at a refreshed dry
-   tail. Preserve DUPLICATE/FULL continuation semantics and the existing
-   zero-count early return.
-5. Acceptance requires QD1 producer claims to remain zero, QD8/QD32 lower
-   requests to stay near 520/~138, producer-tail work to remain substantial,
-   and blocking waits to fall sharply below handoffs. Faster mixed async lower
-   WRITE requests and one-page PACK_READY closes should move back toward the
-   prior ~950-1040/~90-140 range without increasing lower WRITE bytes or
-   degrading packed-read tails.
-6. Do not claim a performance improvement from the one-pair write-only sweep.
-   Statistically repeated saturation, sustained GC, genuine lower errors,
-   kernel-worker CPU attribution and long-run resource pressure remain release
-   gates.
+1. Keep `6642e7e`'s singular-head producer guard, persistent credit lifetime,
+   unbound workqueue placement, retained targets, extent planning, physical
+   byte policy, read policy and GC unchanged.
+2. Suppress a producer wake in the inline-WRITE path when the protected
+   preparation list is empty or singular. Preserve that earned token for the
+   next real two-entry head/tail opportunity.
+3. Under the same `queue_lock`, wake from `->map` on retained credit only when
+   at least two unclaimed preparation entries exist. The independent active
+   lower-WRITE wake must remain unconditional on list length.
+4. Reject this scheduling-only experiment if it reduces mixed useful
+   throughput, raises backing WRITE bytes/requests, harms packed READ p99, or
+   causes QD1 producer claims or blocking waits. QD8/QD32 write-only requests
+   should remain near 520/~138; tail claims cannot be manufactured from a
+   singular FIFO head.
+5. If skipping redundant wakes proves insufficient, further write-only
+   parallelism requires an independently reviewed, bounded FIFO-preserving
+   preparation-ahead design, not the proven harmful singular-head steal.
+   Statistically repeated saturation, sustained GC, genuine lower errors and
+   kernel-worker CPU attribution remain release gates.
 
 ## Release gates
 
