@@ -326,6 +326,9 @@ struct swapz_dm {
 	u64 window_commit_wall_ns;
 	/* Engine commit wall time with synchronous lower-WRITE wait removed. */
 	u64 window_commit_nonio_wall_ns;
+	u64 engine_plan_wall_ns;
+	u64 engine_pack_wall_ns;
+	u64 engine_publish_wall_ns;
 	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
 	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
@@ -1375,6 +1378,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		swapz_u8 succeeded = 0;
 
 		u64 lower_write_before = ctx->lower_write_wall_ns;
+		u64 plan_before = ctx->engine.plan_wall_ns;
+		u64 pack_before = ctx->engine.pack_wall_ns;
+		u64 publish_before = ctx->engine.publish_wall_ns;
 		u64 commit_elapsed;
 		u64 lower_write_elapsed;
 
@@ -1389,6 +1395,12 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		if (commit_elapsed >= lower_write_elapsed)
 			ctx->window_commit_nonio_wall_ns +=
 				commit_elapsed - lower_write_elapsed;
+		ctx->engine_plan_wall_ns +=
+			ctx->engine.plan_wall_ns - plan_before;
+		ctx->engine_pack_wall_ns +=
+			ctx->engine.pack_wall_ns - pack_before;
+		ctx->engine_publish_wall_ns +=
+			ctx->engine.publish_wall_ns - publish_before;
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -3142,8 +3154,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
-		       ctx->engine.plan_wall_ns, ctx->engine.pack_wall_ns,
-		       ctx->engine.publish_wall_ns,
+		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
+		       ctx->engine_publish_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
