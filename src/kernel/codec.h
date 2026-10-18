@@ -71,6 +71,10 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 	      swapz_u32 bytes_total, swapz_u32 sequence);
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	       swapz_u32 generation, const void *payload, swapz_u16 length);
+int swapz_append_prehashed(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u32 payload_crc32c);
 int swapz_seal(struct swapz_builder *builder);
 int swapz_validate(const void *bytes, swapz_u32 bytes_total);
 /*
@@ -81,6 +85,11 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	     struct swapz_decoded *out);
 int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	       struct swapz_decoded *out, const swapz_u8 **payload);
+/* Caller must have already completed swapz_validate() on this immutable image.
+ * This still verifies the selected final payload CRC before returning it. */
+int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
+			 swapz_u8 index, struct swapz_decoded *out,
+			 const swapz_u8 **payload);
 swapz_u32 swapz_crc32c_bytes(const void *bytes, swapz_u32 length);
 
 #endif
