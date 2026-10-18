@@ -523,3 +523,28 @@ Presuspend closes admission before waiting for an external lower completion,
 then wakes/drains the ordered worker so every paused transaction is published
 or aborted before teardown. The target drain invariant includes the asynchronous
 run-active bit in addition to batch and authority state.
+
+
+### Paused-run read independence
+
+A paused immutable lower-WRITE group must not globally fence unrelated READs.
+While the K=1 run is active, committed mappings remain authoritative until the
+ordered worker replays and publishes the paused transactions. A READ may bypass
+the active collector only when its logical page is absent from both the
+collector and every transaction in the immutable run, authority replay is not
+active, and no PREFLUSH/FUA/control fence applies. Malformed or mismatched run
+metadata fails closed and forces ordered finalization. Same-page read-after-
+write never bypasses the unpublished generation.
+
+### Exact per-segment mapping counts
+
+Production rotating-GC authority maintains one preallocated exact logical-map
+count per physical segment. Every successful compressed/raw publication and
+logical discard updates it in the same serialized authority phase as
+`live_records`. Dead-segment selection and victim-role commit cross-check the
+segment count against the sum of the segment's 256 physical live-record
+refcounts; disagreement is corruption and fails closed. This sidecar replaces
+production full-logical-map validation scans at dead-segment allocation and
+post-evacuation role commit, while portable callers without the sidecar retain
+the conservative full-map fallback. Victim discovery/evacuation may still scan
+the logical map until a separately qualified reverse index exists.

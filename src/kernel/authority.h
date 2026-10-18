@@ -58,6 +58,10 @@ struct swapz_authority {
 	 * NULL retains the original research allocator/test behavior.
 	 */
 	swapz_u8 *segment_foreground;
+	/* Optional exact logical-map occupancy per 1MiB segment. Production
+	 * supplies this bounded sidecar so dead-segment validation is O(256)
+	 * instead of rescanning every logical page. */
+	swapz_u32 *segment_mapped_pages;
 	swapz_u32 segment_count;
 	swapz_u32 gc_destination;
 	swapz_u32 next_block;
@@ -119,6 +123,11 @@ struct swapz_authority {
 int swapz_enable_segment_rotation(struct swapz_authority *authority,
 				swapz_u8 *segment_roles,
 				swapz_u32 segment_count);
+/* Attach a caller-owned exact mapping-count sidecar on a fresh rotating
+ * authority. Native/research callers may omit it and retain full-map checks. */
+int swapz_enable_segment_mapping_counts(struct swapz_authority *authority,
+				      swapz_u32 *segment_mapped_pages,
+				      swapz_u32 segment_count);
 /* Begin GC into ONE entirely dead reserve segment (not a foreground one).
  * Caller preserves the foreground cursor until commit; no nested GC. */
 int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim);

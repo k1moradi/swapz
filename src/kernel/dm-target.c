@@ -200,6 +200,7 @@ struct swapz_dm {
 	swapz_u16 *gc_live_counts; /* count for ties/control comparison */
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	swapz_u32 *gc_segment_evictions; /* successful committed victim rotations */
+	swapz_u32 *segment_mapped_pages; /* exact current logical maps per segment */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	swapz_u32 segment_count;
 	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
@@ -1452,13 +1453,21 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 	 * liveness record remain in the original segment. If this test fails,
 	 * return an error without recycling any physical bytes.
 	 */
-	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		const struct swapz_map *m = &ctx->maps[logical];
-
-		if (m->valid &&
-		    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim) {
+	if (a->segment_mapped_pages) {
+		if (victim >= a->segment_count ||
+		    a->segment_mapped_pages[victim]) {
 			error = -EUCLEAN;
 			goto out;
+		}
+	} else {
+		for (logical = 0; logical < ctx->logical_pages; ++logical) {
+			const struct swapz_map *m = &ctx->maps[logical];
+
+			if (m->valid &&
+			    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim) {
+				error = -EUCLEAN;
+				goto out;
+			}
 		}
 	}
 	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
@@ -2429,13 +2438,49 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 
 static bool swapz_retention_expired(struct swapz_dm *ctx);
 
+static bool swapz_inflight_run_touches_logical(struct swapz_dm *ctx,
+					       swapz_u32 logical)
+{
+	struct swapz_inflight_write *inflight = &ctx->inflight_write;
+	struct swapz_io_run *run = &inflight->run;
+	swapz_u8 extent, record;
+
+	if (!READ_ONCE(inflight->active))
+		return false;
+	/* A malformed or mismatched paused snapshot is a fence, never a bypass. */
+	if (!run->txs || !run->extent_count ||
+	    run->extent_count > SWAPZ_MAX_RECORDS ||
+	    ctx->authority.batch_pending != run->extent_count)
+		return true;
+	for (extent = 0; extent < run->extent_count; ++extent) {
+		const struct swapz_tx *tx = &run->txs[extent];
+
+		if (!tx->count || tx->count > SWAPZ_MAX_RECORDS)
+			return true;
+		for (record = 0; record < tx->count; ++record)
+			if (tx->records[record].logical_page == logical)
+				return true;
+	}
+	return false;
+}
+
 static bool swapz_read_is_independent(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
+	bool inflight_active = READ_ONCE(ctx->inflight_write.active);
 	bool blocked = !READ_ONCE(ctx->accepting) || ctx->failed ||
-		ctx->authority.in_flight || ctx->authority.batch_pending ||
-		(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
+		ctx->authority.in_flight || ctx->authority.batch_replaying ||
+		(ctx->authority.batch_pending && !inflight_active) ||
+		(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)) ||
+		swapz_inflight_run_touches_logical(ctx, logical);
 
+	/*
+	 * A K=1 lower run has reserved unpublished generations, but its committed
+	 * predecessor mappings remain authoritative until ordered completion.
+	 * Unrelated reads may therefore use those committed mappings while the
+	 * lower WRITE is active. Same-page reads and collector conflicts still
+	 * fence and force ordered finalization.
+	 */
 	return swapz_window_read_independent(ctx->batch, ctx->batch_count,
 					 logical, ctx->retain_ms, blocked);
 }
@@ -3124,6 +3169,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->gc_live_counts);
 	kvfree(ctx->gc_min_live_blocks);
 	kvfree(ctx->gc_segment_evictions);
+	kvfree(ctx->segment_mapped_pages);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
@@ -3270,6 +3316,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->gc_segment_evictions = kvcalloc(ctx->segment_count,
 					    sizeof(*ctx->gc_segment_evictions),
 					    GFP_KERNEL);
+	ctx->segment_mapped_pages = kvcalloc(ctx->segment_count,
+					    sizeof(*ctx->segment_mapped_pages),
+					    GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
@@ -3281,7 +3330,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->discard_epoch || !ctx->discard_count ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
-	    !ctx->gc_segment_evictions || !ctx->segment_roles) {
+	    !ctx->gc_segment_evictions || !ctx->segment_mapped_pages ||
+	    !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -3299,6 +3349,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 					  ctx->segment_roles, ctx->segment_count);
 	if (error) {
 		ti->error = "Cannot initialize rotating GC reserve roles";
+		goto fail;
+	}
+	error = swapz_enable_segment_mapping_counts(&ctx->authority,
+						ctx->segment_mapped_pages,
+						ctx->segment_count);
+	if (error) {
+		ti->error = "Cannot initialize exact segment mapping counts";
 		goto fail;
 	}
 	ctx->batch_bytes = vzalloc(SWAPZ_BATCH_BYTES);

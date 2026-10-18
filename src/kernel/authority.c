@@ -100,7 +100,7 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 	for (scan = 0; scan < count; ++scan) {
 		swapz_u32 segment = (a->next_segment_probe + scan) % count;
 		swapz_u32 start = segment * SWAPZ_SEGMENT_BLOCKS;
-		swapz_u32 off, logical;
+		swapz_u32 off, logical, live_total = 0;
 		int used = 0, blocked = 0;
 
 		/*
@@ -128,29 +128,33 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 		     !a->segment_foreground[segment]))
 			continue;
 		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
-			if (a->live_records[start + off]) {
-				blocked = 1;
-				break;
-			}
+			live_total += a->live_records[start + off];
 			if (a->extent_classes[start + off])
 				used = 1;
 		}
-		if (blocked)
-			continue;
-		for (logical = 0; logical < a->logical_pages; ++logical) {
-			const struct swapz_map *map = &a->maps[logical];
-
-			if (!map->valid)
-				continue;
-			if (map->start_block >= a->physical_blocks)
+		if (a->segment_mapped_pages) {
+			if (live_total != a->segment_mapped_pages[segment])
 				return -EUCLEAN;
-			if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment) {
-				blocked = 1;
-				break;
+			if (live_total)
+				continue;
+		} else {
+			if (live_total)
+				continue;
+			for (logical = 0; logical < a->logical_pages; ++logical) {
+				const struct swapz_map *map = &a->maps[logical];
+
+				if (!map->valid)
+					continue;
+				if (map->start_block >= a->physical_blocks)
+					return -EUCLEAN;
+				if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment) {
+					blocked = 1;
+					break;
+				}
 			}
+			if (blocked)
+				continue;
 		}
-		if (blocked)
-			continue;
 		/*
 		 * Segment has no authoritative records and no pending writes.
 		 * The previous contents are disposable swap bytes, not durable
@@ -198,6 +202,19 @@ int swapz_enable_segment_rotation(struct swapz_authority *a,
 	return 0;
 }
 
+int swapz_enable_segment_mapping_counts(struct swapz_authority *a,
+				      swapz_u32 *counts, swapz_u32 count)
+{
+	if (!a || !counts || a->segment_mapped_pages || !a->segment_foreground ||
+	    a->in_flight || a->batch_pending || a->gc_allocation ||
+	    a->next_block || a->open_segment != ~(swapz_u32)0 ||
+	    count != a->segment_count)
+		return -EINVAL;
+	memset(counts, 0, (size_t)count * sizeof(*counts));
+	a->segment_mapped_pages = counts;
+	return 0;
+}
+
 /*
  * Force relocation into ONE verified dead reserve segment. Do not touch
  * the foreground cursor here: the sole DM worker saves it before GC and
@@ -242,7 +259,7 @@ int swapz_gc_begin_rotation(struct swapz_authority *a, swapz_u32 victim)
  */
 int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 {
-	swapz_u32 dest, logical, block;
+	swapz_u32 dest, logical, block, live_total = 0;
 
 	if (!a || !a->segment_foreground || !a->gc_allocation ||
 	    a->in_flight || a->batch_pending || victim >= a->segment_count ||
@@ -266,17 +283,24 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 	 */
 	if (a->next_block == (dest + 1U) * SWAPZ_SEGMENT_BLOCKS)
 		return -ENOSPC;
-	for (logical = 0; logical < a->logical_pages; ++logical) {
-		const struct swapz_map *m = &a->maps[logical];
-
-		if (m->valid && (m->start_block >= a->physical_blocks ||
-		    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim))
+	if (a->segment_mapped_pages) {
+		if (a->segment_mapped_pages[victim])
 			return -EUCLEAN;
+	} else {
+		for (logical = 0; logical < a->logical_pages; ++logical) {
+			const struct swapz_map *m = &a->maps[logical];
+
+			if (m->valid && (m->start_block >= a->physical_blocks ||
+			    m->start_block / SWAPZ_SEGMENT_BLOCKS == victim))
+				return -EUCLEAN;
+		}
 	}
 	for (block = victim * SWAPZ_SEGMENT_BLOCKS;
 	     block < (victim + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
-		if (a->live_records[block])
-			return -EUCLEAN;
+		live_total += a->live_records[block];
+	if (live_total || (a->segment_mapped_pages &&
+			   live_total != a->segment_mapped_pages[victim]))
+		return -EUCLEAN;
 	/* Commit both roles without further lower I/O or fallible work. */
 	a->segment_foreground[dest] = 1;
 	a->segment_foreground[victim] = 0;
@@ -564,7 +588,7 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 		   const void *raw_page, swapz_u8 completed_blocks, int io_error)
 {
 	struct swapz_map *old;
-	swapz_u32 page;
+	swapz_u32 page, old_segment = 0, new_segment;
 	int error;
 
 	if (!swapz_is_active(a, tx))
@@ -587,6 +611,7 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 		goto fail;
 	}
 	old = &a->maps[page];
+	new_segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
 	if (old->generation == ~(swapz_u32)0 ||
 	    old->generation + 1U != tx->records[0].generation ||
 	    a->live_records[tx->start_block] ||
@@ -602,10 +627,35 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
+	if (a->segment_mapped_pages) {
+		if (new_segment >= a->segment_count) {
+			error = -EUCLEAN;
+			goto fail;
+		}
+		if (old->valid) {
+			old_segment = old->start_block / SWAPZ_SEGMENT_BLOCKS;
+			if (old_segment >= a->segment_count ||
+			    !a->segment_mapped_pages[old_segment]) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+		}
+		if ((!old->valid || old_segment != new_segment) &&
+		    a->segment_mapped_pages[new_segment] == ~(swapz_u32)0) {
+			error = -EOVERFLOW;
+			goto fail;
+		}
+	}
 	a->live_records[tx->start_block] = 1;
 	a->extent_classes[tx->start_block] = 1;
 	if (old->valid)
 		a->live_records[old->start_block]--;
+	if (a->segment_mapped_pages &&
+	    (!old->valid || old_segment != new_segment)) {
+		if (old->valid)
+			a->segment_mapped_pages[old_segment]--;
+		a->segment_mapped_pages[new_segment]++;
+	}
 	*old = (struct swapz_map){
 		.start_block = tx->start_block,
 		.sequence = tx->sequence,
@@ -652,7 +702,7 @@ int swapz_verify_raw(const struct swapz_authority *a, swapz_u32 logical_page,
 int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 {
 	struct swapz_map *old;
-	swapz_u32 generation;
+	swapz_u32 generation, old_segment = 0;
 
 	if (!a || !a->maps || logical_page >= a->logical_pages)
 		return -EINVAL;
@@ -668,8 +718,16 @@ int swapz_discard_page(struct swapz_authority *a, swapz_u32 logical_page)
 	     !a->live_records[old->start_block]))
 		return -EUCLEAN;
 	generation = old->generation + 1U;
+	if (a->segment_mapped_pages && old->valid) {
+		old_segment = old->start_block / SWAPZ_SEGMENT_BLOCKS;
+		if (old_segment >= a->segment_count ||
+		    !a->segment_mapped_pages[old_segment])
+			return -EUCLEAN;
+	}
 	if (old->valid)
 		a->live_records[old->start_block]--;
+	if (a->segment_mapped_pages && old->valid)
+		a->segment_mapped_pages[old_segment]--;
 	memset(old, 0, sizeof(*old));
 	old->generation = generation;
 	return 0;
@@ -689,6 +747,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	const swapz_u8 *image = extent;
 	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u32 old_segments[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u32 new_segment, new_additions = 0;
 	swapz_u8 index;
 	int error = 0;
 
@@ -703,6 +763,11 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	error = swapz_validate(image, bytes_total);
 	if (error)
 		goto fail;
+	new_segment = tx->start_block / SWAPZ_SEGMENT_BLOCKS;
+	if (a->segment_mapped_pages && new_segment >= a->segment_count) {
+		error = -EUCLEAN;
+		goto fail;
+	}
 	if (image[7] != tx->count || swapz_disk_sequence(image) != tx->sequence) {
 		error = -EUCLEAN;
 		goto fail;
@@ -753,8 +818,11 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			error = -ESTALE;
 			goto fail;
 		}
-		if (!old->valid)
+		if (!old->valid) {
+			if (a->segment_mapped_pages)
+				new_additions++;
 			continue;
+		}
 		if (old->start_block >= a->physical_blocks ||
 		    !swapz_legal_class(old->extent_blocks) ||
 		    a->extent_classes[old->start_block] != old->extent_blocks) {
@@ -773,6 +841,38 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			error = -EUCLEAN;
 			goto fail;
 		}
+		if (a->segment_mapped_pages) {
+			swapz_u8 segment_prior = 0;
+
+			old_segments[index] =
+				old->start_block / SWAPZ_SEGMENT_BLOCKS;
+			if (old_segments[index] >= a->segment_count) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			for (j = 0; j <= index; ++j) {
+				const struct swapz_map *earlier_old =
+					&a->maps[tx->records[j].logical_page];
+
+				if (earlier_old->valid &&
+				    earlier_old->start_block / SWAPZ_SEGMENT_BLOCKS ==
+						old_segments[index])
+					segment_prior++;
+			}
+			if (a->segment_mapped_pages[old_segments[index]] <
+			    segment_prior) {
+				error = -EUCLEAN;
+				goto fail;
+			}
+			if (old_segments[index] != new_segment)
+				new_additions++;
+		}
+	}
+	if (a->segment_mapped_pages &&
+	    new_additions > ~(swapz_u32)0 -
+			a->segment_mapped_pages[new_segment]) {
+		error = -EOVERFLOW;
+		goto fail;
 	}
 	if (a->live_records[tx->start_block] ||
 	    a->extent_classes[tx->start_block]) {
@@ -793,6 +893,12 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 
 		if (entry->valid)
 			a->live_records[entry->start_block]--;
+		if (a->segment_mapped_pages) {
+			if (entry->valid && old_segments[index] != new_segment)
+				a->segment_mapped_pages[old_segments[index]]--;
+			if (!entry->valid || old_segments[index] != new_segment)
+				a->segment_mapped_pages[new_segment]++;
+		}
 		*entry = (struct swapz_map){
 			.start_block = tx->start_block,
 			.sequence = tx->sequence,

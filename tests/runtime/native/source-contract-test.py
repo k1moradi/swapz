@@ -335,8 +335,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_flush_window"))
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_raw_write"))
         self.assertIn("swapz_gc_choose_victim(ctx,", body("swapz_gc_compact_one"))
-        self.assertIn("if (a->live_records[start + off])", AUTH)
-        self.assertIn("if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment)", AUTH)
+        self.assertIn("live_total += a->live_records[start + off]", AUTH)
+        self.assertIn("live_total != a->segment_mapped_pages[segment]", AUTH)
+        self.assertIn("swapz_enable_segment_mapping_counts", AUTH)
         self.assertIn("cost = swapz_gc_live_byte_cost(m)", DM)
         self.assertIn("ctx->gc_scores[segment] += cost", DM)
         self.assertIn("swapz_gc_prefer(score, count, best, best_count)", DM)
@@ -520,6 +521,26 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         drain = body("swapz_drain")
         self.assertIn("ctx->authority.batch_pending", drain)
         self.assertIn("ctx->authority.in_flight", drain)
+
+    def test_gc_production_uses_exact_segment_mapping_counts(self):
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        finish = source_body("swapz_finish", authority)
+        raw = source_body("swapz_finish_raw", authority)
+        discard = source_body("swapz_discard_page", authority)
+        dead = source_body("swapz_pick_dead_segment", authority)
+        rotate = source_body("swapz_gc_commit_rotation", authority)
+        ctor = body("swapz_ctr")
+        compact = body("swapz_gc_compact_one")
+        self.assertIn("segment_mapped_pages", (ROOT / "src/kernel/authority.h").read_text())
+        self.assertIn("segment_mapped_pages[new_segment]++", finish)
+        self.assertIn("segment_mapped_pages[old_segments[index]]--", finish)
+        self.assertIn("segment_mapped_pages[new_segment]++", raw)
+        self.assertIn("segment_mapped_pages[old_segment]--", discard)
+        self.assertIn("live_total != a->segment_mapped_pages[segment]", dead)
+        self.assertIn("a->segment_mapped_pages[victim]", rotate)
+        self.assertIn("ctx->segment_mapped_pages = kvcalloc", ctor)
+        self.assertIn("swapz_enable_segment_mapping_counts(&ctx->authority", ctor)
+        self.assertIn("a->segment_mapped_pages[victim]", compact)
 
     def test_gc_large_record_preflight_avoids_pointless_full_relocation(self):
         choose = body("swapz_gc_choose_victim")
@@ -1113,9 +1134,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         process = body("swapz_process")
         flush = body("swapz_flush_window")
         for fence in ("!READ_ONCE(ctx->accepting)", "ctx->failed",
-                      "ctx->authority.in_flight", "ctx->authority.batch_pending",
+                      "ctx->authority.in_flight", "ctx->authority.batch_replaying",
                       "REQ_PREFLUSH | REQ_FUA"):
             self.assertIn(fence, independent)
+        self.assertIn("ctx->authority.batch_pending && !inflight_active", independent)
+        run_fence = body("swapz_inflight_run_touches_logical")
+        self.assertIn("ctx->authority.batch_pending != run->extent_count", run_fence)
+        self.assertIn("tx->records[record].logical_page == logical", run_fence)
+        self.assertIn("swapz_inflight_run_touches_logical(ctx, logical)", independent)
         self.assertIn("swapz_window_read_independent(ctx->batch, ctx->batch_count",
                       independent)
         self.assertIn("logical, ctx->retain_ms, blocked", independent)
