@@ -104,8 +104,10 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 	return 0;
 }
 
-int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
-	       swapz_u32 generation, const void *payload, swapz_u16 length)
+static int swapz_append_crc(struct swapz_builder *builder,
+			    swapz_u32 logical_page, swapz_u32 generation,
+			    const void *payload, swapz_u16 length,
+			    swapz_u32 payload_crc32c)
 {
 	struct swapz_record record = { 0 };
 	struct swapz_record previous;
@@ -137,12 +139,28 @@ int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	record.generation_le = swapz_le32(generation);
 	record.payload_offset_le = swapz_le16(offset);
 	record.payload_length_le = swapz_le16(length);
-	record.payload_crc32c_le = swapz_le32(swapz_crc32c_bytes(payload, length));
+	record.payload_crc32c_le = swapz_le32(payload_crc32c);
 	memcpy(builder->bytes + offset, payload, length);
 	swapz_put_record(builder->bytes, builder->count, &record);
 	builder->count++;
 	builder->payload_start = offset;
 	return 0;
+}
+
+int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
+	       swapz_u32 generation, const void *payload, swapz_u16 length)
+{
+	return swapz_append_crc(builder, logical_page, generation, payload, length,
+			      swapz_crc32c_bytes(payload, length));
+}
+
+int swapz_append_prehashed(struct swapz_builder *builder,
+			 swapz_u32 logical_page, swapz_u32 generation,
+			 const void *payload, swapz_u16 length,
+			 swapz_u32 payload_crc32c)
+{
+	return swapz_append_crc(builder, logical_page, generation, payload, length,
+			      payload_crc32c);
 }
 
 int swapz_seal(struct swapz_builder *builder)
