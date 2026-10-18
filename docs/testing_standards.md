@@ -520,3 +520,9 @@ write callback is configured, but it must not invoke that callback. Lower I/O
 submission remains in the synchronous wrapper until the target-side async
 candidate is enabled; transaction replay and publish timing belong to the new
 completion function.
+
+
+Phase-wall source contracts follow the new immutable-run ownership: planning
+and packing attribution live in run preparation, while publication attribution
+lives in run completion. The synchronous compatibility wrapper is orchestration
+and lower-I/O submission only; it must not duplicate those phase timers.
