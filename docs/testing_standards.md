@@ -294,11 +294,13 @@ must clear the token after the existing zero-count early-return path. The former
 `ordered_worker_busy` atomic had no reader and is dead state; source coverage
 must keep it absent.
 
-Source coverage must also require both the ordered `swapz` workqueue and the
-`swapz-lz4` preparation workqueue to use
-`WQ_MEM_RECLAIM | WQ_UNBOUND` with one active worker. This changes scheduling
-placement only; FIFO ordering and sole publication/completion ownership remain
-serialized.
+Source coverage must keep the ordered `swapz` workqueue on
+`WQ_MEM_RECLAIM | WQ_UNBOUND`, while the `swapz-lz4` preparation workqueue
+uses `WQ_MEM_RECLAIM` without `WQ_UNBOUND`. The preparation work item is
+therefore queued to the issuing CPU and remains non-reentrant; the experiment
+is accepted only if it converts synchronous lower-WRITE sleep into useful LZ4
+work without increasing ordered completion waits. FIFO ordering and sole
+publication/completion ownership remain serialized.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
@@ -309,9 +311,15 @@ Qualification must therefore compare mixed throughput, lower WRITE requests,
 worker-empty deadlines and packed-read p99 against the qualified head-cushion
 source, while QD8/QD32 preserve deep-window aggregation and low blocking waits.
 Mixed QD32 must also report one-page PACK_READY closes so dry-tail evidence
-consumption can be rejected if it merely moves fragmentation elsewhere. The existing
-`prep_lower_write_overlap_starts` diagnostic remains meaningful, and all
-publication/completion/fail-closed invariants are unchanged.
+consumption can be rejected if it merely moves fragmentation elsewhere. For the
+CPU-local preparation experiment, faster-model mixed QD32 must preserve the
+accepted-wave result near 23.74 MB/s, 875 lower WRITE requests and ~60
+worker-empty deadlines; full LZ4-in-lower-WRITE overlap should rise above the
+3.8 ms qualified result without a material increase in the 0.58 ms ordered
+preparation wait. Write-only QD1 must remain producer-free, QD8/QD32 must keep
+~520/~139 lower WRITE requests, and lower-byte/read-tail gates remain hard.
+The existing `prep_lower_write_overlap_starts` diagnostic remains meaningful,
+and all publication/completion/fail-closed invariants are unchanged.
 
 Idempotent metadata-cache invalidation qualification must preserve the existing
 explicit-invalidation and post-write miss tests. Source coverage requires the
