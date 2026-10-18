@@ -170,7 +170,6 @@ class PairReplayContract(unittest.TestCase):
             "dry_pack_close_events": 2,
             "dry_pack_followup_events": 1,
             "dry_pack_followup_sum_ns": 9000,
-            "dry_pack_followup_max_ns": 9000,
             "dry_pack_followup_le10us": 1,
             "prep_wait_wall_ns": 10,
             "prep_lower_write_overlap_ns": 20,
@@ -200,7 +199,6 @@ class PairReplayContract(unittest.TestCase):
             "dry_pack_close_events": 7,
             "dry_pack_followup_events": 4,
             "dry_pack_followup_sum_ns": 39000,
-            "dry_pack_followup_max_ns": 15000,
             "dry_pack_followup_le10us": 3,
             "dry_pack_followup_11_50us": 1,
             "prep_wait_wall_ns": 510,
@@ -248,6 +246,12 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "engine phase"):
             module.kernel_write_delta(
                 before, dict(after, engine_publish_wall_ns=15000))
+        with self.assertRaisesRegex(ValueError, "dry-pack"):
+            module.kernel_write_delta(
+                before, dict(after, dry_pack_followup_gt200us=1))
+        with self.assertRaisesRegex(ValueError, "dry-pack"):
+            module.kernel_write_delta(
+                before, dict(after, dry_pack_followup_events=8))
         with self.assertRaisesRegex(ValueError, "incomplete"):
             module.kernel_write_delta(None, after)
         with patch.object(module.subprocess, "run",
