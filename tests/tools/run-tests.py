@@ -373,6 +373,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["sessions"] = parse_sessions(output)
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])
+        if (loaded_correctness.get("overall") == "PASS" and                 result["benchmarks"]["verdicts"].get("overall") ==                 "PASS_BOUNDED_RAM_MATRIX":
+            result["benchmarks"]["verdicts"]["gc"] =                 "LIVE_VICTIMS_EXERCISED_OWNED_RAM"
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -916,8 +918,8 @@ def benchmark_verdicts(sessions):
         "regimes": verdicts,
         "endurance": "PROXY_ONLY: lower RAM device writes, no flash endurance",
         "packed_read": "MEASURED_4MIB_QD32_NO_COLD_CACHE_PROOF",
-        "gc": "NOT_EXERCISED unless separate live-GC evidence exists",
-        "cpu_scope": "replay userspace process and threads; kernel DM workers NOT ATTRIBUTED",
+        "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
+        "cpu_scope": "replay userspace CPU only; kernel callback wall is not CPU time",
         "physical_media": "NOT_TESTED",
         "statistical_confidence": "EXPLORATORY: two pairs per mode/regime, materiality 5%, no CI",
         "real_swap_device": "NOT_AUTHORIZED_NOT_TESTED",
