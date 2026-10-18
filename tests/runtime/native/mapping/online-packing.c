@@ -107,10 +107,17 @@ static void prepare(struct swapz_compressed_page *pages, swapz_u8 count,
 	for (index = 0; index < count; ++index) {
 		memset(originals[index], (int)(index + salt + 1),
 		       sizeof(originals[index]));
-		pages[index].logical_page = base + index;
-		pages[index].payload = originals[index];
-		pages[index].length = sizeof(originals[index]);
-		pages[index].raw = 0;
+		/*
+		 * Initialize the complete descriptor. The optional precomputed-CRC
+		 * fields must start clear so native callers use the ordinary hashing
+		 * path unless they explicitly provide a matching payload CRC.
+		 */
+		pages[index] = (struct swapz_compressed_page) {
+			.logical_page = base + index,
+			.payload = originals[index],
+			.length = sizeof(originals[index]),
+			.raw = 0,
+		};
 	}
 }
 
