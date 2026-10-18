@@ -439,7 +439,9 @@ note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 PACKED_ARGS=()
 (( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
 replay_off() {
-    timeout --signal=TERM --kill-after=5s 120s python3 -B \
+    local rc
+
+    if timeout --signal=TERM --kill-after=5s 120s python3 -B \
         tests/runtime/benchmark/io-replay.py run \
         --fixture "$SESSION/fixture.bin" \
         --trace "$SESSION/plan/trace.jsonl" \
@@ -448,11 +450,19 @@ replay_off() {
         --device "${LOWERS[0]}" --result "$SESSION/off.json" \
         "${PACKED_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[0]}" \
-        --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}" ||
-        fail 'uncompressed replay rejected'
+        --expected-dev "${DEVS[0]}" --expected-lower-dev "${DEVS[0]}"; then
+        return 0
+    else
+        rc=$?
+    fi
+    (( rc == 124 || rc == 137 )) &&
+        fail 'uncompressed replay exceeded bounded timeout'
+    return "$rc"
 }
 replay_swapz() {
-    timeout --signal=TERM --kill-after=5s 120s python3 -B \
+    local rc
+
+    if timeout --signal=TERM --kill-after=5s 120s python3 -B \
         tests/runtime/benchmark/io-replay.py run \
         --fixture "$SESSION/fixture.bin" \
         --trace "$SESSION/plan/trace.jsonl" \
@@ -462,7 +472,14 @@ replay_swapz() {
         "${PACKED_ARGS[@]}" \
         --owned-nullblk-name "${NAMES[1]}" \
         --expected-dev "$DMDEV" --expected-lower-dev "${DEVS[1]}" \
-        --expected-dm-uuid "$DMUUID" || fail 'swapz replay rejected'
+        --expected-dm-uuid "$DMUUID"; then
+        return 0
+    else
+        rc=$?
+    fi
+    (( rc == 124 || rc == 137 )) &&
+        fail 'swapz replay exceeded bounded timeout'
+    return "$rc"
 }
 if (( REPLAY_SWAPZ_FIRST )); then
     note 'REPLAY_ORDER=swapz-first'

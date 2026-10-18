@@ -670,6 +670,18 @@ class ReportContract(unittest.TestCase):
         self.assertIn("[swapz packed_read]", phase)
         self.assertIn("verified fixed volume", reason)
 
+        replay_detail = (
+            "START_OWNED_RAM_REGIME=ssd_emulated\n"
+            "START_OWNED_RAM_PAIR_ASYNC_PREPARE=1\n"
+            "BENCH_IO_PHASE=swapz:packed_read\n"
+            "BLOCKED/FAIL: short or mismatched packed swap-in page\n"
+            "BLOCKED: swapz replay rejected\n"
+        )
+        phase, reason = runner.failure_context(replay_detail)
+        self.assertIn("ssd_emulated comparison 1/8 (async)", phase)
+        self.assertIn("[swapz packed_read]", phase)
+        self.assertEqual(reason, "FAIL: short or mismatched packed swap-in page")
+
     def test_non_root_fixture_never_uses_privileged_evidence_directory(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         private = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
