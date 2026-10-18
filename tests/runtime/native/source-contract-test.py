@@ -12,6 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 DM = (ROOT / "src/kernel/dm-target.c").read_text()
 ENGINE = (ROOT / "src/kernel/engine.c").read_text()
+CODEC = (ROOT / "src/kernel/codec.c").read_text()
 AUTH = (ROOT / "src/kernel/authority.c").read_text()
 MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
@@ -752,27 +753,38 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("e->pack_wall_ns +=", engine_write)
         self.assertIn("e->publish_wall_ns +=", engine_bulk_flush)
         self.assertIn("ctx->gc_wall_ns +=", flush)
-        self.assertIn("#include <linux/sched/cputime.h>", DM)
-        self.assertIn("task_cputime_adjusted(current", DM)
+        self.assertNotIn("#include <linux/sched/cputime.h>", DM)
+        self.assertNotIn("task_cputime_adjusted(current", DM)
         self.assertNotIn("current->se.sum_exec_runtime", DM)
         self.assertEqual(producer.count("return;"),
-                         producer.count("swapz_account_worker_cpu("))
+                         producer.count("swapz_account_preparation_active_wall("))
         self.assertEqual(worker.count("return;"),
-                         worker.count("swapz_account_worker_cpu("))
+                         worker.count("swapz_account_ordered_active_wall("))
+        self.assertIn("ctx->lower_read_wall_ns - lower_read_before", DM)
+        self.assertIn("ctx->lower_write_wall_ns - lower_write_before", DM)
+        self.assertIn("ctx->preparation_ordered_wait_wall_ns - prep_wait_before", DM)
+        self.assertIn("ordered_active_underflows=%llu", status)
         for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
                     "engine_pack_wall_ns", "engine_publish_wall_ns",
-                    "lower_read_wall_ns", "lower_write_wall_ns",
-                    "ordered_worker_cpu_ns", "gc_wall_ns"):
+                    "engine_stage_wall_ns", "engine_pause_wall_ns",
+                    "engine_hole_clear_wall_ns", "engine_resume_wall_ns",
+                    "publish_initial_validate_wall_ns",
+                    "publish_phase1_wall_ns", "publish_lookup_wall_ns",
+                    "publish_mutation_wall_ns", "batch_pause_hash_wall_ns",
+                    "batch_resume_hash_wall_ns", "lower_read_wall_ns",
+                    "lower_write_wall_ns", "ordered_active_wall_ns",
+                    "gc_wall_ns"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
-        # The public status key intentionally follows the existing short
-        # "prep_" telemetry vocabulary; the internal single-writer field is
-        # named for its preparation-worker owner.
-        self.assertIn("prep_worker_cpu_ns=%llu", status)
-        self.assertIn("ctx->preparation_worker_cpu_ns", status)
+        self.assertIn("prep_active_wall_ns=%llu", status)
+        self.assertIn("ctx->preparation_worker_active_wall_ns", status)
+        self.assertIn("payload_crc_wall_ns=%llu payload_crc_bytes=%llu", status)
+        self.assertIn("dry_close_samples=%llu dry_close_next_sum_ns=%llu", status)
+        self.assertIn("dry_next_le10us=%llu dry_next_11_50us=%llu", status)
+        self.assertIn("dry_next_51_200us=%llu dry_next_gt200us=%llu", status)
         self.assertIn("swapz_engine_write_window_batched_read_cap(", flush)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
@@ -1110,6 +1122,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker)", ctor)
         self.assertIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1', ctor)
         self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
+        self.assertNotIn('alloc_workqueue(\n\t\t\t"swapz-lz4", WQ_MEM_RECLAIM,', ctor)
+        self.assertNotIn("WQ_CPU_INTENSIVE", ctor)
         self.assertIn("mempool_create_kmalloc_pool(", ctor)
         self.assertIn("ctx->preparation_lz4_workmem", ctor)
         self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
@@ -1235,6 +1249,19 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_copy_bio_accounted(entry->bio", producer)
         self.assertIn("swapz_memcpy_accounted(prepared->bytes", producer)
         self.assertIn("swapz_memcpy_accounted(", accept)
+        self.assertIn("swapz_crc32c_accounted(", producer)
+        self.assertIn("swapz_crc32c_accounted(", accept)
+        self.assertIn("payload_crc_valid", producer)
+        self.assertIn("payload_crc32c", accept)
+        self.assertIn("swapz_append_prehashed(", ENGINE)
+        self.assertIn("swapz_append_prehashed(", CODEC)
+        self.assertIn("error = swapz_lookup(image, bytes_total, index", AUTH)
+        self.assertIn("swapz_crc32c_bytes((const swapz_u8 *)bytes + out->payload_offset",
+                      CODEC)
+        self.assertIn("atomic64_cmpxchg(&ctx->dry_close_pending_ns", worker)
+        self.assertIn("swapz_record_dry_close_arrival(ctx)", body("swapz_map"))
+        self.assertIn("gc_victim_unique=%u gc_destination_unique=%u", status)
+        self.assertIn("gc_victim_max_reuse=%u gc_destination_max_reuse=%u", status)
         self.assertIn("async_prepare=%u prep_lower_write_overlap_starts=%llu",
                       status)
         self.assertIn("insmod \"$MODULE\" \"async_prepare=$ASYNC_PREPARE\"",
