@@ -399,13 +399,15 @@ gc_victim="$(status_u64 "$gc_after" last_gc_victim)" ||
     fail "live-GC status lacks last victim"
 gc_destination="$(status_u64 "$gc_after" last_gc_destination)" ||
     fail "live-GC status lacks last destination"
+gc_dead_reuses="$(status_u64 "$gc_after" dead_segment_reuses)" ||
+    fail "live-GC status lacks dead-segment reuse count"
 (( $(status_u64 "$gc_after" failed) == 0 &&
    gc_victims >= 2 && gc_rotations == gc_victims &&
    gc_pages > 0 && gc_read > 0 && gc_write > 0 &&
    gc_read_reqs > 0 && gc_write_reqs > 0 &&
-   gc_victim != gc_destination )) ||
-    fail "loaded live-GC did not prove repeated live evacuation and rotation"
-note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs last:$gc_victim->$gc_destination verified_pages:4096"
+   gc_dead_reuses > 0 && gc_victim != gc_destination )) ||
+    fail "loaded live-GC did not prove repeated live evacuation, rotation, and dead-segment reuse"
+note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs dead_reuses:$gc_dead_reuses last:$gc_victim->$gc_destination verified_pages:4096"
 dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
 OWN_DM=0
 
