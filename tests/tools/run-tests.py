@@ -513,7 +513,7 @@ def parse_sessions(output):
 
 
 def parse_write_saturation(output):
-    """Parse only the bounded write-only QD pilot; never mix it into QD32."""
+    """Parse the bounded write-only QD matrix independently of mixed QD32."""
     sessions, current, regime = [], None, None
     for line in output.splitlines():
         line = line.strip()
@@ -1351,7 +1351,7 @@ def print_bench(result):
                   f"[{confidence['async']['low'] * 100:+.1f}, "
                   f"{confidence['async']['high'] * 100:+.1f}]%")
     else:
-        print("\n  Write-only saturation pilot: NOT QUALIFIED "
+        print("\n  Write-only saturation matrix: NOT QUALIFIED "
               f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")
 
 
@@ -1384,7 +1384,7 @@ def main():
                                  f"KDIR={args.kdir}", "W=1", "all"]),
         ("Kernel warnings W=2", ["make", "-C", "src/kernel",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
-        ("Owned RAM smoke + mixed/QD pilot", ["bash", "tests/tools/test-loaded.sh"])
+        ("Owned RAM smoke + mixed/QD matrix", ["bash", "tests/tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):
@@ -1406,14 +1406,14 @@ def main():
                 benchmark["overall"] = "INCONCLUSIVE"
                 benchmark["reason"] = "Loaded benchmark source Git ID mismatched tested checkout"
         saturation = result["benchmarks"]["write_saturation"]
-        if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT" and \
+        if saturation.get("overall") == "PASS_WRITE_SATURATION_MATRIX" and \
                 re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
             if any(session.get("source_sha") != result["tested_commit_sha"]
                    for session in result["benchmarks"]["write_saturation_sessions"]):
                 saturation["overall"] = "INCONCLUSIVE"
-                saturation["reason"] = "Write-only pilot source Git ID mismatched tested checkout"
+                saturation["reason"] = "Write-only matrix source Git ID mismatched tested checkout"
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
-                saturation.get("overall") != "PASS_WRITE_SATURATION_PILOT":
+                saturation.get("overall") != "PASS_WRITE_SATURATION_MATRIX":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)
