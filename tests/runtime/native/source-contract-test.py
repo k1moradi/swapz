@@ -129,7 +129,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         read = body("swapz_read")
         status = body("swapz_status")
         self.assertIn("length > 0 && length <= 64", accept)
-        self.assertIn("swapz_page_is_zero(ctx->input_page)", accept)
+        self.assertIn("inline_zero = swapz_page_is_zero(input)", accept)
+        self.assertIn("(prepared_async ? entry->prepared_page->zero : inline_zero)",
+                      accept)
+        self.assertLess(accept.index("inline_zero = swapz_page_is_zero(input)"),
+                        accept.index("kunmap_local(mapped_input)"))
         self.assertIn("swapz_flush_window(ctx)", accept)
         self.assertIn("swapz_discard_page(&ctx->authority, logical)", accept)
         self.assertIn("ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES", accept)
@@ -137,7 +141,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_complete(bio, error)", accept)
         self.assertIn("swapz_issue_flush(ctx)", accept)
         self.assertLess(accept.index("swapz_flush_window(ctx);",
-                                    accept.index("swapz_page_is_zero")),
+                                    accept.index("inline_zero = swapz_page_is_zero(input)")),
                         accept.index("swapz_discard_page(&ctx->authority"))
         self.assertIn("if (!map->valid)", read)
         self.assertIn("memset(ctx->read_page, 0, SWAPZ_BLOCK_BYTES)", read)
