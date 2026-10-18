@@ -137,6 +137,11 @@ def parse_loaded_correctness(output):
         "oracle": re.compile(
             r"PASS_LOADED_ORACLE_PROFILE=raw_pages:(\d+) zero_pages:(\d+) "
             r"flush_calls:(\d+)$"),
+        "gc": re.compile(
+            r"PASS_LOADED_LIVE_GC=victims:(\d+) rotations:(\d+) "
+            r"pages:(\d+) read_bytes:(\d+) write_bytes:(\d+) "
+            r"read_reqs:(\d+) write_reqs:(\d+) last:(\d+)->(\d+) "
+            r"verified_pages:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
             r"observed_open:(\d+) verified_pages:(\d+)$"),
@@ -160,12 +165,21 @@ def parse_loaded_correctness(output):
                 "reason": "missing loaded correctness markers: " + ",".join(missing)}
 
     raw_pages, zero_pages, flush_calls = found["oracle"]
+    (gc_victims, gc_rotations, gc_pages, gc_read_bytes, gc_write_bytes,
+     gc_read_reqs, gc_write_reqs, gc_last_victim, gc_last_destination,
+     gc_verified_pages) = found["gc"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
     if raw_pages != 64 or zero_pages != 9 or flush_calls < 2:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
+    if (gc_victims < 2 or gc_rotations != gc_victims or gc_pages <= 0 or
+            gc_read_bytes <= 0 or gc_write_bytes <= 0 or gc_read_reqs <= 0 or
+            gc_write_reqs <= 0 or gc_last_victim == gc_last_destination or
+            gc_verified_pages != 4096):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded live-GC evidence is incomplete"}
     if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
@@ -180,6 +194,14 @@ def parse_loaded_correctness(output):
         "raw_pages": raw_pages,
         "zero_pages": zero_pages,
         "flush_calls": flush_calls,
+        "gc_victims": gc_victims,
+        "gc_rotations": gc_rotations,
+        "gc_pages": gc_pages,
+        "gc_read_bytes": gc_read_bytes,
+        "gc_write_bytes": gc_write_bytes,
+        "gc_read_reqs": gc_read_reqs,
+        "gc_write_reqs": gc_write_reqs,
+        "gc_verified_pages": gc_verified_pages,
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
         "suspend_verified_pages": verified_pages,
@@ -1060,6 +1082,12 @@ def print_bench(result):
                 ("RAW/zero pages",
                  f"{loaded['raw_pages']}/{loaded['zero_pages']}"),
                 ("flushes", loaded["flush_calls"]),
+                ("live GC",
+                 f"{loaded['gc_victims']} victims / "
+                 f"{loaded['gc_rotations']} rotations; "
+                 f"{loaded['gc_verified_pages']} pages verified"),
+                ("GC lower I/O",
+                 f"R {loaded['gc_read_reqs']} / W {loaded['gc_write_reqs']} req"),
                 ("suspend/resume",
                  f"retain {loaded['suspend_retain_ms']} ms; "
                  f"{loaded['suspend_verified_pages']} pages verified"),
@@ -1075,7 +1103,7 @@ def print_bench(result):
             ("write-only", "one pair/QD; directional only"),
             ("CPU", "replay CPU only; kernel callback wall is not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
-            ("GC", "live victims not exercised"),
+            ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
             ("Full telemetry", "build/test_results.json.xz"),
         ])
 
