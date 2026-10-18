@@ -1075,6 +1075,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
 
         self.assertIn("module_param_named(async_prepare", DM)
         self.assertIn("ctx->async_prepare = swapz_async_prepare", ctor)
+        self.assertIn("INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker)", ctor)
         self.assertIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1', ctor)
         self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM, 1', ctor)
         self.assertNotIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
