@@ -27,7 +27,11 @@ The write-only pilot uses QD1/4/8/32, 0% reads, finite unpaced waves, one sync a
 
 Exclude fixture generation, device provisioning, worker allocation, buffer setup and warmup from measured useful throughput. Include the measured I/O and required final drain/fsync. Lower-sector/request deltas cover the same interval.
 
-Report process CPU separately from kernel-worker CPU; do not imply one includes the other. RAM-backed 4MiB read tests are not cold physical swap-in.
+Report replay-process CPU separately from kernel callback wall residency.
+Callback wall is not CPU time: ordered callback wall includes synchronous
+lower-I/O sleep and callback wall may include scheduler delay. Use explicit
+LZ4/CRC/copy/plan/pack/publish timers for hot-path attribution. RAM-backed 4MiB
+read tests are not cold physical swap-in.
 
 ## Current directional result
 
