@@ -318,9 +318,13 @@ Write-engine attribution must additionally report planner, pack and publish wall
 time. Non-I/O commit time must never exceed total commit time, and the sum of
 planner+pack+publish must never exceed commit non-I/O. Source coverage must
 require direct mapping only for a complete single-bvec 4KiB BIO, balanced
-`kmap_local_page`/`kunmap_local`, retained multi-bvec fallback, and a RAW
-copy into persistent staging before unmapping. Write-only QD1 must remain
-producer-free,
+`kmap_local_page`/`kunmap_local`, retained multi-bvec fallback, and exactly
+one durable RAW staging copy: mapped input directly to `batch_bytes` in bulk
+mode, or the existing `swapz_raw_write()` BIO copy in non-bulk mode. Source
+coverage must reject the retired mapped-input -> `input_page` -> `batch_bytes`
+bounce. Ordered/preparation worker CPU counters must use exported scheduler
+cputime accounting, be present on every callback return, and remain diagnostics
+only. Write-only QD1 must remain producer-free,
 QD8/QD32 must keep ~520/~139 lower WRITE requests, and lower-byte/read-tail
 gates remain hard. The existing `prep_lower_write_overlap_starts` diagnostic
 remains meaningful, and all publication/completion/fail-closed invariants are
