@@ -527,3 +527,15 @@ Phase-wall source contracts follow the new immutable-run ownership: planning
 and packing attribution live in run preparation, while publication attribution
 lives in run completion. The synchronous compatibility wrapper is orchestration
 and lower-I/O submission only; it must not duplicate those phase timers.
+
+
+### Privileged Git inspection must not mutate the checkout index
+
+Loaded qualification executes its device helpers as root, but their Git checks
+are source-identity/read-cleanliness assertions only. Every privileged helper
+that invokes Git must set `GIT_OPTIONAL_LOCKS=0` before the first Git command.
+This forbids optional index refresh/locking during root-side `git branch`,
+`git diff`, and `git rev-parse` inspection, preventing a successful
+qualification from replacing the operator-owned `.git/index` with a
+root-owned file. Privileged helpers must never stage, refresh, rewrite, or
+otherwise own the checkout index.

@@ -63,3 +63,9 @@ working-tree/index state is excluded from the privileged loaded-source
 cleanliness gate. No other tracked path is exempt. The report is atomically
 replaced only after qualification stops and publication then reconciles the
 local main/index on success.
+
+
+Loaded `make test` helpers execute privileged device work through `sudo`, but
+Git inspection inside those helpers is read-only and runs with
+`GIT_OPTIONAL_LOCKS=0`. The privileged phase must not refresh or replace
+`.git/index`; repository/index ownership remains with the invoking operator.

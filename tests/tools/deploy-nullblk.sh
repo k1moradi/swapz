@@ -8,6 +8,10 @@ source "$ROOT/tests/tools/nullblk-identity.sh"
 source "$ROOT/tests/tools/quiet-lower-io.sh"
 source "$ROOT/tests/tools/swap-inventory.sh"
 cd "$ROOT"
+# This script runs as root during loaded qualification. Git source checks are
+# read-only; disable optional index refresh/locking so privileged inspection can
+# never replace the operator-owned .git/index with a root-owned file.
+export GIT_OPTIONAL_LOCKS=0
 MODULE="$ROOT/build/kernel/experimental/dm-swapz.ko"
 ORACLE="$ROOT/build/tests/device-roundtrip"
 CONFIG=""

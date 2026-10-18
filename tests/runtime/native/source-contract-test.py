@@ -1360,6 +1360,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         pathspec = "' :(exclude)test_results.json.xz'".replace("' :", "':")
         for script in (deploy, benchmark):
+            self.assertIn("export GIT_OPTIONAL_LOCKS=0", script)
+            self.assertLess(script.index("export GIT_OPTIONAL_LOCKS=0"),
+                            script.index("git branch --show-current"))
             self.assertIn("git diff --quiet -- . " + pathspec, script)
             self.assertIn("git diff --cached --quiet -- . " + pathspec, script)
             self.assertNotIn("git diff --quiet && git diff --cached --quiet", script)
