@@ -31,7 +31,12 @@ struct swapz_io {
 struct swapz_compressed_page {
 	swapz_u32 logical_page;
 	const swapz_u8 *payload;
+	swapz_u32 payload_crc32c;
 	swapz_u16 length;
+	/* When set, payload_crc32c was computed over exactly payload/length
+	 * before serialized packing. Final bulk_scratch is still CRC-verified
+	 * again by authority publication after lower I/O. */
+	swapz_u8 payload_crc32c_valid;
 	/* True for an uncompressed 4096-byte page. Raw entries follow all
 	 * compressed entries in a mixed physical write window. */
 	swapz_u8 raw;
