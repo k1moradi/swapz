@@ -72,7 +72,7 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "lower_write_wall_ns",
                        "ordered_worker_wall_ns", "prep_worker_wall_ns",
                        "dry_pack_close_events", "dry_pack_followup_events",
-                       "dry_pack_followup_sum_ns", "dry_pack_followup_max_ns",
+                       "dry_pack_followup_sum_ns",
                        "dry_pack_followup_le10us", "dry_pack_followup_11_50us",
                        "dry_pack_followup_51_200us", "dry_pack_followup_gt200us",
                        "prep_wait_wall_ns",
@@ -1057,8 +1057,8 @@ def print_bench(result):
                  f"{asynchronous['mixed_dry_pack_followup_le10us']:.1f}/"
                  f"{asynchronous['mixed_dry_pack_followup_11_50us']:.1f}/"
                  f"{asynchronous['mixed_dry_pack_followup_51_200us']:.1f}"),
-                ("dry followup max us",
-                 f"{asynchronous['mixed_dry_pack_followup_max_ns'] / 1000:.1f}"),
+                ("dry followup mean us",
+                 f"{(asynchronous['mixed_dry_pack_followup_sum_ns'] / max(1.0, asynchronous['mixed_dry_pack_followup_events'])) / 1000:.1f}"),
                 ("GC victims", f"{counters['gc_victims']:.1f}"),
             ])
         async_criteria = data["criteria"]["async"]
