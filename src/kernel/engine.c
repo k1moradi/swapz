@@ -30,15 +30,17 @@ static int swapz_append_page(struct swapz_engine *engine,
 			    const struct swapz_compressed_page *page,
 			    swapz_u32 generation)
 {
-	if (page->payload_crc32c_valid) {
+	int error;
+
+	if (!page->payload_crc32c_valid)
+		return swapz_append(builder, page->logical_page, generation,
+				    page->payload, page->length);
+	error = swapz_append_prehashed(builder, page->logical_page, generation,
+				      page->payload, page->length,
+				      page->payload_crc32c);
+	if (!error)
 		engine->prehashed_records++;
-		return swapz_append_prehashed(builder, page->logical_page,
-					     generation, page->payload,
-					     page->length,
-					     page->payload_crc32c);
-	}
-	return swapz_append(builder, page->logical_page, generation,
-			    page->payload, page->length);
+	return error;
 }
 
 static int swapz_page_valid(const struct swapz_compressed_page *page)
