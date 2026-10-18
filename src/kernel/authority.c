@@ -698,7 +698,13 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		swapz_u8 prior = 0;
 		swapz_u8 j;
 
-		error = swapz_lookup(image, bytes_total, index, &decoded, &payload);
+		/*
+		 * The complete immutable image was validated once above. Verify this
+		 * record's final payload CRC without reparsing/revalidating every
+		 * sibling descriptor on each iteration.
+		 */
+		error = swapz_lookup_validated(image, bytes_total, index,
+					     &decoded, &payload);
 		if (error)
 			goto fail;
 		payload_lengths[index] = decoded.payload_length;
