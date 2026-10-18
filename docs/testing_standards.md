@@ -617,6 +617,12 @@ and `SWAPZ_STATUS_AFTER` may include prefill, warmup and packed-read population
 and therefore are not report evidence for timed scheduling decisions.
 `retained_burst_target` is recorded as the end-of-interval gauge.
 
+The direct rootless unit for this measurement schema lives at
+`tests/runtime/benchmark/io-replay-test.py`; report aggregation and Make-interface
+fixtures remain under `tests/runtime/native/`. When the timed schema gains a
+counter or gauge, all three fixture surfaces must be updated together so a
+rootless pass cannot hide a missing loaded-report field.
+
 Source coverage requires an explicit ordering-boundary predicate that clears the
 learned singleton deadline streak and fast-close flag before the empty-window
 return. IDLE and DEADLINE must remain outside that predicate. Native/report
