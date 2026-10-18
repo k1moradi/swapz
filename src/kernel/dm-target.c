@@ -2996,6 +2996,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS);
 	atomic_set(&ctx->lower_write_active, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
+	atomic64_set(&ctx->dry_close_pending_ns, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
