@@ -54,6 +54,12 @@ Official human-readable and JSON reports use `swapz`, not implementation-generat
 
 Reports distinguish useful logical throughput, backing WRITE throughput, lower READ/WRITE bytes and requests, p95/p99 where available, process CPU scope, kernel counters, GC, fixture/trace/source provenance, lifecycle result and cleanup. Never call synthetic RAM results physical SD/SSD evidence.
 
+The console report is a compact operator summary. It keeps raw and synchronous
+throughput controls because they isolate compression and asynchronous scheduling
+effects, but suppresses repetitive per-control diagnostics. Detailed cache,
+window and counter evidence remains in the replace-in-place
+`build/test_results.json.xz` report.
+
 The retained production counters must describe active decisions only. Closed/rejected diagnostic counters are removed from production and report schemas.
 
 ## Evidence levels
@@ -268,15 +274,25 @@ without consuming its token. `batch_count` remains worker-owned and must never
 become a map-path signal; `ordered_worker_busy` is not required for a credit
 that legitimately survives the inter-BIO gap of an open retained window.
 
-For asynchronous WRITE consumption, source coverage must show
-`ordered_worker_busy=1` is published under `queue_lock` before the ordered
-worker removes or inspects its head preparation. An inline steal increments the
-ordered-inline diagnostic and grants one token; a producer-owned entry records
-a handoff, and `completion_done()` distinguishes an actual blocking wait from
-an already-complete handoff. The producer may continue after one tail item only
-when a fresh token was earned while it ran. The worker must clear an unused
-token when no retained batch remains, and every nonempty window close must clear
-the token after the existing zero-count early-return path.
+For asynchronous WRITE consumption, source coverage must keep all
+preparation ownership decisions under `queue_lock`. At the start of an ordered
+worker quantum, a finite accepted wave may grant exactly one initial tail credit
+only when at least two unclaimed WRITE preparations are already present. This is
+bounded FIFO-distance evidence: the ordered worker keeps the head while the
+producer may claim a distinct tail. QD1 therefore receives no accepted-wave
+producer kick, and the producer's singular-list guard remains before credit
+consumption.
+
+An inline steal increments the ordered-inline diagnostic and grants one token;
+a producer-owned entry records a handoff and clears any unused starter credit so
+that the same ordered head cannot authorize another tail claim. `completion_done()`
+distinguishes an actual blocking wait from an already-complete handoff, and the
+blocking interval is accumulated separately. The producer may continue after one
+tail item only when a fresh token was earned while it ran. The worker must clear
+an unused token when no retained batch remains, and every nonempty window close
+must clear the token after the existing zero-count early-return path. The former
+`ordered_worker_busy` atomic had no reader and is dead state; source coverage
+must keep it absent.
 
 Source coverage must also require both the ordered `swapz` workqueue and the
 `swapz-lz4` preparation workqueue to use
