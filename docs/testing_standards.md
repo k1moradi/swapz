@@ -336,9 +336,14 @@ require direct mapping only for a complete single-bvec 4KiB BIO, balanced
 one durable RAW staging copy: mapped input directly to `batch_bytes` in bulk
 mode, or the existing `swapz_raw_write()` BIO copy in non-bulk mode. Source
 coverage must reject the retired mapped-input -> `input_page` -> `batch_bytes`
-bounce. Ordered/preparation worker CPU counters must use exported scheduler
-cputime accounting, be present on every callback return, and remain diagnostics
-only. Write-only QD1 must remain producer-free,
+bounce. Ordered/preparation callback residency counters must use
+`ktime_get_ns()` at callback entry and every callback return, must be labeled
+wall time rather than CPU time, and remain diagnostic only. Source coverage
+must reject direct scheduler-accounting-field reads and the retired
+`task_cputime_adjusted()` metric. Pack-side CRC precomputation must retain a
+final payload CRC over `bulk_scratch` during publication. Dry PACK_READY
+arrival probes must timestamp under `queue_lock` and must not change the
+retention deadline, producer credits or worker count. Write-only QD1 must remain producer-free,
 QD8/QD32 must keep ~520/~139 lower WRITE requests, and lower-byte/read-tail
 gates remain hard. The existing `prep_lower_write_overlap_starts` diagnostic
 remains meaningful, and all publication/completion/fail-closed invariants are
