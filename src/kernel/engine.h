@@ -31,7 +31,11 @@ struct swapz_io {
 struct swapz_compressed_page {
 	swapz_u32 logical_page;
 	const swapz_u8 *payload;
+	swapz_u32 payload_crc32c;
 	swapz_u16 length;
+	/* payload_crc32c is valid only when this flag is set. GC/native callers
+	 * may leave it clear and retain the original swapz_append() CRC path. */
+	swapz_u8 payload_crc_valid;
 	/* True for an uncompressed 4096-byte page. Raw entries follow all
 	 * compressed entries in a mixed physical write window. */
 	swapz_u8 raw;
@@ -72,6 +76,12 @@ struct swapz_engine {
 	unsigned long long plan_wall_ns;
 	unsigned long long pack_wall_ns;
 	unsigned long long publish_wall_ns;
+	/* Nested attribution. stage/pause/hole live in commit residual; resume
+	 * is nested inside publish. Do not add nested counters to parent walls. */
+	unsigned long long stage_wall_ns;
+	unsigned long long pause_wall_ns;
+	unsigned long long resume_wall_ns;
+	unsigned long long hole_clear_wall_ns;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
 	struct swapz_tx pending;
 	swapz_u32 logical_scratch[SWAPZ_MAX_RECORDS];
