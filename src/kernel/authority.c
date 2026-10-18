@@ -3,11 +3,27 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/ktime.h>
 #include <linux/string.h>
 #else
 #include <errno.h>
 #include <string.h>
 #endif
+
+static unsigned long long swapz_authority_now_ns(void)
+{
+#ifdef __KERNEL__
+	return ktime_get_ns();
+#else
+	return 0;
+#endif
+}
+
+static unsigned long long swapz_authority_elapsed_ns(
+		unsigned long long start, unsigned long long end)
+{
+	return end >= start ? end - start : 0;
+}
 
 static int swapz_legal_class(swapz_u8 blocks)
 {
@@ -667,6 +683,9 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	const swapz_u8 *image = extent;
 	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS] = { 0 };
+	unsigned long long phase_start;
+	unsigned long long liveness_start = 0;
+	unsigned long long payload_verify_elapsed = 0;
 	swapz_u8 index;
 	int error = 0;
 
@@ -678,12 +697,24 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = io_error < 0 ? io_error : -EIO;
 		goto fail;
 	}
+
+	phase_start = swapz_authority_now_ns();
 	error = swapz_validate(image, bytes_total);
+	a->finish_metadata_validate_wall_ns += swapz_authority_elapsed_ns(
+		phase_start, swapz_authority_now_ns());
 	if (error)
 		goto fail;
+
+	/*
+	 * Everything after the one full metadata validation and outside the
+	 * per-record payload verifier is authority/liveness work. Keep it separate
+	 * from the final payload CRC path so publish cost can be acted on without
+	 * weakening either integrity boundary.
+	 */
+	liveness_start = swapz_authority_now_ns();
 	if (image[7] != tx->count || swapz_disk_sequence(image) != tx->sequence) {
 		error = -EUCLEAN;
-		goto fail;
+		goto fail_liveness;
 	}
 
 	/*
@@ -697,34 +728,41 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		swapz_u32 logical = tx->records[index].logical_page;
 		swapz_u8 prior = 0;
 		swapz_u8 j;
+		unsigned long long verify_start;
+		unsigned long long verify_elapsed;
 
 		/*
 		 * The complete immutable image was validated once above. Verify this
 		 * record's final payload CRC without reparsing/revalidating every
 		 * sibling descriptor on each iteration.
 		 */
+		verify_start = swapz_authority_now_ns();
 		error = swapz_lookup_validated(image, bytes_total, index,
 					     &decoded, &payload);
+		verify_elapsed = swapz_authority_elapsed_ns(
+			verify_start, swapz_authority_now_ns());
+		a->finish_payload_verify_wall_ns += verify_elapsed;
+		payload_verify_elapsed += verify_elapsed;
 		if (error)
-			goto fail;
+			goto fail_liveness;
 		payload_lengths[index] = decoded.payload_length;
 		payload_offsets[index] = decoded.payload_offset;
 		if (!payload_lengths[index] ||
 		    payload_lengths[index] > SWAPZ_MAX_COMPRESSED) {
 			error = -EUCLEAN;
-			goto fail;
+			goto fail_liveness;
 		}
 		if (logical >= a->logical_pages ||
 		    decoded.logical_page != logical ||
 		    decoded.generation != tx->records[index].generation) {
 			error = -EUCLEAN;
-			goto fail;
+			goto fail_liveness;
 		}
 		old = &a->maps[logical];
 		if (old->generation == ~(swapz_u32)0 ||
 		    old->generation + 1U != decoded.generation) {
 			error = -ESTALE;
-			goto fail;
+			goto fail_liveness;
 		}
 		if (!old->valid)
 			continue;
@@ -732,7 +770,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		    !swapz_legal_class(old->extent_blocks) ||
 		    a->extent_classes[old->start_block] != old->extent_blocks) {
 			error = -EUCLEAN;
-			goto fail;
+			goto fail_liveness;
 		}
 		for (j = 0; j <= index; ++j) {
 			const struct swapz_map *earlier_old =
@@ -744,13 +782,20 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		}
 		if (a->live_records[old->start_block] < prior) {
 			error = -EUCLEAN;
-			goto fail;
+			goto fail_liveness;
 		}
 	}
 	if (a->live_records[tx->start_block] ||
 	    a->extent_classes[tx->start_block]) {
 		error = -EUCLEAN;
-		goto fail;
+		goto fail_liveness;
+	}
+	{
+		unsigned long long phase_elapsed = swapz_authority_elapsed_ns(
+			liveness_start, swapz_authority_now_ns());
+
+		a->finish_liveness_wall_ns += phase_elapsed >= payload_verify_elapsed ?
+			phase_elapsed - payload_verify_elapsed : 0;
 	}
 
 	/*
@@ -758,6 +803,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	 * A failed physical write or a malformed sibling leaves old authority
 	 * untouched, even when an earlier block completed successfully.
 	 */
+	phase_start = swapz_authority_now_ns();
 	a->live_records[tx->start_block] = tx->count;
 	a->extent_classes[tx->start_block] = tx->extent_blocks;
 	for (index = 0; index < tx->count; ++index) {
@@ -778,7 +824,18 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		};
 	}
 	swapz_forget_active(a, 1);
+	a->finish_apply_wall_ns += swapz_authority_elapsed_ns(
+		phase_start, swapz_authority_now_ns());
 	return 0;
+
+fail_liveness:
+	{
+		unsigned long long phase_elapsed = swapz_authority_elapsed_ns(
+			liveness_start, swapz_authority_now_ns());
+
+		a->finish_liveness_wall_ns += phase_elapsed >= payload_verify_elapsed ?
+			phase_elapsed - payload_verify_elapsed : 0;
+	}
 fail:
 	swapz_forget_active(a, 0);
 	return error;
