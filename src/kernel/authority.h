@@ -105,6 +105,16 @@ struct swapz_authority {
 	 * including record identities and generations. A forged caller
 	 * snapshot can never publish an unrelated page into a batch. */
 	swapz_u32 batch_hashes[SWAPZ_MAX_RECORDS];
+	/*
+	 * Diagnostic-only wall attribution. Kernel builds accumulate real
+	 * nanoseconds; user-space native builds leave these at zero.
+	 */
+	unsigned long long batch_pause_hash_wall_ns;
+	unsigned long long batch_resume_hash_wall_ns;
+	unsigned long long finish_initial_validate_wall_ns;
+	unsigned long long finish_phase1_wall_ns;
+	unsigned long long finish_lookup_wall_ns;
+	unsigned long long finish_mutation_wall_ns;
 };
 
 /*
