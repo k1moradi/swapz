@@ -137,6 +137,10 @@ struct swapz_dm {
 	u64 preparation_ordered_waits;
 	u64 preparation_ordered_wait_wall_ns;
 	u64 preparation_wave_kicks;
+	u64 preparation_exit_slot_blocked;
+	u64 preparation_exit_empty;
+	u64 preparation_exit_singular;
+	u64 preparation_exit_no_credit_tail;
 	u64 prepared_during_lower_write;
 	u64 preparation_lz4_lower_write_overlap_ns;
 	/* Callback only queues the serialized worker; it never owns BIOs. */
@@ -781,11 +785,13 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * exhausted, leave all remaining entries claimable by inline steal.
 		 */
 		if (down_trylock(&ctx->preparation_slots)) {
+			ctx->preparation_exit_slot_blocked++;
 			swapz_account_preparation_active_wall(ctx, active_start_ns);
 			return;
 		}
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
+			ctx->preparation_exit_empty++;
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			up(&ctx->preparation_slots);
 			swapz_account_preparation_active_wall(ctx, active_start_ns);
@@ -817,8 +823,17 @@ static void swapz_preparation_worker(struct work_struct *work)
 			 * both the head and its earned credit intact until a true tail
 			 * exists behind it.
 			 */
-			if (list_is_singular(&ctx->preparation_incoming) ||
-			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
+			if (list_is_singular(&ctx->preparation_incoming)) {
+				ctx->preparation_exit_singular++;
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				up(&ctx->preparation_slots);
+				swapz_account_preparation_active_wall(ctx, active_start_ns);
+				return;
+			}
+			if (!atomic_xchg(&ctx->preparation_tail_credit, 0)) {
+				/* A distinct tail existed, but policy exposed no token.
+				 * This is the direct diagnostic for credit-limited work. */
+				ctx->preparation_exit_no_credit_tail++;
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
 				swapz_account_preparation_active_wall(ctx, active_start_ns);
@@ -3254,6 +3269,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
+		       "prep_exit_slot=%llu prep_exit_empty=%llu "
+		       "prep_exit_singular=%llu prep_exit_no_credit_tail=%llu "
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
 		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
 		       "direct_lz4_input_pages=%llu "
@@ -3382,6 +3399,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->preparation_ordered_handoffs,
 		       ctx->preparation_ordered_waits,
 		       ctx->preparation_ordered_wait_wall_ns,
+		       ctx->preparation_exit_slot_blocked,
+		       ctx->preparation_exit_empty,
+		       ctx->preparation_exit_singular,
+		       ctx->preparation_exit_no_credit_tail,
 		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
 		       ctx->decode_wall_ns,
 		       ctx->preparation_copy_wall_ns +
