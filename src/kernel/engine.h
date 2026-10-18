@@ -77,6 +77,7 @@ struct swapz_engine {
 	unsigned long long plan_wall_ns;
 	unsigned long long pack_wall_ns;
 	unsigned long long publish_wall_ns;
+	swapz_u32 prehashed_records;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
 	struct swapz_tx pending;
 	swapz_u32 logical_scratch[SWAPZ_MAX_RECORDS];
