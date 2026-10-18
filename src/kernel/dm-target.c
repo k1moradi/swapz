@@ -1324,6 +1324,16 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 			goto out;
 		ctx->last_gc_victim = victim;
 		ctx->last_gc_destination = destination;
+		if (++ctx->gc_victim_counts[victim] == 1)
+			ctx->gc_victim_unique++;
+		if (++ctx->gc_destination_counts[destination] == 1)
+			ctx->gc_destination_unique++;
+		if (ctx->gc_victim_counts[victim] > ctx->gc_victim_max_reuse)
+			ctx->gc_victim_max_reuse = ctx->gc_victim_counts[victim];
+		if (ctx->gc_destination_counts[destination] >
+		    ctx->gc_destination_max_reuse)
+			ctx->gc_destination_max_reuse =
+				ctx->gc_destination_counts[destination];
 		ctx->gc_role_rotations++;
 	}
 	ctx->gc_victims++;
@@ -2898,6 +2908,8 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->gc_live_counts);
 	kvfree(ctx->gc_min_live_blocks);
 	kvfree(ctx->segment_roles);
+	kvfree(ctx->gc_victim_counts);
+	kvfree(ctx->gc_destination_counts);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
@@ -3042,6 +3054,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 					  GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
+	ctx->gc_victim_counts = kvcalloc(ctx->segment_count,
+					 sizeof(*ctx->gc_victim_counts), GFP_KERNEL);
+	ctx->gc_destination_counts = kvcalloc(ctx->segment_count,
+					      sizeof(*ctx->gc_destination_counts),
+					      GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
@@ -3051,7 +3068,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->discard_epoch || !ctx->discard_count ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
-	    !ctx->segment_roles) {
+	    !ctx->segment_roles || !ctx->gc_victim_counts ||
+	    !ctx->gc_destination_counts) {
 		error = -ENOMEM;
 		goto fail;
 	}
