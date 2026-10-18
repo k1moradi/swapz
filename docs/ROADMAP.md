@@ -8,70 +8,84 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `39e7787b784410140cf90d3fe3a08ad4d674f4f2` passed all
-five qualification stages. Direct single-bvec BIO-to-LZ4 input hit 12,301
-foreground pages in each mixed regime and reduced explicit write copying from
-22.4 ms / 59.4 MiB to 3.9 ms / 11.0 MiB on the faster model and from 32.8 ms /
-57.5 MiB to 4.7 ms / 9.1 MiB on the slower model. Faster mixed async reached
-21.22 MB/s versus 19.89 sync (+6.7%, preliminary) with 1051.5 lower WRITE
-requests and 2.69 ms READ p99. Faster write-only QD8 reached 25.50 versus
-19.84 MB/s (+28.5%) with 520 lower requests. QD1 remained producer-free.
+Owner-loaded source `d63ab97c6cb104dc99c4792c207805e97e22d233` passed all
+five qualification stages. Direct single-bvec BIO-to-LZ4 input remained fully
+effective, explicit WRITE-copy cost stayed near 4 ms / 11 MiB on the faster
+model, and write-only QD8 async reached 27.00 MB/s versus 19.58 sync (+37.9%)
+with 524 lower WRITE requests. Mixed faster-model async reached 20.87 MB/s
+versus 19.73 sync, but lower WRITE requests rose to 1078 and one-page
+PACK_READY closes / worker-empty deadlines rose to 138.2 / 71.5. The stronger
+historical mixed geometry at `e5c1721` therefore remains a useful reference.
 
-This is a qualified CPU/memory-path improvement over `c6d15ca`, but it has not
-recovered the stronger historical faster-model mixed result from `e5c1721`
-(23.74 MB/s, 874.5 lower WRITE requests, 2.10 ms READ p99). Request aggregation
-and scheduling therefore remain open performance work even though the copy
-optimization itself succeeded.
+The attempted per-callback CPU metric is rejected. `task_cputime_adjusted()`
+can still rely on scheduler-accounted state that is too coarse for short,
+nonblocking preparation callbacks under ordinary tick accounting. Production
+must not infer producer saturation from that counter. The next source removes
+those misleading CPU fields and reports callback wall residency only, explicitly
+as wall time that may include scheduler delay and, for the ordered worker,
+synchronous lower-I/O sleep.
 
-Commit attribution now resolves the faster-model 48.5 ms non-I/O envelope into
-5.2 ms planner, 16.4 ms pack, 18.9 ms publish and 8.0 ms residual. The slower
-model reports 6.1 / 22.3 / 21.7 / 9.4 ms respectively. Pack includes the
-batch-to-bulk payload copy plus initial payload/metadata CRC work. Publish
-includes transaction resume, SWZ3 validation/payload CRC checks and authority
-publication. Residual also includes staging, batch pause, alignment-hole clears
-and loop/control work; it must not be labeled as CRC alone without additional
-attribution.
+Commit attribution is stable: faster-model mixed reports about 5.2 ms planner,
+16.5 ms pack, 18.5 ms publish and 8.4 ms residual inside 48.5 ms commit non-I/O.
+Two source-level redundancies are now strong enough to test without weakening
+publication safety:
 
-Source review found one remaining avoidable RAW bounce in the inline
-single-bvec path: an incompressible mapped page was copied to `input_page`
-before unmap and then copied again to `batch_bytes` in bulk mode. The next
-candidate stages bulk RAW directly into its batch slot once. In non-bulk mode it
-unmaps without a preliminary copy and lets `swapz_raw_write()` perform the
-single required BIO copy after older windows drain.
+1. compute the compressed payload CRC during preparation/inline LZ4 and pass it
+   into packing, removing the first serialized payload rescan;
+2. validate the immutable SWZ3 metadata image once in `swapz_finish()`, then
+   decode each already-validated descriptor and still verify every final
+   `bulk_scratch` payload CRC before publishing mappings.
 
-The next candidate also adds scheduler-accounted task CPU time for the ordered
-and preparation workqueue callbacks using the exported
-`task_cputime_adjusted()` API. This is diagnostic task CPU time, not wall time,
-and excludes callback sleep according to scheduler CPU accounting. It avoids
-direct dependency on `current->se.sum_exec_runtime`, whose raw value can omit
-the currently executing slice.
+The publish-side payload CRC remains mandatory because it validates the final
+image after the `batch_bytes -> bulk_scratch` copy. Transaction/generation/
+liveness checks remain fail-closed.
 
-Loaded GC victims remain zero, so endurance claims are still proxy-only: lower
-bytes/requests are demonstrated, but sustained victim rotation and physical
-reuse distribution are not yet qualified.
+The scheduling hypothesis is also promoted to direct measurement rather than
+policy change. A worker-tail dry PACK_READY close records a timestamp only when
+`incoming` is actually empty under `queue_lock`; the next admitted WRITE
+records the elapsed time into <=10us, 11-50us, 51-200us and >200us bins. No
+retention interval, credit count or worker count changes in this probe.
 
 ## Immediate work queue
 
-1. Qualify the inline RAW no-bounce change. Explicit write-copy bytes/time
-   should fall only to the extent RAW inline pages occur; compressed behavior,
-   request geometry and lifecycle semantics must remain unchanged.
-2. Collect ordered-worker and preparation-worker task CPU deltas in the mixed
-   path. Keep these separate from wall counters; do not add worker CPU to LZ4,
-   commit or lower-I/O elapsed time.
-3. Use the 39e7787 commit split to decide the next serialized-path experiment.
-   Publish (18.9 ms faster-model) and pack (16.4 ms) are the leading measured
-   phases. Add isolated CRC/copy attribution before removing transaction or
-   payload validation; preserve fail-closed generation and authority checks.
-4. The QD8 +28.5% directional result keeps multi-credit and N=1/2/4 producer
-   experiments alive, but do not stack them with this RAW/CPU-attribution run.
-   Kernel-worker CPU evidence comes first.
-5. Keep QD1 producer claims at zero and preserve QD8/QD32 lower-request
-   geometry near ~520/~139. Lower bytes, packed-read tails and lifecycle
-   correctness remain hard gates.
-6. After CPU/CRC attribution stabilizes, run repeated matched statistics, then
-   evaluate bounded multi-worker/NUMA locality. Separately force sustained GC
-   with nonzero victims before testing segment reuse distribution or lower
-   DISCARD/TRIM.
+1. Qualify the precomputed pack-side payload CRC and one-pass metadata
+   validation. Accept only if correctness, lower bytes/requests and read tails
+   remain intact and pack/publish wall time falls in the corresponding phase.
+2. Use dry-close -> next-arrival timing to validate or refute the hypothesis
+   that the ordered worker is closing useful retained work only microseconds
+   before companion BIOs reach `->map`. Only after that evidence may
+   multi-credit pacing or retention policy change.
+3. Keep rejected CPU-local preparation and "maximize overlap" experiments
+   deleted. They improved an internal overlap metric while regressing useful
+   mixed throughput/request geometry.
+4. Do not add N=2/4 preparation workers until sustained eligible backlog is
+   demonstrated. More workers cannot repair a one-token/no-work dispatch gap.
+5. The mandatory loaded smoke now includes a dedicated 16MiB logical / 64MiB
+   physical owned-RAM pressure phase. Five deterministic incompressible logical
+   generations retain one survivor per old segment, must produce at least two
+   live GC victims and role rotations with nonzero GC READ/WRITE traffic, and
+   verify all 4096 logical pages byte-exact afterward.
+6. After nonzero live-GC qualification, add segment reuse-distribution evidence
+   (per-segment role rotations/reuse counts, spread/max-min) before any physical
+   endurance claim or lower DISCARD/TRIM experiment.
+7. Implement >=5 counterbalanced matched pairs before promoting QD8 or mixed
+   throughput from directional/preliminary to confirmatory evidence.
+
+## NUMA / deployment topology
+
+Preparation should become NUMA-local only after bounded multi-worker scaling is
+proven. The preferred architecture is one preparation domain per memory-local
+NUMA node (node-local LZ4 workmem/scratch/prepared pools, routed by source page
+home), feeding one global ordered mapping/allocation/GC authority when all nodes
+share one backing device. Do not equate a Linux NUMA node one-to-one with a
+physical memory controller without hardware-specific topology evidence.
+
+A fully independent `swapz` instance per NUMA node is a deployment topology,
+not the default single-target design. It is appropriate to evaluate when each
+NUMA node also has genuinely node-local backing storage (for example an NVMe
+behind that node's PCIe root complex). If multiple nodes share one backing
+device, preserve one global storage authority so extent packing, barriers,
+physical allocation and GC do not fragment across independent writers.
 
 ## Release gates
 
