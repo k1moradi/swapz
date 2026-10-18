@@ -1003,13 +1003,16 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
-        print("  Async pipeline — timings overlap; CPU rows are task CPU, not wall.")
+        print("  Async pipeline — wall counters overlap; active rows are upper bounds.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
             [
                 ("LZ4",
                  f"{asynchronous['mixed_lz4_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} IO"),
+                ("payload CRC",
+                 f"{asynchronous['mixed_payload_crc_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_payload_crc_bytes'] / 1048576:.1f} MiB"),
                 ("RAM copies",
                  f"{asynchronous['mixed_write_copy_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_write_copy_bytes'] / 1048576:.1f} MiB"),
@@ -1026,12 +1029,32 @@ def print_bench(result):
                  "-"),
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
-                ("ordered CPU",
-                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f}", "-"),
-                ("prep CPU",
-                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f}", "-"),
+                ("ordered active<=",
+                 f"{asynchronous['mixed_ordered_active_wall_ns'] / 1e6:.1f}", "-"),
+                ("prep active<=",
+                 f"{asynchronous['mixed_prep_active_wall_ns'] / 1e6:.1f}", "-"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
+            ])
+        print("  Commit detail — nested wall subsets; do not add to parent rows.")
+        print_table(
+            ("phase", "ms"),
+            [
+                ("stage", f"{asynchronous['mixed_engine_stage_wall_ns'] / 1e6:.1f}"),
+                ("pause/hash",
+                 f"{asynchronous['mixed_engine_pause_wall_ns'] / 1e6:.1f}/"
+                 f"{asynchronous['mixed_batch_pause_hash_wall_ns'] / 1e6:.1f}"),
+                ("hole clear", f"{asynchronous['mixed_engine_hole_clear_wall_ns'] / 1e6:.1f}"),
+                ("resume/hash",
+                 f"{asynchronous['mixed_engine_resume_wall_ns'] / 1e6:.1f}/"
+                 f"{asynchronous['mixed_batch_resume_hash_wall_ns'] / 1e6:.1f}"),
+                ("publish validate",
+                 f"{asynchronous['mixed_publish_initial_validate_wall_ns'] / 1e6:.1f}"),
+                ("publish phase1/lookup",
+                 f"{asynchronous['mixed_publish_phase1_wall_ns'] / 1e6:.1f}/"
+                 f"{asynchronous['mixed_publish_lookup_wall_ns'] / 1e6:.1f}"),
+                ("publish mutate",
+                 f"{asynchronous['mixed_publish_mutation_wall_ns'] / 1e6:.1f}"),
             ])
         print_table(
             ("async signal", "mean"),
@@ -1053,6 +1076,11 @@ def print_bench(result):
                 ("one-page pack/deadline",
                  f"{counters['win1_pack_ready']:.1f}/"
                  f"{counters['win1_deadline']:.1f}"),
+                ("dry next <=10/50/200/>",
+                 f"{asynchronous['mixed_dry_next_le10us']:.1f}/"
+                 f"{asynchronous['mixed_dry_next_11_50us']:.1f}/"
+                 f"{asynchronous['mixed_dry_next_51_200us']:.1f}/"
+                 f"{asynchronous['mixed_dry_next_gt200us']:.1f}"),
                 ("GC victims", f"{counters['gc_victims']:.1f}"),
             ])
         async_criteria = data["criteria"]["async"]
@@ -1089,7 +1117,7 @@ def print_bench(result):
             ("media", "synthetic RAM only"),
             ("mixed statistics", "two pairs/mode; no confidence interval"),
             ("write-only", "one pair/QD; directional only"),
-            ("CPU", "replay + ordered/prep worker task CPU; IRQ/device CPU excluded"),
+            ("CPU", "replay CPU only; worker active-wall upper bounds are not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims not exercised"),
             ("Full telemetry", "build/test_results.json.xz"),
