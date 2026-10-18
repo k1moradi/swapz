@@ -46,6 +46,9 @@ def arm(candidate, *, mode, regime):
                     "read_payload_blocks": 512,
                     "lower_read_wall_ns": 120000000,
                     "decode_wall_ns": 20000000,
+                    "read_copy_wall_ns": 4000000,
+                    "read_copy_bytes": 4194304,
+                    "read_engine_nonio_wall_ns": 6000000,
                     "read_meta_cache_hits": 128,
                     "read_meta_lru_hits": 100,
                     "read_full_extent_reqs": 200,
@@ -87,8 +90,11 @@ def arm(candidate, *, mode, regime):
         "kernel_write_path": ({
             "physical_write_reqs": 5,
             "lz4_wall_ns": 20000000,
+            "write_copy_wall_ns": 3000000,
+            "write_copy_bytes": 6000000,
             "window_sort_wall_ns": 1000000,
             "window_commit_wall_ns": 40000000,
+            "window_commit_nonio_wall_ns": 10000000,
             "lower_write_wall_ns": 30000000,
             "prep_wait_wall_ns": 500000,
             "prep_lower_write_overlap_ns": 5000000,
@@ -347,6 +353,9 @@ class ReportContract(unittest.TestCase):
             slow["columns"]["sync"]["sequential_4mib_s"], .9)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_reqs"], 1024)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_payload_reqs"], 512)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_copy_wall_ns"], 4000000)
+        self.assertEqual(slow["columns"]["async"]["seeded_random_read_copy_bytes"], 4194304)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_engine_nonio_wall_ns"], 6000000)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_cache_hits"], 128)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_lru_hits"], 100)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
@@ -354,6 +363,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
         self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
+        self.assertEqual(slow["columns"]["sync"]["mixed_write_copy_wall_ns"], 3000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_write_copy_bytes"], 6000000)
+        self.assertEqual(slow["columns"]["sync"]["mixed_window_commit_nonio_wall_ns"], 10000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
         self.assertEqual(
@@ -394,6 +406,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("wave kicks", rendered)
         self.assertIn("scheduling", rendered)
         self.assertIn("Verified 4MiB packed reads", rendered)
+        self.assertIn("Packed-read C attribution", rendered)
+        self.assertIn("RAM copies", rendered)
+        self.assertIn("commit non-I/O", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SATURATION PILOT", rendered)
