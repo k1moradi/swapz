@@ -71,6 +71,16 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 	      swapz_u32 bytes_total, swapz_u32 sequence);
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	       swapz_u32 generation, const void *payload, swapz_u16 length);
+/*
+ * Same byte-exact SWZ3 append, but the caller supplies the CRC32C already
+ * computed over this exact payload. This only skips the source-buffer scan;
+ * swapz_finish() still verifies the copied final extent payload before any
+ * mapping publication.
+ */
+int swapz_append_prehashed(struct swapz_builder *builder,
+			 swapz_u32 logical_page, swapz_u32 generation,
+			 const void *payload, swapz_u16 length,
+			 swapz_u32 payload_crc32c);
 int swapz_seal(struct swapz_builder *builder);
 int swapz_validate(const void *bytes, swapz_u32 bytes_total);
 /*
