@@ -399,8 +399,11 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		tx = &engine->pending;
 		for (j = 0; j < take; ++j)
 			engine->logical_scratch[j] = pages[entry + j].logical_page;
+		phase_start = swapz_engine_now_ns();
 		error = swapz_stage(engine->authority, engine->logical_scratch,
 				  take, blocks, tx);
+		engine->stage_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error)
 			return error;
 		phase_start = swapz_engine_now_ns();
@@ -549,8 +552,11 @@ static int swapz_bulk_flush(struct swapz_engine *e, swapz_u32 start,
 		struct swapz_tx *tx = &e->bulk_txs[i];
 		swapz_u16 offset = e->bulk_offsets[i];
 		unsigned long long publish_start = swapz_engine_now_ns();
+		unsigned long long resume_start = publish_start;
 
 		error = swapz_batch_resume(e->authority, tx);
+		e->batch_resume_wall_ns += swapz_engine_elapsed_ns(
+			resume_start, swapz_engine_now_ns());
 		if (error) {
 			int cleanup;
 
@@ -694,8 +700,11 @@ retry_stage:
 		tx = &e->bulk_txs[staged];
 		for (j = 0; j < take; ++j)
 			e->logical_scratch[j] = pages[entry + j].logical_page;
+		phase_start = swapz_engine_now_ns();
 		error = swapz_stage_batch(e->authority, e->logical_scratch,
 					take, blocks, tx);
+		e->stage_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error == -EAGAIN && staged) {
 			error = swapz_bulk_flush(e, run_start, run_blocks,
 					       staged, committed_pages);
@@ -741,11 +750,15 @@ retry_stage:
 			 * become lower-media bytes, so clear exactly those holes instead
 			 * of the whole 256KiB scratch buffer for every run.
 			 */
-			if (offset > run_blocks)
+			if (offset > run_blocks) {
+				phase_start = swapz_engine_now_ns();
 				memset(e->bulk_scratch +
 				       (size_t)run_blocks * SWAPZ_BLOCK_BYTES, 0,
 				       (size_t)(offset - run_blocks) *
 				       SWAPZ_BLOCK_BYTES);
+				e->hole_clear_wall_ns += swapz_engine_elapsed_ns(
+					phase_start, swapz_engine_now_ns());
+			}
 
 			phase_start = swapz_engine_now_ns();
 			if (raw) {
@@ -782,7 +795,10 @@ retry_stage:
 			}
 			e->pack_wall_ns += swapz_engine_elapsed_ns(
 				phase_start, swapz_engine_now_ns());
+			phase_start = swapz_engine_now_ns();
 			error = swapz_batch_pause(e->authority, tx);
+			e->batch_pause_wall_ns += swapz_engine_elapsed_ns(
+				phase_start, swapz_engine_now_ns());
 			if (error)
 				goto abort_current;
 			e->bulk_offsets[staged] = offset;
