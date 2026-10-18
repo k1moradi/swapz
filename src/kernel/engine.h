@@ -64,6 +64,14 @@ struct swapz_engine {
 	swapz_u32 bulk_mixed_runs;
 	swapz_u32 bulk_raw_only_runs;
 	swapz_u32 bulk_raw_entries;
+	/*
+	 * Kernel wall-time attribution for serialized write-engine CPU/memory
+	 * phases. Userspace codec/unit builds leave these at zero. These are
+	 * diagnostics only and never participate in correctness decisions.
+	 */
+	unsigned long long plan_wall_ns;
+	unsigned long long pack_wall_ns;
+	unsigned long long publish_wall_ns;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
 	struct swapz_tx pending;
 	swapz_u32 logical_scratch[SWAPZ_MAX_RECORDS];
