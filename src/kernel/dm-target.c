@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
+#include <linux/sched/cputime.h>
 #include <linux/vmalloc.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
@@ -334,6 +335,14 @@ struct swapz_dm {
 	u64 gc_wall_ns;
 	u64 lower_read_wall_ns;
 	u64 lower_write_wall_ns;
+	/*
+	 * Scheduler-accounted CPU time for the two kernel workqueue callbacks.
+	 * This is task CPU accounting, not wall time; sleep in dm_io() or
+	 * completion waits is therefore excluded. Each field has one callback
+	 * writer because both workqueues are max_active=1.
+	 */
+	u64 ordered_worker_cpu_ns;
+	u64 preparation_worker_cpu_ns;
 	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
 	 * nested in lower_write_wall_ns, not hardware command latency. */
 	u64 write_wait_le_1ms;
@@ -346,6 +355,22 @@ struct swapz_dm {
 	u64 reordered_records;
 	u64 io_failures;
 };
+
+static u64 swapz_current_task_cpu_ns(void)
+{
+	u64 user_ns;
+	u64 system_ns;
+
+	task_cputime_adjusted(current, &user_ns, &system_ns);
+	return user_ns + system_ns;
+}
+
+static void swapz_account_worker_cpu(u64 *counter, u64 start_ns)
+{
+	u64 end_ns = swapz_current_task_cpu_ns();
+
+	*counter += swapz_elapsed_ns(start_ns, end_ns);
+}
 
 /*
  * Per-BIO prepared bytes have one final owner: the serialized worker.
@@ -663,6 +688,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		container_of(work, struct swapz_dm, preparation_worker);
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
+	u64 cpu_start_ns = swapz_current_task_cpu_ns();
 
 	for (;;) {
 		struct swapz_prepared_page *prepared;
@@ -681,12 +707,17 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * behind prepared tail entries that own every slot. If capacity is
 		 * exhausted, leave all remaining entries claimable by inline steal.
 		 */
-		if (down_trylock(&ctx->preparation_slots))
+		if (down_trylock(&ctx->preparation_slots)) {
+			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
+						cpu_start_ns);
 			return;
+		}
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			up(&ctx->preparation_slots);
+			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
+						cpu_start_ns);
 			return;
 		}
 		/*
@@ -719,6 +750,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
+				swapz_account_worker_cpu(
+					&ctx->preparation_worker_cpu_ns,
+					cpu_start_ns);
 				return;
 			}
 			entry = list_last_entry(&ctx->preparation_incoming,
@@ -736,8 +770,12 @@ static void swapz_preparation_worker(struct work_struct *work)
 			up(&ctx->preparation_slots);
 			complete(&entry->preparation_finished);
 			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-			    !atomic_read(&ctx->preparation_tail_credit))
+			    !atomic_read(&ctx->preparation_tail_credit)) {
+				swapz_account_worker_cpu(
+					&ctx->preparation_worker_cpu_ns,
+					cpu_start_ns);
 				return;
+			}
 			continue;
 		}
 		input = swapz_map_single_bio_input(entry->bio, &mapped_input);
@@ -755,8 +793,12 @@ static void swapz_preparation_worker(struct work_struct *work)
 				complete(&entry->preparation_finished);
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
-				    !atomic_read(&ctx->preparation_tail_credit))
+				    !atomic_read(&ctx->preparation_tail_credit)) {
+					swapz_account_worker_cpu(
+						&ctx->preparation_worker_cpu_ns,
+						cpu_start_ns);
 					return;
+				}
 				continue;
 			}
 			input = ctx->preparation_input_page;
@@ -803,8 +845,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * Otherwise stop; the producer never drains uncredited tail work.
 		 */
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-		    !atomic_read(&ctx->preparation_tail_credit))
+		    !atomic_read(&ctx->preparation_tail_credit)) {
+			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
+						cpu_start_ns);
 			return;
+		}
 	}
 }
 
@@ -1680,6 +1725,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	swapz_u8 i;
 	u64 section_start;
 	bool inline_zero = false;
+	bool raw_staged_in_batch = false;
+	bool bulk_raw_eligible = ctx->engine.bulk_enabled &&
+				 !ctx->engine.verify_after_write;
 	bool prepared_async = ctx->async_prepare && !entry->preparation_inline;
 	int length;
 	int error;
@@ -1740,14 +1788,21 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		if (length > 0 && length <= 64)
 			inline_zero = swapz_page_is_zero(input);
 		/*
-		 * An incompressible page must outlive this short BIO mapping until
-		 * the retained window commits. Preserve it in worker-owned staging.
+		 * If retained bulk RAW admission is available, copy the mapped
+		 * upper page exactly once into its durable batch slot before the
+		 * temporary mapping goes away. Non-bulk RAW keeps BIO ownership
+		 * through swapz_flush_window() and lets swapz_raw_write() perform
+		 * its one required copy afterwards.
 		 */
-		if (length <= 0 && mapped_input)
+		if (length <= 0 && mapped_input && bulk_raw_eligible) {
 			swapz_memcpy_accounted(
-				ctx->input_page, input, SWAPZ_BLOCK_BYTES,
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				input, SWAPZ_BLOCK_BYTES,
 				&ctx->ordered_write_copy_wall_ns,
 				&ctx->ordered_write_copy_bytes);
+			raw_staged_in_batch = true;
+		}
 		if (mapped_input)
 			kunmap_local(mapped_input);
 	}
@@ -1801,8 +1856,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		swapz_complete(bio, error);
 		return 0;
 	}
-	if (length <= 0 && ctx->engine.bulk_enabled &&
-	    !ctx->engine.verify_after_write) {
+	if (length <= 0 && bulk_raw_eligible) {
 		/* Preserve the complete original 4KiB page in worker-owned
 		 * staging. Admission and FUA ordering match compressed BIOs;
 		 * CRC authority is published only after the shared lower write. */
@@ -1813,7 +1867,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				entry->prepared_page->bytes, SWAPZ_BLOCK_BYTES,
 				&ctx->ordered_write_copy_wall_ns,
 				&ctx->ordered_write_copy_bytes);
-		else
+		else if (!raw_staged_in_batch)
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
@@ -2229,6 +2283,7 @@ static void swapz_worker(struct work_struct *work)
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	unsigned int remaining;
+	u64 cpu_start_ns = swapz_current_task_cpu_ns();
 
 	for (;;) {
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
@@ -2481,15 +2536,21 @@ static void swapz_worker(struct work_struct *work)
 					ctx->retain_timer_arm_skips++;
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
+							cpu_start_ns);
 				return;
 			}
 			if (ctx->batch_count && !ctx->accepting) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
 				swapz_flush_window(ctx);
+				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
+							cpu_start_ns);
 				return;
 			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
+						cpu_start_ns);
 			return;
 		}
 		if (ctx->accepting) {
@@ -2500,6 +2561,8 @@ static void swapz_worker(struct work_struct *work)
 			ctx->worker_requeues++;
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
+			swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
+						cpu_start_ns);
 			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -3039,6 +3102,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "engine_publish_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
+		       "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu "
@@ -3158,6 +3222,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine_publish_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
+		       ctx->ordered_worker_cpu_ns,
+		       ctx->preparation_worker_cpu_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
