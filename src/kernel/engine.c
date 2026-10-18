@@ -25,6 +25,22 @@ static unsigned long long swapz_engine_elapsed_ns(unsigned long long start,
 	return end >= start ? end - start : 0;
 }
 
+static int swapz_append_page(struct swapz_engine *engine,
+			    struct swapz_builder *builder,
+			    const struct swapz_compressed_page *page,
+			    swapz_u32 generation)
+{
+	if (page->payload_crc32c_valid) {
+		engine->prehashed_records++;
+		return swapz_append_prehashed(builder, page->logical_page,
+					     generation, page->payload,
+					     page->length,
+					     page->payload_crc32c);
+	}
+	return swapz_append(builder, page->logical_page, generation,
+			    page->payload, page->length);
+}
+
 static int swapz_page_valid(const struct swapz_compressed_page *page)
 {
 	return page && !page->raw && page->payload && page->length > 0 &&
@@ -396,9 +412,8 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		for (j = 0; j < take; ++j) {
 			const struct swapz_compressed_page *page = &pages[entry + j];
 
-			error = swapz_append(&builder, page->logical_page,
-					   tx->records[j].generation,
-					   page->payload, page->length);
+			error = swapz_append_page(engine, &builder, page,
+					       tx->records[j].generation);
 			if (error) {
 				engine->pack_wall_ns += swapz_engine_elapsed_ns(
 					phase_start, swapz_engine_now_ns());
@@ -747,9 +762,8 @@ retry_stage:
 					const struct swapz_compressed_page *p =
 							&pages[entry + j];
 
-					error = swapz_append(&builder, p->logical_page,
-						   tx->records[j].generation,
-						   p->payload, p->length);
+					error = swapz_append_page(e, &builder, p,
+						       tx->records[j].generation);
 					if (error) {
 						e->pack_wall_ns += swapz_engine_elapsed_ns(
 							phase_start,
