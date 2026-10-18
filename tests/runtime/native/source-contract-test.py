@@ -1222,6 +1222,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       status)
         self.assertIn("prep_ordered_inline=%llu prep_ordered_handoffs=%llu", status)
         self.assertIn("prep_ordered_waits=%llu prep_wait_wall_ns=%llu", status)
+        self.assertIn("prep_exit_slot=%llu prep_exit_empty=%llu", status)
+        self.assertIn("prep_exit_singular=%llu prep_exit_no_credit_tail=%llu",
+                      status)
+        self.assertIn("ctx->preparation_exit_no_credit_tail++", producer)
         self.assertIn("prep_lower_write_overlap_ns=%llu prep_wave_kicks=%llu",
                       status)
         self.assertIn("ctx->preparation_lz4_lower_write_overlap_ns +=", producer)
