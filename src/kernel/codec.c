@@ -302,8 +302,12 @@ int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
 	*out = (struct swapz_decoded){ 0 };
 	*payload = NULL;
 	swapz_get_header(bytes, &header);
-	if (index >= header.record_count)
+	if (!header.record_count || header.record_count > SWAPZ_MAX_RECORDS ||
+	    index >= header.record_count)
 		return -ERANGE;
+	if (sizeof(struct swapz_header) +
+	    ((swapz_u32)index + 1U) * sizeof(struct swapz_record) > bytes_total)
+		return -EUCLEAN;
 	swapz_get_record(bytes, index, &record);
 	out->logical_page = swapz_le32(record.logical_page_le);
 	out->generation = swapz_le32(record.generation_le);
