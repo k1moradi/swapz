@@ -150,6 +150,11 @@ static int swapz_append_crc(struct swapz_builder *builder,
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	       swapz_u32 generation, const void *payload, swapz_u16 length)
 {
+	/* Preserve the historical validation-before-read contract. In
+	 * particular, do not checksum a NULL/zero/oversized payload merely
+	 * because the common implementation now accepts a supplied CRC. */
+	if (!payload || !length || length > SWAPZ_MAX_COMPRESSED)
+		return -EINVAL;
 	return swapz_append_crc(builder, logical_page, generation, payload, length,
 			      swapz_crc32c_bytes(payload, length));
 }
