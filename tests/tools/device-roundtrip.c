@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { PAGE = 4096, NPAGES = 128 };
+enum { PAGE = 4096, NPAGES = 128, LOGICAL_PAGES = 4096 };
 
 static void pattern(unsigned char *p, unsigned int page, unsigned int round)
 {
@@ -94,6 +94,60 @@ static int validate_owned_device(int fd)
 		size == UINT64_C(16) * 1024 * 1024 ? 0 : -1;
 }
 
+static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
+		     unsigned int rounds)
+{
+	unsigned char *latest = NULL;
+	unsigned int page, round;
+
+	latest = calloc(LOGICAL_PAGES, sizeof(*latest));
+	if (!latest)
+		return -1;
+	/*
+	 * Populate the full 16MiB logical target first. Subsequent deterministic
+	 * scattered half-page overwrites keep live survivors distributed across
+	 * old physical segments instead of manufacturing trivially dead segments.
+	 * This is a bounded loaded GC oracle, not a performance benchmark.
+	 */
+	for (page = 0; page < LOGICAL_PAGES; ++page) {
+		pattern(expected, page, 1);
+		if (transfer(fd, expected, page, 1))
+			goto fail;
+		latest[page] = 1;
+	}
+	for (round = 2; round < rounds + 2; ++round) {
+		for (page = 0; page < LOGICAL_PAGES; ++page) {
+			uint32_t mix = (uint32_t)page * 2654435761U ^
+				       (uint32_t)round * 2246822519U;
+
+			mix ^= mix >> 16;
+			mix *= 0x7feb352dU;
+			mix ^= mix >> 15;
+			if (mix & 1U)
+				continue;
+			pattern(expected, page, round);
+			if (transfer(fd, expected, page, 1))
+				goto fail;
+			latest[page] = (unsigned char)round;
+		}
+	}
+	if (fsync(fd))
+		goto fail;
+	for (page = 0; page < LOGICAL_PAGES; ++page) {
+		pattern(expected, page, latest[page]);
+		if (transfer(fd, buf, page, 0) || memcmp(buf, expected, PAGE)) {
+			fprintf(stderr, "FAIL GC byte-exact page=%u round=%u\n",
+				page, latest[page]);
+			goto fail;
+		}
+	}
+	free(latest);
+	return 0;
+fail:
+	free(latest);
+	return -1;
+}
+
 static int series(int fd, unsigned char *buf, unsigned char *expected,
 		  unsigned int count, unsigned int round, int write_data)
 {
@@ -118,13 +172,13 @@ int main(int argc, char **argv)
 {
 	const char *prefix = "/dev/mapper/swapz-demo-";
 	unsigned char *buf = NULL, *expected = NULL;
-	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
-	unsigned int i, phase, count = 0, round = 0;
+	int fd = -1, rc = 1, private_mode = 0, write_series = 0, gc_mode = 0;
+	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
-	if (argc != 2 && argc != 5) {
+	if (argc != 2 && argc != 4 && argc != 5) {
 		fprintf(stderr,
-			"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> [private series mode]\n");
+			"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> [private series|GC mode]\n");
 		return 2;
 	}
 	if (strncmp(argv[1], prefix, strlen(prefix)) ||
@@ -148,6 +202,15 @@ int main(int argc, char **argv)
 		/* Deliberately omit O_SYNC here: the lifecycle writer must be
 		 * eligible for retention rather than closing through FUA. */
 		open_flags &= ~O_SYNC;
+	} else if (argc == 4) {
+		if (strcmp(argv[2], "--gc-stress") ||
+		    parse_uint(argv[3], 96U, &gc_rounds) ||
+		    gc_rounds < 8U || gc_rounds > 96U) {
+			fprintf(stderr, "FAIL invalid private GC mode\n");
+			return 2;
+		}
+		gc_mode = 1;
+		open_flags &= ~O_SYNC;
 	}
 	if (posix_memalign((void **)&buf, PAGE, PAGE) ||
 	    posix_memalign((void **)&expected, PAGE, PAGE)) {
@@ -162,6 +225,14 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
+	if (gc_mode) {
+		if (gc_stress(fd, buf, expected, gc_rounds))
+			goto out;
+		printf("PASS: owned swapz live GC stress rounds=%u logical_pages=%u\n",
+		       gc_rounds, LOGICAL_PAGES);
+		rc = 0;
+		goto out;
+	}
 	if (private_mode) {
 		if (series(fd, buf, expected, count, round, write_series))
 			goto out;
