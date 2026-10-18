@@ -8,64 +8,60 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `e5c172177242e3f7edcc6e470989eb3a71a43e92` passed all
-five qualification stages and is the current scheduling baseline. It keeps the
-bounded accepted-wave preparation kick, the singular-head anti-convoy cushion,
-one-for-one tail credits and the compact raw/sync controls.
+Owner-loaded source `e5c172177242e3f7edcc6e470989eb3a71a43e92` remains the
+accepted scheduling baseline. It passed all five qualification stages with the
+bounded accepted-wave preparation kick, producer-side singular-head cushion,
+one-for-one tail credits and both ordered/preparation workqueues unbound.
 
-On the slow RAM model, mixed QD32 async is effectively neutral versus sync:
-7.09 versus 7.08 MB/s, with 545.5 lower WRITE requests and 11.82 ms READ p99.
-On the faster model, async reaches 23.74 MB/s versus 19.71 MB/s sync, while
-lower WRITE requests fall to 874.5 and mixed READ p99 reaches 2.10 ms. Against
-the preceding qualified `5aeae47` run, faster-model async useful WRITE is up
-about 12%, lower WRITE requests are down about 15%, and worker-empty deadline
-closes fall from 70.2 to 60.5 per pair. Lower WRITE bytes and packed-read byte
-savings remain intact.
+On the faster RAM model, that baseline reached 23.74 MB/s async mixed WRITE
+versus 19.71 MB/s sync, with 874.5 lower WRITE requests, 2.10 ms mixed READ p99
+and 60.5 worker-empty deadline closes. The slow model remained neutral at
+7.09 MB/s async versus 7.08 MB/s sync. Lower-write byte savings and packed-read
+byte savings remained intact.
 
-The accepted-wave result is therefore progress for mixed scheduling, but its
-idle-time attribution exposes the next bottleneck. Faster-model mixed spends
-70.6 ms in LZ4 and 183.9 ms in synchronous lower WRITE service, yet only 3.8 ms
-of producer LZ4 is proven wholly inside lower-WRITE waits. Ordered preparation
-blocking is only 0.58 ms, so the problem is not a completion convoy; most useful
-compression is still scheduled outside the device-wait interval. The
-write-only pilot remains directional only: QD8 preserves 520 lower WRITE
-requests and async is 18% above its same-run sync control, but its 21.80 MB/s
-absolute point is below the earlier 29.75 MB/s one-pair observation and must not
-be treated as a confirmed regression. QD1 still has zero producer claims.
+Source `e199ac5399808fbf3dcf470989eb3a71a43e92` tested CPU-local preparation.
+It increased proven LZ4-inside-lower-WRITE overlap on the faster model from
+3.8 ms to 6.4 ms and nearly eliminated ordered preparation wait, but the useful
+path regressed: async mixed WRITE fell to 20.37 MB/s, lower WRITE requests rose
+to 1055, and worker-empty deadline closes rose to 72.5. Faster write-only QD8
+also fell below its same-run sync control while request geometry stayed at 520.
+The CPU-local placement is therefore rejected and deleted from production.
 
-Loaded GC victims remain zero, so endurance claims are still limited to the
-demonstrated proxy: fewer lower bytes/requests for the same verified logical
-workload. Wear distribution and block-reuse behavior are not yet qualified.
+The next bottleneck is CPU/memory attribution, not another scheduling heuristic.
+Current C timing proves lower WRITE remains the largest wall interval and LZ4 is
+the largest explicitly timed CPU stage, but explicit BIO/scratch/batch copies,
+packing/CRC work and authority processing are not separated. The next source
+restores the accepted unbound scheduler and adds kernel-C timing/byte counters
+for explicit RAM copies plus engine processing with synchronous lower-I/O wait
+subtracted.
+
+Loaded GC victims remain zero, so endurance claims are still proxy-only: fewer
+lower bytes/requests are demonstrated, but sustained victim rotation and
+physical-block reuse distribution are not yet qualified.
 
 ## Immediate work queue
 
-1. Keep the accepted-wave ownership policy and change only LZ4 preparation
-   placement: use a CPU-local `WQ_MEM_RECLAIM` preparation workqueue while the
-   ordered Device Mapper worker remains `WQ_MEM_RECLAIM | WQ_UNBOUND`.
-   `queue_work()` then targets the issuing CPU. In the lower-WRITE wake the
-   issuer is the ordered worker, allowing pending LZ4 work to consume that CPU's
-   otherwise-idle synchronous-I/O interval instead of immediately competing on
-   another CPU.
-2. Preserve producer non-reentrance, the singular-head guard, bounded prepared
-   slots, one-for-one tail pacing, head-first claims during lower WRITE,
-   sole ordered mapping/publication/completion ownership, retained-window
-   policy, extent planning, lower-byte/read policy and GC behavior.
-3. Accept the CPU-local placement only if faster mixed stays near or above
-   23.74 MB/s, lower WRITE requests stay near or below 875, worker-empty
-   deadlines stay near or below 60.5, and full LZ4-in-lower-WRITE overlap rises
-   above 3.8 ms without materially increasing the 0.58 ms ordered preparation
-   wait. Slow-model mixed must remain neutral rather than lose useful WRITE.
-4. Keep QD1 producer claims at zero. Preserve write-only QD8/QD32 request
-   geometry near 520/~139 and treat their one-pair throughput only as
-   directional. Lower WRITE bytes, packed-read byte savings and read-tail
-   behavior remain hard gates.
-5. If CPU-local placement only trades away same-run async/sync throughput
-   without increasing useful lower-I/O overlap, reject it and remove the code;
-   do not stack another scheduling heuristic on top of an unqualified one.
-6. After scheduling is stable, add release evidence rather than more heuristics:
-   kernel-worker CPU attribution, statistically repeated matched performance,
-   sustained GC with nonzero victims and explicit reuse/wear-distribution
-   evidence, plus genuine lower-error coverage.
+1. Requalify the accepted unbound preparation placement with the new C
+   attribution only; do not add another scheduler heuristic in the same run.
+2. Measure WRITE explicit-copy wall time/bytes, READ output-copy wall time/bytes,
+   write-engine commit non-I/O time and read-engine non-I/O time. Keep LZ4,
+   lower-I/O and preparation-wait counters as independent controls.
+3. If explicit copy time is material, optimize the common single-4KiB-BIO path
+   by feeding LZ4 directly from a mapped BIO page and/or decompressing directly
+   into the mapped read BIO, retaining the existing copy path as the fragmented
+   BIO fallback. Do not pin producer buffers across window commit merely to
+   avoid one memcpy unless bounded-pool pressure is separately proven safe.
+4. If commit non-I/O dominates instead, profile the SWZ3 build path as a coarse
+   phase before changing CRC, packing or authority logic. Preserve byte-exact
+   format, ordering and fail-closed publication.
+5. Keep QD1 producer claims at zero and preserve faster-model mixed behavior
+   near the accepted 23.74 MB/s / ~875-request / ~60.5-worker-empty result.
+   Preserve QD8/QD32 request geometry near 520/~139. Lower-write bytes and
+   packed-read tails remain hard gates.
+6. After scheduling and CPU/memory attribution stabilize, add kernel-worker CPU
+   attribution, statistically repeated matched performance, sustained GC with
+   nonzero victims and explicit segment-reuse/wear-distribution evidence, plus
+   genuine lower-error coverage.
 
 ## Release gates
 
