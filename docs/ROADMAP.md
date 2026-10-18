@@ -10,28 +10,28 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`44363933e9e401ccaf3a3af6c1fa42b2878d2bab` passed all five stages and is
+`6330cb5d264a7cf563f4a161c29ac9ccd1d3e08b` passed all five stages and is
 qualified exploratory evidence, but is not promoted.
 
-The credited-preparation run preserved the deep write-only geometry: QD8 used
-520 lower WRITE requests in async mode on both RAM models, and faster-model
-QD32 async used 139 requests. QD1 async remained a lone-head path with zero
-producer claims and 0.37 ms p99.
+The persistent preparation-credit experiment solved producer starvation without
+damaging write-only geometry. QD1 async still recorded zero producer claims.
+On the faster model QD4/QD8/QD32 producer-tail claims rose to
+2026/2071/2142, while QD8 retained 520 lower WRITE requests and QD32 retained
+138. Faster QD32 sync also improved to 45.45 MB/s after moving the serialized
+ordered worker to `WQ_UNBOUND`.
 
-The new preparation counters rejected the one-shot execution-time credit
-hypothesis for write-only bursts. On the faster model QD8 async recorded only
-one producer tail claim against 5366 ordered-inline preparations; QD32 recorded
-two tail claims against 5350 ordered-inline preparations. Useful throughput
-therefore showed no asynchronous gain: 17.32 MB/s at QD8 and 31.15 MB/s at
-QD32, approximately equal to sync.
+The remaining preparation problem is now directly measured as head collision.
+Faster-model blocking waits were 943/1373/1941 against
+2029/2074/2164 handoffs at QD4/QD8/QD32: roughly 46%/66%/90%. A nominal tail
+claim on a singular preparation list is the FIFO head, so staggered arrivals
+turn the intended two-ended scheme into ordered-worker completion waits.
 
-Mixed QD32 did expose producer work because its longer ordered service intervals
-kept credits consumable: slow async averaged 5023.5 producer-tail claims and
-82.5 blocking waits, while faster async averaged 5464 tail claims and 275
-blocking waits. Mixed throughput was 7.14 MB/s on the slow model and
-20.49 MB/s on the faster model, with lower WRITE savings preserved. Faster
-mixed still recorded about 70 worker-empty deadline closes, but retention
-policy is not part of the next scheduling experiment.
+Mixed behavior exposes a second bounded issue. Slow mixed remained efficient at
+about 544.5 async lower WRITE requests with only 4.0 worker-empty deadlines.
+Faster mixed async rose to 1155 lower WRITE requests, 77.8 worker-empty
+deadlines and 160.2 one-page PACK_READY closes, while useful WRITE throughput
+was 20.40 MB/s. Read/fence evidence is therefore surviving a dry-tail nonempty
+close long enough to authorize later singleton closes in the same worker pass.
 
 The write-only pilot remains one pair per mode/QD with no confidence interval,
 and the loaded run again reported zero GC victims. No physical-media or
@@ -39,30 +39,27 @@ endurance claim is permitted.
 
 ## Immediate work queue
 
-1. Qualify a scheduling-only successor to `4436393`. Keep retained-window,
-   extent-planning, lower-byte, read-tail and GC policy unchanged.
-2. Define `preparation_tail_credit` as one token earned by ordered inline
-   WRITE work in the currently open retained burst. Permit that token to survive
-   the end of the individual `swapz_process()` call until the producer
-   consumes it or the nonempty window closes.
-3. Let an already-running producer consume a newly earned token without forcing
-   a workqueue return/re-wake between every prepared page. Never permit
-   uncredited tail draining.
-4. Keep `batch_count` worker-private. The map path wakes preparation only for
-   `lower_write_active` or an earned atomic tail token; it must not depend on
-   `ordered_worker_busy` to bridge an inter-BIO gap.
-5. Run the ordered Device Mapper worker on a serialized
-   `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueue so copy/LZ4 execution is not
-   forced onto the submitting CPU. Publication and lower-I/O ownership remain
-   single-threaded.
-6. Acceptance requires QD1 to retain zero producer claims, QD8/QD32 lower
-   requests to stay near 520/~139, and write-only async producer-tail work to
-   become substantial without blocking waits turning into a convoy. Reject any
-   throughput gain that raises lower WRITE bytes or regresses packed-read tails.
-7. Revisit the residual faster mixed worker-empty deadline cluster only after
-   preparation scheduling is isolated. Sustained GC, genuine lower errors,
-   kernel-worker CPU attribution and statistically repeated saturation remain
-   release gates.
+1. Keep the `6330cb5` credit lifetime, unbound worker placement, retained
+   targets, extent planning, lower-byte policy, read policy and GC unchanged.
+2. Outside `lower_write_active`, never consume a preparation token when
+   `preparation_incoming` is singular. Leave the sole FIFO head and its credit
+   for ordered inline steal; claim only a true tail behind at least one head.
+3. Preserve the credit when the producer rejects a singular queue so the next
+   admitted companion can create an eligible two-entry head/tail split.
+4. Consume `retained_window_read_bypasses` and
+   `retained_wave_interrupted` after a real nonempty close at a refreshed dry
+   tail. Keep the existing zero-count early return so empty READ/ZERO processing
+   cannot erase retained evidence prematurely.
+5. Acceptance requires QD1 producer claims to remain zero, QD8/QD32 lower
+   requests to stay near 520/~138, producer-tail work to remain substantial,
+   and blocking waits to fall sharply below handoffs. Faster mixed async lower
+   WRITE requests and one-page PACK_READY closes should move back toward the
+   prior ~950-1040/~90-140 range without increasing lower WRITE bytes or
+   degrading packed-read tails.
+6. Do not claim a performance improvement from the one-pair write-only sweep.
+   Statistically repeated saturation, sustained GC, genuine lower errors,
+   kernel-worker CPU attribution and long-run resource pressure remain release
+   gates.
 
 ## Release gates
 

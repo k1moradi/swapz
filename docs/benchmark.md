@@ -277,3 +277,37 @@ producer claims, QD8/QD32 request geometry must stay near 520/~139, write-only
 producer-tail claims must become substantial, and blocking waits must not
 become a serial handoff convoy. Lower WRITE bytes and packed-read tails remain
 hard rejection gates.
+
+
+### Qualified persistent-credit result and head-cushion successor
+
+Source `6330cb5d264a7cf563f4a161c29ac9ccd1d3e08b` passed all five
+owner-loaded qualification stages. Persistent retained-burst credit restored
+producer participation while preserving write-only aggregation. On the faster
+RAM model, QD8 async used 520 lower WRITE requests with 2071 producer-tail
+claims; QD32 async used 138 requests with 2142 tail claims. QD1 recorded zero
+producer claims.
+
+The same counters reject the current handoff policy. Faster QD4/QD8/QD32
+blocking waits were 943/1373/1941 for 2029/2074/2164 handoffs, so producer work
+was frequently claimed too near the ordered FIFO head. On a singular
+`preparation_incoming` list, `list_last_entry` is the same entry as
+`list_first_entry`; that nominal tail claim is therefore an immediate
+head-of-line collision, not useful opposite-end overlap.
+
+Faster mixed async also used 1155 lower WRITE requests and recorded 160.2 mean
+one-page PACK_READY closes, compared with materially lower request counts in
+earlier qualified runs. The next candidate consumes retained read/fence evidence
+after a real nonempty dry-tail close so one serviced interruption cannot
+authorize repeated later singleton closes. The zero-count flush path remains
+unchanged.
+
+The next comparison keeps the unbound ordered worker, persistent credit,
+retained targets, extent planner, read cap and GC policy fixed. Outside lower
+WRITE wait the producer may consume a credit only when at least two unclaimed
+preparation entries exist, preserving one FIFO head cushion. Acceptance requires
+QD1 to retain zero producer claims, QD8/QD32 request geometry to remain near
+520/~138, blocking waits to fall sharply relative to handoffs, and faster mixed
+async lower WRITE requests/one-page PACK_READY closes to fall without increasing
+lower WRITE bytes or regressing packed-read tails. The write-only sweep remains
+directional until statistically repeated pairs exist.

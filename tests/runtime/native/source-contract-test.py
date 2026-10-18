@@ -1034,6 +1034,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(flush.index("if (!count)"),
                         flush.index("ctx->single_pack_deferred = false"))
         self.assertIn("ctx->retained_wave_interrupted", flush)
+        evidence_reset = flush[flush.rindex("if (!ctx->retain_ms"):
+                               flush.rindex("return 0;")]
+        self.assertIn("!ctx->worker_has_immediate_followup", evidence_reset)
+        self.assertIn("ctx->retained_window_read_bypasses = 0", evidence_reset)
+        self.assertIn("ctx->retained_wave_interrupted = false", evidence_reset)
         self.assertIn("swapz_refresh_accepted_followup(ctx)", process)
         normal_read = process[process.index("case REQ_OP_READ:"):
                               process.index("case REQ_OP_DISCARD:")]
@@ -1085,7 +1090,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("if (atomic_read(&ctx->lower_write_active))", producer)
         self.assertIn("list_first_entry(&ctx->preparation_incoming", producer)
         self.assertIn("list_last_entry(&ctx->preparation_incoming", producer)
+        self.assertIn("list_is_singular(&ctx->preparation_incoming)", producer)
         self.assertIn("atomic_xchg(&ctx->preparation_tail_credit, 0)", producer)
+        self.assertLess(producer.index("list_is_singular(&ctx->preparation_incoming)"),
+                        producer.index("atomic_xchg(&ctx->preparation_tail_credit, 0)"))
         self.assertIn("ctx->preparation_producer_head_claims++", producer)
         self.assertIn("ctx->preparation_producer_tail_claims++", producer)
         self.assertIn("if (tail_claim && !atomic_read(&ctx->lower_write_active) &&",

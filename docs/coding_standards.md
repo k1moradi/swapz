@@ -319,8 +319,10 @@ QD32 wave to a transient short prefix.
 An empty `swapz_flush_window()` call is not a committed window and must not
 erase retained-chain/tail evidence for ordinary READ/zero processing. Real
 ordering barriers still terminate that scheduling evidence. Successful
-retained READ service may carry across intermediate packed/fence commits within
-the same accepted worker burst and is cleared at a true idle boundary.
+retained READ/fence service may carry only while already-accepted followers
+remain in the same worker burst. A real nonempty close at a refreshed dry tail
+consumes that finite evidence so it cannot fragment later windows into repeated
+singleton PACK_READY closes.
 
 A serviced useful pack may close on a refreshed dry worker tail. A sub-pack
 1..3-record residue may do so only after successful retained READ service or a
@@ -346,10 +348,13 @@ only after the ordered worker atomically reserves its own FIFO head.
 For a retained window, an earned `preparation_tail_credit` may survive the end
 of that individual `swapz_process()` call. This bridges the admission gap
 between companion BIOs without exposing worker-owned `batch_count` to
-`->map`. The producer atomically consumes the token when it claims a tail
-entry. If ordered inline work earns a fresh token while the producer is already
+`->map`. Outside lower WRITE wait, the producer must not consume a token when
+`preparation_incoming` is singular: on a one-entry list the nominal tail is
+also the FIFO head, so claiming it forces an avoidable ordered completion wait.
+The sole head and its token remain intact until a true tail exists behind it.
+If ordered inline work earns a fresh token while the producer is already
 running, the producer may continue for that new token; it must stop when no
-token remains. A nonempty window close clears any unused token.
+eligible credited tail remains. A nonempty window close clears any unused token.
 
 A cold lone head has no token and therefore does not wake the producer.
 `->map` may wake parallel preparation only for active lower WRITE service or

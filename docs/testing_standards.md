@@ -238,7 +238,9 @@ Tail learning must be gated exclusively by
 pack is forbidden. Source coverage must also prove the zero-count flush return
 precedes retained-state clearing, normal and independent retained READs refresh
 accepted followers after synchronous service, and tiny dry-residue closure is
-gated by read/fence evidence rather than a prior packed chain alone.
+gated by read/fence evidence rather than a prior packed chain alone. After a
+real nonempty close with no already-accepted follower, that read/fence evidence
+must be consumed so it cannot authorize another dry-tail singleton close.
 
 Loaded qualification must compare write-only QD8/QD32 window histograms and
 lower requests against the last deep-aggregation result, and mixed QD32
@@ -249,8 +251,10 @@ hard ordering boundary.
 Credited opposite-end preparation qualification requires source coverage that
 the producer selects the FIFO head only while `lower_write_active` is true.
 Otherwise it may select the tail only after atomically consuming
-`preparation_tail_credit`. The ordered worker must reserve its head under
-`queue_lock` before publishing that credit.
+`preparation_tail_credit`, and it must reject a singular preparation queue
+before consuming that credit. On a one-entry list the tail is the FIFO head;
+leaving it unclaimed is the required anti-convoy cushion. The ordered worker
+must reserve its head under `queue_lock` before publishing that credit.
 
 The map path must leave a cold idle head to the ordered worker and wake the
 producer only for active lower WRITE service or an already-earned atomic tail
@@ -276,9 +280,11 @@ serialized.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
-QD1 must keep the inline-steal latency benefit; QD8 should show substantial
-ordered-inline plus producer-tail work with few blocking waits; QD32 must retain
-deep lower-request aggregation. The existing
+QD1 must keep zero producer claims. QD4/QD8/QD32 should retain substantial
+producer-tail work while blocking waits fall sharply relative to handoffs, and
+QD8/QD32 must preserve deep lower-request aggregation. Mixed QD32 must also
+report one-page PACK_READY closes so dry-tail evidence consumption can be
+rejected if it merely moves fragmentation elsewhere. The existing
 `prep_lower_write_overlap_starts` diagnostic remains meaningful, and all
 publication/completion/fail-closed invariants are unchanged.
 

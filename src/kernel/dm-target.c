@@ -641,12 +641,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 			ctx->preparation_producer_head_claims++;
 		} else {
 			/*
-			 * Consume at most one opposite-end item for each ordered-work
-			 * credit. Without this gate the producer can claim BIO 2, then 3,
-			 * then 4 before the FIFO worker reaches them, recreating the same
-			 * serial completion convoy that tail selection was meant to avoid.
+			 * On a singular list, list_last_entry is also the FIFO head the
+			 * ordered worker is about to steal inline. Claiming that sole
+			 * entry manufactures a wait_for_completion() collision. Leave
+			 * both the head and its earned credit intact until a true tail
+			 * exists behind it.
 			 */
-			if (!atomic_xchg(&ctx->preparation_tail_credit, 0)) {
+			if (list_is_singular(&ctx->preparation_incoming) ||
+			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
 				return;
@@ -1377,16 +1379,17 @@ accounted:
 		ctx->pack_close_pending_tail_sample = false;
 	}
 	/*
-	 * Carry read/fence service only across an accepted retained burst.
-	 * Hard barriers and deadline/idle closure end that evidence explicitly;
-	 * an ordinary worker-idle return performs the other reset site.
+	 * Carry read/fence service only while already-accepted followers remain
+	 * in this retained worker burst. A real nonempty close at a refreshed dry
+	 * tail consumes that evidence; otherwise one read/fence could fragment
+	 * later windows in the same worker pass into repeated singleton closes.
+	 * Empty flushes returned above and therefore do not erase this evidence.
 	 */
-	if (!ctx->retain_ms || hard_boundary) {
+	if (!ctx->retain_ms || hard_boundary ||
+	    !ctx->worker_has_immediate_followup) {
 		ctx->retained_window_read_bypasses = 0;
 		ctx->retained_wave_interrupted = false;
-	} else if (interrupted_close &&
-		   (ctx->worker_has_immediate_followup ||
-		    close_reason == SWAPZ_CLOSE_DUPLICATE)) {
+	} else if (interrupted_close) {
 		ctx->retained_wave_interrupted = true;
 	}
 	return 0;
