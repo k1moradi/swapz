@@ -37,25 +37,43 @@ read tests are not cold physical swap-in.
 
 ## Current directional result
 
-At qualified source `d63ab97c6cb104dc99c4792c207805e97e22d233`:
+Owner-qualified source `5036137fa7cdbb155cf9b0189079011d49b74de3`
+passed all five stages; the canonical report was published as
+`fd6d46fe5ba022bd6a744ceac260104324d1117d`.
 
-- slow mixed QD32 reached 7.09/7.14 MB/s sync/async with 543 async lower
-  WRITE requests and 11.95 ms async READ p99;
-- faster mixed QD32 reached 19.73/20.87 MB/s sync/async with 1078 async
-  lower WRITE requests and 2.72 ms async READ p99;
-- direct BIO-to-LZ4 input kept explicit faster-model WRITE-copy cost near
-  4.0 ms / 11.0 MiB;
-- faster-model commit non-I/O remained about 48.5 ms, split into 5.2 ms
-  planner, 16.5 ms pack, 18.5 ms publish and 8.4 ms residual;
-- write-only QD8 reached 19.58/27.00 MB/s sync/async (+37.9%) with 524 lower
-  requests, but this is one-pair directional evidence only;
-- mixed one-page PACK_READY closes and worker-empty deadlines rose to about
-  138.2 / 71.5, while the stronger historical `e5c1721` mixed result used
-  about 874.5 lower requests.
+- On the slow serial-depth model (`hw_queue_depth=1`), mixed raw reaches
+  2.68 MB/s WRITE and 0.89 MB/s READ. swapz reaches 7.08/2.35 sync and
+  7.05/2.34 async. Async therefore adds no meaningful gain over sync, but the
+  product path itself is about 2.6x faster for useful WRITE while reducing
+  lower WRITE requests from 12301 to about 546.
+- Observed slow lower depth never exceeds one. The async K=1 run slot is active
+  only ~0.08 of mixed wall, preparation backlog is 0.00/0.00 at lower-WRITE
+  boundaries, and LZ4/lower-WRITE overlap is ~0.2 ms. The serial-model win is
+  compression/aggregation, not pipeline overlap.
+- Slow packed reads now qualify FASTER: sequential p99 falls 34.20 -> 18.33 ms
+  and seeded-random 34.31 -> 23.67 ms while lower traffic also falls.
+- On the faster `hw_queue_depth=64` model, mixed raw/sync/async WRITE is
+  19.54/21.63/22.45 MB/s. Async is +3.8% versus sync but remains
+  NO_SIGNIFICANT_ASYNC_GAIN with only two pairs/mode. Lower WRITE requests are
+  ~908 async versus 12301 raw.
+- Fast raw traffic reaches sampled lower peaks above one (about 4 READ and 6.2
+  WRITE averaged across pairs), while swapz remains near peak one. The K=1
+  WRITE slot is active only ~0.09 of mixed wall, so current evidence points more
+  strongly to READ serialization/on-CPU work than to insufficient WRITE slots.
+- Fast packed reads improve numerically but remain NOT_FASTER under the
+  qualification gate.
+- Write-only QD8 remains the narrow async signal on the faster model:
+  19.40 -> 23.78 MB/s (+22.6%) versus sync, but raw is 45.84 MB/s and the pilot
+  has one pair only. On the serial model async adds only +1.2% at QD8.
+- Mixed WRITE attribution is ~605.8/179.4 ms lower WRITE and ~140.4/80.0 ms LZ4
+  slow/fast. Commit non-I/O is ~52.7/38.1 ms; final publish CRC is 12.0/8.8 ms.
+  CRC remains a material integrity subphase, not the global bottleneck.
 
-Interpretation: direct input is a qualified CPU/memory-path win, but retained
-wave chopping and serialized pack/publish work remain open. The rejected
-per-callback task-CPU metric is not used for performance conclusions.
+Interpretation: the corrected serial-depth experiment validates swapz's core
+compression/aggregation goal on a high-latency one-slot lower device. It does
+not validate K=1 async WRITE scheduling as a default optimization. The faster
+model now supplies direct evidence for a bounded parallel READ experiment and
+for better on-CPU attribution before adding WRITE slots or workers.
 
 ## Confirmation gate
 
