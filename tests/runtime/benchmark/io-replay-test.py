@@ -161,19 +161,22 @@ class PairReplayContract(unittest.TestCase):
             "engine_plan_wall_ns": 10,
             "engine_pack_wall_ns": 20,
             "engine_publish_wall_ns": 30,
+            "engine_publish_crc_wall_ns": 10,
+            "engine_publish_auth_wall_ns": 20,
             "engine_prehashed_records": 1,
             "prep_crc_wall_ns": 5,
             "ordered_crc_wall_ns": 7,
             "lower_write_wall_ns": 300,
             "ordered_worker_wall_ns": 400,
             "prep_worker_wall_ns": 40,
-            "dry_pack_close_events": 2,
-            "dry_pack_followup_events": 1,
-            "dry_pack_followup_sum_ns": 9000,
-            "dry_pack_followup_le10us": 1,
             "prep_wait_wall_ns": 10,
             "prep_lower_write_overlap_ns": 20,
             "windows": 1,
+            "prep_lower_write_samples": 2,
+            "prep_lower_write_start_queued": 1,
+            "prep_lower_write_start_nonempty": 1,
+            "prep_lower_write_end_queued": 0,
+            "prep_lower_write_end_nonempty": 0,
             "write_wait_le1ms": 1,
             "write_wait_1to4ms": 1,
         })
@@ -190,20 +193,22 @@ class PairReplayContract(unittest.TestCase):
             "engine_plan_wall_ns": 1010,
             "engine_pack_wall_ns": 2020,
             "engine_publish_wall_ns": 3030,
+            "engine_publish_crc_wall_ns": 1010,
+            "engine_publish_auth_wall_ns": 2020,
             "engine_prehashed_records": 101,
             "prep_crc_wall_ns": 505,
             "ordered_crc_wall_ns": 707,
             "lower_write_wall_ns": 60300,
             "ordered_worker_wall_ns": 70400,
             "prep_worker_wall_ns": 4040,
-            "dry_pack_close_events": 7,
-            "dry_pack_followup_events": 4,
-            "dry_pack_followup_sum_ns": 39000,
-            "dry_pack_followup_le10us": 3,
-            "dry_pack_followup_11_50us": 1,
             "prep_wait_wall_ns": 510,
             "prep_lower_write_overlap_ns": 5020,
             "windows": 4,
+            "prep_lower_write_samples": 7,
+            "prep_lower_write_start_queued": 5,
+            "prep_lower_write_start_nonempty": 4,
+            "prep_lower_write_end_queued": 2,
+            "prep_lower_write_end_nonempty": 2,
             "write_wait_le1ms": 3,
             "write_wait_1to4ms": 3,
             "write_wait_gt4ms": 1,
@@ -231,22 +236,15 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["engine_prehashed_records"], 100)
         self.assertEqual(delta["prep_crc_wall_ns"], 500)
         self.assertEqual(delta["ordered_crc_wall_ns"], 700)
-        self.assertEqual(delta["dry_pack_close_events"], 5)
-        self.assertEqual(delta["dry_pack_followup_events"], 3)
+        self.assertEqual(delta["engine_publish_crc_wall_ns"], 1000)
+        self.assertEqual(delta["engine_publish_auth_wall_ns"], 2000)
+        self.assertEqual(delta["prep_lower_write_samples"], 5)
+        self.assertEqual(delta["prep_lower_write_start_queued"], 4)
+        self.assertEqual(delta["prep_lower_write_start_nonempty"], 3)
+        self.assertEqual(delta["prep_lower_write_end_queued"], 2)
+        self.assertEqual(delta["prep_lower_write_end_nonempty"], 2)
         self.assertEqual(delta["prep_wait_wall_ns"], 500)
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
-
-        # A close may occur just before the measurement snapshot and receive
-        # its next-WRITE follow-up just after it. Cumulative snapshots remain
-        # valid even though the interval has one follow-up and zero closes.
-        cross_after = dict(before,
-                           dry_pack_followup_events=2,
-                           dry_pack_followup_sum_ns=18000,
-                           dry_pack_followup_le10us=2)
-        cross_delta = module.kernel_write_delta(before, cross_after)
-        self.assertEqual(cross_delta["dry_pack_close_events"], 0)
-        self.assertEqual(cross_delta["dry_pack_followup_events"], 1)
-        self.assertEqual(cross_delta["dry_pack_followup_le10us"], 1)
 
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)
@@ -259,12 +257,12 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "engine phase"):
             module.kernel_write_delta(
                 before, dict(after, engine_publish_wall_ns=15000))
-        with self.assertRaisesRegex(ValueError, "dry-pack"):
+        with self.assertRaisesRegex(ValueError, "publish attribution"):
             module.kernel_write_delta(
-                before, dict(after, dry_pack_followup_gt200us=1))
-        with self.assertRaisesRegex(ValueError, "dry-pack"):
+                before, dict(after, engine_publish_crc_wall_ns=2011))
+        with self.assertRaisesRegex(ValueError, "queue attribution"):
             module.kernel_write_delta(
-                before, dict(after, dry_pack_followup_events=8))
+                before, dict(after, prep_lower_write_start_nonempty=8))
         with self.assertRaisesRegex(ValueError, "incomplete"):
             module.kernel_write_delta(None, after)
         with patch.object(module.subprocess, "run",

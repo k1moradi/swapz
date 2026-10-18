@@ -114,6 +114,8 @@ struct swapz_dm {
 	struct workqueue_struct *preparation_workqueue;
 	struct work_struct preparation_worker;
 	struct list_head preparation_incoming;
+	/* Exact unclaimed preparation descriptors, protected by queue_lock. */
+	swapz_u32 preparation_queued;
 	struct semaphore preparation_slots;
 	mempool_t *preparation_pool;
 	u8 *preparation_input_page;
@@ -139,6 +141,12 @@ struct swapz_dm {
 	u64 preparation_wave_kicks;
 	u64 prepared_during_lower_write;
 	u64 preparation_lz4_lower_write_overlap_ns;
+	/* Diagnostic queue-depth samples at synchronous lower-WRITE boundaries. */
+	u64 prep_lower_write_samples;
+	u64 prep_lower_write_start_queued;
+	u64 prep_lower_write_start_nonempty;
+	u64 prep_lower_write_end_queued;
+	u64 prep_lower_write_end_nonempty;
 	/* Callback only queues the serialized worker; it never owns BIOs. */
 	struct hrtimer retention_timer;
 	spinlock_t queue_lock;
@@ -177,6 +185,7 @@ struct swapz_dm {
 	swapz_u32 *gc_io_scores; /* conservative read+write cost per victim */
 	swapz_u16 *gc_live_counts; /* count for ties/control comparison */
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
+	swapz_u32 *gc_segment_evictions; /* successful committed victim rotations */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	swapz_u32 segment_count;
 	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
@@ -331,6 +340,7 @@ struct swapz_dm {
 	u64 engine_plan_wall_ns;
 	u64 engine_pack_wall_ns;
 	u64 engine_publish_wall_ns;
+	u64 engine_publish_crc_wall_ns;
 	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
 	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
@@ -345,15 +355,6 @@ struct swapz_dm {
 	u64 preparation_worker_wall_ns;
 	u64 preparation_crc_wall_ns;
 	u64 ordered_crc_wall_ns;
-	/* Dry PACK_READY close -> next admitted WRITE timing. */
-	u64 dry_pack_close_ns;
-	u64 dry_pack_close_events;
-	u64 dry_pack_followup_events;
-	u64 dry_pack_followup_sum_ns;
-	u64 dry_pack_followup_le10us;
-	u64 dry_pack_followup_11_50us;
-	u64 dry_pack_followup_51_200us;
-	u64 dry_pack_followup_gt200us;
 	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
 	 * nested in lower_write_wall_ns, not hardware command latency. */
 	u64 write_wait_le_1ms;
@@ -464,20 +465,30 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 	 * If an inline-steal head left preparation work queued, a real lower
 	 * WRITE is the overlap opportunity that should wake the producer. */
 	if (op == REQ_OP_WRITE) {
-		atomic_set(&ctx->lower_write_active, 1);
-		if (ctx->async_prepare) {
-			unsigned long irq_flags;
+		unsigned long irq_flags;
 
-			spin_lock_irqsave(&ctx->queue_lock, irq_flags);
-			if (!list_empty(&ctx->preparation_incoming))
-				queue_work(ctx->preparation_workqueue,
-					   &ctx->preparation_worker);
-			spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
-		}
+		spin_lock_irqsave(&ctx->queue_lock, irq_flags);
+		atomic_set(&ctx->lower_write_active, 1);
+		ctx->prep_lower_write_samples++;
+		ctx->prep_lower_write_start_queued += ctx->preparation_queued;
+		if (ctx->preparation_queued)
+			ctx->prep_lower_write_start_nonempty++;
+		if (ctx->async_prepare && ctx->preparation_queued)
+			queue_work(ctx->preparation_workqueue,
+				   &ctx->preparation_worker);
+		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
 	}
 	error = dm_io(&req, 1, &region, &bitmap, IOPRIO_DEFAULT);
-	if (op == REQ_OP_WRITE)
+	if (op == REQ_OP_WRITE) {
+		unsigned long irq_flags;
+
+		spin_lock_irqsave(&ctx->queue_lock, irq_flags);
+		ctx->prep_lower_write_end_queued += ctx->preparation_queued;
+		if (ctx->preparation_queued)
+			ctx->prep_lower_write_end_nonempty++;
 		atomic_set(&ctx->lower_write_active, 0);
+		spin_unlock_irqrestore(&ctx->queue_lock, irq_flags);
+	}
 	elapsed_ns = swapz_elapsed_ns(section_start, ktime_get_ns());
 	if (op == REQ_OP_READ)
 		ctx->lower_read_wall_ns += elapsed_ns;
@@ -761,6 +772,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			tail_claim = true;
 			ctx->preparation_producer_tail_claims++;
 		}
+		if (ctx->preparation_queued)
+			ctx->preparation_queued--;
 		list_del_init(&entry->preparation_list);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
@@ -1269,6 +1282,8 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 			goto out;
 		ctx->last_gc_victim = victim;
 		ctx->last_gc_destination = destination;
+		if (ctx->gc_segment_evictions[victim] != U32_MAX)
+			ctx->gc_segment_evictions[victim]++;
 		ctx->gc_role_rotations++;
 	}
 	ctx->gc_victims++;
@@ -1446,6 +1461,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		u64 plan_before = ctx->engine.plan_wall_ns;
 		u64 pack_before = ctx->engine.pack_wall_ns;
 		u64 publish_before = ctx->engine.publish_wall_ns;
+		u64 publish_crc_before = ctx->authority.publish_crc_wall_ns;
 		u64 commit_elapsed;
 		u64 lower_write_elapsed;
 
@@ -1466,6 +1482,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->engine.pack_wall_ns - pack_before;
 		ctx->engine_publish_wall_ns +=
 			ctx->engine.publish_wall_ns - publish_before;
+		if (ctx->authority.publish_crc_wall_ns >= publish_crc_before)
+			ctx->engine_publish_crc_wall_ns +=
+				ctx->authority.publish_crc_wall_ns - publish_crc_before;
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -1709,48 +1728,6 @@ static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
 		ctx->single_pack_deferred, 0,
 		ctx->batch_count, ctx->retained_burst_target,
 		ctx->retained_tail_target);
-}
-
-/*
- * A serviced useful pack may close below a learned target after the refreshed
- * accepted queue is dry. Tiny mixed/fence residues are a separate bounded
- * exception: read service or a forced mid-burst fence may release only 1..3
- * records. Write-only medium QD8/QD32 therefore cannot cascade into singleton
- * closes merely because an earlier PACK_READY write completed.
- */
-static void swapz_note_dry_pack_close(struct swapz_dm *ctx)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (list_empty(&ctx->incoming)) {
-		ctx->dry_pack_close_ns = ktime_get_ns();
-		ctx->dry_pack_close_events++;
-	}
-	spin_unlock_irqrestore(&ctx->queue_lock, flags);
-}
-
-static void swapz_note_dry_pack_followup_locked(struct swapz_dm *ctx, u64 now_ns)
-{
-	u64 close_ns = ctx->dry_pack_close_ns;
-	u64 delta;
-
-	if (!close_ns)
-		return;
-	ctx->dry_pack_close_ns = 0;
-	if (now_ns < close_ns)
-		return;
-	delta = now_ns - close_ns;
-	ctx->dry_pack_followup_events++;
-	ctx->dry_pack_followup_sum_ns += delta;
-	if (delta <= 10000ULL)
-		ctx->dry_pack_followup_le10us++;
-	else if (delta <= 50000ULL)
-		ctx->dry_pack_followup_11_50us++;
-	else if (delta <= 200000ULL)
-		ctx->dry_pack_followup_51_200us++;
-	else
-		ctx->dry_pack_followup_gt200us++;
 }
 
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
@@ -2402,6 +2379,8 @@ static void swapz_worker(struct work_struct *work)
 				 * had a chance to consume it.
 				 */
 				if (!list_empty(&entry->preparation_list)) {
+					if (ctx->preparation_queued)
+						ctx->preparation_queued--;
 					list_del_init(&entry->preparation_list);
 					entry->preparation_inline = true;
 					inline_preparation = true;
@@ -2493,7 +2472,6 @@ static void swapz_worker(struct work_struct *work)
 				ctx->packed_early_commits++;
 				if (ctx->accepted_burst_pack_ready)
 					ctx->accepted_burst_tail_flushes++;
-				swapz_note_dry_pack_close(ctx);
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
@@ -2691,8 +2669,6 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		init_completion(&entry->preparation_finished);
 	entry->bio = bio;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
-	if (bio_op(bio) == REQ_OP_WRITE && count)
-		swapz_note_dry_pack_followup_locked(ctx, ktime_get_ns());
 	/*
 	 * Admission and shutdown share queue_lock: presuspend cannot finish
 	 * draining while a previously admitted BIO is added after the drain.
@@ -2712,6 +2688,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		 */
 		list_add_tail(&entry->preparation_list,
 			      &ctx->preparation_incoming);
+		ctx->preparation_queued++;
 		if (atomic_read(&ctx->lower_write_active) ||
 		    atomic_read(&ctx->preparation_tail_credit))
 			queue_work(ctx->preparation_workqueue,
@@ -2767,7 +2744,8 @@ static void swapz_drain(struct dm_target *ti)
 	drain_workqueue(ctx->workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!list_empty(&ctx->incoming) ||
-	    !list_empty(&ctx->preparation_incoming) || ctx->batch_count ||
+	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||
+	    ctx->batch_count ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("swapz drain invariant: accepted BIOs remain after draining");
@@ -2832,6 +2810,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->gc_io_scores);
 	kvfree(ctx->gc_live_counts);
 	kvfree(ctx->gc_min_live_blocks);
+	kvfree(ctx->gc_segment_evictions);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
@@ -2975,6 +2954,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->gc_min_live_blocks = kvcalloc(ctx->segment_count,
 					  sizeof(*ctx->gc_min_live_blocks),
 					  GFP_KERNEL);
+	ctx->gc_segment_evictions = kvcalloc(ctx->segment_count,
+					    sizeof(*ctx->gc_segment_evictions),
+					    GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
@@ -2986,7 +2968,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->discard_epoch || !ctx->discard_count ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
-	    !ctx->segment_roles) {
+	    !ctx->gc_segment_evictions || !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
 	}
@@ -3110,13 +3092,44 @@ static void swapz_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	limits->max_discard_sectors = UINT_MAX;
 }
 
+static void swapz_gc_victim_distribution(const struct swapz_dm *ctx,
+					  swapz_u32 *distinct,
+					  swapz_u32 *minimum,
+					  swapz_u32 *maximum)
+{
+	swapz_u32 segment;
+	swapz_u32 seen = 0, min_count = U32_MAX, max_count = 0;
+
+	for (segment = 0; segment < ctx->segment_count; ++segment) {
+		swapz_u32 count = ctx->gc_segment_evictions[segment];
+
+		if (!count)
+			continue;
+		seen++;
+		min_count = min(min_count, count);
+		max_count = max(max_count, count);
+	}
+	*distinct = seen;
+	*minimum = seen ? min_count : 0;
+	*maximum = max_count;
+}
+
 static void swapz_status(struct dm_target *ti, status_type_t type,
 		       unsigned int flags, char *result, unsigned int maxlen)
 {
 	struct swapz_dm *ctx = ti->private;
+	swapz_u32 gc_distinct_victims, gc_victim_min_evictions;
+	swapz_u32 gc_victim_max_evictions;
+	u64 engine_publish_auth_wall_ns;
 	unsigned int sz = 0;
 
 	(void)flags;
+	swapz_gc_victim_distribution(ctx, &gc_distinct_victims,
+				     &gc_victim_min_evictions,
+				     &gc_victim_max_evictions);
+	engine_publish_auth_wall_ns =
+		ctx->engine_publish_wall_ns >= ctx->engine_publish_crc_wall_ns ?
+		ctx->engine_publish_wall_ns - ctx->engine_publish_crc_wall_ns : 0;
 	switch (type) {
 	case STATUSTYPE_INFO:
 		DMEMIT("version=%s mode=alpha-live-gc logical_write=%llu logical_read=%llu "
@@ -3129,6 +3142,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_role_rotations=%llu "
+		       "gc_distinct_victims=%u gc_victim_min_evictions=%u "
+		       "gc_victim_max_evictions=%u "
 		       "last_gc_victim=%u last_gc_destination=%u "
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
@@ -3165,6 +3180,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "retain_timer_arm_skips=%llu "
 		       "async_prepare=%u prep_lower_write_overlap_starts=%llu "
 		       "prep_lower_write_overlap_ns=%llu prep_wave_kicks=%llu "
+		       "prep_lower_write_samples=%llu "
+		       "prep_lower_write_start_queued=%llu "
+		       "prep_lower_write_start_nonempty=%llu "
+		       "prep_lower_write_end_queued=%llu "
+		       "prep_lower_write_end_nonempty=%llu "
 		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
@@ -3175,15 +3195,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
 		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
-		       "engine_publish_wall_ns=%llu engine_prehashed_records=%u "
+		       "engine_publish_wall_ns=%llu engine_publish_crc_wall_ns=%llu "
+		       "engine_publish_auth_wall_ns=%llu engine_prehashed_records=%u "
 		       "prep_crc_wall_ns=%llu ordered_crc_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "ordered_worker_wall_ns=%llu prep_worker_wall_ns=%llu "
-		       "dry_pack_close_events=%llu dry_pack_followup_events=%llu "
-		       "dry_pack_followup_sum_ns=%llu "
-		       "dry_pack_followup_le10us=%llu dry_pack_followup_11_50us=%llu "
-		       "dry_pack_followup_51_200us=%llu dry_pack_followup_gt200us=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu "
@@ -3214,6 +3231,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->reordered_records, ctx->authority.next_block,
 		       ctx->authority.reserve_blocks,
 		       ctx->gc_victims, ctx->gc_role_rotations,
+		       gc_distinct_victims, gc_victim_min_evictions,
+		       gc_victim_max_evictions,
 		       ctx->last_gc_victim, ctx->last_gc_destination,
 		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
@@ -3282,6 +3301,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->async_prepare, ctx->prepared_during_lower_write,
 		       ctx->preparation_lz4_lower_write_overlap_ns,
 		       ctx->preparation_wave_kicks,
+		       ctx->prep_lower_write_samples,
+		       ctx->prep_lower_write_start_queued,
+		       ctx->prep_lower_write_start_nonempty,
+		       ctx->prep_lower_write_end_queued,
+		       ctx->prep_lower_write_end_nonempty,
 		       ctx->preparation_producer_head_claims,
 		       ctx->preparation_producer_tail_claims,
 		       ctx->preparation_ordered_inline,
@@ -3300,18 +3324,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
 		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
-		       ctx->engine_publish_wall_ns, ctx->engine.prehashed_records,
+		       ctx->engine_publish_wall_ns, ctx->engine_publish_crc_wall_ns,
+		       engine_publish_auth_wall_ns, ctx->engine.prehashed_records,
 		       ctx->preparation_crc_wall_ns, ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->ordered_worker_wall_ns,
 		       ctx->preparation_worker_wall_ns,
-		       ctx->dry_pack_close_events, ctx->dry_pack_followup_events,
-		       ctx->dry_pack_followup_sum_ns,
-		       ctx->dry_pack_followup_le10us,
-		       ctx->dry_pack_followup_11_50us,
-		       ctx->dry_pack_followup_51_200us,
-		       ctx->dry_pack_followup_gt200us,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],

@@ -105,6 +105,9 @@ struct swapz_authority {
 	 * including record identities and generations. A forged caller
 	 * snapshot can never publish an unrelated page into a batch. */
 	swapz_u32 batch_hashes[SWAPZ_MAX_RECORDS];
+	/* Diagnostic only: exact wall time inside final publication payload CRC32C
+	 * calls. Native builds leave this at zero; it never affects authority. */
+	unsigned long long publish_crc_wall_ns;
 };
 
 /*

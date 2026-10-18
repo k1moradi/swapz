@@ -298,13 +298,13 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	return 0;
 }
 
-int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
-			 swapz_u8 index, struct swapz_decoded *out,
-			 const swapz_u8 **payload)
+int swapz_lookup_validated_descriptor(const void *bytes,
+				    swapz_u32 bytes_total, swapz_u8 index,
+				    struct swapz_decoded *out,
+				    const swapz_u8 **payload)
 {
 	struct swapz_header header;
 	struct swapz_record record;
-	const swapz_u8 *stored;
 
 	if (!bytes || !out || !payload ||
 	    (bytes_total != SWAPZ_BLOCK_BYTES &&
@@ -332,7 +332,24 @@ int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
 		*out = (struct swapz_decoded){ 0 };
 		return -EUCLEAN;
 	}
-	stored = (const swapz_u8 *)bytes + out->payload_offset;
+	*payload = (const swapz_u8 *)bytes + out->payload_offset;
+	return 0;
+}
+
+int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
+			 swapz_u8 index, struct swapz_decoded *out,
+			 const swapz_u8 **payload)
+{
+	const swapz_u8 *stored;
+	int error;
+
+	if (!out || !payload)
+		return -EINVAL;
+	*payload = NULL;
+	error = swapz_lookup_validated_descriptor(bytes, bytes_total, index,
+					      out, &stored);
+	if (error)
+		return error;
 	if (swapz_crc32c_bytes(stored, out->payload_length) !=
 	    out->payload_crc32c) {
 		*out = (struct swapz_decoded){ 0 };

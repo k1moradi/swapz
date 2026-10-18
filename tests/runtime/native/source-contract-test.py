@@ -53,6 +53,34 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_publish_crc_probe_times_only_final_payload_crc(self):
+        descriptor = source_body("swapz_lookup_validated_descriptor", CODEC)
+        validated = source_body("swapz_lookup_validated", CODEC)
+        finish = source_body("swapz_finish", AUTH)
+        self.assertNotIn("swapz_crc32c_bytes", descriptor)
+        self.assertIn("swapz_crc32c_bytes", validated)
+        self.assertIn("swapz_lookup_validated_descriptor", finish)
+        self.assertIn("swapz_publish_crc32c(a, payload, decoded.payload_length)",
+                      finish)
+        self.assertNotIn("swapz_lookup_validated(image", finish)
+
+    def test_completed_dry_probe_is_removed_and_queue_starvation_probe_is_bounded(self):
+        lower = body("swapz_lower")
+        self.assertNotIn("dry_pack_", DM)
+        self.assertIn("prep_lower_write_start_queued", lower)
+        self.assertIn("prep_lower_write_end_queued", lower)
+        self.assertIn("ctx->preparation_queued", lower)
+        self.assertIn("ctx->preparation_queued++", DM)
+        self.assertGreaterEqual(DM.count("ctx->preparation_queued--"), 2)
+
+    def test_gc_tracks_committed_victim_distribution(self):
+        gc = body("swapz_gc_compact_one")
+        self.assertIn("gc_segment_evictions[victim]", gc)
+        self.assertIn("gc_distinct_victims", DM)
+        self.assertIn("gc_victim_min_evictions", DM)
+        self.assertIn("gc_victim_max_evictions", DM)
+        self.assertIn("kvfree(ctx->gc_segment_evictions)", DM)
+
     def test_codec_append_rejects_invalid_length_before_payload_hash(self):
         append = source_body("swapz_append", CODEC)
         guard = append.index("length > SWAPZ_MAX_COMPRESSED")

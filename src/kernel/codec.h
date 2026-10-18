@@ -86,6 +86,13 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	       struct swapz_decoded *out, const swapz_u8 **payload);
 /* Caller must have already completed swapz_validate() on this immutable image.
+ * Descriptor lookup retains defensive bounds checks but deliberately does not
+ * hash the payload. It exists so authority publication can time ONLY the final
+ * payload CRC without weakening the public validated lookup contract. */
+int swapz_lookup_validated_descriptor(const void *bytes, swapz_u32 bytes_total,
+				    swapz_u8 index, struct swapz_decoded *out,
+				    const swapz_u8 **payload);
+/* Caller must have already completed swapz_validate() on this immutable image.
  * This still verifies the selected final payload CRC before returning it. */
 int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
 			 swapz_u8 index, struct swapz_decoded *out,

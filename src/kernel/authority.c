@@ -3,11 +3,33 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/ktime.h>
 #include <linux/string.h>
 #else
 #include <errno.h>
 #include <string.h>
 #endif
+
+static unsigned long long swapz_authority_now_ns(void)
+{
+#ifdef __KERNEL__
+	return ktime_get_ns();
+#else
+	return 0;
+#endif
+}
+
+static swapz_u32 swapz_publish_crc32c(struct swapz_authority *a,
+				      const void *bytes, swapz_u32 length)
+{
+	unsigned long long start = swapz_authority_now_ns();
+	swapz_u32 crc = swapz_crc32c_bytes(bytes, length);
+	unsigned long long end = swapz_authority_now_ns();
+
+	if (end >= start)
+		a->publish_crc_wall_ns += end - start;
+	return crc;
+}
 
 static int swapz_legal_class(swapz_u8 blocks)
 {
@@ -588,7 +610,7 @@ int swapz_finish_raw(struct swapz_authority *a, const struct swapz_tx *tx,
 		.start_block = tx->start_block,
 		.sequence = tx->sequence,
 		.generation = tx->records[0].generation,
-		.raw_crc32c = swapz_crc32c_bytes(raw_page, SWAPZ_BLOCK_BYTES),
+		.raw_crc32c = swapz_publish_crc32c(a, raw_page, SWAPZ_BLOCK_BYTES),
 		.payload_length = SWAPZ_BLOCK_BYTES,
 		.extent_blocks = 1,
 		.record_index = 0,
@@ -703,10 +725,15 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		 * record's final payload CRC without reparsing/revalidating every
 		 * sibling descriptor on each iteration.
 		 */
-		error = swapz_lookup_validated(image, bytes_total, index,
-					     &decoded, &payload);
+		error = swapz_lookup_validated_descriptor(image, bytes_total, index,
+						       &decoded, &payload);
 		if (error)
 			goto fail;
+		if (swapz_publish_crc32c(a, payload, decoded.payload_length) !=
+		    decoded.payload_crc32c) {
+			error = -EBADMSG;
+			goto fail;
+		}
 		payload_lengths[index] = decoded.payload_length;
 		payload_offsets[index] = decoded.payload_offset;
 		if (!payload_lengths[index] ||

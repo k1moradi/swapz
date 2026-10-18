@@ -69,16 +69,18 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "window_sort_wall_ns", "window_commit_wall_ns",
                        "window_commit_nonio_wall_ns",
                        "engine_plan_wall_ns", "engine_pack_wall_ns",
-                       "engine_publish_wall_ns", "engine_prehashed_records",
+                       "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
+                       "engine_publish_auth_wall_ns", "engine_prehashed_records",
                        "prep_crc_wall_ns", "ordered_crc_wall_ns",
                        "lower_write_wall_ns",
                        "ordered_worker_wall_ns", "prep_worker_wall_ns",
-                       "dry_pack_close_events", "dry_pack_followup_events",
-                       "dry_pack_followup_sum_ns",
-                       "dry_pack_followup_le10us", "dry_pack_followup_11_50us",
-                       "dry_pack_followup_51_200us", "dry_pack_followup_gt200us",
                        "prep_wait_wall_ns",
                        "prep_lower_write_overlap_ns", "windows",
+                       "prep_lower_write_samples",
+                       "prep_lower_write_start_queued",
+                       "prep_lower_write_start_nonempty",
+                       "prep_lower_write_end_queued",
+                       "prep_lower_write_end_nonempty",
                        "write_wait_le1ms", "write_wait_1to4ms",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
@@ -142,7 +144,8 @@ def parse_loaded_correctness(output):
         "gc": re.compile(
             r"PASS_LOADED_LIVE_GC=victims:(\d+) rotations:(\d+) "
             r"pages:(\d+) read_bytes:(\d+) write_bytes:(\d+) "
-            r"read_reqs:(\d+) write_reqs:(\d+) last:(\d+)->(\d+) "
+            r"read_reqs:(\d+) write_reqs:(\d+) distinct:(\d+) "
+            r"victim_min:(\d+) victim_max:(\d+) last:(\d+)->(\d+) "
             r"verified_pages:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
@@ -168,8 +171,9 @@ def parse_loaded_correctness(output):
 
     raw_pages, zero_pages, flush_calls = found["oracle"]
     (gc_victims, gc_rotations, gc_pages, gc_read_bytes, gc_write_bytes,
-     gc_read_reqs, gc_write_reqs, gc_last_victim, gc_last_destination,
-     gc_verified_pages) = found["gc"]
+     gc_read_reqs, gc_write_reqs, gc_distinct_victims,
+     gc_victim_min_evictions, gc_victim_max_evictions,
+     gc_last_victim, gc_last_destination, gc_verified_pages) = found["gc"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
@@ -178,8 +182,11 @@ def parse_loaded_correctness(output):
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
     if (gc_victims < 2 or gc_rotations != gc_victims or gc_pages <= 0 or
             gc_read_bytes <= 0 or gc_write_bytes <= 0 or gc_read_reqs <= 0 or
-            gc_write_reqs <= 0 or gc_last_victim == gc_last_destination or
-            gc_verified_pages != 4096):
+            gc_write_reqs <= 0 or gc_distinct_victims < 3 or
+            gc_victim_min_evictions <= 0 or
+            gc_victim_max_evictions < gc_victim_min_evictions or
+            gc_victim_max_evictions > gc_victims or
+            gc_last_victim == gc_last_destination or gc_verified_pages != 4096):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded live-GC evidence is incomplete"}
     if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
@@ -203,6 +210,9 @@ def parse_loaded_correctness(output):
         "gc_write_bytes": gc_write_bytes,
         "gc_read_reqs": gc_read_reqs,
         "gc_write_reqs": gc_write_reqs,
+        "gc_distinct_victims": gc_distinct_victims,
+        "gc_victim_min_evictions": gc_victim_min_evictions,
+        "gc_victim_max_evictions": gc_victim_max_evictions,
         "gc_verified_pages": gc_verified_pages,
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
@@ -836,12 +846,17 @@ def benchmark_verdicts(sessions):
                            ("engine_plan_wall_ns", "engine_pack_wall_ns",
                             "engine_publish_wall_ns")) >
                            record["window_commit_nonio_wall_ns"] or
-                       sum(record[field] for field in
-                           ("dry_pack_followup_le10us",
-                            "dry_pack_followup_11_50us",
-                            "dry_pack_followup_51_200us",
-                            "dry_pack_followup_gt200us")) !=
-                           record["dry_pack_followup_events"]
+                       record["engine_publish_crc_wall_ns"] +
+                           record["engine_publish_auth_wall_ns"] !=
+                           record["engine_publish_wall_ns"] or
+                       record["prep_lower_write_start_nonempty"] >
+                           record["prep_lower_write_samples"] or
+                       record["prep_lower_write_end_nonempty"] >
+                           record["prep_lower_write_samples"] or
+                       record["prep_lower_write_start_queued"] <
+                           record["prep_lower_write_start_nonempty"] or
+                       record["prep_lower_write_end_queued"] <
+                           record["prep_lower_write_end_nonempty"]
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
@@ -1048,6 +1063,10 @@ def print_bench(result):
                  f"{asynchronous['mixed_engine_pack_wall_ns'] / 1e6:.1f}", "-"),
                 ("engine publish",
                  f"{asynchronous['mixed_engine_publish_wall_ns'] / 1e6:.1f}", "-"),
+                ("publish CRC",
+                 f"{asynchronous['mixed_engine_publish_crc_wall_ns'] / 1e6:.1f}", "-"),
+                ("publish authority",
+                 f"{asynchronous['mixed_engine_publish_auth_wall_ns'] / 1e6:.1f}", "-"),
                 ("engine residual",
                  f"{max(0.0, asynchronous['mixed_window_commit_nonio_wall_ns'] - asynchronous['mixed_engine_plan_wall_ns'] - asynchronous['mixed_engine_pack_wall_ns'] - asynchronous['mixed_engine_publish_wall_ns']) / 1e6:.1f}",
                  "-"),
@@ -1080,15 +1099,12 @@ def print_bench(result):
                 ("one-page pack/deadline",
                  f"{counters['win1_pack_ready']:.1f}/"
                  f"{counters['win1_deadline']:.1f}"),
-                ("dry-close followups",
-                 f"{asynchronous['mixed_dry_pack_followup_events']:.1f}/"
-                 f"{asynchronous['mixed_dry_pack_close_events']:.1f}"),
-                ("dry <=10/50/200us",
-                 f"{asynchronous['mixed_dry_pack_followup_le10us']:.1f}/"
-                 f"{asynchronous['mixed_dry_pack_followup_11_50us']:.1f}/"
-                 f"{asynchronous['mixed_dry_pack_followup_51_200us']:.1f}"),
-                ("dry followup mean us",
-                 f"{(asynchronous['mixed_dry_pack_followup_sum_ns'] / max(1.0, asynchronous['mixed_dry_pack_followup_events'])) / 1000:.1f}"),
+                ("lower-W queue start/end",
+                 f"{asynchronous['mixed_prep_lower_write_start_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}/"
+                 f"{asynchronous['mixed_prep_lower_write_end_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}"),
+                ("lower-W nonempty start/end",
+                 f"{asynchronous['mixed_prep_lower_write_start_nonempty']:.1f}/"
+                 f"{asynchronous['mixed_prep_lower_write_end_nonempty']:.1f}"),
                 ("GC victims", f"{counters['gc_victims']:.1f}"),
             ])
         async_criteria = data["criteria"]["async"]
@@ -1118,6 +1134,10 @@ def print_bench(result):
                  f"{loaded['gc_verified_pages']} pages verified"),
                 ("GC lower I/O",
                  f"R {loaded['gc_read_reqs']} / W {loaded['gc_write_reqs']} req"),
+                ("GC victim spread",
+                 f"{loaded['gc_distinct_victims']} distinct; "
+                 f"{loaded['gc_victim_min_evictions']}/"
+                 f"{loaded['gc_victim_max_evictions']} min/max"),
                 ("suspend/resume",
                  f"retain {loaded['suspend_retain_ms']} ms; "
                  f"{loaded['suspend_verified_pages']} pages verified"),

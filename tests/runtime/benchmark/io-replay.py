@@ -514,33 +514,22 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "window_sort_wall_ns", "window_commit_wall_ns",
                        "window_commit_nonio_wall_ns",
                        "engine_plan_wall_ns", "engine_pack_wall_ns",
-                       "engine_publish_wall_ns", "engine_prehashed_records",
+                       "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
+                       "engine_publish_auth_wall_ns", "engine_prehashed_records",
                        "prep_crc_wall_ns", "ordered_crc_wall_ns",
                        "lower_write_wall_ns",
                        "ordered_worker_wall_ns", "prep_worker_wall_ns",
-                       "dry_pack_close_events", "dry_pack_followup_events",
-                       "dry_pack_followup_sum_ns",
-                       "dry_pack_followup_le10us", "dry_pack_followup_11_50us",
-                       "dry_pack_followup_51_200us", "dry_pack_followup_gt200us",
                        "prep_wait_wall_ns",
                        "prep_lower_write_overlap_ns", "windows",
+                       "prep_lower_write_samples",
+                       "prep_lower_write_start_queued",
+                       "prep_lower_write_start_nonempty",
+                       "prep_lower_write_end_queued",
+                       "prep_lower_write_end_nonempty",
                        "write_wait_le1ms", "write_wait_1to4ms",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
-
-
-def validate_dry_pack_counters(counters):
-    """Validate cumulative dry-close/follow-up telemetry at one snapshot."""
-    dry_bins = sum(counters[key] for key in
-                   ("dry_pack_followup_le10us",
-                    "dry_pack_followup_11_50us",
-                    "dry_pack_followup_51_200us",
-                    "dry_pack_followup_gt200us"))
-    if (dry_bins != counters["dry_pack_followup_events"] or
-            counters["dry_pack_followup_events"] >
-            counters["dry_pack_close_events"]):
-        raise ValueError("inconsistent cumulative swapz dry-pack followup timing")
 
 
 def kernel_write_snapshot(path, identity):
@@ -557,7 +546,6 @@ def kernel_write_snapshot(path, identity):
         if not match:
             raise ValueError("owned swapz write telemetry missing " + field)
         counters[field] = int(match.group(1))
-    validate_dry_pack_counters(counters)
     return counters
 
 
@@ -566,8 +554,6 @@ def kernel_write_delta(before, after):
         return None
     if before is None or after is None:
         raise ValueError("incomplete swapz write telemetry")
-    validate_dry_pack_counters(before)
-    validate_dry_pack_counters(after)
     counters = {key: after[key] - before[key] for key in KERNEL_WRITE_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
@@ -580,6 +566,18 @@ def kernel_write_delta(before, after):
                            "engine_publish_wall_ns"))
     if measured_engine > counters["window_commit_nonio_wall_ns"]:
         raise ValueError("inconsistent swapz engine phase timing")
+    if (counters["engine_publish_crc_wall_ns"] +
+            counters["engine_publish_auth_wall_ns"] !=
+            counters["engine_publish_wall_ns"]):
+        raise ValueError("inconsistent swapz publish attribution")
+    samples = counters["prep_lower_write_samples"]
+    if (counters["prep_lower_write_start_nonempty"] > samples or
+            counters["prep_lower_write_end_nonempty"] > samples or
+            counters["prep_lower_write_start_queued"] <
+            counters["prep_lower_write_start_nonempty"] or
+            counters["prep_lower_write_end_queued"] <
+            counters["prep_lower_write_end_nonempty"]):
+        raise ValueError("inconsistent swapz lower-write queue attribution")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
