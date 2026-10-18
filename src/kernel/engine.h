@@ -75,7 +75,11 @@ struct swapz_engine {
 	 * diagnostics only and never participate in correctness decisions.
 	 */
 	unsigned long long plan_wall_ns;
+	unsigned long long stage_wall_ns;
 	unsigned long long pack_wall_ns;
+	unsigned long long hole_clear_wall_ns;
+	unsigned long long batch_pause_wall_ns;
+	unsigned long long batch_resume_wall_ns;
 	unsigned long long publish_wall_ns;
 	swapz_u32 prehashed_records;
 	/* Context-owned scratch, never a >1KiB frame on the kernel worker stack. */
