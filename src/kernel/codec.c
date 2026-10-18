@@ -159,6 +159,16 @@ int swapz_append_prehashed(struct swapz_builder *builder,
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	       swapz_u32 generation, const void *payload, swapz_u16 length)
 {
+	/*
+	 * Validate every caller-controlled field that bounds payload access before
+	 * calculating the convenience-path CRC. swapz_append_crc() repeats these
+	 * checks for the prehashed API, but doing them here is required to keep an
+	 * invalid length from becoming an out-of-bounds read before that helper runs.
+	 */
+	if (!builder || !builder->bytes || builder->sealed ||
+	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
+	    !generation)
+		return -EINVAL;
 	return swapz_append_crc(builder, logical_page, generation, payload,
 				length, swapz_crc32c_bytes(payload, length));
 }
