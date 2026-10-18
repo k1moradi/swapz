@@ -786,10 +786,23 @@ def benchmark_verdicts(sessions):
                            record["physical_write_reqs"] or
                        record["window_commit_nonio_wall_ns"] >
                            record["window_commit_wall_ns"] or
+                       record["ordered_lz4_wall_ns"] +
+                           record["prep_lz4_wall_ns"] !=
+                           record["lz4_wall_ns"] or
                        sum(record[field] for field in
                            ("engine_plan_wall_ns", "engine_pack_wall_ns",
-                            "engine_publish_wall_ns")) >
-                           record["window_commit_nonio_wall_ns"]
+                            "engine_publish_wall_ns", "engine_stage_wall_ns",
+                            "engine_pause_wall_ns",
+                            "engine_hole_clear_wall_ns")) >
+                           record["window_commit_nonio_wall_ns"] or
+                       record["engine_resume_wall_ns"] >
+                           record["engine_publish_wall_ns"] or
+                       sum(record[field] for field in
+                           ("dry_pack_gap_le50us",
+                            "dry_pack_gap_51_100us",
+                            "dry_pack_gap_101_500us",
+                            "dry_pack_gap_gt500us")) !=
+                           record["dry_pack_gap_samples"]
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
