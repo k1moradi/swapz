@@ -510,8 +510,11 @@ def kernel_read_delta(before, after):
 # stopwatch. All values are C kernel target counters, never CPU time.
 KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "write_copy_wall_ns", "write_copy_bytes",
+                       "direct_lz4_input_pages",
                        "window_sort_wall_ns", "window_commit_wall_ns",
                        "window_commit_nonio_wall_ns",
+                       "engine_plan_wall_ns", "engine_pack_wall_ns",
+                       "engine_publish_wall_ns",
                        "lower_write_wall_ns", "prep_wait_wall_ns",
                        "prep_lower_write_overlap_ns", "windows",
                        "write_wait_le1ms", "write_wait_1to4ms",
