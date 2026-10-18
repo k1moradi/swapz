@@ -988,13 +988,29 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
-        print("  Async pipeline — timings overlap; CPU rows are task CPU, not wall.")
+        print("  Async pipeline — wall timings overlap; nested rows are labeled.")
+        residual_other = max(
+            0.0,
+            asynchronous["mixed_window_commit_nonio_wall_ns"] -
+            asynchronous["mixed_engine_plan_wall_ns"] -
+            asynchronous["mixed_engine_pack_wall_ns"] -
+            asynchronous["mixed_engine_publish_wall_ns"] -
+            asynchronous["mixed_engine_stage_wall_ns"] -
+            asynchronous["mixed_engine_pause_wall_ns"] -
+            asynchronous["mixed_engine_hole_clear_wall_ns"])
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
             [
-                ("LZ4",
+                ("LZ4 total",
                  f"{asynchronous['mixed_lz4_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} IO"),
+                ("LZ4 ordered",
+                 f"{asynchronous['mixed_ordered_lz4_wall_ns'] / 1e6:.1f}", "-"),
+                ("LZ4 prep",
+                 f"{asynchronous['mixed_prep_lz4_wall_ns'] / 1e6:.1f}", "-"),
+                ("payload CRC",
+                 f"{asynchronous['mixed_payload_crc_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_payload_crc_pages']:.0f} pages"),
                 ("RAM copies",
                  f"{asynchronous['mixed_write_copy_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_write_copy_bytes'] / 1048576:.1f} MiB"),
@@ -1006,18 +1022,25 @@ def print_bench(result):
                  f"{asynchronous['mixed_engine_pack_wall_ns'] / 1e6:.1f}", "-"),
                 ("engine publish",
                  f"{asynchronous['mixed_engine_publish_wall_ns'] / 1e6:.1f}", "-"),
-                ("engine residual",
-                 f"{max(0.0, asynchronous['mixed_window_commit_nonio_wall_ns'] - asynchronous['mixed_engine_plan_wall_ns'] - asynchronous['mixed_engine_pack_wall_ns'] - asynchronous['mixed_engine_publish_wall_ns']) / 1e6:.1f}",
-                 "-"),
+                ("engine stage",
+                 f"{asynchronous['mixed_engine_stage_wall_ns'] / 1e6:.1f}", "-"),
+                ("engine pause",
+                 f"{asynchronous['mixed_engine_pause_wall_ns'] / 1e6:.1f}", "-"),
+                ("engine resume*",
+                 f"{asynchronous['mixed_engine_resume_wall_ns'] / 1e6:.1f}",
+                 "nested publish"),
+                ("hole clear",
+                 f"{asynchronous['mixed_engine_hole_clear_wall_ns'] / 1e6:.1f}", "-"),
+                ("residual other",
+                 f"{residual_other / 1e6:.1f}", "-"),
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
-                ("ordered CPU",
-                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f}", "-"),
-                ("prep CPU",
-                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f}", "-"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
+        dry_samples = asynchronous["mixed_dry_pack_gap_samples"]
+        dry_mean_us = (asynchronous["mixed_dry_pack_gap_sum_ns"] /
+                       dry_samples / 1000.0) if dry_samples else 0.0
         print_table(
             ("async signal", "mean"),
             [
@@ -1033,6 +1056,13 @@ def print_bench(result):
                  f"{prep['prep_ordered_inline']:.1f}/"
                  f"{prep['prep_ordered_handoffs']:.1f}/"
                  f"{prep['prep_ordered_waits']:.1f}"),
+                ("dry->WRITE samples",
+                 f"{dry_samples:.1f}; mean {dry_mean_us:.1f} us"),
+                ("dry gap <=50/100/500/>500us",
+                 f"{asynchronous['mixed_dry_pack_gap_le50us']:.1f}/"
+                 f"{asynchronous['mixed_dry_pack_gap_51_100us']:.1f}/"
+                 f"{asynchronous['mixed_dry_pack_gap_101_500us']:.1f}/"
+                 f"{asynchronous['mixed_dry_pack_gap_gt500us']:.1f}"),
                 ("worker-empty deadlines",
                  f"{counters['deadline_worker_empty']:.1f}"),
                 ("one-page pack/deadline",
