@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--cpu-trace] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -16,6 +16,7 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
+CPU_TRACE=0
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
@@ -23,6 +24,12 @@ LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
 REPLAY_SWAPZ_FIRST=0
+# Diagnostic sched_switch accounting is permitted only as an explicit
+# internal suffix; ordinary performance arms keep it disabled.
+if [[ $# -gt 1 && ${!#} == --cpu-trace ]]; then
+    CPU_TRACE=1
+    set -- "${@:1:$(( $# - 1 ))}"
+fi
 # The final internal suffix controls safe replay order only.
 if [[ $# -gt 1 && ${!#} == --swapz-first ]]; then
     REPLAY_SWAPZ_FIRST=1
@@ -345,7 +352,7 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "cpu_trace=$CPU_TRACE" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -377,6 +384,8 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:spac
     fail 'unexpected swapz retained policy after owned DM creation'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])cpu_trace=$CPU_TRACE([[:space:]]|$)" ||
+    fail 'loaded swapz CPU trace diagnostic does not match selected arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do
@@ -435,7 +444,14 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --reader-pages 256 --qd "$QD" --read-pct "$READ_PCT" \
     --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
 fi
-note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
+swapz_status_before="$(dmsetup status "$DMNAME")"
+note "SWAPZ_STATUS_BEFORE=$swapz_status_before"
+status_u64() {
+    local line="$1" key="$2"
+    [[ $line =~ (^|[[:space:]])${key}=([0-9]+)($|[[:space:]]) ]] ||
+        return 1
+    printf '%s\n' "${BASH_REMATCH[2]}"
+}
 PACKED_ARGS=()
 (( PACKED_READ )) && PACKED_ARGS+=(--packed-read)
 replay_off() {
@@ -475,6 +491,19 @@ else
 fi
 swapz_status_after="$(dmsetup status "$DMNAME")"
 note "SWAPZ_STATUS_AFTER=$swapz_status_after"
+if (( CPU_TRACE )); then
+    ordered_before="$(status_u64 "$swapz_status_before" ordered_worker_oncpu_ns)" ||
+        fail 'CPU trace status missing ordered pre-counter'
+    ordered_after="$(status_u64 "$swapz_status_after" ordered_worker_oncpu_ns)" ||
+        fail 'CPU trace status missing ordered post-counter'
+    prep_before="$(status_u64 "$swapz_status_before" prep_worker_oncpu_ns)" ||
+        fail 'CPU trace status missing prep pre-counter'
+    prep_after="$(status_u64 "$swapz_status_after" prep_worker_oncpu_ns)" ||
+        fail 'CPU trace status missing prep post-counter'
+    (( ordered_after > ordered_before && prep_after > prep_before )) ||
+        fail 'sched_switch diagnostic did not observe both swapz worker callbacks'
+    note "PASS_WORKER_ONCPU_TRACE=ordered_ns:$((ordered_after-ordered_before)) prep_ns:$((prep_after-prep_before))"
+fi
 if (( ASYNC_PREPARE && !WRITE_ONLY_QD )); then
     if [[ "$swapz_status_after" =~ prep_lower_write_overlap_starts=([0-9]+) ]]; then
         (( ${BASH_REMATCH[1]} > 0 )) ||
