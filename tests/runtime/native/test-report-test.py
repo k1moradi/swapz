@@ -260,10 +260,20 @@ class ReportContract(unittest.TestCase):
         loaded = runner.parse_loaded_correctness(synthetic_log())
         self.assertEqual(loaded["overall"], "PASS")
         self.assertEqual(loaded["raw_pages"], 64)
+        self.assertEqual(loaded["gc_victims"], 12)
+        self.assertEqual(loaded["gc_rotations"], 12)
+        self.assertEqual(loaded["gc_verified_pages"], 4096)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
         self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
         self.assertIn("PRE_SUBMISSION", loaded["retained_write_fault"])
+
+        missing_gc = synthetic_log().replace(
+            "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 "
+            "read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 "
+            "last:11->29 verified_pages:4096\n", "")
+        self.assertEqual(runner.parse_loaded_correctness(missing_gc)["overall"],
+                         "INCOMPLETE")
 
         missing = synthetic_log().replace(
             "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 "
