@@ -70,30 +70,42 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `d63ab97c6cb104dc99c4792c207805e97e22d233` passed all five stages.
-Direct BIO-to-LZ4 input remained effective at roughly 4 ms / 11 MiB explicit
-WRITE-copy cost on the faster model. Faster mixed async reached 20.87 MB/s
-versus 19.73 sync with 1078 lower WRITE requests, while the one-pair write-only
-QD8 pilot reached 27.00 versus 19.58 MB/s. These remain synthetic directional
-or preliminary results; `e5c1721` retains the stronger historical mixed
-request geometry.
+Source `fda75f9c06d7181623c6f90c0885efbda499e9a6` passed all five
+stages. Slow-model mixed async reached 7.11 MB/s WRITE versus 7.07 sync and
+7.85 raw; fast-model mixed async reached 21.05 versus 19.78 sync and 19.23 raw.
+Fast-model commit non-I/O was about 40.8 ms with 5.3/10.9/16.3 ms
+plan/pack/publish. Slow-model commit non-I/O was about 49.0 ms with
+6.1/14.8/18.6 ms plan/pack/publish.
 
-The per-callback `task_cputime_adjusted()` experiment is rejected as a
-portable worker-CPU metric because short preparation callbacks were materially
-undercounted. Qualification therefore uses explicit phase wall timers plus
-honestly labeled whole-callback wall residency. Callback wall is not CPU time
-and must not be added to overlapping phase or lower-I/O wall counters.
+Pack-side payload CRC precomputation and one-pass immutable metadata validation
+are qualified. The final payload CRC over the exact published
+`bulk_scratch` image remains mandatory. Loaded live GC is also qualified on
+owned RAM evidence: 20 victims, 20 role rotations, nonzero GC lower READ/WRITE
+traffic and byte-exact verification of all 4096 pages.
+
+The completed dry PACK_READY arrival probe measured millisecond-scale followups
+rather than a dominant tens-of-microseconds cluster (about 4.706 ms mean on the
+slow model and 1.468 ms on the fast model). That probe is retired and a
+microsecond grace/spin policy is rejected. The replacement diagnostic samples
+unclaimed preparation queue depth at synchronous lower-WRITE start/end.
+
+The per-callback `task_cputime_adjusted()` experiment remains rejected as a
+portable worker-CPU metric. Whole-callback wall residency is not CPU time.
 
 ## Open qualification gaps
 
-The next qualification must force repeated live GC victims on the owned
-RAM-backed target and verify the complete logical image afterward. It must also
-test pack-side precomputed payload CRC, one-pass publish metadata validation,
-and dry PACK_READY-close to next-WRITE arrival timing without changing
-retention/credit policy. Genuine device-originated/partial lower errors,
-long-run resource pressure, larger controlled cold-read working sets,
-statistically repeated QD saturation, segment reuse-distribution evidence and
-physical-media behavior remain open. Physical-media testing remains blocked
+The current Step-1 source must qualify exact final-image publish-CRC wall,
+publication-authority residual, lower-WRITE preparation queue-depth samples,
+and committed GC victim distribution. After that evidence, the next bounded
+parallel experiment may use multiple independent unbound WRITE-preparation
+workers with explicit N=1/2/4 and bounded credits. Asynchronous lower I/O is a
+separate later experiment requiring immutable per-in-flight run ownership.
+Parallel READ service requires separate scratch ownership.
+
+Genuine device-originated/partial lower errors, long-run resource pressure,
+larger controlled cold-read working sets, >=5-pair statistics, deliberate
+CPU oversubscription/low-RAM qualification, physical-device behavior and
+physical endurance remain open. Physical-device admission remains blocked
 pending separate authorization and safety review.
 
 
@@ -343,24 +355,27 @@ input page hits, READ-copy wall/bytes, write-engine commit time excluding
 synchronous lower WRITE, and read-engine time excluding synchronous lower READ.
 Write-engine attribution must additionally report planner, pack and publish wall
 time. Non-I/O commit time must never exceed total commit time, and the sum of
-planner+pack+publish must never exceed commit non-I/O. Source coverage must
-require direct mapping only for a complete single-bvec 4KiB BIO, balanced
-`kmap_local_page`/`kunmap_local`, retained multi-bvec fallback, and exactly
-one durable RAW staging copy: mapped input directly to `batch_bytes` in bulk
-mode, or the existing `swapz_raw_write()` BIO copy in non-bulk mode. Source
-coverage must reject the retired mapped-input -> `input_page` -> `batch_bytes`
-bounce. Ordered/preparation callback residency counters must use
-`ktime_get_ns()` at callback entry and every callback return, must be labeled
-wall time rather than CPU time, and remain diagnostic only. Source coverage
-must reject direct scheduler-accounting-field reads and the retired
-`task_cputime_adjusted()` metric. Pack-side CRC precomputation must retain a
-final payload CRC over `bulk_scratch` during publication. Dry PACK_READY
-arrival probes must timestamp under `queue_lock` and must not change the
-retention deadline, producer credits or worker count. Write-only QD1 must remain producer-free,
-QD8/QD32 must keep ~520/~139 lower WRITE requests, and lower-byte/read-tail
-gates remain hard. The existing `prep_lower_write_overlap_starts` diagnostic
-remains meaningful, and all publication/completion/fail-closed invariants are
-unchanged.
+planner+pack+publish must never exceed commit non-I/O. Publication attribution
+must split the exact final-image payload `crc32c()` wall from the remaining
+authority/liveness work; CRC plus authority residual must equal publication
+wall for the measured interval. The CRC counter may surround only the final
+payload CRC call, not descriptor decode, metadata validation or mapping work.
+
+Source coverage must require direct mapping only for a complete single-bvec
+4KiB BIO, balanced `kmap_local_page`/`kunmap_local`, retained multi-bvec
+fallback, and exactly one durable RAW staging copy. Ordered/preparation callback
+residency is wall time rather than CPU time and remains diagnostic only.
+Pack-side CRC precomputation must retain the final payload CRC over
+`bulk_scratch` during publication.
+
+The completed dry PACK_READY arrival timer/histogram is retired. Lower-WRITE
+starvation attribution instead maintains an exact unclaimed preparation
+descriptor count under `queue_lock` and samples that count at synchronous
+lower-WRITE start/end without changing scheduling, retention, credits or worker
+count. Nonempty-event counts may never exceed lower-WRITE sample count and
+queued totals may never be smaller than their corresponding nonempty counts.
+Write-only QD1 remains producer-free and lower-byte/read-tail gates remain hard.
+All publication/completion/fail-closed invariants are unchanged.
 
 Idempotent metadata-cache invalidation qualification must preserve the existing
 explicit-invalidation and post-write miss tests. Source coverage requires the
@@ -395,17 +410,21 @@ tail preparation at queue depths above the 64-record bound from creating a
 FIFO/semaphore deadlock.
 
 
-### Dry PACK_READY interval attribution
+### Lower-WRITE queue starvation and GC distribution attribution
 
-Dry PACK_READY close/follow-up counters are cumulative causal telemetry.
-Each complete status snapshot must have follow-up histogram bins summing to
-`dry_pack_followup_events`, and cumulative follow-ups must never exceed
-cumulative dry closes. Do not impose that causal inequality on a subtraction
-between two snapshots: a dry close may precede the measurement boundary while
-its next admitted WRITE lands inside the measured interval. Such a delta may
-therefore contain one follow-up with zero new closes while both endpoint
-snapshots remain valid. Qualification validates cumulative endpoints first and
-then reports their nonnegative deltas.
+The retired dry-close timer answered its bounded scheduling question and is no
+longer production telemetry. The active starvation probe is observational:
+`preparation_queued` counts unclaimed preparation descriptors exactly under
+`queue_lock`; every synchronous lower WRITE records queue depth and whether it
+is nonempty immediately before `dm_io()` and immediately after it returns.
+The probe must not grant credits, wake extra workers beyond the existing wake,
+extend retention or alter completion ownership.
+
+Live-GC distribution attribution increments a per-segment eviction counter only
+after a successful committed victim rotation. Loaded qualification reports the
+number of distinct victim segments and min/max evictions among used victim
+segments. This establishes synthetic reuse-distribution evidence; it is not a
+physical wear claim and is a prerequisite to any DISCARD/TRIM experiment.
 
 Top-level qualification status follows the classified stage result, not a raw
 child exit-code convention. A stage classified FAIL remains overall FAIL even
@@ -425,13 +444,6 @@ A separate `ls-remote` authorization probe is not required. The generated
 report commit has the exact tested source commit as its parent and is pushed
 normally (never force-pushed) to `main`. Therefore a concurrent advance of
 `origin/main` makes the push non-fast-forward and Git rejects it.
-
-The mixed benchmark stores `kernel_write_path` as a snapshot delta. Its dry
-follow-up histogram must sum exactly to the follow-up-event delta, but the
-delta is not required to have at least as many new dry closes: the matching
-close may lie immediately before the measurement boundary. Causal
-`followups <= closes` validation belongs to the cumulative endpoint snapshots.
-
 
 ### Generated report versus tracked source cleanliness
 
