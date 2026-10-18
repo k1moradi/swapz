@@ -69,6 +69,15 @@ The rejected `task_cputime_adjusted()` metric, CPU-local/bound preparation,
 dry microsecond grace experiment and freeze-then-compress design remain deleted
 or rejected.
 
+A source audit after this baseline found a concrete K=1 mixed-read fence:
+`authority.batch_pending` represented the paused immutable run and therefore
+made every unrelated READ force ordered finalization. The production fix now
+allows unrelated READs to continue against committed mappings while same-page
+reads and Collector-B conflicts remain fenced. The same audit added exact
+per-segment mapping counts for production GC. The folio audit also corrected
+ID 43: iterator bvecs are already page-normalized, so adding `nth_page()` to
+the current iterator result would double-advance rather than fix an overrun.
+
 ## Current bottleneck ranking
 
 These wall counters overlap and must not be added as if they formed one serial
@@ -141,13 +150,14 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **4 conditional** | Correctness-qualified but not a mixed-QD32 win. Keep opt-in because write-only QD8 repeatedly improves; require repeated matched pairs. |
+| 37 | K=1 ping-pong WRITE pipeline | **4 implemented-fix pending owner evidence** | Mixed READs falsely treated paused batch_pending as a global fence. Production now permits unrelated committed-map reads while fencing Collector-B and in-flight-run logical pages. Re-run owner matrix before judging K=1. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Do not increase K yet; K=1 already inflates fast mixed request count without throughput gain. |
 | 39 | Latency-first READ busy-time queue | **4 dependent** | Device-model dependent: fast packed reads now qualify faster while slow packed reads regress. Requires private read scratch and idle bypass. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
-| 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **4 highest priority** | **New.** Current slow profile is not a strict one-head model. Add a serial-depth owned-RAM profile with explicit queue parameters (including hardware queue depth 1), record configured/observed lower queue depth, and compare against the existing queued profile before making SD/HDD conclusions. |
-| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **6 roadmap architecture** | **New.** Accept larger/compound memory backing safely. First preserve the 4KiB SWZ3 logical/integrity unit while iterating/mapslicing a folio without extra copies; only later evaluate native larger logical records/extents because they change random-read latency, packing, metadata and on-disk-format assumptions. |
+| 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **4 partially implemented** | Queue geometry is now pinned: slow hw_queue_depth=1, fast=64, both blk-mq with one submit queue. Configured geometry is report-qualified; observed time-varying lower in-flight depth remains the next measurement. |
+| 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **4 evidence/coverage** | bio_for_each_segment() already page-normalizes multi-page bvecs; current copies are page-local and page-aligned 4KiB folio slices can direct-map. Do not add nth_page() to iterator bvecs. Add explicit THP/folio coverage; larger base PAGE_SIZE/native larger records remain architecture work. |
+| 44 | Exact per-segment authoritative mapping counts / GC map-scan elimination | **4 implemented pending owner evidence** | Production now maintains a bounded per-segment logical-map count and cross-checks it against the 256-block live-record sum. Dead-segment allocation and post-evacuation role commit avoid full logical-map validation scans; victim scoring/evacuation still scan the map until a reverse index is justified. |
 
 ## Why the current slow test does not prove a serial-device result
 
@@ -197,11 +207,10 @@ before any on-disk-format change.
 
 ## Immediate work queue
 
-1. **Fix the storage model before interpreting SD/HDD behavior.** Add an
-   explicit serial-depth owned-RAM profile with one hardware service slot and
-   record queue-mode/submission-queue/hardware-depth configuration plus
-   observed lower in-flight depth. Compare it against the existing queued
-   slow profile using the same QD32 trace.
+1. **Re-run owner qualification on the corrected mixed-read fence and pinned
+   queue geometry.** The slow model now has one hardware service slot; the
+   fast model retains depth 64. Compare request count, Collector-B growth and
+   mixed throughput before changing K.
 2. Add lower queue-pressure telemetry: current/peak/time-weighted lower
    READ/WRITE in-flight depth and swapz immutable-run occupancy. Existing
    preparation-queue depth is not a substitute for device queue depth.

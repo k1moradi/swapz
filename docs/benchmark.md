@@ -565,3 +565,11 @@ Packed-read behavior reinforces the latency rule. The slow model reduced lower
 requests yet produced worse packed-read p99; the fast model was close but not
 qualified faster. Any read queue may reorder/coalesce only work already waiting
 behind active lower I/O and must dispatch immediately when the device is idle.
+
+
+The mandatory synthetic models now pin queue geometry before power-on as well
+as bandwidth and completion delay. The slow profile uses blk-mq, one submission
+queue and hardware queue depth 1. The fast profile uses blk-mq, one submission
+queue and hardware queue depth 64. These are deliberately contrasting
+serial-depth and queued-depth experiments; they are not literal protocol models
+for every SD/HDD/SSD/NVMe device.
