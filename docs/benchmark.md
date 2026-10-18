@@ -440,9 +440,10 @@ not confirmatory evidence by itself. QD1 still recorded zero producer claims.
 
 The next candidate keeps every accepted-wave ownership rule but changes the
 preparation workqueue from unbound to CPU-local `WQ_MEM_RECLAIM`. The ordered
-worker remains unbound. The intended effect is for queued preparation to run on
-the issuing CPU when synchronous lower WRITE makes the ordered kworker sleep,
-using an otherwise-idle CPU interval without immediately competing on another
-CPU. Acceptance requires more proven LZ4-in-lower-WRITE overlap while preserving
+worker remains unbound. For the lower-WRITE wake, the issuing context is the
+ordered kworker, so the intended effect is for queued preparation to use that
+CPU when synchronous lower WRITE makes it sleep, rather than immediately
+competing on another CPU. Acceptance requires more proven
+LZ4-in-lower-WRITE overlap while preserving
 mixed throughput/request geometry, low ordered wait time, QD1 zero producer
 claims, QD8/QD32 deep aggregation, lower-byte savings and packed-read tails.
