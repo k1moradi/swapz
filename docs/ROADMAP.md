@@ -10,54 +10,52 @@ This file contains only active work. Completed experiments and detailed historic
 
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
-`6642e7ebfce3255267f51fe99b66114122bda7e0` passed all five owner-loaded
-qualification stages and remains the preferred exploratory preparation/window
-source.
+`5aeae47f82c71bbc3e5722b977f684d08eee0083` passed all five owner-loaded
+qualification stages and requalified the preferred exploratory preparation/window
+behavior restored from `6642e7ebfce3255267f51fe99b66114122bda7e0`.
 
-At `6642e7e`, preserving a singular FIFO head eliminated the preparation
-convoy without damaging deep write-only aggregation. SSD-model QD8 async used
-520 lower WRITE requests and reached 26.24 MB/s against 19.58 sync; QD32 async
-used 138 requests and reached 46.87 MB/s. Those write-only numbers are
-single-pair directional evidence only. Mixed SSD async reached 21.80 MB/s with
-1007 lower WRITE requests, 26.5 preparation blocking waits, 136 one-page
-PACK_READY closes and 59.5 worker-empty deadlines. Packed read p99 was below
-raw on that faster model.
+At `5aeae47`, slow-model mixed QD32 async reached 7.10 MB/s with 544.5
+lower WRITE requests. Faster-model mixed async reached 21.18 MB/s against
+19.49 MB/s sync and 19.39 MB/s raw, with 1029 lower WRITE requests and
+2.58 ms mixed READ p99. Faster write-only QD8 async reached 29.75 MB/s while
+preserving 520 lower WRITE requests; QD32 async reached 46.89 MB/s with 138
+requests. These write-only points remain one-pair directional evidence.
 
-Source `2ad805b02da02af95eed78945338876f831e61e0` also passed all five
-qualification stages but regressed the measured objective and is rejected.
-Suppressing credit-driven producer wakeups on an instantaneous singular-list
-snapshot reduced SSD mixed async to 20.92 MB/s, raised lower WRITE requests to
-1091.5, raised worker-empty deadlines to 74 and one-page PACK_READY closes to
-146. SSD QD8 async fell to 20.74 MB/s while producer claims remained sparse.
-The change therefore saved no meaningful preparation work and disturbed useful
-retained-window scheduling/coalescing.
+The rollback is a clear recovery from rejected `2ad805b`, but it has not yet
+matched every qualified `6642e7e` mixed metric: faster mixed worker-empty
+deadline closes are 70.2 per pair rather than about 59.5, and lower WRITE
+requests are 1029 rather than about 1007. Loaded GC victims remain zero.
 
-Slow-model mixed lower WRITE savings remained intact in both runs, and the
-loaded run again recorded zero GC victims. No physical-media or endurance claim
-is permitted. The project must not treat the one-pair write-only variation as
-established performance.
+Low/medium-QD preparation is now the most useful scheduling target. On the
+faster write-only model, QD4 async recorded only 30 producer-tail claims against
+5346 ordered-inline preparations; QD8 recorded only 9 tail claims against 5363
+inline preparations. The producer therefore usually receives work after the
+ordered worker has already consumed the useful preparation interval.
 
 ## Immediate work queue
 
-1. Restore `6642e7e`'s credit-driven wake behavior exactly while retaining its
-   producer-side singular-head guard. Tail eligibility belongs in the producer,
-   immediately before credit consumption under `queue_lock`.
-2. Forbid mapper-side or inline-WRITE singular-list pre-screening. A queued
-   producer may safely wake and reject a lone head without consuming its token;
-   workqueue coalescing and a companion admission before execution are part of
-   the measured schedule.
-3. Keep persistent credit lifetime, unbound placement, dry-PACK_READY evidence
-   consumption, retained targets, extent planning, lower-byte/read policy and
-   GC unchanged for the rollback qualification.
-4. Acceptance requires the current source to recover toward the qualified
-   `6642e7e` mixed SSD result: roughly 1007 lower WRITE requests, about 60
-   worker-empty deadlines, low preparation waits and no packed-read regression.
-   QD1 must retain zero producer claims, QD8/QD32 request geometry must stay
-   near 520/~138, and lower WRITE bytes remain a hard gate.
-5. Do not add another preparation-ahead heuristic until the rollback is
-   requalified. Further overlap work needs bounded FIFO-distance evidence
-   rather than an instantaneous wake-site list snapshot.
-6. Statistically repeated saturation, sustained GC with nonzero victims,
+1. Test one bounded accepted-wave preparation kick. After the ordered worker
+   atomically captures a finite incoming wave, it may grant one producer tail
+   credit only when at least two unclaimed WRITE preparations already exist.
+   This supplies real FIFO-distance evidence without waiting for future BIOs.
+2. Preserve the producer-side singular-head guard, one-for-one tail pacing,
+   head-first preparation during synchronous lower WRITE wait, sole ordered
+   mapping/publication ownership, retained-window policy, extent planning,
+   lower-byte/read policy and GC behavior.
+3. Attribute the idle timeline directly: accumulate producer LZ4 time wholly
+   contained inside lower-WRITE waits, actual ordered completion-wait time, and
+   accepted-wave producer kicks. Do not add overlapping wall counters together.
+4. Remove dead coordination state. `ordered_worker_busy` had no reader and is
+   deleted; rejected experiment state is not retained as production archaeology.
+5. Keep raw and sync as compact performance controls, but move verbose cache,
+   window and per-control diagnostics out of the console. The complete evidence
+   remains in `build/test_results.json.xz`.
+6. Acceptance is simultaneous: QD1 must keep zero producer claims; QD4/QD8
+   producer participation should increase without recreating blocking handoff
+   convoys; QD8/QD32 lower-request geometry should remain near 520/~138;
+   faster mixed lower WRITE requests and worker-empty deadlines must not regress;
+   lower WRITE bytes and packed-read tails remain hard gates.
+7. Statistically repeated saturation, sustained GC with nonzero victims,
    genuine lower-error coverage and kernel-worker CPU attribution remain
    release gates.
 
