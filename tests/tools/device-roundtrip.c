@@ -132,6 +132,14 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 	return 0;
 }
 
+static unsigned int gc_expected_round(unsigned int page,
+				      unsigned int rounds)
+{
+	unsigned int offset = page % 256U;
+
+	return offset < rounds - 1U ? offset : rounds - 1U;
+}
+
 static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 		    unsigned int rounds)
 {
@@ -141,10 +149,14 @@ static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 		return -1;
 	for (round = 0; round < rounds; ++round) {
 		for (page = 0; page < GC_PAGES; ++page) {
-			/* After the initial fill, leave one live survivor in every
-			 * original 1MiB logical stripe. Old physical segments then
-			 * remain live and must be evacuated under capacity pressure. */
-			if (round && !(page % 256U))
+			/*
+			 * Preserve a distinct page from every prior generation in
+			 * each 1MiB logical stripe: round 1 keeps offset 0, round 2
+			 * keeps offsets 0..1, and so on. No earlier generation can
+			 * become wholly dead before capacity pressure, so allocator
+			 * dead-segment reuse cannot substitute for copying live GC.
+			 */
+			if (round && (page % 256U) < round)
 				continue;
 			raw_pattern(expected, page, round);
 			if (transfer(fd, expected, page, 1))
@@ -154,8 +166,7 @@ static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 			return -1;
 	}
 	for (page = 0; page < GC_PAGES; ++page) {
-		unsigned int expected_round =
-			(page % 256U) ? rounds - 1U : 0U;
+		unsigned int expected_round = gc_expected_round(page, rounds);
 
 		raw_pattern(expected, page, expected_round);
 		if (transfer(fd, buf, page, 0) ||

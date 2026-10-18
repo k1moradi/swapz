@@ -362,10 +362,10 @@ flush_injected="$(status_delta flush_injected)"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
 # Force real loaded GC before lifecycle/fault phases. Recreate authority on
-# the same positively identified RAM lower, then write five complete logical
-# generations while preserving one old survivor per 1MiB logical stripe.
-# With 64MiB physical backing and two reserve segments this must create live
-# victims rather than qualifying only dead-segment reuse.
+# the same positively identified RAM lower, then write five logical generations
+# while cumulatively preserving one page from every prior generation per 1MiB
+# logical stripe. With 64MiB physical backing and the authority's four 1MiB
+# reserve segments, dead-segment reuse alone cannot satisfy capacity pressure.
 note "START_LOADED_LIVE_GC"
 dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before GC phase"
 OWN_DM=0
@@ -399,6 +399,11 @@ gc_victim="$(status_u64 "$gc_after" last_gc_victim)" ||
     fail "live-GC status lacks last victim"
 gc_destination="$(status_u64 "$gc_after" last_gc_destination)" ||
     fail "live-GC status lacks last destination"
+gc_dead_reuses="$(status_u64 "$gc_after" dead_segment_reuses)" ||
+    fail "live-GC status lacks dead-segment reuse count"
+gc_no_headroom="$(status_u64 "$gc_after" gc_no_headroom_skips)" ||
+    fail "live-GC status lacks no-headroom skip count"
+note "LIVE_GC_EVIDENCE=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs dead_reuses:$gc_dead_reuses no_headroom:$gc_no_headroom last:$gc_victim->$gc_destination"
 (( $(status_u64 "$gc_after" failed) == 0 &&
    gc_victims >= 2 && gc_rotations == gc_victims &&
    gc_pages > 0 && gc_read > 0 && gc_write > 0 &&
