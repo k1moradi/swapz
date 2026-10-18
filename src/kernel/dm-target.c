@@ -761,7 +761,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		container_of(work, struct swapz_dm, preparation_worker);
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
-	u64 cpu_start_ns = swapz_current_task_cpu_ns();
+	u64 active_start_ns = ktime_get_ns();
 
 	for (;;) {
 		struct swapz_prepared_page *prepared;
@@ -781,16 +781,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * exhausted, leave all remaining entries claimable by inline steal.
 		 */
 		if (down_trylock(&ctx->preparation_slots)) {
-			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_account_preparation_active_wall(ctx, active_start_ns);
 			return;
 		}
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			up(&ctx->preparation_slots);
-			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_account_preparation_active_wall(ctx, active_start_ns);
 			return;
 		}
 		/*
@@ -823,9 +821,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
-				swapz_account_worker_cpu(
-					&ctx->preparation_worker_cpu_ns,
-					cpu_start_ns);
+				swapz_account_preparation_active_wall(ctx, active_start_ns);
 				return;
 			}
 			entry = list_last_entry(&ctx->preparation_incoming,
@@ -844,9 +840,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			complete(&entry->preparation_finished);
 			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 			    !atomic_read(&ctx->preparation_tail_credit)) {
-				swapz_account_worker_cpu(
-					&ctx->preparation_worker_cpu_ns,
-					cpu_start_ns);
+				swapz_account_preparation_active_wall(ctx, active_start_ns);
 				return;
 			}
 			continue;
@@ -867,9 +861,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
 				    !atomic_read(&ctx->preparation_tail_credit)) {
-					swapz_account_worker_cpu(
-						&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+					swapz_account_preparation_active_wall(ctx, active_start_ns);
 					return;
 				}
 				continue;
@@ -899,6 +891,13 @@ static void swapz_preparation_worker(struct work_struct *work)
 		prepared->zero = prepared->length > 0 &&
 				 prepared->length <= 64 &&
 				 swapz_page_is_zero(input);
+		prepared->payload_crc_valid =
+			prepared->length > 0 && !prepared->zero;
+		prepared->payload_crc32c = prepared->payload_crc_valid ?
+			swapz_crc32c_accounted(prepared->bytes,
+					      (u32)prepared->length,
+					      &ctx->preparation_crc_wall_ns,
+					      &ctx->preparation_crc_bytes) : 0;
 		if (prepared->length <= 0)
 			swapz_memcpy_accounted(prepared->bytes, input,
 					      SWAPZ_BLOCK_BYTES,
@@ -919,8 +918,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 */
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit)) {
-			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_account_preparation_active_wall(ctx, active_start_ns);
 			return;
 		}
 	}
@@ -1006,7 +1004,9 @@ static void swapz_order_window(struct swapz_dm *ctx)
 		ctx->planned[position] = (struct swapz_compressed_page) {
 			.logical_page = ctx->batch[index].logical,
 			.payload = ctx->batch_bytes + (size_t)index * SWAPZ_BLOCK_BYTES,
+			.payload_crc32c = ctx->batch[index].payload_crc32c,
 			.length = ctx->batch[index].length,
+			.payload_crc_valid = ctx->batch[index].payload_crc_valid,
 			.raw = ctx->batch[index].raw,
 		};
 	}
@@ -1060,7 +1060,9 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 			.logical_page = ctx->gc_pending[index].logical,
 			.payload = ctx->gc_bytes_store +
 				(size_t)index * SWAPZ_BLOCK_BYTES,
+			.payload_crc32c = ctx->gc_pending[index].payload_crc32c,
 			.length = ctx->gc_pending[index].length,
+			.payload_crc_valid = ctx->gc_pending[index].payload_crc_valid,
 		};
 	}
 }
@@ -1796,8 +1798,10 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	const u8 *input = NULL;
 	void *mapped_input = NULL;
 	swapz_u8 i;
+	u32 payload_crc32c = 0;
 	u64 section_start;
 	bool inline_zero = false;
+	bool payload_crc_valid = false;
 	bool raw_staged_in_batch = false;
 	bool bulk_raw_eligible = ctx->engine.bulk_enabled &&
 				 !ctx->engine.verify_after_write;
@@ -1830,6 +1834,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			return entry->preparation_error ?
 				entry->preparation_error : -EIO;
 		length = entry->prepared_page->length;
+		payload_crc_valid = entry->prepared_page->payload_crc_valid;
+		payload_crc32c = entry->prepared_page->payload_crc32c;
 		if (length > 0)
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
@@ -1860,6 +1866,14 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 						   ktime_get_ns());
 		if (length > 0 && length <= 64)
 			inline_zero = swapz_page_is_zero(input);
+		if (length > 0 && !inline_zero) {
+			payload_crc32c = swapz_crc32c_accounted(
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				(u32)length, &ctx->ordered_crc_wall_ns,
+				&ctx->ordered_crc_bytes);
+			payload_crc_valid = true;
+		}
 		/*
 		 * If retained bulk RAW admission is available, copy the mapped
 		 * upper page exactly once into its durable batch slot before the
@@ -1953,6 +1967,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.bio = bio,
 			.logical = logical,
 			.length = SWAPZ_BLOCK_BYTES,
+			.payload_crc_valid = 0,
 			.raw = 1,
 		};
 		if (bio->bi_opf & REQ_FUA) {
@@ -1982,7 +1997,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	ctx->batch[ctx->batch_count] = (struct swapz_pending_bio) {
 		.bio = bio,
 		.logical = logical,
+		.payload_crc32c = payload_crc32c,
 		.length = (swapz_u16)length,
+		.payload_crc_valid = payload_crc_valid,
 	};
 	ctx->batch_count++;
 	/*
