@@ -469,3 +469,27 @@ calling the payload CRC helper; an invalid length is not permission to read
 that many bytes from the caller. The prehashed append path retains the same
 authoritative mutation-time validation. Sanitizer qualification plus a
 source-order contract pins this fail-before-read rule.
+
+
+### Immutable lower-write run ownership
+
+Batched lower-write packing must have an explicit ownership boundary before
+asynchronous Device Mapper I/O is enabled. A `swapz_io_run` owns the exact
+packed bytes, immutable staged transaction snapshots, per-extent offsets/takes,
+raw/compressed identity and physical run geometry from the final
+`swapz_batch_pause()` through definitive lower completion and authority
+replay.
+
+The portable engine separates `swapz_engine_prepare_batched_run()` from
+`swapz_engine_complete_batched_run()`. Preparation may reserve and pack a
+bounded prefix but must publish no mapping and submit no lower I/O.
+Completion may replay/publish only after the caller supplies a definitive
+completion result; failed, short or uncertain I/O quarantines every remaining
+reservation. The existing synchronous writer is implemented on top of this same
+split so the asynchronous path cannot grow a second publication state machine.
+
+Upper BIO references, completions, PREFLUSH/FUA state and Linux callback
+lifetime remain Device-Mapper-target ownership; the portable engine must not
+depend on `struct bio`. A future async target may reuse a run buffer only after
+its lower completion has been finalized and every paused transaction has been
+published or aborted.

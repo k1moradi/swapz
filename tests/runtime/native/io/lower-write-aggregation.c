@@ -1096,10 +1096,68 @@ static int test_malformed_mixed_input_fails_before_staging(void)
 	return 0;
 }
 
+static int test_immutable_run_prepare_then_complete(void)
+{
+	struct swapz_io_run run = {
+		.bytes = bulk,
+		.txs = bulk_txs,
+	};
+	swapz_u8 prepared = 0, committed = 0;
+	swapz_u16 completed = 0;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	CHECK(swapz_engine_prepare_batched_run(&e, pages, 16, &run,
+					       &prepared, 0) == 0);
+	CHECK(prepared == 16);
+	CHECK(run.page_count == prepared && run.extent_count > 0 &&
+	      run.blocks > 0 && run.blocks <= SWAPZ_BULK_BLOCKS);
+	CHECK(a.batch_pending == run.extent_count && !a.in_flight);
+	for (i = 0; i < prepared; ++i)
+		CHECK(!maps[i].valid);
+	/* Prepared bytes and transactions are the sole publication source.
+	 * Mutating the original compressed-page payloads cannot affect the run. */
+	for (i = 0; i < prepared; ++i)
+		memset(payloads[i], 0xee, pages[i].length);
+	CHECK(write_run(NULL, run.start_block, run.blocks,
+			run.bytes, &completed) == 0);
+	CHECK(completed == run.blocks);
+	CHECK(swapz_engine_complete_batched_run(&e, &run, completed, 0,
+						 &committed) == 0);
+	CHECK(committed == prepared && !a.batch_pending && !a.in_flight);
+	for (i = 0; i < committed; ++i)
+		CHECK(maps[i].valid && maps[i].generation == 1);
+	return 0;
+}
+
+static int test_immutable_run_failure_quarantines_all(void)
+{
+	struct swapz_io_run run = {
+		.bytes = bulk,
+		.txs = bulk_txs,
+	};
+	swapz_u8 prepared = 0, committed = 99;
+	unsigned int i;
+
+	CHECK(setup() == 0);
+	CHECK(swapz_engine_prepare_batched_run(&e, pages, 16, &run,
+					       &prepared, 0) == 0);
+	CHECK(prepared == 16 && a.batch_pending);
+	CHECK(swapz_engine_complete_batched_run(&e, &run, 0, -EIO,
+						 &committed) == -EIO);
+	CHECK(committed == 0 && !a.batch_pending && !a.in_flight);
+	for (i = 0; i < prepared; ++i)
+		CHECK(!maps[i].valid);
+	CHECK(a.abandoned_blocks > 0);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
 
+	CHECK(test_immutable_run_prepare_then_complete() == 0); passed++;
+	CHECK(test_immutable_run_failure_quarantines_all() == 0); passed++;
 	CHECK(test_real_aggregation_and_readback() == 0); passed++;
 	CHECK(test_failed_run_acks_nothing() == 0); passed++;
 	CHECK(test_overwrite_failed_run_preserves_old_pages() == 0); passed++;

@@ -494,172 +494,106 @@ abort_transaction:
  * This preserves the original committed-prefix semantics on a failed
  * group, and prevents false acknowledgement of durable media.
  */
-static int swapz_bulk_abort(struct swapz_engine *e, swapz_u8 count,
-			  swapz_u8 first)
+static int swapz_bulk_abort(struct swapz_engine *e,
+				  const struct swapz_io_run *run,
+				  swapz_u8 first)
 {
 	swapz_u8 i;
 	int error;
 
-	for (i = first; i < count; ++i) {
-		error = swapz_batch_resume(e->authority, &e->bulk_txs[i]);
+	for (i = first; i < run->extent_count; ++i) {
+		error = swapz_batch_resume(e->authority, &run->txs[i]);
 		if (error)
 			return error;
-		error = swapz_abort(e->authority, &e->bulk_txs[i]);
+		error = swapz_abort(e->authority, &run->txs[i]);
 		if (error)
 			return error;
 	}
 	return 0;
 }
 
-static int swapz_bulk_flush(struct swapz_engine *e, swapz_u32 start,
-			  swapz_u16 blocks, swapz_u8 count,
-			  swapz_u8 *committed_pages)
+static int swapz_validate_batched_pages(struct swapz_engine *e,
+					const struct swapz_compressed_page *pages,
+					swapz_u8 count,
+					swapz_u8 *compressed_count,
+					swapz_u8 *raw_count)
 {
-	swapz_u16 completed = 0;
-	swapz_u8 i, raw_entries = 0;
-	int error;
+	swapz_u8 group;
 
-	if (!count)
-		return 0;
-	if (!blocks || blocks > SWAPZ_BULK_BLOCKS)
-		return -EUCLEAN;
-	e->submitted_blocks += blocks;
-	error = e->io.write_run(e->io.opaque, start, blocks,
-				e->bulk_scratch, &completed);
-	if (completed > blocks) {
-		completed = 0;
-		error = -EUCLEAN;
-	}
-	if (!error && completed != blocks)
-		error = -EIO;
-	/*
-	 * An uncertain lower I/O is NEVER interpreted as partial success.
-	 * Quarantine all its reservations, including possibly written pages,
-	 * and preserve prior authoritative generations.
-	 */
-	if (error) {
-		int cleanup = swapz_bulk_abort(e, count, 0);
+	*compressed_count = 0;
+	*raw_count = 0;
+	for (group = 0; group < count; ++group) {
+		swapz_u8 j;
 
-		return cleanup ? cleanup : error;
-	}
-	e->completed_blocks += completed;
-	e->bulk_writes++;
-	e->bulk_extents += count;
-	for (i = 0; i < count; ++i) {
-		struct swapz_tx *tx = &e->bulk_txs[i];
-		swapz_u16 offset = e->bulk_offsets[i];
-		unsigned long long publish_start = swapz_engine_now_ns();
-
-		error = swapz_batch_resume(e->authority, tx);
-		if (error) {
-			int cleanup;
-
-			e->publish_wall_ns += swapz_engine_elapsed_ns(
-				publish_start, swapz_engine_now_ns());
-			cleanup = swapz_bulk_abort(e, count, i);
-			return cleanup ? cleanup : error;
+		if (pages[group].logical_page >= e->authority->logical_pages)
+			return -ERANGE;
+		if (e->authority->maps[pages[group].logical_page].generation ==
+		    ~(swapz_u32)0)
+			return -EOVERFLOW;
+		if (pages[group].raw) {
+			if (!pages[group].payload ||
+			    pages[group].length != SWAPZ_BLOCK_BYTES)
+				return -EINVAL;
+			(*raw_count)++;
+		} else {
+			if (*raw_count || !swapz_page_valid(&pages[group]))
+				return -EINVAL;
+			(*compressed_count)++;
 		}
-		/* Same lower completion, but distinct CRC/mapping publication:
-		 * raw blocks carry no SWZ3 metadata on physical media. */
-		if (e->bulk_raw[i])
-			error = swapz_finish_raw(e->authority, tx,
-				e->bulk_scratch +
-					(size_t)offset * SWAPZ_BLOCK_BYTES,
-				tx->extent_blocks, 0);
-		else
-			error = swapz_finish(e->authority, tx,
-				   e->bulk_scratch +
-					(size_t)offset * SWAPZ_BLOCK_BYTES,
-				   (swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES,
-				   tx->extent_blocks, 0);
-		e->publish_wall_ns += swapz_engine_elapsed_ns(
-			publish_start, swapz_engine_now_ns());
-		if (error) {
-			int cleanup = swapz_bulk_abort(e, count, i + 1);
-
-			return cleanup ? cleanup : error;
-		}
-		*committed_pages += e->bulk_takes[i];
-		if (e->bulk_raw[i])
-			raw_entries++;
+		for (j = 0; j < group; ++j)
+			if (pages[group].logical_page == pages[j].logical_page)
+				return -EEXIST;
 	}
-	/* These composition counters count fully published runs, not
-	 * attempted I/O and not independent backing-device requests. */
-	e->bulk_raw_entries += raw_entries;
-	if (raw_entries == count)
-		e->bulk_raw_only_runs++;
-	else if (raw_entries)
-		e->bulk_mixed_runs++;
 	return 0;
 }
 
-int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
+int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 				   const struct swapz_compressed_page *pages,
-				   swapz_u8 count, swapz_u8 *committed_pages,
+				   swapz_u8 count, struct swapz_io_run *run,
+				   swapz_u8 *prepared_pages,
 				   swapz_u8 plan_read_blocks)
 {
 	swapz_u8 extent_count = 0, compressed_count = 0, raw_count = 0;
 	swapz_u8 entry = 0, group, staged = 0;
 	swapz_u32 run_start = 0;
 	swapz_u16 run_blocks = 0;
+	swapz_u8 *run_bytes;
+	struct swapz_tx *run_txs;
 	unsigned long long phase_start;
 	int error;
 
-	if (!e || !e->authority || !committed_pages || plan_read_blocks > 3U)
+	if (!e || !e->authority || !pages || !count ||
+	    count > SWAPZ_MAX_RECORDS || !run || !run->bytes || !run->txs ||
+	    !prepared_pages || plan_read_blocks > 3U)
 		return -EINVAL;
-	*committed_pages = 0;
-	swapz_engine_invalidate_read_cache(e);
-	if (!pages || !count || count > SWAPZ_MAX_RECORDS)
-		return -EINVAL;
-	/* Validate every record BEFORE reserving any physical blocks. The
-	 * worker sorts compressed records first and appends the raw tail.
-	 * Malformed or duplicate mixed input must not fall into the old
-	 * SWZ3-only path, which cannot interpret raw data. */
-	for (group = 0; group < count; ++group) {
-		swapz_u8 j;
-
-		if (pages[group].raw) {
-			if (!pages[group].payload ||
-			    pages[group].length != SWAPZ_BLOCK_BYTES)
-				return -EINVAL;
-			raw_count++;
-		} else {
-			if (raw_count || !swapz_page_valid(&pages[group]))
-				return -EINVAL;
-			compressed_count++;
-		}
-		for (j = 0; j < group; ++j)
-			if (pages[group].logical_page == pages[j].logical_page) {
-				if (raw_count)
-					return -EEXIST;
-				return swapz_engine_write_window_planned(e, pages, count,
-							      committed_pages,
-							      plan_read_blocks);
-			}
-	}
-	if (!raw_count && (!e->bulk_enabled || !e->bulk_scratch ||
-	    !e->bulk_txs || !e->io.write_run || e->verify_after_write ||
-	    count <= 1))
-		return swapz_engine_write_window_planned(e, pages, count,
-					      committed_pages,
-					      plan_read_blocks);
-	/* Raw admission stays serialized in lower_bulk=0/verify mode.
-	 * Never silently reinterpret it as a compressed SWZ3 record. */
-	if (!e->bulk_enabled || !e->bulk_scratch || !e->bulk_txs ||
-	    !e->io.write_run || e->verify_after_write)
+	*prepared_pages = 0;
+	if (!e->bulk_enabled || !e->io.write_run || e->verify_after_write)
 		return -EOPNOTSUPP;
+	error = swapz_validate_batched_pages(e, pages, count,
+					     &compressed_count, &raw_count);
+	if (error)
+		return error;
+
+	run_bytes = run->bytes;
+	run_txs = run->txs;
+	memset(run, 0, sizeof(*run));
+	run->bytes = run_bytes;
+	run->txs = run_txs;
+	swapz_engine_invalidate_read_cache(e);
+
 	if (compressed_count) {
 		phase_start = swapz_engine_now_ns();
 		error = swapz_engine_plan_bounded_policy(pages, compressed_count,
-					plan_read_blocks,
-					e->plan_classes, e->plan_takes,
-					&extent_count, 1,
-					e->authority->next_block);
+						plan_read_blocks,
+						e->plan_classes, e->plan_takes,
+						&extent_count, 1,
+						e->authority->next_block);
 		e->plan_wall_ns += swapz_engine_elapsed_ns(
 			phase_start, swapz_engine_now_ns());
 		if (error)
 			return error;
 	}
+
 	for (group = 0; group < extent_count + raw_count; ++group) {
 		struct swapz_builder builder;
 		struct swapz_tx *tx;
@@ -669,10 +603,9 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 		swapz_u32 aligned;
 
 		/*
-		 * Flush the old run BEFORE trying to move the authority
-		 * beyond its pending segment or 256KiB limit. Alignment
-		 * holes are explicitly zero filled and count as real lower
-		 * bytes; never pack across independently recyclable segments.
+		 * A prepared run is immutable once returned. Stop before the next
+		 * extent would require another physical run; the caller can submit
+		 * this prefix and prepare the remainder only after completion.
 		 */
 		if (staged) {
 			aligned = (e->authority->next_block + blocks - 1U) &
@@ -682,36 +615,23 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 			    aligned < run_start ||
 			    (e->bulk_enabled == 1 &&
 			     aligned != run_start + run_blocks) ||
-			    aligned - run_start + blocks > SWAPZ_BULK_BLOCKS) {
-				error = swapz_bulk_flush(e, run_start, run_blocks,
-						       staged, committed_pages);
-				if (error)
-					return error;
-				staged = 0;
-			}
+			    aligned - run_start + blocks > SWAPZ_BULK_BLOCKS)
+				break;
 		}
-retry_stage:
-		tx = &e->bulk_txs[staged];
+
+		tx = &run->txs[staged];
 		for (j = 0; j < take; ++j)
 			e->logical_scratch[j] = pages[entry + j].logical_page;
 		error = swapz_stage_batch(e->authority, e->logical_scratch,
-					take, blocks, tx);
-		if (error == -EAGAIN && staged) {
-			error = swapz_bulk_flush(e, run_start, run_blocks,
-					       staged, committed_pages);
-			if (error)
-				return error;
-			staged = 0;
-			goto retry_stage;
-		}
+					 take, blocks, tx);
 		if (error) {
-			if (staged) {
-				int flushed = swapz_bulk_flush(e, run_start,
-						run_blocks, staged, committed_pages);
-
-				if (flushed)
-					return flushed;
-			}
+			/*
+			 * If a valid prefix is already staged, preserve the old
+			 * committed-prefix contract: return that immutable run now.
+			 * The same remaining input is retried after publication.
+			 */
+			if (staged)
+				break;
 			return error;
 		}
 		if (!staged) {
@@ -723,38 +643,30 @@ retry_stage:
 		     tx->start_block != run_start + run_blocks) ||
 		    tx->start_block - run_start + blocks > SWAPZ_BULK_BLOCKS ||
 		    tx->start_block / SWAPZ_SEGMENT_BLOCKS !=
-					run_start / SWAPZ_SEGMENT_BLOCKS) {
+						run_start / SWAPZ_SEGMENT_BLOCKS) {
 			swapz_abort(e->authority, tx);
 			error = -EUCLEAN;
-			goto abort_group;
+			goto abort_run;
 		}
 		{
 			swapz_u16 offset = tx->start_block - run_start;
 			swapz_u16 end = offset + blocks;
-			swapz_u8 *image = e->bulk_scratch +
-					       (size_t)offset * SWAPZ_BLOCK_BYTES;
+			swapz_u8 *image = run->bytes +
+					 (size_t)offset * SWAPZ_BLOCK_BYTES;
 
-			/*
-			 * Each extent initializes every byte it owns: compressed
-			 * builders clear their final unused gap at seal, while RAW
-			 * records overwrite one full block. Only mode 2 alignment holes
-			 * become lower-media bytes, so clear exactly those holes instead
-			 * of the whole 256KiB scratch buffer for every run.
-			 */
 			if (offset > run_blocks)
-				memset(e->bulk_scratch +
+				memset(run->bytes +
 				       (size_t)run_blocks * SWAPZ_BLOCK_BYTES, 0,
 				       (size_t)(offset - run_blocks) *
 				       SWAPZ_BLOCK_BYTES);
 
 			phase_start = swapz_engine_now_ns();
 			if (raw) {
-				/* A raw block must not acquire a fake SWZ3 header. */
 				memcpy(image, pages[entry].payload, SWAPZ_BLOCK_BYTES);
 			} else {
 				error = swapz_begin(&builder, image,
-					  (swapz_u32)blocks * SWAPZ_BLOCK_BYTES,
-					  tx->sequence);
+					    (swapz_u32)blocks * SWAPZ_BLOCK_BYTES,
+					    tx->sequence);
 				if (error) {
 					e->pack_wall_ns += swapz_engine_elapsed_ns(
 						phase_start, swapz_engine_now_ns());
@@ -762,14 +674,16 @@ retry_stage:
 				}
 				for (j = 0; j < take; ++j) {
 					const struct swapz_compressed_page *p =
-							&pages[entry + j];
+							 &pages[entry + j];
 
-					error = swapz_append_page(e, &builder, p,
-						       tx->records[j].generation);
+					error = swapz_append_page(
+						e, &builder, p,
+						tx->records[j].generation);
 					if (error) {
-						e->pack_wall_ns += swapz_engine_elapsed_ns(
-							phase_start,
-							swapz_engine_now_ns());
+						e->pack_wall_ns +=
+							swapz_engine_elapsed_ns(
+								phase_start,
+								swapz_engine_now_ns());
 						goto abort_current;
 					}
 				}
@@ -785,9 +699,9 @@ retry_stage:
 			error = swapz_batch_pause(e->authority, tx);
 			if (error)
 				goto abort_current;
-			e->bulk_offsets[staged] = offset;
-			e->bulk_takes[staged] = take;
-			e->bulk_raw[staged] = raw;
+			run->offsets[staged] = offset;
+			run->takes[staged] = take;
+			run->raw[staged] = raw;
 			e->bulk_padding_blocks += offset > run_blocks ?
 						      offset - run_blocks : 0;
 			run_blocks = end;
@@ -795,19 +709,176 @@ retry_stage:
 			entry += take;
 		}
 		continue;
+
 abort_current:
 		swapz_abort(e->authority, tx);
-abort_group:
+abort_run:
 		if (staged) {
-			int cleanup = swapz_bulk_abort(e, staged, 0);
+			run->extent_count = staged;
+			{
+				int cleanup = swapz_bulk_abort(e, run, 0);
 
-			if (cleanup)
-				return cleanup;
+				if (cleanup)
+					return cleanup;
+			}
 		}
 		return error;
 	}
-	return swapz_bulk_flush(e, run_start, run_blocks, staged,
-			      committed_pages);
+
+	if (!staged || !entry || !run_blocks)
+		return -EUCLEAN;
+	run->start_block = run_start;
+	run->blocks = run_blocks;
+	run->extent_count = staged;
+	run->page_count = entry;
+	*prepared_pages = entry;
+	return 0;
+}
+
+int swapz_engine_complete_batched_run(struct swapz_engine *e,
+				    const struct swapz_io_run *run,
+				    swapz_u16 completed_blocks, int io_error,
+				    swapz_u8 *committed_pages)
+{
+	swapz_u8 i, raw_entries = 0;
+	int error = io_error;
+
+	if (!e || !e->authority || !run || !run->bytes || !run->txs ||
+	    !run->extent_count || !run->page_count || !run->blocks ||
+	    run->blocks > SWAPZ_BULK_BLOCKS || !committed_pages)
+		return -EINVAL;
+	*committed_pages = 0;
+	if (completed_blocks > run->blocks) {
+		completed_blocks = 0;
+		error = -EUCLEAN;
+	}
+	if (!error && completed_blocks != run->blocks)
+		error = -EIO;
+	if (error) {
+		int cleanup = swapz_bulk_abort(e, run, 0);
+
+		return cleanup ? cleanup : error;
+	}
+
+	e->completed_blocks += completed_blocks;
+	e->bulk_writes++;
+	e->bulk_extents += run->extent_count;
+	for (i = 0; i < run->extent_count; ++i) {
+		const struct swapz_tx *tx = &run->txs[i];
+		swapz_u16 offset = run->offsets[i];
+		unsigned long long publish_start = swapz_engine_now_ns();
+
+		error = swapz_batch_resume(e->authority, tx);
+		if (error) {
+			int cleanup;
+
+			e->publish_wall_ns += swapz_engine_elapsed_ns(
+				publish_start, swapz_engine_now_ns());
+			cleanup = swapz_bulk_abort(e, run, i);
+			return cleanup ? cleanup : error;
+		}
+		if (run->raw[i])
+			error = swapz_finish_raw(
+				e->authority, tx,
+				run->bytes + (size_t)offset * SWAPZ_BLOCK_BYTES,
+				tx->extent_blocks, 0);
+		else
+			error = swapz_finish(
+				e->authority, tx,
+				run->bytes + (size_t)offset * SWAPZ_BLOCK_BYTES,
+				(swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES,
+				tx->extent_blocks, 0);
+		e->publish_wall_ns += swapz_engine_elapsed_ns(
+			publish_start, swapz_engine_now_ns());
+		if (error) {
+			int cleanup = swapz_bulk_abort(e, run, i + 1);
+
+			return cleanup ? cleanup : error;
+		}
+		*committed_pages += run->takes[i];
+		if (run->raw[i])
+			raw_entries++;
+	}
+	if (*committed_pages != run->page_count)
+		return -EUCLEAN;
+	e->bulk_raw_entries += raw_entries;
+	if (raw_entries == run->extent_count)
+		e->bulk_raw_only_runs++;
+	else if (raw_entries)
+		e->bulk_mixed_runs++;
+	return 0;
+}
+
+int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
+				   const struct swapz_compressed_page *pages,
+				   swapz_u8 count, swapz_u8 *committed_pages,
+				   swapz_u8 plan_read_blocks)
+{
+	struct swapz_io_run run;
+	swapz_u8 total = 0;
+	swapz_u8 raw_count = 0;
+	swapz_u8 index;
+	int error;
+
+	if (!e || !e->authority || !committed_pages || plan_read_blocks > 3U)
+		return -EINVAL;
+	*committed_pages = 0;
+	if (!pages || !count || count > SWAPZ_MAX_RECORDS)
+		return -EINVAL;
+	for (index = 0; index < count; ++index)
+		if (pages[index].raw)
+			raw_count++;
+
+	if (!raw_count && (!e->bulk_enabled || !e->bulk_scratch ||
+	    !e->bulk_txs || !e->io.write_run || e->verify_after_write ||
+	    count <= 1))
+		return swapz_engine_write_window_planned(e, pages, count,
+						      committed_pages,
+						      plan_read_blocks);
+	if (!e->bulk_enabled || !e->bulk_scratch || !e->bulk_txs ||
+	    !e->io.write_run || e->verify_after_write)
+		return -EOPNOTSUPP;
+
+	memset(&run, 0, sizeof(run));
+	run.bytes = e->bulk_scratch;
+	run.txs = e->bulk_txs;
+	while (total < count) {
+		swapz_u8 prepared = 0, published = 0;
+		swapz_u16 completed = 0;
+
+		error = swapz_engine_prepare_batched_run(
+			e, pages + total, count - total, &run, &prepared,
+			plan_read_blocks);
+		if (error == -EEXIST && !raw_count && !total)
+			return swapz_engine_write_window_planned(
+				e, pages, count, committed_pages, plan_read_blocks);
+		if (error)
+			return error;
+		if (!prepared || prepared > count - total)
+			return -EUCLEAN;
+
+		e->submitted_blocks += run.blocks;
+		error = e->io.write_run(e->io.opaque, run.start_block, run.blocks,
+					run.bytes, &completed);
+		if (completed > run.blocks) {
+			completed = 0;
+			error = -EUCLEAN;
+		}
+		if (!error && completed != run.blocks)
+			error = -EIO;
+		{
+			int complete_error = swapz_engine_complete_batched_run(
+				e, &run, completed, error, &published);
+
+			if (complete_error)
+				return complete_error;
+		}
+		if (published != prepared)
+			return -EUCLEAN;
+		total += published;
+		*committed_pages = total;
+	}
+	return 0;
 }
 
 int swapz_engine_write_window_batched(struct swapz_engine *e,

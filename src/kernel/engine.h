@@ -42,6 +42,24 @@ struct swapz_compressed_page {
 	swapz_u8 raw;
 };
 
+/*
+ * One immutable packed lower run. The caller owns bytes/tx storage for the
+ * complete lifetime from staging through confirmed lower-I/O completion and
+ * authority replay. Upper BIO ownership intentionally stays in dm-target.c so
+ * the portable engine never depends on Linux bio types.
+ */
+struct swapz_io_run {
+	swapz_u8 *bytes; /* at least SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES */
+	struct swapz_tx *txs; /* at least SWAPZ_MAX_RECORDS transactions */
+	swapz_u16 offsets[SWAPZ_MAX_RECORDS];
+	swapz_u8 takes[SWAPZ_MAX_RECORDS];
+	swapz_u8 raw[SWAPZ_MAX_RECORDS];
+	swapz_u32 start_block;
+	swapz_u16 blocks;
+	swapz_u8 extent_count;
+	swapz_u8 page_count;
+};
+
 struct swapz_engine {
 	struct swapz_authority *authority;
 	struct swapz_io io;
@@ -149,6 +167,24 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
  * write. This selects a less read-amplifying 4/8/16KiB layout without
  * changing the target's runtime read policy or lower publication contract.
  */
+/*
+ * Split batched write ownership for asynchronous lower-I/O callers.
+ * prepare reserves/stages and packs one bounded physical run but publishes
+ * no mapping. complete may run only after the caller has a definitive lower
+ * completion result. A failed/uncertain run quarantines every reservation.
+ */
+int swapz_engine_prepare_batched_run(
+				   struct swapz_engine *engine,
+				   const struct swapz_compressed_page *pages,
+				   swapz_u8 count, struct swapz_io_run *run,
+				   swapz_u8 *prepared_pages,
+				   swapz_u8 plan_read_blocks);
+int swapz_engine_complete_batched_run(
+				    struct swapz_engine *engine,
+				    const struct swapz_io_run *run,
+				    swapz_u16 completed_blocks, int io_error,
+				    swapz_u8 *committed_pages);
+
 int swapz_engine_write_window_batched_read_cap(
 				   struct swapz_engine *engine,
 				   const struct swapz_compressed_page *pages,
