@@ -733,11 +733,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(accept.index("length = LZ4_compress_fast("),
                         accept.index("ctx->lz4_wall_ns +="))
         self.assertIn("ctx->decode_wall_ns +=", read)
+        self.assertIn("swapz_copy_bio_accounted(bio, ctx->read_page, true", read)
+        self.assertIn("ctx->read_engine_nonio_wall_ns +=", read)
         self.assertIn("ctx->window_sort_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_wall_ns +=", flush)
+        self.assertIn("ctx->window_commit_nonio_wall_ns +=", flush)
         self.assertIn("ctx->gc_wall_ns +=", flush)
-        for key in ("lz4_wall_ns", "decode_wall_ns", "window_sort_wall_ns",
-                    "window_commit_wall_ns", "lower_read_wall_ns",
+        for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
+                    "read_copy_bytes", "read_engine_nonio_wall_ns",
+                    "window_sort_wall_ns", "window_commit_wall_ns",
+                    "window_commit_nonio_wall_ns", "lower_read_wall_ns",
                     "lower_write_wall_ns", "gc_wall_ns"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
@@ -1077,8 +1082,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->async_prepare = swapz_async_prepare", ctor)
         self.assertIn("INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker)", ctor)
         self.assertIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1', ctor)
-        self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM, 1', ctor)
-        self.assertNotIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
+        self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
         self.assertIn("mempool_create_kmalloc_pool(", ctor)
         self.assertIn("ctx->preparation_lz4_workmem", ctor)
         self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
@@ -1187,6 +1191,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("mempool_destroy(ctx->preparation_pool)", freeing)
         self.assertIn("kfree(ctx->preparation_lz4_workmem)", freeing)
         self.assertIn("ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns", status)
+        self.assertIn("write_copy_wall_ns=%llu write_copy_bytes=%llu", status)
+        self.assertIn("ctx->preparation_copy_wall_ns +", status)
+        self.assertIn("ctx->ordered_write_copy_wall_ns", status)
+        self.assertIn("swapz_copy_bio_accounted(entry->bio", producer)
+        self.assertIn("swapz_memcpy_accounted(prepared->bytes", producer)
+        self.assertIn("swapz_memcpy_accounted(", accept)
         self.assertIn("async_prepare=%u prep_lower_write_overlap_starts=%llu",
                       status)
         self.assertIn("insmod \"$MODULE\" \"async_prepare=$ASYNC_PREPARE\"",
