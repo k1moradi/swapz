@@ -485,6 +485,33 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("batch_stage_allowed", authority)
         self.assertIn("a->batch_pending", source_body("swapz_gc_commit_rotation", authority))
 
+    def test_partial_extent_read_cache_tracks_only_successful_blocks(self):
+        engine_h = (ROOT / "src/kernel/engine.h").read_text()
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+        read = source_body("swapz_engine_read_page", engine)
+        invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
+        process = body("swapz_process")
+        self.assertIn("read_cached_block_mask", engine_h)
+        self.assertIn("engine->read_cached_block_mask = 0", invalidate)
+        self.assertIn("cached_mask = cached_metadata ?", read)
+        self.assertIn("cached_mask = 1U", read)
+        self.assertIn("(1U << initial_blocks) - 1U", read)
+        self.assertIn("while (start <= last && (cached_mask & (1U << start)))",
+                      read)
+        self.assertIn("while (start <= last && (cached_mask & (1U << last)))",
+                      read)
+        payload_read = read.index("engine->io.read_blocks",
+                                  read.index("if (last >= start)"))
+        self.assertLess(payload_read,
+                        read.index("cached_mask |=", payload_read))
+        self.assertIn("engine->read_cached_block_mask = cached_mask", read)
+        self.assertIn(
+            "cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U)",
+            read)
+        self.assertIn("if (op != REQ_OP_READ ||", process)
+        self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
+                      process)
+
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
         engine = (ROOT / "src/kernel/engine.c").read_text()
         writer = source_body("swapz_engine_write_window_batched_read_cap", engine)
@@ -861,6 +888,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->preparation_worker_wall_ns", status)
         self.assertIn("engine_prehashed_records=%u", status)
         self.assertIn("ctx->engine.prehashed_records", status)
+        self.assertIn("batch_snapshot_crc_wall_ns=%llu", status)
+        self.assertIn("ctx->authority.batch_snapshot_crc_wall_ns", status)
         self.assertIn("swapz_engine_write_window_batched_read_cap(", flush)
         codec = (ROOT / "src/kernel/codec.c").read_text()
         authority = (ROOT / "src/kernel/authority.c").read_text()
@@ -871,6 +900,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       authority)
         self.assertIn("swapz_publish_crc32c(a, payload, decoded.payload_length)",
                       authority)
+        self.assertIn("swapz_batch_snapshot_crc32c(a, tx)", authority)
+        snapshot = source_body("swapz_batch_snapshot_crc32c", authority)
+        self.assertIn("swapz_crc32c_bytes(tx, sizeof(*tx))", snapshot)
+        self.assertIn("a->batch_snapshot_crc_wall_ns += end - start", snapshot)
+        self.assertNotIn("offsetof(", snapshot)
         self.assertIn("swapz_crc32c_bytes(prepared->bytes", producer)
         self.assertIn("payload_crc32c_valid", accept)
         self.assertNotIn("swapz_note_dry_pack_close", DM)
@@ -1031,6 +1065,24 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("cap3", flush)
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
 
+    def test_timed_window_telemetry_uses_measurement_snapshots(self):
+        replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("WINDOW_INTERVAL_FIELDS", replay)
+        self.assertIn("KERNEL_WRITE_COUNTER_FIELDS", replay)
+        self.assertIn(
+            'KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target",)', replay)
+        self.assertIn("counters[key] = after[key]", replay)
+        self.assertIn("TIMED_WINDOW_COUNTER_FIELDS", runner)
+        self.assertIn("def timed_window_error", runner)
+        self.assertIn('"kernel_write_path": obj.get("kernel_write_path")',
+                      runner)
+        self.assertIn(
+            "Full-process status includes prefill/warmup/post-mixed work",
+            runner)
+        self.assertIn(
+            "Never use full-process window counters for the QD pilot", runner)
+
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
         expiry = body("swapz_retention_expired")
         wake = body("swapz_retention_wake")
@@ -1084,6 +1136,25 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       worker[learned_close:timer_arm])
         self.assertIn("ctx->singleton_deadline_streak = 0", flush)
         self.assertIn("ctx->singleton_fast_close = false", flush)
+        self.assertIn("bool ordering_boundary =", flush)
+        ordering_start = flush.index("bool ordering_boundary =")
+        hard_start = flush.index("bool hard_boundary =")
+        ordering_reset = flush.index("if (ordering_boundary)")
+        empty_flush = flush.index("if (!count)")
+        self.assertLess(ordering_start, hard_start)
+        self.assertLess(ordering_reset, empty_flush)
+        ordering_definition = flush[ordering_start:hard_start]
+        for reason in ("SWAPZ_CLOSE_FUA", "SWAPZ_CLOSE_PREFLUSH",
+                       "SWAPZ_CLOSE_DISCARD", "SWAPZ_CLOSE_SHUTDOWN",
+                       "SWAPZ_CLOSE_OTHER"):
+            self.assertIn(reason, ordering_definition)
+        self.assertNotIn("SWAPZ_CLOSE_IDLE", ordering_definition)
+        self.assertNotIn("SWAPZ_CLOSE_DEADLINE", ordering_definition)
+        ordering_reset_block = flush[ordering_reset:empty_flush]
+        self.assertIn("ctx->singleton_deadline_streak = 0",
+                      ordering_reset_block)
+        self.assertIn("ctx->singleton_fast_close = false",
+                      ordering_reset_block)
         self.assertIn("swapz_flush_window(ctx)", process)
         self.assertIn("ctx->retain_worker_passes++", worker)
         self.assertIn("ctx->retain_timer_arms++", worker)

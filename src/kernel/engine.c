@@ -339,6 +339,7 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 	if (engine) {
 		engine->read_cache_valid = 0;
 		engine->read_cached_full = 0;
+		engine->read_cached_block_mask = 0;
 		/*
 		 * clock==0 is the canonical empty-LRU state. Writes commonly hit
 		 * this fence more than once (process-level mutation plus physical
@@ -899,8 +900,8 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	struct swapz_decoded peek;
 	struct swapz_map observed;
 	const swapz_u8 *stored;
-	swapz_u32 bytes, first, last, start, count;
-	swapz_u8 initial_blocks = 1;
+	swapz_u32 bytes, first, last, start, count, block;
+	swapz_u8 initial_blocks = 1, cached_mask;
 	int error;
 	int cached_metadata, cached_full, lru_cached_metadata;
 	int metadata_lru_slot;
@@ -939,17 +940,20 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->read_cached_start_block == observed.start_block &&
 		engine->read_cached_extent_blocks == observed.extent_blocks;
 	cached_full = cached_metadata && engine->read_cached_full;
+	cached_mask = cached_metadata ? engine->read_cached_block_mask : 0;
 	metadata_lru_slot = swapz_read_metadata_lru_lookup(engine,
 						 observed.start_block,
 						 observed.extent_blocks);
 	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
+	engine->read_cached_block_mask = 0;
 	if (lru_cached_metadata) {
 		memcpy(engine->read_scratch,
 		       engine->read_metadata_cache +
 		       (size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES,
 		       SWAPZ_BLOCK_BYTES);
+		cached_mask = 1U;
 	} else if (!cached_metadata) {
 		if (observed.extent_blocks == 2 &&
 		    engine->max_read_blocks_per_record != 1 &&
@@ -963,6 +967,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			return error;
 		engine->physical_read_blocks += initial_blocks;
 		engine->read_metadata_requests++;
+		cached_mask = (swapz_u8)((1U << initial_blocks) - 1U);
 		if (initial_blocks == 2)
 			engine->read_full_extent_requests++;
 		else if (observed.extent_blocks == 2 &&
@@ -981,10 +986,17 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	first = peek.payload_offset / SWAPZ_BLOCK_BYTES;
 	last = ((swapz_u32)peek.payload_offset +
 		peek.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
-	/* Both blocks are already present after full prefetch or a
-	 * successful same-extent reuse; never issue a duplicate payload I/O. */
-	start = (cached_full || initial_blocks == 2) ?
-		observed.extent_blocks : (first ? first : 1U);
+	/*
+	 * Block zero is already resident before peek. A compressed record is at
+	 * most SWAPZ_MAX_COMPRESSED bytes, so first..last spans at most two
+	 * contiguous 4KiB blocks. Trimming resident blocks from both ends
+	 * therefore leaves either one contiguous missing run or nothing.
+	 */
+	start = first ? first : 1U;
+	while (start <= last && (cached_mask & (1U << start)))
+		start++;
+	while (start <= last && (cached_mask & (1U << last)))
+		last--;
 	if (last >= start) {
 		count = last - start + 1U;
 		if (start + count > observed.extent_blocks)
@@ -997,6 +1009,8 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->physical_read_blocks += count;
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
+		for (block = start; block < start + count; ++block)
+			cached_mask |= (swapz_u8)(1U << block);
 	}
 	error = swapz_read_authoritative_peeked(engine->authority, logical_page,
 					      &observed, engine->read_scratch,
@@ -1011,7 +1025,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	 * and payload-CRC validation. Any error path leaves the cache invalid. */
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
-	engine->read_cached_full = cached_full || initial_blocks == 2;
+	engine->read_cached_full =
+		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
+	engine->read_cached_block_mask = cached_mask;
 	engine->read_cache_valid = 1;
 	if (cached_metadata)
 		engine->read_metadata_cache_hits++;

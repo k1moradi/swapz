@@ -548,3 +548,34 @@ production full-logical-map validation scans at dead-segment allocation and
 post-evacuation role commit, while portable callers without the sidecar retain
 the conservative full-map fallback. Victim discovery/evacuation may still scan
 the logical map until a separately qualified reverse index exists.
+
+
+### Timed benchmark telemetry ownership
+
+Performance-policy counters used to explain measured mixed or write-only
+throughput must be sampled at the same measure boundary as useful throughput and
+independent lower-I/O deltas. Full-process status snapshots may remain private
+session diagnostics, but prefill, warmup and post-measure activity must never be
+reported as timed window, close-reason, deadline, burst-learning or preparation
+evidence. Monotonic counters are differenced; policy state such as
+`retained_burst_target` is an end-of-interval gauge and must not be subtracted.
+
+### Explicit ordering-boundary state reset
+
+Learned singleton fast-close state describes one uninterrupted admission stream.
+FUA, PREFLUSH, DISCARD, shutdown and other explicit ordering boundaries clear
+`singleton_deadline_streak` and `singleton_fast_close`, including empty
+barrier flushes. Ordinary IDLE, DEADLINE and finite worker QUANTUM closes are
+not ordering boundaries and must not erase the learned QD1 behavior they are
+designed to preserve.
+
+### Partial extent read residency
+
+The serialized compressed-read cache may retain successfully fetched 4KiB
+blocks from the current immutable extent in `read_scratch`. Residency is exact:
+a block bit becomes valid only after its lower read succeeds, every authority-
+changing write/GC/discard/barrier invalidates the mask, and generation,
+descriptor and payload CRC validation still runs before returning a logical
+page. This optimization may remove duplicate reads of sibling records but must
+not turn cached bytes into mapping authority or weaken the existing mutation
+fence.

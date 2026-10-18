@@ -31,6 +31,18 @@ static swapz_u32 swapz_publish_crc32c(struct swapz_authority *a,
 	return crc;
 }
 
+static swapz_u32 swapz_batch_snapshot_crc32c(struct swapz_authority *a,
+					     const struct swapz_tx *tx)
+{
+	unsigned long long start = swapz_authority_now_ns();
+	swapz_u32 crc = swapz_crc32c_bytes(tx, sizeof(*tx));
+	unsigned long long end = swapz_authority_now_ns();
+
+	if (end >= start)
+		a->batch_snapshot_crc_wall_ns += end - start;
+	return crc;
+}
+
 static int swapz_legal_class(swapz_u8 blocks)
 {
 	return blocks == 1U || blocks == 2U || blocks == 4U;
@@ -502,7 +514,7 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 		a->batch_consumed = 0;
 	}
 	a->batch_hashes[a->batch_pending] =
-		swapz_crc32c_bytes(tx, sizeof(*tx));
+		swapz_batch_snapshot_crc32c(a, tx);
 	a->batch_pending++;
 	a->in_flight = 0;
 	a->active_sequence = 0;
@@ -531,7 +543,7 @@ int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 	    tx->start_block + tx->extent_blocks > a->next_block ||
 	    a->batch_consumed >= SWAPZ_MAX_RECORDS ||
 	    a->batch_hashes[a->batch_consumed] !=
-				swapz_crc32c_bytes(tx, sizeof(*tx)))
+				swapz_batch_snapshot_crc32c(a, tx))
 		return -ESTALE;
 	for (i = 0; i < tx->count; ++i)
 		if (tx->records[i].logical_page >= a->logical_pages ||

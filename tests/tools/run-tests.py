@@ -66,37 +66,41 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips")
-KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
-                       "write_copy_wall_ns", "write_copy_bytes",
-                       "direct_lz4_input_pages",
-                       "window_sort_wall_ns", "window_commit_wall_ns",
-                       "window_commit_nonio_wall_ns",
-                       "engine_plan_wall_ns", "engine_pack_wall_ns",
-                       "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
-                       "engine_publish_auth_wall_ns", "engine_prehashed_records",
-                       "prep_crc_wall_ns", "ordered_crc_wall_ns",
-                       "lower_write_wall_ns",
-                       "ordered_worker_wall_ns", "prep_worker_wall_ns",
-                       "prep_wait_wall_ns",
-                       "prep_lower_write_overlap_ns", "windows",
-                       "prep_lower_write_samples",
-                       "prep_lower_write_start_queued",
-                       "prep_lower_write_start_nonempty",
-                       "prep_lower_write_end_queued",
-                       "prep_lower_write_end_nonempty",
-                       "pipeline_async_runs", "pipeline_active_wall_ns",
-                       "write_wait_le1ms", "write_wait_1to4ms",
-                       "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 PREPARATION_FIELDS = (
     "prep_lower_write_overlap_starts", "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
     "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
-SATURATION_WINDOW_FIELDS = (
+WINDOW_SIZE_FIELDS = (
     "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
-    "win9_16", "win17_64", "close_idle", "close_deadline",
-    "close_pack_ready")
+    "win9_16", "win17_64")
+BURST_COUNTER_FIELDS = (
+    "packed_early_commits", "single_pack_deferrals",
+    "accepted_burst_extensions", "accepted_burst_tail_flushes",
+    "accepted_burst_read_caps")
+TIMED_WINDOW_COUNTER_FIELDS = (
+    WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+    DEADLINE_CONTEXT_FIELDS + BURST_COUNTER_FIELDS + ("gc_victims",))
+SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
+    "close_idle", "close_deadline", "close_pack_ready")
+KERNEL_WRITE_FIELDS = (
+    "physical_write_reqs", "lz4_wall_ns", "write_copy_wall_ns",
+    "write_copy_bytes", "direct_lz4_input_pages", "window_sort_wall_ns",
+    "window_commit_wall_ns", "window_commit_nonio_wall_ns",
+    "engine_plan_wall_ns", "engine_pack_wall_ns",
+    "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
+    "engine_publish_auth_wall_ns", "engine_prehashed_records",
+    "batch_snapshot_crc_wall_ns", "prep_crc_wall_ns",
+    "ordered_crc_wall_ns", "lower_write_wall_ns",
+    "ordered_worker_wall_ns", "prep_worker_wall_ns",
+    "prep_wait_wall_ns", "prep_lower_write_overlap_ns",
+    "prep_lower_write_samples", "prep_lower_write_start_queued",
+    "prep_lower_write_start_nonempty", "prep_lower_write_end_queued",
+    "prep_lower_write_end_nonempty", "pipeline_async_runs",
+    "pipeline_active_wall_ns", "write_wait_le1ms", "write_wait_1to4ms",
+    "write_wait_gt4ms", "retained_burst_target"
+) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
     "target_interval_ns", "samples", "read_start", "write_start",
@@ -112,6 +116,29 @@ def lower_inflight_record(obj):
     if not isinstance(record, dict):
         return None
     return {field: record.get(field) for field in LOWER_INFLIGHT_FIELDS}
+
+
+def timed_window_error(record):
+    if not isinstance(record, dict):
+        return "missing timed swapz window telemetry"
+    if any(type(record.get(field)) is not int or record[field] < 0
+           for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS):
+        return "invalid timed swapz window telemetry"
+    if type(record.get("retained_burst_target")) is not int or not (
+            1 <= record["retained_burst_target"] <= 64):
+        return "invalid timed retained burst target"
+    if sum(record[field] for field in CLOSE_REASON_FIELDS) != record["windows"]:
+        return "timed window close-reason accounting is inconsistent"
+    if sum(record[field] for field in ONE_PAGE_CLOSE_FIELDS) != record["one_page_windows"]:
+        return "timed one-page close-reason accounting is inconsistent"
+    if sum(record[field] for field in DEADLINE_CONTEXT_FIELDS) != record["close_deadline"]:
+        return "timed deadline-context accounting is inconsistent"
+    if (record["accepted_burst_tail_flushes"] >
+            record["accepted_burst_extensions"] or
+            record["accepted_burst_read_caps"] >
+            record["accepted_burst_extensions"]):
+        return "timed accepted-burst accounting is inconsistent"
+    return None
 
 
 def lower_inflight_error(record):
@@ -489,19 +516,12 @@ def parse_sessions(output):
                     "submit_queues": int(match.group(5)),
                     "hw_queue_depth": int(match.group(6)),
                 }
-        elif current is not None and line.startswith(("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
-            name = "before" if line.startswith("SWAPZ_STATUS_BEFORE=") else "after"
-            status_text = line.partition("=")[2]
-            allowed = ("packed_early_commits",
-                       "single_pack_deferrals", "accepted_burst_extensions",
-                       "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                       "windows", "one_page_windows", "gc_victims",
-                       "gc_role_rotations") + PREPARATION_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
-            current.setdefault("kernel_status", {})[name] = {
-                key: int(match.group(1))
-                for key in allowed
-                if (match := re.search(r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", status_text))
-            }
+        elif current is not None and line.startswith(
+                ("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
+            # Full-process status includes prefill/warmup/post-mixed work.
+            # Keep it in the private session log only; report diagnostics come
+            # from io-replay's exact timed kernel_write_path snapshots.
+            continue
         elif current is not None and line.startswith(
                 "PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current["status"] = "PASS"
@@ -620,20 +640,8 @@ def parse_write_saturation(output):
                 }
         elif current is not None and line.startswith(
                 ("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
-            name = "before" if line.startswith("SWAPZ_STATUS_BEFORE=") else "after"
-            status_text = line.partition("=")[2]
-            parsed = {
-                key: int(match.group(1))
-                for key in SATURATION_WINDOW_FIELDS + PREPARATION_FIELDS
-                if (match := re.search(
-                    r"(?:^|\s)" + key + r"=(\d+)(?:\s|$)", status_text))
-            }
-            target = re.search(
-                r"(?:^|\s)retained_burst_target=(\d+)(?:\s|$)",
-                status_text)
-            if target:
-                parsed["retained_burst_target"] = int(target.group(1))
-            current.setdefault("kernel_status", {})[name] = parsed
+            # Never use full-process window counters for the QD pilot.
+            continue
         elif current is not None and line.startswith("{"):
             try:
                 obj = json.loads(line)
@@ -662,6 +670,7 @@ def parse_write_saturation(output):
                 "cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                 "peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
                 "lower_inflight": lower_inflight_record(obj),
+                "kernel_write_path": obj.get("kernel_write_path"),
             }
             for field in ("source_sha", "fixture_sha256", "trace_sha256"):
                 if obj.get(field):
@@ -704,26 +713,28 @@ def write_saturation_verdict(sessions):
                     for key in ("cap_mib_s", "completion_nsec", "irqmode", "queue_mode", "submit_queues", "hw_queue_depth")):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only device model mismatch"}
-            status = row.get("kernel_status", {})
-            before = status.get("before", {})
-            after = status.get("after", {})
-            if (any(type(before.get(field)) is not int or
-                    type(after.get(field)) is not int or
-                    after[field] < before[field]
-                    for field in SATURATION_WINDOW_FIELDS + PREPARATION_FIELDS) or
-                    type(after.get("retained_burst_target")) is not int or
-                    not 1 <= after["retained_burst_target"] <= 64):
+            timed = row["arms"].get("swapz", {}).get("kernel_write_path")
+            if (not isinstance(timed, dict) or
+                    any(type(timed.get(field)) is not int or timed[field] < 0
+                        for field in KERNEL_WRITE_FIELDS) or
+                    timed_window_error(timed) is not None):
                 return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: write-only window attribution missing"}
+                        "reason": f"{regime}: write-only timed window attribution missing"}
+            row["timed_window_delta"] = {
+                field: timed[field] for field in TIMED_WINDOW_COUNTER_FIELDS
+            }
             row["window_delta"] = {
-                field: after[field] - before[field]
-                for field in SATURATION_WINDOW_FIELDS
+                field: timed[field] for field in SATURATION_WINDOW_FIELDS
             }
             row["preparation_delta"] = {
-                field: after[field] - before[field]
-                for field in PREPARATION_FIELDS
+                field: timed[field] for field in PREPARATION_FIELDS
             }
-            row["retained_burst_target"] = after["retained_burst_target"]
+            row["retained_burst_target"] = timed["retained_burst_target"]
+            if not row["async_prepare"] and (
+                    timed["pipeline_async_runs"] or
+                    timed["pipeline_active_wall_ns"]):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: write-only sync arm used async run occupancy"}
             for arm in row["arms"].values():
                 required = ("input_write_mbps", "output_lower_write_mbps",
                             "logical_write_bytes", "logical_read_bytes",
@@ -778,6 +789,7 @@ def write_saturation_verdict(sessions):
                 "swapz_lower_write_requests": row["arms"]["swapz"]["lower_write_requests"],
                 "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
                 "swapz_write_p99_ms": row["arms"]["swapz"]["write_p99_ms"],
+                "timed_window_delta": row["timed_window_delta"],
                 "window_delta": row["window_delta"],
                 "preparation_delta": row["preparation_delta"],
                 "retained_burst_target": row["retained_burst_target"],
@@ -822,48 +834,16 @@ def benchmark_verdicts(sessions):
         return {"overall": "INCOMPLETE", "reason": "exactly eight modeled RAM-only pairs required"}
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
-        status = row.get("kernel_status", {})
-        for field in ("packed_early_commits",
-                      "single_pack_deferrals", "accepted_burst_extensions",
-                       "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                       "windows",
-                      "one_page_windows", "gc_victims") + PREPARATION_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS:
-            before = status.get("before", {}).get(field)
-            after = status.get("after", {}).get(field)
-            if not isinstance(before, int) or not isinstance(after, int) or after < before:
-                return {"overall": "INCOMPLETE",
-                        "reason": "missing or invalid kernel packed/GC counters"}
+        timed = row["arms"].get("swapz", {}).get("kernel_write_path")
+        error = timed_window_error(timed)
+        if error is not None:
+            return {"overall": "INCOMPLETE",
+                    "reason": f"timed mixed window telemetry: {error}"}
         row["kernel_counter_delta"] = {
-            key: status["after"][key] - status["before"][key]
-            for key in ("packed_early_commits",
-                        "single_pack_deferrals", "accepted_burst_extensions",
-                        "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                        "windows",
-                        "one_page_windows", "gc_victims") + PREPARATION_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+            key: timed[key]
+            for key in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS
         }
-        if sum(row["kernel_counter_delta"][field]
-               for field in CLOSE_REASON_FIELDS) != \
-                row["kernel_counter_delta"]["windows"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "window close-reason accounting is inconsistent"}
-        if sum(row["kernel_counter_delta"][field]
-               for field in ONE_PAGE_CLOSE_FIELDS) != \
-                row["kernel_counter_delta"]["one_page_windows"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "one-page close-reason accounting is inconsistent"}
-        if sum(row["kernel_counter_delta"][field]
-               for field in DEADLINE_CONTEXT_FIELDS) != \
-                row["kernel_counter_delta"]["close_deadline"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "deadline-context accounting is inconsistent"}
-        if (row["kernel_counter_delta"]["accepted_burst_tail_flushes"] >
-                row["kernel_counter_delta"]["accepted_burst_extensions"]):
-            return {"overall": "INCOMPLETE",
-                    "reason": "accepted-burst tail closes exceed extensions"}
-        if (row["kernel_counter_delta"]["accepted_burst_read_caps"] >
-                row["kernel_counter_delta"]["accepted_burst_extensions"]):
-            return {"overall": "INCOMPLETE",
-                    "reason": "accepted-burst read caps exceed extensions"}
+        row["retained_burst_target"] = timed["retained_burst_target"]
     for digest in ("source_sha", "fixture_sha256", "trace_sha256"):
         vals = [row.get(digest) for row in all_rows]
         if None in vals or len(set(vals)) != 1:
@@ -916,6 +896,7 @@ def benchmark_verdicts(sessions):
                        record["engine_publish_crc_wall_ns"] +
                            record["engine_publish_auth_wall_ns"] !=
                            record["engine_publish_wall_ns"] or
+                       timed_window_error(record) is not None or
                        record["prep_lower_write_start_nonempty"] >
                            record["prep_lower_write_samples"] or
                        record["prep_lower_write_end_nonempty"] >
@@ -1028,11 +1009,14 @@ def benchmark_verdicts(sessions):
             "kernel_counters": {
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
-                for key in ("packed_early_commits",
-                            "single_pack_deferrals", "accepted_burst_extensions",
-                            "accepted_burst_tail_flushes", "accepted_burst_read_caps",
-                            "windows",
-                            "one_page_windows", "gc_victims") + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+                for key in (BURST_COUNTER_FIELDS + ("windows",
+                            "one_page_windows", "gc_victims") +
+                            CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            DEADLINE_CONTEXT_FIELDS)
+            },
+            "kernel_gauges": {
+                "retained_burst_target": statistics.mean(
+                    row["retained_burst_target"] for row in rows)
             },
             "preparation_counters": {
                 key: statistics.mean(row["kernel_counter_delta"][key]
@@ -1166,6 +1150,8 @@ def print_bench(result):
                  f"{asynchronous['mixed_engine_publish_crc_wall_ns'] / 1e6:.1f}", "-"),
                 ("publish authority",
                  f"{asynchronous['mixed_engine_publish_auth_wall_ns'] / 1e6:.1f}", "-"),
+                ("batch snapshot CRC",
+                 f"{asynchronous['mixed_batch_snapshot_crc_wall_ns'] / 1e6:.1f}", "-"),
                 ("engine residual",
                  f"{max(0.0, asynchronous['mixed_window_commit_nonio_wall_ns'] - asynchronous['mixed_engine_plan_wall_ns'] - asynchronous['mixed_engine_pack_wall_ns'] - asynchronous['mixed_engine_publish_wall_ns']) / 1e6:.1f}",
                  "-"),

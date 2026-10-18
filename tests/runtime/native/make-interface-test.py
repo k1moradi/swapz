@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Owner policy: only four user-visible root Make commands."""
+import importlib.util
 import pathlib
 import re
 import subprocess
@@ -147,6 +148,75 @@ class PublicMakeContract(unittest.TestCase):
             mocked_source_sha = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=ROOT,
                 text=True, timeout=5).strip()
+            runner_spec = importlib.util.spec_from_file_location(
+                "swapz_fixture_runner", ROOT / "tests/tools/run-tests.py")
+            runner_contract = importlib.util.module_from_spec(runner_spec)
+            runner_spec.loader.exec_module(runner_contract)
+
+            def mock_kernel_write(mode, target):
+                record = {field: 0 for field in runner_contract.KERNEL_WRITE_FIELDS}
+                record.update({
+                    "physical_write_reqs": 5,
+                    "lz4_wall_ns": 20000000,
+                    "write_copy_wall_ns": 3000000,
+                    "write_copy_bytes": 6000000,
+                    "direct_lz4_input_pages": 3000,
+                    "window_sort_wall_ns": 1000000,
+                    "window_commit_wall_ns": 40000000,
+                    "window_commit_nonio_wall_ns": 10000000,
+                    "engine_plan_wall_ns": 1000000,
+                    "engine_pack_wall_ns": 2000000,
+                    "engine_publish_wall_ns": 3000000,
+                    "engine_publish_crc_wall_ns": 1000000,
+                    "engine_publish_auth_wall_ns": 2000000,
+                    "engine_prehashed_records": 2500,
+                    "batch_snapshot_crc_wall_ns": 250000,
+                    "prep_crc_wall_ns": 700000,
+                    "ordered_crc_wall_ns": 1300000,
+                    "lower_write_wall_ns": 30000000,
+                    "ordered_worker_wall_ns": 52000000,
+                    "prep_worker_wall_ns": 5000000,
+                    "prep_wait_wall_ns": 500000,
+                    "prep_lower_write_overlap_ns": 5000000,
+                    "prep_lower_write_samples": 5,
+                    "prep_lower_write_start_queued": 4,
+                    "prep_lower_write_start_nonempty": 3,
+                    "prep_lower_write_end_queued": 1,
+                    "prep_lower_write_end_nonempty": 1,
+                    "pipeline_async_runs": 4 if mode else 0,
+                    "pipeline_active_wall_ns": 800000000 if mode else 0,
+                    "write_wait_le1ms": 2,
+                    "write_wait_1to4ms": 2,
+                    "write_wait_gt4ms": 1,
+                    "retained_burst_target": target,
+                    "windows": 20,
+                    "one_page_windows": 4,
+                    "win1": 4,
+                    "win3_4": 8,
+                    "win5_8": 8,
+                    "close_idle": 4,
+                    "close_deadline": 2,
+                    "close_pack_ready": 14,
+                    "win1_idle": 1,
+                    "win1_deadline": 2,
+                    "win1_pack_ready": 1,
+                    "deadline_before_bio": 1,
+                    "deadline_worker_empty": 1,
+                    "packed_early_commits": 8,
+                    "single_pack_deferrals": 24,
+                    "accepted_burst_extensions": 6,
+                    "accepted_burst_tail_flushes": 5,
+                    "accepted_burst_read_caps": 4,
+                    "prep_lower_write_overlap_starts": 42 if mode else 0,
+                    "prep_wave_kicks": 5 if mode else 0,
+                    "prep_producer_head_claims": 2 if mode else 0,
+                    "prep_producer_tail_claims": 3 if mode else 0,
+                    "prep_ordered_inline": 4 if mode else 0,
+                    "prep_ordered_handoffs": 3 if mode else 0,
+                    "prep_ordered_waits": 1 if mode else 0,
+                })
+                return record
+
             def mock_lower_inflight(has_reads):
                 read_mean = 0.25 if has_reads else 0.0
                 return {
@@ -176,40 +246,8 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
                     "lower_inflight": mock_lower_inflight(True),
-                    "kernel_write_path": ({
-                        "physical_write_reqs": 5,
-                        "lz4_wall_ns": 20000000,
-                        "write_copy_wall_ns": 3000000,
-                        "write_copy_bytes": 6000000,
-                        "direct_lz4_input_pages": 3000,
-                        "window_sort_wall_ns": 1000000,
-                        "window_commit_wall_ns": 40000000,
-                        "window_commit_nonio_wall_ns": 10000000,
-                        "engine_plan_wall_ns": 1000000,
-                        "engine_pack_wall_ns": 2000000,
-                        "engine_publish_wall_ns": 3000000,
-                        "engine_publish_crc_wall_ns": 1000000,
-                        "engine_publish_auth_wall_ns": 2000000,
-                        "engine_prehashed_records": 2500,
-                        "prep_crc_wall_ns": 700000,
-                        "ordered_crc_wall_ns": 1300000,
-                        "lower_write_wall_ns": 30000000,
-                        "ordered_worker_wall_ns": 52000000,
-                        "prep_worker_wall_ns": 5000000,
-                        "prep_wait_wall_ns": 500000,
-                        "prep_lower_write_overlap_ns": 5000000,
-                        "windows": 4,
-                        "prep_lower_write_samples": 5,
-                        "prep_lower_write_start_queued": 4,
-                        "prep_lower_write_start_nonempty": 3,
-                        "prep_lower_write_end_queued": 1,
-                        "prep_lower_write_end_nonempty": 1,
-                        "pipeline_async_runs": 4 if mode else 0,
-                        "pipeline_active_wall_ns": 800000000 if mode else 0,
-                        "write_wait_le1ms": 2,
-                        "write_wait_1to4ms": 2,
-                        "write_wait_gt4ms": 1,
-                    } if is_swapz else None),
+                    "kernel_write_path": (
+                        mock_kernel_write(mode, 8) if is_swapz else None),
                     "packed_read": {
                         "logical_bytes": 4194304,
                         "logical_image_sha256": "m" * 64,
@@ -261,7 +299,7 @@ class PublicMakeContract(unittest.TestCase):
                         "lower_read_requests": 4
                     }
                 }, sort_keys=True)
-            def mock_write_arm(candidate, qd):
+            def mock_write_arm(candidate, qd, mode):
                 is_swapz = candidate == "swapz"
                 logical = 4096 * 4096
                 lower = int(logical / 1.4) if is_swapz else logical
@@ -276,6 +314,9 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
                     "lower_inflight": mock_lower_inflight(False),
+                    "kernel_write_path": (
+                        mock_kernel_write(mode, max(4, qd))
+                        if is_swapz else None),
                     "throughput_mbps": {
                         "logical_write_mbps": 20 if is_swapz else 14,
                         "lower_write_mbps": 12 if is_swapz else 14,
@@ -342,8 +383,8 @@ class PublicMakeContract(unittest.TestCase):
                             f"prep_ordered_waits={1 if mode else 0} "
                             f"prep_lower_write_overlap_starts={42 if mode else 0} "
                             f"prep_wave_kicks={5 if mode else 0}",
-                            mock_write_arm("swapz", qd) if index % 2 else mock_write_arm("off", qd),
-                            mock_write_arm("off", qd) if index % 2 else mock_write_arm("swapz", qd),
+                            mock_write_arm("swapz", qd, mode) if index % 2 else mock_write_arm("off", qd, mode),
+                            mock_write_arm("off", qd, mode) if index % 2 else mock_write_arm("swapz", qd, mode),
                             f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
                         ))
                         index += 1

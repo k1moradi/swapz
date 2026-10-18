@@ -33,6 +33,7 @@ struct memory_disk {
 	swapz_u32 write_calls;
 	swapz_u32 write_blocks;
 	swapz_u32 read_blocks;
+	swapz_u32 read_block_hits[PHYSICAL_BLOCKS];
 	swapz_u32 fail_write_on_call;
 	int fail_reads;
 };
@@ -66,6 +67,7 @@ static int lower_read(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		      swapz_u8 *target)
 {
 	struct memory_disk *m = opaque;
+	swapz_u32 block;
 
 	if (m->fail_reads)
 		return -EIO;
@@ -75,6 +77,8 @@ static int lower_read(void *opaque, swapz_u32 start, swapz_u8 blocks,
 	memcpy(target, m->storage + (size_t)start * SWAPZ_BLOCK_BYTES,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
 	m->read_blocks += blocks;
+	for (block = 0; block < blocks; ++block)
+		m->read_block_hits[start + block]++;
 	return 0;
 }
 
@@ -84,6 +88,7 @@ static int setup(void)
 	disk.write_calls = 0;
 	disk.write_blocks = 0;
 	disk.read_blocks = 0;
+	memset(disk.read_block_hits, 0, sizeof(disk.read_block_hits));
 	disk.fail_write_on_call = 0;
 	disk.fail_reads = 0;
 	if (swapz_authority_init(&authority, maps, live, classes,
@@ -304,6 +309,54 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	return 0;
 }
 
+static int test_four_block_extent_reuses_each_payload_block_once(void)
+{
+	struct swapz_compressed_page pages[7];
+	swapz_u8 output[3568], committed = 0;
+	swapz_u16 length = 0;
+	swapz_u32 start, index;
+
+	CHECK(setup() == 0);
+	prepare(pages, 7, 0, 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
+	CHECK(committed == 7);
+	start = maps[0].start_block;
+	for (index = 0; index < 7; ++index) {
+		CHECK(maps[index].valid);
+		CHECK(maps[index].start_block == start);
+		CHECK(maps[index].extent_blocks == 4);
+	}
+
+	disk.read_blocks = 0;
+	memset(disk.read_block_hits, 0, sizeof(disk.read_block_hits));
+	swapz_engine_invalidate_read_cache(&engine);
+	CHECK(engine.read_cached_block_mask == 0);
+	for (index = 0; index < 7; ++index) {
+		CHECK(swapz_engine_read_page(&engine, index, output,
+					   sizeof(output), &length) == 0);
+		CHECK(length == 2072);
+		CHECK(!memcmp(output, originals[index], length));
+	}
+	CHECK(disk.read_blocks == 4);
+	for (index = 0; index < 4; ++index)
+		CHECK(disk.read_block_hits[start + index] == 1);
+	CHECK(engine.read_cached_block_mask == 0x0fU);
+	CHECK(engine.read_cached_full == 1);
+
+	swapz_engine_invalidate_read_cache(&engine);
+	CHECK(engine.read_cached_block_mask == 0);
+	CHECK(engine.read_cached_full == 0);
+
+	/* Production writes use the same mutation fence before lower I/O. */
+	prepare(pages, 1, 0, 70);
+	committed = 0;
+	CHECK(write_window_sequential(pages, 1, &committed) == 0);
+	CHECK(committed == 1);
+	CHECK(engine.read_cached_block_mask == 0);
+	CHECK(engine.read_cache_valid == 0);
+	return 0;
+}
+
 static int test_full_extent_corruption_rejected(void)
 {
 	struct swapz_compressed_page pages[7];
@@ -513,6 +566,7 @@ int main(void)
 	CHECK(test_finite_window_planner() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
+	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;

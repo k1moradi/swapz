@@ -35,6 +35,22 @@ lower-I/O sleep and callback wall may include scheduler delay. Use explicit
 LZ4/CRC/copy/plan/pack/publish timers for hot-path attribution. RAM-backed 4MiB
 read tests are not cold physical swap-in.
 
+Window-size bins, close reasons, one-page close reasons, deadline contexts,
+burst-learning counters, preparation counters and GC-victim attribution are
+sampled by `io-replay.py` at this same measured boundary. Full-process
+`SWAPZ_STATUS_BEFORE/AFTER` output is not used for those report tables because
+it also contains prefill, warmup and post-mixed packed-read population.
+`retained_burst_target` is an end-of-interval gauge, not a delta.
+
+The current unqualified candidate also retains successfully read payload blocks
+from one immutable 16KiB extent so sequential sibling records do not re-read a
+block already present in `read_scratch`. This is a duplicate-I/O elimination
+experiment, not yet evidence that the faster packed-read verdict becomes
+FASTER. The next owner run must report actual lower READ bytes/requests and
+latency before any such claim. It also reports
+`batch_snapshot_crc_wall_ns` for the unchanged full-transaction pause/resume
+CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
+
 ## Current directional result
 
 Owner-qualified source `5036137fa7cdbb155cf9b0189079011d49b74de3`

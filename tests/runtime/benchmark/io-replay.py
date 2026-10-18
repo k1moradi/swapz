@@ -679,29 +679,50 @@ def kernel_read_delta(before, after):
     return counters
 
 
-# Timed MIXED-workload write diagnosis; dmsetup is sampled outside the
-# stopwatch. All values are C kernel target counters, never CPU time.
-KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
-                       "write_copy_wall_ns", "write_copy_bytes",
-                       "direct_lz4_input_pages",
-                       "window_sort_wall_ns", "window_commit_wall_ns",
-                       "window_commit_nonio_wall_ns",
-                       "engine_plan_wall_ns", "engine_pack_wall_ns",
-                       "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
-                       "engine_publish_auth_wall_ns", "engine_prehashed_records",
-                       "prep_crc_wall_ns", "ordered_crc_wall_ns",
-                       "lower_write_wall_ns",
-                       "ordered_worker_wall_ns", "prep_worker_wall_ns",
-                       "prep_wait_wall_ns",
-                       "prep_lower_write_overlap_ns", "windows",
-                       "prep_lower_write_samples",
-                       "prep_lower_write_start_queued",
-                       "prep_lower_write_start_nonempty",
-                       "prep_lower_write_end_queued",
-                       "prep_lower_write_end_nonempty",
-                       "pipeline_async_runs", "pipeline_active_wall_ns",
-                       "write_wait_le1ms", "write_wait_1to4ms",
-                       "write_wait_gt4ms")
+# Timed workload diagnosis; dmsetup is sampled immediately around measure.
+# Monotonic counters are differenced. retained_burst_target is an end-of-
+# interval policy gauge and is never subtracted.
+CLOSE_REASON_FIELDS = (
+    "close_unknown", "close_full", "close_duplicate", "close_zero",
+    "close_fua", "close_raw", "close_read_conflict", "close_read_unrelated",
+    "close_discard", "close_preflush", "close_quantum", "close_idle",
+    "close_shutdown", "close_other", "close_deadline", "close_pack_ready")
+ONE_PAGE_CLOSE_FIELDS = (
+    "win1_unknown", "win1_full", "win1_duplicate", "win1_zero",
+    "win1_fua", "win1_raw", "win1_read_conflict", "win1_read_unrelated",
+    "win1_discard", "win1_preflush", "win1_quantum", "win1_idle",
+    "win1_shutdown", "win1_other", "win1_deadline", "win1_pack_ready")
+DEADLINE_CONTEXT_FIELDS = (
+    "deadline_before_bio", "deadline_after_read",
+    "deadline_worker_with_local", "deadline_worker_empty")
+PREPARATION_FIELDS = (
+    "prep_lower_write_overlap_starts", "prep_wave_kicks",
+    "prep_producer_head_claims", "prep_producer_tail_claims",
+    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
+WINDOW_INTERVAL_FIELDS = (
+    "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
+    "win9_16", "win17_64", "packed_early_commits",
+    "single_pack_deferrals", "accepted_burst_extensions",
+    "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+KERNEL_WRITE_COUNTER_FIELDS = (
+    "physical_write_reqs", "lz4_wall_ns",
+    "write_copy_wall_ns", "write_copy_bytes", "direct_lz4_input_pages",
+    "window_sort_wall_ns", "window_commit_wall_ns",
+    "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
+    "engine_pack_wall_ns", "engine_publish_wall_ns",
+    "engine_publish_crc_wall_ns", "engine_publish_auth_wall_ns",
+    "engine_prehashed_records", "batch_snapshot_crc_wall_ns",
+    "prep_crc_wall_ns", "ordered_crc_wall_ns", "lower_write_wall_ns",
+    "ordered_worker_wall_ns", "prep_worker_wall_ns", "prep_wait_wall_ns",
+    "prep_lower_write_overlap_ns", "prep_lower_write_samples",
+    "prep_lower_write_start_queued", "prep_lower_write_start_nonempty",
+    "prep_lower_write_end_queued", "prep_lower_write_end_nonempty",
+    "pipeline_async_runs", "pipeline_active_wall_ns",
+    "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms"
+) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS
+KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target",)
+KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 
@@ -728,9 +749,14 @@ def kernel_write_delta(before, after):
         return None
     if before is None or after is None:
         raise ValueError("incomplete swapz write telemetry")
-    counters = {key: after[key] - before[key] for key in KERNEL_WRITE_FIELDS}
+    counters = {key: after[key] - before[key]
+                for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
+    for key in KERNEL_WRITE_GAUGE_FIELDS:
+        counters[key] = after[key]
+    if not 1 <= counters["retained_burst_target"] <= 64:
+        raise ValueError("invalid swapz retained burst target")
     if sum(counters[key] for key in WRITE_WAIT_BINS) != counters["physical_write_reqs"]:
         raise ValueError("inconsistent swapz lower write wait histogram")
     if counters["window_commit_nonio_wall_ns"] > counters["window_commit_wall_ns"]:
@@ -744,6 +770,17 @@ def kernel_write_delta(before, after):
             counters["engine_publish_auth_wall_ns"] !=
             counters["engine_publish_wall_ns"]):
         raise ValueError("inconsistent swapz publish attribution")
+    if sum(counters[field] for field in CLOSE_REASON_FIELDS) != counters["windows"]:
+        raise ValueError("inconsistent swapz timed close-reason accounting")
+    if sum(counters[field] for field in ONE_PAGE_CLOSE_FIELDS) != counters["one_page_windows"]:
+        raise ValueError("inconsistent swapz timed one-page accounting")
+    if sum(counters[field] for field in DEADLINE_CONTEXT_FIELDS) != counters["close_deadline"]:
+        raise ValueError("inconsistent swapz timed deadline accounting")
+    if (counters["accepted_burst_tail_flushes"] >
+            counters["accepted_burst_extensions"] or
+            counters["accepted_burst_read_caps"] >
+            counters["accepted_burst_extensions"]):
+        raise ValueError("inconsistent swapz timed burst accounting")
     samples = counters["prep_lower_write_samples"]
     if (counters["prep_lower_write_start_nonempty"] > samples or
             counters["prep_lower_write_end_nonempty"] > samples or

@@ -112,6 +112,10 @@ struct swapz_authority {
 	/* Diagnostic only: exact wall time inside final publication payload CRC32C
 	 * calls. Native builds leave this at zero; it never affects authority. */
 	unsigned long long publish_crc_wall_ns;
+	/* Exact wall time hashing immutable paused transaction snapshots.
+	 * This measures the existing full-struct CRC only; it changes no
+	 * transaction identity, protection scope or publication semantics. */
+	unsigned long long batch_snapshot_crc_wall_ns;
 };
 
 /*

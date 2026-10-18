@@ -1543,15 +1543,17 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		close_reason == SWAPZ_CLOSE_RAW ||
 		close_reason == SWAPZ_CLOSE_READ_CONFLICT ||
 		close_reason == SWAPZ_CLOSE_READ_UNRELATED;
-	bool hard_boundary =
+	bool ordering_boundary =
 		close_reason == SWAPZ_CLOSE_FUA ||
 		close_reason == SWAPZ_CLOSE_PREFLUSH ||
 		close_reason == SWAPZ_CLOSE_DISCARD ||
-		close_reason == SWAPZ_CLOSE_DEADLINE ||
-		close_reason == SWAPZ_CLOSE_IDLE ||
-		close_reason == SWAPZ_CLOSE_QUANTUM ||
 		close_reason == SWAPZ_CLOSE_SHUTDOWN ||
 		close_reason == SWAPZ_CLOSE_OTHER;
+	bool hard_boundary =
+		ordering_boundary ||
+		close_reason == SWAPZ_CLOSE_DEADLINE ||
+		close_reason == SWAPZ_CLOSE_IDLE ||
+		close_reason == SWAPZ_CLOSE_QUANTUM;
 	bool chain_continues;
 	bool async_submitted = false;
 	int error = 0;
@@ -1563,6 +1565,16 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		error = swapz_finalize_inflight_write(ctx, true);
 		if (error && !count)
 			return error;
+	}
+	/*
+	 * Learned singleton bypass describes one uninterrupted admission stream.
+	 * Explicit ordering boundaries end that stream even when they carry no
+	 * data window, while ordinary IDLE/DEADLINE closes intentionally retain
+	 * the learned QD1 behavior.
+	 */
+	if (ordering_boundary) {
+		ctx->singleton_deadline_streak = 0;
+		ctx->singleton_fast_close = false;
 	}
 
 	/*
@@ -3578,6 +3590,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
 		       "engine_publish_wall_ns=%llu engine_publish_crc_wall_ns=%llu "
 		       "engine_publish_auth_wall_ns=%llu engine_prehashed_records=%u "
+		       "batch_snapshot_crc_wall_ns=%llu "
 		       "prep_crc_wall_ns=%llu ordered_crc_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
@@ -3710,6 +3723,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
 		       ctx->engine_publish_wall_ns, ctx->engine_publish_crc_wall_ns,
 		       engine_publish_auth_wall_ns, ctx->engine.prehashed_records,
+		       ctx->authority.batch_snapshot_crc_wall_ns,
 		       ctx->preparation_crc_wall_ns, ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,

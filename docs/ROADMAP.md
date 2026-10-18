@@ -77,6 +77,13 @@ The rejected `task_cputime_adjusted()` metric, CPU-local/bound preparation,
 dry microsecond grace experiment, freeze-then-compress design and iterator-side
 `nth_page()` folio rewrite remain rejected.
 
+The next candidate is intentionally narrower than ID 39: it first removes
+duplicate payload-block reads within one immutable 4-block extent, resets learned
+singleton policy only at explicit ordering barriers, moves scheduling telemetry
+to the exact measured interval, and measures the existing full-transaction
+snapshot CRC. None of those changes adds parallel READ ownership, changes
+PACK_READY closure policy, or shortens the transaction hash.
+
 ## Current bottleneck ranking
 
 These wall counters overlap and must not be added as if they formed one serial
@@ -126,7 +133,7 @@ changes.
 | 9 | Precompute payload CRC during preparation | **1** | Qualified; keep. |
 | 10 | Validate immutable metadata once during finish | **1** | Qualified; keep. |
 | 11 | Split final-image publish CRC from authority/liveness | **1 completed measurement** | Reconfirmed: final CRC is 12.0/22.1 ms slow and 8.8/17.2 ms fast. It is a major publish subphase, not the global bottleneck. |
-| 12 | Split stage/pause hash/hole-clear/control residual | **4** | Residual is ~9.3 ms slow / 6.8 ms fast. Retain as bounded attribution work, behind READ concurrency/LZ4 evidence on the faster model. |
+| 12 | Split stage/pause hash/hole-clear/control residual | **4 instrumentation implemented pending owner evidence** | The unchanged full-struct pause/resume transaction CRC now has its own wall counter. Use the next owner run to determine whether snapshot hashing materially explains the ~9.3/6.8 ms residual before considering active-prefix hashing. |
 | 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
 | 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. |
 | 15 | >=5 counterbalanced pairs for mixed/QD points | **6** | Now the decisive gate: mixed still has two pairs/mode and write-only one pair/QD. Fast QD8 +22.6% async/sync and fast mixed +3.8% must not be promoted without confidence intervals. |
@@ -153,12 +160,13 @@ changes.
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
 | 37 | K=1 ping-pong WRITE pipeline | **4 conditional** | Owner evidence collected after the READ-fence fix. Serial mixed is 7.05 vs 7.08 sync (-0.4%); fast mixed is +3.8% but NO_SIGNIFICANT_ASYNC_GAIN. Fast write-only QD8 remains +22.6% vs sync but far below raw. Keep opt-in pending >=5 matched pairs. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Stronger hold. Serial hwq=1 has no parallel service slot. Fast hwq=64 has capacity, but K=1 run occupancy is only ~0.09 and preparation backlog is shallow; there is no sustained ready-run pressure for K>1 yet. |
-| 39 | Latency-first READ busy-time queue | **4 high priority** | New queue telemetry isolates a real fast-device opportunity: raw READ peak is ~4 while swapz remains peak 1 and packed-read verdict is NOT_FASTER. Preserve the serial model, where packed reads now qualify FASTER. Requires private scratch, same-page fences and idle bypass. |
+| 39 | Latency-first READ busy-time queue | **4 high priority, after duplicate-I/O baseline** | Raw READ peak is ~4 while swapz remains peak 1, but first qualify the new 4-block residency cache so parallel READ service is not used to hide avoidable duplicate lower reads. Private scratch, same-page fences and idle bypass remain mandatory for the later concurrency prototype. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
 | 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **4 evidence/coverage** | bio_for_each_segment() already page-normalizes multi-page bvecs; current copies are page-local and page-aligned 4KiB folio slices can direct-map. Do not add nth_page() to iterator bvecs. Add explicit THP/folio coverage; larger base PAGE_SIZE/native larger records remain architecture work. |
 | 44 | Exact per-segment authoritative mapping counts / GC map-scan elimination | **1** | Owner-qualified with 20 live victims/rotations and byte-exact 4096-page verification. Keep O(1) dead-segment/post-evacuation checks; victim scoring/evacuation reverse indexing remains a separate future optimization. |
+| 45 | 4-block extent payload block-residency cache | **4 implemented pending owner evidence** | Production now remembers exactly which 4KiB blocks of the current immutable extent were successfully fetched, so sibling reads can avoid duplicate payload I/O. Native C proves a seven-record 16KiB extent reads each physical block at most once and mutation invalidation clears residency. Owner packed-read lower-I/O/latency evidence is still required. |
 
 ## What the pinned queue experiment establishes
 
@@ -206,25 +214,30 @@ before any on-disk-format change.
 
 ## Immediate work queue
 
-1. Run >=5 counterbalanced matched pairs for fast mixed QD32 and write-only QD8
-   before promoting or deleting K=1. Preserve the pinned queue geometry and
+1. Owner-qualify the timed-boundary hygiene, explicit ordering-barrier singleton
+   reset and 4-block payload-residency cache. Use only timed
+   `kernel_write_path` window/preparation counters when interpreting the run.
+2. Compare packed-read lower READ bytes/requests and p99 against the
+   `5036137...` baseline. If duplicate lower reads fall without regressions,
+   retain ID 45 before introducing parallel READ ownership.
+3. Use `batch_snapshot_crc_wall_ns` to split the remaining commit residual.
+   Do not change the full-transaction hash scope unless the measured cost is
+   material.
+4. With clean timed window counters, determine whether one-page PACK_READY
+   closes occur materially inside measured mixed QD32 before changing
+   `swapz_retained_pack_close_ready()`.
+5. Run >=5 counterbalanced matched pairs for fast mixed QD32 and write-only QD8
+   before promoting or deleting K=1. Preserve pinned queue geometry and
    lower-depth telemetry.
-2. Prototype latency-first parallel READ service for the fast model with
-   private scratch, same-page dependency checks and immediate idle-device
-   dispatch. The serial-depth path must not regress.
-3. Add trustworthy kernel-worker on-CPU attribution, then use it to explain why
-   fast write-only QD4/QD8 trails raw despite low K=1/lower-WRITE occupancy.
-4. Keep K=1 WRITE ping-pong opt-in. Do not add K=2/4/8 until repeated evidence
-   shows sustained ready-run pressure or K=1 slot saturation.
-5. Split the remaining commit residual (~9.3 ms slow / ~6.8 ms fast); keep the
-   final-image CRC.
-6. Revisit N=2 unbound preparation only if repeated fast-QD8 evidence and
-   on-CPU attribution show LZ4 preparation is the limiting service stage.
-7. Run the bounded owned-RAM dead-segment DISCARD/TRIM experiment.
-8. Design and qualify huge/compound-page input coverage while preserving the
-   current 4KiB logical/on-disk unit; do not add iterator-side `nth_page()`.
-9. Add heavy-CPU/low-RAM qualification before CPU-topology or multi-worker
-   promotion.
+6. Prototype latency-first parallel READ service only after the duplicate-I/O
+   baseline is qualified; require private scratch, same-page dependency checks
+   and immediate idle-device dispatch.
+7. Add trustworthy kernel-worker on-CPU attribution before multi-worker or
+   CPU-topology changes.
+8. Keep K=1 WRITE ping-pong opt-in and do not add K=2/4/8 until repeated
+   evidence shows sustained ready-run pressure or K=1 slot saturation.
+9. Run the bounded owned-RAM dead-segment DISCARD/TRIM experiment, then the
+   huge/compound-page coverage and heavy-CPU/low-RAM gates.
 
 ## NUMA / deployment topology
 

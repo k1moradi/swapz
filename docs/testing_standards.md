@@ -314,8 +314,10 @@ Loaded qualification must compare write-only QD8/QD32 window histograms and
 lower requests against the current deep-aggregation result (~520/~139 requests),
 and mixed QD32 `deadline_worker_empty` plus one-page deadline closes against
 the qualified accepted-wave baseline (~60.5 worker-empty closes on the faster
-model). No scheduling evidence may survive a true worker-idle or hard ordering
-boundary.
+model). Retained-chain and sampled-tail evidence may not survive a true worker-idle or
+hard ordering boundary. The learned singleton fast-close heuristic is separate:
+it intentionally survives ordinary IDLE/DEADLINE closes and is cleared by
+accepted concurrency or an explicit ordering boundary.
 
 Credited opposite-end preparation qualification requires source coverage that
 the producer selects the FIFO head only while `lower_write_active` is true.
@@ -602,3 +604,37 @@ identity accepted by the production parser. Mixed and write-only synthetic logs
 therefore carry queue mode, submission-queue count and hardware queue depth as
 well as bandwidth, completion delay and IRQ mode, and their expected
 `device_model` dictionaries compare all six fields.
+
+
+### Timed scheduling attribution
+
+The loaded replay snapshots all window-size bins, close reasons, one-page close
+reasons, deadline contexts, retained-burst counters, preparation counters and GC
+victim count immediately before the first measured wave and after the required
+measured final fsync. Reported mixed and write-only scheduling tables use only
+those interval deltas. The outer helper's full-process `SWAPZ_STATUS_BEFORE`
+and `SWAPZ_STATUS_AFTER` may include prefill, warmup and packed-read population
+and therefore are not report evidence for timed scheduling decisions.
+`retained_burst_target` is recorded as the end-of-interval gauge.
+
+Source coverage requires an explicit ordering-boundary predicate that clears the
+learned singleton deadline streak and fast-close flag before the empty-window
+return. IDLE and DEADLINE must remain outside that predicate. Native/report
+fixtures must prove that altering full-process status cannot alter the timed
+window verdict while malformed timed close/deadline accounting fails closed.
+
+### Partial 4-block read-cache qualification
+
+Direct production-C engine coverage must create a seven-record 16KiB extent and
+read its sibling records sequentially. With one immutable extent resident, each
+of its four physical blocks may be fetched from the lower device at most once,
+all logical payloads must remain byte-exact, and the complete-block mask may be
+published only after successful lower reads and normal authority/CRC validation.
+Explicit invalidation and a subsequent production write must clear payload
+residency. Device Mapper source coverage must retain the existing non-READ
+mutation fence so discard/barrier/write paths cannot reuse stale payload blocks.
+
+Transaction-snapshot CRC attribution is measurement only. Pause/resume continue
+to hash the complete `struct swapz_tx` until owner evidence shows that this
+work is material; adding the timer must not change hash length, identity checks
+or publication semantics.

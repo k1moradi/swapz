@@ -122,13 +122,15 @@ struct swapz_engine {
 	swapz_u32 read_metadata_requests;
 	swapz_u32 read_payload_requests;
 	swapz_u32 read_payload_blocks;
-	/* One-extent read cache in preallocated read_scratch. On a bounded
-	 * 8KiB fetch it may contain both blocks; otherwise only block zero.
-	 * The serialized caller invalidates before any mutation. */
+	/* One-extent read cache in preallocated read_scratch. The block mask
+	 * records exactly which 4KiB blocks were successfully fetched for the
+	 * current immutable extent. The serialized caller invalidates all
+	 * residency before any mutation. */
 	swapz_u32 read_cached_start_block;
 	swapz_u8 read_cached_extent_blocks;
 	swapz_u8 read_cache_valid;
 	swapz_u8 read_cached_full;
+	swapz_u8 read_cached_block_mask;
 	swapz_u32 read_metadata_cache_hits;
 	/*
 	 * Owner-preallocated metadata-only cache. Each slot holds exactly the

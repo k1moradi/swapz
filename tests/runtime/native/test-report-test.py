@@ -36,6 +36,71 @@ def lower_inflight(*, has_reads):
     }
 
 
+def timed_kernel_write(*, mode, target=8):
+    record = {field: 0 for field in runner.KERNEL_WRITE_FIELDS}
+    record.update({
+        "physical_write_reqs": 5,
+        "lz4_wall_ns": 20000000,
+        "write_copy_wall_ns": 3000000,
+        "write_copy_bytes": 6000000,
+        "direct_lz4_input_pages": 3000,
+        "window_sort_wall_ns": 1000000,
+        "window_commit_wall_ns": 40000000,
+        "window_commit_nonio_wall_ns": 10000000,
+        "engine_plan_wall_ns": 1000000,
+        "engine_pack_wall_ns": 2000000,
+        "engine_publish_wall_ns": 3000000,
+        "engine_publish_crc_wall_ns": 1000000,
+        "engine_publish_auth_wall_ns": 2000000,
+        "engine_prehashed_records": 2500,
+        "batch_snapshot_crc_wall_ns": 250000,
+        "prep_crc_wall_ns": 700000,
+        "ordered_crc_wall_ns": 1300000,
+        "lower_write_wall_ns": 30000000,
+        "ordered_worker_wall_ns": 52000000,
+        "prep_worker_wall_ns": 5000000,
+        "prep_wait_wall_ns": 500000,
+        "prep_lower_write_overlap_ns": 5000000,
+        "prep_lower_write_samples": 5,
+        "prep_lower_write_start_queued": 4,
+        "prep_lower_write_start_nonempty": 3,
+        "prep_lower_write_end_queued": 1,
+        "prep_lower_write_end_nonempty": 1,
+        "pipeline_async_runs": 4 if mode else 0,
+        "pipeline_active_wall_ns": 800000000 if mode else 0,
+        "write_wait_le1ms": 2,
+        "write_wait_1to4ms": 2,
+        "write_wait_gt4ms": 1,
+        "retained_burst_target": target,
+        "windows": 20,
+        "one_page_windows": 4,
+        "win1": 4,
+        "win3_4": 8,
+        "win5_8": 8,
+        "close_idle": 4,
+        "close_deadline": 2,
+        "close_pack_ready": 14,
+        "win1_idle": 1,
+        "win1_deadline": 2,
+        "win1_pack_ready": 1,
+        "deadline_before_bio": 1,
+        "deadline_worker_empty": 1,
+        "packed_early_commits": 8,
+        "single_pack_deferrals": 24,
+        "accepted_burst_extensions": 6,
+        "accepted_burst_tail_flushes": 5,
+        "accepted_burst_read_caps": 4,
+        "prep_lower_write_overlap_starts": 42 if mode else 0,
+        "prep_wave_kicks": 5 if mode else 0,
+        "prep_producer_head_claims": 2 if mode else 0,
+        "prep_producer_tail_claims": 3 if mode else 0,
+        "prep_ordered_inline": 4 if mode else 0,
+        "prep_ordered_handoffs": 3 if mode else 0,
+        "prep_ordered_waits": 1 if mode else 0,
+    })
+    return record
+
+
 def arm(candidate, *, mode, regime):
     swapz = candidate == "swapz"
     raw_mbps = 14 if regime == "sd_emulated" else 32
@@ -108,45 +173,13 @@ def arm(candidate, *, mode, regime):
         "mixed_replay_peak_rss_kb": 12000,
         "lower_inflight": lower_inflight(has_reads=True),
         "packed_read": packed,
-        "kernel_write_path": ({
-            "physical_write_reqs": 5,
-            "lz4_wall_ns": 20000000,
-            "write_copy_wall_ns": 3000000,
-            "write_copy_bytes": 6000000,
-            "direct_lz4_input_pages": 3000,
-            "window_sort_wall_ns": 1000000,
-            "window_commit_wall_ns": 40000000,
-            "window_commit_nonio_wall_ns": 10000000,
-            "engine_plan_wall_ns": 1000000,
-            "engine_pack_wall_ns": 2000000,
-            "engine_publish_wall_ns": 3000000,
-            "engine_publish_crc_wall_ns": 1000000,
-            "engine_publish_auth_wall_ns": 2000000,
-            "engine_prehashed_records": 2500,
-            "prep_crc_wall_ns": 700000,
-            "ordered_crc_wall_ns": 1300000,
-            "lower_write_wall_ns": 30000000,
-            "ordered_worker_wall_ns": 52000000,
-            "prep_worker_wall_ns": 5000000,
-            "prep_wait_wall_ns": 500000,
-            "prep_lower_write_overlap_ns": 5000000,
-            "windows": 4,
-            "prep_lower_write_samples": 5,
-            "prep_lower_write_start_queued": 4,
-            "prep_lower_write_start_nonempty": 3,
-            "prep_lower_write_end_queued": 1,
-            "prep_lower_write_end_nonempty": 1,
-            "pipeline_async_runs": 4 if mode else 0,
-            "pipeline_active_wall_ns": 800000000 if mode else 0,
-            "write_wait_le1ms": 2,
-            "write_wait_1to4ms": 2,
-            "write_wait_gt4ms": 1,
-        } if swapz else None),
+        "kernel_write_path": (timed_kernel_write(mode=mode, target=8)
+                              if swapz else None),
     }
 
 
 
-def write_arm(candidate, *, qd, regime):
+def write_arm(candidate, *, qd, regime, mode):
     swapz = candidate == "swapz"
     raw = 8.0 if regime == "sd_emulated" else 20.0
     swapz_rate = raw * (0.72 + qd / 200.0)
@@ -176,6 +209,8 @@ def write_arm(candidate, *, qd, regime):
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
         "lower_inflight": lower_inflight(has_reads=False),
+        "kernel_write_path": (timed_kernel_write(
+            mode=mode, target=max(4, qd)) if swapz else None),
     }
 
 def synthetic_log():
@@ -229,7 +264,7 @@ def synthetic_log():
                     f"close_pack_ready=14 retained_burst_target={max(4, qd)} prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1 prep_lower_write_overlap_starts=42 prep_wave_kicks=5")
                 for candidate in (("swapz", "off") if index % 2 else ("off", "swapz")):
                     out.append(json.dumps(write_arm(
-                        candidate, qd=qd, regime=regime)))
+                        candidate, qd=qd, regime=regime, mode=mode)))
                 out.append(
                     f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
                 index += 1
@@ -340,6 +375,7 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("overlap_starts", session)
         self.assertNotIn("device_identity", json.dumps(sessions))
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
+        self.assertTrue(all("kernel_status" not in session for session in sessions))
 
     def test_write_saturation_pilot_is_separate_and_not_confirmatory(self):
         sessions = runner.parse_write_saturation(synthetic_log())
@@ -354,6 +390,12 @@ class ReportContract(unittest.TestCase):
             verdict["regimes"]["sd_emulated"][4]["retained_burst_target"], 8)
         self.assertEqual(
             verdict["regimes"]["sd_emulated"][2]["window_delta"]["win3_4"], 8)
+        self.assertEqual(
+            verdict["regimes"]["sd_emulated"][2]["timed_window_delta"]
+            ["win1_pack_ready"], 1)
+        self.assertEqual(
+            verdict["regimes"]["sd_emulated"][2]["timed_window_delta"]
+            ["deadline_worker_empty"], 1)
         self.assertEqual(
             verdict["regimes"]["sd_emulated"][3]["preparation_delta"]
             ["prep_producer_tail_claims"], 3)
@@ -444,6 +486,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_ordered_worker_wall_ns"], 52000000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_wall_ns"], 5000000)
         self.assertEqual(slow["columns"]["async"]["mixed_engine_prehashed_records"], 2500)
+        self.assertEqual(
+            slow["columns"]["async"]["mixed_batch_snapshot_crc_wall_ns"], 250000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
         self.assertEqual(
             slow["columns"]["async"]["mixed_prep_lower_write_overlap_ns"], 5000000)
@@ -453,13 +497,15 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["accepted_burst_tail_flushes"], 5)
         self.assertEqual(slow["kernel_counters"]["accepted_burst_read_caps"], 4)
         self.assertEqual(slow["kernel_counters"]["windows"], 20)
-        self.assertEqual(slow["kernel_counters"]["close_pack_ready"], 18)
+        self.assertEqual(slow["kernel_counters"]["close_pack_ready"], 14)
+        self.assertEqual(slow["kernel_counters"]["close_idle"], 4)
         self.assertEqual(slow["kernel_counters"]["close_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_pack_ready"], 1)
-        self.assertEqual(slow["kernel_counters"]["win1_read_unrelated"], 1)
+        self.assertEqual(slow["kernel_counters"]["win1_idle"], 1)
         self.assertEqual(slow["kernel_counters"]["deadline_before_bio"], 1)
         self.assertEqual(slow["kernel_counters"]["deadline_worker_empty"], 1)
+        self.assertEqual(slow["kernel_gauges"]["retained_burst_target"], 8)
         self.assertEqual(data["gc"], "SEPARATE_LOADED_EVIDENCE_REQUIRED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
         self.assertIn("kernel callback wall is not CPU time", data["cpu_scope"])
@@ -493,6 +539,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("engine publish", rendered)
         self.assertIn("publish CRC", rendered)
         self.assertIn("publish authority", rendered)
+        self.assertIn("batch snapshot CRC", rendered)
         self.assertIn("engine residual", rendered)
         self.assertIn("payload CRC prep", rendered)
         self.assertIn("ordered callback", rendered)
@@ -548,29 +595,34 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_tail_flushes"] = 7
-        sessions[0]["kernel_status"]["after"]["accepted_burst_extensions"] = 6
+        sessions[0]["arms"]["swapz"]["kernel_write_path"][
+            "accepted_burst_tail_flushes"] = 7
+        sessions[0]["arms"]["swapz"]["kernel_write_path"][
+            "accepted_burst_extensions"] = 6
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["accepted_burst_read_caps"] = 7
-        sessions[0]["kernel_status"]["after"]["accepted_burst_extensions"] = 6
+        sessions[0]["arms"]["swapz"]["kernel_write_path"][
+            "accepted_burst_read_caps"] = 7
+        sessions[0]["arms"]["swapz"]["kernel_write_path"][
+            "accepted_burst_extensions"] = 6
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
     def test_close_and_deadline_accounting_fail_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["close_zero"] += 1
+        sessions[0]["arms"]["swapz"]["kernel_write_path"]["close_zero"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["win1_deadline"] += 1
+        sessions[0]["arms"]["swapz"]["kernel_write_path"]["win1_deadline"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
         sessions = runner.parse_sessions(synthetic_log())
-        sessions[0]["kernel_status"]["after"]["deadline_worker_empty"] += 1
+        sessions[0]["arms"]["swapz"]["kernel_write_path"][
+            "deadline_worker_empty"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
     def test_incomplete_mismatch_or_forged_packed_result_fails_closed(self):
