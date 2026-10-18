@@ -175,6 +175,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_write_delta(
                 before, dict(after, write_wait_gt4ms=2))
+        with self.assertRaisesRegex(ValueError, "non-I/O"):
+            module.kernel_write_delta(
+                before, dict(after, window_commit_nonio_wall_ns=80000))
         with self.assertRaisesRegex(ValueError, "incomplete"):
             module.kernel_write_delta(None, after)
         with patch.object(module.subprocess, "run",
