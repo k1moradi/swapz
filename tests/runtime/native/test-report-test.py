@@ -90,6 +90,8 @@ def arm(candidate, *, mode, regime):
             "window_sort_wall_ns": 1000000,
             "window_commit_wall_ns": 40000000,
             "lower_write_wall_ns": 30000000,
+            "prep_wait_wall_ns": 500000,
+            "prep_lower_write_overlap_ns": 5000000,
             "windows": 4,
             "write_wait_le1ms": 2,
             "write_wait_1to4ms": 2,
@@ -145,8 +147,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode}".format(**spec))
-            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 retained_burst_target=4 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0")
-            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 retained_burst_target=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1")
+            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 retained_burst_target=4 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0 prep_lower_write_overlap_starts=0 prep_wave_kicks=0")
+            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 retained_burst_target=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1 prep_lower_write_overlap_starts=42 prep_wave_kicks=5")
             for candidate in (("swapz", "off") if i % 2 else ("off", "swapz")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -170,12 +172,12 @@ def synthetic_log():
                     "SWAPZ_STATUS_BEFORE=windows=0 one_page_windows=0 "
                     "win1=0 win2=0 win3_4=0 win5_8=0 win9_16=0 "
                     "win17_64=0 close_idle=0 close_deadline=0 "
-                    "close_pack_ready=0 retained_burst_target=4 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0")
+                    "close_pack_ready=0 retained_burst_target=4 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0 prep_lower_write_overlap_starts=0 prep_wave_kicks=0")
                 out.append(
                     "SWAPZ_STATUS_AFTER=windows=20 one_page_windows=4 "
                     "win1=4 win2=0 win3_4=8 win5_8=8 win9_16=0 "
                     "win17_64=0 close_idle=4 close_deadline=2 "
-                    f"close_pack_ready=14 retained_burst_target={max(4, qd)} prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1")
+                    f"close_pack_ready=14 retained_burst_target={max(4, qd)} prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1 prep_lower_write_overlap_starts=42 prep_wave_kicks=5")
                 for candidate in (("swapz", "off") if index % 2 else ("off", "swapz")):
                     out.append(json.dumps(write_arm(
                         candidate, qd=qd, regime=regime)))
@@ -353,6 +355,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
+        self.assertEqual(
+            slow["columns"]["async"]["mixed_prep_lower_write_overlap_ns"], 5000000)
+        self.assertEqual(slow["preparation_counters"]["prep_wave_kicks"], 5)
         self.assertEqual(slow["kernel_counters"]["single_pack_deferrals"], 24)
         self.assertEqual(slow["kernel_counters"]["accepted_burst_extensions"], 6)
         self.assertEqual(slow["kernel_counters"]["accepted_burst_tail_flushes"], 5)
@@ -370,7 +376,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("kernel DM workers", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
 
-    def test_benchmark_table_places_units_in_metric_column_once(self):
+    def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
             runner.parse_write_saturation(synthetic_log()))
@@ -382,28 +388,23 @@ class ReportContract(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
         rendered = output.getvalue()
-        self.assertIn("LRU64 reused=", rendered)
-        self.assertIn("All-window close reasons per-pair mean", rendered)
-        self.assertIn("One-page close reasons per-pair mean", rendered)
-        self.assertIn("Deadline closure contexts per-pair mean", rendered)
-        self.assertIn("Loaded lifecycle:", rendered)
-        self.assertIn("retained synthetic WRITE/FLUSH faults failed closed", rendered)
-        self.assertIn("4MiB random lower READ requests", rendered)
+        self.assertIn("| mode | W", rendered)
+        self.assertIn("| sync", rendered)
+        self.assertIn("Async pipeline", rendered)
+        self.assertIn("wave kicks", rendered)
+        self.assertIn("scheduling", rendered)
+        self.assertIn("Verified 4MiB packed reads", rendered)
+        self.assertIn("Lifecycle", rendered)
+        self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SATURATION PILOT", rendered)
-        self.assertIn("one pair per mode/QD", rendered)
-        self.assertIn("QD4 sync windows:", rendered)
-        self.assertIn("close(pack/deadline/idle)=", rendered)
-        lines = rendered.splitlines()
-        cases = (
-            ("Useful WRITE throughput (MB/s)", "MB/s"),
-            ("Mixed READ p99 (ms)", "ms"),
-            ("4MiB sequential lower READ (bytes)", "bytes"),
-            ("Replay process peak RSS (KiB)", "KiB"),
-        )
-        for metric, unit in cases:
-            with self.subTest(metric=metric):
-                line = next(item for item in lines if metric in item)
-                self.assertEqual(line.count(unit), 1)
+        self.assertIn("directional only", rendered)
+        self.assertIn("Async preparation", rendered)
+        self.assertIn("Async windows; close=P/D/I", rendered)
+        self.assertIn("Full telemetry: build/test_results.json.xz", rendered)
+        self.assertNotIn("All-window close reasons per-pair mean", rendered)
+        self.assertNotIn("Timed 4MiB", rendered)
+        self.assertNotIn("QD4 sync windows:", rendered)
+        self.assertLess(max(map(len, rendered.splitlines())), 96)
 
     def test_mixed_write_diagnostics_missing_or_inconsistent_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())
