@@ -295,13 +295,11 @@ must clear the token after the existing zero-count early-return path. The former
 `ordered_worker_busy` atomic had no reader and is dead state; source coverage
 must keep it absent.
 
-Source coverage must keep the ordered `swapz` workqueue on
-`WQ_MEM_RECLAIM | WQ_UNBOUND`, while the `swapz-lz4` preparation workqueue
-uses `WQ_MEM_RECLAIM` without `WQ_UNBOUND`. The preparation work item is
-therefore queued to the issuing CPU and remains non-reentrant; the experiment
-is accepted only if it converts synchronous lower-WRITE sleep into useful LZ4
-work without increasing ordered completion waits. FIFO ordering and sole
-publication/completion ownership remain serialized.
+Source coverage must require both the ordered `swapz` workqueue and the
+`swapz-lz4` preparation workqueue to use
+`WQ_MEM_RECLAIM | WQ_UNBOUND` with one active worker. Bound preparation is a
+rejected experiment. FIFO ordering and sole publication/completion ownership
+remain serialized.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
