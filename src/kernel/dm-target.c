@@ -1719,6 +1719,43 @@ static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
  * records. Write-only medium QD8/QD32 therefore cannot cascade into singleton
  * closes merely because an earlier PACK_READY write completed.
  */
+static void swapz_note_dry_pack_close(struct swapz_dm *ctx)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (list_empty(&ctx->incoming)) {
+		ctx->dry_pack_close_ns = ktime_get_ns();
+		ctx->dry_pack_close_events++;
+	}
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+}
+
+static void swapz_note_dry_pack_followup_locked(struct swapz_dm *ctx, u64 now_ns)
+{
+	u64 close_ns = ctx->dry_pack_close_ns;
+	u64 delta;
+
+	if (!close_ns)
+		return;
+	ctx->dry_pack_close_ns = 0;
+	if (now_ns < close_ns)
+		return;
+	delta = now_ns - close_ns;
+	ctx->dry_pack_followup_events++;
+	ctx->dry_pack_followup_sum_ns += delta;
+	if (delta > ctx->dry_pack_followup_max_ns)
+		ctx->dry_pack_followup_max_ns = delta;
+	if (delta <= 10000ULL)
+		ctx->dry_pack_followup_le10us++;
+	else if (delta <= 50000ULL)
+		ctx->dry_pack_followup_11_50us++;
+	else if (delta <= 200000ULL)
+		ctx->dry_pack_followup_51_200us++;
+	else
+		ctx->dry_pack_followup_gt200us++;
+}
+
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 {
 	bool service_proven_dry_pack =
@@ -2459,6 +2496,7 @@ static void swapz_worker(struct work_struct *work)
 				ctx->packed_early_commits++;
 				if (ctx->accepted_burst_pack_ready)
 					ctx->accepted_burst_tail_flushes++;
+				swapz_note_dry_pack_close(ctx);
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
@@ -2656,6 +2694,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		init_completion(&entry->preparation_finished);
 	entry->bio = bio;
 	spin_lock_irqsave(&ctx->queue_lock, flags);
+	if (bio_op(bio) == REQ_OP_WRITE && count)
+		swapz_note_dry_pack_followup_locked(ctx, ktime_get_ns());
 	/*
 	 * Admission and shutdown share queue_lock: presuspend cannot finish
 	 * draining while a previously admitted BIO is added after the drain.
