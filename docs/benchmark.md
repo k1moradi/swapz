@@ -35,18 +35,25 @@ read tests are not cold physical swap-in.
 
 ## Current directional result
 
-At qualified source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7`:
+At qualified source `d63ab97c6cb104dc99c4792c207805e97e22d233`:
 
-- slow mixed QD32 reached 6.96/7.12 MB/s sync/async with about 763 lower WRITE requests, 1.47x logical/backing ratio and only two mean deadline closes;
-- faster mixed QD32 reached 19.53/22.57 MB/s with about 1400/1248 lower WRITE requests and 1.43-1.44x logical/backing ratio;
-- seeded-random 4MiB lower READ traffic remained about 2.60MiB on the slow model and 2.35-2.39MiB on the faster model;
-- QD1 stayed one block/request per page while reaching about 0.89-0.93x raw;
-- QD8 recovered to about 0.89x raw on the slow model and 0.61-0.77x on the faster model;
-- QD4 still used roughly 2025-2048 lower requests for 4096 medium writes and reached only about 0.60-0.70x raw.
+- slow mixed QD32 reached 7.09/7.14 MB/s sync/async with 543 async lower
+  WRITE requests and 11.95 ms async READ p99;
+- faster mixed QD32 reached 19.73/20.87 MB/s sync/async with 1078 async
+  lower WRITE requests and 2.72 ms async READ p99;
+- direct BIO-to-LZ4 input kept explicit faster-model WRITE-copy cost near
+  4.0 ms / 11.0 MiB;
+- faster-model commit non-I/O remained about 48.5 ms, split into 5.2 ms
+  planner, 16.5 ms pack, 18.5 ms publish and 8.4 ms residual;
+- write-only QD8 reached 19.58/27.00 MB/s sync/async (+37.9%) with 524 lower
+  requests, but this is one-pair directional evidence only;
+- mixed one-page PACK_READY closes and worker-empty deadlines rose to about
+  138.2 / 71.5, while the stronger historical `e5c1721` mixed result used
+  about 874.5 lower requests.
 
-Interpretation: read-service deadline charging and the prior QD8 regression are
-no longer the primary blockers. QD4 now isolates a likely admitted-tail/window
-chopping problem. All write-only QD figures remain exploratory one-pair pilots.
+Interpretation: direct input is a qualified CPU/memory-path win, but retained
+wave chopping and serialized pack/publish work remain open. The rejected
+per-callback task-CPU metric is not used for performance conclusions.
 
 ## Confirmation gate
 
