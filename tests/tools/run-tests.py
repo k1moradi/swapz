@@ -141,8 +141,8 @@ def parse_loaded_correctness(output):
         "gc": re.compile(
             r"PASS_LOADED_LIVE_GC=victims:(\d+) rotations:(\d+) "
             r"pages:(\d+) read_bytes:(\d+) write_bytes:(\d+) "
-            r"read_reqs:(\d+) write_reqs:(\d+) last:(\d+)->(\d+) "
-            r"verified_pages:(\d+)$"),
+            r"read_reqs:(\d+) write_reqs:(\d+) dead_reuses:(\d+) "
+            r"last:(\d+)->(\d+) verified_pages:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
             r"observed_open:(\d+) verified_pages:(\d+)$"),
@@ -167,8 +167,8 @@ def parse_loaded_correctness(output):
 
     raw_pages, zero_pages, flush_calls = found["oracle"]
     (gc_victims, gc_rotations, gc_pages, gc_read_bytes, gc_write_bytes,
-     gc_read_reqs, gc_write_reqs, gc_last_victim, gc_last_destination,
-     gc_verified_pages) = found["gc"]
+     gc_read_reqs, gc_write_reqs, gc_dead_reuses, gc_last_victim,
+     gc_last_destination, gc_verified_pages) = found["gc"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
@@ -177,7 +177,8 @@ def parse_loaded_correctness(output):
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
     if (gc_victims < 2 or gc_rotations != gc_victims or gc_pages <= 0 or
             gc_read_bytes <= 0 or gc_write_bytes <= 0 or gc_read_reqs <= 0 or
-            gc_write_reqs <= 0 or gc_last_victim == gc_last_destination or
+            gc_write_reqs <= 0 or gc_dead_reuses <= 0 or
+            gc_last_victim == gc_last_destination or
             gc_verified_pages != 4096):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded live-GC evidence is incomplete"}
@@ -202,6 +203,7 @@ def parse_loaded_correctness(output):
         "gc_write_bytes": gc_write_bytes,
         "gc_read_reqs": gc_read_reqs,
         "gc_write_reqs": gc_write_reqs,
+        "gc_dead_segment_reuses": gc_dead_reuses,
         "gc_verified_pages": gc_verified_pages,
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
@@ -1258,6 +1260,8 @@ def print_bench(result):
                  f"{loaded['gc_verified_pages']} pages verified"),
                 ("GC lower I/O",
                  f"R {loaded['gc_read_reqs']} / W {loaded['gc_write_reqs']} req"),
+                ("dead-segment reuse",
+                 f"{loaded['gc_dead_segment_reuses']} observed"),
                 ("suspend/resume",
                  f"retain {loaded['suspend_retain_ms']} ms; "
                  f"{loaded['suspend_verified_pages']} pages verified"),
