@@ -86,12 +86,13 @@ PY
 # Two representative delay-modeled RAM-backed environments provide paired
 # write/read evidence. Drop the uncapped and bandwidth-only repeats from
 # every mandatory run: old evidence remains in Git history, while neither
-# resembles actual SD/SSD latency. Keep four counterbalanced pairs per
-# environment (two sync and two async) and all owned-device safety gates.
+# resembles actual SD/SSD latency. Keep ten counterbalanced pairs per
+# environment (five sync and five async) so paired gain has a real sample
+# variance estimate, while preserving every owned-device safety gate.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
     index=0
-    for async_prepare in 0 1 1 0; do
+    for async_prepare in 0 1 1 0 0 1 1 0 0 1; do
         arguments=(--run-owned-ram-pair --profile medium
                    --retain-ms 2 --unpaced)
         case "$regime" in
@@ -147,4 +148,4 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, eight mixed pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: write-only pilot has one pair per mode/QD; confirmatory confidence is NOT established.'
+printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, twenty mixed pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: mixed now has five pairs/mode; write-only remains one pair per mode/QD.'
