@@ -798,8 +798,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 		container_of(work, struct swapz_dm, preparation_worker);
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
-	u64 cpu_start_ns = swapz_current_task_cpu_ns();
 
+	swapz_cpu_trace_enter(ctx, &ctx->preparation_cpu_trace);
 	for (;;) {
 		struct swapz_prepared_page *prepared;
 		const u8 *input;
@@ -818,16 +818,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * exhausted, leave all remaining entries claimable by inline steal.
 		 */
 		if (down_trylock(&ctx->preparation_slots)) {
-			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->preparation_cpu_trace);
 			return;
 		}
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			up(&ctx->preparation_slots);
-			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->preparation_cpu_trace);
 			return;
 		}
 		/*
@@ -860,9 +858,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
-				swapz_account_worker_cpu(
-					&ctx->preparation_worker_cpu_ns,
-					cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->preparation_cpu_trace);
 				return;
 			}
 			entry = list_last_entry(&ctx->preparation_incoming,
@@ -881,9 +877,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			complete(&entry->preparation_finished);
 			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 			    !atomic_read(&ctx->preparation_tail_credit)) {
-				swapz_account_worker_cpu(
-					&ctx->preparation_worker_cpu_ns,
-					cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->preparation_cpu_trace);
 				return;
 			}
 			continue;
@@ -904,9 +898,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
 				    !atomic_read(&ctx->preparation_tail_credit)) {
-					swapz_account_worker_cpu(
-						&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->preparation_cpu_trace);
 					return;
 				}
 				continue;
@@ -936,11 +928,22 @@ static void swapz_preparation_worker(struct work_struct *work)
 		prepared->zero = prepared->length > 0 &&
 				 prepared->length <= 64 &&
 				 swapz_page_is_zero(input);
-		if (prepared->length <= 0)
+		prepared->payload_crc_valid = false;
+		prepared->payload_crc32c = 0;
+		if (prepared->length > 0 && !prepared->zero) {
+			section_start = ktime_get_ns();
+			prepared->payload_crc32c =
+				swapz_crc32c_bytes(prepared->bytes,
+						   prepared->length);
+			ctx->preparation_crc_wall_ns += swapz_elapsed_ns(
+				section_start, ktime_get_ns());
+			prepared->payload_crc_valid = true;
+		} else if (prepared->length <= 0) {
 			swapz_memcpy_accounted(prepared->bytes, input,
 					      SWAPZ_BLOCK_BYTES,
 					      &ctx->preparation_copy_wall_ns,
 					      &ctx->preparation_copy_bytes);
+		}
 		if (mapped_input)
 			kunmap_local(mapped_input);
 		/* Release ordering: complete() wakes the sole consumer. Do not
@@ -956,8 +959,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 */
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit)) {
-			swapz_account_worker_cpu(&ctx->preparation_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->preparation_cpu_trace);
 			return;
 		}
 	}
@@ -1043,7 +1045,9 @@ static void swapz_order_window(struct swapz_dm *ctx)
 		ctx->planned[position] = (struct swapz_compressed_page) {
 			.logical_page = ctx->batch[index].logical,
 			.payload = ctx->batch_bytes + (size_t)index * SWAPZ_BLOCK_BYTES,
+			.payload_crc32c = ctx->batch[index].payload_crc32c,
 			.length = ctx->batch[index].length,
+			.payload_crc_valid = ctx->batch[index].payload_crc_valid,
 			.raw = ctx->batch[index].raw,
 		};
 	}
@@ -1834,6 +1838,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	void *mapped_input = NULL;
 	swapz_u8 i;
 	u64 section_start;
+	swapz_u32 payload_crc32c = 0;
+	bool payload_crc_valid = false;
 	bool inline_zero = false;
 	bool raw_staged_in_batch = false;
 	bool bulk_raw_eligible = ctx->engine.bulk_enabled &&
@@ -1867,6 +1873,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			return entry->preparation_error ?
 				entry->preparation_error : -EIO;
 		length = entry->prepared_page->length;
+		payload_crc32c = entry->prepared_page->payload_crc32c;
+		payload_crc_valid = entry->prepared_page->payload_crc_valid;
 		if (length > 0)
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
@@ -1897,6 +1905,16 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 						   ktime_get_ns());
 		if (length > 0 && length <= 64)
 			inline_zero = swapz_page_is_zero(input);
+		if (length > 0 && !inline_zero) {
+			section_start = ktime_get_ns();
+			payload_crc32c = swapz_crc32c_bytes(
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				(swapz_u32)length);
+			ctx->ordered_crc_wall_ns += swapz_elapsed_ns(
+				section_start, ktime_get_ns());
+			payload_crc_valid = true;
+		}
 		/*
 		 * If retained bulk RAW admission is available, copy the mapped
 		 * upper page exactly once into its durable batch slot before the
@@ -2019,7 +2037,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	ctx->batch[ctx->batch_count] = (struct swapz_pending_bio) {
 		.bio = bio,
 		.logical = logical,
+		.payload_crc32c = payload_crc32c,
 		.length = (swapz_u16)length,
+		.payload_crc_valid = payload_crc_valid,
 	};
 	ctx->batch_count++;
 	/*
@@ -2393,8 +2413,8 @@ static void swapz_worker(struct work_struct *work)
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	unsigned int remaining;
-	u64 cpu_start_ns = swapz_current_task_cpu_ns();
 
+	swapz_cpu_trace_enter(ctx, &ctx->ordered_cpu_trace);
 	for (;;) {
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
@@ -2623,8 +2643,7 @@ static void swapz_worker(struct work_struct *work)
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				swapz_flush_window(ctx);
-				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->ordered_cpu_trace);
 				return;
 			}
 			if (ctx->batch_count &&
@@ -2648,21 +2667,18 @@ static void swapz_worker(struct work_struct *work)
 					ctx->retain_timer_arm_skips++;
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->ordered_cpu_trace);
 				return;
 			}
 			if (ctx->batch_count && !ctx->accepting) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
 				swapz_flush_window(ctx);
-				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->ordered_cpu_trace);
 				return;
 			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->ordered_cpu_trace);
 			return;
 		}
 		if (ctx->accepting) {
@@ -2673,8 +2689,7 @@ static void swapz_worker(struct work_struct *work)
 			ctx->worker_requeues++;
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_cpu_trace_exit(ctx, &ctx->ordered_cpu_trace);
 			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
