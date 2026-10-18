@@ -1168,10 +1168,26 @@ def print_bench(result):
                  f"{asynchronous['mixed_window_commit_nonio_wall_ns'] / 1e6:.1f}", "-"),
                 ("engine plan",
                  f"{asynchronous['mixed_engine_plan_wall_ns'] / 1e6:.1f}", "-"),
+                ("engine stage",
+                 f"{asynchronous['mixed_engine_stage_wall_ns'] / 1e6:.1f}", "residual"),
                 ("engine pack",
                  f"{asynchronous['mixed_engine_pack_wall_ns'] / 1e6:.1f}", "-"),
+                ("hole clear",
+                 f"{asynchronous['mixed_engine_hole_clear_wall_ns'] / 1e6:.1f}", "residual"),
+                ("batch pause",
+                 f"{asynchronous['mixed_engine_batch_pause_wall_ns'] / 1e6:.1f}", "residual"),
                 ("engine publish",
                  f"{asynchronous['mixed_engine_publish_wall_ns'] / 1e6:.1f}", "-"),
+                ("batch resume",
+                 f"{asynchronous['mixed_engine_batch_resume_wall_ns'] / 1e6:.1f}", "publish"),
+                ("publish metadata",
+                 f"{asynchronous['mixed_publish_metadata_validate_wall_ns'] / 1e6:.1f}", "publish"),
+                ("publish payload",
+                 f"{asynchronous['mixed_publish_payload_verify_wall_ns'] / 1e6:.1f}", "publish"),
+                ("publish liveness",
+                 f"{asynchronous['mixed_publish_liveness_wall_ns'] / 1e6:.1f}", "publish"),
+                ("publish apply",
+                 f"{asynchronous['mixed_publish_apply_wall_ns'] / 1e6:.1f}", "publish"),
                 ("engine residual",
                  f"{max(0.0, asynchronous['mixed_window_commit_nonio_wall_ns'] - asynchronous['mixed_engine_plan_wall_ns'] - asynchronous['mixed_engine_pack_wall_ns'] - asynchronous['mixed_engine_publish_wall_ns']) / 1e6:.1f}",
                  "-"),
@@ -1253,7 +1269,7 @@ def print_bench(result):
         ("scope", "value"),
         [
             ("media", "synthetic RAM only"),
-            ("mixed statistics", "two pairs/mode; no confidence interval"),
+            ("mixed statistics", "five matched pairs/mode; conservative 95% t CI"),
             ("write-only", "one pair/QD; directional only"),
             ("CPU", "replay CPU only; kernel callback wall is not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
@@ -1262,8 +1278,8 @@ def print_bench(result):
         ])
 
     saturation = result["benchmarks"].get("write_saturation", {})
-    if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT":
-        print("\n  WRITE-ONLY SATURATION PILOT — directional only")
+    if saturation.get("overall") == "PASS_WRITE_SATURATION_MATRIX":
+        print("\n  WRITE-ONLY SATURATION — QD8 confirmatory sample; other QDs directional")
         for regime in MODEL_ORDER:
             cfg = MODEL_SPECS[regime]
             points = saturation["regimes"][regime]
@@ -1319,7 +1335,17 @@ def print_bench(result):
             print("  Async windows; close=P/D/I")
             print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
-        print("  PILOT LIMITATION: one pair per point; no confirmatory verdict.")
+        print("  QD8: five matched pairs/mode with conservative 95% paired t CI; "
+              "QD1/4/32 remain one-pair directional controls.")
+        for regime in MODEL_ORDER:
+            confidence = saturation["qd8_confidence"][regime]
+            print(f"  {regime.upper()} QD8 swapz/raw gain 95% CI — "
+                  f"sync {confidence['sync']['mean'] * 100:+.1f}% "
+                  f"[{confidence['sync']['low'] * 100:+.1f}, "
+                  f"{confidence['sync']['high'] * 100:+.1f}]%; "
+                  f"async {confidence['async']['mean'] * 100:+.1f}% "
+                  f"[{confidence['async']['low'] * 100:+.1f}, "
+                  f"{confidence['async']['high'] * 100:+.1f}]%")
     else:
         print("\n  Write-only saturation pilot: NOT QUALIFIED "
               f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")
