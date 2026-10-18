@@ -3,11 +3,27 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/ktime.h>
 #include <linux/string.h>
 #else
 #include <errno.h>
 #include <string.h>
 #endif
+
+static unsigned long long swapz_authority_now_ns(void)
+{
+#ifdef __KERNEL__
+	return ktime_get_ns();
+#else
+	return 0;
+#endif
+}
+
+static unsigned long long swapz_authority_elapsed_ns(unsigned long long start,
+						      unsigned long long end)
+{
+	return end >= start ? end - start : 0;
+}
 
 static int swapz_legal_class(swapz_u8 blocks)
 {
@@ -455,8 +471,14 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 		a->batch_segment = segment;
 		a->batch_consumed = 0;
 	}
-	a->batch_hashes[a->batch_pending] =
-		swapz_crc32c_bytes(tx, sizeof(*tx));
+	{
+		unsigned long long hash_start = swapz_authority_now_ns();
+
+		a->batch_hashes[a->batch_pending] =
+			swapz_crc32c_bytes(tx, sizeof(*tx));
+		a->batch_pause_hash_wall_ns += swapz_authority_elapsed_ns(
+			hash_start, swapz_authority_now_ns());
+	}
 	a->batch_pending++;
 	a->in_flight = 0;
 	a->active_sequence = 0;
@@ -471,9 +493,17 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
  * The caller MUST subsequently finish/abort the rearmed transaction. */
 int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 {
+	swapz_u32 tx_hash;
 	swapz_u8 i;
+	unsigned long long hash_start;
 
-	if (!a || !tx || a->in_flight || !a->batch_pending ||
+	if (!a || !tx)
+		return -ESTALE;
+	hash_start = swapz_authority_now_ns();
+	tx_hash = swapz_crc32c_bytes(tx, sizeof(*tx));
+	a->batch_resume_hash_wall_ns += swapz_authority_elapsed_ns(
+		hash_start, swapz_authority_now_ns());
+	if (a->in_flight || !a->batch_pending ||
 	    a->batch_replaying || tx->sequence != a->batch_first_sequence ||
 	    tx->start_block / SWAPZ_SEGMENT_BLOCKS != a->batch_segment ||
 	    (tx->extent_blocks != 1 && tx->extent_blocks != 2 &&
@@ -484,8 +514,7 @@ int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 	    tx->extent_blocks > a->physical_blocks - tx->start_block ||
 	    tx->start_block + tx->extent_blocks > a->next_block ||
 	    a->batch_consumed >= SWAPZ_MAX_RECORDS ||
-	    a->batch_hashes[a->batch_consumed] !=
-				swapz_crc32c_bytes(tx, sizeof(*tx)))
+	    a->batch_hashes[a->batch_consumed] != tx_hash)
 		return -ESTALE;
 	for (i = 0; i < tx->count; ++i)
 		if (tx->records[i].logical_page >= a->logical_pages ||
@@ -668,6 +697,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u8 index;
+	unsigned long long phase_start;
 	int error = 0;
 
 	if (!swapz_is_active(a, tx))
@@ -678,7 +708,10 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = io_error < 0 ? io_error : -EIO;
 		goto fail;
 	}
+	phase_start = swapz_authority_now_ns();
 	error = swapz_validate(image, bytes_total);
+	a->finish_initial_validate_wall_ns += swapz_authority_elapsed_ns(
+		phase_start, swapz_authority_now_ns());
 	if (error)
 		goto fail;
 	if (image[7] != tx->count || swapz_disk_sequence(image) != tx->sequence) {
@@ -690,6 +723,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	 * Phase 1. All metadata, payload CRC32Cs, generations and old liveness
 	 * validated. No map is mutated during this pass.
 	 */
+	phase_start = swapz_authority_now_ns();
 	for (index = 0; index < tx->count; ++index) {
 		struct swapz_decoded decoded;
 		const swapz_u8 *payload;
@@ -698,7 +732,14 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		swapz_u8 prior = 0;
 		swapz_u8 j;
 
-		error = swapz_lookup(image, bytes_total, index, &decoded, &payload);
+		{
+			unsigned long long lookup_start = swapz_authority_now_ns();
+
+			error = swapz_lookup(image, bytes_total, index,
+					   &decoded, &payload);
+			a->finish_lookup_wall_ns += swapz_authority_elapsed_ns(
+				lookup_start, swapz_authority_now_ns());
+		}
 		if (error)
 			goto fail;
 		payload_lengths[index] = decoded.payload_length;
@@ -746,12 +787,15 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		error = -EUCLEAN;
 		goto fail;
 	}
+	a->finish_phase1_wall_ns += swapz_authority_elapsed_ns(
+		phase_start, swapz_authority_now_ns());
 
 	/*
 	 * Phase 2. The single ordered worker owns ALL mapping publication.
 	 * A failed physical write or a malformed sibling leaves old authority
 	 * untouched, even when an earlier block completed successfully.
 	 */
+	phase_start = swapz_authority_now_ns();
 	a->live_records[tx->start_block] = tx->count;
 	a->extent_classes[tx->start_block] = tx->extent_blocks;
 	for (index = 0; index < tx->count; ++index) {
@@ -772,6 +816,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		};
 	}
 	swapz_forget_active(a, 1);
+	a->finish_mutation_wall_ns += swapz_authority_elapsed_ns(
+		phase_start, swapz_authority_now_ns());
 	return 0;
 fail:
 	swapz_forget_active(a, 0);
