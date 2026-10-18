@@ -99,9 +99,20 @@ def arm(candidate, *, mode, regime):
             "engine_plan_wall_ns": 1000000,
             "engine_pack_wall_ns": 2000000,
             "engine_publish_wall_ns": 3000000,
+            "engine_prehashed_records": 2500,
+            "prep_crc_wall_ns": 700000,
+            "ordered_crc_wall_ns": 1300000,
             "lower_write_wall_ns": 30000000,
-            "ordered_worker_cpu_ns": 12000000,
-            "prep_worker_cpu_ns": 4000000,
+            "ordered_worker_wall_ns": 52000000,
+            "prep_worker_wall_ns": 5000000,
+            "dry_pack_close_events": 20,
+            "dry_pack_followup_events": 15,
+            "dry_pack_followup_sum_ns": 450000,
+            "dry_pack_followup_max_ns": 80000,
+            "dry_pack_followup_le10us": 3,
+            "dry_pack_followup_11_50us": 7,
+            "dry_pack_followup_51_200us": 5,
+            "dry_pack_followup_gt200us": 0,
             "prep_wait_wall_ns": 500000,
             "prep_lower_write_overlap_ns": 5000000,
             "windows": 4,
@@ -377,8 +388,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_engine_pack_wall_ns"], 2000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_engine_publish_wall_ns"], 3000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
-        self.assertEqual(slow["columns"]["sync"]["mixed_ordered_worker_cpu_ns"], 12000000)
-        self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_cpu_ns"], 4000000)
+        self.assertEqual(slow["columns"]["sync"]["mixed_ordered_worker_wall_ns"], 52000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_wall_ns"], 5000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_engine_prehashed_records"], 2500)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
         self.assertEqual(
             slow["columns"]["async"]["mixed_prep_lower_write_overlap_ns"], 5000000)
@@ -425,8 +437,10 @@ class ReportContract(unittest.TestCase):
         self.assertIn("engine pack", rendered)
         self.assertIn("engine publish", rendered)
         self.assertIn("engine residual", rendered)
-        self.assertIn("ordered CPU", rendered)
-        self.assertIn("prep CPU", rendered)
+        self.assertIn("payload CRC prep", rendered)
+        self.assertIn("ordered callback", rendered)
+        self.assertIn("prep callback", rendered)
+        self.assertIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
