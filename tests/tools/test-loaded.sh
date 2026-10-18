@@ -86,12 +86,13 @@ PY
 # Two representative delay-modeled RAM-backed environments provide paired
 # write/read evidence. Drop the uncapped and bandwidth-only repeats from
 # every mandatory run: old evidence remains in Git history, while neither
-# resembles actual SD/SSD latency. Keep four counterbalanced pairs per
-# environment (two sync and two async) and all owned-device safety gates.
+# resembles actual SD/SSD latency. Keep five matched pairs per mode and
+# environment, counterbalancing both async mode and replay-arm order. This is
+# the minimum confirmation sample; correctness and provenance gates stay exact.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
     index=0
-    for async_prepare in 0 1 1 0; do
+    for async_prepare in 0 1 1 0 0 1 1 0 0 1; do
         arguments=(--run-owned-ram-pair --profile medium
                    --retain-ms 2 --unpaced)
         case "$regime" in
@@ -114,37 +115,43 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# Bounded write-only saturation pilot: one sync and one async same-work pair
-# at each QD/model. This validates queue-depth direction and recurring-run
-# cost only; the roadmap's >=5 counterbalanced pairs and confidence interval
-# remain required before any confirmatory performance claim.
+# Bounded write-only saturation matrix. QD8 carries the confirmatory
+# five-pair sample per mode because the prior one-pair result was materially
+# large. QD1/4/32 remain directional controls with one pair per mode.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
-    index=0
     for qd in 1 4 8 32; do
-        for async_prepare in 0 1; do
-            arguments=(--run-owned-ram-pair --profile medium
-                       --retain-ms 2 --unpaced)
-            case "$regime" in
-                sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
-                ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
-                *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
-            esac
-            arguments+=(--write-only-qd "$qd")
-            if (( async_prepare )); then
-                arguments+=(--async-prepare)
-            fi
-            arguments+=(--shared-plan "$shared_plan")
-            if (( index % 2 )); then
-                arguments+=(--swapz-first)
-            fi
-            printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
-            "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-            printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
-            (( index += 1 ))
+        repeats=1
+        (( qd == 8 )) && repeats=5
+        for (( repeat = 0; repeat < repeats; ++repeat )); do
+            for async_prepare in 0 1; do
+                arguments=(--run-owned-ram-pair --profile medium
+                           --retain-ms 2 --unpaced)
+                case "$regime" in
+                    sd_emulated) arguments+=(--lower-mbps 10 --completion-nsec 1000000) ;;
+                    ssd_emulated) arguments+=(--lower-mbps 80 --completion-nsec 150000) ;;
+                    *) echo 'BLOCKED: unsupported owned storage model' >&2; exit 2 ;;
+                esac
+                arguments+=(--write-only-qd "$qd")
+                if (( async_prepare )); then
+                    arguments+=(--async-prepare)
+                fi
+                arguments+=(--shared-plan "$shared_plan")
+                # Counterbalance arm order independently inside each mode.
+                if (( (repeat + async_prepare) % 2 )); then
+                    arguments+=(--swapz-first)
+                fi
+                printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
+                    "$qd" "$async_prepare"
+                "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+                printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
+                    "$qd" "$async_prepare"
+            done
         done
     done
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, eight mixed pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: write-only pilot has one pair per mode/QD; confirmatory confidence is NOT established.'
+printf '%s\n' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, twenty mixed pairs, and thirty-two write-only QD pairs completed.' \
+    'PERFORMANCE_EVIDENCE=QD8_AND_MIXED_HAVE_FIVE_MATCHED_PAIRS_PER_MODE: confidence interval is reported by the test runner.'
