@@ -549,7 +549,7 @@ class ReportContract(unittest.TestCase):
             original_root, original_report = runner.ROOT, runner.REPORT
             try:
                 runner.ROOT = Path(name)
-                runner.REPORT = runner.ROOT / "build/test_results.json.xz"
+                runner.REPORT = runner.ROOT / "test_results.json.xz"
                 report = {"schema": "swapz-test-results-v1", "stages": [],
                           "benchmarks": {"sessions": [], "verdicts": {}}}
                 fake = ["python3", "-c",
@@ -560,14 +560,16 @@ class ReportContract(unittest.TestCase):
                 self.assertNotIn("SECRET", output.getvalue())
                 self.assertEqual(report["stages"][0]["status"], "PASS")
                 path = runner.REPORT
+                self.assertFalse(path.exists())
+                runner.write_report(report)
                 first = lzma.open(path, "rt").read()
                 self.assertNotIn("SECRET", first)
                 report["overall"] = "FAIL"
                 runner.write_report(report)
                 second = json.loads(lzma.open(path, "rt").read())
                 self.assertEqual(second["overall"], "FAIL")
-                self.assertEqual(len(list((runner.ROOT / "build").glob("*.xz"))), 1)
-                self.assertIn("test_results.json.xz", str(path))
+                self.assertEqual(len(list(runner.ROOT.glob("*.xz"))), 1)
+                self.assertEqual(path.name, "test_results.json.xz")
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
@@ -584,7 +586,7 @@ class ReportContract(unittest.TestCase):
             original_root, original_report = runner.ROOT, runner.REPORT
             try:
                 runner.ROOT = Path(name)
-                runner.REPORT = runner.ROOT / "build/test_results.json.xz"
+                runner.REPORT = runner.ROOT / "test_results.json.xz"
                 report = {"schema": "swapz-test-results-v1", "stages": [],
                           "benchmarks": {"sessions": [], "verdicts": {}}}
                 rootless = [
@@ -711,6 +713,126 @@ class ReportContract(unittest.TestCase):
             finally:
                 evidence.chmod(0o700)
 
+
+
+
+    def test_git_only_report_sync_updates_main_and_keeps_one_report_file(self):
+        """Exercise real Git plumbing against a local bare remote."""
+        import os
+        import subprocess
+        from unittest import mock
+
+        def git(*args, cwd, check=True):
+            return subprocess.run(["git", *args], cwd=cwd, check=check,
+                                  capture_output=True, text=True, timeout=12)
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-git-", dir=ROOT / "build/tests") as name:
+            sandbox = Path(name)
+            checkout, origin = sandbox / "checkout", sandbox / "origin.git"
+            checkout.mkdir()
+            git("init", "--bare", str(origin), cwd=sandbox)
+            git("init", cwd=checkout)
+            git("checkout", "-b", "main", cwd=checkout)
+            git("config", "user.name", "test-report CI", cwd=checkout)
+            git("config", "user.email", "test@example.invalid", cwd=checkout)
+            (checkout / "source.c").write_text("int source(void){return 7;}\n")
+            (checkout / runner.GIT_RESULT).write_bytes(
+                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
+            git("commit", "-m", "Testable source", cwd=checkout)
+            source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+            git("remote", "add", "origin", str(origin), cwd=checkout)
+            git("push", "origin", "main", cwd=checkout)
+
+            old_root, old_report, old_git_result = (
+                runner.ROOT, runner.REPORT, runner.git_result)
+            runner.ROOT = checkout
+            runner.REPORT = checkout / runner.GIT_RESULT
+
+            def intercept(command, *, data=None, timeout=15, env=None):
+                if command == ["remote", "get-url", "--push", "origin"]:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=b"git@github.com:k1moradi/swapz.git",
+                        stderr=b"")
+                return old_git_result(command, data=data, timeout=timeout,
+                                      env=env)
+
+            try:
+                with mock.patch.object(runner, "git_result",
+                                       side_effect=intercept):
+                    original = {
+                        "schema": "swapz-test-results-v1",
+                        "source_sha": source_sha,
+                        "tested_commit_sha": source_sha,
+                        "overall": "BLOCKED",
+                    }
+                    runner.write_report(original)
+                    first = runner.publish(source_sha)
+                    self.assertIn("SYNCED_GIT", first)
+                    first_head = git("rev-parse", "HEAD",
+                                     cwd=checkout).stdout.strip()
+                    first_remote = git("--git-dir", str(origin), "rev-parse",
+                                       "refs/heads/main",
+                                       cwd=sandbox).stdout.strip()
+                    self.assertEqual(first_head, first_remote)
+                    self.assertNotEqual(source_sha, first_head)
+                    self.assertEqual(git("status", "--porcelain",
+                                         cwd=checkout).stdout, "")
+                    self.assertEqual(
+                        json.loads(lzma.decompress(
+                            (checkout / runner.GIT_RESULT).read_bytes())),
+                        original)
+
+                    updated = dict(original,
+                                   source_sha=first_head,
+                                   tested_commit_sha=first_head,
+                                   overall="PASS")
+                    runner.write_report(updated)
+                    second = runner.publish(first_head)
+                    self.assertIn("SYNCED_GIT", second)
+                    second_head = git("rev-parse", "HEAD",
+                                      cwd=checkout).stdout.strip()
+                    self.assertNotEqual(first_head, second_head)
+                    self.assertEqual(
+                        git("--git-dir", str(origin), "rev-parse",
+                            "refs/heads/main", cwd=sandbox).stdout.strip(),
+                        second_head)
+                    self.assertEqual(
+                        json.loads(lzma.decompress(
+                            (checkout / runner.GIT_RESULT).read_bytes())),
+                        updated)
+                    self.assertEqual(len(list(checkout.glob("*.xz"))), 1)
+
+                    (checkout / "source.c").write_text("unsaved owner change\n")
+                    blocked = dict(updated,
+                                   source_sha=second_head,
+                                   tested_commit_sha=second_head,
+                                   overall="FAIL")
+                    runner.write_report(blocked)
+                    before = git("--git-dir", str(origin), "rev-parse",
+                                 "refs/heads/main", cwd=sandbox).stdout.strip()
+                    self.assertIn("not clean", runner.publish(second_head))
+                    self.assertEqual(
+                        git("--git-dir", str(origin), "rev-parse",
+                            "refs/heads/main", cwd=sandbox).stdout.strip(),
+                        before)
+            finally:
+                runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_git_sync_declines_invalid_source(self):
+        with tempfile.TemporaryDirectory(
+                prefix="publish-", dir=ROOT / "build/tests") as name:
+            previous_root, previous_report = runner.ROOT, runner.REPORT
+            try:
+                runner.ROOT = Path(name)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
+                runner.write_report({"source_sha": "unknown",
+                                     "overall": "BLOCKED"})
+                self.assertIn("unavailable", runner.publish("unknown"))
+            finally:
+                runner.ROOT, runner.REPORT = previous_root, previous_report
 
 
 if __name__ == "__main__":

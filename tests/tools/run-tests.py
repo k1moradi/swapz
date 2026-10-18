@@ -12,7 +12,9 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT / "build/test_results.json.xz"
+GIT_RESULT = "test_results.json.xz"
+REPORT = ROOT / GIT_RESULT
+REPO = "k1moradi/swapz"
 COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
 # Labels describe SYNTHETIC profiles, never a real SD/SSD device.
@@ -396,7 +398,6 @@ def run_stage(title, command, result, *, parse_bench=False):
     if rc and "diagnostic" in record:
         print(f"        Failed during: {record['failed_phase']}", flush=True)
         print(f"        Reason: {record['diagnostic']}", flush=True)
-    write_report(result)
     return rc
 
 
@@ -1195,6 +1196,146 @@ def print_bench(result):
 
 
 
+
+def git_result(command, *, data=None, timeout=15, env=None):
+    """Run noninteractive Git plumbing without exposing remote/credential stderr."""
+    try:
+        return subprocess.run(["git", *command], input=data, cwd=ROOT,
+                              capture_output=True, check=False, timeout=timeout,
+                              env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def publish(source_sha):
+    """Publish the one canonical report as a lease-checked main commit.
+
+    Qualification runs against an unchanged checkout. Only after every stage
+    has finished do we replace test_results.json.xz, construct a report-only
+    commit whose parent is the exact tested checkout, push it nonforce, then
+    advance the local main ref/index to that same commit. No branch or PR is
+    created and no source file is staged or committed.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        return "SKIPPED_GIT_SYNC: tested source commit unavailable"
+    if REPORT != ROOT / GIT_RESULT or not REPORT.is_file():
+        return "SKIPPED_GIT_SYNC: canonical report missing"
+
+    try:
+        with lzma.open(REPORT, "rt", encoding="utf-8") as stream:
+            contents = json.load(stream)
+        if contents.get("tested_commit_sha") != source_sha or \
+                contents.get("source_sha") != source_sha:
+            return "SKIPPED_GIT_SYNC: report does not match tested Git commit"
+    except (OSError, ValueError, lzma.LZMAError):
+        return "SKIPPED_GIT_SYNC: compressed report is unreadable"
+
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    env["GIT_ASKPASS"] = "false"
+    env["SSH_ASKPASS"] = "false"
+    env["SSH_ASKPASS_REQUIRE"] = "never"
+    if not env.get("GIT_SSH_COMMAND"):
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=8"
+
+    def run(*args, data=None, timeout=15):
+        return git_result(list(args), data=data, env=env, timeout=timeout)
+
+    location = run("rev-parse", "--show-toplevel")
+    branch = run("symbolic-ref", "--quiet", "--short", "HEAD")
+    head = run("rev-parse", "HEAD")
+    if any(item is None or item.returncode for item in (location, branch, head)):
+        return "SKIPPED_GIT_SYNC: not an authenticated Git checkout"
+    if Path(os.fsdecode(location.stdout).strip()).resolve() != ROOT or \
+            branch.stdout.strip() != b"main":
+        return "SKIPPED_GIT_SYNC: only the canonical main checkout may publish"
+    if head.stdout.decode("ascii", "replace").strip() != source_sha:
+        return "SKIPPED_GIT_SYNC: checkout changed during testing"
+
+    remote = run("remote", "get-url", "--push", "origin")
+    if remote is None or remote.returncode:
+        return "SKIPPED_GIT_SYNC: Git remote origin missing"
+    url = os.fsdecode(remote.stdout).strip()
+    if not re.fullmatch(
+            r"(?:git@github[.]com:|ssh://git@github[.]com/|https://github[.]com/)"
+            r"k1moradi/swapz(?:[.]git)?", url):
+        return "SKIPPED_GIT_SYNC: origin is not k1moradi/swapz"
+
+    # The freshly written report is the only permitted working-tree change.
+    tracked = run("diff", "--quiet", "--", ".", f":(exclude){GIT_RESULT}")
+    cached = run("diff", "--cached", "--quiet")
+    report_tracked = run("ls-files", "--error-unmatch", "--", GIT_RESULT)
+    if any(item is None or item.returncode
+           for item in (tracked, cached, report_tracked)):
+        return "SKIPPED_GIT_SYNC: tracked source/index is not clean"
+
+    upstream = run("ls-remote", "--exit-code", "origin", "refs/heads/main",
+                   timeout=20)
+    if upstream is None or upstream.returncode:
+        return ("SKIPPED_GIT_SYNC: origin/main unreachable or Git credentials "
+                "are unavailable")
+    refs = upstream.stdout.decode("utf-8", "replace").strip().split()
+    if len(refs) != 2 or refs != [source_sha, "refs/heads/main"]:
+        return ("SKIPPED_GIT_SYNC: origin/main changed since testing; "
+                "pull before the next run")
+
+    blob = run("hash-object", "-w", "--no-filters", str(REPORT))
+    root_tree = run("ls-tree", "-z", source_sha)
+    if any(item is None or item.returncode for item in (blob, root_tree)):
+        return "GIT_SYNC_FAILED: could not prepare report Git objects"
+    blob_id = blob.stdout.decode("ascii", "replace").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", blob_id):
+        return "GIT_SYNC_FAILED: invalid report blob"
+
+    entries = []
+    for item in root_tree.stdout.split(b"\0"):
+        if not item:
+            continue
+        try:
+            _, name = item.split(b"\t", 1)
+        except ValueError:
+            return "GIT_SYNC_FAILED: malformed root Git tree"
+        if name != GIT_RESULT.encode("ascii"):
+            entries.append(item)
+    entries.append(f"100644 blob {blob_id}\t{GIT_RESULT}".encode())
+    entries.sort(key=lambda item: item.split(b"\t", 1)[1])
+    tree = run("mktree", "-z", data=b"\0".join(entries) + b"\0")
+    if tree is None or tree.returncode:
+        return "GIT_SYNC_FAILED: could not assemble report-only tree"
+    tree_id = tree.stdout.decode("ascii", "replace").strip()
+
+    message = (f"test: latest run for {source_sha[:12]} "
+               "[skip ci]").encode("utf-8")
+    commit = run("commit-tree", tree_id, "-p", source_sha, data=message)
+    if commit is None or commit.returncode:
+        return ("SKIPPED_GIT_SYNC: Git commit identity unavailable "
+                "(configure user.name/user.email)")
+    report_sha = commit.stdout.decode("ascii", "replace").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", report_sha):
+        return "GIT_SYNC_FAILED: invalid report commit"
+
+    push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
+    if push is None or push.returncode:
+        return ("GIT_SYNC_FAILED: nonforce report push rejected; "
+                "source checkout was not committed")
+
+    # The remote commit now exists. Advance only the local main ref with a
+    # compare-and-swap, then refresh the index. The working report already has
+    # the exact blob just pushed, so no source/worktree rewrite is needed.
+    local_ref = run("update-ref", "refs/heads/main", report_sha, source_sha)
+    if local_ref is None or local_ref.returncode:
+        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
+                f"{GIT_RESULT} (local main refresh failed)")
+    index = run("read-tree", report_sha)
+    if index is None or index.returncode:
+        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
+                f"{GIT_RESULT} (local index refresh failed)")
+
+    return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
+            f"(report {report_sha[:12]}; tested {source_sha[:12]})")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kdir", required=True)
@@ -1212,8 +1353,6 @@ def main():
                        "write_saturation": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
     }
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.unlink(missing_ok=True)
     print("swapz: full test and benchmark qualification")
     print("  Tests are sequential; independent compilation uses Make jobserver.")
     stages = [
@@ -1258,8 +1397,10 @@ def main():
     write_report(result)
     print_bench(result)
     print(f"\n  Overall qualification: {result['overall']}")
-    print(f"  Report: {REPORT.relative_to(ROOT)} (replaced on every run)")
+    print(f"  Report: {REPORT.relative_to(ROOT)} (single overwriteable artifact)")
     print(f"  Tested Git commit: {result['tested_commit_sha']}", flush=True)
+    notice = publish(result["tested_commit_sha"])
+    print(f"  Git result: {notice}", flush=True)
     return exit_code
 
 

@@ -15,7 +15,11 @@ Normal artifacts live only under `build/`:
 - `build/kernel/w2/dm-swapz.ko`: W=2 warning build.
 - `build/userspace/`: supported userspace binary.
 - `build/tests/native/`: native production-C test executables.
-- `build/test_results.json.xz`: latest official qualification report.
+
+The one generated qualification artifact outside `build/` is the root
+`test_results.json.xz`. It is intentionally overwriteable and versioned so
+the latest completed PASS/FAIL/BLOCKED result is directly readable from
+GitHub; no second report copy is generated.
 
 [`src/kernel/VERSION`](../src/kernel/VERSION) is the release-metadata source. Kbuild generates the version header; DKMS and userspace resolve the same value.
 
@@ -45,6 +49,10 @@ DKMS uses `AUTOINSTALL="no"`. Installation does not load the module, create a ma
 The standalone memory-only kernel smoke module and retired C++ model are intentionally absent. They were not shipped or part of the official qualification. Historical reproduction belongs in Git history, not a second current build path.
 
 
-The test runner never commits or pushes its generated report. This keeps the
-tested Git revision stable for the entire qualification and avoids report-only
-commits racing subsequent owner runs.
+The test runner keeps `test_results.json.xz` unchanged until all qualification
+work has stopped. It then replaces that one file and publishes a report-only,
+nonforce, lease-checked commit directly to `main`. The parent is the exact
+tested revision; publication is refused if origin/main moved or unrelated
+tracked/index state is dirty. After a successful push the local main ref/index
+is advanced to the same report commit, so the operator does not accumulate a
+dirty report file or need a separate pull solely for generated evidence.

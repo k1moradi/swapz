@@ -59,8 +59,8 @@ Reports distinguish useful logical throughput, backing WRITE throughput, lower R
 The console report is a compact operator summary. It keeps raw and synchronous
 throughput controls because they isolate compression and asynchronous scheduling
 effects, but suppresses repetitive per-control diagnostics. Detailed cache,
-window and counter evidence remains in the replace-in-place
-`build/test_results.json.xz` report.
+window and counter evidence remains in the single replace-in-place
+root `test_results.json.xz` report.
 
 The retained production counters must describe active decisions only. Closed/rejected diagnostic counters are removed from production and report schemas.
 
@@ -103,10 +103,21 @@ worker immediately, while retention-off ordinary writes retain zero-delay
 single-instance queueing.
 
 
-The canonical report is local evidence at `build/test_results.json.xz`.
-`make test` must not create commits, push Git refs, or alter the checked-out
-source revision. A report describes the exact tested checkout; publishing or
-archiving it is an explicit owner action outside qualification.
+The canonical report is the single root file `test_results.json.xz`. The
+runner keeps it unchanged while qualification is executing so loaded safety
+checks still see a clean tested tree. At the end of every completed PASS, FAIL,
+or BLOCKED run it atomically replaces that file with the sanitized stage,
+failure-phase/diagnostic, lifecycle and benchmark result for the exact
+`tested_commit_sha`.
+
+After writing the file, `make test` automatically publishes only that report
+to `main` using Git plumbing: origin/main must still equal the exact tested
+commit, the push is nonforce, no branch or PR is created, and any unrelated
+tracked/index change causes publication to be skipped. After a successful push
+the local main ref/index advances to the same report-only commit, leaving the
+checkout clean. Root-owned private session logs are implementation details and
+must not be required for ordinary failure diagnosis once the sanitized report
+has been published.
 
 
 Rootless incremental-build fixtures mirror the current `src/` and `tests/` layout; they must not recreate removed top-level `tools/` or `userspace/` directories.

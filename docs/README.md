@@ -33,6 +33,13 @@ No legacy, recall, NBD, pressure, alternate-module, or historical-model subsyste
 
 The root Make interface is exactly `make`, `make install`, `make uninstall`, and `make test`. Installation never activates swap. The module remains limited to positively owned RAM-backed `null_blk` for current loaded qualification. Physical media, active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices are not authorized.
 
+Every completed `make test` run replaces exactly one generated evidence file,
+root `test_results.json.xz`, with the latest sanitized PASS/FAIL/BLOCKED test
+and benchmark result and automatically publishes that file directly to
+`main` when the tested checkout still matches origin/main. No report branch or
+PR is created, and normal diagnosis should use that published file rather than
+requiring the owner to copy private root-owned logs.
+
 ## Current evidence
 
 Owner-loaded qualification at source `8589a010f7c70c4f1f9737e688c434e4a11c9f9c` passed all five stages, including byte-exact owned-RAM correctness, suspend/drain, retained synthetic WRITE/FLUSH fail-closed checks, two modeled QD32 mixed regimes, and the first bounded write-only QD1/4/8/32 pilot.
