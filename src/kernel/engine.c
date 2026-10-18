@@ -3,11 +3,27 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/ktime.h>
 #include <linux/string.h>
 #else
 #include <errno.h>
 #include <string.h>
 #endif
+
+static unsigned long long swapz_engine_now_ns(void)
+{
+#ifdef __KERNEL__
+	return ktime_get_ns();
+#else
+	return 0;
+#endif
+}
+
+static unsigned long long swapz_engine_elapsed_ns(unsigned long long start,
+						  unsigned long long end)
+{
+	return end >= start ? end - start : 0;
+}
 
 static int swapz_page_valid(const struct swapz_compressed_page *page)
 {
@@ -326,6 +342,7 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 {
 	struct swapz_tx *tx;
 	swapz_u8 extent_count, entry = 0, group;
+	unsigned long long phase_start;
 	int error;
 
 	if (!engine || !engine->authority || !engine->write_scratch ||
@@ -344,9 +361,12 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		return -EINVAL;
 	if (plan_read_blocks > 3U)
 		return -EINVAL;
+	phase_start = swapz_engine_now_ns();
 	error = swapz_engine_plan_bounded(pages, count, plan_read_blocks,
 					engine->plan_classes,
 					engine->plan_takes, &extent_count);
+	engine->plan_wall_ns += swapz_engine_elapsed_ns(
+		phase_start, swapz_engine_now_ns());
 	if (error)
 		return error;
 
@@ -365,20 +385,29 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 				  take, blocks, tx);
 		if (error)
 			return error;
+		phase_start = swapz_engine_now_ns();
 		error = swapz_begin(&builder, engine->write_scratch,
 				  bytes, tx->sequence);
-		if (error)
+		if (error) {
+			engine->pack_wall_ns += swapz_engine_elapsed_ns(
+				phase_start, swapz_engine_now_ns());
 			goto abort_transaction;
+		}
 		for (j = 0; j < take; ++j) {
 			const struct swapz_compressed_page *page = &pages[entry + j];
 
 			error = swapz_append(&builder, page->logical_page,
 					   tx->records[j].generation,
 					   page->payload, page->length);
-			if (error)
+			if (error) {
+				engine->pack_wall_ns += swapz_engine_elapsed_ns(
+					phase_start, swapz_engine_now_ns());
 				goto abort_transaction;
+			}
 		}
 		error = swapz_seal(&builder);
+		engine->pack_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error)
 			goto abort_transaction;
 
@@ -420,9 +449,12 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 					error = -EBADMSG;
 			}
 		}
+		phase_start = swapz_engine_now_ns();
 		error = swapz_finish(engine->authority, tx,
 				   engine->write_scratch, bytes,
 				   completed, error);
+		engine->publish_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error)
 			return error;
 		entry += take;
@@ -499,11 +531,15 @@ static int swapz_bulk_flush(struct swapz_engine *e, swapz_u32 start,
 	for (i = 0; i < count; ++i) {
 		struct swapz_tx *tx = &e->bulk_txs[i];
 		swapz_u16 offset = e->bulk_offsets[i];
+		unsigned long long publish_start = swapz_engine_now_ns();
 
 		error = swapz_batch_resume(e->authority, tx);
 		if (error) {
-			int cleanup = swapz_bulk_abort(e, count, i);
+			int cleanup;
 
+			e->publish_wall_ns += swapz_engine_elapsed_ns(
+				publish_start, swapz_engine_now_ns());
+			cleanup = swapz_bulk_abort(e, count, i);
 			return cleanup ? cleanup : error;
 		}
 		/* Same lower completion, but distinct CRC/mapping publication:
@@ -519,6 +555,8 @@ static int swapz_bulk_flush(struct swapz_engine *e, swapz_u32 start,
 					(size_t)offset * SWAPZ_BLOCK_BYTES,
 				   (swapz_u32)tx->extent_blocks * SWAPZ_BLOCK_BYTES,
 				   tx->extent_blocks, 0);
+		e->publish_wall_ns += swapz_engine_elapsed_ns(
+			publish_start, swapz_engine_now_ns());
 		if (error) {
 			int cleanup = swapz_bulk_abort(e, count, i + 1);
 
@@ -547,6 +585,7 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 	swapz_u8 entry = 0, group, staged = 0;
 	swapz_u32 run_start = 0;
 	swapz_u16 run_blocks = 0;
+	unsigned long long phase_start;
 	int error;
 
 	if (!e || !e->authority || !committed_pages || plan_read_blocks > 3U)
@@ -593,11 +632,14 @@ int swapz_engine_write_window_batched_read_cap(struct swapz_engine *e,
 	    !e->io.write_run || e->verify_after_write)
 		return -EOPNOTSUPP;
 	if (compressed_count) {
+		phase_start = swapz_engine_now_ns();
 		error = swapz_engine_plan_bounded_policy(pages, compressed_count,
 					plan_read_blocks,
 					e->plan_classes, e->plan_takes,
 					&extent_count, 1,
 					e->authority->next_block);
+		e->plan_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error)
 			return error;
 	}
@@ -688,6 +730,7 @@ retry_stage:
 				       (size_t)(offset - run_blocks) *
 				       SWAPZ_BLOCK_BYTES);
 
+			phase_start = swapz_engine_now_ns();
 			if (raw) {
 				/* A raw block must not acquire a fake SWZ3 header. */
 				memcpy(image, pages[entry].payload, SWAPZ_BLOCK_BYTES);
@@ -695,8 +738,11 @@ retry_stage:
 				error = swapz_begin(&builder, image,
 					  (swapz_u32)blocks * SWAPZ_BLOCK_BYTES,
 					  tx->sequence);
-				if (error)
+				if (error) {
+					e->pack_wall_ns += swapz_engine_elapsed_ns(
+						phase_start, swapz_engine_now_ns());
 					goto abort_current;
+				}
 				for (j = 0; j < take; ++j) {
 					const struct swapz_compressed_page *p =
 							&pages[entry + j];
@@ -704,13 +750,22 @@ retry_stage:
 					error = swapz_append(&builder, p->logical_page,
 						   tx->records[j].generation,
 						   p->payload, p->length);
-					if (error)
+					if (error) {
+						e->pack_wall_ns += swapz_engine_elapsed_ns(
+							phase_start,
+							swapz_engine_now_ns());
 						goto abort_current;
+					}
 				}
 				error = swapz_seal(&builder);
-				if (error)
+				if (error) {
+					e->pack_wall_ns += swapz_engine_elapsed_ns(
+						phase_start, swapz_engine_now_ns());
 					goto abort_current;
+				}
 			}
+			e->pack_wall_ns += swapz_engine_elapsed_ns(
+				phase_start, swapz_engine_now_ns());
 			error = swapz_batch_pause(e->authority, tx);
 			if (error)
 				goto abort_current;
