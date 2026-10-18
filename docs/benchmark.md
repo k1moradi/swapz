@@ -27,7 +27,7 @@ The write-only pilot uses QD1/4/8/32, 0% reads, finite unpaced waves, one sync a
 
 Exclude fixture generation, device provisioning, worker allocation, buffer setup and warmup from measured useful throughput. Include the measured I/O and required final drain/fsync. Lower-sector/request deltas cover the same interval.
 
-Report process CPU separately from kernel-worker CPU; do not imply one includes the other. RAM-backed 4MiB read tests are not cold physical swap-in.
+Report replay-process CPU separately from callback-active wall upper bounds; the latter are not CPU time and may include preemption. RAM-backed 4MiB read tests are not cold physical swap-in.
 
 ## Current directional result
 
@@ -507,3 +507,36 @@ and the still-owned BIO is copied once later by `swapz_raw_write()`. It also
 reports scheduler-accounted CPU time for the ordered and preparation workqueue
 callbacks using the exported cputime API. These CPU counters are diagnostics
 and overlap wall-time phases.
+
+
+### CRC, publish, dry-arrival and live-GC successor
+
+Qualified source `d63ab97c6cb104dc99c4792c207805e97e22d233` showed that the
+attempted per-callback task-cputime diagnostic is not reliable for the very
+short nonblocking preparation worker. The successor deletes that metric rather
+than optimizing from it. It reports callback-active wall upper bounds instead:
+ordered callback wall minus independently measured lower READ/WRITE and
+preparation-completion waits, and preparation callback wall with no intentional
+sleep. These remain upper bounds, not kernel CPU utilization.
+
+The successor also precomputes CRC32C over each successful nonzero foreground
+LZ4 payload while the output is still in preparation/batch memory and supplies
+that CRC to the pack builder. This targets the measured 16.5 ms faster-model
+pack phase without changing the post-I/O integrity boundary: normal
+`swapz_finish()` still validates and CRC-checks the copied final
+`bulk_scratch` image before publishing mappings.
+
+New nested diagnostics split commit work into stage, batch pause/hash, alignment
+hole clear, batch resume/hash, initial publish validation, publish phase-1
+lookup/validation, and mapping mutation. A separate PACK_READY diagnostic bins
+the time from a dry-close decision to the next accepted WRITE so request
+fragmentation can be tied to actual arrival timing before any pacing policy is
+changed.
+
+Finally, the loaded owned-RAM smoke now includes a fresh-mapping GC stressor.
+It initializes all 4096 logical pages, applies deterministic scattered overwrite
+pressure, tracks the latest generation per logical page, and verifies the whole
+16MiB image. Passing requires at least four live-victim rotations, relocation
+reads/writes, multiple victim/destination segments and a nonfailed target.
+Per-segment reuse counters provide distribution evidence; none of this is a
+physical-media endurance claim.
