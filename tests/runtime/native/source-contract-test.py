@@ -752,28 +752,43 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("e->pack_wall_ns +=", engine_write)
         self.assertIn("e->publish_wall_ns +=", engine_bulk_flush)
         self.assertIn("ctx->gc_wall_ns +=", flush)
-        self.assertIn("#include <linux/sched/cputime.h>", DM)
-        self.assertIn("task_cputime_adjusted(current", DM)
+        self.assertNotIn("#include <linux/sched/cputime.h>", DM)
+        self.assertNotIn("task_cputime_adjusted(current", DM)
         self.assertNotIn("current->se.sum_exec_runtime", DM)
         self.assertEqual(producer.count("return;"),
-                         producer.count("swapz_account_worker_cpu("))
+                         producer.count("swapz_account_worker_wall("))
         self.assertEqual(worker.count("return;"),
-                         worker.count("swapz_account_worker_cpu("))
+                         worker.count("swapz_account_worker_wall("))
         for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
                     "engine_pack_wall_ns", "engine_publish_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
-                    "ordered_worker_cpu_ns", "gc_wall_ns"):
+                    "ordered_worker_wall_ns", "gc_wall_ns",
+                    "prep_crc_wall_ns", "ordered_crc_wall_ns",
+                    "dry_pack_close_events", "dry_pack_followup_events",
+                    "dry_pack_followup_sum_ns", "dry_pack_followup_max_ns",
+                    "dry_pack_followup_le10us", "dry_pack_followup_11_50us",
+                    "dry_pack_followup_51_200us",
+                    "dry_pack_followup_gt200us"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
-        # The public status key intentionally follows the existing short
-        # "prep_" telemetry vocabulary; the internal single-writer field is
-        # named for its preparation-worker owner.
-        self.assertIn("prep_worker_cpu_ns=%llu", status)
-        self.assertIn("ctx->preparation_worker_cpu_ns", status)
+        self.assertIn("prep_worker_wall_ns=%llu", status)
+        self.assertIn("ctx->preparation_worker_wall_ns", status)
+        self.assertIn("engine_prehashed_records=%u", status)
+        self.assertIn("ctx->engine.prehashed_records", status)
         self.assertIn("swapz_engine_write_window_batched_read_cap(", flush)
+        codec = (ROOT / "src/kernel/codec.c").read_text()
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        self.assertIn("swapz_append_prehashed(", codec)
+        self.assertIn("swapz_lookup_validated(", codec)
+        self.assertIn("swapz_lookup_validated(image, bytes_total, index",
+                      authority)
+        self.assertIn("swapz_crc32c_bytes(prepared->bytes", producer)
+        self.assertIn("payload_crc32c_valid", accept)
+        self.assertIn("swapz_note_dry_pack_close(ctx)", worker)
+        self.assertIn("swapz_note_dry_pack_followup_locked", DM)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
