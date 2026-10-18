@@ -31,6 +31,18 @@ static int swapz_page_valid(const struct swapz_compressed_page *page)
 		page->length <= SWAPZ_MAX_COMPRESSED;
 }
 
+static int swapz_engine_append(struct swapz_builder *builder,
+			      const struct swapz_compressed_page *page,
+			      swapz_u32 generation)
+{
+	if (page->payload_crc_valid)
+		return swapz_append_prehashed(builder, page->logical_page,
+					   generation, page->payload,
+					   page->length, page->payload_crc32c);
+	return swapz_append(builder, page->logical_page, generation,
+			   page->payload, page->length);
+}
+
 /*
  * Check a complete logical page only after the caller's cheap LZ4 size
  * admission (<64B). A merely compressible/patterned page is NOT zero;
@@ -381,8 +393,11 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		tx = &engine->pending;
 		for (j = 0; j < take; ++j)
 			engine->logical_scratch[j] = pages[entry + j].logical_page;
+		phase_start = swapz_engine_now_ns();
 		error = swapz_stage(engine->authority, engine->logical_scratch,
 				  take, blocks, tx);
+		engine->stage_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error)
 			return error;
 		phase_start = swapz_engine_now_ns();
@@ -396,9 +411,8 @@ static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 		for (j = 0; j < take; ++j) {
 			const struct swapz_compressed_page *page = &pages[entry + j];
 
-			error = swapz_append(&builder, page->logical_page,
-					   tx->records[j].generation,
-					   page->payload, page->length);
+			error = swapz_engine_append(&builder, page,
+					      tx->records[j].generation);
 			if (error) {
 				engine->pack_wall_ns += swapz_engine_elapsed_ns(
 					phase_start, swapz_engine_now_ns());
@@ -533,7 +547,13 @@ static int swapz_bulk_flush(struct swapz_engine *e, swapz_u32 start,
 		swapz_u16 offset = e->bulk_offsets[i];
 		unsigned long long publish_start = swapz_engine_now_ns();
 
-		error = swapz_batch_resume(e->authority, tx);
+		{
+			unsigned long long resume_start = swapz_engine_now_ns();
+
+			error = swapz_batch_resume(e->authority, tx);
+			e->resume_wall_ns += swapz_engine_elapsed_ns(
+				resume_start, swapz_engine_now_ns());
+		}
 		if (error) {
 			int cleanup;
 
@@ -677,8 +697,11 @@ retry_stage:
 		tx = &e->bulk_txs[staged];
 		for (j = 0; j < take; ++j)
 			e->logical_scratch[j] = pages[entry + j].logical_page;
+		phase_start = swapz_engine_now_ns();
 		error = swapz_stage_batch(e->authority, e->logical_scratch,
 					take, blocks, tx);
+		e->stage_wall_ns += swapz_engine_elapsed_ns(
+			phase_start, swapz_engine_now_ns());
 		if (error == -EAGAIN && staged) {
 			error = swapz_bulk_flush(e, run_start, run_blocks,
 					       staged, committed_pages);
@@ -724,11 +747,16 @@ retry_stage:
 			 * become lower-media bytes, so clear exactly those holes instead
 			 * of the whole 256KiB scratch buffer for every run.
 			 */
-			if (offset > run_blocks)
+			if (offset > run_blocks) {
+				unsigned long long hole_start = swapz_engine_now_ns();
+
 				memset(e->bulk_scratch +
 				       (size_t)run_blocks * SWAPZ_BLOCK_BYTES, 0,
 				       (size_t)(offset - run_blocks) *
 				       SWAPZ_BLOCK_BYTES);
+				e->hole_clear_wall_ns += swapz_engine_elapsed_ns(
+					hole_start, swapz_engine_now_ns());
+			}
 
 			phase_start = swapz_engine_now_ns();
 			if (raw) {
@@ -747,9 +775,8 @@ retry_stage:
 					const struct swapz_compressed_page *p =
 							&pages[entry + j];
 
-					error = swapz_append(&builder, p->logical_page,
-						   tx->records[j].generation,
-						   p->payload, p->length);
+					error = swapz_engine_append(&builder, p,
+						      tx->records[j].generation);
 					if (error) {
 						e->pack_wall_ns += swapz_engine_elapsed_ns(
 							phase_start,
@@ -766,7 +793,10 @@ retry_stage:
 			}
 			e->pack_wall_ns += swapz_engine_elapsed_ns(
 				phase_start, swapz_engine_now_ns());
+			phase_start = swapz_engine_now_ns();
 			error = swapz_batch_pause(e->authority, tx);
+			e->pause_wall_ns += swapz_engine_elapsed_ns(
+				phase_start, swapz_engine_now_ns());
 			if (error)
 				goto abort_current;
 			e->bulk_offsets[staged] = offset;
