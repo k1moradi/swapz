@@ -309,8 +309,23 @@ struct swapz_dm {
 	 * oracle, NOT CPU cycles and NOT a measurement-interval delta. */
 	u64 lz4_wall_ns;
 	u64 decode_wall_ns;
+	/*
+	 * Explicit RAM-copy attribution. Producer and ordered write paths keep
+	 * separate single-writer accumulators and are summed only for status.
+	 * Bytes count successful explicit copies, not LZ4's own memory traffic.
+	 */
+	u64 preparation_copy_wall_ns;
+	u64 preparation_copy_bytes;
+	u64 ordered_write_copy_wall_ns;
+	u64 ordered_write_copy_bytes;
+	u64 read_copy_wall_ns;
+	u64 read_copy_bytes;
 	u64 window_sort_wall_ns;
 	u64 window_commit_wall_ns;
+	/* Engine commit wall time with synchronous lower-WRITE wait removed. */
+	u64 window_commit_nonio_wall_ns;
+	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
+	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
 	u64 lower_read_wall_ns;
 	u64 lower_write_wall_ns;
@@ -576,6 +591,28 @@ static int swapz_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 	return offset == SWAPZ_BLOCK_BYTES ? 0 : -EINVAL;
 }
 
+static int swapz_copy_bio_accounted(struct bio *bio, void *buffer, bool to_bio,
+				    u64 *wall_ns, u64 *bytes)
+{
+	u64 start_ns = ktime_get_ns();
+	int error = swapz_copy_bio(bio, buffer, to_bio);
+
+	*wall_ns += swapz_elapsed_ns(start_ns, ktime_get_ns());
+	if (!error)
+		*bytes += SWAPZ_BLOCK_BYTES;
+	return error;
+}
+
+static void swapz_memcpy_accounted(void *destination, const void *source,
+				   size_t bytes, u64 *wall_ns, u64 *copied_bytes)
+{
+	u64 start_ns = ktime_get_ns();
+
+	memcpy(destination, source, bytes);
+	*wall_ns += swapz_elapsed_ns(start_ns, ktime_get_ns());
+	*copied_bytes += bytes;
+}
+
 /*
  * Asynchronous compression is restricted to an independent, finite producer.
  * It neither acknowledges nor publishes any write. queue_lock transfers a
@@ -671,8 +708,10 @@ static void swapz_preparation_worker(struct work_struct *work)
 				return;
 			continue;
 		}
-		error = swapz_copy_bio(entry->bio, ctx->preparation_input_page,
-				    false);
+		error = swapz_copy_bio_accounted(entry->bio,
+				    ctx->preparation_input_page, false,
+				    &ctx->preparation_copy_wall_ns,
+				    &ctx->preparation_copy_bytes);
 		if (error) {
 			mempool_free(prepared, ctx->preparation_pool);
 			up(&ctx->preparation_slots);
@@ -707,8 +746,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 				 prepared->length <= 64 &&
 				 swapz_page_is_zero(ctx->preparation_input_page);
 		if (prepared->length <= 0)
-			memcpy(prepared->bytes, ctx->preparation_input_page,
-			       SWAPZ_BLOCK_BYTES);
+			swapz_memcpy_accounted(prepared->bytes,
+					      ctx->preparation_input_page,
+					      SWAPZ_BLOCK_BYTES,
+					      &ctx->preparation_copy_wall_ns,
+					      &ctx->preparation_copy_bytes);
 		/* Release ordering: complete() wakes the sole consumer. Do not
 		 * touch entry again after signaling: it may be bio_endio'd. */
 		entry->prepared_page = prepared;
@@ -1295,13 +1337,21 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	while (committed < count) {
 		swapz_u8 succeeded = 0;
 
+		u64 lower_write_before = ctx->lower_write_wall_ns;
+		u64 commit_elapsed;
+		u64 lower_write_elapsed;
+
 		section_start = ktime_get_ns();
 		error = swapz_engine_write_window_batched_read_cap(&ctx->engine,
 				ctx->planned + committed,
 				count - committed, &succeeded,
 				planning_read_cap);
-		ctx->window_commit_wall_ns +=
-			swapz_elapsed_ns(section_start, ktime_get_ns());
+		commit_elapsed = swapz_elapsed_ns(section_start, ktime_get_ns());
+		lower_write_elapsed = ctx->lower_write_wall_ns - lower_write_before;
+		ctx->window_commit_wall_ns += commit_elapsed;
+		if (commit_elapsed >= lower_write_elapsed)
+			ctx->window_commit_nonio_wall_ns +=
+				commit_elapsed - lower_write_elapsed;
 		committed += succeeded;
 		if (!error)
 			continue;
@@ -1414,7 +1464,9 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 	swapz_u8 completed = 0;
 	int error;
 
-	error = swapz_copy_bio(bio, ctx->input_page, false);
+	error = swapz_copy_bio_accounted(bio, ctx->input_page, false,
+					 &ctx->ordered_write_copy_wall_ns,
+					 &ctx->ordered_write_copy_bytes);
 	if (error)
 		return error;
 	error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
@@ -1424,7 +1476,9 @@ static int swapz_raw_write(struct swapz_dm *ctx, struct bio *bio, swapz_u32 logi
 		error = swapz_gc_compact_one(ctx);
 		if (error)
 			return error;
-		error = swapz_copy_bio(bio, ctx->input_page, false);
+		error = swapz_copy_bio_accounted(bio, ctx->input_page, false,
+					 &ctx->ordered_write_copy_wall_ns,
+					 &ctx->ordered_write_copy_bytes);
 		if (error)
 			return error;
 		error = swapz_stage(&ctx->authority, &logical, 1, 1, &tx);
@@ -1604,11 +1658,16 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				entry->preparation_error : -EIO;
 		length = entry->prepared_page->length;
 		if (length > 0)
-			memcpy(ctx->batch_bytes +
-			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-			       entry->prepared_page->bytes, (size_t)length);
+			swapz_memcpy_accounted(
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				entry->prepared_page->bytes, (size_t)length,
+				&ctx->ordered_write_copy_wall_ns,
+				&ctx->ordered_write_copy_bytes);
 	} else {
-		error = swapz_copy_bio(bio, ctx->input_page, false);
+		error = swapz_copy_bio_accounted(bio, ctx->input_page, false,
+					 &ctx->ordered_write_copy_wall_ns,
+					 &ctx->ordered_write_copy_bytes);
 		if (error)
 			return error;
 		section_start = ktime_get_ns();
@@ -1677,13 +1736,19 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		 * staging. Admission and FUA ordering match compressed BIOs;
 		 * CRC authority is published only after the shared lower write. */
 		if (prepared_async)
-			memcpy(ctx->batch_bytes +
-			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-			       entry->prepared_page->bytes, SWAPZ_BLOCK_BYTES);
+			swapz_memcpy_accounted(
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				entry->prepared_page->bytes, SWAPZ_BLOCK_BYTES,
+				&ctx->ordered_write_copy_wall_ns,
+				&ctx->ordered_write_copy_bytes);
 		else
-			memcpy(ctx->batch_bytes +
-			       (size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-			       ctx->input_page, SWAPZ_BLOCK_BYTES);
+			swapz_memcpy_accounted(
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				ctx->input_page, SWAPZ_BLOCK_BYTES,
+				&ctx->ordered_write_copy_wall_ns,
+				&ctx->ordered_write_copy_bytes);
 		swapz_release_prepared(bio);
 		swapz_window_admit_clock(ctx);
 		ctx->batch[ctx->batch_count++] = (struct swapz_pending_bio) {
@@ -1784,9 +1849,20 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 		if (error)
 			return error;
 	} else {
+		u64 lower_read_before = ctx->lower_read_wall_ns;
+		u64 read_engine_start = ktime_get_ns();
+		u64 read_engine_elapsed;
+		u64 lower_read_elapsed;
+
 		error = swapz_engine_read_page(&ctx->engine, logical,
 				ctx->read_compressed, SWAPZ_BLOCK_BYTES,
 				&payload_bytes);
+		read_engine_elapsed =
+			swapz_elapsed_ns(read_engine_start, ktime_get_ns());
+		lower_read_elapsed = ctx->lower_read_wall_ns - lower_read_before;
+		if (read_engine_elapsed >= lower_read_elapsed)
+			ctx->read_engine_nonio_wall_ns +=
+				read_engine_elapsed - lower_read_elapsed;
 		if (error)
 			return error;
 		section_start = ktime_get_ns();
@@ -1799,7 +1875,9 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 		if (decompressed != SWAPZ_BLOCK_BYTES)
 			return -EBADMSG;
 	}
-	error = swapz_copy_bio(bio, ctx->read_page, true);
+	error = swapz_copy_bio_accounted(bio, ctx->read_page, true,
+					 &ctx->read_copy_wall_ns,
+					 &ctx->read_copy_bytes);
 	if (!error)
 		ctx->logical_read_bytes += SWAPZ_BLOCK_BYTES;
 	return error;
@@ -2773,17 +2851,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -ENOMEM;
 			goto fail;
 		}
-		/*
-		 * Keep each preparation dispatch CPU-local to its queueing context.
-		 * In the key lower-WRITE wake, that context is the ordered worker:
-		 * once it sleeps in synchronous dm_io(), the bound worker can use the
-		 * same CPU instead of immediately competing on another CPU. Map-side
-		 * credit wakes remain local to their submitting CPU. One work_struct
-		 * plus normal workqueue non-reentrance keeps producer execution
-		 * single system-wide; WQ_MEM_RECLAIM preserves reclaim progress.
-		 */
 		ctx->preparation_workqueue = alloc_workqueue(
-					"swapz-lz4", WQ_MEM_RECLAIM, 1);
+					"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,
+					1);
 		if (!ctx->preparation_workqueue) {
 			error = -ENOMEM;
 			goto fail;
