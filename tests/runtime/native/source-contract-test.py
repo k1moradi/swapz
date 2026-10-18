@@ -118,7 +118,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(accept.index("length = LZ4_compress_fast("),
                         accept.index("ctx->lz4_attempts++"))
         self.assertLess(accept.index("ctx->lz4_size_bins[5]++"),
-                        accept.index("if (length <= 0 && ctx->engine.bulk_enabled"))
+                        accept.index("if (length <= 0 && bulk_raw_eligible)"))
         self.assertIn("lz4_attempts=%llu lz4_accepted_bytes=%llu", status)
         self.assertIn("lz4_size_3073_3568=%llu lz4_raw_fallback=%llu", status)
         self.assertIn("ctx->lz4_size_bins[5]", status)
