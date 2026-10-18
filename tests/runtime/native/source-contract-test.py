@@ -749,8 +749,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->window_commit_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_nonio_wall_ns +=", flush)
         self.assertIn("e->plan_wall_ns +=", engine_write)
+        self.assertIn("engine->stage_wall_ns +=", engine_write)
+        self.assertIn("e->stage_wall_ns +=", engine_write)
         self.assertIn("e->pack_wall_ns +=", engine_write)
+        self.assertIn("e->hole_clear_wall_ns +=", engine_write)
+        self.assertIn("e->batch_pause_wall_ns +=", engine_write)
+        self.assertIn("e->batch_resume_wall_ns +=", engine_bulk_flush)
         self.assertIn("e->publish_wall_ns +=", engine_bulk_flush)
+        self.assertIn("finish_metadata_validate_wall_ns +=", authority)
+        self.assertIn("finish_payload_verify_wall_ns +=", authority)
+        self.assertIn("finish_liveness_wall_ns +=", authority)
+        self.assertIn("finish_apply_wall_ns +=", authority)
         self.assertIn("ctx->gc_wall_ns +=", flush)
         self.assertNotIn("#include <linux/sched/cputime.h>", DM)
         self.assertNotIn("task_cputime_adjusted(current", DM)
@@ -763,7 +772,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
-                    "engine_pack_wall_ns", "engine_publish_wall_ns",
+                    "engine_stage_wall_ns", "engine_pack_wall_ns",
+                    "engine_hole_clear_wall_ns", "engine_batch_pause_wall_ns",
+                    "engine_batch_resume_wall_ns", "engine_publish_wall_ns",
+                    "publish_metadata_validate_wall_ns",
+                    "publish_payload_verify_wall_ns",
+                    "publish_liveness_wall_ns", "publish_apply_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
                     "ordered_worker_wall_ns", "gc_wall_ns",
                     "prep_crc_wall_ns", "ordered_crc_wall_ns",
