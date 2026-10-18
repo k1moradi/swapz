@@ -388,7 +388,7 @@ class ReportContract(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
         rendered = output.getvalue()
-        self.assertIn("| mode | W", rendered)
+        self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
         self.assertIn("Async pipeline", rendered)
         self.assertIn("wave kicks", rendered)
