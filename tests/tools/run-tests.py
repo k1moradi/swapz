@@ -1056,7 +1056,7 @@ def print_bench(result):
             ("media", "synthetic RAM only"),
             ("mixed statistics", "two pairs/mode; no confidence interval"),
             ("write-only", "one pair/QD; directional only"),
-            ("CPU", "replay process only; kernel workers excluded"),
+            ("CPU", "replay + ordered/prep worker task CPU; IRQ/device CPU excluded"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims not exercised"),
             ("Full telemetry", "build/test_results.json.xz"),
