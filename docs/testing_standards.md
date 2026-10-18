@@ -68,17 +68,31 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` passed all five stages and is
-the accepted directional performance baseline. It preserved byte-exact loaded
-correctness, retained suspend/drain, RAW/zero/flush behavior and synthetic
-WRITE/FLUSH fail-closed checks while retaining the large random-read lower-byte
-reduction and recovering the earlier QD8 regression. Its QD pilot remains
-one-pair exploratory evidence without confidence intervals, and live GC remains
-unexercised.
+Source `d63ab97c6cb104dc99c4792c207805e97e22d233` passed all five stages.
+Direct BIO-to-LZ4 input remained effective at roughly 4 ms / 11 MiB explicit
+WRITE-copy cost on the faster model. Faster mixed async reached 20.87 MB/s
+versus 19.73 sync with 1078 lower WRITE requests, while the one-pair write-only
+QD8 pilot reached 27.00 versus 19.58 MB/s. These remain synthetic directional
+or preliminary results; `e5c1721` retains the stronger historical mixed
+request geometry.
+
+The per-callback `task_cputime_adjusted()` experiment is rejected as a
+portable worker-CPU metric because short preparation callbacks were materially
+undercounted. Qualification therefore uses explicit phase wall timers plus
+honestly labeled whole-callback wall residency. Callback wall is not CPU time
+and must not be added to overlapping phase or lower-I/O wall counters.
 
 ## Open qualification gaps
 
-Sustained live GC, genuine device-originated/partial lower errors, long-run resource pressure, larger controlled cold-read working sets, kernel-worker CPU attribution and statistically repeated QD saturation remain open. Physical-media testing remains blocked pending separate authorization and safety review.
+The next qualification must force repeated live GC victims on the owned
+RAM-backed target and verify the complete logical image afterward. It must also
+test pack-side precomputed payload CRC, one-pass publish metadata validation,
+and dry PACK_READY-close to next-WRITE arrival timing without changing
+retention/credit policy. Genuine device-originated/partial lower errors,
+long-run resource pressure, larger controlled cold-read working sets,
+statistically repeated QD saturation, segment reuse-distribution evidence and
+physical-media behavior remain open. Physical-media testing remains blocked
+pending separate authorization and safety review.
 
 
 Source contracts should assert retained scheduling semantics rather than a
