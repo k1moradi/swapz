@@ -108,7 +108,6 @@ def arm(candidate, *, mode, regime):
             "dry_pack_close_events": 20,
             "dry_pack_followup_events": 15,
             "dry_pack_followup_sum_ns": 450000,
-            "dry_pack_followup_max_ns": 80000,
             "dry_pack_followup_le10us": 3,
             "dry_pack_followup_11_50us": 7,
             "dry_pack_followup_51_200us": 5,
