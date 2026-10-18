@@ -502,12 +502,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       read)
         payload_read = read.index("engine->io.read_blocks",
                                   read.index("if (last >= start)"))
-        self.assertLess(payload_read,
-                        read.index("cached_mask |=", payload_read))
+        residency_gate = read.index("if (observed.extent_blocks == 4)",
+                                    payload_read)
+        self.assertLess(payload_read, residency_gate)
+        self.assertLess(residency_gate,
+                        read.index("cached_mask |=", residency_gate))
         self.assertIn("engine->read_cached_block_mask = cached_mask", read)
+        self.assertIn("engine->read_cached_full = observed.extent_blocks == 4 ?",
+                      read)
         self.assertIn(
             "cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U)",
             read)
+        self.assertIn("cached_full || initial_blocks == 2", read)
         self.assertIn("if (op != REQ_OP_READ ||", process)
         self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
                       process)

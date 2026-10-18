@@ -1009,8 +1009,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->physical_read_blocks += count;
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
-		for (block = start; block < start + count; ++block)
-			cached_mask |= (swapz_u8)(1U << block);
+		if (observed.extent_blocks == 4)
+			for (block = start; block < start + count; ++block)
+				cached_mask |= (swapz_u8)(1U << block);
 	}
 	error = swapz_read_authoritative_peeked(engine->authority, logical_page,
 					      &observed, engine->read_scratch,
@@ -1025,8 +1026,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	 * and payload-CRC validation. Any error path leaves the cache invalid. */
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
-	engine->read_cached_full =
-		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
+	engine->read_cached_full = observed.extent_blocks == 4 ?
+		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U) :
+		cached_full || initial_blocks == 2;
 	engine->read_cached_block_mask = cached_mask;
 	engine->read_cache_valid = 1;
 	if (cached_metadata)
