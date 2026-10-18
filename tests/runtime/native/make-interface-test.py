@@ -280,15 +280,15 @@ class PublicMakeContract(unittest.TestCase):
                 "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
                 "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
             ]
-            specs = (("sd_emulated", 10, 1000000, 2),
-                     ("ssd_emulated", 80, 150000, 2))
-            for regime, cap, ns, irq in specs:
+            specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),
+                     ("ssd_emulated", 80, 150000, 2, 2, 1, 64))
+            for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_OWNED_RAM_REGIME={regime}")
                 for i, mode in enumerate((0, 1, 1, 0)):
                     records.extend((
                         f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                         "REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first",
-                        f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
+                        f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
                         "SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0 prep_lower_write_overlap_starts=0 prep_wave_kicks=0",
                         f"SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims={2 if mode else 0} prep_producer_tail_claims={3 if mode else 0} prep_ordered_inline={4 if mode else 0} prep_ordered_handoffs={3 if mode else 0} prep_ordered_waits={1 if mode else 0} prep_lower_write_overlap_starts={42 if mode else 0} prep_wave_kicks={5 if mode else 0}",
                         mock_arm("swapz") if i % 2 else mock_arm("off"),
@@ -296,7 +296,7 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
-            for regime, cap, ns, irq in specs:
+            for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_WRITE_SATURATION_REGIME={regime}")
                 index = 0
                 for qd in (1, 4, 8, 32):
@@ -304,7 +304,7 @@ class PublicMakeContract(unittest.TestCase):
                         records.extend((
                             f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
                             "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
-                            f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
+                            f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
                             "SWAPZ_STATUS_BEFORE=windows=0 one_page_windows=0 "
                             "win1=0 win2=0 win3_4=0 win5_8=0 win9_16=0 "
                             "win17_64=0 close_idle=0 close_deadline=0 "
@@ -437,8 +437,8 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)
         self.assertIn("tests/tools/deploy-nullblk.sh", loaded)
         self.assertIn("tests/tools/benchmark-owned-pair.sh", loaded)
-        self.assertIn("--lower-mbps 10 --completion-nsec 1000000", loaded)
-        self.assertIn("--lower-mbps 80 --completion-nsec 150000", loaded)
+        self.assertIn("--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000", loaded)
+        self.assertIn("--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000", loaded)
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("--async-prepare", loaded)
         self.assertIn("for async_prepare in 0 1 1 0", loaded)

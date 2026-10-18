@@ -558,3 +558,15 @@ the page and normalizes the iterator offset to a single-page segment. The copy
 path therefore maps vec.bv_page and uses its page-local vec.bv_offset. A
 page-aligned 4KiB folio slice can already reach the direct single-segment path;
 multi-segment slices retain the copy fallback.
+
+
+### Native Make-interface benchmark fixture fidelity
+
+The unprivileged Make-interface qualification may replace the privileged loaded
+stage with deterministic synthetic output, but that fixture must mirror every
+field that the real report parser treats as benchmark-model identity. When
+lower queue geometry is part of the model contract, fake
+`PASS_RAM_MODEL_LOWER_MBPS` records must include the exact queue mode,
+submission-queue count and hardware queue depth for each regime. A parser
+schema change must update this fixture in the same change so rootless
+qualification cannot pass evidence that a real loaded run would reject.
