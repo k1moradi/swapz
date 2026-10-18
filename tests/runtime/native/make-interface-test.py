@@ -290,7 +290,7 @@ class PublicMakeContract(unittest.TestCase):
                      ("ssd_emulated", 80, 150000, 2))
             for regime, cap, ns, irq in specs:
                 records.append(f"START_OWNED_RAM_REGIME={regime}")
-                for i, mode in enumerate((0, 1, 1, 0)):
+                for i, mode in enumerate((0, 1, 1, 0, 0, 1, 1, 0, 0, 1)):
                     records.extend((
                         f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                         "REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first",
@@ -304,37 +304,38 @@ class PublicMakeContract(unittest.TestCase):
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
             for regime, cap, ns, irq in specs:
                 records.append(f"START_WRITE_SATURATION_REGIME={regime}")
-                index = 0
                 for qd in (1, 4, 8, 32):
-                    for mode in (0, 1):
-                        records.extend((
-                            f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
-                            "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
-                            f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
-                            "SWAPZ_STATUS_BEFORE=windows=0 one_page_windows=0 "
-                            "win1=0 win2=0 win3_4=0 win5_8=0 win9_16=0 "
-                            "win17_64=0 close_idle=0 close_deadline=0 "
-                            "close_pack_ready=0 retained_burst_target=4 "
-                            "prep_producer_head_claims=0 prep_producer_tail_claims=0 "
-                            "prep_ordered_inline=0 prep_ordered_handoffs=0 "
-                            "prep_ordered_waits=0 prep_lower_write_overlap_starts=0 "
-                            "prep_wave_kicks=0",
-                            "SWAPZ_STATUS_AFTER=windows=20 one_page_windows=4 "
-                            "win1=4 win2=0 win3_4=8 win5_8=8 win9_16=0 "
-                            "win17_64=0 close_idle=4 close_deadline=2 "
-                            f"close_pack_ready=14 retained_burst_target={max(4, qd)} "
-                            f"prep_producer_head_claims={2 if mode else 0} "
-                            f"prep_producer_tail_claims={3 if mode else 0} "
-                            f"prep_ordered_inline={4 if mode else 0} "
-                            f"prep_ordered_handoffs={3 if mode else 0} "
-                            f"prep_ordered_waits={1 if mode else 0} "
-                            f"prep_lower_write_overlap_starts={42 if mode else 0} "
-                            f"prep_wave_kicks={5 if mode else 0}",
-                            mock_write_arm("swapz", qd) if index % 2 else mock_write_arm("off", qd),
-                            mock_write_arm("off", qd) if index % 2 else mock_write_arm("swapz", qd),
-                            f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
-                        ))
-                        index += 1
+                    repeats = 5 if qd == 8 else 1
+                    for repeat in range(repeats):
+                        for mode in (0, 1):
+                            swapz_first = (repeat + mode) % 2
+                            records.extend((
+                                f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
+                                "REPLAY_ORDER=swapz-first" if swapz_first else "REPLAY_ORDER=off-first",
+                                f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
+                                "SWAPZ_STATUS_BEFORE=windows=0 one_page_windows=0 "
+                                "win1=0 win2=0 win3_4=0 win5_8=0 win9_16=0 "
+                                "win17_64=0 close_idle=0 close_deadline=0 "
+                                "close_pack_ready=0 retained_burst_target=4 "
+                                "prep_producer_head_claims=0 prep_producer_tail_claims=0 "
+                                "prep_ordered_inline=0 prep_ordered_handoffs=0 "
+                                "prep_ordered_waits=0 prep_lower_write_overlap_starts=0 "
+                                "prep_wave_kicks=0",
+                                "SWAPZ_STATUS_AFTER=windows=20 one_page_windows=4 "
+                                "win1=4 win2=0 win3_4=8 win5_8=8 win9_16=0 "
+                                "win17_64=0 close_idle=4 close_deadline=2 "
+                                f"close_pack_ready=14 retained_burst_target={max(4, qd)} "
+                                f"prep_producer_head_claims={2 if mode else 0} "
+                                f"prep_producer_tail_claims={3 if mode else 0} "
+                                f"prep_ordered_inline={4 if mode else 0} "
+                                f"prep_ordered_handoffs={3 if mode else 0} "
+                                f"prep_ordered_waits={1 if mode else 0} "
+                                f"prep_lower_write_overlap_starts={42 if mode else 0} "
+                                f"prep_wave_kicks={5 if mode else 0}",
+                                mock_write_arm("swapz", qd) if swapz_first else mock_write_arm("off", qd),
+                                mock_write_arm("off", qd) if swapz_first else mock_write_arm("swapz", qd),
+                                f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
+                            ))
                 records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
