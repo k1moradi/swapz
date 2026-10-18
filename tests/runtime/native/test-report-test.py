@@ -573,6 +573,14 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
+    def test_overall_status_follows_stage_semantics_not_raw_exit_code(self):
+        self.assertEqual(runner.qualification_overall(0, [{"status": "PASS"}]),
+                         "PASS")
+        self.assertEqual(runner.qualification_overall(2, [{"status": "FAIL"}]),
+                         "FAIL")
+        self.assertEqual(runner.qualification_overall(
+            2, [{"status": "BLOCKED"}]), "BLOCKED")
+
     def test_rootless_unittest_failure_names_safe_test(self):
         phase, reason = runner.failure_context(
             "FAIL: test_fixture_schema (__main__.Contract.test_fixture_schema)\n"

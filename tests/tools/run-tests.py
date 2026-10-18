@@ -1340,6 +1340,14 @@ def publish(source_sha):
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
 
 
+def qualification_overall(exit_code, stages):
+    if not exit_code:
+        return "PASS"
+    if stages and stages[-1].get("status") == "BLOCKED":
+        return "BLOCKED"
+    return "FAIL"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--kdir", required=True)
@@ -1376,9 +1384,7 @@ def main():
         if code:
             exit_code = code
             break
-    result["overall"] = ("PASS" if not exit_code else
-                         "BLOCKED" if exit_code == 2 or
-                         result["stages"][-1]["status"] == "BLOCKED" else "FAIL")
+    result["overall"] = qualification_overall(exit_code, result["stages"])
     if not exit_code:
         benchmark = result["benchmarks"]["verdicts"]
         if benchmark.get("overall") == "PASS_BOUNDED_RAM_MATRIX" and \

@@ -235,6 +235,19 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["dry_pack_followup_events"], 3)
         self.assertEqual(delta["prep_wait_wall_ns"], 500)
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
+
+        # A close may occur just before the measurement snapshot and receive
+        # its next-WRITE follow-up just after it. Cumulative snapshots remain
+        # valid even though the interval has one follow-up and zero closes.
+        cross_after = dict(before,
+                           dry_pack_followup_events=2,
+                           dry_pack_followup_sum_ns=18000,
+                           dry_pack_followup_le10us=2)
+        cross_delta = module.kernel_write_delta(before, cross_after)
+        self.assertEqual(cross_delta["dry_pack_close_events"], 0)
+        self.assertEqual(cross_delta["dry_pack_followup_events"], 1)
+        self.assertEqual(cross_delta["dry_pack_followup_le10us"], 1)
+
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)
         with self.assertRaisesRegex(ValueError, "inconsistent"):

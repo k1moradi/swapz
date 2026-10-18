@@ -530,6 +530,19 @@ WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 
 
+def validate_dry_pack_counters(counters):
+    """Validate cumulative dry-close/follow-up telemetry at one snapshot."""
+    dry_bins = sum(counters[key] for key in
+                   ("dry_pack_followup_le10us",
+                    "dry_pack_followup_11_50us",
+                    "dry_pack_followup_51_200us",
+                    "dry_pack_followup_gt200us"))
+    if (dry_bins != counters["dry_pack_followup_events"] or
+            counters["dry_pack_followup_events"] >
+            counters["dry_pack_close_events"]):
+        raise ValueError("inconsistent cumulative swapz dry-pack followup timing")
+
+
 def kernel_write_snapshot(path, identity):
     if not identity.get("dm_uuid"):
         return None
@@ -544,6 +557,7 @@ def kernel_write_snapshot(path, identity):
         if not match:
             raise ValueError("owned swapz write telemetry missing " + field)
         counters[field] = int(match.group(1))
+    validate_dry_pack_counters(counters)
     return counters
 
 
@@ -552,6 +566,8 @@ def kernel_write_delta(before, after):
         return None
     if before is None or after is None:
         raise ValueError("incomplete swapz write telemetry")
+    validate_dry_pack_counters(before)
+    validate_dry_pack_counters(after)
     counters = {key: after[key] - before[key] for key in KERNEL_WRITE_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
@@ -564,15 +580,6 @@ def kernel_write_delta(before, after):
                            "engine_publish_wall_ns"))
     if measured_engine > counters["window_commit_nonio_wall_ns"]:
         raise ValueError("inconsistent swapz engine phase timing")
-    dry_bins = sum(counters[key] for key in
-                   ("dry_pack_followup_le10us",
-                    "dry_pack_followup_11_50us",
-                    "dry_pack_followup_51_200us",
-                    "dry_pack_followup_gt200us"))
-    if (dry_bins != counters["dry_pack_followup_events"] or
-            counters["dry_pack_followup_events"] >
-            counters["dry_pack_close_events"]):
-        raise ValueError("inconsistent swapz dry-pack followup timing")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):

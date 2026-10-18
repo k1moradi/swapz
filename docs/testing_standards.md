@@ -393,3 +393,21 @@ claim must `up()` the slot. Existing producer error paths and ordered
 prepared-page release must continue to return exactly one slot. This prevents
 tail preparation at queue depths above the 64-record bound from creating a
 FIFO/semaphore deadlock.
+
+
+### Dry PACK_READY interval attribution
+
+Dry PACK_READY close/follow-up counters are cumulative causal telemetry.
+Each complete status snapshot must have follow-up histogram bins summing to
+`dry_pack_followup_events`, and cumulative follow-ups must never exceed
+cumulative dry closes. Do not impose that causal inequality on a subtraction
+between two snapshots: a dry close may precede the measurement boundary while
+its next admitted WRITE lands inside the measured interval. Such a delta may
+therefore contain one follow-up with zero new closes while both endpoint
+snapshots remain valid. Qualification validates cumulative endpoints first and
+then reports their nonnegative deltas.
+
+Top-level qualification status follows the classified stage result, not a raw
+child exit-code convention. A stage classified FAIL remains overall FAIL even
+when its shell helper returned 2; BLOCKED is reserved for an explicit blocked
+stage marker.
