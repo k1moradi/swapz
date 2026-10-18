@@ -2959,7 +2959,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
+		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
+		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
+		       "window_commit_nonio_wall_ns=%llu "
+		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
@@ -3067,7 +3071,14 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->preparation_ordered_wait_wall_ns,
 		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
 		       ctx->decode_wall_ns,
+		       ctx->preparation_copy_wall_ns +
+			       ctx->ordered_write_copy_wall_ns,
+		       ctx->preparation_copy_bytes +
+			       ctx->ordered_write_copy_bytes,
+		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
+		       ctx->window_commit_nonio_wall_ns,
+		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
