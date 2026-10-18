@@ -564,6 +564,15 @@ def kernel_write_delta(before, after):
                            "engine_publish_wall_ns"))
     if measured_engine > counters["window_commit_nonio_wall_ns"]:
         raise ValueError("inconsistent swapz engine phase timing")
+    dry_bins = sum(counters[key] for key in
+                   ("dry_pack_followup_le10us",
+                    "dry_pack_followup_11_50us",
+                    "dry_pack_followup_51_200us",
+                    "dry_pack_followup_gt200us"))
+    if (dry_bins != counters["dry_pack_followup_events"] or
+            counters["dry_pack_followup_events"] >
+            counters["dry_pack_close_events"]):
+        raise ValueError("inconsistent swapz dry-pack followup timing")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
