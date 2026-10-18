@@ -11,6 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 DM = (ROOT / "src/kernel/dm-target.c").read_text()
+ENGINE = (ROOT / "src/kernel/engine.c").read_text()
 AUTH = (ROOT / "src/kernel/authority.c").read_text()
 MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
@@ -722,6 +723,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         read = body("swapz_read")
         flush = body("swapz_flush_window")
         status = body("swapz_status")
+        engine_write = source_body("swapz_engine_write_window_batched_read_cap",
+                                   ENGINE)
+        engine_bulk_flush = source_body("swapz_bulk_flush", ENGINE)
         self.assertIn("static inline unsigned long long swapz_elapsed_ns", policy)
         self.assertIn("end_ns >= start_ns ? end_ns - start_ns : 0", policy)
         self.assertIn("section_start = ktime_get_ns();", lower)
@@ -738,11 +742,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->window_sort_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_nonio_wall_ns +=", flush)
+        self.assertIn("e->plan_wall_ns +=", engine_write)
+        self.assertIn("e->pack_wall_ns +=", engine_write)
+        self.assertIn("e->publish_wall_ns +=", engine_bulk_flush)
         self.assertIn("ctx->gc_wall_ns +=", flush)
         for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
-                    "window_commit_nonio_wall_ns", "lower_read_wall_ns",
+                    "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
+                    "engine_pack_wall_ns", "engine_publish_wall_ns",
+                    "lower_read_wall_ns",
                     "lower_write_wall_ns", "gc_wall_ns"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
@@ -1192,6 +1201,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("kfree(ctx->preparation_lz4_workmem)", freeing)
         self.assertIn("ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns", status)
         self.assertIn("write_copy_wall_ns=%llu write_copy_bytes=%llu", status)
+        self.assertIn("direct_lz4_input_pages=%llu", status)
+        self.assertIn("static const u8 *swapz_map_single_bio_input", DM)
+        self.assertIn("swapz_map_single_bio_input(entry->bio", producer)
+        self.assertIn("swapz_map_single_bio_input(bio", accept)
+        self.assertIn("kunmap_local(mapped_input)", producer)
+        self.assertIn("kunmap_local(mapped_input)", accept)
         self.assertIn("ctx->preparation_copy_wall_ns +", status)
         self.assertIn("ctx->ordered_write_copy_wall_ns", status)
         self.assertIn("swapz_copy_bio_accounted(entry->bio", producer)
