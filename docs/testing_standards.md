@@ -570,3 +570,10 @@ lower queue geometry is part of the model contract, fake
 submission-queue count and hardware queue depth for each regime. A parser
 schema change must update this fixture in the same change so rootless
 qualification cannot pass evidence that a real loaded run would reject.
+
+
+The write-only saturation parser consumes the same exact owned-RAM device-model
+identity as the mixed benchmark parser. It must validate queue mode,
+submission-queue count and hardware queue depth in addition to bandwidth,
+completion delay and IRQ mode; a private pilot may not silently accept a
+different lower queue geometry from the mixed qualification.

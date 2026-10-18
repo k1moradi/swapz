@@ -562,13 +562,16 @@ def parse_write_saturation(output):
             current["order"] = line.partition("=")[2].strip()
         elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
             match = re.fullmatch(
-                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+)",
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
                 line)
             if match:
                 current["device_model"] = {
                     "cap_mib_s": int(match.group(1)),
                     "completion_nsec": int(match.group(2)),
                     "irqmode": int(match.group(3)),
+                    "queue_mode": int(match.group(4)),
+                    "submit_queues": int(match.group(5)),
+                    "hw_queue_depth": int(match.group(6)),
                 }
         elif current is not None and line.startswith(
                 ("SWAPZ_STATUS_BEFORE=", "SWAPZ_STATUS_AFTER=")):
