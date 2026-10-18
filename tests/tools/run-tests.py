@@ -90,7 +90,9 @@ WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
 PREPARATION_FIELDS = (
     "prep_lower_write_overlap_starts", "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
-    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
+    "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits",
+    "prep_exit_slot", "prep_exit_empty", "prep_exit_singular",
+    "prep_exit_no_credit_tail")
 SATURATION_WINDOW_FIELDS = (
     "windows", "one_page_windows", "win1", "win2", "win3_4", "win5_8",
     "win9_16", "win17_64", "close_idle", "close_deadline",
@@ -1071,6 +1073,11 @@ def print_bench(result):
                  f"{prep['prep_ordered_inline']:.1f}/"
                  f"{prep['prep_ordered_handoffs']:.1f}/"
                  f"{prep['prep_ordered_waits']:.1f}"),
+                ("prep exit S/E/1/C",
+                 f"{prep['prep_exit_slot']:.1f}/"
+                 f"{prep['prep_exit_empty']:.1f}/"
+                 f"{prep['prep_exit_singular']:.1f}/"
+                 f"{prep['prep_exit_no_credit_tail']:.1f}"),
                 ("worker-empty deadlines",
                  f"{counters['deadline_worker_empty']:.1f}"),
                 ("one-page pack/deadline",
