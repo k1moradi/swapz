@@ -104,8 +104,10 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 	return 0;
 }
 
-int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
-	       swapz_u32 generation, const void *payload, swapz_u16 length)
+static int swapz_append_crc(struct swapz_builder *builder,
+			    swapz_u32 logical_page, swapz_u32 generation,
+			    const void *payload, swapz_u16 length,
+			    swapz_u32 payload_crc32c)
 {
 	struct swapz_record record = { 0 };
 	struct swapz_record previous;
@@ -137,12 +139,28 @@ int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 	record.generation_le = swapz_le32(generation);
 	record.payload_offset_le = swapz_le16(offset);
 	record.payload_length_le = swapz_le16(length);
-	record.payload_crc32c_le = swapz_le32(swapz_crc32c_bytes(payload, length));
+	record.payload_crc32c_le = swapz_le32(payload_crc32c);
 	memcpy(builder->bytes + offset, payload, length);
 	swapz_put_record(builder->bytes, builder->count, &record);
 	builder->count++;
 	builder->payload_start = offset;
 	return 0;
+}
+
+int swapz_append_prehashed(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u32 payload_crc32c)
+{
+	return swapz_append_crc(builder, logical_page, generation, payload,
+				length, payload_crc32c);
+}
+
+int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
+	       swapz_u32 generation, const void *payload, swapz_u16 length)
+{
+	return swapz_append_crc(builder, logical_page, generation, payload,
+				length, swapz_crc32c_bytes(payload, length));
 }
 
 int swapz_seal(struct swapz_builder *builder)
@@ -268,6 +286,46 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	return 0;
 }
 
+int swapz_lookup_validated(const void *bytes, swapz_u32 bytes_total,
+			 swapz_u8 index, struct swapz_decoded *out,
+			 const swapz_u8 **payload)
+{
+	struct swapz_header header;
+	struct swapz_record record;
+	const swapz_u8 *stored;
+
+	if (!bytes || !out || !payload ||
+	    (bytes_total != SWAPZ_BLOCK_BYTES &&
+	     bytes_total != 2U * SWAPZ_BLOCK_BYTES &&
+	     bytes_total != 4U * SWAPZ_BLOCK_BYTES))
+		return -EINVAL;
+	*out = (struct swapz_decoded){ 0 };
+	*payload = NULL;
+	swapz_get_header(bytes, &header);
+	if (index >= header.record_count)
+		return -ERANGE;
+	swapz_get_record(bytes, index, &record);
+	out->logical_page = swapz_le32(record.logical_page_le);
+	out->generation = swapz_le32(record.generation_le);
+	out->payload_offset = swapz_le16(record.payload_offset_le);
+	out->payload_length = swapz_le16(record.payload_length_le);
+	out->payload_crc32c = swapz_le32(record.payload_crc32c_le);
+	if (!out->payload_length || out->payload_length > SWAPZ_MAX_COMPRESSED ||
+	    out->payload_offset >= bytes_total ||
+	    out->payload_length > bytes_total - out->payload_offset) {
+		*out = (struct swapz_decoded){ 0 };
+		return -EUCLEAN;
+	}
+	stored = (const swapz_u8 *)bytes + out->payload_offset;
+	if (swapz_crc32c_bytes(stored, out->payload_length) !=
+	    out->payload_crc32c) {
+		*out = (struct swapz_decoded){ 0 };
+		return -EBADMSG;
+	}
+	*payload = stored;
+	return 0;
+}
+
 int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	       struct swapz_decoded *out, const swapz_u8 **payload)
 {
@@ -276,15 +334,9 @@ int swapz_lookup(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	if (!out || !payload)
 		return -EINVAL;
 	*payload = NULL;
-	error = swapz_peek(bytes, bytes_total, index, out);
+	error = swapz_validate(bytes, bytes_total);
 	if (error)
 		return error;
-	if (swapz_crc32c_bytes((const swapz_u8 *)bytes + out->payload_offset,
-			     out->payload_length) != out->payload_crc32c) {
-		*out = (struct swapz_decoded){ 0 };
-		return -EBADMSG;
-	}
-	*payload = (const swapz_u8 *)bytes + out->payload_offset;
-	return 0;
+	return swapz_lookup_validated(bytes, bytes_total, index, out, payload);
 }
 
