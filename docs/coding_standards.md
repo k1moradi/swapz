@@ -373,11 +373,15 @@ rechecks list shape under the same `queue_lock` before consuming the token.
 READ/barrier execution may still grant one bounded token while it owns ordered
 service time.
 
-The ordered Device Mapper worker and preparation worker both use serialized
-`WQ_MEM_RECLAIM | WQ_UNBOUND` workqueues. The ordered worker remains
-non-reentrant and single-active, while unbound placement avoids forcing its
-copy/LZ4 work onto the submitting CPU. This changes placement, not FIFO,
-publication, completion or lower-I/O ownership.
+The ordered Device Mapper worker remains on its serialized
+`WQ_MEM_RECLAIM | WQ_UNBOUND` workqueue. The LZ4 preparation workqueue is
+CPU-local (`WQ_MEM_RECLAIM` without `WQ_UNBOUND`): `queue_work()` places
+that work on the CPU which queued it, so pending preparation can consume the
+same CPU's otherwise-idle interval when the ordered kworker sleeps in
+synchronous lower WRITE I/O instead of immediately competing on another CPU.
+The single preparation `work_struct` remains non-reentrant system-wide; this
+changes scheduling placement only, not FIFO, publication, completion or
+lower-I/O ownership.
 
 The producer reserves bounded prepared-page capacity nonblocking before taking
 `queue_lock` or claiming a BIO. Tail claiming never consumes
