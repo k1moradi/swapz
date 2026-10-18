@@ -26,8 +26,8 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
-#include <linux/sched/cputime.h>
 #include <linux/vmalloc.h>
+#include <trace/events/sched.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
 #include <linux/spinlock.h>
@@ -57,8 +57,20 @@ module_param_named(async_prepare, swapz_async_prepare, bool, 0444);
 MODULE_PARM_DESC(async_prepare,
 		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O");
 
+/*
+ * Diagnostic-only scheduler tracepoint meter. OFF by default and never
+ * enabled by the matched performance matrix: the global sched_switch probe
+ * would otherwise perturb the workload being measured.
+ */
+static bool swapz_cpu_trace;
+module_param_named(cpu_trace, swapz_cpu_trace, bool, 0444);
+MODULE_PARM_DESC(cpu_trace,
+		 "Trace scheduled-on-CPU wall slices for swapz worker callbacks");
+
 struct swapz_prepared_page {
 	int length;
+	swapz_u32 payload_crc32c;
+	bool payload_crc_valid;
 	bool zero;
 	u8 bytes[SWAPZ_BLOCK_BYTES];
 };
@@ -81,6 +93,14 @@ struct swapz_bio_ref {
 };
 
 /* The worker attributes exactly one primary reason to each real window. */
+struct swapz_worker_cpu_trace {
+	struct task_struct *task;
+	u64 start_ns;
+	u64 oncpu_ns;
+	bool active;
+	bool running;
+};
+
 enum swapz_window_close_reason {
 	SWAPZ_CLOSE_UNKNOWN,
 	SWAPZ_CLOSE_FULL,
@@ -177,6 +197,8 @@ struct swapz_dm {
 	swapz_u16 *gc_live_counts; /* count for ties/control comparison */
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
+	swapz_u32 *gc_victim_hits;
+	swapz_u32 *gc_destination_hits;
 	swapz_u32 segment_count;
 	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
 	u64 gc_selected_io_cost;
@@ -185,6 +207,10 @@ struct swapz_dm {
 	u64 gc_selected_live_records;
 	u64 gc_victims;
 	u64 gc_role_rotations;
+	u64 gc_victim_unique;
+	u64 gc_destination_unique;
+	swapz_u32 gc_victim_max_hits;
+	swapz_u32 gc_destination_max_hits;
 	swapz_u32 last_gc_victim;
 	swapz_u32 last_gc_destination;
 	u64 gc_pages;
@@ -330,19 +356,26 @@ struct swapz_dm {
 	u64 engine_plan_wall_ns;
 	u64 engine_pack_wall_ns;
 	u64 engine_publish_wall_ns;
+	u64 engine_stage_wall_ns;
+	u64 engine_pause_wall_ns;
+	u64 engine_resume_wall_ns;
+	u64 engine_hole_clear_wall_ns;
+	u64 preparation_crc_wall_ns;
+	u64 ordered_crc_wall_ns;
 	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
 	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
 	u64 lower_read_wall_ns;
 	u64 lower_write_wall_ns;
 	/*
-	 * Scheduler-accounted CPU time for the two kernel workqueue callbacks.
-	 * This is task CPU accounting, not wall time; sleep in dm_io() or
-	 * completion waits is therefore excluded. Each field has one callback
-	 * writer because both workqueues are max_active=1.
+	 * Optional sched_switch accounting. Values are scheduled-on-CPU wall
+	 * slices for the worker callback task and may include interrupt time.
+	 * They are diagnostics only and are never sampled by the performance arm.
 	 */
-	u64 ordered_worker_cpu_ns;
-	u64 preparation_worker_cpu_ns;
+	raw_spinlock_t cpu_trace_lock;
+	struct swapz_worker_cpu_trace ordered_cpu_trace;
+	struct swapz_worker_cpu_trace preparation_cpu_trace;
+	bool cpu_trace_registered;
 	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
 	 * nested in lower_write_wall_ns, not hardware command latency. */
 	u64 write_wait_le_1ms;
@@ -353,24 +386,101 @@ struct swapz_dm {
 	u64 discard_pages;
 	u64 windows;
 	u64 reordered_records;
+	/* Time from a worker-observed dry PACK_READY decision to the next
+	 * retained plain WRITE admission. queue_lock serializes the marker. */
+	u64 dry_pack_probe_ns;
+	u64 dry_pack_gap_samples;
+	u64 dry_pack_gap_le50us;
+	u64 dry_pack_gap_51_100us;
+	u64 dry_pack_gap_101_500us;
+	u64 dry_pack_gap_gt500us;
+	u64 dry_pack_gap_sum_ns;
+	u64 dry_pack_gap_max_ns;
 	u64 io_failures;
 };
 
-static u64 swapz_current_task_cpu_ns(void)
-{
-	u64 user_ns;
-	u64 system_ns;
 
-	task_cputime_adjusted(current, &user_ns, &system_ns);
-	return user_ns + system_ns;
+static void swapz_cpu_trace_enter(struct swapz_dm *ctx,
+				  struct swapz_worker_cpu_trace *trace)
+{
+	unsigned long flags;
+
+	if (!ctx->cpu_trace_registered)
+		return;
+	raw_spin_lock_irqsave(&ctx->cpu_trace_lock, flags);
+	trace->task = current;
+	trace->start_ns = ktime_get_mono_fast_ns();
+	trace->active = true;
+	trace->running = true;
+	raw_spin_unlock_irqrestore(&ctx->cpu_trace_lock, flags);
 }
 
-static void swapz_account_worker_cpu(u64 *counter, u64 start_ns)
+static void swapz_cpu_trace_exit(struct swapz_dm *ctx,
+				 struct swapz_worker_cpu_trace *trace)
 {
-	u64 end_ns = swapz_current_task_cpu_ns();
+	unsigned long flags;
+	u64 now;
 
-	*counter += swapz_elapsed_ns(start_ns, end_ns);
+	if (!ctx->cpu_trace_registered)
+		return;
+	now = ktime_get_mono_fast_ns();
+	raw_spin_lock_irqsave(&ctx->cpu_trace_lock, flags);
+	if (trace->active && trace->task == current && trace->running)
+		trace->oncpu_ns += swapz_elapsed_ns(trace->start_ns, now);
+	trace->task = NULL;
+	trace->start_ns = 0;
+	trace->active = false;
+	trace->running = false;
+	raw_spin_unlock_irqrestore(&ctx->cpu_trace_lock, flags);
 }
+
+static void swapz_sched_switch_account(struct swapz_dm *ctx,
+				       struct task_struct *prev,
+				       struct task_struct *next)
+{
+	struct swapz_worker_cpu_trace *trace;
+	unsigned long flags;
+	u64 now = ktime_get_mono_fast_ns();
+	int which;
+
+	raw_spin_lock_irqsave(&ctx->cpu_trace_lock, flags);
+	for (which = 0; which < 2; ++which) {
+		trace = which ? &ctx->preparation_cpu_trace :
+				&ctx->ordered_cpu_trace;
+		if (!trace->active)
+			continue;
+		if (trace->task == prev && trace->running) {
+			trace->oncpu_ns += swapz_elapsed_ns(trace->start_ns, now);
+			trace->running = false;
+			trace->start_ns = 0;
+		}
+		if (trace->task == next && !trace->running) {
+			trace->start_ns = now;
+			trace->running = true;
+		}
+	}
+	raw_spin_unlock_irqrestore(&ctx->cpu_trace_lock, flags);
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+static void swapz_sched_switch_probe(void *data, bool preempt,
+				     struct task_struct *prev,
+				     struct task_struct *next,
+				     unsigned int prev_state)
+{
+	(void)preempt;
+	(void)prev_state;
+	swapz_sched_switch_account(data, prev, next);
+}
+#else
+static void swapz_sched_switch_probe(void *data, bool preempt,
+				     struct task_struct *prev,
+				     struct task_struct *next)
+{
+	(void)preempt;
+	swapz_sched_switch_account(data, prev, next);
+}
+#endif
 
 /*
  * Per-BIO prepared bytes have one final owner: the serialized worker.
