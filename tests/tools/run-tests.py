@@ -241,7 +241,18 @@ def failure_context(output, *, loaded=True, default_phase=None):
             elif line.startswith("PASS_OWNED_RAM_PAIR_ASYNC_PREPARE="):
                 phase = f"after completed owned RAM comparison {pair_number}/8"
 
-    if loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
+    unittest_failure = None
+    if not loaded:
+        for line in output.splitlines():
+            match = re.match(
+                r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]+) \(",
+                line.strip())
+            if match:
+                unittest_failure = match.group(1)
+
+    if unittest_failure is not None:
+        reason = f"Unit test failed: {unittest_failure}"
+    elif loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
     elif loaded and "QUARANTINED:" in output:
         reason = "Safety quarantine: owned device or swap identity could not be safely released"
