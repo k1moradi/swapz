@@ -420,6 +420,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         lower.index("error = dm_io(&req"))
         self.assertIn("swapz_lower(ctx, REQ_OP_WRITE", body("swapz_lower_write"))
         self.assertIn("swapz_lower(ctx, REQ_OP_WRITE", body("swapz_lower_write_run"))
+        async_submit = body("swapz_submit_inflight_write")
+        self.assertIn("++ctx->write_fault_calls == ctx->write_fault_nth", async_submit)
+        self.assertIn("ctx->write_fault_injected++", async_submit)
         self.assertIn("write_fault_nth=%u write_fault_calls=%llu "
                       "write_fault_injected=%llu", status)
         self.assertIn("ctx->engine.bulk_enabled, ctx->write_fault_nth", status)
@@ -1167,6 +1170,28 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("mode=alpha-live-gc", body("swapz_status"))
         self.assertNotIn("mode=alpha-no-gc", body("swapz_status"))
         self.assertIn("experimental live GC", DM)
+
+    def test_k1_ping_pong_lower_run_keeps_publication_on_ordered_worker(self):
+        submit = body("swapz_submit_inflight_write")
+        done = body("swapz_async_lower_write_done")
+        finalize = body("swapz_finalize_inflight_write")
+        flush = body("swapz_flush_window")
+        worker = body("swapz_worker")
+        drain = body("swapz_drain")
+        self.assertIn(".fn = swapz_async_lower_write_done", submit)
+        self.assertIn("DM_IO_VMA", submit)
+        self.assertIn("complete(&inflight->lower_done)", done)
+        self.assertNotIn("swapz_finish(", done)
+        self.assertNotIn("bio_endio", done)
+        self.assertIn("swapz_engine_complete_batched_run", finalize)
+        self.assertIn("swapz_complete(inflight->bios[index]", finalize)
+        self.assertIn("prepared == count", flush)
+        self.assertIn("async_submitted = true", flush)
+        self.assertIn("ctx->inflight_write.bios[index] = bio", flush)
+        self.assertIn("pipeline_collected_pages", DM)
+        self.assertIn("completion_done(&ctx->inflight_write.lower_done)", worker)
+        self.assertIn("wait_for_completion(&ctx->inflight_write.lower_done)", drain)
+        self.assertIn("READ_ONCE(ctx->inflight_write.active)", drain)
 
     def test_async_lz4_preparation_overlaps_lower_io_without_publication(self):
         producer = body("swapz_preparation_worker")

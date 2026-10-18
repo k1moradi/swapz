@@ -567,7 +567,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 	    !prepared_pages || plan_read_blocks > 3U)
 		return -EINVAL;
 	*prepared_pages = 0;
-	if (!e->bulk_enabled || !e->io.write_run || e->verify_after_write)
+	if (!e->bulk_enabled || e->verify_after_write)
 		return -EOPNOTSUPP;
 	error = swapz_validate_batched_pages(e, pages, count,
 					     &compressed_count, &raw_count);

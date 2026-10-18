@@ -64,6 +64,20 @@ struct swapz_prepared_page {
 	u8 bytes[SWAPZ_BLOCK_BYTES];
 };
 
+struct swapz_inflight_write {
+	struct swapz_io_run run;
+	struct completion lower_done;
+	struct bio *bios[SWAPZ_MAX_RECORDS];
+	swapz_u8 raw[SWAPZ_MAX_RECORDS];
+	swapz_u8 count;
+	bool active;
+	int lower_error;
+	u64 lower_start_ns;
+	u64 lower_end_ns;
+	u64 commit_start_ns;
+	u64 prepare_nonio_ns;
+};
+
 struct swapz_bio_ref {
 	struct list_head list;
 	struct bio *bio;
@@ -204,6 +218,13 @@ struct swapz_dm {
 	u64 gc_write_reqs;
 	swapz_u8 batch_count;
 	swapz_u8 max_window;
+	/* K=1 asynchronous lower slot. bulk_scratch/bulk_txs are immutable
+	 * while active; batch_bytes immediately becomes the next collector. */
+	struct swapz_inflight_write inflight_write;
+	u64 pipeline_async_runs;
+	u64 pipeline_completed_runs;
+	u64 pipeline_collected_pages;
+	u64 pipeline_finalize_waits;
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
 	/* Explicitly opt-in, disabled at zero. Worker-owned finite window
@@ -406,6 +427,181 @@ static void swapz_fail(struct swapz_dm *ctx, int error)
 		DMERR("swapz alpha: lower or mapping error %d; rejecting subsequent I/O",
 		      ctx->last_error);
 	}
+}
+
+static void swapz_async_lower_write_done(unsigned long error, void *context)
+{
+	struct swapz_dm *ctx = context;
+	struct swapz_inflight_write *inflight = &ctx->inflight_write;
+	unsigned long flags;
+
+	WRITE_ONCE(inflight->lower_error, error ? -EIO : 0);
+	WRITE_ONCE(inflight->lower_end_ns, ktime_get_ns());
+	/* End the preparation-overlap interval at actual lower completion,
+	 * not when the ordered worker later gets CPU to publish the run. */
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	ctx->prep_lower_write_end_queued += ctx->preparation_queued;
+	if (ctx->preparation_queued)
+		ctx->prep_lower_write_end_nonempty++;
+	atomic_set(&ctx->lower_write_active, 0);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	complete(&inflight->lower_done);
+	/* Publication/completion stays on the single ordered authority owner. */
+	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+}
+
+static int swapz_submit_inflight_write(struct swapz_dm *ctx)
+{
+	struct swapz_inflight_write *inflight = &ctx->inflight_write;
+	struct dm_io_region region;
+	struct dm_io_request req = {
+		.bi_opf = REQ_OP_WRITE | REQ_SWAP,
+		.mem = {
+			.type = DM_IO_VMA,
+			.offset = 0,
+			.ptr.vma = inflight->run.bytes,
+		},
+		.notify = {
+			.fn = swapz_async_lower_write_done,
+			.context = ctx,
+		},
+		.client = ctx->io_client,
+	};
+	unsigned long flags;
+	int error;
+
+	if (inflight->active || !inflight->run.blocks ||
+	    inflight->run.start_block >= ctx->physical_blocks ||
+	    inflight->run.blocks >
+		ctx->physical_blocks - inflight->run.start_block)
+		return -EINVAL;
+	/* Same fail-closed fault boundary as the synchronous adapter. */
+	if (ctx->write_fault_nth &&
+	    ++ctx->write_fault_calls == ctx->write_fault_nth) {
+		ctx->write_fault_injected++;
+		return -EIO;
+	}
+	swapz_engine_invalidate_read_cache(&ctx->engine);
+	ctx->lower_write_submitted_bytes +=
+		(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
+	ctx->lower_write_submitted_reqs++;
+	ctx->engine.submitted_blocks += inflight->run.blocks;
+	region.bdev = ctx->backing->bdev;
+	region.sector = (sector_t)inflight->run.start_block * SWAPZ_SECTORS;
+	region.count = (sector_t)inflight->run.blocks * SWAPZ_SECTORS;
+	reinit_completion(&inflight->lower_done);
+	inflight->lower_error = 0;
+	inflight->lower_start_ns = ktime_get_ns();
+	inflight->lower_end_ns = 0;
+	/* Set active before dm_io: a very fast RAM completion may callback
+	 * before dm_io() itself returns. */
+	WRITE_ONCE(inflight->active, true);
+	spin_lock_irqsave(&ctx->queue_lock, flags);
+	atomic_set(&ctx->lower_write_active, 1);
+	ctx->prep_lower_write_samples++;
+	ctx->prep_lower_write_start_queued += ctx->preparation_queued;
+	if (ctx->preparation_queued)
+		ctx->prep_lower_write_start_nonempty++;
+	if (ctx->async_prepare && ctx->preparation_queued)
+		queue_work(ctx->preparation_workqueue, &ctx->preparation_worker);
+	spin_unlock_irqrestore(&ctx->queue_lock, flags);
+	error = dm_io(&req, 1, &region, NULL, IOPRIO_DEFAULT);
+	if (error) {
+		/* No asynchronous completion owns this request after a submission
+		 * failure. Close the diagnostic interval synchronously. */
+		spin_lock_irqsave(&ctx->queue_lock, flags);
+		ctx->prep_lower_write_end_queued += ctx->preparation_queued;
+		if (ctx->preparation_queued)
+			ctx->prep_lower_write_end_nonempty++;
+		atomic_set(&ctx->lower_write_active, 0);
+		spin_unlock_irqrestore(&ctx->queue_lock, flags);
+		inflight->lower_end_ns = ktime_get_ns();
+		inflight->lower_error = error;
+		WRITE_ONCE(inflight->active, false);
+		return error;
+	}
+	ctx->pipeline_async_runs++;
+	return 0;
+}
+
+static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
+{
+	struct swapz_inflight_write *inflight = &ctx->inflight_write;
+	u64 publish_before, publish_crc_before, complete_start, complete_elapsed;
+	u64 lower_end, lower_elapsed, commit_elapsed;
+	swapz_u8 committed = 0, index;
+	int error;
+
+	if (!READ_ONCE(inflight->active))
+		return 0;
+	if (!completion_done(&inflight->lower_done)) {
+		if (!wait)
+			return 0;
+		ctx->pipeline_finalize_waits++;
+		wait_for_completion(&inflight->lower_done);
+	}
+	lower_end = READ_ONCE(inflight->lower_end_ns);
+	if (!lower_end || lower_end < inflight->lower_start_ns)
+		return -EUCLEAN;
+	lower_elapsed = lower_end - inflight->lower_start_ns;
+	ctx->lower_write_wall_ns += lower_elapsed;
+	error = READ_ONCE(inflight->lower_error);
+	if (!error) {
+		ctx->physical_write_bytes +=
+			(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
+		ctx->physical_write_reqs++;
+		if (lower_elapsed <= 1000000ULL)
+			ctx->write_wait_le_1ms++;
+		else if (lower_elapsed <= 4000000ULL)
+			ctx->write_wait_1_to_4ms++;
+		else
+			ctx->write_wait_gt_4ms++;
+	}
+	publish_before = ctx->engine.publish_wall_ns;
+	publish_crc_before = ctx->authority.publish_crc_wall_ns;
+	complete_start = ktime_get_ns();
+	{
+		int complete_error = swapz_engine_complete_batched_run(
+			&ctx->engine, &inflight->run,
+			error ? 0 : inflight->run.blocks, error, &committed);
+
+		if (complete_error)
+			error = complete_error;
+	}
+	complete_elapsed = swapz_elapsed_ns(complete_start, ktime_get_ns());
+	ctx->engine_publish_wall_ns +=
+		ctx->engine.publish_wall_ns - publish_before;
+	if (ctx->authority.publish_crc_wall_ns >= publish_crc_before)
+		ctx->engine_publish_crc_wall_ns +=
+			ctx->authority.publish_crc_wall_ns - publish_crc_before;
+	commit_elapsed = swapz_elapsed_ns(inflight->commit_start_ns,
+					 ktime_get_ns());
+	ctx->window_commit_wall_ns += commit_elapsed;
+	ctx->window_commit_nonio_wall_ns +=
+		inflight->prepare_nonio_ns + complete_elapsed;
+
+	/* Authority and immutable run bytes are no longer needed before any
+	 * upper completion can admit dependent future I/O. */
+	WRITE_ONCE(inflight->active, false);
+	if (error || committed != inflight->count) {
+		error = error ? error : -EIO;
+		swapz_fail(ctx, error);
+		for (index = 0; index < inflight->count; ++index)
+			swapz_complete(inflight->bios[index], error);
+		inflight->count = 0;
+		return error;
+	}
+	for (index = 0; index < inflight->count; ++index) {
+		ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
+		if (inflight->raw[index])
+			ctx->raw_pages++;
+		else
+			ctx->compressed_pages++;
+		swapz_complete(inflight->bios[index], 0);
+	}
+	ctx->pipeline_completed_runs++;
+	inflight->count = 0;
+	return 0;
 }
 
 /*
@@ -1343,7 +1539,17 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		close_reason == SWAPZ_CLOSE_SHUTDOWN ||
 		close_reason == SWAPZ_CLOSE_OTHER;
 	bool chain_continues;
+	bool async_submitted = false;
 	int error = 0;
+
+	/* A second close, barrier, read, zero/raw mutation, GC retry or shutdown
+	 * cannot stage against paused authority. Wait only at that real ownership
+	 * boundary; ordinary incoming WRITEs keep collecting while the run flies. */
+	if (READ_ONCE(ctx->inflight_write.active)) {
+		error = swapz_finalize_inflight_write(ctx, true);
+		if (error && !count)
+			return error;
+	}
 
 	/*
 	 * An empty flush is not a committed write window. In particular, a READ
@@ -1454,7 +1660,92 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	for (index = 0; index < count; ++index)
 		if (ctx->batch[index].bio->bi_opf & REQ_FUA)
 			needs_fua = true;
-	while (committed < count) {
+	/*
+	 * First ping-pong experiment: only a complete multi-record window with
+	 * no hard immediate fence is detached. If geometry yields only a prefix,
+	 * complete that prefix synchronously and keep the existing retry path for
+	 * the remainder; never split a good window merely to manufacture overlap.
+	 */
+	if (ctx->async_prepare && READ_ONCE(ctx->accepting) && count > 1U &&
+	    !needs_fua && ctx->engine.bulk_enabled &&
+	    !ctx->engine.verify_after_write &&
+	    (close_reason == SWAPZ_CLOSE_FULL ||
+	     close_reason == SWAPZ_CLOSE_DUPLICATE ||
+	     close_reason == SWAPZ_CLOSE_QUANTUM ||
+	     close_reason == SWAPZ_CLOSE_IDLE ||
+	     close_reason == SWAPZ_CLOSE_DEADLINE ||
+	     close_reason == SWAPZ_CLOSE_PACK_READY)) {
+		struct swapz_inflight_write *inflight = &ctx->inflight_write;
+		swapz_u8 prepared = 0;
+		u64 plan_before = ctx->engine.plan_wall_ns;
+		u64 pack_before = ctx->engine.pack_wall_ns;
+		u64 prepare_start = ktime_get_ns();
+		u64 prepare_elapsed;
+
+		inflight->run.bytes = ctx->engine.bulk_scratch;
+		inflight->run.txs = ctx->engine.bulk_txs;
+		inflight->commit_start_ns = prepare_start;
+		error = swapz_engine_prepare_batched_run(
+			&ctx->engine, ctx->planned, count, &inflight->run,
+			&prepared, planning_read_cap);
+		prepare_elapsed = swapz_elapsed_ns(prepare_start, ktime_get_ns());
+		ctx->engine_plan_wall_ns +=
+			ctx->engine.plan_wall_ns - plan_before;
+		ctx->engine_pack_wall_ns +=
+			ctx->engine.pack_wall_ns - pack_before;
+		if (!error && prepared == count) {
+			inflight->prepare_nonio_ns = prepare_elapsed;
+			inflight->count = count;
+			error = swapz_submit_inflight_write(ctx);
+			if (!error) {
+				committed = count; /* ownership detached, not ACKed */
+				async_submitted = true;
+			} else {
+				swapz_u8 aborted = 0;
+				u64 complete_start = ktime_get_ns();
+				int complete_error =
+					swapz_engine_complete_batched_run(
+						&ctx->engine, &inflight->run, 0,
+						error, &aborted);
+
+				ctx->window_commit_nonio_wall_ns +=
+					prepare_elapsed +
+					swapz_elapsed_ns(complete_start,
+							 ktime_get_ns());
+				if (complete_error)
+					error = complete_error;
+				inflight->count = 0;
+			}
+		} else if (!error && prepared) {
+			swapz_u16 completed_blocks = 0;
+			swapz_u8 published = 0;
+			u64 complete_start;
+			int io_error;
+
+			ctx->engine.submitted_blocks += inflight->run.blocks;
+			io_error = swapz_lower_write_run(
+				ctx, inflight->run.start_block,
+				inflight->run.blocks, inflight->run.bytes,
+				&completed_blocks);
+			complete_start = ktime_get_ns();
+			error = swapz_engine_complete_batched_run(
+				&ctx->engine, &inflight->run, completed_blocks,
+				io_error, &published);
+			ctx->window_commit_nonio_wall_ns +=
+				prepare_elapsed +
+				swapz_elapsed_ns(complete_start, ktime_get_ns());
+			if (!error) {
+				committed = published;
+				if (published != prepared)
+					error = -EUCLEAN;
+			}
+		}
+		if (error && error != -ENOSPC)
+			goto commit_done;
+		if (error == -ENOSPC)
+			error = 0; /* existing loop/GC path retries unchanged */
+	}
+	while (!async_submitted && committed < count) {
 		swapz_u8 succeeded = 0;
 
 		u64 lower_write_before = ctx->lower_write_wall_ns;
@@ -1506,6 +1797,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		}
 		break;
 	}
+commit_done:
 	/*
 	 * Do not end any upper FUA BIO before the lower cache flush reports
 	 * success. A failed post-write flush permanently fails this target:
@@ -1518,7 +1810,10 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	for (index = 0; index < count; ++index) {
 		struct bio *bio = ctx->batch[ctx->planned_to_batch[index]].bio;
 
-		if (index < committed && !ctx->failed) {
+		if (async_submitted) {
+			ctx->inflight_write.bios[index] = bio;
+			ctx->inflight_write.raw[index] = ctx->planned[index].raw;
+		} else if (index < committed && !ctx->failed) {
 			ctx->logical_write_bytes += SWAPZ_BLOCK_BYTES;
 			if (ctx->planned[index].raw)
 				ctx->raw_pages++;
@@ -1928,6 +2223,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.length = SWAPZ_BLOCK_BYTES,
 			.raw = 1,
 		};
+		if (READ_ONCE(ctx->inflight_write.active))
+			ctx->pipeline_collected_pages++;
 		if (bio->bi_opf & REQ_FUA) {
 			ctx->next_window_close = SWAPZ_CLOSE_FUA;
 			swapz_flush_window(ctx);
@@ -1960,6 +2257,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		.payload_crc32c_valid = payload_crc32c_valid,
 	};
 	ctx->batch_count++;
+	if (READ_ONCE(ctx->inflight_write.active))
+		ctx->pipeline_collected_pages++;
 	/*
 	 * Compression/preparation can take long enough for another upper BIO
 	 * to reach ->map after the worker's initial queue snapshot. Refresh the
@@ -2334,6 +2633,15 @@ static void swapz_worker(struct work_struct *work)
 	u64 wall_start_ns = ktime_get_ns();
 
 	for (;;) {
+		if (READ_ONCE(ctx->inflight_write.active) &&
+		    completion_done(&ctx->inflight_write.lower_done)) {
+			int inflight_error = swapz_finalize_inflight_write(ctx, false);
+
+			if (inflight_error && ctx->batch_count) {
+				ctx->next_window_close = SWAPZ_CLOSE_OTHER;
+				swapz_flush_window(ctx);
+			}
+		}
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
@@ -2741,11 +3049,16 @@ static void swapz_drain(struct dm_target *ti)
 	if (ctx->preparation_workqueue)
 		drain_workqueue(ctx->preparation_workqueue);
 	flush_delayed_work(&ctx->worker);
+	if (READ_ONCE(ctx->inflight_write.active)) {
+		wait_for_completion(&ctx->inflight_write.lower_done);
+		mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
+		flush_delayed_work(&ctx->worker);
+	}
 	drain_workqueue(ctx->workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!list_empty(&ctx->incoming) ||
 	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||
-	    ctx->batch_count ||
+	    ctx->batch_count || READ_ONCE(ctx->inflight_write.active) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		DMERR("swapz drain invariant: accepted BIOs remain after draining");
@@ -3017,6 +3330,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.io.write_extent = swapz_lower_write;
 	ctx->engine.io.write_run = swapz_lower_write_run;
 	ctx->engine.io.read_blocks = swapz_lower_read;
+	ctx->inflight_write.run.bytes = ctx->engine.bulk_scratch;
+	ctx->inflight_write.run.txs = ctx->engine.bulk_txs;
+	init_completion(&ctx->inflight_write.lower_done);
 	ctx->io_client = dm_io_client_create();
 	if (IS_ERR(ctx->io_client)) {
 		error = PTR_ERR(ctx->io_client);
@@ -3185,6 +3501,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_lower_write_start_nonempty=%llu "
 		       "prep_lower_write_end_queued=%llu "
 		       "prep_lower_write_end_nonempty=%llu "
+		       "pipeline_async_runs=%llu pipeline_completed_runs=%llu "
+		       "pipeline_collected_pages=%llu pipeline_finalize_waits=%llu "
 		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
@@ -3306,6 +3624,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->prep_lower_write_start_nonempty,
 		       ctx->prep_lower_write_end_queued,
 		       ctx->prep_lower_write_end_nonempty,
+		       ctx->pipeline_async_runs, ctx->pipeline_completed_runs,
+		       ctx->pipeline_collected_pages, ctx->pipeline_finalize_waits,
 		       ctx->preparation_producer_head_claims,
 		       ctx->preparation_producer_tail_claims,
 		       ctx->preparation_ordered_inline,

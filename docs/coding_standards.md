@@ -493,3 +493,33 @@ lifetime remain Device-Mapper-target ownership; the portable engine must not
 depend on `struct bio`. A future async target may reuse a run buffer only after
 its lower completion has been finalized and every paused transaction has been
 published or aborted.
+
+
+### K=1 ping-pong write pipeline
+
+The first asynchronous Device Mapper experiment is enabled only on the existing
+`async_prepare` candidate. A complete multi-record non-FUA window may be
+packed into the immutable `bulk_scratch`/`bulk_txs` run and submitted with
+an asynchronous dm-io completion callback. The callback owns no mapping or
+upper BIO completion: it records the definitive lower result, ends the lower
+overlap interval, and wakes the single ordered worker. Only that worker calls
+`swapz_engine_complete_batched_run()` and completes the original upper BIOs.
+
+Once the full window has been copied into the sealed run, `batch_bytes` is
+immediately reusable as the active collector. New WRITEs may therefore perform
+zero/LZ4/payload-CRC preparation while the previous lower WRITE is in flight
+without copying its packed run. A later close, read/barrier, zero/raw authority
+mutation, GC retry or shutdown must finalize the prior run before staging or
+mutating authority.
+
+This first candidate keeps exactly one lower WRITE run outstanding. FUA and
+hard control windows stay synchronous. If physical geometry yields only a
+bounded prefix rather than the whole logical window, that prefix is completed
+synchronously and the existing committed-prefix/GC retry path handles the
+remainder. The experiment must never fragment a full packable window solely to
+manufacture overlap.
+
+Presuspend closes admission before waiting for an external lower completion,
+then wakes/drains the ordered worker so every paused transaction is published
+or aborted before teardown. The target drain invariant includes the asynchronous
+run-active bit in addition to batch and authority state.
