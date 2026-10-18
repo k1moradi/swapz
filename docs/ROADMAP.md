@@ -42,9 +42,10 @@ workload. Wear distribution and block-reuse behavior are not yet qualified.
 1. Keep the accepted-wave ownership policy and change only LZ4 preparation
    placement: use a CPU-local `WQ_MEM_RECLAIM` preparation workqueue while the
    ordered Device Mapper worker remains `WQ_MEM_RECLAIM | WQ_UNBOUND`.
-   `queue_work()` then targets the issuing CPU, allowing pending LZ4 work to
-   consume that CPU's otherwise-idle interval when the ordered worker sleeps in
-   synchronous lower WRITE I/O instead of immediately competing on another CPU.
+   `queue_work()` then targets the issuing CPU. In the lower-WRITE wake the
+   issuer is the ordered worker, allowing pending LZ4 work to consume that CPU's
+   otherwise-idle synchronous-I/O interval instead of immediately competing on
+   another CPU.
 2. Preserve producer non-reentrance, the singular-head guard, bounded prepared
    slots, one-for-one tail pacing, head-first claims during lower WRITE,
    sole ordered mapping/publication/completion ownership, retained-window
