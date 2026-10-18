@@ -511,3 +511,30 @@ and the still-owned BIO is copied once later by `swapz_raw_write()`. It also
 reports scheduler-accounted CPU time for the ordered and preparation workqueue
 callbacks using the exported cputime API. These CPU counters are diagnostics
 and overlap wall-time phases.
+
+
+### Current CRC / publish / dry-arrival / live-GC candidate
+
+The latest qualified source before this experiment is
+`d63ab97c6cb104dc99c4792c207805e97e22d233`. Faster-model mixed commit
+non-I/O remained about 48.5 ms, split into 5.2 ms planning, 16.5 ms packing,
+18.5 ms publication and 8.4 ms residual. This candidate attacks two explicit
+serialized redundancies while retaining the final integrity gate: compressed
+payload CRC32C is computed before packing and passed into the builder, while
+`swapz_finish()` performs one full metadata validation and then verifies each
+payload CRC over the final `bulk_scratch` image before publication.
+
+No retention, producer-credit or worker-count policy changes accompany those
+optimizations. Instead, a dry PACK_READY close timestamps the moment
+`incoming` is proven empty under `queue_lock`; the next admitted WRITE is
+binned by elapsed time. A concentration of followups within tens of
+microseconds would support a future bounded pacing experiment, while sparse or
+late followups would refute that hypothesis.
+
+The mandatory loaded correctness phase additionally forces sustained live GC on
+the same newly owned RAM-backed `null_blk`: a 16MiB logical mapping on 64MiB
+physical backing is overwritten for five deterministic generations while one
+old survivor per logical 1MiB stripe remains live. Qualification requires at
+least two live victims/role rotations, nonzero GC READ and WRITE traffic, and
+byte-exact verification of all 4096 logical pages. This is GC correctness and
+cost evidence on synthetic RAM, not physical flash endurance evidence.
