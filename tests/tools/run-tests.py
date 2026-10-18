@@ -968,11 +968,16 @@ def print_bench(result):
                 ("GC victims", f"{counters['gc_victims']:.1f}"),
             ])
         async_criteria = data["criteria"]["async"]
-        print("  Verdict: async/raw="
-              f"{async_criteria['throughput_vs_raw']}; async/sync="
-              f"{data['criteria']['async_vs_sync']['write_throughput']}; "
-              f"lower WRITE savings={async_criteria['lower_write_savings']}; "
-              f"packed read={async_criteria['packed_4mib_sequential']}.")
+        print("  Verdict")
+        print_table(
+            ("check", "result"),
+            [
+                ("async/raw W", async_criteria["throughput_vs_raw"]),
+                ("async/sync W",
+                 data["criteria"]["async_vs_sync"]["write_throughput"]),
+                ("lower WRITE", async_criteria["lower_write_savings"]),
+                ("packed read", async_criteria["packed_4mib_sequential"]),
+            ])
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":
@@ -989,10 +994,18 @@ def print_bench(result):
                 ("fault injection", "retained WRITE/FLUSH failed closed"),
             ])
 
-    print("\n  LIMITATIONS: synthetic RAM models; two mixed pairs/mode and one "
-          "write-only pair/QD; no confidence interval; replay CPU excludes "
-          "kernel workers; 4MiB reads are not cold physical swap-in; live GC "
-          "not exercised. Full telemetry: build/test_results.json.xz.")
+    print("\n  Limitations")
+    print_table(
+        ("scope", "value"),
+        [
+            ("media", "synthetic RAM only"),
+            ("mixed statistics", "two pairs/mode; no confidence interval"),
+            ("write-only", "one pair/QD; directional only"),
+            ("CPU", "replay process only; kernel workers excluded"),
+            ("4MiB read", "RAM-backed; not cold physical swap-in"),
+            ("GC", "live victims not exercised"),
+            ("Full telemetry", "build/test_results.json.xz"),
+        ])
 
     saturation = result["benchmarks"].get("write_saturation", {})
     if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT":
