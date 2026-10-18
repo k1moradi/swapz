@@ -316,8 +316,10 @@ struct swapz_dm {
 	 */
 	u64 preparation_copy_wall_ns;
 	u64 preparation_copy_bytes;
+	u64 preparation_direct_lz4_pages;
 	u64 ordered_write_copy_wall_ns;
 	u64 ordered_write_copy_bytes;
+	u64 ordered_direct_lz4_pages;
 	u64 read_copy_wall_ns;
 	u64 read_copy_bytes;
 	u64 window_sort_wall_ns;
@@ -591,6 +593,31 @@ static int swapz_copy_bio(struct bio *bio, void *buffer, bool to_bio)
 	return offset == SWAPZ_BLOCK_BYTES ? 0 : -EINVAL;
 }
 
+/*
+ * A normal swap page commonly arrives as one complete 4KiB bvec. Keep that
+ * upper page pinned by BIO ownership and map it only for the synchronous
+ * LZ4/zero-scan section. Multi-bvec BIOs retain the established copy fallback.
+ */
+static const u8 *swapz_map_single_bio_input(struct bio *bio, void **mapped)
+{
+	struct bio_vec only = { 0 };
+	struct bio_vec vec;
+	struct bvec_iter iter;
+	unsigned int segments = 0;
+
+	*mapped = NULL;
+	bio_for_each_segment(vec, bio, iter) {
+		if (++segments > 1)
+			return NULL;
+		only = vec;
+	}
+	if (segments != 1 || only.bv_len != SWAPZ_BLOCK_BYTES ||
+	    only.bv_offset != 0)
+		return NULL;
+	*mapped = kmap_local_page(only.bv_page);
+	return *mapped;
+}
+
 static int swapz_copy_bio_accounted(struct bio *bio, void *buffer, bool to_bio,
 				    u64 *wall_ns, u64 *bytes)
 {
@@ -636,6 +663,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 
 	for (;;) {
 		struct swapz_prepared_page *prepared;
+		const u8 *input;
+		void *mapped_input = NULL;
 		u64 section_start;
 		bool tail_claim = false;
 		bool lower_write_overlap;
@@ -708,19 +737,26 @@ static void swapz_preparation_worker(struct work_struct *work)
 				return;
 			continue;
 		}
-		error = swapz_copy_bio_accounted(entry->bio,
-				    ctx->preparation_input_page, false,
-				    &ctx->preparation_copy_wall_ns,
-				    &ctx->preparation_copy_bytes);
-		if (error) {
-			mempool_free(prepared, ctx->preparation_pool);
-			up(&ctx->preparation_slots);
-			entry->preparation_error = error;
-			complete(&entry->preparation_finished);
-			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-			    !atomic_read(&ctx->preparation_tail_credit))
-				return;
-			continue;
+		input = swapz_map_single_bio_input(entry->bio, &mapped_input);
+		if (input) {
+			ctx->preparation_direct_lz4_pages++;
+		} else {
+			error = swapz_copy_bio_accounted(entry->bio,
+					    ctx->preparation_input_page, false,
+					    &ctx->preparation_copy_wall_ns,
+					    &ctx->preparation_copy_bytes);
+			if (error) {
+				mempool_free(prepared, ctx->preparation_pool);
+				up(&ctx->preparation_slots);
+				entry->preparation_error = error;
+				complete(&entry->preparation_finished);
+				if (tail_claim &&
+				    !atomic_read(&ctx->lower_write_active) &&
+				    !atomic_read(&ctx->preparation_tail_credit))
+					return;
+				continue;
+			}
+			input = ctx->preparation_input_page;
 		}
 		section_start = ktime_get_ns();
 		/*
@@ -733,7 +769,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (lower_write_overlap)
 			ctx->prepared_during_lower_write++;
 		prepared->length = LZ4_compress_fast(
-					ctx->preparation_input_page,
+					input,
 					prepared->bytes, SWAPZ_BLOCK_BYTES,
 					SWAPZ_MAX_COMPRESSED, 1,
 					ctx->preparation_lz4_workmem);
@@ -744,13 +780,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 			ctx->preparation_lz4_lower_write_overlap_ns += elapsed_ns;
 		prepared->zero = prepared->length > 0 &&
 				 prepared->length <= 64 &&
-				 swapz_page_is_zero(ctx->preparation_input_page);
+				 swapz_page_is_zero(input);
 		if (prepared->length <= 0)
-			swapz_memcpy_accounted(prepared->bytes,
-					      ctx->preparation_input_page,
+			swapz_memcpy_accounted(prepared->bytes, input,
 					      SWAPZ_BLOCK_BYTES,
 					      &ctx->preparation_copy_wall_ns,
 					      &ctx->preparation_copy_bytes);
+		if (mapped_input)
+			kunmap_local(mapped_input);
 		/* Release ordering: complete() wakes the sole consumer. Do not
 		 * touch entry again after signaling: it may be bio_endio'd. */
 		entry->prepared_page = prepared;
@@ -1626,8 +1663,11 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 {
 	swapz_u32 logical = (swapz_u32)(bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	const u8 *input = NULL;
+	void *mapped_input = NULL;
 	swapz_u8 i;
 	u64 section_start;
+	bool inline_zero = false;
 	bool prepared_async = ctx->async_prepare && !entry->preparation_inline;
 	int length;
 	int error;
@@ -1665,19 +1705,39 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				&ctx->ordered_write_copy_wall_ns,
 				&ctx->ordered_write_copy_bytes);
 	} else {
-		error = swapz_copy_bio_accounted(bio, ctx->input_page, false,
-					 &ctx->ordered_write_copy_wall_ns,
-					 &ctx->ordered_write_copy_bytes);
-		if (error)
-			return error;
+		input = swapz_map_single_bio_input(bio, &mapped_input);
+		if (input) {
+			ctx->ordered_direct_lz4_pages++;
+		} else {
+			error = swapz_copy_bio_accounted(
+				bio, ctx->input_page, false,
+				&ctx->ordered_write_copy_wall_ns,
+				&ctx->ordered_write_copy_bytes);
+			if (error)
+				return error;
+			input = ctx->input_page;
+		}
 		section_start = ktime_get_ns();
-		length = LZ4_compress_fast(ctx->input_page,
+		length = LZ4_compress_fast(input,
 				ctx->batch_bytes +
 					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
 				SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED, 1,
 				ctx->lz4_workmem);
 		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start,
 						   ktime_get_ns());
+		if (length > 0 && length <= 64)
+			inline_zero = swapz_page_is_zero(input);
+		/*
+		 * An incompressible page must outlive this short BIO mapping until
+		 * the retained window commits. Preserve it in worker-owned staging.
+		 */
+		if (length <= 0 && mapped_input)
+			swapz_memcpy_accounted(
+				ctx->input_page, input, SWAPZ_BLOCK_BYTES,
+				&ctx->ordered_write_copy_wall_ns,
+				&ctx->ordered_write_copy_bytes);
+		if (mapped_input)
+			kunmap_local(mapped_input);
 	}
 	/* Account for compressibility as the kernel itself observes it.
 	 * A file extension or userspace fixture label is not the codec result;
@@ -1713,8 +1773,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	 * the lower flush before this upper BIO completes.
 	 */
 	if (length > 0 && length <= 64 &&
-	    (prepared_async ? entry->prepared_page->zero :
-	     swapz_page_is_zero(ctx->input_page))) {
+	    (prepared_async ? entry->prepared_page->zero : inline_zero)) {
 		ctx->next_window_close = SWAPZ_CLOSE_ZERO;
 		error = swapz_flush_window(ctx);
 		if (!error)
@@ -2960,6 +3019,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
 		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
+		       "direct_lz4_input_pages=%llu "
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
@@ -3075,6 +3135,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			       ctx->ordered_write_copy_wall_ns,
 		       ctx->preparation_copy_bytes +
 			       ctx->ordered_write_copy_bytes,
+		       ctx->preparation_direct_lz4_pages +
+			       ctx->ordered_direct_lz4_pages,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
