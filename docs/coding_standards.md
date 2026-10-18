@@ -441,9 +441,20 @@ producer failure. Queue ownership, BIO completion and map publication remain
 unchanged.
 
 
-Scheduler-accounted worker CPU diagnostics must use an exported kernel API,
-not direct reads of scheduler-private accounting fields. Sample task cputime at
-workqueue callback entry and every callback return, then accumulate the
-monotonic delta in the target context. The metric is task CPU accounting, not
-wall time; it may overlap all phase wall counters and must never participate in
-ordering, timeout or scheduling policy.
+Do not expose scheduler-accounted per-callback CPU as a portable module
+metric. The rejected task-cputime experiment undercounted short nonblocking
+preparation callbacks on the qualification host. Exact hot-path attribution
+uses explicit monotonic phase timers around LZ4, CRC, copies, planning, packing
+and publication. Whole callback entry/exit timing may be reported only as wall
+residency and must be labeled as such: ordered residency includes synchronous
+lower-I/O sleep and either callback can include scheduler delay. Diagnostic
+timing must never participate in ordering, timeout or scheduling policy.
+
+A precomputed payload CRC may cross from preparation into serialized packing
+only when it covers exactly the immutable compressed payload and length being
+copied. It can remove the pack-side source rescan, but publication must still
+verify the payload CRC over the final `bulk_scratch` bytes. Likewise,
+`swapz_finish()` may validate immutable extent metadata once and decode
+subsequent descriptors without repeating that global validation, but every
+record still requires final payload CRC, generation, liveness and transaction
+checks before any mapping is published.
