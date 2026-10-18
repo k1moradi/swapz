@@ -373,16 +373,19 @@ rechecks list shape under the same `queue_lock` before consuming the token.
 READ/barrier execution may still grant one bounded token while it owns ordered
 service time.
 
-The ordered Device Mapper worker remains on its serialized
-`WQ_MEM_RECLAIM | WQ_UNBOUND` workqueue. The LZ4 preparation workqueue is
-CPU-local (`WQ_MEM_RECLAIM` without `WQ_UNBOUND`): `queue_work()` places
-that work on the CPU which queued it. In the lower-WRITE wake, the queuer is the
-ordered kworker, so pending preparation can consume that CPU's otherwise-idle
-interval when synchronous lower WRITE sleeps instead of immediately competing
-on another CPU. Map-side credit wakes remain local to their submitting CPU.
-The single preparation `work_struct` remains non-reentrant system-wide; this
-changes scheduling placement only, not FIFO, publication, completion or
-lower-I/O ownership.
+The ordered Device Mapper worker and LZ4 preparation worker both use
+serialized `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueues. The CPU-local preparation
+experiment increased measured lower-I/O/LZ4 overlap but regressed useful mixed
+throughput, lower-WRITE request geometry and worker-empty deadlines, so bound
+placement is rejected and must not remain as production state. The single
+preparation `work_struct` remains non-reentrant system-wide; scheduling
+placement never changes FIFO, publication, completion or lower-I/O ownership.
+
+Performance attribution belongs in kernel C at phase boundaries. Explicit RAM
+copies are timed and byte-counted separately from LZ4. Engine write/read
+processing also records wall time with synchronous lower-I/O wait subtracted.
+Do not infer copy/CRC/packing cost from userspace elapsed time, and do not add
+overlapping wall counters together.
 
 The producer reserves bounded prepared-page capacity nonblocking before taking
 `queue_lock` or claiming a BIO. Tail claiming never consumes
