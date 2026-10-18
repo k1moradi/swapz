@@ -69,6 +69,41 @@ static int test_class(unsigned int bytes, unsigned int count)
 	return 0;
 }
 
+static int test_prehashed_append_preserves_final_crc_gate(void)
+{
+	struct swapz_builder normal, prehashed, bad;
+	struct swapz_decoded d;
+	const uint8_t *readable;
+	uint8_t normal_extent[SWAPZ_BLOCK_BYTES];
+	uint8_t prehashed_extent[SWAPZ_BLOCK_BYTES];
+	uint8_t bad_extent[SWAPZ_BLOCK_BYTES];
+	swapz_u32 crc;
+
+	set_payload(2072, 41);
+	crc = swapz_crc32c_bytes(payload, 2072);
+	CHECK(swapz_begin(&normal, normal_extent, SWAPZ_BLOCK_BYTES, 91) == 0);
+	CHECK(swapz_append(&normal, 7, 3, payload, 2072) == 0);
+	CHECK(swapz_seal(&normal) == 0);
+	CHECK(swapz_begin(&prehashed, prehashed_extent, SWAPZ_BLOCK_BYTES, 91) == 0);
+	CHECK(swapz_append_prehashed(&prehashed, 7, 3, payload, 2072, crc) == 0);
+	CHECK(swapz_seal(&prehashed) == 0);
+	CHECK(memcmp(normal_extent, prehashed_extent, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup(prehashed_extent, SWAPZ_BLOCK_BYTES, 0,
+			   &d, &readable) == 0);
+	CHECK(memcmp(readable, payload, 2072) == 0);
+
+	/* A forged precomputed source CRC can build metadata, but normal final
+	 * image lookup must still reject the payload before authority could use it. */
+	CHECK(swapz_begin(&bad, bad_extent, SWAPZ_BLOCK_BYTES, 92) == 0);
+	CHECK(swapz_append_prehashed(&bad, 8, 4, payload, 2072,
+				   crc ^ 0x1U) == 0);
+	CHECK(swapz_seal(&bad) == 0);
+	CHECK(swapz_validate(bad_extent, SWAPZ_BLOCK_BYTES) == 0);
+	CHECK(swapz_lookup(bad_extent, SWAPZ_BLOCK_BYTES, 0,
+			   &d, &readable) == -EBADMSG);
+	return 0;
+}
+
 static int test_seal_clears_only_unwritten_gap(void)
 {
 	struct swapz_builder b;
@@ -240,6 +275,7 @@ int main(void)
 	CHECK(test_class(4096, 1) == 0); tests++;
 	CHECK(test_class(8192, 3) == 0); tests++;
 	CHECK(test_class(16384, 7) == 0); tests++;
+	CHECK(test_prehashed_append_preserves_final_crc_gate() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;
