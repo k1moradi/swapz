@@ -975,13 +975,16 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
-        print("  Async pipeline — timings overlap; CPU rows are task CPU, not wall.")
+        print("  Async pipeline — wall timings overlap; callback rows include scheduler delay.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
             [
                 ("LZ4",
                  f"{asynchronous['mixed_lz4_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} IO"),
+                ("payload CRC prep",
+                 f"{(asynchronous['mixed_prep_crc_wall_ns'] + asynchronous['mixed_ordered_crc_wall_ns']) / 1e6:.1f}",
+                 f"{asynchronous['mixed_engine_prehashed_records']:.0f} packed"),
                 ("RAM copies",
                  f"{asynchronous['mixed_write_copy_wall_ns'] / 1e6:.1f}",
                  f"{asynchronous['mixed_write_copy_bytes'] / 1048576:.1f} MiB"),
@@ -998,10 +1001,10 @@ def print_bench(result):
                  "-"),
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
-                ("ordered CPU",
-                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f}", "-"),
-                ("prep CPU",
-                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f}", "-"),
+                ("ordered callback",
+                 f"{asynchronous['mixed_ordered_worker_wall_ns'] / 1e6:.1f}", "wall"),
+                ("prep callback",
+                 f"{asynchronous['mixed_prep_worker_wall_ns'] / 1e6:.1f}", "wall"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
@@ -1025,6 +1028,15 @@ def print_bench(result):
                 ("one-page pack/deadline",
                  f"{counters['win1_pack_ready']:.1f}/"
                  f"{counters['win1_deadline']:.1f}"),
+                ("dry-close followups",
+                 f"{asynchronous['mixed_dry_pack_followup_events']:.1f}/"
+                 f"{asynchronous['mixed_dry_pack_close_events']:.1f}"),
+                ("dry <=10/50/200us",
+                 f"{asynchronous['mixed_dry_pack_followup_le10us']:.1f}/"
+                 f"{asynchronous['mixed_dry_pack_followup_11_50us']:.1f}/"
+                 f"{asynchronous['mixed_dry_pack_followup_51_200us']:.1f}"),
+                ("dry followup max us",
+                 f"{asynchronous['mixed_dry_pack_followup_max_ns'] / 1000:.1f}"),
                 ("GC victims", f"{counters['gc_victims']:.1f}"),
             ])
         async_criteria = data["criteria"]["async"]
@@ -1061,7 +1073,7 @@ def print_bench(result):
             ("media", "synthetic RAM only"),
             ("mixed statistics", "two pairs/mode; no confidence interval"),
             ("write-only", "one pair/QD; directional only"),
-            ("CPU", "replay + ordered/prep worker task CPU; IRQ/device CPU excluded"),
+            ("CPU", "replay CPU only; kernel callback wall is not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims not exercised"),
             ("Full telemetry", "build/test_results.json.xz"),
