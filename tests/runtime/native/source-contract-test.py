@@ -748,6 +748,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->window_sort_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_wall_ns +=", flush)
         self.assertIn("ctx->window_commit_nonio_wall_ns +=", flush)
+        authority = (ROOT / "src/kernel/authority.c").read_text()
         self.assertIn("e->plan_wall_ns +=", engine_write)
         self.assertIn("engine->stage_wall_ns +=", engine_write)
         self.assertIn("e->stage_wall_ns +=", engine_write)
@@ -794,7 +795,6 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->engine.prehashed_records", status)
         self.assertIn("swapz_engine_write_window_batched_read_cap(", flush)
         codec = (ROOT / "src/kernel/codec.c").read_text()
-        authority = (ROOT / "src/kernel/authority.c").read_text()
         self.assertIn("swapz_append_prehashed(", codec)
         self.assertIn("swapz_lookup_validated(", codec)
         self.assertIn("swapz_lookup_validated(image, bytes_total, index",
