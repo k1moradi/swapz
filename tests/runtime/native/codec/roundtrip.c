@@ -69,6 +69,28 @@ static int test_class(unsigned int bytes, unsigned int count)
 	return 0;
 }
 
+static int test_prehashed_and_validated_lookup(void)
+{
+	struct swapz_builder b;
+	struct swapz_decoded d;
+	const uint8_t *p;
+	swapz_u32 crc;
+
+	set_payload(2072, 41);
+	crc = swapz_crc32c_bytes(payload, 2072);
+	CHECK(swapz_begin(&b, extent, 4096, 91) == 0);
+	CHECK(swapz_append_prehashed(&b, 7, 3, payload, 2072, crc) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(swapz_validate(extent, 4096) == 0);
+	CHECK(swapz_lookup_validated(extent, 4096, 0, &d, &p) == 0);
+	CHECK(d.logical_page == 7 && d.generation == 3 && d.payload_crc32c == crc);
+	CHECK(!memcmp(p, payload, 2072));
+	((uint8_t *)p)[0] ^= 1;
+	CHECK(swapz_lookup_validated(extent, 4096, 0, &d, &p) == -EBADMSG);
+	((uint8_t *)extent)[4096 - 2072] ^= 1;
+	return 0;
+}
+
 static int test_seal_clears_only_unwritten_gap(void)
 {
 	struct swapz_builder b;
@@ -240,6 +262,7 @@ int main(void)
 	CHECK(test_class(4096, 1) == 0); tests++;
 	CHECK(test_class(8192, 3) == 0); tests++;
 	CHECK(test_class(16384, 7) == 0); tests++;
+	CHECK(test_prehashed_and_validated_lookup() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;
