@@ -3214,6 +3214,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_role_rotations=%llu "
 		       "last_gc_victim=%u last_gc_destination=%u "
+		       "gc_victim_unique=%u gc_destination_unique=%u "
+		       "gc_victim_max_reuse=%u gc_destination_max_reuse=%u "
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
 		       "gc_selected_io_estimate=%llu gc_no_headroom_skips=%llu "
@@ -3255,19 +3257,30 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
 		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
 		       "direct_lz4_input_pages=%llu "
+		       "payload_crc_wall_ns=%llu payload_crc_bytes=%llu "
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
 		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
 		       "engine_publish_wall_ns=%llu "
+		       "engine_stage_wall_ns=%llu engine_pause_wall_ns=%llu "
+		       "engine_hole_clear_wall_ns=%llu engine_resume_wall_ns=%llu "
+		       "publish_initial_validate_wall_ns=%llu "
+		       "publish_phase1_wall_ns=%llu publish_lookup_wall_ns=%llu "
+		       "publish_mutation_wall_ns=%llu "
+		       "batch_pause_hash_wall_ns=%llu batch_resume_hash_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
-		       "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu "
+		       "ordered_active_wall_ns=%llu prep_active_wall_ns=%llu "
+		       "ordered_active_underflows=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu "
 		       "deadline_before_bio=%llu deadline_after_read=%llu "
 		       "deadline_worker_with_local=%llu deadline_worker_empty=%llu "
+		       "dry_close_samples=%llu dry_close_next_sum_ns=%llu "
+		       "dry_next_le10us=%llu dry_next_11_50us=%llu "
+		       "dry_next_51_200us=%llu dry_next_gt200us=%llu "
 		       "retained_read_bypasses=%llu "
 		       "close_pack_ready=%llu packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
@@ -3294,6 +3307,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->authority.reserve_blocks,
 		       ctx->gc_victims, ctx->gc_role_rotations,
 		       ctx->last_gc_victim, ctx->last_gc_destination,
+		       ctx->gc_victim_unique, ctx->gc_destination_unique,
+		       ctx->gc_victim_max_reuse, ctx->gc_destination_max_reuse,
 		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
 		       ctx->gc_selected_live_records, ctx->gc_selected_io_cost,
@@ -3375,20 +3390,33 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			       ctx->ordered_write_copy_bytes,
 		       ctx->preparation_direct_lz4_pages +
 			       ctx->ordered_direct_lz4_pages,
+		       ctx->preparation_crc_wall_ns + ctx->ordered_crc_wall_ns,
+		       ctx->preparation_crc_bytes + ctx->ordered_crc_bytes,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
 		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
 		       ctx->engine_publish_wall_ns,
+		       ctx->engine_stage_wall_ns, ctx->engine_pause_wall_ns,
+		       ctx->engine_hole_clear_wall_ns, ctx->engine_resume_wall_ns,
+		       ctx->publish_initial_validate_wall_ns,
+		       ctx->publish_phase1_wall_ns, ctx->publish_lookup_wall_ns,
+		       ctx->publish_mutation_wall_ns,
+		       ctx->publish_pause_hash_wall_ns,
+		       ctx->publish_resume_hash_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
-		       ctx->ordered_worker_cpu_ns,
-		       ctx->preparation_worker_cpu_ns,
+		       ctx->ordered_worker_active_wall_ns,
+		       ctx->preparation_worker_active_wall_ns,
+		       ctx->ordered_active_underflow_events,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
 		       ctx->deadline_before_bio, ctx->deadline_after_read,
 		       ctx->deadline_worker_with_local, ctx->deadline_worker_empty,
+		       ctx->dry_close_samples, ctx->dry_close_next_sum_ns,
+		       ctx->dry_close_next_le10us, ctx->dry_close_next_11_50us,
+		       ctx->dry_close_next_51_200us, ctx->dry_close_next_gt200us,
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_PACK_READY],
 		       ctx->packed_early_commits,
