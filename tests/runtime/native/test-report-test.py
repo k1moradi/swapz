@@ -436,6 +436,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
+        sessions[2]["arms"]["swapz"]["kernel_write_path"][
+            "window_commit_nonio_wall_ns"] = 50000000
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
         sessions[0]["kernel_status"]["after"]["accepted_burst_tail_flushes"] = 7
         sessions[0]["kernel_status"]["after"]["accepted_burst_extensions"] = 6
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
