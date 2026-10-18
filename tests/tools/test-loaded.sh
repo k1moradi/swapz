@@ -148,4 +148,14 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
+# Isolated scheduler diagnostic. cpu_trace is OFF in every performance arm
+# above; this extra SSD-like QD8 async run exists only to prove that the
+# sched_switch meter sees both workqueue callbacks at sub-tick granularity.
+printf 'START_WORKER_ONCPU_DIAGNOSTIC\n'
+"${privileged[@]}" tests/tools/benchmark-owned-pair.sh \
+    --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced \
+    --lower-mbps 80 --completion-nsec 150000 --write-only-qd 8 \
+    --async-prepare --shared-plan "$shared_plan" --cpu-trace
+printf 'PASS_WORKER_ONCPU_DIAGNOSTIC\n'
+
 printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, twenty mixed pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: mixed now has five pairs/mode; write-only remains one pair per mode/QD.'
