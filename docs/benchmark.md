@@ -412,3 +412,37 @@ remain near 520/~138, and faster mixed request/deadline behavior to improve or
 hold without increasing lower WRITE bytes or degrading packed-read tails. GC
 endurance remains unqualified until loaded testing observes nonzero victims.
 
+
+
+### Qualified accepted-wave result and CPU-local preparation successor
+
+Source `e5c172177242e3f7edcc6e470989eb3a71a43e92` passed all five
+qualification stages. On the faster RAM model, mixed QD32 async reached
+23.74 MB/s versus 19.71 MB/s sync, with 874.5 lower WRITE requests and
+2.10 ms mixed READ p99. Relative to the preceding qualified `5aeae47` run,
+async useful WRITE increased about 12%, lower WRITE requests fell about 15%,
+and worker-empty deadline closes fell from 70.2 to 60.5 per pair. The slow
+model remained effectively neutral at 7.09 MB/s async versus 7.08 sync.
+
+The accepted-wave kick therefore improved the mixed scheduling path, but the
+new overlap counters show that producer placement is still inefficient.
+Faster-model mixed recorded 70.6 ms total LZ4 wall time and 183.9 ms lower
+WRITE wall time, while only 3.8 ms of producer LZ4 was wholly contained inside
+lower-WRITE waits. Ordered preparation blocking was only 0.58 ms. This points
+to dispatch/placement latency and CPU competition rather than a producer
+completion convoy.
+
+The write-only pilot remains directional. Faster QD8 async kept 520 lower
+WRITE requests and exceeded its same-run sync control by about 18%, but the
+single absolute async point was 21.80 MB/s versus 29.75 MB/s in the preceding
+run. Because both sync and async moved and there is one pair per point, this is
+not confirmatory evidence by itself. QD1 still recorded zero producer claims.
+
+The next candidate keeps every accepted-wave ownership rule but changes the
+preparation workqueue from unbound to CPU-local `WQ_MEM_RECLAIM`. The ordered
+worker remains unbound. The intended effect is for queued preparation to run on
+the issuing CPU when synchronous lower WRITE makes the ordered kworker sleep,
+using an otherwise-idle CPU interval without immediately competing on another
+CPU. Acceptance requires more proven LZ4-in-lower-WRITE overlap while preserving
+mixed throughput/request geometry, low ordered wait time, QD1 zero producer
+claims, QD8/QD32 deep aggregation, lower-byte savings and packed-read tails.
