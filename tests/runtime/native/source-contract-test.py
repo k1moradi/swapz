@@ -766,7 +766,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "engine_pack_wall_ns", "engine_publish_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
                     "ordered_worker_wall_ns", "gc_wall_ns",
-                    "prep_crc_wall_ns", "ordered_crc_wall_ns",
+                    "ordered_crc_wall_ns",
                     "dry_pack_close_events", "dry_pack_followup_events",
                     "dry_pack_followup_sum_ns",
                     "dry_pack_followup_le10us", "dry_pack_followup_11_50us",
@@ -774,6 +774,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "dry_pack_followup_gt200us"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
+        self.assertIn("prep_crc_wall_ns=%llu", status)
+        self.assertIn("ctx->preparation_crc_wall_ns", status)
         self.assertIn("prep_worker_wall_ns=%llu", status)
         self.assertIn("ctx->preparation_worker_wall_ns", status)
         self.assertIn("engine_prehashed_records=%u", status)
