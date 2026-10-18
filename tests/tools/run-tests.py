@@ -773,7 +773,9 @@ def benchmark_verdicts(sessions):
                        any(type(record.get(field)) is not int or
                            record[field] < 0 for field in KERNEL_WRITE_FIELDS) or
                        sum(record[field] for field in WRITE_WAIT_BINS) !=
-                           record["physical_write_reqs"]
+                           record["physical_write_reqs"] or
+                       record["window_commit_nonio_wall_ns"] >
+                           record["window_commit_wall_ns"]
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
