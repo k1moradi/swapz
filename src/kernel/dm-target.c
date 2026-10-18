@@ -824,6 +824,16 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (lower_write_overlap &&
 		    atomic_read(&ctx->lower_write_active))
 			ctx->preparation_lz4_lower_write_overlap_ns += elapsed_ns;
+		prepared->payload_crc32c_valid = false;
+		if (prepared->length > 0) {
+			section_start = ktime_get_ns();
+			prepared->payload_crc32c =
+				swapz_crc32c_bytes(prepared->bytes,
+						   prepared->length);
+			ctx->preparation_crc_wall_ns +=
+				swapz_elapsed_ns(section_start, ktime_get_ns());
+			prepared->payload_crc32c_valid = true;
+		}
 		prepared->zero = prepared->length > 0 &&
 				 prepared->length <= 64 &&
 				 swapz_page_is_zero(input);
@@ -934,7 +944,10 @@ static void swapz_order_window(struct swapz_dm *ctx)
 		ctx->planned[position] = (struct swapz_compressed_page) {
 			.logical_page = ctx->batch[index].logical,
 			.payload = ctx->batch_bytes + (size_t)index * SWAPZ_BLOCK_BYTES,
+			.payload_crc32c = ctx->batch[index].payload_crc32c,
 			.length = ctx->batch[index].length,
+			.payload_crc32c_valid =
+				ctx->batch[index].payload_crc32c_valid,
 			.raw = ctx->batch[index].raw,
 		};
 	}
@@ -988,7 +1001,10 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 			.logical_page = ctx->gc_pending[index].logical,
 			.payload = ctx->gc_bytes_store +
 				(size_t)index * SWAPZ_BLOCK_BYTES,
+			.payload_crc32c = ctx->gc_pending[index].payload_crc32c,
 			.length = ctx->gc_pending[index].length,
+			.payload_crc32c_valid =
+				ctx->gc_pending[index].payload_crc32c_valid,
 		};
 	}
 }
@@ -1206,7 +1222,11 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 			(struct swapz_pending_bio) {
 				.bio = NULL,
 				.logical = logical,
+				.payload_crc32c =
+					swapz_crc32c_bytes(ctx->read_compressed,
+							   length),
 				.length = length,
+				.payload_crc32c_valid = 1,
 			};
 		if (ctx->gc_count == SWAPZ_MAX_RECORDS) {
 			error = swapz_gc_flush(ctx);
@@ -1725,6 +1745,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	void *mapped_input = NULL;
 	swapz_u8 i;
 	u64 section_start;
+	swapz_u32 payload_crc32c = 0;
+	bool payload_crc32c_valid = false;
 	bool inline_zero = false;
 	bool raw_staged_in_batch = false;
 	bool bulk_raw_eligible = ctx->engine.bulk_enabled &&
@@ -1758,6 +1780,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			return entry->preparation_error ?
 				entry->preparation_error : -EIO;
 		length = entry->prepared_page->length;
+		payload_crc32c = entry->prepared_page->payload_crc32c;
+		payload_crc32c_valid = entry->prepared_page->payload_crc32c_valid;
 		if (length > 0)
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
@@ -1786,6 +1810,16 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				ctx->lz4_workmem);
 		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start,
 						   ktime_get_ns());
+		if (length > 0) {
+			section_start = ktime_get_ns();
+			payload_crc32c = swapz_crc32c_bytes(
+				ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				(swapz_u32)length);
+			ctx->ordered_crc_wall_ns +=
+				swapz_elapsed_ns(section_start, ktime_get_ns());
+			payload_crc32c_valid = true;
+		}
 		if (length > 0 && length <= 64)
 			inline_zero = swapz_page_is_zero(input);
 		/*
@@ -1910,7 +1944,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	ctx->batch[ctx->batch_count] = (struct swapz_pending_bio) {
 		.bio = bio,
 		.logical = logical,
+		.payload_crc32c = payload_crc32c,
 		.length = (swapz_u16)length,
+		.payload_crc32c_valid = payload_crc32c_valid,
 	};
 	ctx->batch_count++;
 	/*
