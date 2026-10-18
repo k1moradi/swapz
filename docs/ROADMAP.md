@@ -8,70 +8,95 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `39e7787b784410140cf90d3fe3a08ad4d674f4f2` passed all
-five qualification stages. Direct single-bvec BIO-to-LZ4 input hit 12,301
-foreground pages in each mixed regime and reduced explicit write copying from
-22.4 ms / 59.4 MiB to 3.9 ms / 11.0 MiB on the faster model and from 32.8 ms /
-57.5 MiB to 4.7 ms / 9.1 MiB on the slower model. Faster mixed async reached
-21.22 MB/s versus 19.89 sync (+6.7%, preliminary) with 1051.5 lower WRITE
-requests and 2.69 ms READ p99. Faster write-only QD8 reached 25.50 versus
-19.84 MB/s (+28.5%) with 520 lower requests. QD1 remained producer-free.
+Owner-loaded source `d63ab97c6cb104dc99c4792c207805e97e22d233` passed all
+five qualification stages. Direct single-bvec BIO-to-LZ4 input remains a
+validated win: faster-model explicit WRITE-copy cost is about 4.0 ms / 11.0 MiB
+versus 22.4 ms / 59.4 MiB before that optimization. Faster mixed async reached
+20.87 MB/s versus 19.73 sync (+5.8%, preliminary) with 1078 lower WRITE
+requests; write-only QD8 reached 27.00 versus 19.58 MB/s (+37.9%) with 524
+lower requests. These one/two-pair performance results remain directional.
 
-This is a qualified CPU/memory-path improvement over `c6d15ca`, but it has not
-recovered the stronger historical faster-model mixed result from `e5c1721`
-(23.74 MB/s, 874.5 lower WRITE requests, 2.10 ms READ p99). Request aggregation
-and scheduling therefore remain open performance work even though the copy
-optimization itself succeeded.
+The serialized commit split is stable: faster-model non-I/O commit is 48.5 ms,
+with 5.2 ms plan, 16.5 ms pack, 18.5 ms publish and 8.4 ms residual. Explicit
+source review shows pack still scans each compressed payload for CRC before
+copying it into `bulk_scratch`, while publish independently validates the final
+`bulk_scratch` image and its payload CRCs before mapping authority changes.
 
-Commit attribution now resolves the faster-model 48.5 ms non-I/O envelope into
-5.2 ms planner, 16.4 ms pack, 18.9 ms publish and 8.0 ms residual. The slower
-model reports 6.1 / 22.3 / 21.7 / 9.4 ms respectively. Pack includes the
-batch-to-bulk payload copy plus initial payload/metadata CRC work. Publish
-includes transaction resume, SWZ3 validation/payload CRC checks and authority
-publication. Residual also includes staging, batch pause, alignment-hole clears
-and loop/control work; it must not be labeled as CRC alone without additional
-attribution.
+The attempted per-callback kernel-worker CPU metric based on
+`task_cputime_adjusted()` is rejected as a portable measurement. Short
+nonblocking preparation callbacks can complete before scheduler accounting
+commits their current slice on some kernel accounting configurations. Direct
+`current->se.sum_exec_runtime` has the same pending-slice problem, while the
+scheduler helper that explicitly includes the live slice is not an exported
+module API. Production therefore must not report either value as exact worker
+CPU.
 
-Source review found one remaining avoidable RAW bounce in the inline
-single-bvec path: an incompressible mapped page was copied to `input_page`
-before unmap and then copied again to `batch_bytes` in bulk mode. The next
-candidate stages bulk RAW directly into its batch slot once. In non-bulk mode it
-unmaps without a preliminary copy and lets `swapz_raw_write()` perform the
-single required BIO copy after older windows drain.
+The next candidate replaces that misleading metric with portable callback-active
+wall upper bounds. Ordered active wall subtracts the already measured
+synchronous lower READ/WRITE and preparation-completion waits; preparation active
+wall has no intentional sleep. These values can still include preemption, so
+they are evidence bounds rather than CPU time.
 
-The next candidate also adds scheduler-accounted task CPU time for the ordered
-and preparation workqueue callbacks using the exported
-`task_cputime_adjusted()` API. This is diagnostic task CPU time, not wall time,
-and excludes callback sleep according to scheduler CPU accounting. It avoids
-direct dependency on `current->se.sum_exec_runtime`, whose raw value can omit
-the currently executing slice.
+The same candidate safely precomputes payload CRC32C during foreground
+compression and passes it into SWZ3 packing. This removes only the source-buffer
+CRC rescan in pack. Publish still recomputes CRC over the final
+`bulk_scratch` image after lower completion, preserving the fail-closed
+copy/integrity boundary. Additional diagnostic subsets separate stage,
+batch-pause/hash, hole clear, resume/hash, initial publish validation, repeated
+lookup validation and mapping mutation.
 
-Loaded GC victims remain zero, so endurance claims are still proxy-only: lower
-bytes/requests are demonstrated, but sustained victim rotation and physical
-reuse distribution are not yet qualified.
+A diagnostic-only PACK_READY probe records the delay from a dry-close decision
+to the first later WRITE admission. It does not wait, recheck or change close
+policy. This will test whether request fragmentation is caused by microsecond
+userspace wave-submission gaps before any new credit/retention heuristic is
+introduced.
+
+Loaded GC evidence is now a mandatory owned-RAM gate in the next candidate. A
+fresh 16MiB swapz mapping on the positively identified `null_blk` lower is
+filled and then subjected to deterministic scattered overwrite pressure. The
+oracle tracks each logical page's latest generation and verifies all 4096 pages
+afterward. Qualification requires at least four completed live-victim rotations,
+nonzero relocation reads/writes, multiple victim and destination segments, and a
+nonfailed target. Per-segment victim/destination counts provide initial reuse
+distribution evidence. This is still synthetic RAM evidence, not a physical
+flash-endurance claim.
 
 ## Immediate work queue
 
-1. Qualify the inline RAW no-bounce change. Explicit write-copy bytes/time
-   should fall only to the extent RAW inline pages occur; compressed behavior,
-   request geometry and lifecycle semantics must remain unchanged.
-2. Collect ordered-worker and preparation-worker task CPU deltas in the mixed
-   path. Keep these separate from wall counters; do not add worker CPU to LZ4,
-   commit or lower-I/O elapsed time.
-3. Use the 39e7787 commit split to decide the next serialized-path experiment.
-   Publish (18.9 ms faster-model) and pack (16.4 ms) are the leading measured
-   phases. Add isolated CRC/copy attribution before removing transaction or
-   payload validation; preserve fail-closed generation and authority checks.
-4. The QD8 +28.5% directional result keeps multi-credit and N=1/2/4 producer
-   experiments alive, but do not stack them with this RAW/CPU-attribution run.
-   Kernel-worker CPU evidence comes first.
-5. Keep QD1 producer claims at zero and preserve QD8/QD32 lower-request
-   geometry near ~520/~139. Lower bytes, packed-read tails and lifecycle
-   correctness remain hard gates.
-6. After CPU/CRC attribution stabilizes, run repeated matched statistics, then
-   evaluate bounded multi-worker/NUMA locality. Separately force sustained GC
-   with nonzero victims before testing segment reuse distribution or lower
-   DISCARD/TRIM.
+1. Qualify foreground precomputed payload CRC. Acceptance requires lower pack
+   time or ordered active-wall work without weakening final-image CRC
+   verification, lower-request geometry, read tails or lifecycle correctness.
+2. Use publish sub-attribution to determine whether repeated metadata validation
+   inside `swapz_lookup()`, payload CRC itself, liveness checks or mapping
+   mutation dominate the 18-22 ms publish phase. Do not remove any fail-closed
+   check until an equivalent validated-once path is separately qualified.
+3. Use stage/pause/hash/hole/resume sub-attribution to explain the residual
+   commit bucket before changing transaction snapshot protection.
+4. Use dry-close arrival histograms to validate or refute the wave-chopping
+   hypothesis. Only if many later WRITE admissions cluster shortly after
+   PACK_READY closes should a bounded credit/retention experiment be attempted.
+5. Keep bound/CPU-local preparation and "maximize overlap" experiments rejected
+   and absent. More preparation workers remain blocked until evidence shows
+   eligible backlog rather than merely insufficient credits.
+6. Require sustained loaded GC rotations and byte-exact verification in every
+   complete qualification. After rotation/reuse distribution is stable, test
+   dead-segment DISCARD/TRIM as a separate lower-device/endurance experiment.
+7. Add statistically repeated matched mixed/QD8 trials before confirmatory
+   performance claims.
+
+## Deployment topology roadmap
+
+For one shared backing device, retain one global ordered swapz storage authority:
+one physical allocator, extent packer, mapping publisher, barrier/FUA owner and
+GC/reuse authority. Future NUMA work may use page-home preparation domains with
+node-local LZ4 work memory and prepared-page pools feeding that single authority;
+it must be tested on real multi-node hardware before becoming policy.
+
+For systems with physically node-local NVMe devices/PCIe roots, one complete
+swapz target per NUMA node and local backing device is an explicit future
+deployment topology. That arrangement can isolate both RAM and storage traffic,
+but it is a deployment/hardware experiment rather than a reason to split one
+shared device into independent authorities.
 
 ## Release gates
 
