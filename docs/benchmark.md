@@ -345,3 +345,27 @@ write-only QD8/QD32 requests near 520/~138, no reintroduced blocking waits,
 and preserved mixed lower WRITE savings/read tails. An exploratory throughput
 change alone is not grounds to claim a performance improvement; the project
 still requires repeated counterbalanced pairs and confidence intervals.
+
+
+### Rejected singular-wake suppression and rollback
+
+Source `2ad805b02da02af95eed78945338876f831e61e0` passed all five
+owner-loaded stages, so the rejection is performance/geometry based rather than
+a correctness failure. Against qualified exploratory source `6642e7e`, SSD
+mixed async useful WRITE throughput fell from 21.80 to 20.92 MB/s, lower WRITE
+requests rose from 1007 to 1091.5, worker-empty deadlines rose from 59.5 to 74,
+and one-page PACK_READY closes rose from 136 to 146. Packed sequential/random
+read p99 also moved from 4.80/5.42 ms to 5.37/5.78 ms.
+
+The write-only single-pair SSD QD8 result simultaneously fell from 26.24 to
+20.74 MB/s while request geometry remained 520. Producer work did not increase:
+QD8 recorded only 13 tail claims and zero blocking waits. This is not evidence
+that singular-head claiming should return; it shows that suppressing a
+credit-driven wake from an instantaneous queue snapshot changed useful
+scheduling without eliminating meaningful preparation work.
+
+The next source restores the `6642e7e` production wake behavior while keeping
+the producer-side singular guard that eliminated the completion convoy.
+Retention policy, LZ4/extent planning, lower-byte policy, read behavior and GC
+are otherwise unchanged. The rollback must itself pass the full official
+qualification before any new preparation-ahead policy is attempted.

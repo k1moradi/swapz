@@ -260,13 +260,13 @@ must reserve its head under `queue_lock` before publishing that credit.
 
 The map path must leave a cold idle head to the ordered worker and wake the
 producer only for active lower WRITE service or an already-earned atomic tail
-credit with at least two unclaimed preparation entries. The latter eligibility
-check must run under `queue_lock` and preserve the credit on a singular list;
-the inline-WRITE kick has the same condition. During lower WRITE, head-first
-preparation must still wake even for a singular list. `batch_count` remains
-worker-owned and must never become a map-path signal; `ordered_worker_busy`
-is not required for a credit that legitimately survives the inter-BIO gap of
-an open retained window.
+credit. Tail eligibility stays producer-owned: source coverage must forbid
+mapper-side singular-list gating and keep the producer's singular check before
+credit consumption. An inline WRITE may queue the producer whenever unclaimed
+preparation work exists; the producer is allowed to wake and reject a lone head
+without consuming its token. `batch_count` remains worker-owned and must never
+become a map-path signal; `ordered_worker_busy` is not required for a credit
+that legitimately survives the inter-BIO gap of an open retained window.
 
 For asynchronous WRITE consumption, source coverage must show
 `ordered_worker_busy=1` is published under `queue_lock` before the ordered
@@ -286,13 +286,14 @@ serialized.
 
 Loaded comparison must report producer head/tail claims plus ordered inline,
 handoff and blocking-wait counts for mixed QD32 and write-only QD1/4/8/32.
-QD1 must keep zero producer claims. The qualified anti-convoy guard yielded
-almost no write-only producer-tail work at QD4/QD8/QD32; the present scheduling
-experiment skips pointless singular wakeups rather than claiming those heads.
-It should not reduce genuine producer-tail work, regress QD8/QD32 deep-window
-aggregation, or reintroduce completion waits. Mixed QD32 must also report
-one-page PACK_READY closes so dry-tail evidence consumption can be rejected if
-it merely moves fragmentation elsewhere. The existing
+QD1 must keep zero producer claims. The rejected singular-wake suppression
+experiment showed that a wake which appears redundant from an instantaneous
+list snapshot can still affect useful scheduling before the producer runs.
+Qualification must therefore compare mixed throughput, lower WRITE requests,
+worker-empty deadlines and packed-read p99 against the qualified head-cushion
+source, while QD8/QD32 preserve deep-window aggregation and low blocking waits.
+Mixed QD32 must also report one-page PACK_READY closes so dry-tail evidence
+consumption can be rejected if it merely moves fragmentation elsewhere. The existing
 `prep_lower_write_overlap_starts` diagnostic remains meaningful, and all
 publication/completion/fail-closed invariants are unchanged.
 

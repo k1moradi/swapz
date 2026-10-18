@@ -11,54 +11,55 @@ This file contains only active work. Completed experiments and detailed historic
 Owner-loaded source `f10a1e0173f45e6daf52773d0b4a559b7df7ddb7` remains the
 accepted directional performance baseline. Source
 `6642e7ebfce3255267f51fe99b66114122bda7e0` passed all five owner-loaded
-qualification stages and is qualified exploratory evidence, not promoted.
+qualification stages and remains the preferred exploratory preparation/window
+source.
 
-The singular-head guard eliminated the `6330cb5` preparation convoy while
-preserving write-only request aggregation and improving the mixed faster model.
-Faster-model QD4/QD8/QD32 async blocking waits fell to zero, but tail
-preparations fell to only 16/14/0. QD8 retained 520 lower WRITE requests and
-QD32 retained 138, with QD1 still at zero producer claims. Faster-model
-write-only QD8 async reached 26.24 MB/s versus 19.58 sync; QD32 async reached
-46.87 MB/s versus 46.01 sync. Those one-pair results are directional only and
-do not establish a reproducible gain.
+At `6642e7e`, preserving a singular FIFO head eliminated the preparation
+convoy without damaging deep write-only aggregation. SSD-model QD8 async used
+520 lower WRITE requests and reached 26.24 MB/s against 19.58 sync; QD32 async
+used 138 requests and reached 46.87 MB/s. Those write-only numbers are
+single-pair directional evidence only. Mixed SSD async reached 21.80 MB/s with
+1007 lower WRITE requests, 26.5 preparation blocking waits, 136 one-page
+PACK_READY closes and 59.5 worker-empty deadlines. Packed read p99 was below
+raw on that faster model.
 
-Mixed faster-model async reached 21.80 MB/s with 1007 lower WRITE requests,
-26.5 preparation blocking waits, 136 one-page PACK_READY closes, 59.5
-worker-empty deadlines and packed read p99 below raw. Slow mixed remained
-7.09 MB/s async with 544.5 lower WRITE requests and 12.0 blocking waits.
-The lower-WRITE byte savings and existing read-tail limitations are still gates.
+Source `2ad805b02da02af95eed78945338876f831e61e0` also passed all five
+qualification stages but regressed the measured objective and is rejected.
+Suppressing credit-driven producer wakeups on an instantaneous singular-list
+snapshot reduced SSD mixed async to 20.92 MB/s, raised lower WRITE requests to
+1091.5, raised worker-empty deadlines to 74 and one-page PACK_READY closes to
+146. SSD QD8 async fell to 20.74 MB/s while producer claims remained sparse.
+The change therefore saved no meaningful preparation work and disturbed useful
+retained-window scheduling/coalescing.
 
-The qualified result shows that a one-entry preparation queue is too shallow
-for useful opposite-end stealing under staggered write-only admission: the
-guard eliminates harmful overlap but its repeated producer wake/return cycles
-are scheduling overhead. There is not yet evidence that another eligibility
-relaxation would improve actual throughput rather than rebuild the convoy.
-
-The loaded run again recorded zero GC victims, so no physical-media or
-endurance claim is permitted. Write-only saturation remains one pair per
-mode/QD with no confidence interval.
+Slow-model mixed lower WRITE savings remained intact in both runs, and the
+loaded run again recorded zero GC victims. No physical-media or endurance claim
+is permitted. The project must not treat the one-pair write-only variation as
+established performance.
 
 ## Immediate work queue
 
-1. Keep `6642e7e`'s singular-head producer guard, persistent credit lifetime,
-   unbound workqueue placement, retained targets, extent planning, physical
-   byte policy, read policy and GC unchanged.
-2. Suppress a producer wake in the inline-WRITE path when the protected
-   preparation list is empty or singular. Preserve that earned token for the
-   next real two-entry head/tail opportunity.
-3. Under the same `queue_lock`, wake from `->map` on retained credit only when
-   at least two unclaimed preparation entries exist. The independent active
-   lower-WRITE wake must remain unconditional on list length.
-4. Reject this scheduling-only experiment if it reduces mixed useful
-   throughput, raises backing WRITE bytes/requests, harms packed READ p99, or
-   causes QD1 producer claims or blocking waits. QD8/QD32 write-only requests
-   should remain near 520/~138; tail claims cannot be manufactured from a
-   singular FIFO head.
-5. If skipping redundant wakes proves insufficient, further write-only
-   parallelism requires an independently reviewed, bounded FIFO-preserving
-   preparation-ahead design, not the proven harmful singular-head steal.
-   Statistically repeated saturation, sustained GC, genuine lower errors and
-   kernel-worker CPU attribution remain release gates.
+1. Restore `6642e7e`'s credit-driven wake behavior exactly while retaining its
+   producer-side singular-head guard. Tail eligibility belongs in the producer,
+   immediately before credit consumption under `queue_lock`.
+2. Forbid mapper-side or inline-WRITE singular-list pre-screening. A queued
+   producer may safely wake and reject a lone head without consuming its token;
+   workqueue coalescing and a companion admission before execution are part of
+   the measured schedule.
+3. Keep persistent credit lifetime, unbound placement, dry-PACK_READY evidence
+   consumption, retained targets, extent planning, lower-byte/read policy and
+   GC unchanged for the rollback qualification.
+4. Acceptance requires the current source to recover toward the qualified
+   `6642e7e` mixed SSD result: roughly 1007 lower WRITE requests, about 60
+   worker-empty deadlines, low preparation waits and no packed-read regression.
+   QD1 must retain zero producer claims, QD8/QD32 request geometry must stay
+   near 520/~138, and lower WRITE bytes remain a hard gate.
+5. Do not add another preparation-ahead heuristic until the rollback is
+   requalified. Further overlap work needs bounded FIFO-distance evidence
+   rather than an instantaneous wake-site list snapshot.
+6. Statistically repeated saturation, sustained GC with nonzero victims,
+   genuine lower-error coverage and kernel-worker CPU attribution remain
+   release gates.
 
 ## Release gates
 
