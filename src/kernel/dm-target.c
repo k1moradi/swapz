@@ -2373,7 +2373,10 @@ static void swapz_worker(struct work_struct *work)
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	unsigned int remaining;
-	u64 cpu_start_ns = swapz_current_task_cpu_ns();
+	u64 active_start_ns = ktime_get_ns();
+	u64 lower_read_before = ctx->lower_read_wall_ns;
+	u64 lower_write_before = ctx->lower_write_wall_ns;
+	u64 prep_wait_before = ctx->preparation_ordered_wait_wall_ns;
 
 	for (;;) {
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
@@ -2512,6 +2515,13 @@ static void swapz_worker(struct work_struct *work)
 				ctx->packed_early_commits++;
 				if (ctx->accepted_burst_pack_ready)
 					ctx->accepted_burst_tail_flushes++;
+				/*
+				 * Mark the decision instant, not the end of lower I/O.
+				 * The first later WRITE admission consumes this marker.
+				 * Do not overwrite an unresolved prior sample.
+				 */
+				(void)atomic64_cmpxchg(&ctx->dry_close_pending_ns, 0,
+						      (s64)ktime_get_ns());
 				swapz_flush_window(ctx);
 			}
 			ctx->worker_has_immediate_followup = false;
@@ -2603,8 +2613,10 @@ static void swapz_worker(struct work_struct *work)
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				swapz_flush_window(ctx);
-				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
+				swapz_account_ordered_active_wall(ctx, active_start_ns,
+						 lower_read_before,
+						 lower_write_before,
+						 prep_wait_before);
 				return;
 			}
 			if (ctx->batch_count &&
@@ -2628,21 +2640,27 @@ static void swapz_worker(struct work_struct *work)
 					ctx->retain_timer_arm_skips++;
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
+				swapz_account_ordered_active_wall(ctx, active_start_ns,
+						 lower_read_before,
+						 lower_write_before,
+						 prep_wait_before);
 				return;
 			}
 			if (ctx->batch_count && !ctx->accepting) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
 				swapz_flush_window(ctx);
-				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-							cpu_start_ns);
+				swapz_account_ordered_active_wall(ctx, active_start_ns,
+						 lower_read_before,
+						 lower_write_before,
+						 prep_wait_before);
 				return;
 			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_account_ordered_active_wall(ctx, active_start_ns,
+						 lower_read_before,
+						 lower_write_before,
+						 prep_wait_before);
 			return;
 		}
 		if (ctx->accepting) {
@@ -2653,8 +2671,10 @@ static void swapz_worker(struct work_struct *work)
 			ctx->worker_requeues++;
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
-						cpu_start_ns);
+			swapz_account_ordered_active_wall(ctx, active_start_ns,
+						 lower_read_before,
+						 lower_write_before,
+						 prep_wait_before);
 			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -2717,6 +2737,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 		return DM_MAPIO_KILL;
 	}
+	if (bio_op(bio) == REQ_OP_WRITE && count)
+		swapz_record_dry_close_arrival(ctx);
 	list_add_tail(&entry->list, &ctx->incoming);
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count) {
 		/*
