@@ -105,6 +105,17 @@ struct swapz_authority {
 	 * including record identities and generations. A forged caller
 	 * snapshot can never publish an unrelated page into a batch. */
 	swapz_u32 batch_hashes[SWAPZ_MAX_RECORDS];
+
+	/*
+	 * Kernel-only wall attribution for swapz_finish(). Portable native tests
+	 * leave these at zero. payload_verify includes descriptor decode/bounds
+	 * plus the mandatory final-payload CRC; liveness covers transaction,
+	 * generation and prior-authority checks. These are diagnostics only.
+	 */
+	unsigned long long finish_metadata_validate_wall_ns;
+	unsigned long long finish_payload_verify_wall_ns;
+	unsigned long long finish_liveness_wall_ns;
+	unsigned long long finish_apply_wall_ns;
 };
 
 /*
