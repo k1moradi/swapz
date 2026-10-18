@@ -92,9 +92,13 @@ def arm(candidate, *, mode, regime):
             "lz4_wall_ns": 20000000,
             "write_copy_wall_ns": 3000000,
             "write_copy_bytes": 6000000,
+            "direct_lz4_input_pages": 3000,
             "window_sort_wall_ns": 1000000,
             "window_commit_wall_ns": 40000000,
             "window_commit_nonio_wall_ns": 10000000,
+            "engine_plan_wall_ns": 1000000,
+            "engine_pack_wall_ns": 2000000,
+            "engine_publish_wall_ns": 3000000,
             "lower_write_wall_ns": 30000000,
             "prep_wait_wall_ns": 500000,
             "prep_lower_write_overlap_ns": 5000000,
@@ -365,7 +369,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_write_copy_wall_ns"], 3000000)
         self.assertEqual(slow["columns"]["async"]["mixed_write_copy_bytes"], 6000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_direct_lz4_input_pages"], 3000)
         self.assertEqual(slow["columns"]["sync"]["mixed_window_commit_nonio_wall_ns"], 10000000)
+        self.assertEqual(slow["columns"]["sync"]["mixed_engine_plan_wall_ns"], 1000000)
+        self.assertEqual(slow["columns"]["sync"]["mixed_engine_pack_wall_ns"], 2000000)
+        self.assertEqual(slow["columns"]["sync"]["mixed_engine_publish_wall_ns"], 3000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
         self.assertEqual(
@@ -409,6 +417,11 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Packed-read C attribution", rendered)
         self.assertIn("RAM copies", rendered)
         self.assertIn("commit non-I/O", rendered)
+        self.assertIn("engine plan", rendered)
+        self.assertIn("engine pack", rendered)
+        self.assertIn("engine publish", rendered)
+        self.assertIn("engine residual", rendered)
+        self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SATURATION PILOT", rendered)
@@ -438,6 +451,11 @@ class ReportContract(unittest.TestCase):
         sessions = runner.parse_sessions(synthetic_log())
         sessions[2]["arms"]["swapz"]["kernel_write_path"][
             "window_commit_nonio_wall_ns"] = 50000000
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[2]["arms"]["swapz"]["kernel_write_path"][
+            "engine_publish_wall_ns"] = 11000000
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
