@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { PAGE = 4096, NPAGES = 128 };
+enum { PAGE = 4096, NPAGES = 128, GC_PAGES = 4096 };
 
 static void pattern(unsigned char *p, unsigned int page, unsigned int round)
 {
@@ -51,6 +51,24 @@ static void pattern(unsigned char *p, unsigned int page, unsigned int round)
 	}
 	p[PAGE - 8] = (unsigned char)page;
 	p[PAGE - 7] = (unsigned char)round;
+}
+
+static void raw_pattern(unsigned char *p, unsigned int page,
+			unsigned int round)
+{
+	uint32_t s = 0x9e3779b9U ^ (page * 2654435761U) ^
+		     (round * 2246822519U);
+	unsigned int i;
+
+	for (i = 0; i < PAGE; ++i) {
+		s ^= s << 13;
+		s ^= s >> 17;
+		s ^= s << 5;
+		p[i] = (unsigned char)(s >> 8);
+	}
+	p[PAGE - 8] = (unsigned char)page;
+	p[PAGE - 7] = (unsigned char)(page >> 8);
+	p[PAGE - 6] = (unsigned char)round;
 }
 
 static int transfer(int fd, void *buffer, unsigned int page, int write_data)
@@ -114,15 +132,53 @@ static int series(int fd, unsigned char *buf, unsigned char *expected,
 	return 0;
 }
 
+static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
+		    unsigned int rounds)
+{
+	unsigned int round, page;
+
+	if (rounds < 4)
+		return -1;
+	for (round = 0; round < rounds; ++round) {
+		for (page = 0; page < GC_PAGES; ++page) {
+			/* After the initial fill, leave one live survivor in every
+			 * original 1MiB logical stripe. Old physical segments then
+			 * remain live and must be evacuated under capacity pressure. */
+			if (round && !(page % 256U))
+				continue;
+			raw_pattern(expected, page, round);
+			if (transfer(fd, expected, page, 1))
+				return -1;
+		}
+		if (fsync(fd))
+			return -1;
+	}
+	for (page = 0; page < GC_PAGES; ++page) {
+		unsigned int expected_round =
+			(page % 256U) ? rounds - 1U : 0U;
+
+		raw_pattern(expected, page, expected_round);
+		if (transfer(fd, buf, page, 0) ||
+		    memcmp(buf, expected, PAGE)) {
+			fprintf(stderr,
+				"FAIL GC byte-exact page=%u expected_round=%u\n",
+				page, expected_round);
+			return -1;
+		}
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *prefix = "/dev/mapper/swapz-demo-";
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
-	unsigned int i, phase, count = 0, round = 0;
+	int gc_mode = 0;
+	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
-	if (argc != 2 && argc != 5) {
+	if (argc != 2 && argc != 5 && argc != 4) {
 		fprintf(stderr,
 			"Usage: device-roundtrip /dev/mapper/swapz-demo-<owned-id> [private series mode]\n");
 		return 2;
@@ -131,6 +187,16 @@ int main(int argc, char **argv)
 	    strlen(argv[1]) <= strlen(prefix)) {
 		fprintf(stderr, "FAIL refusing non-owned mapper path\n");
 		return 2;
+	}
+	if (argc == 4) {
+		if (strcmp(argv[2], "--gc-stress") ||
+		    parse_uint(argv[3], 8U, &gc_rounds) ||
+		    gc_rounds < 4U) {
+			fprintf(stderr, "FAIL invalid private GC mode\n");
+			return 2;
+		}
+		gc_mode = 1;
+		open_flags &= ~O_SYNC;
 	}
 	if (argc == 5) {
 		if (!strcmp(argv[2], "--write-series"))
@@ -162,6 +228,14 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
+	if (gc_mode) {
+		if (gc_stress(fd, buf, expected, gc_rounds))
+			goto out;
+		printf("PASS: owned swapz live-GC stress rounds=%u pages=%u\n",
+		       gc_rounds, GC_PAGES);
+		rc = 0;
+		goto out;
+	}
 	if (private_mode) {
 		if (series(fd, buf, expected, count, round, write_series))
 			goto out;
