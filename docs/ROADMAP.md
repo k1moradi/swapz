@@ -8,60 +8,61 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner-loaded source `e5c172177242e3f7edcc6e470989eb3a71a43e92` remains the
-accepted scheduling baseline. It passed all five qualification stages with the
-bounded accepted-wave preparation kick, producer-side singular-head cushion,
-one-for-one tail credits and both ordered/preparation workqueues unbound.
+Owner-loaded source `c6d15ca56753610ed21d805333a49b6a291a36cb` passed all
+five qualification stages with the accepted unbound scheduling policy and new
+kernel-C copy/non-I/O attribution. Slow-model mixed async remained effectively
+neutral versus sync at 7.12 versus 7.06 MB/s with 544 lower WRITE requests.
+Faster-model mixed async reached 21.04 MB/s versus 20.04 sync with 1027 lower
+WRITE requests and 2.38 ms READ p99. Faster write-only QD8 remained the clearest
+directional async opportunity at 23.73 versus 19.87 MB/s (+19.5%) with 524 lower
+WRITE requests; QD1 still had zero producer claims.
 
-On the faster RAM model, that baseline reached 23.74 MB/s async mixed WRITE
-versus 19.71 MB/s sync, with 874.5 lower WRITE requests, 2.10 ms mixed READ p99
-and 60.5 worker-empty deadline closes. The slow model remained neutral at
-7.09 MB/s async versus 7.08 MB/s sync. Lower-write byte savings and packed-read
-byte savings remained intact.
+The new attribution identifies two concrete write-side costs. Faster-model mixed
+spent 83.6 ms in LZ4, 22.4 ms copying 59.4 MiB explicitly in dm-target, and
+46.2 ms in write-engine commit work after subtracting synchronous lower WRITE.
+Packed-read output copying was only 1.1-1.4 ms and is not a current priority.
+Source inspection also shows that engine commit copies compressed payloads again
+into `bulk_scratch`, computes payload CRC32C while packing, then revalidates
+metadata/payload CRCs during authoritative publication. Batch pause/resume also
+hashes transaction snapshots. Those validations remain correctness barriers
+until timing proves which portion is worth redesigning.
 
-Source `e199ac5399808fbf3dcf470989eb3a71a43e92` tested CPU-local preparation.
-It increased proven LZ4-inside-lower-WRITE overlap on the faster model from
-3.8 ms to 6.4 ms and nearly eliminated ordered preparation wait, but the useful
-path regressed: async mixed WRITE fell to 20.37 MB/s, lower WRITE requests rose
-to 1055, and worker-empty deadline closes rose to 72.5. Faster write-only QD8
-also fell below its same-run sync control while request geometry stayed at 520.
-The CPU-local placement is therefore rejected and deleted from production.
+The next candidate therefore changes only two evidence-backed areas: the common
+single-segment 4KiB WRITE BIO is mapped directly for LZ4/zero scanning instead
+of first copying into an input scratch page, while multi-segment BIOs and RAW
+lifetime fallbacks retain the existing copy path; and the engine reports
+separate planner, pack and post-I/O publication wall times. No scheduling,
+extent geometry, mapping publication, lower-I/O or GC policy changes accompany
+this experiment.
 
-The next bottleneck is CPU/memory attribution, not another scheduling heuristic.
-Current C timing proves lower WRITE remains the largest wall interval and LZ4 is
-the largest explicitly timed CPU stage, but explicit BIO/scratch/batch copies,
-packing/CRC work and authority processing are not separated. The next source
-restores the accepted unbound scheduler and adds kernel-C timing/byte counters
-for explicit RAM copies plus engine processing with synchronous lower-I/O wait
-subtracted.
-
-Loaded GC victims remain zero, so endurance claims are still proxy-only: fewer
-lower bytes/requests are demonstrated, but sustained victim rotation and
-physical-block reuse distribution are not yet qualified.
+Loaded GC victims remain zero, so endurance claims are still proxy-only: lower
+bytes/requests are demonstrated, but sustained victim rotation and physical
+reuse distribution are not yet qualified.
 
 ## Immediate work queue
 
-1. Requalify the accepted unbound preparation placement with the new C
-   attribution only; do not add another scheduler heuristic in the same run.
-2. Measure WRITE explicit-copy wall time/bytes, READ output-copy wall time/bytes,
-   write-engine commit non-I/O time and read-engine non-I/O time. Keep LZ4,
-   lower-I/O and preparation-wait counters as independent controls.
-3. If explicit copy time is material, optimize the common single-4KiB-BIO path
-   by feeding LZ4 directly from a mapped BIO page and/or decompressing directly
-   into the mapped read BIO, retaining the existing copy path as the fragmented
-   BIO fallback. Do not pin producer buffers across window commit merely to
-   avoid one memcpy unless bounded-pool pressure is separately proven safe.
-4. If commit non-I/O dominates instead, profile the SWZ3 build path as a coarse
-   phase before changing CRC, packing or authority logic. Preserve byte-exact
-   format, ordering and fail-closed publication.
-5. Keep QD1 producer claims at zero and preserve faster-model mixed behavior
-   near the accepted 23.74 MB/s / ~875-request / ~60.5-worker-empty result.
-   Preserve QD8/QD32 request geometry near 520/~139. Lower-write bytes and
-   packed-read tails remain hard gates.
-6. After scheduling and CPU/memory attribution stabilize, add kernel-worker CPU
-   attribution, statistically repeated matched performance, sustained GC with
-   nonzero victims and explicit segment-reuse/wear-distribution evidence, plus
-   genuine lower-error coverage.
+1. Qualify direct single-bvec WRITE input. It should reduce
+   `write_copy_wall_ns`/bytes while preserving LZ4 results, lower WRITE
+   geometry, useful throughput and all fail-closed behavior. Report direct-input
+   page hits so a no-effect run can be distinguished from a missed fast path.
+2. Split `window_commit_nonio_wall_ns` into engine planner, pack and publish
+   phases. Planner measures bounded extent selection; pack measures
+   begin/append/seal including the payload copy and first CRC; publish measures
+   batch resume plus finish/revalidation/mapping publication after lower I/O.
+   Their sum must not exceed total commit non-I/O time; the residual remains
+   stage/pause/allocation/hole-clear/loop overhead.
+3. Do not remove payload/metadata revalidation or precompute-and-trust CRCs until
+   the new phase counters prove publish/CRC cost is material and a replacement
+   preserves exactly the same fail-closed authority checks.
+4. Do not add multi-credit or multi-worker scheduling in this run. The QD8
+   directional gain makes those ideas worth revisiting later, but first isolate
+   copy/commit effects from scheduling effects.
+5. Keep QD1 producer claims at zero and preserve QD8/QD32 request geometry near
+   ~520/~139. Lower-write bytes, packed-read tails and lifecycle correctness
+   remain hard gates.
+6. After copy/commit attribution stabilizes, add kernel-worker CPU attribution,
+   then evaluate N=1/2/4 preparation workers, NUMA locality, sustained GC with
+   nonzero victims, segment-reuse distribution and safe lower discard/TRIM.
 
 ## Release gates
 
