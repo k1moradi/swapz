@@ -1036,7 +1036,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->retained_wave_interrupted", flush)
         evidence_reset = flush[flush.rindex("if (!ctx->retain_ms"):
                                flush.rindex("return 0;")]
-        self.assertIn("!ctx->worker_has_immediate_followup", evidence_reset)
+        self.assertIn("packed_close && !ctx->worker_has_immediate_followup",
+                      evidence_reset)
+        self.assertIn("close_reason == SWAPZ_CLOSE_DUPLICATE", evidence_reset)
         self.assertIn("ctx->retained_window_read_bypasses = 0", evidence_reset)
         self.assertIn("ctx->retained_wave_interrupted = false", evidence_reset)
         self.assertIn("swapz_refresh_accepted_followup(ctx)", process)

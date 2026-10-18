@@ -298,9 +298,9 @@ head-of-line collision, not useful opposite-end overlap.
 Faster mixed async also used 1155 lower WRITE requests and recorded 160.2 mean
 one-page PACK_READY closes, compared with materially lower request counts in
 earlier qualified runs. The next candidate consumes retained read/fence evidence
-after a real nonempty dry-tail close so one serviced interruption cannot
-authorize repeated later singleton closes. The zero-count flush path remains
-unchanged.
+after a dry PACK_READY close so one serviced interruption cannot authorize
+repeated later singleton closes. DUPLICATE/FULL continuation and the zero-count
+flush path remain unchanged.
 
 The next comparison keeps the unbound ordered worker, persistent credit,
 retained targets, extent planner, read cap and GC policy fixed. Outside lower

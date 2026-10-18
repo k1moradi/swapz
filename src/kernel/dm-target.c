@@ -1379,17 +1379,23 @@ accounted:
 		ctx->pack_close_pending_tail_sample = false;
 	}
 	/*
-	 * Carry read/fence service only while already-accepted followers remain
-	 * in this retained worker burst. A real nonempty close at a refreshed dry
-	 * tail consumes that evidence; otherwise one read/fence could fragment
-	 * later windows in the same worker pass into repeated singleton closes.
-	 * Empty flushes returned above and therefore do not erase this evidence.
+	 * Carry read/fence service across intermediate retained work, but consume
+	 * it when PACK_READY closes a refreshed dry tail. That close has already
+	 * used the finite wave-tail exception; carrying it farther would fragment
+	 * later windows into repeated singleton PACK_READY closes.
+	 *
+	 * DUPLICATE/FULL are different: they flush an older batch while the
+	 * current WRITE itself continues into the next batch, so no-followup does
+	 * not mean the retained wave is dry there. Empty flushes returned above
+	 * also preserve the existing evidence semantics.
 	 */
 	if (!ctx->retain_ms || hard_boundary ||
-	    !ctx->worker_has_immediate_followup) {
+	    (packed_close && !ctx->worker_has_immediate_followup)) {
 		ctx->retained_window_read_bypasses = 0;
 		ctx->retained_wave_interrupted = false;
-	} else if (interrupted_close) {
+	} else if (interrupted_close &&
+		   (ctx->worker_has_immediate_followup ||
+		    close_reason == SWAPZ_CLOSE_DUPLICATE)) {
 		ctx->retained_wave_interrupted = true;
 	}
 	return 0;

@@ -319,10 +319,11 @@ QD32 wave to a transient short prefix.
 An empty `swapz_flush_window()` call is not a committed window and must not
 erase retained-chain/tail evidence for ordinary READ/zero processing. Real
 ordering barriers still terminate that scheduling evidence. Successful
-retained READ/fence service may carry only while already-accepted followers
-remain in the same worker burst. A real nonempty close at a refreshed dry tail
-consumes that finite evidence so it cannot fragment later windows into repeated
-singleton PACK_READY closes.
+retained READ/fence service may carry across intermediate retained work, but a
+PACK_READY close at a refreshed dry tail consumes that finite evidence so it
+cannot fragment later windows into repeated singleton PACK_READY closes.
+DUPLICATE/FULL closes are not dry-tail evidence consumers because the current
+WRITE itself continues after flushing the older batch.
 
 A serviced useful pack may close on a refreshed dry worker tail. A sub-pack
 1..3-record residue may do so only after successful retained READ service or a

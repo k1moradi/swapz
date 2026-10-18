@@ -47,9 +47,9 @@ endurance claim is permitted.
 3. Preserve the credit when the producer rejects a singular queue so the next
    admitted companion can create an eligible two-entry head/tail split.
 4. Consume `retained_window_read_bypasses` and
-   `retained_wave_interrupted` after a real nonempty close at a refreshed dry
-   tail. Keep the existing zero-count early return so empty READ/ZERO processing
-   cannot erase retained evidence prematurely.
+   `retained_wave_interrupted` after a PACK_READY close at a refreshed dry
+   tail. Preserve DUPLICATE/FULL continuation semantics and the existing
+   zero-count early return.
 5. Acceptance requires QD1 producer claims to remain zero, QD8/QD32 lower
    requests to stay near 520/~138, producer-tail work to remain substantial,
    and blocking waits to fall sharply below handoffs. Faster mixed async lower

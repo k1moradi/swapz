@@ -239,8 +239,10 @@ pack is forbidden. Source coverage must also prove the zero-count flush return
 precedes retained-state clearing, normal and independent retained READs refresh
 accepted followers after synchronous service, and tiny dry-residue closure is
 gated by read/fence evidence rather than a prior packed chain alone. After a
-real nonempty close with no already-accepted follower, that read/fence evidence
+PACK_READY close with no already-accepted follower, that read/fence evidence
 must be consumed so it cannot authorize another dry-tail singleton close.
+Source coverage must preserve DUPLICATE continuation semantics because the
+current WRITE continues after that older batch is flushed.
 
 Loaded qualification must compare write-only QD8/QD32 window histograms and
 lower requests against the last deep-aggregation result, and mixed QD32
