@@ -172,6 +172,8 @@ class PublicMakeContract(unittest.TestCase):
                         "engine_pack_wall_ns": 2000000,
                         "engine_publish_wall_ns": 3000000,
                         "lower_write_wall_ns": 30000000,
+                        "ordered_worker_cpu_ns": 12000000,
+                        "prep_worker_cpu_ns": 4000000,
                         "prep_wait_wall_ns": 500000,
                         "prep_lower_write_overlap_ns": 5000000,
                         "windows": 4,
