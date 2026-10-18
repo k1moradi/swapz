@@ -62,12 +62,14 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_two_block_skips")
 KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "window_sort_wall_ns", "window_commit_wall_ns",
-                       "lower_write_wall_ns", "windows",
+                       "lower_write_wall_ns", "prep_wait_wall_ns",
+                       "prep_lower_write_overlap_ns", "windows",
                        "write_wait_le1ms", "write_wait_1to4ms",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 PREPARATION_FIELDS = (
+    "prep_lower_write_overlap_starts", "prep_wave_kicks",
     "prep_producer_head_claims", "prep_producer_tail_claims",
     "prep_ordered_inline", "prep_ordered_handoffs", "prep_ordered_waits")
 SATURATION_WINDOW_FIELDS = (
@@ -870,169 +872,187 @@ def benchmark_verdicts(sessions):
     }
 
 
+def print_table(headers, rows):
+    """Print a compact Markdown-style console table."""
+    text_rows = [[str(value) for value in row] for row in rows]
+    widths = [
+        max(len(str(headers[index])),
+            *(len(row[index]) for row in text_rows))
+        for index in range(len(headers))
+    ]
+    print("  | " + " | ".join(
+        f"{header:<{widths[index]}}"
+        for index, header in enumerate(headers)) + " |")
+    print("  | " + " | ".join("-" * width for width in widths) + " |")
+    for row in text_rows:
+        print("  | " + " | ".join(
+            f"{value:<{widths[index]}}"
+            for index, value in enumerate(row)) + " |")
+
+
 def print_bench(result):
     verdict = result["benchmarks"]["verdicts"]
     if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
         print("  Benchmark matrix: NOT QUALIFIED "
               f"({verdict.get('reason', verdict.get('overall', 'NOT_RUN'))})")
         return
+
     for regime in MODEL_ORDER:
         data = verdict["regimes"][regime]
         columns = data["columns"]
         cfg = data["device_model"]
-        print(f"\n  {regime.upper()} QD32 — raw vs sync vs async (two pairs/mode)")
-        print(f"  MODEL: RAM null_blk cap={cfg['cap_mib_s']} MiB/s, "
-              f"irqmode={cfg['irqmode']}, "
-              f"completion delay={cfg['completion_nsec']} ns")
-        print(f"  SCOPE: {data['interpretation']}")
-        print(f"  {'Metric':<37} {'Raw off':>12} {'swapz sync':>12} {'swapz async':>12}")
-        print("  " + "-" * 76)
-        for title, key in [
-            ("Useful WRITE throughput (MB/s)", "input_write_mbps"),
-            ("Backing WRITE throughput (MB/s)", "output_lower_write_mbps"),
-            ("Logical/backing WRITE ratio (x)", "write_input_per_lower_byte"),
-            ("Backing WRITE requests", "lower_write_requests"),
-            ("Mixed READ throughput (MB/s)", "swap_in_read_mbps"),
-            ("Mixed READ p99 (ms)", "swap_in_read_p99_ms"),
-            ("Verified 4MiB sequential READ (s)", "sequential_4mib_s"),
-            ("Verified 4MiB random READ (s)", "seeded_random_4mib_s"),
-            ("Packed sequential READ p99 (ms)", "sequential_read_p99_ms"),
-            ("Packed random READ p99 (ms)", "seeded_random_read_p99_ms"),
-            ("4MiB sequential lower READ (bytes)", "sequential_lower_read_bytes"),
-            ("4MiB random lower READ (bytes)", "seeded_random_lower_read_bytes"),
-            ("4MiB sequential lower READ requests", "sequential_lower_read_requests"),
-            ("4MiB random lower READ requests", "seeded_random_lower_read_requests"),
-            ("Replay process CPU user (s)", "mixed_replay_cpu_user_s"),
-            ("Replay process CPU system (s)", "mixed_replay_cpu_system_s"),
-            ("Replay process peak RSS (KiB)", "mixed_replay_peak_rss_kb"),
-        ]:
-            fields = []
-            for mode in COLUMNS:
-                val = columns[mode].get(key)
-                fields.append(f"{val:.2f}" if val is not None else "n/a")
-            print(f"  {title:<37} {fields[0]:>12} {fields[1]:>12} {fields[2]:>12}")
-        for read_mode, label in (("sequential", "sequential"),
-                                 ("seeded_random", "random")):
-            sync = columns["sync"]
-            asynchronous = columns["async"]
-            print(f"  Timed 4MiB {label} swapz READ calls (sync/async): "
-                  f"metadata={sync[f'{read_mode}_read_meta_reqs']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_meta_reqs']:.1f}, "
-                  f"payload={sync[f'{read_mode}_read_payload_reqs']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_payload_reqs']:.1f}, "
-                  f"metadata reused={sync[f'{read_mode}_read_meta_cache_hits']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_meta_cache_hits']:.1f}, "
-                  f"LRU64 reused={sync[f'{read_mode}_read_meta_lru_hits']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_meta_lru_hits']:.1f}, "
-                  f"full 8KiB fetch={sync[f'{read_mode}_read_full_extent_reqs']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_full_extent_reqs']:.1f}, "
-                  f"full reuse={sync[f'{read_mode}_read_full_cache_hits']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_full_cache_hits']:.1f}, "
-                  f"4KiB second-block skips={sync[f'{read_mode}_read_two_block_skips']:.1f}/"
-                  f"{asynchronous[f'{read_mode}_read_two_block_skips']:.1f}")
-        sync, asynchronous = columns["sync"], columns["async"]
-        print("  Timed mixed swapz C WRITE (sync/async; overlapping wall ns): "
-              f"LZ4={sync['mixed_lz4_wall_ns']/1e9:.2f}/"
-              f"{asynchronous['mixed_lz4_wall_ns']/1e9:.2f}s, "
-              f"commit={sync['mixed_window_commit_wall_ns']/1e9:.2f}/"
-              f"{asynchronous['mixed_window_commit_wall_ns']/1e9:.2f}s, "
-              f"lower wait={sync['mixed_lower_write_wall_ns']/1e9:.2f}/"
-              f"{asynchronous['mixed_lower_write_wall_ns']/1e9:.2f}s")
-        print("  Completed lower WRITE wait bins (sync/async; <=1ms / 1–4ms / >4ms): "
-              + ", ".join(
-                  f"{sync[f'mixed_{field}']:.1f}/"
-                  f"{asynchronous[f'mixed_{field}']:.1f}"
-                  for field in WRITE_WAIT_BINS))
-        for mode in ("sync", "async"):
-            crit = data["criteria"][mode]
-            print(f"  {mode.upper():<6} vs raw: WRITE={crit['throughput_vs_raw']}, "
-                  f"lower WRITE savings={crit['lower_write_savings']}, "
-                  f"packed 4MiB read={crit['packed_4mib_sequential']}")
-        print(f"  ASYNC vs SYNC: "
-              f"{data['criteria']['async_vs_sync']['write_throughput']}")
+        asynchronous = columns["async"]
         prep = data["preparation_counters"]
-        print("  Async preparation per-pair mean: "
-              f"producer head={prep['prep_producer_head_claims']:.1f}, "
-              f"tail={prep['prep_producer_tail_claims']:.1f}, "
-              f"ordered inline={prep['prep_ordered_inline']:.1f}, "
-              f"handoffs={prep['prep_ordered_handoffs']:.1f}, "
-              f"blocking waits={prep['prep_ordered_waits']:.1f}")
-        kc = data["kernel_counters"]
-        print(f"  Packed-window per-pair mean: deferred first packs="
-              f"{kc['single_pack_deferrals']:.1f}, "
-              f"accepted-burst extensions={kc['accepted_burst_extensions']:.1f}, "
-              f"accepted-burst tail closes={kc['accepted_burst_tail_flushes']:.1f}, "
-              f"read-capped accepted windows={kc['accepted_burst_read_caps']:.1f}, "
-              f"early pack closes={kc['close_pack_ready']:.1f}, "
-              f"one-page windows={kc['one_page_windows']:.1f}, "
-              f"GC victims={kc['gc_victims']:.1f}")
-        closes = ", ".join(
-            f"{label}={kc[field]:.1f}"
-            for field, label in CLOSE_REASON_LABELS if kc[field])
-        print("  All-window close reasons per-pair mean: " + (closes or "none"))
-        win1 = ", ".join(
-            f"{label}={kc[field]:.1f}"
-            for field, label in ONE_PAGE_CLOSE_LABELS if kc[field])
-        print("  One-page close reasons per-pair mean: " + (win1 or "none"))
-        deadline = ", ".join(
-            f"{label}={kc[field]:.1f}"
-            for field, label in DEADLINE_CONTEXT_LABELS if kc[field])
-        print("  Deadline closure contexts per-pair mean: " +
-              (deadline or "none"))
+        counters = data["kernel_counters"]
+
+        print(f"\n  {regime.upper()} QD32 mixed — synthetic RAM model "
+              f"{cfg['cap_mib_s']} MiB/s, {cfg['completion_nsec']} ns")
+        print("  Throughput MB/s; p99 ms. Sync stays as the scheduling control.")
+        print_table(
+            ("mode", "W", "lower W", "W req", "R", "R p99"),
+            [
+                (mode,
+                 f"{columns[mode]['input_write_mbps']:.2f}",
+                 f"{columns[mode]['output_lower_write_mbps']:.2f}",
+                 f"{columns[mode]['lower_write_requests']:.1f}",
+                 f"{columns[mode]['swap_in_read_mbps']:.2f}",
+                 f"{columns[mode]['swap_in_read_p99_ms']:.2f}")
+                for mode in COLUMNS
+            ])
+
+        print("  Verified 4MiB packed reads — detailed cache counters remain in JSON.")
+        read_rows = []
+        for label, read_mode in (("seq", "sequential"),
+                                 ("rnd", "seeded_random")):
+            for mode in ("off", "async"):
+                read_rows.append((
+                    f"{label}-{mode}",
+                    f"{columns[mode][f'{read_mode}_lower_read_bytes'] / 1024:.0f}",
+                    f"{columns[mode][f'{read_mode}_lower_read_requests']:.1f}",
+                    f"{columns[mode][f'{read_mode}_read_p99_ms']:.2f}",
+                ))
+        print_table(("read", "lower KiB", "req", "p99"), read_rows)
+
+        print("  Async pipeline — per-pair wall counters overlap; do not add rows.")
+        print_table(
+            ("stage", "busy ms", "overlap/stall ms"),
+            [
+                ("LZ4",
+                 f"{asynchronous['mixed_lz4_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_prep_lower_write_overlap_ns'] / 1e6:.1f} IO"),
+                ("lower WRITE",
+                 f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
+                ("window commit",
+                 f"{asynchronous['mixed_window_commit_wall_ns'] / 1e6:.1f}", "-"),
+                ("scheduling", "-",
+                 f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
+            ])
+        print_table(
+            ("async signal", "mean"),
+            [
+                ("wave kicks", f"{prep['prep_wave_kicks']:.1f}"),
+                ("lower-IO prep starts",
+                 f"{prep['prep_lower_write_overlap_starts']:.1f}"),
+                ("producer head/tail",
+                 f"{prep['prep_producer_head_claims']:.1f}/"
+                 f"{prep['prep_producer_tail_claims']:.1f}"),
+                ("inline/handoff/wait",
+                 f"{prep['prep_ordered_inline']:.1f}/"
+                 f"{prep['prep_ordered_handoffs']:.1f}/"
+                 f"{prep['prep_ordered_waits']:.1f}"),
+                ("worker-empty deadlines",
+                 f"{counters['deadline_worker_empty']:.1f}"),
+                ("one-page pack/deadline",
+                 f"{counters['win1_pack_ready']:.1f}/"
+                 f"{counters['win1_deadline']:.1f}"),
+                ("GC victims", f"{counters['gc_victims']:.1f}"),
+            ])
+        async_criteria = data["criteria"]["async"]
+        print("  Verdict: async/raw="
+              f"{async_criteria['throughput_vs_raw']}; async/sync="
+              f"{data['criteria']['async_vs_sync']['write_throughput']}; "
+              f"lower WRITE savings={async_criteria['lower_write_savings']}; "
+              f"packed read={async_criteria['packed_4mib_sequential']}.")
+
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":
-        print("\n  Loaded lifecycle: "
-              f"RAW={loaded['raw_pages']}, zero={loaded['zero_pages']}, "
-              f"flushes={loaded['flush_calls']}; retain="
-              f"{loaded['suspend_retain_ms']}ms retained window observed open "
-              f"before suspend/resume; verified "
-              f"{loaded['suspend_verified_pages']} pages; retained synthetic "
-              "WRITE/FLUSH faults failed closed.")
+        print("\n  Lifecycle")
+        print_table(
+            ("check", "result"),
+            [
+                ("RAW/zero pages",
+                 f"{loaded['raw_pages']}/{loaded['zero_pages']}"),
+                ("flushes", loaded["flush_calls"]),
+                ("suspend/resume",
+                 f"retain {loaded['suspend_retain_ms']} ms; "
+                 f"{loaded['suspend_verified_pages']} pages verified"),
+                ("fault injection", "retained WRITE/FLUSH failed closed"),
+            ])
 
-    print("\n  LIMITATIONS: timer-delayed RAM models are synthetic; no physical-media claim. "
-          "Two pairs per mode, no confidence interval; replay CPU"
-          " excludes kernel workers; 4MiB RAM read is NOT cold SSD swap-in; "
-          "live GC NOT EXERCISED.")
+    print("\n  LIMITATIONS: synthetic RAM models; two mixed pairs/mode and one "
+          "write-only pair/QD; no confidence interval; replay CPU excludes "
+          "kernel workers; 4MiB reads are not cold physical swap-in; live GC "
+          "not exercised. Full telemetry: build/test_results.json.xz.")
 
     saturation = result["benchmarks"].get("write_saturation", {})
     if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT":
-        print("\n  WRITE-ONLY SATURATION PILOT — one pair per mode/QD; NOT confirmatory")
+        print("\n  WRITE-ONLY SATURATION PILOT — directional only")
         for regime in MODEL_ORDER:
             cfg = MODEL_SPECS[regime]
-            print(f"  {regime.upper()} cap={cfg['cap_mib_s']} MiB/s "
-                  f"completion={cfg['completion_nsec']} ns")
-            print("  QD  mode    raw MB/s    swapz MB/s   swapz/raw  logical/lower  "
-                  "raw reqs  swapz reqs  raw p99ms  swapz p99ms")
-            for point in saturation["regimes"][regime]:
-                print(f"  {point['qd']:>2}  {point['mode']:<5} "
-                      f"{point['raw_write_mbps']:>10.2f} "
-                      f"{point['swapz_write_mbps']:>10.2f} "
-                      f"{point['swapz_to_raw_write_ratio']:>8.3f} "
-                      f"{point['swapz_logical_to_lower_ratio']:>14.3f} "
-                      f"{point['raw_lower_write_requests']:>9.0f} "
-                      f"{point['swapz_lower_write_requests']:>8.0f} "
-                      f"{point['raw_write_p99_ms']:>10.2f} "
-                      f"{point['swapz_write_p99_ms']:>9.2f}")
-            for point in saturation["regimes"][regime]:
-                wd = point["window_delta"]
-                print(
-                    f"      QD{point['qd']} {point['mode']} windows: "
-                    f"1={wd['win1']} 2={wd['win2']} 3-4={wd['win3_4']} "
-                    f"5-8={wd['win5_8']} 9-16={wd['win9_16']} "
-                    f"17-64={wd['win17_64']} close(pack/deadline/idle)="
-                    f"{wd['close_pack_ready']}/{wd['close_deadline']}/"
-                    f"{wd['close_idle']} target={point['retained_burst_target']}")
-                if point["mode"] == "async":
-                    prep = point["preparation_delta"]
-                    print(
-                        "        async prep: "
-                        f"producer head={prep['prep_producer_head_claims']} "
-                        f"tail={prep['prep_producer_tail_claims']} "
-                        f"ordered inline={prep['prep_ordered_inline']} "
-                        f"handoffs={prep['prep_ordered_handoffs']} "
-                        f"blocking waits={prep['prep_ordered_waits']}")
-        print("  PILOT LIMITATION: one pair per mode/QD; no confidence interval "
-              "and no confirmatory performance verdict.")
+            points = saturation["regimes"][regime]
+            by_qd = {}
+            for point in points:
+                by_qd.setdefault(point["qd"], {})[point["mode"]] = point
+
+            print(f"\n  {regime.upper()} — {cfg['cap_mib_s']} MiB/s, "
+                  f"{cfg['completion_nsec']} ns")
+            throughput_rows = []
+            prep_rows = []
+            window_rows = []
+            for qd in (1, 4, 8, 32):
+                sync = by_qd[qd]["sync"]
+                asynchronous_point = by_qd[qd]["async"]
+                gain = (asynchronous_point["swapz_write_mbps"] /
+                        sync["swapz_write_mbps"] - 1.0) * 100.0
+                throughput_rows.append((
+                    qd,
+                    f"{asynchronous_point['raw_write_mbps']:.2f}",
+                    f"{sync['swapz_write_mbps']:.2f}",
+                    f"{asynchronous_point['swapz_write_mbps']:.2f}",
+                    f"{gain:+.1f}%",
+                    f"{asynchronous_point['swapz_lower_write_requests']:.0f}",
+                ))
+                preparation = asynchronous_point["preparation_delta"]
+                prep_rows.append((
+                    qd,
+                    preparation["prep_wave_kicks"],
+                    f"{preparation['prep_producer_head_claims']}/"
+                    f"{preparation['prep_producer_tail_claims']}",
+                    preparation["prep_ordered_inline"],
+                    f"{preparation['prep_ordered_handoffs']}/"
+                    f"{preparation['prep_ordered_waits']}",
+                ))
+                windows = asynchronous_point["window_delta"]
+                window_rows.append((
+                    qd,
+                    asynchronous_point["retained_burst_target"],
+                    windows["win1"],
+                    windows["win3_4"],
+                    windows["win5_8"],
+                    windows["win17_64"],
+                    f"{windows['close_pack_ready']}/"
+                    f"{windows['close_deadline']}/"
+                    f"{windows['close_idle']}",
+                ))
+            print_table(("QD", "raw", "sync", "async", "A/S", "A req"),
+                        throughput_rows)
+            print("  Async preparation")
+            print_table(("QD", "wave", "head/tail", "inline", "hand/wait"),
+                        prep_rows)
+            print("  Async windows; close=P/D/I")
+            print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
+                        window_rows)
+        print("  PILOT LIMITATION: one pair per point; no confirmatory verdict.")
     else:
         print("\n  Write-only saturation pilot: NOT QUALIFIED "
               f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")
