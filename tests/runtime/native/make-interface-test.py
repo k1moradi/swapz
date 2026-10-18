@@ -165,6 +165,8 @@ class PublicMakeContract(unittest.TestCase):
                         "window_sort_wall_ns": 1000000,
                         "window_commit_wall_ns": 40000000,
                         "lower_write_wall_ns": 30000000,
+                        "prep_wait_wall_ns": 500000,
+                        "prep_lower_write_overlap_ns": 5000000,
                         "windows": 4,
                         "write_wait_le1ms": 2,
                         "write_wait_1to4ms": 2,
@@ -262,8 +264,8 @@ class PublicMakeContract(unittest.TestCase):
                         f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                         "REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first",
                         f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq}",
-                        "SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0",
-                        f"SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims={2 if mode else 0} prep_producer_tail_claims={3 if mode else 0} prep_ordered_inline={4 if mode else 0} prep_ordered_handoffs={3 if mode else 0} prep_ordered_waits={1 if mode else 0}",
+                        "SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 burst_tail_flushes=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 accepted_burst_cap_extra_blocks=0 accepted_burst_cap_extra_gt1_windows=0 accepted_burst_four_extents_avoided=0 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=0 accepted_burst_cap3_recovered_blocks=0 accepted_burst_cap3_full_recovery_windows=0 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0 prep_lower_write_overlap_starts=0 prep_wave_kicks=0",
+                        f"SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 burst_tail_flushes=7 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 accepted_burst_cap_extra_blocks=4 accepted_burst_cap_extra_gt1_windows=1 accepted_burst_four_extents_avoided=8 accepted_burst_plan_stats_failures=0 accepted_burst_cap3_pareto_candidates=1 accepted_burst_cap3_recovered_blocks=2 accepted_burst_cap3_full_recovery_windows=1 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims={2 if mode else 0} prep_producer_tail_claims={3 if mode else 0} prep_ordered_inline={4 if mode else 0} prep_ordered_handoffs={3 if mode else 0} prep_ordered_waits={1 if mode else 0} prep_lower_write_overlap_starts={42 if mode else 0} prep_wave_kicks={5 if mode else 0}",
                         mock_arm("swapz") if i % 2 else mock_arm("off"),
                         mock_arm("off") if i % 2 else mock_arm("swapz"),
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
@@ -284,7 +286,8 @@ class PublicMakeContract(unittest.TestCase):
                             "close_pack_ready=0 retained_burst_target=4 "
                             "prep_producer_head_claims=0 prep_producer_tail_claims=0 "
                             "prep_ordered_inline=0 prep_ordered_handoffs=0 "
-                            "prep_ordered_waits=0",
+                            "prep_ordered_waits=0 prep_lower_write_overlap_starts=0 "
+                            "prep_wave_kicks=0",
                             "SWAPZ_STATUS_AFTER=windows=20 one_page_windows=4 "
                             "win1=4 win2=0 win3_4=8 win5_8=8 win9_16=0 "
                             "win17_64=0 close_idle=4 close_deadline=2 "
@@ -293,7 +296,9 @@ class PublicMakeContract(unittest.TestCase):
                             f"prep_producer_tail_claims={3 if mode else 0} "
                             f"prep_ordered_inline={4 if mode else 0} "
                             f"prep_ordered_handoffs={3 if mode else 0} "
-                            f"prep_ordered_waits={1 if mode else 0}",
+                            f"prep_ordered_waits={1 if mode else 0} "
+                            f"prep_lower_write_overlap_starts={42 if mode else 0} "
+                            f"prep_wave_kicks={5 if mode else 0}",
                             mock_write_arm("swapz", qd) if index % 2 else mock_write_arm("off", qd),
                             mock_write_arm("off", qd) if index % 2 else mock_write_arm("swapz", qd),
                             f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
