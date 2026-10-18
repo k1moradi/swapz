@@ -970,7 +970,7 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
-        print("  Async pipeline — wall counters may overlap; do not add rows.")
+        print("  Async pipeline — timings overlap; CPU rows are task CPU, not wall.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
             [
