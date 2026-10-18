@@ -547,6 +547,8 @@ def kernel_write_delta(before, after):
         raise ValueError("swapz write telemetry reset during measurement")
     if sum(counters[key] for key in WRITE_WAIT_BINS) != counters["physical_write_reqs"]:
         raise ValueError("inconsistent swapz lower write wait histogram")
+    if counters["window_commit_nonio_wall_ns"] > counters["window_commit_wall_ns"]:
+        raise ValueError("inconsistent swapz non-I/O commit timing")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
