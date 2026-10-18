@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DM = (ROOT / "src/kernel/dm-target.c").read_text()
 ENGINE = (ROOT / "src/kernel/engine.c").read_text()
 AUTH = (ROOT / "src/kernel/authority.c").read_text()
+CODEC = (ROOT / "src/kernel/codec.c").read_text()
 MK = (ROOT / "src/kernel/Makefile").read_text()
 README = (ROOT / "docs/README.md").read_text()
 
@@ -52,6 +53,13 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_codec_append_rejects_invalid_length_before_payload_hash(self):
+        append = source_body("swapz_append", CODEC)
+        guard = append.index("length > SWAPZ_MAX_COMPRESSED")
+        payload_hash = append.index("swapz_crc32c_bytes(payload, length)")
+        self.assertLess(guard, payload_hash)
+        self.assertIn("!payload || !length", append)
+
     def test_separate_target_and_release_metadata(self):
         self.assertRegex(DM, r'\.name\s*=\s*"swapz"')
         self.assertRegex(DM, r'MODULE_ALIAS\("dm-swapz"\)')

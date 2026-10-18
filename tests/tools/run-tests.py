@@ -302,11 +302,11 @@ def failure_context(output, *, loaded=True, default_phase=None):
     else:
         # A deliberately small allowlist preserves actionable errors without
         # exposing paths, UUIDs, usernames, raw JSON or system swap entries.
+        # Replay helpers may emit a detailed BLOCKED/FAIL line before a generic
+        # shell epilogue, so preserve the detailed marker regardless of order.
         reason = None
         for line in reversed(output.splitlines()):
             candidate = line.strip()
-            if candidate == "FAIL: test exit 1; safe teardown attempted":
-                continue
             if candidate.startswith("BLOCKED/FAIL: "):
                 msg = candidate.partition(": ")[2]
                 msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
@@ -315,6 +315,10 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 msg = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?", msg)
                 reason = f"FAIL: {msg[:155]}"
                 break
+        for line in reversed(output.splitlines()) if reason is None else ():
+            candidate = line.strip()
+            if candidate == "FAIL: test exit 1; safe teardown attempted":
+                continue
             if candidate.startswith(("BLOCKED: ", "FAIL: ")):
                 msg = candidate.partition(": ")[2]
                 msg = re.sub(r"(?<![A-Za-z0-9])/[^\s'\"<>]+", "[path]", msg)
@@ -341,8 +345,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 reason = "Operation exceeded its bounded timeout"
                 break
         if reason is None:
-            reason = (("Child returned nonzero; inspect the latest local owned-device "
-                       "diagnostic session under build/") if loaded else
+            reason = (("Child returned nonzero without a sanitized loaded diagnostic marker")
+                      if loaded else
                       "Child returned nonzero in this non-privileged stage")
     return phase, reason
 

@@ -458,3 +458,14 @@ verify the payload CRC over the final `bulk_scratch` bytes. Likewise,
 subsequent descriptors without repeating that global validation, but every
 record still requires final payload CRC, generation, liveness and transaction
 checks before any mapping is published.
+
+
+### Codec input validation before payload inspection
+
+Public codec append entry points must reject null/zero/oversized payload
+descriptions before hashing or copying caller memory. In particular,
+`swapz_append()` must validate `length <= SWAPZ_MAX_COMPRESSED` before
+calling the payload CRC helper; an invalid length is not permission to read
+that many bytes from the caller. The prehashed append path retains the same
+authoritative mutation-time validation. Sanitizer qualification plus a
+source-order contract pins this fail-before-read rule.
