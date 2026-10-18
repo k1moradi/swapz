@@ -993,6 +993,10 @@ def print_bench(result):
                  "-"),
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
+                ("ordered CPU",
+                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f}", "-"),
+                ("prep CPU",
+                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f}", "-"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
