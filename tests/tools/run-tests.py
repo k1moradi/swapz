@@ -3,6 +3,7 @@
 import argparse
 import json
 import lzma
+import math
 import os
 import re
 from pathlib import Path
@@ -600,111 +601,217 @@ def parse_write_saturation(output):
     return sessions
 
 
+def paired_gain_ci95(rows):
+    """Conservative 95% t interval for >=5 matched swapz/control pairs."""
+    values = [
+        row["arms"]["swapz"]["input_write_mbps"] /
+        row["arms"]["off"]["input_write_mbps"] - 1.0
+        for row in rows
+    ]
+    if len(values) < 5:
+        return None
+    center = statistics.mean(values)
+    # t(0.975, df=4). Using the minimum-sample critical value remains
+    # conservative if a future run contributes more than five pairs.
+    half_width = 2.7764451051977987 * statistics.stdev(values) / math.sqrt(
+        len(values))
+    return {
+        "n": len(values),
+        "mean": center,
+        "low": center - half_width,
+        "high": center + half_width,
+    }
+
+
 def write_saturation_verdict(sessions):
-    """Validate the one-pair-per-point pilot without claiming confidence."""
-    expected_shape = [(qd, mode) for qd in (1, 4, 8, 32) for mode in (0, 1)]
+    """Validate directional controls plus five-pair confirmatory QD8 samples."""
+    expected_count = {1: 1, 4: 1, 8: 5, 32: 1}
     regimes = {}
     for regime in MODEL_ORDER:
         rows = [row for row in sessions if row.get("regime") == regime]
-        shape = [(row.get("qd"), row.get("async_prepare")) for row in rows]
-        if shape != expected_shape:
-            return {"overall": "INCOMPLETE",
-                    "reason": f"{regime}: QD1/4/8/32 sync+async pilot required"}
         expected = MODEL_SPECS[regime]
-        for index, row in enumerate(rows):
-            if row.get("status") != "PASS" or set(row.get("arms", {})) != {"off", "swapz"}:
-                return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: incomplete write-only pair"}
-            provenance_error = paired_provenance_error(row, f"{regime}: write-only")
-            if provenance_error is not None:
-                return provenance_error
-            if row.get("order") != ("swapz-first" if index % 2 else "off-first"):
-                return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: write-only replay order mismatch"}
-            model = row.get("device_model")
-            if not isinstance(model, dict) or any(
-                    model.get(key) != expected[key]
-                    for key in ("cap_mib_s", "completion_nsec", "irqmode")):
-                return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: write-only device model mismatch"}
-            status = row.get("kernel_status", {})
-            before = status.get("before", {})
-            after = status.get("after", {})
-            if (any(type(before.get(field)) is not int or
-                    type(after.get(field)) is not int or
-                    after[field] < before[field]
-                    for field in SATURATION_WINDOW_FIELDS + PREPARATION_FIELDS) or
-                    type(after.get("retained_burst_target")) is not int or
-                    not 1 <= after["retained_burst_target"] <= 64):
-                return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: write-only window attribution missing"}
-            row["window_delta"] = {
-                field: after[field] - before[field]
-                for field in SATURATION_WINDOW_FIELDS
-            }
-            row["preparation_delta"] = {
-                field: after[field] - before[field]
-                for field in PREPARATION_FIELDS
-            }
-            row["retained_burst_target"] = after["retained_burst_target"]
-            for arm in row["arms"].values():
-                required = ("input_write_mbps", "output_lower_write_mbps",
+        for qd in (1, 4, 8, 32):
+            for mode in (0, 1):
+                samples = [
+                    row for row in rows
+                    if row.get("qd") == qd and
+                    row.get("async_prepare") == mode
+                ]
+                if len(samples) != expected_count[qd]:
+                    return {
+                        "overall": "INCOMPLETE",
+                        "reason": (
+                            f"{regime}: QD{qd} mode {mode} requires "
+                            f"{expected_count[qd]} matched pair(s)")
+                    }
+                for repeat, row in enumerate(samples):
+                    if row.get("status") != "PASS" or                             set(row.get("arms", {})) != {"off", "swapz"}:
+                        return {"overall": "INCOMPLETE",
+                                "reason": f"{regime}: incomplete write-only pair"}
+                    provenance_error = paired_provenance_error(
+                        row, f"{regime}: write-only")
+                    if provenance_error is not None:
+                        return provenance_error
+                    expected_order = (
+                        "swapz-first" if (repeat + mode) % 2 else "off-first")
+                    if row.get("order") != expected_order:
+                        return {
+                            "overall": "INCOMPLETE",
+                            "reason": (
+                                f"{regime}: QD{qd} mode {mode} "
+                                "write-only replay order mismatch")
+                        }
+                    model = row.get("device_model")
+                    if not isinstance(model, dict) or any(
+                            model.get(key) != expected[key]
+                            for key in ("cap_mib_s", "completion_nsec",
+                                        "irqmode")):
+                        return {"overall": "INCOMPLETE",
+                                "reason": f"{regime}: write-only device model mismatch"}
+                    status = row.get("kernel_status", {})
+                    before = status.get("before", {})
+                    after = status.get("after", {})
+                    if (any(type(before.get(field)) is not int or
+                            type(after.get(field)) is not int or
+                            after[field] < before[field]
+                            for field in SATURATION_WINDOW_FIELDS +
+                            PREPARATION_FIELDS) or
+                            type(after.get("retained_burst_target")) is not int or
+                            not 1 <= after["retained_burst_target"] <= 64):
+                        return {
+                            "overall": "INCOMPLETE",
+                            "reason": (
+                                f"{regime}: write-only window attribution missing")
+                        }
+                    row["window_delta"] = {
+                        field: after[field] - before[field]
+                        for field in SATURATION_WINDOW_FIELDS
+                    }
+                    row["preparation_delta"] = {
+                        field: after[field] - before[field]
+                        for field in PREPARATION_FIELDS
+                    }
+                    row["retained_burst_target"] = after[
+                        "retained_burst_target"]
+                    for arm in row["arms"].values():
+                        required = (
+                            "input_write_mbps", "output_lower_write_mbps",
                             "logical_write_bytes", "logical_read_bytes",
                             "lower_write_bytes", "lower_write_requests",
                             "write_p99_ms", "seconds")
-                if any(not isinstance(arm.get(key), (int, float)) for key in required):
-                    return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: write-only metrics missing"}
-                if arm["logical_read_bytes"] != 0:
-                    return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: write-only trace contained logical reads"}
-                if arm["logical_write_bytes"] <= 0 or arm["lower_write_bytes"] <= 0:
-                    return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: write-only byte accounting invalid"}
-            if not re.fullmatch(r"[0-9a-f]{40}", row.get("source_sha", "")):
-                return {"overall": "INCONCLUSIVE",
-                        "reason": f"{regime}: write-only source SHA unavailable"}
+                        if any(not isinstance(arm.get(key), (int, float))
+                               for key in required):
+                            return {
+                                "overall": "INCOMPLETE",
+                                "reason": f"{regime}: write-only metrics missing"}
+                        if arm["logical_read_bytes"] != 0:
+                            return {
+                                "overall": "INCOMPLETE",
+                                "reason": (
+                                    f"{regime}: write-only trace contained "
+                                    "logical reads")
+                            }
+                        if (arm["logical_write_bytes"] <= 0 or
+                                arm["lower_write_bytes"] <= 0):
+                            return {
+                                "overall": "INCOMPLETE",
+                                "reason": (
+                                    f"{regime}: write-only byte accounting invalid")
+                            }
+                    if not re.fullmatch(
+                            r"[0-9a-f]{40}", row.get("source_sha", "")):
+                        return {
+                            "overall": "INCONCLUSIVE",
+                            "reason": (
+                                f"{regime}: write-only source SHA unavailable")
+                        }
         regimes[regime] = rows
-    if len(sessions) != len(MODEL_ORDER) * 8:
-        return {"overall": "INCOMPLETE",
-                "reason": "exactly sixteen write-only pilot pairs required"}
-    if len({row["source_sha"] for row in sessions}) != 1 or \
-            len({row.get("fixture_sha256") for row in sessions}) != 1:
+
+    expected_total = len(MODEL_ORDER) * 16
+    if len(sessions) != expected_total:
+        return {
+            "overall": "INCOMPLETE",
+            "reason": f"exactly {expected_total} write-only pairs required"
+        }
+    if len({row["source_sha"] for row in sessions}) != 1 or             len({row.get("fixture_sha256") for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
-                "reason": "write-only source/fixture differs across pilot"}
+                "reason": "write-only source/fixture differs across matrix"}
     for regime, rows in regimes.items():
         for qd in (1, 4, 8, 32):
             traces = {row.get("trace_sha256") for row in rows if row["qd"] == qd}
             if None in traces or len(traces) != 1:
                 return {"overall": "INCONCLUSIVE",
                         "reason": f"{regime}: QD{qd} write-only trace mismatch"}
+
+    aggregated = {}
+    qd8_confidence = {}
+    for regime, rows in regimes.items():
+        points = []
+        qd8_confidence[regime] = {}
+        for qd in (1, 4, 8, 32):
+            for mode_value, mode_name in ((0, "sync"), (1, "async")):
+                samples = [
+                    row for row in rows
+                    if row["qd"] == qd and
+                    row["async_prepare"] == mode_value
+                ]
+                point = {
+                    "qd": qd,
+                    "mode": mode_name,
+                    "pairs": len(samples),
+                    "raw_write_mbps": statistics.mean(
+                        row["arms"]["off"]["input_write_mbps"]
+                        for row in samples),
+                    "swapz_write_mbps": statistics.mean(
+                        row["arms"]["swapz"]["input_write_mbps"]
+                        for row in samples),
+                    "swapz_to_raw_write_ratio": statistics.mean(
+                        row["arms"]["swapz"]["input_write_mbps"] /
+                        row["arms"]["off"]["input_write_mbps"]
+                        for row in samples),
+                    "swapz_logical_to_lower_ratio": statistics.mean(
+                        row["arms"]["swapz"]["logical_write_bytes"] /
+                        row["arms"]["swapz"]["lower_write_bytes"]
+                        for row in samples),
+                    "raw_lower_write_requests": statistics.mean(
+                        row["arms"]["off"]["lower_write_requests"]
+                        for row in samples),
+                    "swapz_lower_write_requests": statistics.mean(
+                        row["arms"]["swapz"]["lower_write_requests"]
+                        for row in samples),
+                    "raw_write_p99_ms": statistics.mean(
+                        row["arms"]["off"]["write_p99_ms"] for row in samples),
+                    "swapz_write_p99_ms": statistics.mean(
+                        row["arms"]["swapz"]["write_p99_ms"]
+                        for row in samples),
+                    "window_delta": {
+                        field: statistics.mean(
+                            row["window_delta"][field] for row in samples)
+                        for field in SATURATION_WINDOW_FIELDS
+                    },
+                    "preparation_delta": {
+                        field: statistics.mean(
+                            row["preparation_delta"][field] for row in samples)
+                        for field in PREPARATION_FIELDS
+                    },
+                    "retained_burst_target": statistics.mean(
+                        row["retained_burst_target"] for row in samples),
+                }
+                confidence = paired_gain_ci95(samples)
+                if confidence is not None:
+                    point["swapz_to_raw_gain_ci95"] = confidence
+                    qd8_confidence[regime][mode_name] = confidence
+                points.append(point)
+        aggregated[regime] = points
+
     return {
-        "overall": "PASS_WRITE_SATURATION_PILOT",
-        "pairs_per_mode_qd": 1,
-        "confidence": "NOT_ESTABLISHED_ONE_PAIR_PER_MODE_QD",
-        "regimes": {
-            regime: [{
-                "qd": row["qd"],
-                "mode": "async" if row["async_prepare"] else "sync",
-                "raw_write_mbps": row["arms"]["off"]["input_write_mbps"],
-                "swapz_write_mbps": row["arms"]["swapz"]["input_write_mbps"],
-                "swapz_to_raw_write_ratio": (
-                    row["arms"]["swapz"]["input_write_mbps"] /
-                    row["arms"]["off"]["input_write_mbps"]),
-                "swapz_logical_to_lower_ratio": (
-                    row["arms"]["swapz"]["logical_write_bytes"] /
-                    row["arms"]["swapz"]["lower_write_bytes"]),
-                "raw_lower_write_requests": row["arms"]["off"]["lower_write_requests"],
-                "swapz_lower_write_requests": row["arms"]["swapz"]["lower_write_requests"],
-                "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
-                "swapz_write_p99_ms": row["arms"]["swapz"]["write_p99_ms"],
-                "window_delta": row["window_delta"],
-                "preparation_delta": row["preparation_delta"],
-                "retained_burst_target": row["retained_burst_target"],
-            } for row in rows]
-            for regime, rows in regimes.items()
-        },
-        "interpretation": "SYNTHETIC_RAM_QD_DIRECTION_ONLY_NOT_CONFIRMATORY",
+        "overall": "PASS_WRITE_SATURATION_MATRIX",
+        "pairs_per_mode_qd": {1: 1, 4: 1, 8: 5, 32: 1},
+        "confidence": "QD8_HAS_FIVE_MATCHED_PAIRS_WITH_CONSERVATIVE_95PCT_T_CI",
+        "qd8_confidence": qd8_confidence,
+        "regimes": aggregated,
+        "interpretation": (
+            "SYNTHETIC_RAM_QD8_CONFIRMATORY_SAMPLE_OTHER_QD_DIRECTIONAL"),
     }
 
 def mean(items, key):
@@ -713,17 +820,21 @@ def mean(items, key):
 
 
 def benchmark_verdicts(sessions):
-    """Validate 8 loaded sessions; keep capped/uncapped conclusions separate."""
+    """Validate five matched pairs per sync/async mode and report confidence."""
+    mode_sequence = [0, 1, 1, 0, 0, 1, 1, 0, 0, 1]
     regimes = {}
     for regime in MODEL_ORDER:
         rows = [s for s in sessions if s.get("regime") == regime]
-        if len(rows) != 4 or [s.get("async_prepare") for s in rows] != [0, 1, 1, 0] \
-                or any(s.get("status") != "PASS" or
-                       set(s.get("arms", {})) != {"off", "swapz"} or
-                       s.get("order") != ("swapz-first" if i % 2 else "off-first")
-                       for i, s in enumerate(rows)):
+        if len(rows) != len(mode_sequence) or \
+                [s.get("async_prepare") for s in rows] != mode_sequence or \
+                any(s.get("status") != "PASS" or
+                    set(s.get("arms", {})) != {"off", "swapz"} or
+                    s.get("order") != ("swapz-first" if i % 2 else "off-first")
+                    for i, s in enumerate(rows)):
             return {"overall": "INCOMPLETE",
-                    "reason": f"{regime}: four valid ABBA/ABAB pairs required"}
+                    "reason": (
+                        f"{regime}: five counterbalanced matched pairs "
+                        "per sync/async mode required")}
         expected = MODEL_SPECS[regime]
         for row in rows:
             actual = row.get("device_model")
@@ -736,8 +847,11 @@ def benchmark_verdicts(sessions):
             if provenance_error is not None:
                 return provenance_error
         regimes[regime] = rows
-    if len(sessions) != len(MODEL_ORDER) * 4:
-        return {"overall": "INCOMPLETE", "reason": "exactly eight modeled RAM-only pairs required"}
+    if len(sessions) != len(MODEL_ORDER) * 10:
+        return {
+            "overall": "INCOMPLETE",
+            "reason": "exactly twenty modeled RAM-only matched pairs required"
+        }
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
         status = row.get("kernel_status", {})
@@ -820,6 +934,21 @@ def benchmark_verdicts(sessions):
                             "engine_publish_wall_ns")) >
                            record["window_commit_nonio_wall_ns"] or
                        sum(record[field] for field in
+                           ("engine_stage_wall_ns",
+                            "engine_hole_clear_wall_ns",
+                            "engine_batch_pause_wall_ns")) >
+                           record["window_commit_nonio_wall_ns"] -
+                           sum(record[field] for field in
+                               ("engine_plan_wall_ns", "engine_pack_wall_ns",
+                                "engine_publish_wall_ns")) or
+                       record["engine_batch_resume_wall_ns"] +
+                           sum(record[field] for field in
+                               ("publish_metadata_validate_wall_ns",
+                                "publish_payload_verify_wall_ns",
+                                "publish_liveness_wall_ns",
+                                "publish_apply_wall_ns")) >
+                           record["engine_publish_wall_ns"] or
+                       sum(record[field] for field in
                            ("dry_pack_followup_le10us",
                             "dry_pack_followup_11_50us",
                             "dry_pack_followup_51_200us",
@@ -874,13 +1003,19 @@ def benchmark_verdicts(sessions):
             change = [(s["arms"]["swapz"]["input_write_mbps"] /
                        s["arms"]["off"]["input_write_mbps"] - 1)
                       for s in paired]
-            def decision(vals):
-                return ("MATERIAL_GAIN_PRELIMINARY" if all(v >= .05 for v in vals)
-                        else "MATERIAL_LOSS_PRELIMINARY" if all(v <= -.05 for v in vals)
-                        else "NO_ESTABLISHED_GAIN")
+            confidence = paired_gain_ci95(paired)
+            def decision(interval):
+                if interval is None:
+                    return "INSUFFICIENT_MATCHED_PAIRS"
+                if interval["low"] >= .05:
+                    return "MATERIAL_GAIN_CONFIRMED_95PCT_CI"
+                if interval["high"] <= -.05:
+                    return "MATERIAL_LOSS_CONFIRMED_95PCT_CI"
+                return "NO_ESTABLISHED_MATERIAL_GAIN"
             criteria[mode] = {
-                "throughput_vs_raw": decision(change),
+                "throughput_vs_raw": decision(confidence),
                 "paired_write_gain_fraction": change,
+                "paired_write_gain_ci95": confidence,
                 "lower_write_saved_fraction": (
                     1 - columns[mode]["lower_write_bytes"] / raw["lower_write_bytes"]),
                 "lower_write_savings": (
@@ -905,7 +1040,9 @@ def benchmark_verdicts(sessions):
                 "PRELIMINARY_5PCT_GAIN" if delta >= .05 else
                 "PRELIMINARY_5PCT_LOSS" if delta <= -.05 else
                 "NO_SIGNIFICANT_ASYNC_GAIN"),
-            "caution": "Only two observations per mode; no confidence interval",
+            "caution": (
+                "Descriptive async/sync mean only; confirmation is based on "
+                "five matched swapz/raw pairs within each mode"),
         }
         verdicts[regime] = {
             "columns": columns, "criteria": criteria,
@@ -934,7 +1071,9 @@ def benchmark_verdicts(sessions):
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
         "cpu_scope": "replay userspace CPU only; kernel callback wall is not CPU time",
         "physical_media": "NOT_TESTED",
-        "statistical_confidence": "EXPLORATORY: two pairs per mode/regime, materiality 5%, no CI",
+        "statistical_confidence": (
+            "CONFIRMATORY_SAMPLE: five matched pairs per mode/regime; "
+            "conservative 95% t CI on paired swapz/raw throughput gain"),
         "real_swap_device": "NOT_AUTHORIZED_NOT_TESTED",
     }
 
