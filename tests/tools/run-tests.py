@@ -961,7 +961,7 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
-        print("  Async pipeline — wall counters overlap only where labeled.")
+        print("  Async pipeline — wall counters may overlap; do not add rows.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
             [
