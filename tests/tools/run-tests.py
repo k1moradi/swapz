@@ -147,6 +147,13 @@ def parse_loaded_correctness(output):
         "flush_fault": re.compile(
             r"PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:(\d+) "
             r"injected:(\d+) data_write_reached_lower:(\d+)$"),
+        "gc": re.compile(
+            r"PASS_LOADED_GC_PRESSURE=victims:(\d+) rotations:(\d+) "
+            r"pages:(\d+) read_bytes:(\d+) write_bytes:(\d+) "
+            r"victim_unique:(\d+) destination_unique:(\d+) "
+            r"victim_max:(\d+) destination_max:(\d+)$"),
+        "worker_cpu": re.compile(
+            r"PASS_WORKER_ONCPU_TRACE=ordered_ns:(\d+) prep_ns:(\d+)$"),
     }
     found = {}
     for line in output.splitlines():
@@ -164,6 +171,10 @@ def parse_loaded_correctness(output):
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
+    (gc_victims, gc_rotations, gc_pages, gc_read_bytes, gc_write_bytes,
+     gc_victim_unique, gc_destination_unique, gc_victim_max,
+     gc_destination_max) = found["gc"]
+    ordered_oncpu_ns, prep_oncpu_ns = found["worker_cpu"]
     if raw_pages != 64 or zero_pages != 9 or flush_calls < 2:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded RAW/zero/flush oracle counters are inconsistent"}
@@ -176,6 +187,14 @@ def parse_loaded_correctness(output):
     if flush_retain != 2 or flush_injected != 1 or flush_data_lower != 1:
         return {"overall": "INCOMPLETE",
                 "reason": "synthetic retained FLUSH fault contract failed"}
+    if (gc_victims <= 0 or gc_rotations != gc_victims or gc_pages <= 0 or
+            gc_read_bytes <= 0 or gc_write_bytes <= 0 or
+            gc_victim_unique <= 0 or gc_destination_unique <= 0):
+        return {"overall": "INCOMPLETE",
+                "reason": "copying GC pressure evidence is incomplete"}
+    if ordered_oncpu_ns <= 0 or prep_oncpu_ns <= 0:
+        return {"overall": "INCOMPLETE",
+                "reason": "sched-switch worker on-CPU evidence is incomplete"}
     return {
         "overall": "PASS",
         "raw_pages": raw_pages,
@@ -186,7 +205,18 @@ def parse_loaded_correctness(output):
         "suspend_verified_pages": verified_pages,
         "retained_write_fault": "PRE_SUBMISSION_EIO_ZERO_LOWER_WRITE",
         "retained_flush_fault": "PRE_SUBMISSION_FLUSH_EIO_AFTER_DATA_WRITE",
-        "scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_ONLY",
+        "gc_victims": gc_victims,
+        "gc_rotations": gc_rotations,
+        "gc_pages": gc_pages,
+        "gc_read_bytes": gc_read_bytes,
+        "gc_write_bytes": gc_write_bytes,
+        "gc_victim_unique": gc_victim_unique,
+        "gc_destination_unique": gc_destination_unique,
+        "gc_victim_max_hits": gc_victim_max,
+        "gc_destination_max_hits": gc_destination_max,
+        "ordered_worker_oncpu_ns": ordered_oncpu_ns,
+        "prep_worker_oncpu_ns": prep_oncpu_ns,
+        "scope": "OWNED_RAM_NULL_BLK_SYNTHETIC_FAILURE_AND_GC_ONLY",
     }
 
 
@@ -238,6 +268,10 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 phase = "owned RAM retained synthetic WRITE fault"
             elif line.startswith("START_LOADED_RETAINED_FLUSH_FAULT"):
                 phase = "owned RAM retained synthetic FLUSH fault"
+            elif line.startswith("START_LOADED_GC_PRESSURE"):
+                phase = "owned RAM sustained copying GC pressure"
+            elif line.startswith("START_WORKER_ONCPU_DIAGNOSTIC"):
+                phase = "isolated worker on-CPU scheduler diagnostic"
             elif line.startswith("PASS_LOADED_OWNED_NULLBLK_SMOKE"):
                 phase = "shared fixture allocation and workload generation"
             elif line.startswith("START_OWNED_RAM_REGIME="):
@@ -1107,6 +1141,13 @@ def print_bench(result):
                  f"retain {loaded['suspend_retain_ms']} ms; "
                  f"{loaded['suspend_verified_pages']} pages verified"),
                 ("fault injection", "retained WRITE/FLUSH failed closed"),
+                ("GC pressure",
+                 f"{loaded['gc_victims']} victims; "
+                 f"{loaded['gc_victim_unique']}/{loaded['gc_destination_unique']} "
+                 "unique victim/dest"),
+                ("worker on-CPU",
+                 f"{loaded['ordered_worker_oncpu_ns'] / 1e6:.1f}/"
+                 f"{loaded['prep_worker_oncpu_ns'] / 1e6:.1f} ms ordered/prep"),
             ])
 
     print("\n  Limitations")
@@ -1118,7 +1159,7 @@ def print_bench(result):
             ("write-only", "one pair/QD; directional only"),
             ("CPU", "replay CPU; worker on-CPU trace is separate diagnostic"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
-            ("GC", "live victims not exercised"),
+            ("GC", "owned partial-live pressure exercised; physical media still not"),
             ("Full telemetry", "build/test_results.json.xz"),
         ])
 
