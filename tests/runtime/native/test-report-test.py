@@ -503,6 +503,14 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
+    def test_rootless_unittest_failure_names_safe_test(self):
+        phase, reason = runner.failure_context(
+            "FAIL: test_fixture_schema (__main__.Contract.test_fixture_schema)\n"
+            "AssertionError\n",
+            loaded=False, default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertEqual(reason, "Unit test failed: test_fixture_schema")
+
     def test_exit_two_is_fail_before_loaded_stage_and_blocked_only_when_marked(self):
         with tempfile.TemporaryDirectory(prefix="report-", dir=ROOT / "build/tests") as name:
             original_root, original_report = runner.ROOT, runner.REPORT
