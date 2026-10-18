@@ -552,6 +552,11 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz lower write wait histogram")
     if counters["window_commit_nonio_wall_ns"] > counters["window_commit_wall_ns"]:
         raise ValueError("inconsistent swapz non-I/O commit timing")
+    measured_engine = sum(counters[key] for key in
+                          ("engine_plan_wall_ns", "engine_pack_wall_ns",
+                           "engine_publish_wall_ns"))
+    if measured_engine > counters["window_commit_nonio_wall_ns"]:
+        raise ValueError("inconsistent swapz engine phase timing")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
