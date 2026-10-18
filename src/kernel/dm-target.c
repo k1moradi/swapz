@@ -2774,13 +2774,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			goto fail;
 		}
 		/*
-		 * Keep preparation CPU-local to the ordered worker which queued it.
-		 * The common useful slot is synchronous lower WRITE sleep: a bound
-		 * worker can run on that CPU once the ordered kworker blocks, avoiding
-		 * cross-CPU cache/scheduler competition before the I/O wait begins.
-		 * One work_struct plus normal workqueue non-reentrance keeps the
-		 * producer single-execution system-wide; WQ_MEM_RECLAIM preserves
-		 * forward progress under memory pressure.
+		 * Keep each preparation dispatch CPU-local to its queueing context.
+		 * In the key lower-WRITE wake, that context is the ordered worker:
+		 * once it sleeps in synchronous dm_io(), the bound worker can use the
+		 * same CPU instead of immediately competing on another CPU. Map-side
+		 * credit wakes remain local to their submitting CPU. One work_struct
+		 * plus normal workqueue non-reentrance keeps producer execution
+		 * single system-wide; WQ_MEM_RECLAIM preserves reclaim progress.
 		 */
 		ctx->preparation_workqueue = alloc_workqueue(
 					"swapz-lz4", WQ_MEM_RECLAIM, 1);
