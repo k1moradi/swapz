@@ -795,7 +795,29 @@ def benchmark_verdicts(sessions):
                        sum(record[field] for field in
                            ("engine_plan_wall_ns", "engine_pack_wall_ns",
                             "engine_publish_wall_ns")) >
-                           record["window_commit_nonio_wall_ns"]
+                           record["window_commit_nonio_wall_ns"] or
+                       any(record[field] > record["window_commit_nonio_wall_ns"]
+                           for field in ("engine_stage_wall_ns",
+                                         "engine_pause_wall_ns",
+                                         "engine_hole_clear_wall_ns")) or
+                       record["engine_resume_wall_ns"] >
+                           record["engine_publish_wall_ns"] or
+                       (record["publish_initial_validate_wall_ns"] +
+                        record["publish_phase1_wall_ns"] +
+                        record["publish_mutation_wall_ns"] +
+                        record["engine_resume_wall_ns"]) >
+                           record["engine_publish_wall_ns"] or
+                       record["publish_lookup_wall_ns"] >
+                           record["publish_phase1_wall_ns"] or
+                       record["batch_pause_hash_wall_ns"] >
+                           record["engine_pause_wall_ns"] or
+                       record["batch_resume_hash_wall_ns"] >
+                           record["engine_resume_wall_ns"] or
+                       sum(record[field] for field in
+                           ("dry_next_le10us", "dry_next_11_50us",
+                            "dry_next_51_200us", "dry_next_gt200us")) !=
+                           record["dry_close_samples"] or
+                       record["ordered_active_underflows"] != 0
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
