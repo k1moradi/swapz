@@ -166,7 +166,7 @@ def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
-           "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 last:11->29 verified_pages:4096",
+           "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 dead_reuses:3 last:11->29 verified_pages:4096",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
@@ -272,6 +272,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["raw_pages"], 64)
         self.assertEqual(loaded["gc_victims"], 12)
         self.assertEqual(loaded["gc_rotations"], 12)
+        self.assertEqual(loaded["gc_dead_segment_reuses"], 3)
         self.assertEqual(loaded["gc_verified_pages"], 4096)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
         self.assertEqual(loaded["suspend_observed_open"], 1)
@@ -281,7 +282,7 @@ class ReportContract(unittest.TestCase):
         missing_gc = synthetic_log().replace(
             "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 "
             "read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 "
-            "last:11->29 verified_pages:4096\n", "")
+            "dead_reuses:3 last:11->29 verified_pages:4096\n", "")
         self.assertEqual(runner.parse_loaded_correctness(missing_gc)["overall"],
                          "INCOMPLETE")
 
