@@ -513,8 +513,13 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "direct_lz4_input_pages",
                        "window_sort_wall_ns", "window_commit_wall_ns",
                        "window_commit_nonio_wall_ns",
-                       "engine_plan_wall_ns", "engine_pack_wall_ns",
+                       "engine_plan_wall_ns", "engine_stage_wall_ns",
+                       "engine_pack_wall_ns", "engine_hole_clear_wall_ns",
+                       "engine_batch_pause_wall_ns", "engine_batch_resume_wall_ns",
                        "engine_publish_wall_ns", "engine_prehashed_records",
+                       "publish_metadata_validate_wall_ns",
+                       "publish_payload_verify_wall_ns",
+                       "publish_liveness_wall_ns", "publish_apply_wall_ns",
                        "prep_crc_wall_ns", "ordered_crc_wall_ns",
                        "lower_write_wall_ns",
                        "ordered_worker_wall_ns", "prep_worker_wall_ns",
@@ -564,6 +569,20 @@ def kernel_write_delta(before, after):
                            "engine_publish_wall_ns"))
     if measured_engine > counters["window_commit_nonio_wall_ns"]:
         raise ValueError("inconsistent swapz engine phase timing")
+    measured_residual = counters["window_commit_nonio_wall_ns"] - measured_engine
+    attributed_residual = sum(counters[key] for key in
+                              ("engine_stage_wall_ns",
+                               "engine_hole_clear_wall_ns",
+                               "engine_batch_pause_wall_ns"))
+    if attributed_residual > measured_residual:
+        raise ValueError("inconsistent swapz engine residual timing")
+    attributed_publish = counters["engine_batch_resume_wall_ns"] + sum(
+        counters[key] for key in
+        ("publish_metadata_validate_wall_ns",
+         "publish_payload_verify_wall_ns",
+         "publish_liveness_wall_ns", "publish_apply_wall_ns"))
+    if attributed_publish > counters["engine_publish_wall_ns"]:
+        raise ValueError("inconsistent swapz publish subphase timing")
     dry_bins = sum(counters[key] for key in
                    ("dry_pack_followup_le10us",
                     "dry_pack_followup_11_50us",
