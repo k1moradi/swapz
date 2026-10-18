@@ -176,15 +176,16 @@ healthy product arm. Benchmark diagnostics and errors use the product name
 
 The retained suspend/resume oracle gates on observing an open retained window,
 successful suspend/resume, a nonfailed target, and byte-exact verification of
-all accepted pages. Its status sampler starts before the private writer and
-polls without an added sleep so adaptive singleton fast-close cannot hide the
-initial full-retention opportunity behind userspace process-start latency. It
-must still observe `retain_timer_arms > windows`; historical timer activity is
-not a substitute for an actually open window. The maximum supported 4ms
-deadline can legitimately expire between that observation and the separate
-suspend request, so the oracle must not require a specific close-reason counter
-afterwards. Loaded failure reporting skips the generic cleanup epilogue so the
-preceding specific sanitized failure remains visible.
+all accepted pages. The bounded private writer starts first; the status sampler
+then polls without an added sleep for exactly as long as that writer process
+remains alive. A fixed poll-count loop is forbidden because it can exhaust
+before the child is scheduled and falsely miss the first 4ms retention
+opportunity. The sampler must still observe `retain_timer_arms > windows`;
+historical timer activity is not a substitute for an actually open window. The
+maximum supported 4ms deadline can legitimately expire between that observation
+and the separate suspend request, so the oracle must not require a specific
+close-reason counter afterwards. Loaded failure reporting skips the generic
+cleanup epilogue so the preceding specific sanitized failure remains visible.
 
 
 Production-C differential tests for the lower-run writer must not freeze an

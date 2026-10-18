@@ -1396,6 +1396,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("START_LOADED_SUSPEND_DRAIN", deploy)
         self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4"', deploy)
         self.assertIn("timer_arms > lifecycle_windows", deploy)
+        self.assertIn('while kill -0 "$writer_pid" 2>/dev/null', deploy)
+        self.assertNotIn("for i in {1..400}", deploy)
+        self.assertLess(deploy.index('>"$SESSION/suspend-writer.log" 2>&1 &'),
+                        deploy.index('while kill -0 "$writer_pid" 2>/dev/null'))
         self.assertIn('dmsetup suspend "$DMNAME"', deploy)
         self.assertIn('dmsetup resume "$DMNAME"', deploy)
         self.assertIn("observed_open:$open_window", deploy)

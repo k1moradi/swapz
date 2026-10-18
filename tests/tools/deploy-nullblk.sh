@@ -442,13 +442,20 @@ suspend_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$suspend_before" retain_ms) == 4 &&
    $(status_u64 "$suspend_before" failed) == 0 )) ||
     fail "retained suspend mapping policy mismatch"
-# Start the sampler before the writer. Learned singleton fast-close can make
-# later writes complete immediately, so qualification must observe one of the
-# initial full-retention opportunities instead of racing process startup.
+# Launch the bounded private writer first, then sample for exactly as long as
+# that writer remains alive. A fixed poll count can exhaust before the child is
+# scheduled and falsely miss the first 4ms retained window. Poll without sleep
+# so adaptive singleton fast-close cannot hide the initial full-retention
+# opportunity; timer_arms > windows still proves a window is open NOW rather
+# than merely proving historical timer activity.
 lifecycle_probe="$SESSION/retained-open-probe"
 : >"$lifecycle_probe"
+timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --write-series 128 2 \
+    >"$SESSION/suspend-writer.log" 2>&1 &
+writer_pid=$!
 (
-    for i in {1..400}; do
+    while kill -0 "$writer_pid" 2>/dev/null; do
         lifecycle_status="$(dmsetup status "$DMNAME")" || exit 2
         timer_arms="$(status_u64 "$lifecycle_status" retain_timer_arms)" || exit 3
         lifecycle_windows="$(status_u64 "$lifecycle_status" windows)" || exit 4
@@ -460,10 +467,6 @@ lifecycle_probe="$SESSION/retained-open-probe"
     exit 1
 ) &
 probe_pid=$!
-timeout --signal=TERM --kill-after=2s 15s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --write-series 128 2 \
-    >"$SESSION/suspend-writer.log" 2>&1 &
-writer_pid=$!
 probe_rc=0
 wait "$probe_pid" || probe_rc=$?
 open_window=0
