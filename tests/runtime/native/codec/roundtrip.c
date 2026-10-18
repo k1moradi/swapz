@@ -88,6 +88,14 @@ static int test_prehashed_and_validated_lookup(void)
 	((uint8_t *)p)[0] ^= 1;
 	CHECK(swapz_lookup_validated(extent, 4096, 0, &d, &p) == -EBADMSG);
 	((uint8_t *)extent)[4096 - 2072] ^= 1;
+
+	/* A bad producer-supplied CRC can make a syntactically valid sealed
+	 * image, but final payload verification must still reject publication. */
+	CHECK(swapz_begin(&b, extent, 4096, 92) == 0);
+	CHECK(swapz_append_prehashed(&b, 8, 4, payload, 2072, crc ^ 1U) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(swapz_validate(extent, 4096) == 0);
+	CHECK(swapz_lookup_validated(extent, 4096, 0, &d, &p) == -EBADMSG);
 	return 0;
 }
 
