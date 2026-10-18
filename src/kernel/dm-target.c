@@ -3178,10 +3178,15 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
 		       "window_commit_nonio_wall_ns=%llu "
 		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
-		       "engine_publish_wall_ns=%llu "
+		       "engine_publish_wall_ns=%llu engine_prehashed_records=%u "
+		       "prep_crc_wall_ns=%llu ordered_crc_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
-		       "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu "
+		       "ordered_worker_wall_ns=%llu prep_worker_wall_ns=%llu "
+		       "dry_pack_close_events=%llu dry_pack_followup_events=%llu "
+		       "dry_pack_followup_sum_ns=%llu dry_pack_followup_max_ns=%llu "
+		       "dry_pack_followup_le10us=%llu dry_pack_followup_11_50us=%llu "
+		       "dry_pack_followup_51_200us=%llu dry_pack_followup_gt200us=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu "
@@ -3298,11 +3303,18 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_sort_wall_ns, ctx->window_commit_wall_ns,
 		       ctx->window_commit_nonio_wall_ns,
 		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
-		       ctx->engine_publish_wall_ns,
+		       ctx->engine_publish_wall_ns, ctx->engine.prehashed_records,
+		       ctx->preparation_crc_wall_ns, ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
-		       ctx->ordered_worker_cpu_ns,
-		       ctx->preparation_worker_cpu_ns,
+		       ctx->ordered_worker_wall_ns,
+		       ctx->preparation_worker_wall_ns,
+		       ctx->dry_pack_close_events, ctx->dry_pack_followup_events,
+		       ctx->dry_pack_followup_sum_ns, ctx->dry_pack_followup_max_ns,
+		       ctx->dry_pack_followup_le10us,
+		       ctx->dry_pack_followup_11_50us,
+		       ctx->dry_pack_followup_51_200us,
+		       ctx->dry_pack_followup_gt200us,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
