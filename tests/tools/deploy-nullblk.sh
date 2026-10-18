@@ -361,14 +361,82 @@ flush_injected="$(status_delta flush_injected)"
     fail "loaded oracle flush/barrier accounting changed"
 note "PASS_LOADED_ORACLE_PROFILE=raw_pages:$raw_writes zero_pages:$zero_writes flush_calls:$flush_calls"
 
+# Sustained live-GC qualification. Recreate only this exact owned mapper on
+# the already-verified RAM-backed lower so the stress starts with fresh volatile
+# authority while preserving the same ownership/quarantine guarantees.
+note "START_LOADED_LIVE_GC"
+dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before GC phase"
+OWN_DM=0
+UUID="SWAPZ-TEST-$TOKEN-gc"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 0 2 0 1 0" ||
+    fail "cannot create live-GC qualification mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "live-GC DM UUID mismatch"
+dmsetup deps -o devname "$DMNAME" | grep -Fq "$DISK" ||
+    fail "live-GC mapping dependency changed"
+gc_before="$(dmsetup status "$DMNAME")"
+for key in gc_victims gc_role_rotations gc_read gc_write gc_read_reqs gc_write_reqs \
+           gc_victim_unique gc_destination_unique gc_victim_max_reuse \
+           gc_destination_max_reuse dead_segment_reuses failed; do
+    status_u64 "$gc_before" "$key" >/dev/null ||
+        fail "live-GC status missing $key"
+done
+timeout --signal=TERM --kill-after=5s 120s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --gc-stress 64 ||
+    fail "live-GC overwrite/verification oracle failed or timed out"
+swapz_capture_quiescent_io "$DMNAME" "/sys/block/$DISK/stat" 12 0.2 ||
+    fail "target/backing not quiescent after live GC"
+gc_after="$SWAPZ_QUIET_STATUS"
+gc_delta() {
+    local key="$1" before_value after_value
+    before_value="$(status_u64 "$gc_before" "$key")" ||
+        fail "live-GC pre-status missing $key"
+    after_value="$(status_u64 "$gc_after" "$key")" ||
+        fail "live-GC post-status missing $key"
+    (( after_value >= before_value )) ||
+        fail "live-GC counter regressed: $key"
+    printf '%s\n' "$((after_value - before_value))"
+}
+gc_victims_delta="$(gc_delta gc_victims)"
+gc_rotations_delta="$(gc_delta gc_role_rotations)"
+gc_read_delta="$(gc_delta gc_read)"
+gc_write_delta="$(gc_delta gc_write)"
+gc_read_reqs_delta="$(gc_delta gc_read_reqs)"
+gc_write_reqs_delta="$(gc_delta gc_write_reqs)"
+gc_victim_unique="$(status_u64 "$gc_after" gc_victim_unique)" ||
+    fail "live-GC victim distribution missing"
+gc_destination_unique="$(status_u64 "$gc_after" gc_destination_unique)" ||
+    fail "live-GC destination distribution missing"
+gc_victim_max_reuse="$(status_u64 "$gc_after" gc_victim_max_reuse)" ||
+    fail "live-GC victim reuse maximum missing"
+gc_destination_max_reuse="$(status_u64 "$gc_after" gc_destination_max_reuse)" ||
+    fail "live-GC destination reuse maximum missing"
+gc_dead_reuses="$(gc_delta dead_segment_reuses)"
+gc_failed="$(status_u64 "$gc_after" failed)" ||
+    fail "live-GC failed state missing"
+(( gc_failed == 0 )) || fail "live-GC target failed"
+(( gc_victims_delta >= 4 && gc_rotations_delta == gc_victims_delta )) ||
+    fail "live-GC stress did not complete at least four safe victim rotations"
+(( gc_read_delta > 0 && gc_write_delta > 0 &&
+   gc_read_reqs_delta > 0 && gc_write_reqs_delta > 0 )) ||
+    fail "live-GC victims did not perform relocation I/O"
+(( gc_victim_unique >= 2 && gc_destination_unique >= 2 )) ||
+    fail "live-GC rotation did not exercise multiple physical segments"
+(( gc_victim_max_reuse < gc_victims_delta &&
+   gc_destination_max_reuse < gc_rotations_delta )) ||
+    fail "live-GC rotation collapsed onto one physical segment"
+note "PASS_LOADED_LIVE_GC=victims:$gc_victims_delta rotations:$gc_rotations_delta read_bytes:$gc_read_delta write_bytes:$gc_write_delta read_reqs:$gc_read_reqs_delta write_reqs:$gc_write_reqs_delta victim_unique:$gc_victim_unique destination_unique:$gc_destination_unique victim_max_reuse:$gc_victim_max_reuse destination_max_reuse:$gc_destination_max_reuse dead_reuses:$gc_dead_reuses"
+dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
+OWN_DM=0
+
 # Retained lifecycle qualification. Use the maximum already-supported
 # retention interval only to make the drain-path race observable; the real
 # performance policy remains owner-qualified retain_ms=2. The private writer
 # deliberately omits O_SYNC/FUA so a successful timer arm can represent a
 # genuinely retained upper write.
 note "START_LOADED_SUSPEND_DRAIN"
-dmsetup remove "$DMNAME" || fail "cannot remove ordinary owned mapping before lifecycle phase"
-OWN_DM=0
 UUID="SWAPZ-TEST-$TOKEN-suspend"
 dmsetup create "$DMNAME" --uuid "$UUID" \
     --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4" ||
