@@ -78,7 +78,7 @@ unexercised.
 
 ## Open qualification gaps
 
-Sustained live GC, genuine device-originated/partial lower errors, long-run resource pressure, larger controlled cold-read working sets, kernel-worker CPU attribution and statistically repeated QD saturation remain open. Physical-media testing remains blocked pending separate authorization and safety review.
+Genuine device-originated/partial lower errors, long-run resource pressure, larger controlled cold-read working sets, exact portable kernel-worker CPU attribution and statistically repeated QD saturation remain open. Sustained live GC is now an owned-RAM qualification gate: it must complete multiple victim rotations with byte-exact verification and reuse-distribution evidence. Physical-media testing remains blocked pending separate authorization and safety review.
 
 
 Source contracts should assert retained scheduling semantics rather than a
@@ -322,9 +322,12 @@ require direct mapping only for a complete single-bvec 4KiB BIO, balanced
 one durable RAW staging copy: mapped input directly to `batch_bytes` in bulk
 mode, or the existing `swapz_raw_write()` BIO copy in non-bulk mode. Source
 coverage must reject the retired mapped-input -> `input_page` -> `batch_bytes`
-bounce. Ordered/preparation worker CPU counters must use exported scheduler
-cputime accounting, be present on every callback return, and remain diagnostics
-only. Write-only QD1 must remain producer-free,
+bounce. Exact worker CPU counters must not rely on raw scheduler-private fields or
+claim that `task_cputime_adjusted()` captures every short current slice.
+Portable callback-active wall upper bounds must account every callback return,
+subtract only independently measured waits, expose subtraction underflow as a
+fail-closed diagnostic, and remain policy-independent. Write-only QD1 must
+remain producer-free,
 QD8/QD32 must keep ~520/~139 lower WRITE requests, and lower-byte/read-tail
 gates remain hard. The existing `prep_lower_write_overlap_starts` diagnostic
 remains meaningful, and all publication/completion/fail-closed invariants are
@@ -361,3 +364,22 @@ claim must `up()` the slot. Existing producer error paths and ordered
 prepared-page release must continue to return exactly one slot. This prevents
 tail preparation at queue depths above the 64-record bound from creating a
 FIFO/semaphore deadlock.
+
+
+Loaded GC qualification must run only on the same freshly owned, positively
+identified RAM-backed null_blk safety path. It must start from a fresh swapz
+mapping, apply bounded scattered overwrites that preserve live survivors across
+old segments, verify every logical page against its latest expected generation,
+and require nonzero relocation READ/WRITE I/O. A passing run requires at least
+four successful victim/role rotations, multiple distinct victim and destination
+segments, no failed target state, and reported maximum reuse below the total
+rotation count. This evidence qualifies the GC mechanism on synthetic RAM; it
+does not establish physical flash endurance or authorize physical media.
+
+Precomputed foreground payload CRC qualification must prove that the CRC is
+computed over the exact compressed bytes, carried through admission/planning,
+and consumed only by the pack-side prehashed append. Source and native tests
+must also prove that `swapz_finish()` still verifies payload CRC over the final
+extent image before publication. Dry-close arrival timing is diagnostic only:
+recording a timestamp may not delay, recheck, cancel or otherwise influence a
+PACK_READY decision.
