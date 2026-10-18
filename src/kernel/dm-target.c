@@ -688,7 +688,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		container_of(work, struct swapz_dm, preparation_worker);
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
-	u64 cpu_start_ns = ktime_get_ns();
+	u64 wall_start_ns = ktime_get_ns();
 
 	for (;;) {
 		struct swapz_prepared_page *prepared;
@@ -709,7 +709,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 */
 		if (down_trylock(&ctx->preparation_slots)) {
 			swapz_account_worker_wall(&ctx->preparation_worker_wall_ns,
-						cpu_start_ns);
+						wall_start_ns);
 			return;
 		}
 		spin_lock_irqsave(&ctx->queue_lock, flags);
@@ -717,7 +717,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			up(&ctx->preparation_slots);
 			swapz_account_worker_wall(&ctx->preparation_worker_wall_ns,
-						cpu_start_ns);
+						wall_start_ns);
 			return;
 		}
 		/*
@@ -752,7 +752,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				up(&ctx->preparation_slots);
 				swapz_account_worker_wall(
 					&ctx->preparation_worker_wall_ns,
-					cpu_start_ns);
+					wall_start_ns);
 				return;
 			}
 			entry = list_last_entry(&ctx->preparation_incoming,
@@ -773,7 +773,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 			    !atomic_read(&ctx->preparation_tail_credit)) {
 				swapz_account_worker_wall(
 					&ctx->preparation_worker_wall_ns,
-					cpu_start_ns);
+					wall_start_ns);
 				return;
 			}
 			continue;
@@ -796,7 +796,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 				    !atomic_read(&ctx->preparation_tail_credit)) {
 					swapz_account_worker_wall(
 						&ctx->preparation_worker_wall_ns,
-						cpu_start_ns);
+						wall_start_ns);
 					return;
 				}
 				continue;
@@ -857,7 +857,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit)) {
 			swapz_account_worker_wall(&ctx->preparation_worker_wall_ns,
-						cpu_start_ns);
+						wall_start_ns);
 			return;
 		}
 	}
@@ -2354,7 +2354,7 @@ static void swapz_worker(struct work_struct *work)
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	unsigned int remaining;
-	u64 cpu_start_ns = ktime_get_ns();
+	u64 wall_start_ns = ktime_get_ns();
 
 	for (;;) {
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
@@ -2586,7 +2586,7 @@ static void swapz_worker(struct work_struct *work)
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				swapz_flush_window(ctx);
 				swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-							cpu_start_ns);
+							wall_start_ns);
 				return;
 			}
 			if (ctx->batch_count &&
@@ -2611,7 +2611,7 @@ static void swapz_worker(struct work_struct *work)
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-							cpu_start_ns);
+							wall_start_ns);
 				return;
 			}
 			if (ctx->batch_count && !ctx->accepting) {
@@ -2619,12 +2619,12 @@ static void swapz_worker(struct work_struct *work)
 				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
 				swapz_flush_window(ctx);
 				swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-							cpu_start_ns);
+							wall_start_ns);
 				return;
 			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-						cpu_start_ns);
+						wall_start_ns);
 			return;
 		}
 		if (ctx->accepting) {
@@ -2636,7 +2636,7 @@ static void swapz_worker(struct work_struct *work)
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-						cpu_start_ns);
+						wall_start_ns);
 			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
