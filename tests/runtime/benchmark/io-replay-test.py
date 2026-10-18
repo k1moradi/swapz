@@ -144,9 +144,10 @@ class PairReplayContract(unittest.TestCase):
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_write_delta(None, None))
         before = dict(zip(module.KERNEL_WRITE_FIELDS,
-                          (2, 100, 20, 400, 300, 1, 1, 1, 0)))
+                          (2, 100, 20, 400, 300, 10, 20, 1, 1, 1, 0)))
         after = dict(zip(module.KERNEL_WRITE_FIELDS,
-                         (7, 50100, 1020, 70400, 60300, 4, 3, 3, 1)))
+                         (7, 50100, 1020, 70400, 60300, 510, 5020,
+                          4, 3, 3, 1)))
         fake = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -158,6 +159,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
                          [2, 2, 1])
         self.assertEqual(delta["lower_write_wall_ns"], 60000)
+        self.assertEqual(delta["prep_wait_wall_ns"], 500)
+        self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)
         with self.assertRaisesRegex(ValueError, "inconsistent"):
