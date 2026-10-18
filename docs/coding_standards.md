@@ -376,9 +376,10 @@ service time.
 The ordered Device Mapper worker remains on its serialized
 `WQ_MEM_RECLAIM | WQ_UNBOUND` workqueue. The LZ4 preparation workqueue is
 CPU-local (`WQ_MEM_RECLAIM` without `WQ_UNBOUND`): `queue_work()` places
-that work on the CPU which queued it, so pending preparation can consume the
-same CPU's otherwise-idle interval when the ordered kworker sleeps in
-synchronous lower WRITE I/O instead of immediately competing on another CPU.
+that work on the CPU which queued it. In the lower-WRITE wake, the queuer is the
+ordered kworker, so pending preparation can consume that CPU's otherwise-idle
+interval when synchronous lower WRITE sleeps instead of immediately competing
+on another CPU. Map-side credit wakes remain local to their submitting CPU.
 The single preparation `work_struct` remains non-reentrant system-wide; this
 changes scheduling placement only, not FIFO, publication, completion or
 lower-I/O ownership.
