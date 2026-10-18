@@ -518,31 +518,50 @@ per-callback CPU metric was rejected because short preparation callbacks were
 materially undercounted. Current callback counters are wall residency only.
 
 
-### Qualified CRC/publish result and current starvation probe
+### Qualified Step-1 evidence and ping-pong successor
 
-The latest owner-qualified source is
-`fda75f9c06d7181623c6f90c0885efbda499e9a6`. Precomputing compressed
-payload CRC before packing and validating immutable metadata once both passed
-the full loaded qualification. Fast-model pack/publish wall fell to about
-10.9/16.3 ms and slow-model to about 14.8/18.6 ms. Publication still verifies
-every final payload CRC over `bulk_scratch`.
+Owner qualification of `c8ba1180310878141f2179a3ce0fa6d95f93f049`
+passed all five stages.
 
-The dry PACK_READY arrival experiment is complete and removed. Followups were
-predominantly millisecond-scale, refuting a general microsecond grace/spin fix.
-The current diagnostic source instead splits publish wall into exact final
-payload CRC versus authority/liveness residual and samples the exact unclaimed
-preparation queue depth at synchronous lower-WRITE start/end. This directly
-tests whether the slow-model lower-I/O interval exposes enough eligible CPU work
-to justify a multi-worker preparation pool.
+Exact publication attribution shows that final-image CRC is the larger publish
+subphase but not the whole cost. Slow-model publication was 21.3 ms with
+12.4 ms CRC and 8.9 ms authority/liveness work; fast-model publication was
+18.2 ms with 9.9 ms CRC and 8.3 ms authority. Skipping the final CRC remains
+invalid. The remaining engine residual is still material at 9.2/8.2 ms and is
+the next CPU-attribution split worth measuring.
 
-Loaded live GC is qualified on synthetic RAM with 20 victims/20 rotations and
-4096 verified pages. The current diagnostic source records committed victim
-counts per segment and requires distinct/min/max distribution evidence before a
-DISCARD/TRIM experiment.
+The lower-WRITE queue probe refutes extra workers/credits as the immediate
+standalone solution. Slow-model lower WRITE consumed about 613 ms but the mean
+unclaimed preparation queue was 0.00 at both start/end, with only about 0.2 ms
+of preparation-LZ4 overlap. Fast-model lower WRITE consumed 220.7 ms; queue
+means were only 0.11/0.07 and overlap 6.8 ms. The synchronous ordered worker is
+therefore spending substantial wall time inside lower I/O without a sustained
+existing preparation backlog for another worker to drain.
 
-No scheduling, retention, credit, worker-count or lower-I/O policy changes are
-part of this diagnostic source. A later Phase-A experiment may compare
-N=1/2/4 independent `WQ_UNBOUND` WRITE-preparation workers only after queue
-evidence exists. Asynchronous lower I/O remains a separate Phase-B change that
-requires bounded immutable in-flight run ownership before any dm-io callback
-continuation can safely return early.
+The successor is an asynchronous ownership experiment, not a larger worker
+count. One immutable sealed run may stream to the lower device while a separate
+active collector accepts and prepares the next writes. LZ4 and payload CRC run
+during collection so lower completion is followed by seal/plan/submit rather
+than freeze-then-compress delay. The shared collector preserves the largest
+possible global set for size-aware packing.
+
+This is not guaranteed to improve packing merely because the device is busy.
+With closed-loop QD32, one well-packed run can consume the entire outstanding
+upper wave, so no new wave can arrive until completions return. The candidate
+must not split a good run solely to create overlap unless measured throughput
+wins without lower-byte/request or tail regression.
+
+For one-lower-depth media, the first test uses one lower run outstanding plus a
+separate collector. Multiple lower runs in flight are a later explicit K
+experiment for devices/workloads that can profit from queue depth. Keep one
+global planner/authority rather than sharding writes into per-lane accumulators.
+
+Loaded GC distribution is now fully even in the synthetic pressure phase:
+20 victims, 20 rotations, 20 distinct victim segments and 1/1 min/max
+evictions. This removes the synthetic distribution prerequisite for a bounded
+dead-segment DISCARD/TRIM experiment, but does not establish flash endurance.
+
+Packed-read behavior reinforces the latency rule. The slow model reduced lower
+requests yet produced worse packed-read p99; the fast model was close but not
+qualified faster. Any read queue may reorder/coalesce only work already waiting
+behind active lower I/O and must dispatch immediately when the device is idle.

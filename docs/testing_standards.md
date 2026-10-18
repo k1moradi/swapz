@@ -70,43 +70,63 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `fda75f9c06d7181623c6f90c0885efbda499e9a6` passed all five
-stages. Slow-model mixed async reached 7.11 MB/s WRITE versus 7.07 sync and
-7.85 raw; fast-model mixed async reached 21.05 versus 19.78 sync and 19.23 raw.
-Fast-model commit non-I/O was about 40.8 ms with 5.3/10.9/16.3 ms
-plan/pack/publish. Slow-model commit non-I/O was about 49.0 ms with
-6.1/14.8/18.6 ms plan/pack/publish.
+Source `c8ba1180310878141f2179a3ce0fa6d95f93f049` passed all five
+stages and published the canonical report as
+`b0dc69a00c01a8301d553e3d109b963a7b15a10b`.
 
-Pack-side payload CRC precomputation and one-pass immutable metadata validation
-are qualified. The final payload CRC over the exact published
-`bulk_scratch` image remains mandatory. Loaded live GC is also qualified on
-owned RAM evidence: 20 victims, 20 role rotations, nonzero GC lower READ/WRITE
-traffic and byte-exact verification of all 4096 pages.
+Slow-model mixed async reached 7.11 MB/s WRITE versus 7.09 sync and 7.84 raw;
+fast-model mixed async reached 21.37 versus 19.81 sync and 18.85 raw. The
+write-only pilot remains directional: fast QD8 async reached 26.61 versus
+20.57 MB/s (+29.4%), while fast QD4 regressed -2.6% and QD32 improved +2.6%.
 
-The completed dry PACK_READY arrival probe measured millisecond-scale followups
-rather than a dominant tens-of-microseconds cluster (about 4.706 ms mean on the
-slow model and 1.468 ms on the fast model). That probe is retired and a
-microsecond grace/spin policy is rejected. The replacement diagnostic samples
-unclaimed preparation queue depth at synchronous lower-WRITE start/end.
+Exact publish attribution is qualified. Slow publication was 21.3 ms:
+12.4 ms final-image payload CRC plus 8.9 ms authority/liveness work. Fast
+publication was 18.2 ms: 9.9 ms CRC plus 8.3 ms authority. The final
+`bulk_scratch` payload CRC remains mandatory.
 
-The per-callback `task_cputime_adjusted()` experiment remains rejected as a
-portable worker-CPU metric. Whole-callback wall residency is not CPU time.
+The lower-WRITE starvation probe also answered its question. Slow-model mean
+unclaimed preparation queue depth was 0.00 at both lower-WRITE start and end;
+fast-model means were only 0.11/0.07. Extra credits or preparation workers are
+therefore not qualified as standalone changes to the current synchronous
+ownership model.
+
+Loaded live-GC distribution is qualified on owned RAM: 20 victims, 20
+rotations, 20 distinct victim segments, 1/1 min/max evictions, nonzero GC
+READ/WRITE traffic and byte-exact verification of all 4096 pages.
+
+Packed-read lower I/O dominates CPU copy/decode attribution. The slow-model
+packed p99 remained worse than raw and the fast model did not earn a faster
+verdict, so read batching must be latency-first rather than fill-delay based.
 
 ## Open qualification gaps
 
-The current Step-1 source must qualify exact final-image publish-CRC wall,
-publication-authority residual, lower-WRITE preparation queue-depth samples,
-and committed GC victim distribution. After that evidence, the next bounded
-parallel experiment may use multiple independent unbound WRITE-preparation
-workers with explicit N=1/2/4 and bounded credits. Asynchronous lower I/O is a
-separate later experiment requiring immutable per-in-flight run ownership.
-Parallel READ service requires separate scratch ownership.
+The next architecture experiment is an immutable ping-pong WRITE pipeline:
+while one sealed run is in lower I/O, a separate active collector may admit and
+prepare new writes. Per-page LZ4/CRC must happen during collection, not after
+freeze. A shared global accumulator/planner is retained; device parallelism is
+expressed as a bounded number of immutable in-flight runs rather than per-lane
+write accumulators.
+
+Before asynchronous lower I/O can return from submission, every in-flight run
+must own its packed bytes, staged transaction state, upper BIO references,
+ordering/FUA state and completion result until lower completion and authority
+publication. Same-page writes across runs require generation reservation or an
+ordering fence. Completion remains fail-closed.
+
+The first pipeline qualification uses one lower run outstanding plus one active
+collector. Higher lower-I/O depth is a later explicit K experiment. Multiple
+preparation workers/credits are tested only if the new collector actually shows
+sustained eligible backlog.
+
+Parallel READ service is separate: it requires private read scratch and must
+dispatch immediately when lower I/O is idle. Reordering/coalescing is permitted
+only for reads already waiting behind active lower work.
 
 Genuine device-originated/partial lower errors, long-run resource pressure,
-larger controlled cold-read working sets, >=5-pair statistics, deliberate
-CPU oversubscription/low-RAM qualification, physical-device behavior and
-physical endurance remain open. Physical-device admission remains blocked
-pending separate authorization and safety review.
+larger controlled cold-read working sets, >=5-pair statistics, deliberate CPU
+oversubscription/low-RAM qualification, automatic device-queue-depth policy,
+physical-device behavior and physical endurance remain open. Physical-device
+admission remains separately blocked.
 
 
 Source contracts should assert retained scheduling semantics rather than a
@@ -430,6 +450,37 @@ Top-level qualification status follows the classified stage result, not a raw
 child exit-code convention. A stage classified FAIL remains overall FAIL even
 when its shell helper returned 2; BLOCKED is reserved for an explicit blocked
 stage marker.
+
+
+### Immutable ping-pong lower-I/O qualification
+
+A write run may become asynchronous only after its mutable engine buffers and
+transaction state have been moved into a caller-owned immutable run object.
+Submission completion callbacks must never observe reused `bulk_scratch`,
+`bulk_txs`, batch hashes, upper-BIO pointers or ordering flags.
+
+The active collector and immutable streaming run are separate ownership
+domains. The collector performs zero detection, LZ4 and payload CRC while the
+previous run is in lower I/O. Freezing a collector forbids further mutation; it
+does not start compression. Planning/packing may use the exact prepared lengths
+before submission.
+
+For a serial-depth experiment, keep exactly one lower run outstanding while a
+second ownership domain collects/prepares the next run. Do not force smaller
+runs merely to manufacture overlap. A candidate fails if lower WRITE bytes or
+request count regress materially, if a well-packed QD wave is fragmented
+without compensating useful throughput, or if any generation/order/read-tail
+gate regresses.
+
+For parallel-depth experiments, retain one global collector/planner and vary
+only the number of immutable lower runs allowed in flight. Start with explicit
+K values rather than protocol-name assumptions. Per-lane independent write
+accumulators are not the default because they reduce the global set available
+to the packing planner.
+
+A latency-sensitive READ queue must bypass batching when lower I/O is idle.
+Any busy-time coalescing/reordering experiment requires private request/run read
+scratch and same-page dependency checks against active/frozen/in-flight writes.
 
 
 ### Report publication authentication and concurrency
