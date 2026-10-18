@@ -456,3 +456,28 @@ wait subtracted. This is diagnostic instrumentation, not a new I/O/layout
 policy. If copy time is material, the next optimization can target direct
 single-BIO LZ4 input/output; if non-I/O engine time dominates, packing/CRC and
 authority work become the next profiling target.
+
+
+### Direct write-input and commit-phase successor
+
+Qualified source `c6d15ca56753610ed21d805333a49b6a291a36cb` made the
+previously hidden memory/CPU cost measurable. Faster-model mixed async recorded
+83.6 ms LZ4, 22.4 ms explicit WRITE copies moving 59.4 MiB, 46.2 ms write
+commit non-I/O, and 216.6 ms synchronous lower WRITE. Packed-read output copying
+was only 1.1-1.4 ms, so read-side zero-copy is deprioritized. Faster write-only
+QD8 remained directionally favorable at +19.5% async versus sync with 524 lower
+requests, while QD1 remained producer-free.
+
+Source inspection shows that serialized commit still copies each compressed
+payload from batch storage into `bulk_scratch` in `swapz_append()`, computes
+its payload CRC there, and later revalidates the sealed extent/payload CRC during
+`swapz_finish()`. Batch snapshot pause/resume also hashes the transaction.
+Those checks are intentionally unchanged in the next candidate.
+
+The successor maps a complete single-bvec 4KiB upper WRITE page directly for
+LZ4 and zero scanning, preserving the existing copy fallback and RAW persistent
+staging. It also reports planner, pack and post-I/O publish wall time inside the
+46.2 ms commit non-I/O envelope. Acceptance requires lower copy time/bytes with
+no loss of useful throughput, request geometry, read tails or lifecycle
+correctness; engine phase timing is diagnostic and must not itself change
+packing/publication behavior.
