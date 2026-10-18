@@ -26,7 +26,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
-#include <linux/sched/cputime.h>
 #include <linux/vmalloc.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
@@ -60,6 +59,8 @@ MODULE_PARM_DESC(async_prepare,
 struct swapz_prepared_page {
 	int length;
 	bool zero;
+	bool payload_crc_valid;
+	u32 payload_crc32c;
 	u8 bytes[SWAPZ_BLOCK_BYTES];
 };
 
@@ -177,7 +178,13 @@ struct swapz_dm {
 	swapz_u16 *gc_live_counts; /* count for ties/control comparison */
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
+	swapz_u32 *gc_victim_counts;
+	swapz_u32 *gc_destination_counts;
 	swapz_u32 segment_count;
+	swapz_u32 gc_victim_unique;
+	swapz_u32 gc_destination_unique;
+	swapz_u32 gc_victim_max_reuse;
+	swapz_u32 gc_destination_max_reuse;
 	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
 	u64 gc_selected_io_cost;
 	u64 gc_no_headroom_skips;
@@ -318,9 +325,13 @@ struct swapz_dm {
 	u64 preparation_copy_wall_ns;
 	u64 preparation_copy_bytes;
 	u64 preparation_direct_lz4_pages;
+	u64 preparation_crc_wall_ns;
+	u64 preparation_crc_bytes;
 	u64 ordered_write_copy_wall_ns;
 	u64 ordered_write_copy_bytes;
 	u64 ordered_direct_lz4_pages;
+	u64 ordered_crc_wall_ns;
+	u64 ordered_crc_bytes;
 	u64 read_copy_wall_ns;
 	u64 read_copy_bytes;
 	u64 window_sort_wall_ns;
@@ -330,19 +341,41 @@ struct swapz_dm {
 	u64 engine_plan_wall_ns;
 	u64 engine_pack_wall_ns;
 	u64 engine_publish_wall_ns;
+	u64 engine_stage_wall_ns;
+	u64 engine_pause_wall_ns;
+	u64 engine_hole_clear_wall_ns;
+	u64 engine_resume_wall_ns;
+	u64 publish_initial_validate_wall_ns;
+	u64 publish_phase1_wall_ns;
+	u64 publish_lookup_wall_ns;
+	u64 publish_mutation_wall_ns;
+	u64 publish_pause_hash_wall_ns;
+	u64 publish_resume_hash_wall_ns;
 	/* Targeted-read engine wall time with synchronous lower-READ wait removed. */
 	u64 read_engine_nonio_wall_ns;
 	u64 gc_wall_ns;
 	u64 lower_read_wall_ns;
 	u64 lower_write_wall_ns;
 	/*
-	 * Scheduler-accounted CPU time for the two kernel workqueue callbacks.
-	 * This is task CPU accounting, not wall time; sleep in dm_io() or
-	 * completion waits is therefore excluded. Each field has one callback
-	 * writer because both workqueues are max_active=1.
+	 * Portable callback-active wall upper bounds. Ordered accounting subtracts
+	 * measured synchronous lower READ/WRITE waits and producer-completion wait;
+	 * preparation has no intentional sleep. Preemption may still inflate either
+	 * metric, so these are never labeled CPU time or used for policy.
 	 */
-	u64 ordered_worker_cpu_ns;
-	u64 preparation_worker_cpu_ns;
+	u64 ordered_worker_active_wall_ns;
+	u64 preparation_worker_active_wall_ns;
+	u64 ordered_active_underflow_events;
+	/*
+	 * PACK_READY dry-close arrival probe. One pending marker is consumed by
+	 * the first later upper WRITE admission. It is diagnostic only.
+	 */
+	atomic64_t dry_close_pending_ns;
+	u64 dry_close_samples;
+	u64 dry_close_next_sum_ns;
+	u64 dry_close_next_le10us;
+	u64 dry_close_next_11_50us;
+	u64 dry_close_next_51_200us;
+	u64 dry_close_next_gt200us;
 	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
 	 * nested in lower_write_wall_ns, not hardware command latency. */
 	u64 write_wait_le_1ms;
@@ -356,20 +389,60 @@ struct swapz_dm {
 	u64 io_failures;
 };
 
-static u64 swapz_current_task_cpu_ns(void)
+static u32 swapz_crc32c_accounted(const void *bytes, u32 length,
+				   u64 *wall_ns, u64 *crc_bytes)
 {
-	u64 user_ns;
-	u64 system_ns;
+	u64 start_ns = ktime_get_ns();
+	u32 crc = swapz_crc32c_bytes(bytes, length);
 
-	task_cputime_adjusted(current, &user_ns, &system_ns);
-	return user_ns + system_ns;
+	*wall_ns += swapz_elapsed_ns(start_ns, ktime_get_ns());
+	*crc_bytes += length;
+	return crc;
 }
 
-static void swapz_account_worker_cpu(u64 *counter, u64 start_ns)
+static void swapz_account_preparation_active_wall(struct swapz_dm *ctx,
+						  u64 start_ns)
 {
-	u64 end_ns = swapz_current_task_cpu_ns();
+	ctx->preparation_worker_active_wall_ns +=
+		swapz_elapsed_ns(start_ns, ktime_get_ns());
+}
 
-	*counter += swapz_elapsed_ns(start_ns, end_ns);
+static void swapz_account_ordered_active_wall(struct swapz_dm *ctx,
+					      u64 start_ns,
+					      u64 lower_read_before,
+					      u64 lower_write_before,
+					      u64 prep_wait_before)
+{
+	u64 elapsed = swapz_elapsed_ns(start_ns, ktime_get_ns());
+	u64 known_wait =
+		(ctx->lower_read_wall_ns - lower_read_before) +
+		(ctx->lower_write_wall_ns - lower_write_before) +
+		(ctx->preparation_ordered_wait_wall_ns - prep_wait_before);
+
+	if (elapsed >= known_wait)
+		ctx->ordered_worker_active_wall_ns += elapsed - known_wait;
+	else
+		ctx->ordered_active_underflow_events++;
+}
+
+static void swapz_record_dry_close_arrival(struct swapz_dm *ctx)
+{
+	u64 marked = (u64)atomic64_xchg(&ctx->dry_close_pending_ns, 0);
+	u64 elapsed;
+
+	if (!marked)
+		return;
+	elapsed = swapz_elapsed_ns(marked, ktime_get_ns());
+	ctx->dry_close_samples++;
+	ctx->dry_close_next_sum_ns += elapsed;
+	if (elapsed <= 10000ULL)
+		ctx->dry_close_next_le10us++;
+	else if (elapsed <= 50000ULL)
+		ctx->dry_close_next_11_50us++;
+	else if (elapsed <= 200000ULL)
+		ctx->dry_close_next_51_200us++;
+	else
+		ctx->dry_close_next_gt200us++;
 }
 
 /*
