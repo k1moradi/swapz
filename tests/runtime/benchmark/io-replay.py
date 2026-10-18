@@ -559,11 +559,20 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz lower write wait histogram")
     if counters["window_commit_nonio_wall_ns"] > counters["window_commit_wall_ns"]:
         raise ValueError("inconsistent swapz non-I/O commit timing")
+    if counters["ordered_lz4_wall_ns"] + counters["prep_lz4_wall_ns"] != \
+            counters["lz4_wall_ns"]:
+        raise ValueError("inconsistent swapz split LZ4 timing")
     measured_engine = sum(counters[key] for key in
                           ("engine_plan_wall_ns", "engine_pack_wall_ns",
-                           "engine_publish_wall_ns"))
-    if measured_engine > counters["window_commit_nonio_wall_ns"]:
+                           "engine_publish_wall_ns", "engine_stage_wall_ns",
+                           "engine_pause_wall_ns", "engine_hole_clear_wall_ns"))
+    if measured_engine > counters["window_commit_nonio_wall_ns"] or \
+            counters["engine_resume_wall_ns"] > counters["engine_publish_wall_ns"]:
         raise ValueError("inconsistent swapz engine phase timing")
+    dry_bins = ("dry_pack_gap_le50us", "dry_pack_gap_51_100us",
+                "dry_pack_gap_101_500us", "dry_pack_gap_gt500us")
+    if sum(counters[key] for key in dry_bins) != counters["dry_pack_gap_samples"]:
+        raise ValueError("inconsistent swapz dry-pack gap histogram")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
