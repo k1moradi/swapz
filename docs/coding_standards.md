@@ -390,11 +390,13 @@ overlapping wall counters together.
 For a complete single-bvec 4KiB WRITE, the still-owned BIO page may be mapped
 with `kmap_local_page()` and used directly as the synchronous LZ4/zero-scan
 input. The mapping must be released before the BIO can be completed or ownership
-can change. Multi-bvec BIOs retain the copy fallback. An incompressible RAW page
-must still be copied into worker-owned staging before unmapping because retained
-window lifetime exceeds the temporary mapping. Direct mapping is an input-copy
-optimization only; compressed output ownership, publication and lower-I/O
-semantics are unchanged.
+can change. Multi-bvec BIOs retain the copy fallback. An incompressible page in
+retained bulk mode must be copied directly from the temporary mapping into its
+durable `batch_bytes` slot exactly once before unmapping; do not bounce it
+through `input_page`. In non-bulk RAW mode, BIO ownership survives the older
+window flush, so release the temporary mapping and let `swapz_raw_write()`
+perform its existing one copy afterwards. Direct mapping changes neither
+publication nor lower-I/O semantics.
 
 Engine write attribution separates planner, pack and publish phases. Pack
 includes SWZ3 begin/append/seal work, including payload memcpy and first CRC.
@@ -437,3 +439,11 @@ returning. Once an entry is claimed, exactly one slot is either transferred to
 its prepared page and later released by the ordered consumer, or released on
 producer failure. Queue ownership, BIO completion and map publication remain
 unchanged.
+
+
+Scheduler-accounted worker CPU diagnostics must use an exported kernel API,
+not direct reads of scheduler-private accounting fields. Sample task cputime at
+workqueue callback entry and every callback return, then accumulate the
+monotonic delta in the target context. The metric is task CPU accounting, not
+wall time; it may overlap all phase wall counters and must never participate in
+ordering, timeout or scheduling policy.
