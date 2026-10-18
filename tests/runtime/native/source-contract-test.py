@@ -765,10 +765,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
                     "engine_pack_wall_ns", "engine_publish_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
-                    "ordered_worker_cpu_ns", "prep_worker_cpu_ns",
-                    "gc_wall_ns"):
+                    "ordered_worker_cpu_ns", "gc_wall_ns"):
             self.assertIn(key + "=%llu", status)
             self.assertIn("ctx->" + key, status)
+        # The public status key intentionally follows the existing short
+        # "prep_" telemetry vocabulary; the internal single-writer field is
+        # named for its preparation-worker owner.
+        self.assertIn("prep_worker_cpu_ns=%llu", status)
+        self.assertIn("ctx->preparation_worker_cpu_ns", status)
         self.assertIn("swapz_engine_write_window_batched_read_cap(", flush)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
