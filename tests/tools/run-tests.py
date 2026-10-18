@@ -813,7 +813,15 @@ def benchmark_verdicts(sessions):
                        sum(record[field] for field in
                            ("engine_plan_wall_ns", "engine_pack_wall_ns",
                             "engine_publish_wall_ns")) >
-                           record["window_commit_nonio_wall_ns"]
+                           record["window_commit_nonio_wall_ns"] or
+                       sum(record[field] for field in
+                           ("dry_pack_followup_le10us",
+                            "dry_pack_followup_11_50us",
+                            "dry_pack_followup_51_200us",
+                            "dry_pack_followup_gt200us")) !=
+                           record["dry_pack_followup_events"] or
+                       record["dry_pack_followup_events"] >
+                           record["dry_pack_close_events"]
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
