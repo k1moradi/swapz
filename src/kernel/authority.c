@@ -698,7 +698,14 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		swapz_u8 prior = 0;
 		swapz_u8 j;
 
-		error = swapz_lookup(image, bytes_total, index, &decoded, &payload);
+		/*
+		 * swapz_validate() above has already authenticated the complete
+		 * immutable metadata image once. Re-decode this record and verify
+		 * its payload CRC over the final post-copy image without recursively
+		 * re-running whole-image metadata validation for every sibling.
+		 */
+		error = swapz_lookup_validated(image, bytes_total, index,
+					      &decoded, &payload);
 		if (error)
 			goto fail;
 		payload_lengths[index] = decoded.payload_length;
