@@ -311,10 +311,16 @@ worker-empty deadlines and packed-read p99 against the qualified head-cushion
 source, while QD8/QD32 preserve deep-window aggregation and low blocking waits.
 Mixed QD32 must also report one-page PACK_READY closes so dry-tail evidence
 consumption can be rejected if it merely moves fragmentation elsewhere.
-Kernel-C attribution must report explicit WRITE-copy wall/bytes, READ-copy
-wall/bytes, write-engine commit time excluding synchronous lower WRITE, and
-read-engine time excluding synchronous lower READ. Non-I/O commit time must
-never exceed total commit time. Write-only QD1 must remain producer-free,
+Kernel-C attribution must report explicit WRITE-copy wall/bytes, direct-LZ4
+input page hits, READ-copy wall/bytes, write-engine commit time excluding
+synchronous lower WRITE, and read-engine time excluding synchronous lower READ.
+Write-engine attribution must additionally report planner, pack and publish wall
+time. Non-I/O commit time must never exceed total commit time, and the sum of
+planner+pack+publish must never exceed commit non-I/O. Source coverage must
+require direct mapping only for a complete single-bvec 4KiB BIO, balanced
+`kmap_local_page`/`kunmap_local`, retained multi-bvec fallback, and a RAW
+copy into persistent staging before unmapping. Write-only QD1 must remain
+producer-free,
 QD8/QD32 must keep ~520/~139 lower WRITE requests, and lower-byte/read-tail
 gates remain hard. The existing `prep_lower_write_overlap_starts` diagnostic
 remains meaningful, and all publication/completion/fail-closed invariants are
