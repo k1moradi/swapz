@@ -2513,6 +2513,8 @@ static void swapz_worker(struct work_struct *work)
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				swapz_flush_window(ctx);
+				swapz_account_worker_cpu(&ctx->ordered_worker_cpu_ns,
+							cpu_start_ns);
 				return;
 			}
 			if (ctx->batch_count &&
