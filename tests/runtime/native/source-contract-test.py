@@ -19,7 +19,7 @@ README = (ROOT / "docs/README.md").read_text()
 
 
 def body(symbol: str) -> str:
-    match = re.search(r"static\s+(?:int|void|bool|unsigned\s+long|enum\s+hrtimer_restart)\s+" + re.escape(symbol) +
+    match = re.search(r"static\s+(?:int|void|bool|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
         raise AssertionError(f"Missing production symbol {symbol}")
