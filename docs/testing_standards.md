@@ -504,3 +504,11 @@ exact root path from its tracked/staged source-cleanliness check. This permits a
 previous local report to remain until the current run finishes, including after
 an earlier publication failure. Every other tracked or staged change still
 blocks loaded qualification before module/device work.
+
+
+Immutable-run native qualification must accept a bounded prepared prefix rather
+than assuming an arbitrary logical window fits one physical run. Tests walk
+successive prepare/complete cycles until the complete logical window is
+published, while each individual prepared prefix remains immutable and
+unpublished until its own lower completion. A failed first prefix must publish
+nothing and quarantine all reservations belonging to that prefix.
