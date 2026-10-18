@@ -373,8 +373,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["sessions"] = parse_sessions(output)
         result["benchmarks"]["verdicts"] = benchmark_verdicts(
             result["benchmarks"]["sessions"])
-        if (loaded_correctness.get("overall") == "PASS" and                 result["benchmarks"]["verdicts"].get("overall") ==                 "PASS_BOUNDED_RAM_MATRIX":
-            result["benchmarks"]["verdicts"]["gc"] =                 "LIVE_VICTIMS_EXERCISED_OWNED_RAM"
+        if (loaded_correctness.get("overall") == "PASS" and
+                result["benchmarks"]["verdicts"].get("overall") ==
+                "PASS_BOUNDED_RAM_MATRIX"):
+            result["benchmarks"]["verdicts"]["gc"] = (
+                "LIVE_VICTIMS_EXERCISED_OWNED_RAM")
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
