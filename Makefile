@@ -20,12 +20,16 @@ CC ?= cc
 # Make can compile independent outputs concurrently (make test -j2).
 # The module recipe always checks running-kernel Kbuild; Kbuild's own
 # incremental dependency logic avoids unchanged .o recompilation.
-all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapzctl
+all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/tests/gc-pressure build/userspace/swapzctl
 
 build/kernel/experimental/dm-swapz.ko:
 	$(MAKE) -C src/kernel KDIR="$(KDIR)" all
 
 build/tests/device-roundtrip: tests/tools/device-roundtrip.c Makefile
+	@mkdir -p build/tests
+	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+build/tests/gc-pressure: tests/tools/gc-pressure.c Makefile
 	@mkdir -p build/tests
 	$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
