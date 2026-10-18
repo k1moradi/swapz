@@ -3,6 +3,7 @@
 import argparse
 import json
 import lzma
+import math
 import os
 import re
 from pathlib import Path
@@ -83,6 +84,7 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "prep_lower_write_start_nonempty",
                        "prep_lower_write_end_queued",
                        "prep_lower_write_end_nonempty",
+                       "pipeline_async_runs", "pipeline_active_wall_ns",
                        "write_wait_le1ms", "write_wait_1to4ms",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
@@ -96,6 +98,48 @@ SATURATION_WINDOW_FIELDS = (
     "win9_16", "win17_64", "close_idle", "close_deadline",
     "close_pack_ready")
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
+LOWER_INFLIGHT_INT_FIELDS = (
+    "target_interval_ns", "samples", "read_start", "write_start",
+    "read_end", "write_end", "read_peak", "write_peak", "total_peak")
+LOWER_INFLIGHT_FLOAT_FIELDS = (
+    "read_time_weighted", "write_time_weighted", "total_time_weighted")
+LOWER_INFLIGHT_FIELDS = LOWER_INFLIGHT_INT_FIELDS + LOWER_INFLIGHT_FLOAT_FIELDS
+
+
+def lower_inflight_record(obj):
+    """Copy only non-identifying lower queue metrics into the report."""
+    record = obj.get("lower_inflight")
+    if not isinstance(record, dict):
+        return None
+    return {field: record.get(field) for field in LOWER_INFLIGHT_FIELDS}
+
+
+def lower_inflight_error(record):
+    if not isinstance(record, dict):
+        return "missing lower in-flight telemetry"
+    if any(type(record.get(field)) is not int or record[field] < 0
+           for field in LOWER_INFLIGHT_INT_FIELDS):
+        return "invalid lower in-flight integer telemetry"
+    if record["target_interval_ns"] <= 0 or record["samples"] <= 0:
+        return "empty lower in-flight telemetry"
+    if any(not isinstance(record.get(field), (int, float)) or
+           not math.isfinite(record[field]) or record[field] < 0
+           for field in LOWER_INFLIGHT_FLOAT_FIELDS):
+        return "invalid lower in-flight weighted telemetry"
+    if (record["read_start"] > record["read_peak"] or
+            record["write_start"] > record["write_peak"] or
+            record["read_end"] > record["read_peak"] or
+            record["write_end"] > record["write_peak"] or
+            record["total_peak"] < max(record["read_peak"], record["write_peak"]) or
+            record["total_peak"] > record["read_peak"] + record["write_peak"] or
+            record["read_time_weighted"] > record["read_peak"] + 1e-9 or
+            record["write_time_weighted"] > record["write_peak"] + 1e-9 or
+            record["total_time_weighted"] > record["total_peak"] + 1e-9 or
+            abs(record["total_time_weighted"] -
+                record["read_time_weighted"] -
+                record["write_time_weighted"]) > 1e-6):
+        return "inconsistent lower in-flight telemetry"
+    return None
 
 
 
@@ -497,6 +541,7 @@ def parse_sessions(output):
                     "mixed_replay_cpu_user_s": obj.get("mixed_replay_cpu_user_s"),
                     "mixed_replay_cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                     "mixed_replay_peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
+                    "lower_inflight": lower_inflight_record(obj),
                     "kernel_write_path": obj.get("kernel_write_path"),
                     "packed_read": None,
                 }
@@ -616,6 +661,7 @@ def parse_write_saturation(output):
                 "cpu_user_s": obj.get("mixed_replay_cpu_user_s"),
                 "cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                 "peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
+                "lower_inflight": lower_inflight_record(obj),
             }
             for field in ("source_sha", "fixture_sha256", "trace_sha256"):
                 if obj.get(field):
@@ -692,6 +738,9 @@ def write_saturation_verdict(sessions):
                 if arm["logical_write_bytes"] <= 0 or arm["lower_write_bytes"] <= 0:
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: write-only byte accounting invalid"}
+                if lower_inflight_error(arm.get("lower_inflight")) is not None:
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: write-only lower in-flight telemetry invalid"}
             if not re.fullmatch(r"[0-9a-f]{40}", row.get("source_sha", "")):
                 return {"overall": "INCONCLUSIVE",
                         "reason": f"{regime}: write-only source SHA unavailable"}
@@ -732,6 +781,8 @@ def write_saturation_verdict(sessions):
                 "window_delta": row["window_delta"],
                 "preparation_delta": row["preparation_delta"],
                 "retained_burst_target": row["retained_burst_target"],
+                "raw_lower_inflight": row["arms"]["off"]["lower_inflight"],
+                "swapz_lower_inflight": row["arms"]["swapz"]["lower_inflight"],
             } for row in rows]
             for regime, rows in regimes.items()
         },
@@ -830,13 +881,21 @@ def benchmark_verdicts(sessions):
                 "write_p99_ms", "lower_write_bytes", "lower_write_requests",
                 "lower_read_bytes", "lower_read_requests",
                 "mixed_replay_cpu_user_s", "mixed_replay_cpu_system_s",
-                "mixed_replay_peak_rss_kb")
+                "mixed_replay_peak_rss_kb", "seconds")
         for name, rows_for_arm in arms.items():
             columns[name] = {key: mean(rows_for_arm, key) for key in keys}
             input_bytes = mean(rows_for_arm, "logical_write_bytes")
             backing_bytes = columns[name]["lower_write_bytes"]
             columns[name]["write_input_per_lower_byte"] = (
                 input_bytes / backing_bytes if input_bytes and backing_bytes else None)
+            inflight_records = [arm.get("lower_inflight") for arm in rows_for_arm]
+            if any(lower_inflight_error(record) is not None
+                   for record in inflight_records):
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: missing/inconsistent lower in-flight telemetry"}
+            for field in LOWER_INFLIGHT_FIELDS:
+                columns[name][f"lower_inflight_{field}"] = statistics.mean(
+                    record[field] for record in inflight_records)
             if name != "off":
                 # kernel_write_path is an interval delta. Histogram totals
                 # must remain exact, but a follow-up can land inside this
@@ -871,6 +930,23 @@ def benchmark_verdicts(sessions):
                 for field in KERNEL_WRITE_FIELDS:
                     columns[name][f"mixed_{field}"] = statistics.mean(
                         record[field] for record in diagnostics)
+                if name == "sync" and any(
+                        record["pipeline_async_runs"] or
+                        record["pipeline_active_wall_ns"]
+                        for record in diagnostics):
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: sync arm used async run occupancy"}
+                if any(record["pipeline_active_wall_ns"] >
+                       arm["seconds"] * 1e9 + 1000000
+                       for record, arm in zip(diagnostics, rows_for_arm)):
+                    return {"overall": "INCOMPLETE",
+                            "reason": f"{regime}: K=1 run occupancy exceeds timed interval"}
+                columns[name]["mixed_pipeline_active_mean"] = statistics.mean(
+                    record["pipeline_active_wall_ns"] / (arm["seconds"] * 1e9)
+                    for record, arm in zip(diagnostics, rows_for_arm))
+                columns[name]["mixed_pipeline_active_peak"] = max(
+                    1 if record["pipeline_async_runs"] else 0
+                    for record in diagnostics)
             for mode in ("sequential", "seeded_random"):
                 reads = [(arm.get("packed_read") or {}).get("passes", {}).get(mode)
                          for arm in rows_for_arm]
@@ -1051,6 +1127,20 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
+        print("  Lower queue — sampled time-weighted mean / peak during mixed I/O.")
+        print_table(
+            ("mode", "bdev R", "bdev W", "K=1 run slot"),
+            [
+                (mode,
+                 f"{columns[mode]['lower_inflight_read_time_weighted']:.2f}/"
+                 f"{columns[mode]['lower_inflight_read_peak']:.1f}",
+                 f"{columns[mode]['lower_inflight_write_time_weighted']:.2f}/"
+                 f"{columns[mode]['lower_inflight_write_peak']:.1f}",
+                 ("-" if mode == "off" else
+                  f"{columns[mode]['mixed_pipeline_active_mean']:.2f}/"
+                  f"{columns[mode]['mixed_pipeline_active_peak']:.0f}"))
+                for mode in COLUMNS
+            ])
         print("  Async pipeline — wall timings overlap; callback rows include scheduler delay.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),

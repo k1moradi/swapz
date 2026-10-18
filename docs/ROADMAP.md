@@ -155,7 +155,7 @@ changes.
 | 39 | Latency-first READ busy-time queue | **4 dependent** | Device-model dependent: fast packed reads now qualify faster while slow packed reads regress. Requires private read scratch and idle bypass. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
-| 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **4 partially implemented** | Queue geometry is now pinned: slow hw_queue_depth=1, fast=64, both blk-mq with one submit queue. Configured geometry is report-qualified; observed time-varying lower in-flight depth remains the next measurement. |
+| 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **4 implemented pending owner evidence** | Queue geometry is pinned: slow hw_queue_depth=1, fast=64, both blk-mq with one submit queue. Timed arms now sample split lower READ/WRITE depth with peaks/time-weighted means, and swapz mixed arms report exact K=1 immutable-run slot wall occupancy. Re-run owner qualification before interpreting the evidence. |
 | 43 | Huge/compound-page RAM input support (folio/THP/hugetlb), not only 4KiB page inputs | **4 evidence/coverage** | bio_for_each_segment() already page-normalizes multi-page bvecs; current copies are page-local and page-aligned 4KiB folio slices can direct-map. Do not add nth_page() to iterator bvecs. Add explicit THP/folio coverage; larger base PAGE_SIZE/native larger records remain architecture work. |
 | 44 | Exact per-segment authoritative mapping counts / GC map-scan elimination | **4 implemented pending owner evidence** | Production now maintains a bounded per-segment logical-map count and cross-checks it against the 256-block live-record sum. Dead-segment allocation and post-evacuation role commit avoid full logical-map validation scans; victim scoring/evacuation still scan the map until a reverse index is justified. |
 
@@ -168,13 +168,13 @@ until every operation in the current wave completes. swapz further aggregates
 thousands of upper writes into only hundreds of lower writes and currently
 allows one immutable lower WRITE run outstanding.
 
-The owned `null_blk` profile sets `mbps`, `irqmode=2` and
-`completion_nsec`, but does not yet pin `queue_mode`, `submit_queues` or
-`hw_queue_depth`. The kernel default hardware queue depth is much greater
-than one. A timer-delayed queued device and a mechanical/single-command device
-are different scheduling experiments. The roadmap therefore treats the
-existing slow profile as a queued latency model and adds an explicit
-serial-depth qualification before interpreting results as SD/HDD behavior.
+The owned `null_blk` profiles now pin `mbps`, `irqmode=2`,
+`completion_nsec`, `queue_mode=2`, `submit_queues=1` and hardware queue
+depth. The slow profile uses one hardware service slot; the faster profile uses
+64. Earlier performance evidence predates that correction, so it cannot be
+reinterpreted as serial-depth evidence. The next owner run must use the pinned
+geometry plus observed lower in-flight telemetry before drawing SD/HDD-like
+scheduling conclusions.
 
 The serial-depth experiment must record both **offered upper QD** and
 **observed lower in-flight depth** for raw/sync/async. It must distinguish:
@@ -211,9 +211,10 @@ before any on-disk-format change.
    queue geometry.** The slow model now has one hardware service slot; the
    fast model retains depth 64. Compare request count, Collector-B growth and
    mixed throughput before changing K.
-2. Add lower queue-pressure telemetry: current/peak/time-weighted lower
-   READ/WRITE in-flight depth and swapz immutable-run occupancy. Existing
-   preparation-queue depth is not a substitute for device queue depth.
+2. Use the new queue-pressure telemetry to compare sampled boundary depth,
+   peak/time-weighted lower READ/WRITE depth and K=1 immutable-run occupancy
+   against the existing preparation backlog. Reject any claim that conflates
+   collector backlog, run-slot occupancy and actual block-device depth.
 3. Run >=5 counterbalanced pairs for mixed QD32 and write-only QD8 on the
    relevant queued and serial-depth models before promoting/deleting K=1.
 4. Keep K=1 ping-pong opt-in. Do not add K=2/4/8 until lower-depth evidence

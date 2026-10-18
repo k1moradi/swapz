@@ -28,6 +28,7 @@ from pathlib import Path
 PAGE = 4096
 SCHEMA = 1
 CANDIDATES = ("off", "swapz")
+LOWER_INFLIGHT_SAMPLE_INTERVAL_NS = 500000
 
 
 def sha(data):
@@ -366,6 +367,178 @@ def lower_stat(name):
     return values
 
 
+class LowerInflightSampler:
+    """Sample the exact owned lower block device during the timed interval.
+
+    /sys/block/<disk>/inflight exposes current READ and WRITE requests. Sampling
+    is observational: the benchmark preserves its I/O policy and reports the
+    achieved sample count rather than pretending this is an event trace.
+    """
+
+    def __init__(self, disk_name):
+        self._path = ((Path("/sys/block") / disk_name / "inflight")
+                      if disk_name is not None else None)
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._thread = None
+        self._error = None
+        self._measuring = False
+        self._start_ns = 0
+        self._last_ns = 0
+        self._current = (0, 0)
+        self._start = (0, 0)
+        self._samples = 0
+        self._read_peak = 0
+        self._write_peak = 0
+        self._total_peak = 0
+        self._read_weighted_ns = 0
+        self._write_weighted_ns = 0
+        self._total_weighted_ns = 0
+
+    @staticmethod
+    def _parse(text):
+        fields = text.split()
+        if len(fields) != 2 or any(
+                re.fullmatch(r"(0|[1-9][0-9]*)", field) is None
+                for field in fields):
+            raise ValueError("invalid lower inflight counters")
+        return tuple(map(int, fields))
+
+    @classmethod
+    def _read_fd(cls, fd):
+        os.lseek(fd, 0, os.SEEK_SET)
+        return cls._parse(os.read(fd, 64).decode("ascii"))
+
+    def _read_once(self):
+        return self._parse(self._path.read_text(encoding="ascii"))
+
+    def _set_error(self, exc):
+        with self._lock:
+            if self._error is None:
+                self._error = exc
+
+    def _raise_error_locked(self):
+        if self._error is not None:
+            raise ValueError("lower inflight sampler failed") from self._error
+
+    def _account_locked(self, now_ns):
+        elapsed_ns = now_ns - self._last_ns
+        if elapsed_ns < 0:
+            raise ValueError("lower inflight sample clock moved backwards")
+        read_depth, write_depth = self._current
+        self._read_weighted_ns += read_depth * elapsed_ns
+        self._write_weighted_ns += write_depth * elapsed_ns
+        self._total_weighted_ns += (read_depth + write_depth) * elapsed_ns
+        self._last_ns = now_ns
+
+    def _observe_locked(self, current):
+        self._current = current
+        read_depth, write_depth = current
+        self._samples += 1
+        self._read_peak = max(self._read_peak, read_depth)
+        self._write_peak = max(self._write_peak, write_depth)
+        self._total_peak = max(self._total_peak, read_depth + write_depth)
+
+    def _run(self):
+        fd = None
+        try:
+            fd = os.open(self._path, os.O_RDONLY | os.O_CLOEXEC)
+            self._ready.set()
+            interval_s = LOWER_INFLIGHT_SAMPLE_INTERVAL_NS / 1e9
+            while not self._stop.wait(interval_s):
+                current = self._read_fd(fd)
+                now_ns = time.monotonic_ns()
+                with self._lock:
+                    if self._measuring:
+                        self._account_locked(now_ns)
+                        self._observe_locked(current)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            self._set_error(exc)
+            self._ready.set()
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+    def start(self):
+        if self._path is None:
+            return
+        # Fail before the timed boundary if this kernel lacks the required
+        # split lower READ/WRITE inflight telemetry.
+        self._read_once()
+        self._thread = threading.Thread(
+            target=self._run, name="swapz-lower-inflight", daemon=True)
+        self._thread.start()
+        if not self._ready.wait(timeout=2):
+            self._stop.set()
+            self._thread.join(timeout=2)
+            raise ValueError("lower inflight sampler did not start")
+        with self._lock:
+            self._raise_error_locked()
+
+    def begin(self):
+        if self._path is None:
+            return time.monotonic_ns()
+        current = self._read_once()
+        with self._lock:
+            self._raise_error_locked()
+            start_ns = time.monotonic_ns()
+            self._start_ns = start_ns
+            self._last_ns = start_ns
+            self._current = current
+            self._start = current
+            self._samples = 0
+            self._read_peak = 0
+            self._write_peak = 0
+            self._total_peak = 0
+            self._read_weighted_ns = 0
+            self._write_weighted_ns = 0
+            self._total_weighted_ns = 0
+            self._observe_locked(current)
+            self._measuring = True
+            return start_ns
+
+    def finish(self):
+        if self._path is None:
+            return time.monotonic_ns(), None
+        with self._lock:
+            self._raise_error_locked()
+            if not self._measuring:
+                raise ValueError("lower inflight sampler was not measuring")
+            end_ns = time.monotonic_ns()
+            self._account_locked(end_ns)
+            self._measuring = False
+            duration_ns = end_ns - self._start_ns
+            if duration_ns <= 0:
+                raise ValueError("invalid lower inflight sample interval")
+            read_depth, write_depth = self._current
+            metrics = {
+                "target_interval_ns": LOWER_INFLIGHT_SAMPLE_INTERVAL_NS,
+                "samples": self._samples,
+                "read_start": self._start[0],
+                "write_start": self._start[1],
+                "read_end": read_depth,
+                "write_end": write_depth,
+                "read_peak": self._read_peak,
+                "write_peak": self._write_peak,
+                "total_peak": self._total_peak,
+                "read_time_weighted": self._read_weighted_ns / duration_ns,
+                "write_time_weighted": self._write_weighted_ns / duration_ns,
+                "total_time_weighted": self._total_weighted_ns / duration_ns,
+            }
+            return end_ns, metrics
+
+    def close(self):
+        if self._thread is None:
+            return
+        self._stop.set()
+        self._thread.join(timeout=2)
+        if self._thread.is_alive():
+            raise ValueError("lower inflight sampler did not stop")
+        with self._lock:
+            self._raise_error_locked()
+
+
 def iostat_delta(before, after):
     if before is None or after is None:
         return None
@@ -526,6 +699,7 @@ KERNEL_WRITE_FIELDS = ("physical_write_reqs", "lz4_wall_ns",
                        "prep_lower_write_start_nonempty",
                        "prep_lower_write_end_queued",
                        "prep_lower_write_end_nonempty",
+                       "pipeline_async_runs", "pipeline_active_wall_ns",
                        "write_wait_le1ms", "write_wait_1to4ms",
                        "write_wait_gt4ms")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
@@ -759,6 +933,9 @@ def replay(args):
             after = None
             kernel_write_before = None
             kernel_write_after = None
+            lower_inflight = None
+            lower_inflight_sampler = LowerInflightSampler(
+                identity.get("owned_disk"))
             try:
                 def execute(item, slot):
                     start = time.monotonic_ns()
@@ -785,10 +962,11 @@ def replay(args):
                         job.result(timeout=10)
                     for wave in replay_waves:
                         if wave[0]["phase"] == "measure" and measured_start_ns is None:
+                            lower_inflight_sampler.start()
                             before = lower_stat(identity.get("owned_disk"))
                             kernel_write_before = kernel_write_snapshot(path, identity)
                             cpu_before = process_cpu()
-                            measured_start_ns = time.monotonic_ns()
+                            measured_start_ns = lower_inflight_sampler.begin()
                         if mf["iops"] and wave[0]["phase"] == "measure":
                             due = (measured_start_ns +
                                    (wave[0]["seq"] - mf["warmup_ops"]) *
@@ -805,11 +983,12 @@ def replay(args):
                     # Acknowledged write completion requires final drain.
                     # Buffer and executor teardown are not part of the clock.
                     os.fsync(fd)
-                    measured_end_ns = time.monotonic_ns()
+                    measured_end_ns, lower_inflight = lower_inflight_sampler.finish()
                     cpu_after = process_cpu()
                     after = lower_stat(identity.get("owned_disk"))
                     kernel_write_after = kernel_write_snapshot(path, identity)
             finally:
+                lower_inflight_sampler.close()
                 for view in mixed_views:
                     view.release()
                 for buffer in mixed_buffers:
@@ -868,6 +1047,7 @@ def replay(args):
                               "buffer allocations, executor startup and post-run oracle"),
         "packed_read": packed_read,
         "kernel_write_path": kernel_write_delta(kernel_write_before, kernel_write_after),
+        "lower_inflight": lower_inflight,
         "lower_io": iostat_delta(before, after), "verdict": "PASS",
         "read_p50_ns": percentile(samples["R"], .50),
         "read_p95_ns": percentile(samples["R"], .95),

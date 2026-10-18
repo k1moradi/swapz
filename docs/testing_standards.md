@@ -550,6 +550,22 @@ records these values with bandwidth and timer latency; mismatch is incomplete.
 Loaded correctness smoke also uses depth 1. These are synthetic queue models,
 not literal SD/HDD/SSD/NVMe protocol emulation.
 
+Each timed benchmark arm samples only its positively identified owned lower
+device's `/sys/block/<disk>/inflight` counters. The sanitized report records the
+target sampling interval, achieved sample count, initial/last sampled
+READ/WRITE depth, sampled peaks and sample-and-hold time-weighted means.
+Sampling is observational and is not an exact per-request trace; the achieved
+sample count stays visible so sparse evidence cannot be mistaken for complete
+queue history.
+
+For swapz mixed arms, the kernel also reports K=1 immutable-run occupancy as
+wall time from setting `inflight_write.active` before asynchronous `dm_io`
+through ordered authority publication and release of the run slot. This
+occupancy intentionally includes callback-to-worker scheduling delay and
+publication; it is distinct from lower-WRITE device wall time and from the
+preparation backlog. Synchronous arms must report zero asynchronous run
+occupancy.
+
 ### Compound/folio bvec iteration
 
 Do not apply nth_page() to a bvec returned by bio_for_each_segment() merely

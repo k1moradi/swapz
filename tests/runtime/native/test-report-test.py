@@ -16,6 +16,26 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+def lower_inflight(*, has_reads):
+    read_peak = 1 if has_reads else 0
+    read_mean = 0.25 if has_reads else 0.0
+    write_mean = 0.50
+    return {
+        "target_interval_ns": 500000,
+        "samples": 4000,
+        "read_start": 0,
+        "write_start": 0,
+        "read_end": 0,
+        "write_end": 0,
+        "read_peak": read_peak,
+        "write_peak": 1,
+        "total_peak": 1,
+        "read_time_weighted": read_mean,
+        "write_time_weighted": write_mean,
+        "total_time_weighted": read_mean + write_mean,
+    }
+
+
 def arm(candidate, *, mode, regime):
     swapz = candidate == "swapz"
     raw_mbps = 14 if regime == "sd_emulated" else 32
@@ -86,6 +106,7 @@ def arm(candidate, *, mode, regime):
         "mixed_replay_cpu_user_s": .12,
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
+        "lower_inflight": lower_inflight(has_reads=True),
         "packed_read": packed,
         "kernel_write_path": ({
             "physical_write_reqs": 5,
@@ -115,6 +136,8 @@ def arm(candidate, *, mode, regime):
             "prep_lower_write_start_nonempty": 3,
             "prep_lower_write_end_queued": 1,
             "prep_lower_write_end_nonempty": 1,
+            "pipeline_async_runs": 4 if mode else 0,
+            "pipeline_active_wall_ns": 800000000 if mode else 0,
             "write_wait_le1ms": 2,
             "write_wait_1to4ms": 2,
             "write_wait_gt4ms": 1,
@@ -152,6 +175,7 @@ def write_arm(candidate, *, qd, regime):
         "mixed_replay_cpu_user_s": .12,
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
+        "lower_inflight": lower_inflight(has_reads=False),
     }
 
 def synthetic_log():
@@ -410,6 +434,12 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["async"]["mixed_prep_lower_write_samples"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_lower_write_start_queued"], 4)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_lower_write_end_queued"], 1)
+        self.assertEqual(
+            slow["columns"]["async"]["lower_inflight_write_time_weighted"], .5)
+        self.assertEqual(slow["columns"]["async"]["lower_inflight_write_peak"], 1)
+        self.assertEqual(slow["columns"]["async"]["mixed_pipeline_active_mean"], .4)
+        self.assertEqual(slow["columns"]["async"]["mixed_pipeline_active_peak"], 1)
+        self.assertEqual(slow["columns"]["sync"]["mixed_pipeline_active_mean"], 0)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_ordered_worker_wall_ns"], 52000000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_wall_ns"], 5000000)
@@ -449,6 +479,8 @@ class ReportContract(unittest.TestCase):
         rendered = output.getvalue()
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
+        self.assertIn("Lower queue", rendered)
+        self.assertIn("K=1 run slot", rendered)
         self.assertIn("Async pipeline", rendered)
         self.assertIn("wave kicks", rendered)
         self.assertIn("scheduling", rendered)

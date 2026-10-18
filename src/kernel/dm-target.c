@@ -226,6 +226,8 @@ struct swapz_dm {
 	u64 pipeline_completed_runs;
 	u64 pipeline_collected_pages;
 	u64 pipeline_finalize_waits;
+	/* K=1 slot occupancy from async submission through ordered publication. */
+	u64 pipeline_active_wall_ns;
 	/* Admission coalescing is optional and bounded by one timer expiry.
 	 * No write is published/ACKed until its actual lower I/O completes. */
 	/* Explicitly opt-in, disabled at zero. Worker-owned finite window
@@ -582,7 +584,10 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 		inflight->prepare_nonio_ns + complete_elapsed;
 
 	/* Authority and immutable run bytes are no longer needed before any
-	 * upper completion can admit dependent future I/O. */
+	 * upper completion can admit dependent future I/O. Count the whole K=1
+	 * slot lifetime, including callback-to-publication scheduling delay. */
+	ctx->pipeline_active_wall_ns +=
+		swapz_elapsed_ns(inflight->lower_start_ns, ktime_get_ns());
 	WRITE_ONCE(inflight->active, false);
 	if (error || committed != inflight->count) {
 		error = error ? error : -EIO;
@@ -3560,6 +3565,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_lower_write_end_nonempty=%llu "
 		       "pipeline_async_runs=%llu pipeline_completed_runs=%llu "
 		       "pipeline_collected_pages=%llu pipeline_finalize_waits=%llu "
+		       "pipeline_active_wall_ns=%llu "
 		       "prep_producer_head_claims=%llu prep_producer_tail_claims=%llu "
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
@@ -3683,6 +3689,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->prep_lower_write_end_nonempty,
 		       ctx->pipeline_async_runs, ctx->pipeline_completed_runs,
 		       ctx->pipeline_collected_pages, ctx->pipeline_finalize_waits,
+		       ctx->pipeline_active_wall_ns,
 		       ctx->preparation_producer_head_claims,
 		       ctx->preparation_producer_tail_claims,
 		       ctx->preparation_ordered_inline,

@@ -14,10 +14,12 @@ A performance result is useful only when the final logical image is byte-exact a
 
 Mandatory loaded benchmarking uses newly owned RAM-backed `null_blk` only:
 
-- slow model: 10 MiB/s lower cap, 1 ms completion delay;
-- faster model: 80 MiB/s lower cap, 0.15 ms completion delay.
+- slow model: 10 MiB/s lower cap, 1 ms completion delay, blk-mq with one
+  submit queue and `hw_queue_depth=1`;
+- faster model: 80 MiB/s lower cap, 0.15 ms completion delay, blk-mq with one
+  submit queue and `hw_queue_depth=64`.
 
-These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results.
+These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results. Every timed arm samples the positively identified lower device's block-layer READ/WRITE in-flight counters and reports sampled boundary depth, peak and time-weighted mean. swapz mixed arms also report K=1 immutable-run slot occupancy from async submission through ordered publication.
 
 The mixed QD32 matrix uses four counterbalanced pairs per model across sync/async preparation. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks.
 
