@@ -100,6 +100,8 @@ def arm(candidate, *, mode, regime):
             "engine_pack_wall_ns": 2000000,
             "engine_publish_wall_ns": 3000000,
             "lower_write_wall_ns": 30000000,
+            "ordered_worker_cpu_ns": 12000000,
+            "prep_worker_cpu_ns": 4000000,
             "prep_wait_wall_ns": 500000,
             "prep_lower_write_overlap_ns": 5000000,
             "windows": 4,
@@ -375,6 +377,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_engine_pack_wall_ns"], 2000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_engine_publish_wall_ns"], 3000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
+        self.assertEqual(slow["columns"]["sync"]["mixed_ordered_worker_cpu_ns"], 12000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_cpu_ns"], 4000000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
         self.assertEqual(
             slow["columns"]["async"]["mixed_prep_lower_write_overlap_ns"], 5000000)
@@ -421,6 +425,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("engine pack", rendered)
         self.assertIn("engine publish", rendered)
         self.assertIn("engine residual", rendered)
+        self.assertIn("ordered CPU", rendered)
+        self.assertIn("prep CPU", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
