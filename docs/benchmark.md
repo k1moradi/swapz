@@ -369,3 +369,46 @@ the producer-side singular guard that eliminated the completion convoy.
 Retention policy, LZ4/extent planning, lower-byte policy, read behavior and GC
 are otherwise unchanged. The rollback must itself pass the full official
 qualification before any new preparation-ahead policy is attempted.
+
+### Qualified rollback result and accepted-wave overlap successor
+
+Source `5aeae47f82c71bbc3e5722b977f684d08eee0083` passed all five
+owner-loaded qualification stages. The restored producer wake behavior recovered
+the rejected scheduling regression while retaining the producer-side singular
+head guard. Slow mixed QD32 async reached 7.10 MB/s with 544.5 lower WRITE
+requests. Faster mixed async reached 21.18 MB/s versus 19.49 sync and 19.39 raw,
+with 1029 lower WRITE requests and 2.58 ms mixed READ p99.
+
+The write-only pilot again preserved deep aggregation. Faster-model async QD8
+used 520 lower WRITE requests and reached 29.75 MB/s versus 20.69 sync; QD32
+used 138 requests and reached 46.89 MB/s versus 45.02 sync. These are
+single-pair directional observations, not established performance.
+
+The rollback is preferred over rejected `2ad805b`, but the mixed path still
+has avoidable scheduling fragmentation: faster mixed averaged 70.2 worker-empty
+deadline closes and 1029 lower WRITE requests, compared with about 59.5 and
+1007 at qualified exploratory source `6642e7e`. Faster write-only QD4/QD8 also
+showed little producer participation despite useful async throughput: QD4
+recorded 30 producer-tail claims versus 5346 ordered-inline preparations and
+QD8 recorded 9 versus 5363.
+
+The next candidate uses that measured gap rather than adding another arrival
+timer. Immediately after the ordered worker captures a finite incoming wave, it
+may grant one tail credit when at least two unclaimed WRITE preparations already
+exist. The producer still cannot claim a singular FIFO head, remains one-for-one
+paced outside lower-I/O service, and continues to drain head-first only while a
+synchronous lower WRITE is active. No new future-arrival wait, extent geometry,
+retention rule, mapping publication rule, read policy or GC policy is added.
+
+New attribution measures producer LZ4 time wholly contained in lower-WRITE
+waits, actual ordered completion-wait time, and accepted-wave kicks. The dead
+`ordered_worker_busy` state is removed. Human output is condensed into narrow
+tables while the complete telemetry remains in `build/test_results.json.xz`;
+sync remains a compact scheduling control rather than a verbose report arm.
+
+Acceptance requires QD1 to retain zero producer claims, QD4/QD8 producer
+participation to rise without a completion convoy, QD8/QD32 request geometry to
+remain near 520/~138, and faster mixed request/deadline behavior to improve or
+hold without increasing lower WRITE bytes or degrading packed-read tails. GC
+endurance remains unqualified until loaded testing observes nonzero victims.
+
