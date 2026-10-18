@@ -820,6 +820,10 @@ def benchmark_verdicts(sessions):
             columns[name]["write_input_per_lower_byte"] = (
                 input_bytes / backing_bytes if input_bytes and backing_bytes else None)
             if name != "off":
+                # kernel_write_path is an interval delta. Histogram totals
+                # must remain exact, but a follow-up can land inside this
+                # interval after its matching dry close occurred just before
+                # the starting snapshot.
                 diagnostics = [arm.get("kernel_write_path") for arm in rows_for_arm]
                 if any(not isinstance(record, dict) or
                        any(type(record.get(field)) is not int or
@@ -837,9 +841,7 @@ def benchmark_verdicts(sessions):
                             "dry_pack_followup_11_50us",
                             "dry_pack_followup_51_200us",
                             "dry_pack_followup_gt200us")) !=
-                           record["dry_pack_followup_events"] or
-                       record["dry_pack_followup_events"] >
-                           record["dry_pack_close_events"]
+                           record["dry_pack_followup_events"]
                        for record in diagnostics):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: missing/inconsistent timed swapz C write counters"}
@@ -1235,11 +1237,10 @@ def publish(source_sha):
         return "SKIPPED_GIT_SYNC: compressed report is unreadable"
 
     env = os.environ.copy()
+    # Never block make test on an interactive Git username/password prompt,
+    # but preserve configured credential helpers/askpass. The operator's
+    # ordinary git pull/push authentication must remain usable here.
     env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GCM_INTERACTIVE"] = "never"
-    env["GIT_ASKPASS"] = "false"
-    env["SSH_ASKPASS"] = "false"
-    env["SSH_ASKPASS_REQUIRE"] = "never"
     if not env.get("GIT_SSH_COMMAND"):
         env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=8"
 
@@ -1273,16 +1274,6 @@ def publish(source_sha):
     if any(item is None or item.returncode
            for item in (tracked, cached, report_tracked)):
         return "SKIPPED_GIT_SYNC: tracked source/index is not clean"
-
-    upstream = run("ls-remote", "--exit-code", "origin", "refs/heads/main",
-                   timeout=20)
-    if upstream is None or upstream.returncode:
-        return ("SKIPPED_GIT_SYNC: origin/main unreachable or Git credentials "
-                "are unavailable")
-    refs = upstream.stdout.decode("utf-8", "replace").strip().split()
-    if len(refs) != 2 or refs != [source_sha, "refs/heads/main"]:
-        return ("SKIPPED_GIT_SYNC: origin/main changed since testing; "
-                "pull before the next run")
 
     blob = run("hash-object", "-w", "--no-filters", str(REPORT))
     root_tree = run("ls-tree", "-z", source_sha)
@@ -1319,10 +1310,13 @@ def publish(source_sha):
     if not re.fullmatch(r"[0-9a-f]{40}", report_sha):
         return "GIT_SYNC_FAILED: invalid report commit"
 
+    # report_sha is a direct child of source_sha. A normal nonforce push is
+    # therefore safe: any concurrent main advance makes this non-fast-forward
+    # and Git rejects it without overwriting the other work.
     push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
     if push is None or push.returncode:
-        return ("GIT_SYNC_FAILED: nonforce report push rejected; "
-                "source checkout was not committed")
+        return ("GIT_SYNC_FAILED: nonforce report push rejected or "
+                "authentication unavailable; local source was not committed")
 
     # The remote commit now exists. Advance only the local main ref with a
     # compare-and-swap, then refresh the index. The working report already has

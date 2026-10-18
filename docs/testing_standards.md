@@ -411,3 +411,23 @@ Top-level qualification status follows the classified stage result, not a raw
 child exit-code convention. A stage classified FAIL remains overall FAIL even
 when its shell helper returned 2; BLOCKED is reserved for an explicit blocked
 stage marker.
+
+
+### Report publication authentication and concurrency
+
+The report publisher must preserve the operator's configured noninteractive Git
+credential helper or askpass mechanism. It may set `GIT_TERMINAL_PROMPT=0`
+and SSH batch mode so qualification never waits for an interactive password,
+but it must not blank `GIT_ASKPASS` or disable a configured credential
+manager.
+
+A separate `ls-remote` authorization probe is not required. The generated
+report commit has the exact tested source commit as its parent and is pushed
+normally (never force-pushed) to `main`. Therefore a concurrent advance of
+`origin/main` makes the push non-fast-forward and Git rejects it.
+
+The mixed benchmark stores `kernel_write_path` as a snapshot delta. Its dry
+follow-up histogram must sum exactly to the follow-up-event delta, but the
+delta is not required to have at least as many new dry closes: the matching
+close may lie immediately before the measurement boundary. Causal
+`followups <= closes` validation belongs to the cumulative endpoint snapshots.

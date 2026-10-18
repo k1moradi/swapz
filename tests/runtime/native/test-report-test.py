@@ -489,6 +489,17 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
+        crossing = sessions[0]["arms"]["swapz"]["kernel_write_path"]
+        crossing["dry_pack_close_events"] = 0
+        crossing["dry_pack_followup_events"] = 1
+        crossing["dry_pack_followup_le10us"] = 1
+        crossing["dry_pack_followup_11_50us"] = 0
+        crossing["dry_pack_followup_51_200us"] = 0
+        crossing["dry_pack_followup_gt200us"] = 0
+        self.assertNotEqual(runner.benchmark_verdicts(sessions)["overall"],
+                            "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
         sessions[0]["kernel_status"]["after"]["accepted_burst_tail_flushes"] = 7
         sessions[0]["kernel_status"]["after"]["accepted_burst_extensions"] = 6
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
@@ -828,6 +839,13 @@ class ReportContract(unittest.TestCase):
                         before)
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_publisher_preserves_configured_git_credentials(self):
+        source = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn('env["GIT_TERMINAL_PROMPT"] = "0"', source)
+        self.assertNotIn('env["GIT_ASKPASS"] = "false"', source)
+        self.assertNotIn('env["GCM_INTERACTIVE"] = "never"', source)
+        self.assertNotIn('"ls-remote"', source)
 
     def test_git_sync_declines_invalid_source(self):
         with tempfile.TemporaryDirectory(
