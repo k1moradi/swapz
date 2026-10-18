@@ -71,6 +71,28 @@ retention interval, credit count or worker count changes in this probe.
 7. Implement >=5 counterbalanced matched pairs before promoting QD8 or mixed
    throughput from directional/preliminary to confirmatory evidence.
 
+## Worker CPU evidence path
+
+Accurate worker CPU attribution remains desirable, but it must not be rebuilt
+from another in-module approximation. The authoritative kernel helper that
+includes a currently running task's pending scheduler slice is not a stable
+loadable-module interface for swapz. Qualification should therefore derive
+worker on-CPU time externally by correlating workqueue execute start/end events
+for the swapz ordered/preparation work functions with scheduler switch events
+for the executing kworker. Sum only the runnable slices that occur while the
+specific swapz work item is executing; exclude sleep time, scheduler delay and
+unrelated work executed by the same pooled kworker.
+
+This evidence must be collected by the existing `make test` qualification
+path when tracing support and privilege are available, and reported as BLOCKED
+rather than guessed when they are not. Compare traced on-CPU time against the
+existing callback wall residency, LZ4/CRC phase walls and prepared-page claim
+counts. A CPU-bound conclusion requires traced CPU growth to track useful work
+across matched runs; a credit/arrival-bound conclusion is supported when wall
+residency or dry-close gaps grow while traced on-CPU time stays comparatively
+flat. The traced result is diagnostic evidence only and must not weaken any
+correctness, aggregation or read-tail gate.
+
 ## NUMA / deployment topology
 
 Preparation should become NUMA-local only after bounded multi-worker scaling is
