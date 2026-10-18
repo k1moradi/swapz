@@ -251,10 +251,11 @@ Source coverage must preserve DUPLICATE continuation semantics because the
 current WRITE continues after that older batch is flushed.
 
 Loaded qualification must compare write-only QD8/QD32 window histograms and
-lower requests against the last deep-aggregation result, and mixed QD32
-`deadline_worker_empty` plus one-page deadline closes against the prior
-~88-close cluster. No scheduling evidence may survive a true worker-idle or
-hard ordering boundary.
+lower requests against the current deep-aggregation result (~520/~139 requests),
+and mixed QD32 `deadline_worker_empty` plus one-page deadline closes against
+the qualified accepted-wave baseline (~60.5 worker-empty closes on the faster
+model). No scheduling evidence may survive a true worker-idle or hard ordering
+boundary.
 
 Credited opposite-end preparation qualification requires source coverage that
 the producer selects the FIFO head only while `lower_write_active` is true.
