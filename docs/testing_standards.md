@@ -577,3 +577,12 @@ identity as the mixed benchmark parser. It must validate queue mode,
 submission-queue count and hardware queue depth in addition to bandwidth,
 completion delay and IRQ mode; a private pilot may not silently accept a
 different lower queue geometry from the mixed qualification.
+
+
+### Report-contract fixture model identity
+
+Native report-contract fixtures must emit the complete configured storage-model
+identity accepted by the production parser. Mixed and write-only synthetic logs
+therefore carry queue mode, submission-queue count and hardware queue depth as
+well as bandwidth, completion delay and IRQ mode, and their expected
+`device_model` dictionaries compare all six fields.
