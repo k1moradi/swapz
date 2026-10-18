@@ -481,3 +481,29 @@ staging. It also reports planner, pack and post-I/O publish wall time inside the
 no loss of useful throughput, request geometry, read tails or lifecycle
 correctness; engine phase timing is diagnostic and must not itself change
 packing/publication behavior.
+
+
+### Qualified direct-input result and RAW/CPU successor
+
+Source `39e7787b784410140cf90d3fe3a08ad4d674f4f2` passed full qualification.
+Direct input covered 12,301 mixed foreground pages. Faster-model explicit
+WRITE-copy cost fell to 3.9 ms / 11.0 MiB from 22.4 ms / 59.4 MiB, while mixed
+async reached 21.22 MB/s versus 19.89 sync and write-only QD8 reached 25.50
+versus 19.84 MB/s with 520 lower requests. Slow-model explicit copying fell to
+4.7 ms / 9.1 MiB and useful mixed behavior remained neutral.
+
+The 48.5 ms faster-model commit non-I/O interval split into 5.2 ms planner,
+16.4 ms pack, 18.9 ms publish and 8.0 ms residual. Publish is not synonymous
+with CRC: it includes batch resume, validation, liveness/generation checks and
+mapping publication. Residual is likewise not synonymous with batch CRC: it
+contains stage/pause/allocation, alignment-hole clearing and control overhead.
+Future CRC removal requires isolated evidence plus equivalent fail-closed
+validation.
+
+The successor removes one remaining inline RAW bounce. A directly mapped
+incompressible page is copied straight to its durable `batch_bytes` slot when
+bulk RAW admission is active. In non-bulk mode the mapping is simply released
+and the still-owned BIO is copied once later by `swapz_raw_write()`. It also
+reports scheduler-accounted CPU time for the ordered and preparation workqueue
+callbacks using the exported cputime API. These CPU counters are diagnostics
+and overlap wall-time phases.
