@@ -3258,6 +3258,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "lz4_size_3073_3568=%llu lz4_raw_fallback=%llu "
 		       "windows=%llu reordered=%llu cursor=%u reserve=%u "
 		       "gc_victims=%llu gc_role_rotations=%llu "
+		       "gc_victim_unique=%llu gc_destination_unique=%llu "
+		       "gc_victim_max_hits=%u gc_destination_max_hits=%u "
 		       "last_gc_victim=%u last_gc_destination=%u "
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
@@ -3305,9 +3307,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "window_commit_nonio_wall_ns=%llu "
 		       "engine_plan_wall_ns=%llu engine_pack_wall_ns=%llu "
 		       "engine_publish_wall_ns=%llu "
+		       "engine_stage_wall_ns=%llu engine_pause_wall_ns=%llu "
+		       "engine_resume_wall_ns=%llu engine_hole_clear_wall_ns=%llu "
+		       "payload_crc_wall_ns=%llu "
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
-		       "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu "
+		       "cpu_trace=%u ordered_worker_oncpu_ns=%llu "
+		       "prep_worker_oncpu_ns=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu "
@@ -3318,6 +3324,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
 		       "retained_burst_target=%u "
+		       "dry_pack_gap_samples=%llu dry_pack_gap_le50us=%llu "
+		       "dry_pack_gap_51_100us=%llu dry_pack_gap_101_500us=%llu "
+		       "dry_pack_gap_gt500us=%llu dry_pack_gap_sum_ns=%llu "
+		       "dry_pack_gap_max_ns=%llu "
 		       "read_meta_reqs=%u read_payload_reqs=%u "
 		       "read_payload_blocks=%u read_meta_cache_hits=%u "
 		       "read_meta_lru_hits=%u "
@@ -3338,6 +3348,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->reordered_records, ctx->authority.next_block,
 		       ctx->authority.reserve_blocks,
 		       ctx->gc_victims, ctx->gc_role_rotations,
+		       ctx->gc_victim_unique, ctx->gc_destination_unique,
+		       ctx->gc_victim_max_hits, ctx->gc_destination_max_hits,
 		       ctx->last_gc_victim, ctx->last_gc_destination,
 		       ctx->gc_pages, ctx->gc_read_bytes, ctx->gc_write_bytes,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
@@ -3425,10 +3437,14 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_commit_nonio_wall_ns,
 		       ctx->engine_plan_wall_ns, ctx->engine_pack_wall_ns,
 		       ctx->engine_publish_wall_ns,
+		       ctx->engine_stage_wall_ns, ctx->engine_pause_wall_ns,
+		       ctx->engine_resume_wall_ns, ctx->engine_hole_clear_wall_ns,
+		       ctx->preparation_crc_wall_ns + ctx->ordered_crc_wall_ns,
 		       ctx->read_engine_nonio_wall_ns,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
-		       ctx->ordered_worker_cpu_ns,
-		       ctx->preparation_worker_cpu_ns,
+		       ctx->cpu_trace_registered,
+		       ctx->ordered_cpu_trace.oncpu_ns,
+		       ctx->preparation_cpu_trace.oncpu_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
@@ -3442,6 +3458,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->accepted_burst_tail_flushes,
 		       ctx->accepted_burst_read_caps,
 		       ctx->retained_burst_target,
+		       ctx->dry_pack_gap_samples,
+		       ctx->dry_pack_gap_le50us,
+		       ctx->dry_pack_gap_51_100us,
+		       ctx->dry_pack_gap_101_500us,
+		       ctx->dry_pack_gap_gt500us,
+		       ctx->dry_pack_gap_sum_ns,
+		       ctx->dry_pack_gap_max_ns,
 		       ctx->engine.read_metadata_requests,
 		       ctx->engine.read_payload_requests,
 		       ctx->engine.read_payload_blocks,
