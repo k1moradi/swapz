@@ -570,6 +570,29 @@ def kernel_write_delta(before, after):
                            "engine_publish_wall_ns"))
     if measured_engine > counters["window_commit_nonio_wall_ns"]:
         raise ValueError("inconsistent swapz engine phase timing")
+    if any(counters[key] > counters["window_commit_nonio_wall_ns"]
+           for key in ("engine_stage_wall_ns", "engine_pause_wall_ns",
+                       "engine_hole_clear_wall_ns")):
+        raise ValueError("inconsistent swapz engine residual timing")
+    if counters["engine_resume_wall_ns"] > counters["engine_publish_wall_ns"]:
+        raise ValueError("inconsistent swapz engine resume timing")
+    publish_parts = (counters["publish_initial_validate_wall_ns"] +
+                     counters["publish_phase1_wall_ns"] +
+                     counters["publish_mutation_wall_ns"] +
+                     counters["engine_resume_wall_ns"])
+    if publish_parts > counters["engine_publish_wall_ns"]:
+        raise ValueError("inconsistent swapz publish phase timing")
+    if counters["publish_lookup_wall_ns"] > counters["publish_phase1_wall_ns"]:
+        raise ValueError("inconsistent swapz publish lookup timing")
+    if counters["batch_pause_hash_wall_ns"] > counters["engine_pause_wall_ns"] or        counters["batch_resume_hash_wall_ns"] > counters["engine_resume_wall_ns"]:
+        raise ValueError("inconsistent swapz batch hash timing")
+    dry_bins = sum(counters[key] for key in
+                   ("dry_next_le10us", "dry_next_11_50us",
+                    "dry_next_51_200us", "dry_next_gt200us"))
+    if dry_bins != counters["dry_close_samples"]:
+        raise ValueError("inconsistent swapz dry-close arrival histogram")
+    if counters["ordered_active_underflows"]:
+        raise ValueError("inconsistent swapz active-wall wait subtraction")
     return counters
 
 def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
