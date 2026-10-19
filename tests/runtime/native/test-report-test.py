@@ -632,8 +632,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_idle"], 1.5)
         self.assertEqual(slow["kernel_counters"]["burst_target_grows"], 2.5)
         self.assertEqual(slow["kernel_counters"]["burst_target_shrinks"], 1.5)
-        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferred_start"], 0)
-        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferred_end"], 0)
+        self.assertEqual(
+            slow["columns"]["async"]["mixed_pack_tail_zero_deferred_start"], 0)
+        self.assertEqual(
+            slow["columns"]["async"]["mixed_pack_tail_zero_deferred_end"], 0)
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferrals"], 1)
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_finalize_holds"], 0.5)
         self.assertEqual(slow["kernel_counters"]["pack_tail_deferred_resolve_one"], 0.5)
@@ -787,13 +789,13 @@ class ReportContract(unittest.TestCase):
                          "INCOMPLETE")
 
         sessions = runner.parse_sessions(synthetic_log())
-        carried = sessions[1]["arms"]["swapz"]["kernel_write_path"]
+        carried = sessions[0]["arms"]["swapz"]["kernel_write_path"]
         carried["pack_tail_zero_deferred_start"] = 1
-        carried["pack_tail_zero_deferrals"] = 1
-        carried["pack_tail_deferred_resolve_many"] = 2
+        carried["pack_tail_zero_deferrals"] = 0
+        carried["pack_tail_deferred_resolve_many"] = 1
         carried["pack_tail_zero_deferred_end"] = 0
-        self.assertNotEqual(runner.benchmark_verdicts(sessions)["overall"],
-                            "INCOMPLETE")
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "PASS_BOUNDED_RAM_MATRIX")
 
     def test_close_and_deadline_accounting_fail_closed(self):
         sessions = runner.parse_sessions(synthetic_log())

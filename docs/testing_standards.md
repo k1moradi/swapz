@@ -756,6 +756,9 @@ snapshot must yield exactly 0 or 1. Timed conservation is exact only when
 holds are bounded by `start + interval_deferrals`; post-finalization closes
 remain a same-event subset of timed packed-early closes. Never reject valid
 evidence merely because a lifecycle crosses the measurement boundary.
+Rootless report fixtures must include both a valid carry-in resolution with
+zero same-interval deferrals and an impossible cumulative lifecycle that fails
+closed.
 
 Synthetic ID57 fixtures must preserve the same subset invariants as runtime
 telemetry: a nonzero post-finalization close requires a corresponding packed
