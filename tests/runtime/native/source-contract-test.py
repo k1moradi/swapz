@@ -241,10 +241,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine->read_cache_valid = 0", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(engine)", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(e)", engine)
-        self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
-                      body("swapz_lower"))
-        self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
-                      body("swapz_process"))
+        self.assertIn("swapz_invalidate_read_caches(ctx)", body("swapz_lower"))
+        self.assertIn("swapz_invalidate_read_caches(ctx)", body("swapz_process"))
         self.assertIn("ctx->engine.read_metadata_cache =",
                       body("swapz_ctr"))
         self.assertIn("SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES",
@@ -515,8 +513,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             read)
         self.assertIn("cached_full || initial_blocks == 2", read)
         self.assertIn("if (op != REQ_OP_READ ||", process)
-        self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)",
-                      process)
+        self.assertIn("swapz_invalidate_read_caches(ctx)", process)
 
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
         engine = (ROOT / "src/kernel/engine.c").read_text()
@@ -612,11 +609,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         worker = body("swapz_worker")
         self.assertIn("SWAPZ_WORK_QUANTUM_BIOS", worker)
         self.assertIn("while (remaining && !list_empty(&local))", worker)
-        self.assertIn("remaining--", worker)
+        self.assertIn("remaining -= processed_bios", worker)
+        self.assertIn("unsigned int processed_bios = 1", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
         self.assertIn("mod_delayed_work(ctx->workqueue, &ctx->worker, 0)", worker)
         self.assertIn("cond_resched()", worker)
-        self.assertLess(worker.index("remaining--"),
+        self.assertLess(worker.index("remaining -= processed_bios"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
         self.assertLess(worker.index("swapz_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
@@ -795,7 +793,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(worker.index("for (;;)"),
                         worker.index("remaining = SWAPZ_WORK_QUANTUM_BIOS;"))
         self.assertIn("while (remaining && !list_empty(&local))", worker)
-        self.assertIn("remaining--", worker)
+        self.assertIn("remaining -= processed_bios", worker)
+        self.assertIn("unsigned int processed_bios = 1", worker)
         self.assertIn("list_splice_tail_init(&ctx->incoming, &local)", worker)
         self.assertIn("list_splice_init(&local, &ctx->incoming)", worker)
         self.assertIn("if (ctx->accepting) {", worker)

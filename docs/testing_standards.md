@@ -673,3 +673,11 @@ second read.
 Because two synchronous slot callbacks can overlap, reported lower READ wall is
 the sum of slot busy intervals, not necessarily elapsed pair wall. Use sampled
 lower in-flight depth and end-to-end latency/throughput for concurrency claims.
+
+Source-contract assertions must follow current ownership helpers rather than freeze
+retired body-local syntax. When cache invalidation moves behind the all-read-slot
+invalidation wrapper, assert that wrapper at mutation call sites and assert the
+main/private engine invalidations inside the wrapper. A finite worker quantum may
+consume two BIOs for one joined Kread pair, so source coverage must require
+`remaining -= processed_bios`, default `processed_bios = 1`, and the explicit
+paired value 2 instead of requiring the retired one-BIO `remaining--` spelling.
