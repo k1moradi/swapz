@@ -167,6 +167,7 @@ changes.
 | 60 | Queued READ coalescing within the same immutable extent | **4 evidence collection** | Reuse existing `parallel_read_pairs` / `parallel_read_same_extent_pairs` first. Coalescing is worth an active experiment only if a material fraction of already-waiting reads target the same immutable extent/block and lower request reduction can be achieved without delaying an otherwise dispatchable read or regressing Kread p99. |
 | 61 | Background/asynchronous GC instead of foreground collection stalls | **4 dependent evidence** | ID28 proves loaded live-GC correctness/cost, not that a background worker helps. Before adding concurrency, measure foreground-GC stall contribution, free-segment headroom, trigger frequency and mixed p99/throughput under bounded GC pressure. A future worker must never race allocation/publication, consume the last reserve, or turn GC into uncontrolled write amplification. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Explicitly retained as a future evidence item. Current development may use only newly owned RAM-backed `null_blk`; no physical-device experiment is authorized. A real-device study needs separate owner authorization, device-loss acceptance, exact identity/alias checks, endurance/error metrics and an independent safety review. It is not part of current `make test`. |
+| 63 | Physically adjacent **distinct-extent** lower READ coalescing | **4 passive opportunity evidence only** | Distinct from ID60's same-extent sibling grouping. ID49's owned-RAM sequential READ evidence is 2830 KiB / 400.5 lower requests (~7.1 KiB/request), but this does **not** prove adjacent queued extents. First count already-admitted independent READs whose *authoritative physical extents* are contiguous, with current-cache residency and requested-block coverage accounted for. No active merger until request/byte and p99 opportunity is measured. |
 
 
 ## What the pinned queue experiment establishes
@@ -233,6 +234,17 @@ generation.
   small, do not add a coalescer; if material, test only reads already queued
   behind lower service, never delay an immediately dispatchable read to create
   a batch.
+- **ID63 adjacent distinct-extent READ coalescing:** ID60's same-extent
+  pair counter cannot measure this separate opportunity. When ID57 settles,
+  passively classify the already-admitted, independent READ prefix by
+  authoritative physical start/end block and immutable generation. Count
+  physically contiguous *different* extents, bytes already needed vs extra
+  bytes a proposed merged span would fetch, cache hits, and any intervening
+  ordering/GC constraints. Logical-page adjacency alone is not evidence.
+  A later opt-in may consider bounded <=64KiB spans only if every individual
+  record retains its metadata/payload CRC and authority validation, with no
+  future-arrival wait, no fence reordering, no cache publication before success,
+  and no increase in lower READ bytes or read p99.
 - **ID61 background GC:** extend the existing owned-RAM live-GC evidence only
   after ID57 settles. The required observation is foreground stall/headroom
   pressure, not merely more victims. Background GC is justified only if GC
@@ -242,6 +254,11 @@ generation.
   reconsidered only after repeated evidence that a complete/usable next run is
   ready while K=1 is actually blocking submission and the lower model can serve
   more than one write.
+- **ID29 dead-segment DISCARD/TRIM:** the already-qualified victim-distribution
+  telemetry provides a placement baseline, not an SSD endurance result.
+  Qualify optional whole-dead-segment discard support/failure/alignment and
+  foreground/GC ordering on newly owned RAM only. A physical FTL benefit
+  remains unproven until a separately authorized device study.
 - **ID62 physical devices:** deliberately blocked by the current safety scope.
   Keep the study design documented, but collect no physical-media data under the
   development harness.
@@ -265,9 +282,10 @@ generation.
 6. Preserve IDs 58-62 in the evidence backlog. The next owner report may
    collect ID58/59 trace-only opportunity at no kernel-policy cost; do not start
    their active implementations until ID57 is resolved.
-7. After ID57, surface ID60 same-extent read-pair prevalence and add bounded
-   foreground-GC stall/headroom evidence for ID61 before considering a read
-   coalescer or background GC worker.
+7. After ID57, surface ID60 same-extent read-pair prevalence, then separately
+   measure ID63 *physically adjacent distinct-extent* opportunities in already-
+   queued READ prefixes. Add bounded foreground-GC stall/headroom evidence for
+   ID61 before considering any read coalescer or background GC worker.
 8. Proceed independently with bounded owned-RAM DISCARD/TRIM (ID29),
    huge/compound-page coverage (ID43), and heavy-CPU/low-RAM qualification.
 
