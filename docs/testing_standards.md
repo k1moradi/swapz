@@ -728,8 +728,11 @@ ID55 remains measurement only. For every learned burst-target close,
 `pack_close_burst_target`; the four learned-target bins and four actual-count
 bins must independently sum to that same total, and overshoot cannot exceed it.
 Source contracts must prove admission/worker snapshot the existing learned
-target without changing any readiness predicate. Replay/report contracts fail
-closed on any broken conservation.
+target without changing any readiness predicate. Assertions should follow the
+actual accumulator mapped to a status label (for example
+`ordered_lz4_wall_ns` is emitted from `ctx->lz4_wall_ns`) rather than assume
+the label is a same-named struct member, and must tolerate ordinary source line
+wrapping. Replay/report contracts fail closed on any broken conservation.
 
 ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain

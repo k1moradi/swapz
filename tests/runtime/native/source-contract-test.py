@@ -978,9 +978,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                          producer.count("swapz_account_worker_runtime("))
         self.assertEqual(worker.count("return;"),
                          worker.count("swapz_account_worker_runtime("))
-        for key in ("lz4_wall_ns", "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
-                    "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns",
-                    "decode_wall_ns", "read_copy_wall_ns",
+        for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
@@ -1301,7 +1299,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->pack_close_burst_overshoot++", flush)
         self.assertIn("SWAPZ_BURST_CLOSE_ADMISSION", writer)
         self.assertIn("SWAPZ_BURST_CLOSE_WORKER", worker)
-        self.assertIn("ctx->next_burst_close_target = ctx->retained_burst_target", writer)
+        self.assertIn("ctx->next_burst_close_target =", writer)
+        self.assertIn("ctx->retained_burst_target", writer)
         self.assertIn("ctx->next_burst_close_target =", worker)
         self.assertIn("packed_early_commits=%llu", status)
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
