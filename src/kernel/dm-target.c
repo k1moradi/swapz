@@ -316,6 +316,10 @@ struct swapz_dm {
 	u64 accepted_burst_read_caps;
 	swapz_u8 retained_burst_target;
 	swapz_u8 retained_tail_target;
+	/* A one-record post-PACK sample is too timing-sensitive to authorize
+	 * another PACK_READY close. Keep that singleton open until a companion
+	 * joins or the original retention deadline expires. */
+	bool retained_single_tail_deferred;
 	swapz_u8 retained_chain_completed;
 	bool pack_close_pending_tail_sample;
 	u64 window_records_total;
@@ -1671,6 +1675,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->singleton_deadline_streak = 0;
 		ctx->singleton_fast_close = false;
 	}
+	if (count || hard_boundary)
+		ctx->retained_single_tail_deferred = false;
 
 	/*
 	 * An empty flush is not a committed write window. In particular, a READ
@@ -2127,10 +2133,17 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
 			ctx->retained_burst_target, ctx->retained_chain_completed,
 			tail, ctx->max_window);
-		ctx->retained_tail_target = tail;
+		if (tail == 1U) {
+			ctx->retained_tail_target = 0;
+			ctx->retained_single_tail_deferred = true;
+		} else {
+			ctx->retained_tail_target = tail;
+			ctx->retained_single_tail_deferred = false;
+		}
 	} else {
 		ctx->retained_chain_completed = 0;
 		ctx->retained_tail_target = 0;
+		ctx->retained_single_tail_deferred = false;
 	}
 	ctx->pack_close_pending_tail_sample = false;
 }
@@ -2148,6 +2161,8 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
  */
 static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
 {
+	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
+		return false;
 	return swapz_window_burst_close_ready(
 		ctx->single_pack_deferred, 0,
 		ctx->batch_count, ctx->retained_burst_target,
@@ -2156,7 +2171,11 @@ static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
 
 static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 {
-	bool service_proven_dry_pack =
+	bool service_proven_dry_pack;
+
+	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
+		return false;
+	service_proven_dry_pack =
 		!ctx->retained_tail_target && ctx->batch_count &&
 		(((ctx->retained_chain_completed ||
 		   ctx->retained_window_read_bypasses) &&
@@ -2352,6 +2371,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.length = SWAPZ_BLOCK_BYTES,
 			.raw = 1,
 		};
+		if (ctx->batch_count >= 2U)
+			ctx->retained_single_tail_deferred = false;
 		if (READ_ONCE(ctx->inflight_write.active))
 			ctx->pipeline_collected_pages++;
 		if (bio->bi_opf & REQ_FUA) {
@@ -2386,6 +2407,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		.payload_crc32c_valid = payload_crc32c_valid,
 	};
 	ctx->batch_count++;
+	if (ctx->batch_count >= 2U)
+		ctx->retained_single_tail_deferred = false;
 	if (READ_ONCE(ctx->inflight_write.active))
 		ctx->pipeline_collected_pages++;
 	/*
@@ -3357,6 +3380,7 @@ static void swapz_worker(struct work_struct *work)
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
 				ctx->retained_tail_target = 0;
+				ctx->retained_single_tail_deferred = false;
 				ctx->pack_close_pending_tail_sample = false;
 			}
 			/*

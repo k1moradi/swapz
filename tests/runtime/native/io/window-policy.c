@@ -218,7 +218,8 @@ static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 	 * for an oversized learned target and burn the absolute deadline. */
 	CHECK(swapz_window_burst_close_ready(1, 1, 6, 32, 0));
 	CHECK(swapz_window_burst_close_ready(0, 1, 6, 32, 0));
-	CHECK(swapz_window_burst_close_ready(0, 0, 1, 8, 1));
+	CHECK(!swapz_window_burst_close_ready(0, 0, 1, 8, 1));
+	CHECK(swapz_window_burst_close_ready(0, 0, 2, 8, 2));
 	CHECK(!swapz_window_burst_close_ready(0, 0, 2, 8, 3));
 	CHECK(swapz_window_burst_close_ready(0, 0, 3, 8, 3));
 	return 0;

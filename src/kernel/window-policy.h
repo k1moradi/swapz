@@ -182,6 +182,11 @@ static inline int swapz_window_burst_close_ready(
 	 */
 	if (accepted_pack_ready)
 		return 1;
+	/* A sampled one-record tail is admission skew, not a useful packed
+	 * residual. Keep it on the existing pinned retention deadline so a
+	 * companion already in flight can join without manufacturing win1. */
+	if (count < 2U)
+		return 0;
 	return target && count >= target &&
 		(first_pack_seen || admitted_tail_target);
 }

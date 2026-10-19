@@ -647,11 +647,35 @@ resume is already inside publish authority and must not be subtracted twice.
 Both paths continue to hash the complete `struct swapz_tx`; adding the split
 must not change hash length, identity checks or publication semantics.
 
-One-page PACK_READY cause attribution is also observational. For every timed
-`win1_pack_ready`, exactly one of sampled-tail-target, retained-read-bypass or
-wave-interruption counters must increment. Their sum must equal
-`win1_pack_ready` in replay and report validation. Do not change closure policy
-until owner evidence identifies a dominant cause.
+One-page PACK_READY cause attribution remains exact. The repaired READ baseline
+confirms 78.0 sampled-tail / 24.2 read-bypass / 0 wave-interruption on the fast
+model and 0/0/0 on the slow model, so the dominant-cause measurement is closed.
+For every timed `win1_pack_ready`, exactly one T/R/W counter must still increment
+and their sum must equal `win1_pack_ready`; ID50 must not make suppressed tail
+closes reappear under the read-bypass or wave bucket.
+
+### Sampled-single-tail PACK_READY qualification
+
+Direct policy coverage must prove a sampled admitted tail of one cannot close a
+one-record window early, while sampled tails of two and three can close at their
+exact one-shot targets. Source contracts must prove `tail == 1U` updates learned
+burst width, clears the one-shot tail target and sets
+`retained_single_tail_deferred`; multi-record samples arm the exact tail target
+and clear the deferral.
+
+Both `swapz_retained_target_close_ready()` and
+`swapz_retained_pack_close_ready()` must refuse a deferred singleton. The
+second admitted record clears the deferral, and real nonempty flushes, hard
+boundaries and true empty burst boundaries clear it as well. No new timer,
+grace interval or future-arrival wait is permitted; a genuine final singleton
+uses the existing pinned retention deadline.
+
+Loaded qualification compares against source `1be728162202...`. On the fast
+mixed async arm, sampled-tail one-page PACK_READY closes should fall materially
+from ~78 and lower WRITE requests should move toward the 840-request sync
+control. The read-bypass/wave counters must not absorb the removed tail closes.
+Reject the candidate if lower WRITE bytes grow materially, useful mixed
+throughput/read p99 regress, or slow mixed/write-only window geometry regresses.
 
 ### Bounded Kread=2 qualification
 

@@ -333,6 +333,30 @@ write-only QD8/QD32 into singleton closes. Publication, FUA/PREFLUSH,
 dependency, discard, shutdown, completion and fail-closed ownership are
 unchanged.
 
+### Sampled-single-tail PACK_READY deferral
+
+A post-PACK admitted-tail sample of exactly one WRITE is timing evidence, not
+packed geometry. It may grow `retained_burst_target`, but it must not set a
+one-shot `retained_tail_target == 1` or authorize an early one-record
+PACK_READY close. The ordered owner records this state with
+`retained_single_tail_deferred` and keeps the existing first-record absolute
+retention deadline unchanged; there is no added timer, sleep, spin or future
+arrival wait.
+
+While that state is active and `batch_count == 1`, both admission target closure
+and worker service-proven closure must return false. This prevents carried
+read-bypass/wave-interruption evidence from relabeling the same singleton as a
+different PACK_READY cause. A second admitted record clears the deferral and
+normal multi-record target/service rules resume. Any real nonempty flush, hard
+boundary, or true empty burst boundary also clears the state. A genuine final
+singleton therefore drains through the pre-existing deadline/idle machinery,
+not a new scheduling path.
+
+Existing one-page PACK_READY T/R/W attribution remains unchanged. The policy is
+qualified only if sampled-tail closes fall without migrating into read-bypass or
+wave buckets and without harming slow-model geometry, lower bytes, useful
+throughput, read tail latency, ordering or fail-closed ownership.
+
 ### Opposite-end asynchronous preparation
 
 The ordered worker owns FIFO execution and may atomically reserve an unclaimed

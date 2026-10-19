@@ -8,60 +8,59 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner qualification of `bd3f5886b61a28667585ce13032f8e83065dce85`
+Owner qualification of `1be728162202b46e23d5e64996d7d0d57b42d4cd`
 passed all five stages; report-only commit
-`571d99e69adfb2462e0047e155ea1e3022119908` is the canonical result. These
+`a68888b95ed298f6f7cdb33e80cb3cda3d231205` is the canonical result. These
 remain owned-RAM `null_blk` synthetic models, not physical-media claims.
 
-The naive private-slot Kread=2 experiment answered the concurrency question but
-failed the efficiency gate. Fast mixed lower READ peak rose from one to 2.0 and
-fast packed random p99 improved to 3.58 ms, but packed lower traffic increased
-materially: slow sequential/random became 4446/6546 KiB and 635.5/1017.5
-requests; fast became 4916/6388 KiB and 738.5/1011 requests. The depth-one model
-therefore regressed badly, and the fast latency win was bought with unacceptable
-physical read amplification. That implementation is rejected.
+ID49, the 16-entry shared multi-extent READ residency cache, is independently
+qualified by the depth-one model where parallel READ service is disabled. Slow
+packed sequential improved from the qualified `89fe711...` 3056 KiB / 457.5
+requests / 16.85 ms to 2824 KiB / 400.5 / 14.02 ms; random used 2506 KiB /
+626.5 requests with 23.33 ms p99. Keep the shared 256KiB extent cache and exact
+block-mask invalidation.
 
-The cause is architectural rather than evidence against READ concurrency itself:
-private slots had no 512-entry metadata cache, shared no multi-extent residency
-with the master, and coalesced only immediately adjacent siblings. The next ID39
-candidate keeps one shared ordered-owner cache (512 metadata blocks plus 16
-multi-block extents), primes private slots before dispatch, absorbs validated
-residency after join, groups siblings across the already-admitted independent
-READ prefix, and disables the slot path entirely when backing `nr_requests == 1`.
+The cache-coherent ID39 revision also removed the naive Kread=2 amplification.
+On the depth-64 model lower READ peak reaches 2.0, sequential packed reads are
+2878 KiB / 433.5 requests / 4.64 ms, and random traffic is 2392 KiB / 598
+requests. Fast random p99 is 5.71 ms versus 5.22 ms at `89fe711...`, however,
+so parallel service remains Class 4 pending a same-cache Kread on/off A/B rather
+than being promoted together with ID49.
 
-ID48 is now answered. Fast mixed one-page PACK_READY attribution is about
-79.8 tail-target / 17.8 read-bypass / 0 wave-interruption per pair: sampled
-one-record tails dominate, so the earlier read-bypass-focused closure hypothesis
-is refuted. Keep closure policy unchanged while the read baseline is repaired,
-then remeasure the same attribution before changing tail sampling.
+ID48 is now confirmed across the repaired READ baseline. Fast mixed one-page
+PACK_READY attribution is 78.0 sampled-tail / 24.2 read-bypass / 0
+wave-interruption, while the slow model is 0/0/0. Sampled one-record tails remain
+the dominant cause, refuting the earlier read-bypass-focused root cause. ID50
+therefore tests only whether a sampled singleton should be deferred to the
+existing pinned deadline instead of becoming a one-shot PACK_READY target.
 
-ID12 is also narrowed. Snapshot CRC totals about 3.5 ms slow / 2.2 ms fast, but
-pause contributes only 1.8/1.0 ms outside publish; resume is 1.7/1.2 ms already
-inside publication. Residual after subtracting pause remains about 9.0/5.8 ms.
-Keep full-`struct swapz_tx` hashing and attribute the remaining residual before
-any hash-scope experiment.
+ID12's snapshot question is answered. Full transaction snapshot CRC remains
+unchanged; pause-side cost is only 1.7 ms slow / 1.1 ms fast, with residual
+8.6/6.2 ms after pause attribution. Do not narrow hash coverage. Further
+residual splitting is optional evidence collection, not justification for a
+snapshot-integrity optimization.
 
-WRITE evidence remains directional. Slow mixed async is 7.00 MB/s versus 6.95
-sync and 2.68 raw with about 545.5 lower requests. Fast mixed async is 24.36
-versus 24.51 sync and 19.94 raw, so async/sync is still not a qualified gain.
-Fast write-only QD8 is +29.8% async/sync in one pair, while QD1/QD4/QD32 are
-+5.9/+3.4/+2.4%; >=5 matched pairs remain mandatory before policy promotion.
-Live GC, suspend/resume and fail-closed fault qualification remain green.
+WRITE evidence remains directional. Slow mixed sync/async are both 7.04 MB/s
+with 545.5 lower WRITE requests. Fast mixed favors sync: 24.11 MB/s and 840
+requests versus async 23.40 MB/s and 1005.5 requests. Fast write-only QD8 is
++10.3% async/sync in one pair, QD4 +2.5%, QD32 +3.1%, and QD1 -1.5%; >=5
+matched pairs remain mandatory before K=1 scheduling promotion. Live GC,
+suspend/resume and fail-closed fault qualification remain green.
 
 ## Current bottleneck ranking
 
-These overlapping wall counters are diagnostic, not additive. From the
-`bd3f588...` mixed run, lower WRITE remains the largest measured WRITE-path
-wall (605.2 ms slow / 183.2 ms fast), LZ4 preparation is 142.9/76.3 ms, and
-commit non-I/O is 56.2/35.7 ms. Snapshot pause CRC explains only 1.8/1.0 ms;
-the residual after that subtraction is still 9.0/5.8 ms. Planner and explicit
-copy costs remain secondary.
+These overlapping wall counters are diagnostic, not additive. In the latest
+mixed run lower WRITE remains the largest measured WRITE-path wall at about
+603.3 ms slow / 195.1 ms fast. LZ4 preparation is 140.6/78.8 ms and commit
+non-I/O is 54.5/37.0 ms. Snapshot pause CRC is only 1.7/1.1 ms; residual after
+pause remains 8.6/6.2 ms. Planner and explicit copy costs remain secondary.
 
-READ evidence is more decisive: the naive Kread=2 path raised fast lower READ
-depth to 2 but increased lower traffic up to ~1.6x. The next READ experiment
-must preserve cache locality while retaining depth; additional WRITE slots are
-still unsupported because K=1 occupancy is only about 0.10 and preparation
-backlog remains shallow.
+READ amplification is no longer the active defect: shared multi-extent
+residency cuts lower bytes/requests even on the serial queue, and fast Kread=2
+reaches sampled depth two without recreating the naive traffic explosion. The
+open READ question is isolated latency value of Kread itself. The clearer WRITE
+problem is fast async request fragmentation: 1005.5 lower requests versus 840
+sync, alongside 78 sampled-tail one-page PACK_READY closes.
 
 ## Optimization evidence table
 
@@ -86,7 +85,7 @@ changes.
 | 9 | Precompute payload CRC during preparation | **1** | Qualified; keep. |
 | 10 | Validate immutable metadata once during finish | **1** | Qualified; keep. |
 | 11 | Split final-image publish CRC from authority/liveness | **1 completed measurement** | Reconfirmed: final CRC is 12.0/22.1 ms slow and 8.8/17.2 ms fast. It is a major publish subphase, not the global bottleneck. |
-| 12 | Split stage/pause hash/hole-clear/control residual | **4 attribution continues** | Pause/resume split answered the snapshot question: pause is only ~1.8/1.0 ms, leaving ~9.0/5.8 ms residual after subtraction. Keep full-transaction hashing and split the remaining residual before optimizing. |
+| 12 | Split stage/pause hash/hole-clear/control residual | **1 completed snapshot measurement** | Reconfirmed at ~1.7/1.1 ms pause with ~8.6/6.2 ms residual after subtraction. Full-transaction hashing stays; the snapshot-scope optimization question is closed. Further residual splitting is optional attribution only. |
 | 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
 | 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. |
 | 15 | >=5 counterbalanced pairs for mixed/QD points | **6** | Decisive WRITE-policy gate. Fast QD8 is +29.8% async/sync in the latest one-pair pilot and other QDs are positive, but fast mixed async remains slightly below sync. Repeat >=5 matched pairs before policy promotion. |
@@ -113,7 +112,7 @@ changes.
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
 | 37 | K=1 ping-pong WRITE pipeline | **4 conditional** | Latest fast write-only QD8 is +29.8% and all write-only QDs are directionally positive, but fast mixed async is 24.36 vs 24.51 sync and evidence remains one pair/QD. Keep opt-in pending >=5 matched pairs. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Stronger hold. Serial hwq=1 has no parallel service slot. Fast hwq=64 has capacity, but K=1 run occupancy is only ~0.09 and preparation backlog is shallow; there is no sustained ready-run pressure for K>1 yet. |
-| 39 | Latency-first bounded parallel READ service | **4 revised experiment implemented; naive form rejected** | `bd3f588...` proved depth-2 latency potential but failed lower-I/O/serial gates because private slots fragmented caches. Revised candidate gates depth-one media off, adds a 16-slot ordered-owner extent cache, primes/absorbs private slots, and groups same-extent followers across the ready independent-READ prefix. |
+| 39 | Latency-first bounded parallel READ service | **4 isolated A/B required** | Cache-coherent Kread=2 reaches fast lower READ peak 2.0 without amplification, but fast random p99 is 5.71 ms versus 5.22 ms at `89fe711...`. Hold the shared cache fixed and compare Kread on/off before promoting parallel service itself. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
@@ -122,7 +121,10 @@ changes.
 | 45 | 4-block extent payload block-residency cache | **1** | Owner-qualified; keep. Slow packed sequential p99 improved to 16.85 ms with 3056 KiB / 457.5 lower requests, and native C proves each block of a seven-record 16KiB extent is fetched at most once before invalidation. |
 | 46 | Timed-interval scheduling telemetry hygiene | **1 completed measurement** | Qualified. Mixed/write-only scheduling conclusions now use kernel snapshots strictly around measured waves; full-process prefill/warmup counters are not evidence. |
 | 47 | Explicit ordering-boundary singleton reset | **1** | Qualified correctness/measurement hygiene. PREFLUSH/FUA/discard/shutdown/other reset learned singleton state, including empty fsync PREFLUSH; ordinary idle/deadline closes do not. |
-| 48 | Fast mixed one-page PACK_READY cause attribution | **1 completed measurement** | Latest fast mixed split is ~79.8 tail-target / 17.8 read-bypass / 0 wave-interruption. Tail sampling dominates; the earlier read-bypass-focused root cause is refuted. Preserve counters for one repaired-read-baseline confirmation before changing policy. |
+| 48 | Fast mixed one-page PACK_READY cause attribution | **1 completed measurement** | Repaired-read confirmation is 78.0 tail-target / 24.2 read-bypass / 0 wave-interruption, with slow 0/0/0. Sampled singleton tails remain dominant; read-bypass/wave as the primary root cause is refuted. |
+| 49 | 16-entry shared multi-extent READ residency cache | **1** | Independently qualified on hwq=1 where Kread is disabled: sequential packed reads improved to 2824 KiB / 400.5 requests / 14.02 ms, with random traffic also lower. Keep the 256KiB ordered-owner cache and exact invalidation. |
+| 50 | Sampled-single-tail PACK_READY deferral | **4 implemented pending owner evidence** | A post-PACK sample of exactly one admitted WRITE now updates learned burst width but cannot arm a one-shot target or close via carried read/wave evidence. The singleton waits only until a second record or the existing pinned deadline; no new timer/wait is added. |
+
 
 ## What the pinned queue experiment establishes
 
@@ -170,19 +172,19 @@ before any on-disk-format change.
 
 ## Immediate work queue
 
-1. Owner-qualify the cache-coherent, queue-gated ID39 revision. Depth-one must
-   use zero parallel batches and recover the serialized packed-read baseline;
-   depth-64 should retain READ peak >1 without increasing lower bytes/requests
-   versus the qualified `89fe711...` cache baseline.
-2. Re-read ID48 on that repaired READ baseline. Do not change PACK_READY policy
-   yet. If tail-target still dominates, instrument/adjust tail sampling rather
-   than the minority read-bypass branch.
-3. Split the remaining ID12 9.0/5.8 ms residual into stage/control/hole-clear/
-   allocation-validation buckets; keep full transaction snapshot hashing.
-4. Run >=5 counterbalanced fast write-only QD8 pairs plus QD1 and mixed-QD32
+1. Owner-qualify ID50 on the current READ baseline. Fast mixed should collapse
+   sampled-tail one-page PACK_READY closes from ~78 without shifting them into
+   read-bypass attribution; lower WRITE requests should move toward sync's 840
+   while useful throughput/read p99 and slow-model geometry do not regress.
+2. Run an isolated same-cache ID39 A/B on the fast model with parallel READ
+   service disabled versus enabled. Promote Kread only if depth/latency improve
+   without lower-byte/request inflation; ID49 remains Class 1 either way.
+3. Run >=5 counterbalanced fast write-only QD8 pairs plus QD1 and mixed-QD32
    controls before promoting/deleting K=1 WRITE scheduling.
-5. Collect trustworthy kernel-worker on-CPU attribution before N=2 preparation
+4. Collect trustworthy kernel-worker on-CPU attribution before N=2 preparation
    workers or CPU-topology changes; keep K>1 lower-WRITE slots rejected.
+5. Optional: split the remaining 8.6/6.2 ms commit residual only if attribution
+   is still useful; do not alter full transaction snapshot hashing.
 6. Then run bounded owned-RAM dead-segment DISCARD/TRIM, huge/compound-page
    coverage and heavy-CPU/low-RAM qualification.
 

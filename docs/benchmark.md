@@ -53,39 +53,42 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `bd3f5886b61a28667585ce13032f8e83065dce85`
-(report-only `571d99e69adfb2462e0047e155ea1e3022119908`) confirms that the
-first Kread=2 implementation is not retainable as a performance policy.
+Owner-qualified source `1be728162202b46e23d5e64996d7d0d57b42d4cd`
+(report-only `a68888b95ed298f6f7cdb33e80cb3cda3d231205`) passed all five
+stages and resolves the cache-versus-parallelism question more cleanly.
 
-It achieved the intended fast lower READ depth of 2 and reduced fast packed
-random p99 to 3.58 ms, but cache fragmentation increased physical READ work.
-Relative to the qualified pre-Kread cache baseline, slow sequential/random
-lower traffic rose to 4446/6546 KiB and 635.5/1017.5 requests; fast rose to
-4916/6388 KiB and 738.5/1011 requests. The serial model therefore regressed and
-the fast latency win violates the endurance-first lower-I/O gate.
+The 16-entry shared extent cache is independently useful because the depth-one
+model disables Kread=2 entirely. Slow packed sequential improved from the
+qualified pre-Kread 3056 KiB / 457.5 requests / 16.85 ms to 2824 / 400.5 /
+14.02; random lower traffic is 2506 KiB / 626.5 requests. This promotes the
+shared multi-extent residency mechanism independently of any concurrency claim.
 
-The next candidate keeps one shared ordered-owner cache: the existing 512-entry
-metadata LRU plus a fixed 16-entry (256KiB) multi-block extent cache. Private
-read slots are primed from that cache before dispatch and absorbed only after a
-successful join. The worker scans only the already-admitted independent READ
-prefix, selects at most two physical extents and groups all siblings for those
-extents. No write/barrier/dependency is crossed and no future-arrival wait is
-introduced. Backing queues with `nr_requests == 1` bypass the slot path entirely
-and use the original serialized reader.
+On the depth-64 model the cache-coherent Kread path reaches sampled READ peak
+2.0 while avoiding the rejected private-slot amplification. Packed sequential
+is 2878 KiB / 433.5 requests / 4.64 ms and random is 2392 KiB / 598 requests /
+5.71 ms. Lower traffic is better than the qualified cache baseline, but random
+p99 remains worse than the prior 5.22 ms; Kread therefore needs an isolated
+same-cache on/off A/B before promotion.
 
-The same owner run completed two attribution questions without policy changes.
-One-page PACK_READY causes are about 79.8 sampled-tail / 17.8 read-bypass / 0
-wave-interruption on the fast model, so tail sampling—not the read-bypass branch
-—is the dominant next scheduling question. Snapshot CRC is 3.5/2.2 ms total
-slow/fast, but pause is only 1.8/1.0 ms; residual after pause remains 9.0/5.8 ms,
-so full-transaction hashing stays unchanged.
+Fast mixed WRITE exposes the next bounded scheduling experiment. Sync is 24.11
+MB/s with 840 lower WRITE requests; async is 23.40 MB/s with 1005.5 requests.
+One-page PACK_READY attribution is 78.0 sampled-tail / 24.2 read-bypass / 0
+wave-interruption, reproducing tail dominance after the READ repair. ID50 keeps
+all current timers and geometry but refuses to convert a post-PACK sample of one
+WRITE into an immediate one-shot PACK_READY target. The sampled singleton stays
+open until a second record joins or the existing absolute retention deadline
+expires. It also cannot be closed immediately by carried read-bypass/wave
+evidence, preventing attribution from merely moving buckets.
 
-For the revised Kread experiment, success requires simultaneous latency and I/O
-efficiency: depth-one results must recover the serialized baseline; depth-64
-must show lower READ peak >1 and better useful packed-read latency without a
-material increase in sequential or random lower bytes/requests versus the
-`89fe711...` cache baseline. Summed slot busy wall may overlap and is not an
-elapsed-time concurrency metric.
+Snapshot hashing remains unchanged. Pause-side snapshot CRC is only 1.7 ms slow
+/ 1.1 ms fast, leaving 8.6/6.2 ms residual after pause attribution; this closes
+the hash-scope optimization question.
+
+ID50 acceptance is simultaneous: fast `win1_pack_tail_target` should collapse
+from ~78, `win1_pack_read_bypass` must not absorb those closes, async lower
+WRITE requests should move materially toward sync without increasing lower
+bytes, and useful mixed throughput/read p99 plus slow mixed/write-only window
+geometry must not regress. No conclusion is valid from request reduction alone.
 
 ## Confirmation gate
 
