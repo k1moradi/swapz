@@ -13,6 +13,16 @@ passed all five stages; report-only commit
 `e25f0a0d0e1c3b4ea65e7297593f5b10d4dffe27` is the canonical result. These
 remain owned-RAM `null_blk` synthetic models, not physical-media claims.
 
+The first owner run of ID57 source `a32a6ec8655cab54e83e38d12b34fac8ab3980fc`
+did **not** qualify the benchmark matrix. Build, rootless/native, W=1 and W=2
+passed, but the loaded fast-mixed run stopped during async comparison 6/8
+because the report validator treated an ID57 lifecycle that began before the
+timed snapshot as if it had to begin inside the same interval. Report-only
+commit `aebc35fc383983d9aba43de63a472a815b8d8f1e` records that failed
+qualification. This is an evidence-pipeline boundary-accounting defect, not a
+performance verdict for or against ID57; no incomplete fast-mixed statistics
+may be promoted from that run.
+
 Fast mixed async no longer has a statistically established gain over sync:
 23.12 versus 22.63 MB/s, paired +2.2% with 95% CI [-3.2%,+7.7%]. The async
 lower-WRITE request penalty worsened to +94.4 requests, CI [+14.3,+174.5].

@@ -742,6 +742,11 @@ ID57_FIELDS = (
     "pack_ready_busy_deferrals_admission",
     "pack_ready_busy_deferrals_worker",
     "pack_ready_post_finalize_closes")
+ID57_TERMINAL_FIELDS = (
+    "pack_tail_deferred_resolve_zero", "pack_tail_deferred_resolve_one",
+    "pack_tail_deferred_resolve_many", "pack_tail_zero_deferred_aborts")
+ID57_STATE_FIELDS = (
+    "pack_tail_zero_deferred_start", "pack_tail_zero_deferred_end")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -803,6 +808,14 @@ def kernel_write_snapshot(path, identity):
     return counters
 
 
+def id57_deferred_state(snapshot):
+    active = (snapshot["pack_tail_zero_deferrals"] -
+              sum(snapshot[field] for field in ID57_TERMINAL_FIELDS))
+    if active not in (0, 1):
+        raise ValueError("inconsistent swapz ID57 cumulative lifecycle")
+    return active
+
+
 def kernel_write_delta(before, after):
     if before is None and after is None:
         return None
@@ -812,6 +825,10 @@ def kernel_write_delta(before, after):
                 for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
+    start_deferred = id57_deferred_state(before)
+    end_deferred = id57_deferred_state(after)
+    counters["pack_tail_zero_deferred_start"] = start_deferred
+    counters["pack_tail_zero_deferred_end"] = end_deferred
     for key in KERNEL_WRITE_GAUGE_FIELDS:
         counters[key] = after[key]
     if not 1 <= counters["retained_burst_target"] <= 64:
@@ -874,14 +891,11 @@ def kernel_write_delta(before, after):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             counters["pack_tail_samples"]):
         raise ValueError("inconsistent swapz post-pack tail-sample attribution")
-    if (sum(counters[field] for field in (
-                "pack_tail_deferred_resolve_zero",
-                "pack_tail_deferred_resolve_one",
-                "pack_tail_deferred_resolve_many",
-                "pack_tail_zero_deferred_aborts")) >
-            counters["pack_tail_zero_deferrals"] or
+    id57_terminals = sum(counters[field] for field in ID57_TERMINAL_FIELDS)
+    if (start_deferred + counters["pack_tail_zero_deferrals"] !=
+            id57_terminals + end_deferred or
             counters["pack_tail_zero_finalize_holds"] >
-            counters["pack_tail_zero_deferrals"] or
+            start_deferred + counters["pack_tail_zero_deferrals"] or
             counters["pack_ready_post_finalize_closes"] >
             counters["packed_early_commits"]):
         raise ValueError("inconsistent swapz ID57 intervention attribution")

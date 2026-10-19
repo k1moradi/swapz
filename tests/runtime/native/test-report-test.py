@@ -632,6 +632,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_idle"], 1.5)
         self.assertEqual(slow["kernel_counters"]["burst_target_grows"], 2.5)
         self.assertEqual(slow["kernel_counters"]["burst_target_shrinks"], 1.5)
+        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferred_start"], 0)
+        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferred_end"], 0)
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferrals"], 1)
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_finalize_holds"], 0.5)
         self.assertEqual(slow["kernel_counters"]["pack_tail_deferred_resolve_one"], 0.5)
@@ -697,6 +699,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Mixed burst-close split", rendered)
         self.assertIn("Mixed post-PACK tail samples", rendered)
         self.assertIn("ID57 K=1 collector intervention", rendered)
+        self.assertIn("carry S/E", rendered)
         self.assertIn("Fast mixed burst-close async-sync paired 95% CI", rendered)
         self.assertIn("async-sync", rendered)
         self.assertIn("Fast mixed async-sync paired 95% CI", rendered)
@@ -782,6 +785,15 @@ class ReportContract(unittest.TestCase):
             "pack_tail_deferred_resolve_many"] = 3
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
+
+        sessions = runner.parse_sessions(synthetic_log())
+        carried = sessions[1]["arms"]["swapz"]["kernel_write_path"]
+        carried["pack_tail_zero_deferred_start"] = 1
+        carried["pack_tail_zero_deferrals"] = 1
+        carried["pack_tail_deferred_resolve_many"] = 2
+        carried["pack_tail_zero_deferred_end"] = 0
+        self.assertNotEqual(runner.benchmark_verdicts(sessions)["overall"],
+                            "INCOMPLETE")
 
     def test_close_and_deadline_accounting_fail_closed(self):
         sessions = runner.parse_sessions(synthetic_log())

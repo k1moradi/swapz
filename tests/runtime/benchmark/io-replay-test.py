@@ -339,6 +339,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["pack_tail_many_idle"], 1)
         self.assertEqual(delta["burst_target_grows"], 1)
         self.assertEqual(delta["burst_target_shrinks"], 1)
+        self.assertEqual(delta["pack_tail_zero_deferred_start"], 0)
+        self.assertEqual(delta["pack_tail_zero_deferred_end"], 0)
         self.assertEqual(delta["pack_tail_zero_deferrals"], 2)
         self.assertEqual(delta["pack_tail_zero_finalize_holds"], 1)
         self.assertEqual(delta["pack_tail_deferred_resolve_one"], 1)
@@ -363,6 +365,24 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["single_tail_comp_age_le250us"], 1)
         self.assertEqual(delta["single_tail_comp_age_251_500us"], 1)
         self.assertEqual(delta["single_tail_comp_after_both"], 1)
+
+        # A deferred-zero lifecycle may begin in prefill and resolve after the
+        # timed mixed snapshot. Exact interval conservation therefore includes
+        # the inferred one-bit carry state rather than requiring a new
+        # same-interval deferral.
+        carry_before = dict(before)
+        carry_before["pack_tail_zero_deferrals"] = 1
+        carry_after = dict(carry_before)
+        carry_after["pack_tail_deferred_resolve_many"] = 1
+        carry_delta = module.kernel_write_delta(carry_before, carry_after)
+        self.assertEqual(carry_delta["pack_tail_zero_deferred_start"], 1)
+        self.assertEqual(carry_delta["pack_tail_zero_deferred_end"], 0)
+        self.assertEqual(carry_delta["pack_tail_zero_deferrals"], 0)
+        self.assertEqual(carry_delta["pack_tail_deferred_resolve_many"], 1)
+
+        with self.assertRaisesRegex(ValueError, "cumulative lifecycle"):
+            module.kernel_write_delta(
+                dict(before, pack_tail_deferred_resolve_many=1), after)
 
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)

@@ -129,6 +129,11 @@ ID57_FIELDS = (
     "pack_ready_busy_deferrals_admission",
     "pack_ready_busy_deferrals_worker",
     "pack_ready_post_finalize_closes")
+ID57_TERMINAL_FIELDS = (
+    "pack_tail_deferred_resolve_zero", "pack_tail_deferred_resolve_one",
+    "pack_tail_deferred_resolve_many", "pack_tail_zero_deferred_aborts")
+ID57_STATE_FIELDS = (
+    "pack_tail_zero_deferred_start", "pack_tail_zero_deferred_end")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -188,7 +193,7 @@ KERNEL_WRITE_FIELDS = (
     "prep_lower_write_end_nonempty", "pipeline_async_runs",
     "pipeline_active_wall_ns", "write_wait_le1ms", "write_wait_1to4ms",
     "write_wait_gt4ms", "retained_burst_target"
-) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS
+) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + ID57_STATE_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
     "target_interval_ns", "samples", "read_start", "write_start",
@@ -215,6 +220,9 @@ def timed_window_error(record):
     if type(record.get("retained_burst_target")) is not int or not (
             1 <= record["retained_burst_target"] <= 64):
         return "invalid timed retained burst target"
+    if any(type(record.get(field)) is not int or record[field] not in (0, 1)
+           for field in ID57_STATE_FIELDS):
+        return "invalid timed ID57 boundary state"
     if sum(record[field] for field in CLOSE_REASON_FIELDS) != record["windows"]:
         return "timed window close-reason accounting is inconsistent"
     if sum(record[field] for field in ONE_PAGE_CLOSE_FIELDS) != record["one_page_windows"]:
@@ -262,13 +270,12 @@ def timed_window_error(record):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             record["pack_tail_samples"]):
         return "timed post-pack tail-sample attribution is inconsistent"
-    if (sum(record[field] for field in (
-                "pack_tail_deferred_resolve_zero",
-                "pack_tail_deferred_resolve_one",
-                "pack_tail_deferred_resolve_many",
-                "pack_tail_zero_deferred_aborts")) >
-            record["pack_tail_zero_deferrals"] or
+    id57_terminals = sum(record[field] for field in ID57_TERMINAL_FIELDS)
+    if (record["pack_tail_zero_deferred_start"] +
+            record["pack_tail_zero_deferrals"] !=
+            id57_terminals + record["pack_tail_zero_deferred_end"] or
             record["pack_tail_zero_finalize_holds"] >
+            record["pack_tail_zero_deferred_start"] +
             record["pack_tail_zero_deferrals"] or
             record["pack_ready_post_finalize_closes"] >
             record["packed_early_commits"]):
@@ -1719,10 +1726,12 @@ def print_bench(result):
                     tail_rows)
         print("  ID57 K=1 collector intervention")
         print_table(
-            ("mode", "zero D/hold", "resolve 0/1/2+", "abort",
-             "busy A/W", "post-final"),
+            ("mode", "carry S/E", "zero D/hold", "resolve 0/1/2+",
+             "abort", "busy A/W", "post-final"),
             [
                 (mode,
+                 f"{columns[mode]['mixed_pack_tail_zero_deferred_start']:.1f}/"
+                 f"{columns[mode]['mixed_pack_tail_zero_deferred_end']:.1f}",
                  f"{columns[mode]['mixed_pack_tail_zero_deferrals']:.1f}/"
                  f"{columns[mode]['mixed_pack_tail_zero_finalize_holds']:.1f}",
                  f"{columns[mode]['mixed_pack_tail_deferred_resolve_zero']:.1f}/"

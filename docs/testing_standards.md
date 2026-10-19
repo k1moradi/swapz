@@ -745,9 +745,17 @@ to active && !completion_done, require admission and worker PACK_READY paths to
 count-and-defer only while that helper is true, and prove the sampler can return
 with its pending sample/chain intact for zero-tail active or completion-only
 holds. The deferred sample must be retried before processing a nonempty next
-local wave. Resolution/abort totals may not exceed deferrals, completion-only
-holds may not exceed deferrals, and post-finalization closes may not exceed
-packed early closes. No new timer, sleep, spin or K>1 slot is allowed.
+local wave. No new timer, sleep, spin or K>1 slot is allowed.
+
+ID57 lifecycle validation must be boundary-aware. A deferred-zero lifecycle may
+begin before a timed mixed/write-only snapshot and resolve or abort inside that
+interval. Derive the one-bit start/end state from cumulative counters as
+`deferrals - (resolve0 + resolve1 + resolve2plus + aborts)`; each cumulative
+snapshot must yield exactly 0 or 1. Timed conservation is exact only when
+`start + interval_deferrals == interval_terminals + end`. Completion-only
+holds are bounded by `start + interval_deferrals`; post-finalization closes
+remain a same-event subset of timed packed-early closes. Never reject valid
+evidence merely because a lifecycle crosses the measurement boundary.
 
 Synthetic ID57 fixtures must preserve the same subset invariants as runtime
 telemetry: a nonzero post-finalization close requires a corresponding packed
