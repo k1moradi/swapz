@@ -154,6 +154,12 @@ enum swapz_pack_close_cause {
 	SWAPZ_PACK_CLOSE_SERVICE_DRY,
 };
 
+enum swapz_burst_close_site {
+	SWAPZ_BURST_CLOSE_NONE,
+	SWAPZ_BURST_CLOSE_ADMISSION,
+	SWAPZ_BURST_CLOSE_WORKER,
+};
+
 struct swapz_dm {
 	struct dm_target *target;
 	struct dm_dev *backing;
@@ -375,10 +381,24 @@ struct swapz_dm {
 	u64 win1_pack_wave_interrupted;
 	/* Mutually exclusive primary attribution for every PACK_READY window. */
 	enum swapz_pack_close_cause next_pack_close_cause;
+	enum swapz_burst_close_site next_burst_close_site;
+	swapz_u8 next_burst_close_target;
 	u64 pack_close_tail_target;
 	u64 pack_close_tail_target_le4;
 	u64 pack_close_burst_target;
 	u64 pack_close_service_dry;
+	/* ID55: passive attribution inside the learned burst-target bucket. */
+	u64 pack_close_burst_admission;
+	u64 pack_close_burst_worker;
+	u64 pack_close_burst_target_le4;
+	u64 pack_close_burst_target_5_8;
+	u64 pack_close_burst_target_9_16;
+	u64 pack_close_burst_target_17_64;
+	u64 pack_close_burst_count_le4;
+	u64 pack_close_burst_count_5_8;
+	u64 pack_close_burst_count_9_16;
+	u64 pack_close_burst_count_17_64;
+	u64 pack_close_burst_overshoot;
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -1706,6 +1726,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	bool packed_close = ctx->next_window_close == SWAPZ_CLOSE_PACK_READY;
 	enum swapz_pack_close_cause pack_close_cause =
 		ctx->next_pack_close_cause;
+	enum swapz_burst_close_site burst_close_site =
+		ctx->next_burst_close_site;
+	swapz_u8 burst_close_target = ctx->next_burst_close_target;
 	bool win1_pack_tail_target = count == 1U && packed_close &&
 		ctx->retained_tail_target == 1U;
 	bool win1_pack_read_bypass = count == 1U && packed_close &&
@@ -1792,6 +1815,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		}
 		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
 		ctx->next_pack_close_cause = SWAPZ_PACK_CLOSE_NONE;
+		ctx->next_burst_close_site = SWAPZ_BURST_CLOSE_NONE;
+		ctx->next_burst_close_target = 0;
 		ctx->window_first_ns = 0;
 		return 0;
 	}
@@ -1866,6 +1891,28 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			break;
 		case SWAPZ_PACK_CLOSE_BURST_TARGET:
 			ctx->pack_close_burst_target++;
+			if (burst_close_site == SWAPZ_BURST_CLOSE_ADMISSION)
+				ctx->pack_close_burst_admission++;
+			else if (burst_close_site == SWAPZ_BURST_CLOSE_WORKER)
+				ctx->pack_close_burst_worker++;
+			if (burst_close_target <= 4U)
+				ctx->pack_close_burst_target_le4++;
+			else if (burst_close_target <= 8U)
+				ctx->pack_close_burst_target_5_8++;
+			else if (burst_close_target <= 16U)
+				ctx->pack_close_burst_target_9_16++;
+			else
+				ctx->pack_close_burst_target_17_64++;
+			if (count <= 4U)
+				ctx->pack_close_burst_count_le4++;
+			else if (count <= 8U)
+				ctx->pack_close_burst_count_5_8++;
+			else if (count <= 16U)
+				ctx->pack_close_burst_count_9_16++;
+			else
+				ctx->pack_close_burst_count_17_64++;
+			if (burst_close_target && count > burst_close_target)
+				ctx->pack_close_burst_overshoot++;
 			break;
 		case SWAPZ_PACK_CLOSE_SERVICE_DRY:
 			ctx->pack_close_service_dry++;
@@ -1875,6 +1922,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		}
 	}
 	ctx->next_pack_close_cause = SWAPZ_PACK_CLOSE_NONE;
+	ctx->next_burst_close_site = SWAPZ_BURST_CLOSE_NONE;
+	ctx->next_burst_close_target = 0;
 	/* An independent READ can fail while older writes are only prepared.
 	 * Complete their original owners once, without ordering/staging or
 	 * submitting any unpublished bytes after the target has failed. */
@@ -2651,6 +2700,13 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			ctx->next_pack_close_cause = ctx->retained_tail_target ?
 				SWAPZ_PACK_CLOSE_TAIL_TARGET :
 				SWAPZ_PACK_CLOSE_BURST_TARGET;
+			if (ctx->next_pack_close_cause ==
+			    SWAPZ_PACK_CLOSE_BURST_TARGET) {
+				ctx->next_burst_close_site =
+					SWAPZ_BURST_CLOSE_ADMISSION;
+				ctx->next_burst_close_target =
+					ctx->retained_burst_target;
+			}
 			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
 			if (ctx->accepted_burst_pack_ready)
@@ -3528,6 +3584,13 @@ static void swapz_worker(struct work_struct *work)
 					(ctx->retained_tail_target ?
 					 SWAPZ_PACK_CLOSE_TAIL_TARGET :
 					 SWAPZ_PACK_CLOSE_BURST_TARGET);
+				if (ctx->next_pack_close_cause ==
+				    SWAPZ_PACK_CLOSE_BURST_TARGET) {
+					ctx->next_burst_close_site =
+						SWAPZ_BURST_CLOSE_WORKER;
+					ctx->next_burst_close_target =
+						ctx->retained_burst_target;
+				}
 				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 				ctx->packed_early_commits++;
 				if (ctx->accepted_burst_pack_ready)
@@ -4364,7 +4427,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "prep_ordered_inline=%llu prep_ordered_handoffs=%llu "
 		       "prep_ordered_waits=%llu prep_wait_wall_ns=%llu "
 		       "lz4_wall_ns=%llu decode_wall_ns=%llu "
+		       "ordered_lz4_wall_ns=%llu prep_lz4_wall_ns=%llu "
 		       "write_copy_wall_ns=%llu write_copy_bytes=%llu "
+		       "ordered_write_copy_wall_ns=%llu prep_write_copy_wall_ns=%llu "
 		       "direct_lz4_input_pages=%llu "
 		       "read_copy_wall_ns=%llu read_copy_bytes=%llu "
 		       "window_sort_wall_ns=%llu window_commit_wall_ns=%llu "
@@ -4389,6 +4454,16 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "close_pack_ready=%llu "
 		       "pack_close_tail_target=%llu pack_close_tail_target_le4=%llu "
 		       "pack_close_burst_target=%llu pack_close_service_dry=%llu "
+		       "pack_close_burst_admission=%llu pack_close_burst_worker=%llu "
+		       "pack_close_burst_target_le4=%llu "
+		       "pack_close_burst_target_5_8=%llu "
+		       "pack_close_burst_target_9_16=%llu "
+		       "pack_close_burst_target_17_64=%llu "
+		       "pack_close_burst_count_le4=%llu "
+		       "pack_close_burst_count_5_8=%llu "
+		       "pack_close_burst_count_9_16=%llu "
+		       "pack_close_burst_count_17_64=%llu "
+		       "pack_close_burst_overshoot=%llu "
 		       "packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
@@ -4527,10 +4602,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->preparation_ordered_wait_wall_ns,
 		       ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns,
 		       ctx->decode_wall_ns,
+		       ctx->lz4_wall_ns, ctx->preparation_lz4_wall_ns,
 		       ctx->preparation_copy_wall_ns +
 			       ctx->ordered_write_copy_wall_ns,
 		       ctx->preparation_copy_bytes +
 			       ctx->ordered_write_copy_bytes,
+		       ctx->ordered_write_copy_wall_ns,
+		       ctx->preparation_copy_wall_ns,
 		       ctx->preparation_direct_lz4_pages +
 			       ctx->ordered_direct_lz4_pages,
 		       ctx->read_copy_wall_ns, ctx->read_copy_bytes,
@@ -4561,6 +4639,17 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_close_tail_target_le4,
 		       ctx->pack_close_burst_target,
 		       ctx->pack_close_service_dry,
+		       ctx->pack_close_burst_admission,
+		       ctx->pack_close_burst_worker,
+		       ctx->pack_close_burst_target_le4,
+		       ctx->pack_close_burst_target_5_8,
+		       ctx->pack_close_burst_target_9_16,
+		       ctx->pack_close_burst_target_17_64,
+		       ctx->pack_close_burst_count_le4,
+		       ctx->pack_close_burst_count_5_8,
+		       ctx->pack_close_burst_count_9_16,
+		       ctx->pack_close_burst_count_17_64,
+		       ctx->pack_close_burst_overshoot,
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,

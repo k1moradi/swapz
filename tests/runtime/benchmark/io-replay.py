@@ -723,6 +723,13 @@ ID52_FIELDS = (
 PACK_CLOSE_FIELDS = (
     "pack_close_tail_target", "pack_close_tail_target_le4",
     "pack_close_burst_target", "pack_close_service_dry")
+BURST_CLOSE_DETAIL_FIELDS = (
+    "pack_close_burst_admission", "pack_close_burst_worker",
+    "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
+    "pack_close_burst_target_9_16", "pack_close_burst_target_17_64",
+    "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
+    "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
+    "pack_close_burst_overshoot")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -738,10 +745,13 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
-    "write_copy_wall_ns", "write_copy_bytes", "direct_lz4_input_pages",
+    "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
+    "write_copy_wall_ns", "write_copy_bytes",
+    "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns",
+    "direct_lz4_input_pages",
     "window_sort_wall_ns", "window_commit_wall_ns",
     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
     "engine_pack_wall_ns", "engine_publish_wall_ns",
@@ -833,6 +843,19 @@ def kernel_write_delta(before, after):
             counters["pack_close_tail_target_le4"] >
             counters["pack_close_tail_target"]):
         raise ValueError("inconsistent swapz PACK_READY close attribution")
+    burst = counters["pack_close_burst_target"]
+    if (counters["pack_close_burst_admission"] +
+            counters["pack_close_burst_worker"] != burst or
+            sum(counters[field] for field in (
+                "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
+                "pack_close_burst_target_9_16",
+                "pack_close_burst_target_17_64")) != burst or
+            sum(counters[field] for field in (
+                "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
+                "pack_close_burst_count_9_16",
+                "pack_close_burst_count_17_64")) != burst or
+            counters["pack_close_burst_overshoot"] > burst):
+        raise ValueError("inconsistent swapz burst-target close attribution")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),

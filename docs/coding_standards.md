@@ -397,16 +397,27 @@ sum exactly to `close_pack_ready` at quiescent measurement boundaries.
 only closes whose actual window count is <=4. This attribution is passive: it
 must not alter any readiness predicate, target, timer, ownership or completion.
 
+ID55 further partitions only `SWAPZ_PACK_CLOSE_BURST_TARGET`. Snapshot the
+learned target and decision site immediately when the close is authorized, then
+at the real flush count exactly one admission/worker site, one learned-target
+bin (<=4/5-8/9-16/17-64), one actual-count bin using the same ranges, and whether
+count overshot target. Site totals, target bins and count bins must each
+conserve exactly to `pack_close_burst_target`. This is diagnostic state only;
+it must not alter `swapz_window_burst_close_ready()` or learned-target updates.
+
 ### Worker scheduler-accounted CPU attribution
 
 Keep callback wall residency and worker CPU attribution separate. At
 ordered/preparation/read-helper worker boundaries, sample
 `READ_ONCE(current->se.sum_exec_runtime)` and accumulate nonnegative deltas in
-dedicated counters. These samples exclude lower-I/O sleep and runqueue wall
-delay, but a direct sample can conservatively miss the current scheduler slice
-that has not yet been charged into `sum_exec_runtime`; therefore the counters
-are a sampled lower-bound diagnostic, not cycle-exact CPU time. Do not call an
-unexported scheduler helper from the module merely to sharpen this measurement.
+dedicated counters. These samples exclude lower-I/O sleep and runqueue wall delay, but a direct
+entry/exit sample can materially miss a short non-sleeping callback when the
+scheduler has not updated the current entity between samples. Therefore the
+counters are lower-bound diagnostics, not total or cycle-exact CPU time. Expose
+separate ordered/preparation LZ4 and copy timers; reports may sum
+LZ4+CRC+copy for the producer and LZ4+CRC+copy+commit-non-I/O for the ordered
+path as measured non-sleeping phase floors. Floors are not total CPU either.
+Do not call an unexported scheduler helper merely to sharpen this measurement.
 
 ### Parallel-read diagnostic control
 

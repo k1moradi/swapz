@@ -978,7 +978,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                          producer.count("swapz_account_worker_runtime("))
         self.assertEqual(worker.count("return;"),
                          worker.count("swapz_account_worker_runtime("))
-        for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
+        for key in ("lz4_wall_ns", "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
+                    "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns",
+                    "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
                     "window_commit_nonio_wall_ns", "engine_plan_wall_ns",
@@ -998,6 +1000,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("engine_publish_auth_wall_ns", status)
         self.assertIn("prep_crc_wall_ns=%llu", status)
         self.assertIn("ctx->preparation_crc_wall_ns", status)
+        self.assertIn("ordered_lz4_wall_ns=%llu", status)
+        self.assertIn("ctx->lz4_wall_ns", status)
+        self.assertIn("prep_lz4_wall_ns=%llu", status)
+        self.assertIn("ctx->preparation_lz4_wall_ns", status)
+        self.assertIn("ordered_write_copy_wall_ns=%llu", status)
+        self.assertIn("ctx->ordered_write_copy_wall_ns", status)
+        self.assertIn("prep_write_copy_wall_ns=%llu", status)
+        self.assertIn("ctx->preparation_copy_wall_ns", status)
         self.assertIn("prep_worker_wall_ns=%llu", status)
         self.assertIn("ctx->preparation_worker_wall_ns", status)
         self.assertIn("ordered_worker_cpu_ns=%llu", status)
@@ -1267,7 +1277,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_flush_window(ctx)", worker)
         self.assertIn("close_pack_ready=%llu", status)
         for field in ("pack_close_tail_target", "pack_close_tail_target_le4",
-                      "pack_close_burst_target", "pack_close_service_dry"):
+                      "pack_close_burst_target", "pack_close_service_dry",
+                      "pack_close_burst_admission", "pack_close_burst_worker",
+                      "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
+                      "pack_close_burst_target_9_16", "pack_close_burst_target_17_64",
+                      "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
+                      "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
+                      "pack_close_burst_overshoot"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
         self.assertIn("SWAPZ_PACK_CLOSE_TAIL_TARGET", writer)
@@ -1278,6 +1294,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->pack_close_tail_target_le4++", flush)
         self.assertIn("ctx->pack_close_burst_target++", flush)
         self.assertIn("ctx->pack_close_service_dry++", flush)
+        self.assertIn("ctx->pack_close_burst_admission++", flush)
+        self.assertIn("ctx->pack_close_burst_worker++", flush)
+        self.assertIn("ctx->pack_close_burst_target_le4++", flush)
+        self.assertIn("ctx->pack_close_burst_count_le4++", flush)
+        self.assertIn("ctx->pack_close_burst_overshoot++", flush)
+        self.assertIn("SWAPZ_BURST_CLOSE_ADMISSION", writer)
+        self.assertIn("SWAPZ_BURST_CLOSE_WORKER", worker)
+        self.assertIn("ctx->next_burst_close_target = ctx->retained_burst_target", writer)
+        self.assertIn("ctx->next_burst_close_target =", worker)
         self.assertIn("packed_early_commits=%llu", status)
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
         self.assertIn("accepted_burst_tail_flushes=%llu", status)
@@ -1304,6 +1329,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("TIMED_WINDOW_COUNTER_FIELDS", runner)
         self.assertIn("def timed_window_error", runner)
         self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)
+        self.assertIn("BURST_CLOSE_DETAIL_FIELDS", runner)
+        self.assertIn("pack_close_burst_admission", replay)
+        self.assertIn("pack_close_burst_target_5_8", replay)
         self.assertIn("single_tail_comp_age_1001_1250us", runner)
         self.assertIn("ordered_worker_cpu_ns", runner)
         self.assertIn("read_worker_cpu_ns", runner)

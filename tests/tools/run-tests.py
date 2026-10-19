@@ -110,6 +110,13 @@ ID52_FIELDS = (
 PACK_CLOSE_FIELDS = (
     "pack_close_tail_target", "pack_close_tail_target_le4",
     "pack_close_burst_target", "pack_close_service_dry")
+BURST_CLOSE_DETAIL_FIELDS = (
+    "pack_close_burst_admission", "pack_close_burst_worker",
+    "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
+    "pack_close_burst_target_9_16", "pack_close_burst_target_17_64",
+    "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
+    "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
+    "pack_close_burst_overshoot")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -144,13 +151,16 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS +
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + DEADLINE_CONTEXT_FIELDS +
     BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
 KERNEL_WRITE_FIELDS = (
-    "physical_write_reqs", "lz4_wall_ns", "write_copy_wall_ns",
-    "write_copy_bytes", "direct_lz4_input_pages", "window_sort_wall_ns",
+    "physical_write_reqs", "lz4_wall_ns",
+    "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
+    "write_copy_wall_ns", "write_copy_bytes",
+    "ordered_write_copy_wall_ns", "prep_write_copy_wall_ns",
+    "direct_lz4_input_pages", "window_sort_wall_ns",
     "window_commit_wall_ns", "window_commit_nonio_wall_ns",
     "engine_plan_wall_ns", "engine_pack_wall_ns",
     "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
@@ -221,6 +231,19 @@ def timed_window_error(record):
             record["pack_close_tail_target_le4"] >
             record["pack_close_tail_target"]):
         return "timed PACK_READY close attribution is inconsistent"
+    burst = record["pack_close_burst_target"]
+    if (record["pack_close_burst_admission"] +
+            record["pack_close_burst_worker"] != burst or
+            sum(record[field] for field in (
+                "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
+                "pack_close_burst_target_9_16",
+                "pack_close_burst_target_17_64")) != burst or
+            sum(record[field] for field in (
+                "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
+                "pack_close_burst_count_9_16",
+                "pack_close_burst_count_17_64")) != burst or
+            record["pack_close_burst_overshoot"] > burst):
+        return "timed burst-target close attribution is inconsistent"
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
@@ -1395,6 +1418,8 @@ def benchmark_verdicts(sessions):
                         "reason": f"{regime}: {exc}"}
             pair_deltas = []
             pair_request_deltas = []
+            pair_request_absolute_deltas = []
+            cause_deltas = {field: [] for field in PACK_CLOSE_FIELDS}
             for pair in mixed_pairs:
                 sync = pair[0]["arms"]["swapz"]
                 asynchronous = pair[1]["arms"]["swapz"]
@@ -1404,8 +1429,20 @@ def benchmark_verdicts(sessions):
                 pair_request_deltas.append(
                     asynchronous["lower_write_requests"] /
                     sync["lower_write_requests"] - 1.0)
+                pair_request_absolute_deltas.append(
+                    asynchronous["lower_write_requests"] -
+                    sync["lower_write_requests"])
+                for field in PACK_CLOSE_FIELDS:
+                    cause_deltas[field].append(
+                        asynchronous["kernel_write_path"][field] -
+                        sync["kernel_write_path"][field])
             throughput_ci = paired_ci95(pair_deltas)
             request_ci = paired_ci95(pair_request_deltas)
+            request_absolute_ci = paired_ci95(pair_request_absolute_deltas)
+            cause_ci = {
+                field: paired_ci95(values)
+                for field, values in cause_deltas.items()
+            }
             if throughput_ci["low"] >= .05:
                 throughput_result = "CONFIRMED_5PCT_GAIN"
             elif throughput_ci["high"] <= -.05:
@@ -1418,6 +1455,9 @@ def benchmark_verdicts(sessions):
                 "matched_pairs": 5,
                 "paired_95pct_ci": throughput_ci,
                 "lower_request_change_paired_95pct_ci": request_ci,
+                "lower_request_absolute_delta_paired_95pct_ci":
+                    request_absolute_ci,
+                "pack_ready_cause_delta_paired_95pct_ci": cause_ci,
                 "caution": "Synthetic RAM model; five matched pairs",
             }
         else:
@@ -1439,7 +1479,7 @@ def benchmark_verdicts(sessions):
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
-                            SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
             "kernel_gauges": {
@@ -1459,8 +1499,9 @@ def benchmark_verdicts(sessions):
         "packed_read": "MEASURED_4MIB_QD32_NO_COLD_CACHE_PROOF",
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
         "cpu_scope":
-            "kernel worker CPU uses scheduler-accounted sum_exec_runtime deltas; "
-            "direct samples may conservatively miss the current unaccounted slice",
+            "worker-boundary sum_exec_runtime is a scheduler-accounted lower "
+            "bound that can miss short current slices; separately reported "
+            "non-sleeping phase floors are the trusted in-callback evidence",
         "physical_media": "NOT_TESTED",
         "statistical_confidence":
             "FAST_MIXED_FIVE_MATCHED_PAIRS_WITH_PAIRED_95PCT_CI; "
@@ -1573,6 +1614,46 @@ def print_bench(result):
                  f"{columns[mode]['mixed_close_idle']:.1f}")
                 for mode in ("sync", "async")
             ])
+        print("  Mixed PACK_READY causes")
+        pack_fields = (
+            "pack_close_tail_target_le4", "pack_close_tail_target",
+            "pack_close_burst_target", "pack_close_service_dry")
+        print_table(
+            ("mode", "tail<=4", "tail", "burst", "dry"),
+            [
+                (mode, *(f"{columns[mode][f'mixed_{field}']:.1f}"
+                         for field in pack_fields))
+                for mode in ("sync", "async")
+            ] + [
+                ("async-sync",
+                 *(f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
+                   for field in pack_fields))
+            ])
+        if regime == "ssd_emulated":
+            mixed_ab = data["criteria"]["async_vs_sync"]
+            throughput_ci = mixed_ab["paired_95pct_ci"]
+            requests_ci = mixed_ab[
+                "lower_request_absolute_delta_paired_95pct_ci"]
+            cause_ci = mixed_ab["pack_ready_cause_delta_paired_95pct_ci"]
+            print("  Fast mixed async-sync paired 95% CI")
+            ci_rows = [
+                ("W %", throughput_ci["mean"] * 100,
+                 throughput_ci["low"] * 100, throughput_ci["high"] * 100),
+                ("lower req", requests_ci["mean"],
+                 requests_ci["low"], requests_ci["high"]),
+            ]
+            ci_rows.extend(
+                (label, cause_ci[field]["mean"],
+                 cause_ci[field]["low"], cause_ci[field]["high"])
+                for label, field in (
+                    ("tail<=4", "pack_close_tail_target_le4"),
+                    ("tail", "pack_close_tail_target"),
+                    ("burst", "pack_close_burst_target"),
+                    ("dry", "pack_close_service_dry")))
+            print_table(
+                ("metric", "mean", "low", "high"),
+                [(label, f"{mean:+.1f}", f"{low:+.1f}", f"{high:+.1f}")
+                 for label, mean, low, high in ci_rows])
         print("  Async pipeline — wall timings overlap; callback rows include scheduler delay.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
@@ -1609,12 +1690,18 @@ def print_bench(result):
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
                 ("ordered callback",
                  f"{asynchronous['mixed_ordered_worker_wall_ns'] / 1e6:.1f}",
-                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f} CPU"),
+                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f} sched floor"),
+                ("ordered measured floor",
+                 f"{(asynchronous['mixed_ordered_lz4_wall_ns'] + asynchronous['mixed_ordered_crc_wall_ns'] + asynchronous['mixed_ordered_write_copy_wall_ns'] + asynchronous['mixed_window_commit_nonio_wall_ns']) / 1e6:.1f}",
+                 "non-sleeping phases"),
                 ("prep callback",
                  f"{asynchronous['mixed_prep_worker_wall_ns'] / 1e6:.1f}",
-                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f} CPU"),
+                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f} sched floor"),
+                ("prep measured floor",
+                 f"{(asynchronous['mixed_prep_lz4_wall_ns'] + asynchronous['mixed_prep_crc_wall_ns'] + asynchronous['mixed_prep_write_copy_wall_ns']) / 1e6:.1f}",
+                 "non-sleeping phases"),
                 ("read helper", "-",
-                 f"{asynchronous['mixed_read_worker_cpu_ns'] / 1e6:.1f} CPU"),
+                 f"{asynchronous['mixed_read_worker_cpu_ns'] / 1e6:.1f} sched floor"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
@@ -1648,11 +1735,6 @@ def print_bench(result):
                  f"{counters['win1_deadline_deferred_tail']:.1f}/"
                  f"{counters['win1_idle_deferred_tail']:.1f}/"
                  f"{counters['single_tail_other_clears']:.1f}"),
-                ("PACK_READY tail<=4/tail/burst/dry",
-                 f"{counters['pack_close_tail_target_le4']:.1f}/"
-                 f"{counters['pack_close_tail_target']:.1f}/"
-                 f"{counters['pack_close_burst_target']:.1f}/"
-                 f"{counters['pack_close_service_dry']:.1f}"),
                 ("deferred C age <=250/500/1000/>",
                  f"{counters['single_tail_comp_age_le250us']:.1f}/"
                  f"{counters['single_tail_comp_age_251_500us']:.1f}/"
@@ -1758,7 +1840,7 @@ def print_bench(result):
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
             ("write-only", "fast QD8: 5 matched pairs + paired CI; others directional"),
-            ("CPU", "worker scheduler-accounted CPU is reported beside callback wall"),
+            ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
             ("Full telemetry", "test_results.json.xz"),

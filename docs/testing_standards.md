@@ -70,21 +70,22 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `7f3c447e28e7198b076eddb6a85ded54245456e2` passed all five stages
+Source `f6d658ddf767cd6d209a203e7860ef232e65d7b4` passed all five stages
 and published the canonical report as
-`6de1a3602ac9285095b4acb7d799715357d95883`.
+`dec12b4edebf1a47e2e7f08bcc1f3a54adeab56e`.
 
-On the faster model, mixed async/sync reached 23.46/23.93 MB/s with
-960.4/822.6 lower WRITE requests and no confirmed >=5% async gain. The active
-ID53 cutoff closed 31.5 deferred singletons and recorded 13.8 next WRITEs before
-the original deadline, so ID53 is rejected and the next source restores ID50's
-ordinary deadline.
+Fast mixed async/sync is 23.93/22.91 MB/s with 907.4/854.2 lower WRITE
+requests. Five matched pairs give +4.47% throughput, 95% CI
+[+3.20%, +5.73%]; this is positive but below the >=5% materiality threshold.
+Fast QD8 independently reconfirms K=1 at +14.4%, CI [+6.6%, +22.2%], with
+524 requests. Same-cache Kread seeded-random p99 is -4.9%,
+CI [-9.1%, -0.7%], with identical traffic; sequential is -8.8%,
+CI [-18.2%, +0.7%].
 
-Fast write-only QD8 is the confirmed positive scheduling point: five matched
-rounds show +20.8% async/sync with paired 95% CI [+7.0%, +34.5%] and 524
-async lower WRITE requests. Same-cache Kread remains inconclusive: sequential
-p99 is -9.4%, CI [-23.1%, +4.3%], and random is -0.8%, CI
-[-14.6%, +12.9%].
+Per-mode ID54 evidence shows async-minus-sync learned burst-target closes
++74.2, CI [+21.2,+127.2], while tail-target closes are -58.4,
+CI [-73.1,-43.7]. Do not apply a small-tail policy successor from this run.
+ID55 collects only learned burst-target site/geometry evidence.
 
 ## Open qualification gaps
 
@@ -717,20 +718,28 @@ ID54 PACK_READY attribution is measurement only. Every timed PACK_READY close
 must increment exactly one of `pack_close_tail_target`,
 `pack_close_burst_target` or `pack_close_service_dry`; their sum must equal
 `close_pack_ready`. `pack_close_tail_target_le4` must not exceed the tail
-counter. Rootless replay/report fixtures must fail closed on broken
-conservation and display the compact tail<=4/tail/burst/dry row. Source
-contracts may follow a factored service-dry helper, but must assert the same
-batch/read-bypass/wave-interruption predicate in the helper that actually owns
-the decision.
+counter. The operator report must display tail<=4/tail/burst/dry separately for
+sync and async and, on the fast five-pair model, print paired async-minus-sync
+95% CIs for those causes plus mixed throughput and absolute lower-request
+delta. Never average sync/async causes into an “async signal” row.
 
-ID24 worker CPU attribution is also measurement only. Status and timed deltas
-must expose `ordered_worker_cpu_ns`, `prep_worker_cpu_ns` and
-`read_worker_cpu_ns`, and the report must show worker CPU beside callback wall.
-Source coverage pins `READ_ONCE(current->se.sum_exec_runtime)` boundary
-sampling and preserves callback-wall counters. Treat the CPU values as
-scheduler-accounted sampled lower bounds, because the current unaccounted slice
-may be absent from a direct sample; they are not a correctness or performance
-pass criterion by themselves.
+ID55 remains measurement only. For every learned burst-target close,
+`pack_close_burst_admission + pack_close_burst_worker` must equal
+`pack_close_burst_target`; the four learned-target bins and four actual-count
+bins must independently sum to that same total, and overshoot cannot exceed it.
+Source contracts must prove admission/worker snapshot the existing learned
+target without changing any readiness predicate. Replay/report contracts fail
+closed on any broken conservation.
+
+ID24 boundary CPU attribution is measurement only and is not a trustworthy
+total for short callbacks. Status/timed deltas retain
+`ordered_worker_cpu_ns`, `prep_worker_cpu_ns` and `read_worker_cpu_ns` as
+scheduler-accounted lower bounds. They must also expose separate
+`ordered_lz4_wall_ns`, `prep_lz4_wall_ns`,
+`ordered_write_copy_wall_ns` and `prep_write_copy_wall_ns`. The report shows
+callback wall, scheduler lower bound and measured non-sleeping phase floors
+separately. No worker-count/affinity conclusion may rely on the boundary
+`sum_exec_runtime` value alone.
 
 ### Same-cache Kread A/B confirmation
 

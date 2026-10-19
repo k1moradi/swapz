@@ -158,8 +158,12 @@ class PairReplayContract(unittest.TestCase):
         before.update({
             "physical_write_reqs": 2,
             "lz4_wall_ns": 100,
+            "ordered_lz4_wall_ns": 60,
+            "prep_lz4_wall_ns": 40,
             "write_copy_wall_ns": 30,
             "write_copy_bytes": 4096,
+            "ordered_write_copy_wall_ns": 20,
+            "prep_write_copy_wall_ns": 10,
             "direct_lz4_input_pages": 1,
             "window_sort_wall_ns": 20,
             "window_commit_wall_ns": 400,
@@ -202,8 +206,12 @@ class PairReplayContract(unittest.TestCase):
         after.update({
             "physical_write_reqs": 7,
             "lz4_wall_ns": 50100,
+            "ordered_lz4_wall_ns": 30060,
+            "prep_lz4_wall_ns": 20040,
             "write_copy_wall_ns": 1030,
             "write_copy_bytes": 8192,
+            "ordered_write_copy_wall_ns": 620,
+            "prep_write_copy_wall_ns": 410,
             "direct_lz4_input_pages": 5,
             "window_sort_wall_ns": 1020,
             "window_commit_wall_ns": 70400,
@@ -233,6 +241,11 @@ class PairReplayContract(unittest.TestCase):
             "pack_close_tail_target_le4": 2,
             "pack_close_burst_target": 1,
             "pack_close_service_dry": 1,
+            "pack_close_burst_admission": 1,
+            "pack_close_burst_worker": 0,
+            "pack_close_burst_target_5_8": 1,
+            "pack_close_burst_count_5_8": 1,
+            "pack_close_burst_overshoot": 0,
             "retained_burst_target": 8,
             "prep_lower_write_samples": 7,
             "prep_lower_write_start_queued": 5,
@@ -273,6 +286,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
                          [2, 2, 1])
         self.assertEqual(delta["write_copy_wall_ns"], 1000)
+        self.assertEqual(delta["ordered_lz4_wall_ns"], 30000)
+        self.assertEqual(delta["prep_lz4_wall_ns"], 20000)
+        self.assertEqual(delta["ordered_write_copy_wall_ns"], 600)
+        self.assertEqual(delta["prep_write_copy_wall_ns"], 400)
         self.assertEqual(delta["write_copy_bytes"], 4096)
         self.assertEqual(delta["direct_lz4_input_pages"], 4)
         self.assertEqual(delta["window_commit_nonio_wall_ns"], 10000)
@@ -296,6 +313,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["pack_close_tail_target_le4"], 1)
         self.assertEqual(delta["pack_close_burst_target"], 1)
         self.assertEqual(delta["pack_close_service_dry"], 1)
+        self.assertEqual(delta["pack_close_burst_admission"], 1)
+        self.assertEqual(delta["pack_close_burst_worker"], 0)
+        self.assertEqual(delta["pack_close_burst_target_5_8"], 1)
+        self.assertEqual(delta["pack_close_burst_count_5_8"], 1)
         self.assertEqual(delta["prep_crc_wall_ns"], 500)
         self.assertEqual(delta["ordered_crc_wall_ns"], 700)
         self.assertEqual(delta["engine_publish_crc_wall_ns"], 1000)
@@ -349,6 +370,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "PACK_READY"):
             module.kernel_write_delta(
                 before, dict(after, pack_close_burst_target=2))
+        with self.assertRaisesRegex(ValueError, "burst-target"):
+            module.kernel_write_delta(
+                before, dict(after, pack_close_burst_worker=1))
         with self.assertRaisesRegex(ValueError, "upper-tail"):
             module.kernel_write_delta(
                 before, dict(after, single_tail_comp_age_251_500us=0,

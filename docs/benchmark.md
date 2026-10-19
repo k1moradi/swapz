@@ -34,10 +34,12 @@ Callback wall is not CPU time: ordered callback wall includes synchronous
 lower-I/O sleep and callback wall may include scheduler delay. ID24 additionally
 reports scheduler-accounted sampled worker CPU from
 `current->se.sum_exec_runtime` for ordered, preparation and read-helper work.
-Direct boundary samples may conservatively miss the current unaccounted
-scheduler slice, so treat them as a lower-bound discriminator rather than
-cycle-exact accounting. Use explicit LZ4/CRC/copy/plan/pack/publish timers for
-hot-path attribution. RAM-backed 4MiB read tests are not cold physical swap-in.
+Direct boundary samples can materially miss short callbacks that return before
+the scheduler updates the current entity, so treat them only as a lower-bound
+diagnostic. The report also carries separate ordered/preparation LZ4 and copy
+timers and derives measured non-sleeping phase floors from LZ4/CRC/copy plus
+ordered commit-non-I/O work. Those floors still do not equal total worker CPU;
+use external scheduler accounting before worker-count/affinity decisions. RAM-backed 4MiB read tests are not cold physical swap-in.
 
 Window-size bins, close reasons, one-page close reasons, deadline contexts,
 burst-learning counters, preparation counters and GC-victim attribution are
@@ -57,43 +59,41 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `7f3c447e28e7198b076eddb6a85ded54245456e2`
-(report-only `6de1a3602ac9285095b4acb7d799715357d95883`) passed all five
+Owner-qualified source `f6d658ddf767cd6d209a203e7860ef232e65d7b4`
+(report-only `dec12b4edebf1a47e2e7f08bcc1f3a54adeab56e`) passed all five
 stages. It is synthetic owned-RAM evidence only.
 
-ID53 is rejected. Fast mixed measured 31.5 active 1 ms cutoff closes and 13.8
-next ordinary WRITEs before the original deadline, a 43.8% miss signal. The
-same run measured async/sync 23.46/23.93 MB/s and 960.4/822.6 lower WRITE
-requests. The successor restores ID50's full ordinary first-record deadline and
-removes the active cutoff/watermark counters.
+The ID53 rollback materially recovers fast mixed geometry: async/sync is
+23.93/22.91 MB/s with 907.4/854.2 lower WRITE requests. The five matched
+throughput delta is +4.47%, 95% CI [+3.20%, +5.73%]; request delta is +53.2
+and remains a fragmentation cost. PACK_READY excess is now +43.6 and
+win2+win3_4 excess +41.0, both far below the active-cutoff run.
 
-ID50 remains useful: fast D/C/DL/I/O is 105.4/73.9/31.5/0/0. ID51/ID52 stay
-passive. Because active early completion can itself alter a closed-loop
-workload's future submissions, the rollback refines only the passive companion
-survival curve above 1 ms into 1001-1250/1251-1500/1501-1750/>1750 us bins.
+Passive ID50/52 data is again stable under the ordinary deadline:
+D/C/DL/I/O = 98.8/65.8/33.0/0/0, with only 1.5 companions above 1 ms. This
+supports ID50 and permanently rejects another simple active age cutoff because
+ID53 demonstrated closed-loop feedback from early BIO completion.
 
-ID37 is confirmed at fast write-only QD8: five matched rounds show async
-24.81 versus sync 20.54 MB/s, +20.8%, with paired 95% CI
-[+7.0%, +34.5%] and 524 async lower WRITE requests. This does not promote a
-universal mixed policy: fast mixed has no confirmed >=5% async gain.
+ID37 fast write-only QD8 repeats as a statistically qualified K=1 win:
+23.86 versus 20.87 MB/s, +14.4%, paired 95% CI [+6.6%, +22.2%], with
+524 lower WRITE requests. ID39 now has a significant seeded-random p99 benefit:
+5.37 -> 5.11 ms, -4.9%, CI [-9.1%, -0.7%], at identical physical traffic;
+sequential is 5.08 -> 4.63 ms, -8.8%, CI [-18.2%, +0.7%].
 
-ID39 remains inconclusive. Five matched same-cache Kread rounds show sequential
-p99 -9.4% with CI [-23.1%, +4.3%] and random -0.8% with
-CI [-14.6%, +12.9%]. Both intervals cross zero; no READ-policy change follows.
+Reading the committed report per mode corrects the ID54 console ambiguity.
+Fast sync/async primary PACK_READY causes are:
+tail<=4 52.4/44.8, tail 120.8/62.4, learned burst-target 23.8/98.0, and
+service-dry 594.2/622.0. Five matched async-minus-sync deltas are tail
+-58.4 CI [-73.1,-43.7], burst +74.2 CI [+21.2,+127.2], and dry +27.8 with
+a CI crossing zero. Therefore the residual async fragmentation is not caused by
+small sampled tails. ID55 passively splits learned burst-target closes by
+decision site, learned-target bin, actual count bin and overshoot before any
+policy successor.
 
-Fast mixed exposes a concrete fragmentation target: async has 823.4 PACK_READY
-closes versus 717.6 sync (+105.8), while win2+win3_4 is 185.4 versus 99.8
-(+85.6). Total async windows exceed sync by 136.6, nearly the entire +137.8
-lower-WRITE-request gap. ID54 therefore records each PACK_READY close under
-exactly one primary trigger: sampled retained-tail target, learned burst target,
-or service-proven dry close. A tail-target <=4 subset answers the small-window
-question directly; the primary counters must sum exactly to
-`close_pack_ready`.
-
-ID24 accompanies that passive experiment. Worker callback wall remains, and
-ordered/preparation/read-helper worker boundaries add scheduler-accounted
-sampled CPU. This evidence decides whether fast QD4/QD8/mixed deficits justify
-CPU-topology or worker-count experiments; it does not itself change scheduling.
+ID24 boundary `sum_exec_runtime` samples are retained only as lower bounds:
+fast prep callback wall is 51.2 ms while the sampled scheduler delta is only
+2.1 ms. Existing synchronous phase timers are now reported as non-sleeping
+measured floors so short callbacks are not mistaken for zero CPU work.
 
 ## Confirmation gate
 
