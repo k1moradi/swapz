@@ -693,9 +693,11 @@ validation therefore require exact delta conservation:
 `D == C + DL + I + O`, with `DL <= win1_deadline` and
 `I <= win1_idle`. Missing or inconsistent telemetry fails qualification.
 
-The operator report must print the compact row `deferred tail D/C/DL/I/O`.
-ID51 answers where ID50 work goes; it does not itself justify another retention
-rule. Any successor must be a separate source revision after owner evidence.
+The operator report must print the compact row `deferred tail D/C/DL/I/O`;
+rootless report-contract coverage must assert that row is present so schema
+plumbing cannot silently omit the new lifecycle evidence. ID51 answers where
+ID50 work goes; it does not itself justify another retention rule. Any successor
+must be a separate source revision after owner evidence.
 
 ### Bounded Kread=2 qualification
 

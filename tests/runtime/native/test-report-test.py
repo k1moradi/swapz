@@ -562,6 +562,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("prep callback", rendered)
         self.assertIn("lower-W queue start/end", rendered)
         self.assertIn("lower-W nonempty start/end", rendered)
+        self.assertIn("deferred tail D/C/DL/I/O", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
