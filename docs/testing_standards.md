@@ -48,7 +48,7 @@ The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms 
 
 Both arms of every session carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered. The five fast matched deltas use a two-sided Student-t 95% confidence interval with four degrees of freedom. Report both the paired mean and interval; do not replace paired analysis with an interval over unpaired arm means.
 
-The write-only QD1/4/8/32 sweep stays directional except for fast QD8. Slow QD1/4/8/32 and fast QD1/QD4/QD32 each run one sync and one async observation. Fast QD8 uses the same ten-session confirmation sequence and reports paired 95% confidence intervals for useful throughput, lower requests and lower bytes. A claim about any other QD still requires its own >=5 matched rounds.
+The write-only QD1/4/8/32 sweep stays directional except for fast QD8. Slow QD1/4/8/32 and fast QD1/QD4/QD32 each run one sync and one async observation. Fast QD8 uses the same ten-session confirmation sequence and reports paired 95% confidence intervals for useful throughput, lower requests and lower bytes. A claim about any other QD still requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared ten-session sequence and the mode-array loops rather than the retired literal four-session loop, so changing the evidence shape cannot silently bypass parser contracts.
 
 ## Report contract
 
