@@ -65,6 +65,55 @@ def choose_slot(rng, start, count, used):
     raise ValueError("no independent logical page in this wave")
 
 
+def nonzero_same_filled_page(page):
+    """True for one repeated nonzero 64-bit word across the 4KiB page."""
+    if len(page) != PAGE:
+        raise ValueError("opportunity analysis requires complete pages")
+    word = page[:8]
+    return word != b"\x00" * 8 and word * (PAGE // 8) == page
+
+
+def workload_opportunity(events, pages, logical_pages):
+    """Offline payload opportunity only; never a kernel performance claim."""
+    live = [pages[i % len(pages)] for i in range(logical_pages)]
+    resident = {}
+    for payload in live:
+        resident[payload] = resident.get(payload, 0) + 1
+    measured_writes = same_filled = same_page = resident_dup = 0
+    measured_payloads = set()
+    for event in events:
+        if event["op"] != "W":
+            continue
+        old = live[event["page"]]
+        new = pages[event["fixture"]]
+        if event["phase"] == "measure":
+            measured_writes += 1
+            measured_payloads.add(new)
+            same_filled += int(nonzero_same_filled_page(new))
+            same_page += int(old == new)
+            resident_dup += int(
+                resident.get(new, 0) - (1 if old == new else 0) > 0)
+        if old != new:
+            resident[old] -= 1
+            if not resident[old]:
+                del resident[old]
+            resident[new] = resident.get(new, 0) + 1
+            live[event["page"]] = new
+    return {
+        "scope": "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS",
+        "measured_write_ops": measured_writes,
+        "measured_unique_write_payloads": len(measured_payloads),
+        "nonzero_same_filled_write_ops": same_filled,
+        "same_page_rewrite_ops": same_page,
+        "resident_duplicate_write_ops": resident_dup,
+        "final_live_unique_payloads": len(resident),
+        "final_live_duplicate_pages":
+            sum(count for count in resident.values() if count > 1),
+        "final_live_nonzero_same_filled_pages":
+            sum(1 for payload in live if nonzero_same_filled_page(payload)),
+    }
+
+
 def prepare(args):
     fixture_pages, fixture_hash = fixture_info(args.fixture)
     if args.qd < 1 or args.qd > 32 or args.measure_ops < 1:
@@ -126,6 +175,7 @@ def prepare(args):
         if e["op"] == "W":
             h.update(struct.pack("<QII", e["seq"], e["page"], e["fixture"]))
             h.update(pages[e["fixture"]])
+    opportunity = workload_opportunity(events, pages, args.logical_pages)
     prefill_hash = sha(b"".join(pages[i % fixture_pages] for i in range(args.logical_pages)))
     post_hash = sha(b"".join(pages[i] for i in latest))
     trace_bytes = "".join(json.dumps(e, sort_keys=True, separators=(",", ":")) + "\n"
@@ -141,6 +191,7 @@ def prepare(args):
                 "seed": args.seed, "prefill_sha256": prefill_hash,
                 "expected_post_sha256": post_hash,
                 "write_payload_stream_sha256": h.hexdigest(),
+                "workload_opportunity": opportunity,
                 "algorithm": "fixed-seed independent-QD-waves, deterministic complete 4KiB pages"}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"manifest": str(out / "manifest.json"), **manifest}, sort_keys=True))
@@ -1204,6 +1255,7 @@ def replay(args):
         "device_identity": identity, "fixture_sha256": fixture_hash,
         "trace_sha256": mf["trace_sha256"], "manifest_sha256": manifest_sha,
         "write_payload_stream_sha256": mf["write_payload_stream_sha256"],
+        "workload_opportunity": mf["workload_opportunity"],
         "prefill_sha256": mf["prefill_sha256"],
         "expected_post_sha256": mf["expected_post_sha256"],
         "verified_post_sha256": post_hash.hexdigest(),
@@ -1246,7 +1298,8 @@ def compare(args):
     if set(x["candidate"] for x in entries) != set(CANDIDATES) or len(entries) != 2:
         raise ValueError("exactly one off and one swapz result required")
     immutable = ("fixture_sha256", "trace_sha256", "write_payload_stream_sha256",
-                 "prefill_sha256", "expected_post_sha256", "manifest_sha256",
+                 "workload_opportunity", "prefill_sha256",
+                 "expected_post_sha256", "manifest_sha256",
                  "qd", "layout", "seed", "iops_requested", "warmup_ops",
                  "measure_ops", "read_ops", "write_ops", "verified_pages",
                  "verified_post_sha256")
@@ -1290,6 +1343,7 @@ def compare(args):
               "fixture_sha256": first["fixture_sha256"],
               "trace_sha256": first["trace_sha256"],
               "write_payload_stream_sha256": first["write_payload_stream_sha256"],
+              "workload_opportunity": first.get("workload_opportunity"),
               "read_ops": first["read_ops"], "write_ops": first["write_ops"],
               "results": [{k: entry.get(k) for k in
                            ("candidate", "source_sha", "achieved_iops", "lower_io")}

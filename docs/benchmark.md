@@ -96,6 +96,44 @@ directional control. Latest Kread same-cache result is inconclusive
 
 Do not claim a QD performance improvement until that specific QD/regime has at least five counterbalanced matched rounds, an appropriate paired confidence interval, unchanged correctness, provenance equality and no unacceptable regression in lower bytes, read tails, CPU/RAM or GC. The current confirmation harness qualifies fast mixed QD32, fast write-only QD8 and the same-cache Kread toggle for this statistical gate; QD1/QD4/QD32 write-only remain directional controls.
 
+## Deferred idea evidence
+
+The benchmark keeps future optimization ideas visible without turning them into
+current performance claims.
+
+**Same-filled pages and exact-content dedup (IDs 58/59).** Trace preparation now
+computes a deterministic `workload_opportunity` record from the exact fixture
+bytes and logical event stream before any device I/O. It reports measured write
+count, unique measured payloads, nonzero same-filled writes (one repeated
+64-bit word across the 4KiB page), exact same-page rewrites, writes whose exact
+payload is already resident on another logical page, and final live
+unique/duplicate/same-filled populations. This is a synthetic trace/fixture
+opportunity measurement only. It does not estimate kernel CPU cost, metadata
+cost, lower-byte savings or real swap-workload prevalence.
+
+**READ coalescing (ID60).** The existing same-cache Kread evidence already
+records `parallel_read_pairs` and `parallel_read_same_extent_pairs` for each
+sequential/random pass. Use their ratio as the first gate. An active coalescing
+experiment must show fewer lower READ requests/bytes without increasing p99;
+it may combine only reads already waiting for service and must not wait for a
+future read to manufacture a batch.
+
+**Background GC (ID61).** Current live-GC qualification proves correctness and
+accounts lower GC I/O, but it is not evidence for a background worker. Required
+pre-implementation evidence is foreground GC wall/stall contribution during
+useful I/O, reserve/headroom pressure and latency/throughput impact under
+bounded owned-RAM pressure. Compare useful work including all GC lower traffic.
+
+**K>1 (ID38).** A second lower-WRITE slot is gated on sustained ready-run
+pressure while K=1 is genuinely busy plus demonstrated lower-device queue
+headroom. ID57 busy-PACK_READY deferrals are relevant evidence, but a counter
+alone is not a win: K=2 would still require matched throughput, request/byte,
+read-tail and correctness qualification.
+
+**Physical media (ID62).** No current benchmark may collect this evidence.
+Physical-device behavior/endurance remains separately authorized future work;
+RAM `null_blk` results must never be relabeled as device results.
+
 ## Physical media
 
 No current benchmark authorizes physical storage or active swap. A future real-device study requires separate owner authorization, exact device ownership/alias checks, backup/data-loss acceptance, independent safety review and a pinned source/procedure.

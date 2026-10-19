@@ -45,6 +45,35 @@ Every implementation task updates the relevant governing standard in the same co
 Never reboot, `swapon`, `swapoff`, mount test storage, force-remove mappings or touch physical/unowned devices. Loaded development uses only positively owned RAM-backed `null_blk` with exact identity checks and ordinary teardown/quarantine.
 
 
+### Deferred content-sharing and concurrency experiments
+
+Same-filled-page and dedup optimizations must preserve the existing authority
+model rather than create hidden aliases. A nonzero same-filled representation
+needs an explicit type/format decision and exact 4KiB reconstruction; do not
+reuse the zero-page encoding for nonzero values. Exact-content dedup requires
+bounded ownership/refcount state, full-byte verification before sharing,
+generation-safe copy-on-write on overwrite, and GC/DISCARD accounting that
+cannot free a payload while any authoritative mapping references it. Hash
+equality alone is never sufficient authority.
+
+READ coalescing may combine only requests already waiting behind serialized
+service. It must not delay an otherwise dispatchable read, cross an ordering or
+authority mutation boundary, merge incompatible generations, or share mutable
+decode scratch across concurrent completions.
+
+A future background-GC worker remains subordinate to the single publication and
+allocation authority. It may not consume the last reserve, race foreground
+allocation for a destination, publish relocation before lower completion, or
+continue after suspend/drain/failure has revoked ownership.
+
+K>1 lower-WRITE slots require immutable per-run ownership exactly as K=1 does.
+Adding a slot without measured ready-run pressure is forbidden. Same-page writes
+across runs require an explicit generation/order fence; publication remains
+serialized even if lower I/O is parallel.
+
+Physical-device support is not a coding shortcut around current safety policy.
+No production/test flag may silently relax the RAM-backed owned-device gate.
+
 ### Admission-policy cleanup
 
 The old `coalesce_ms` constructor option is retired. Supported mappings had

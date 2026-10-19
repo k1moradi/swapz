@@ -216,6 +216,17 @@ def arm(candidate, *, mode, regime):
         "mixed_replay_cpu_system_s": .08,
         "mixed_replay_peak_rss_kb": 12000,
         "lower_inflight": lower_inflight(has_reads=True),
+        "workload_opportunity": {
+            "scope": "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS",
+            "measured_write_ops": 100,
+            "measured_unique_write_payloads": 20,
+            "nonzero_same_filled_write_ops": 5,
+            "same_page_rewrite_ops": 7,
+            "resident_duplicate_write_ops": 30,
+            "final_live_unique_payloads": 18,
+            "final_live_duplicate_pages": 40,
+            "final_live_nonzero_same_filled_pages": 3,
+        },
         "packed_read": packed,
         "kernel_write_path": (timed_kernel_write(mode=mode, target=8)
                               if swapz else None),
@@ -550,6 +561,10 @@ class ReportContract(unittest.TestCase):
                          1000000)
         self.assertEqual(data["regimes"]["ssd_emulated"]["device_model"]["cap_mib_s"],
                          80)
+        self.assertEqual(
+            data["workload_opportunity"]["resident_duplicate_write_ops"], 30)
+        self.assertEqual(
+            data["workload_opportunity"]["nonzero_same_filled_write_ops"], 5)
         self.assertAlmostEqual(
             slow["criteria"]["sync"]["lower_write_saved_fraction"], .375)
         self.assertEqual(
@@ -697,6 +712,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("lower-W queue start/end", rendered)
         self.assertIn("lower-W nonempty start/end", rendered)
         self.assertIn("deferred tail D/C/DL/I/O", rendered)
+        self.assertIn("Workload content opportunity", rendered)
+        self.assertIn("resident-dup", rendered)
         self.assertIn("Mixed PACK_READY causes", rendered)
         self.assertIn("Mixed burst-close split", rendered)
         self.assertIn("Mixed post-PACK tail samples", rendered)

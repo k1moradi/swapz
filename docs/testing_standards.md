@@ -92,6 +92,36 @@ deferrals, completion-only holds, zero/one/many resolutions, aborts and
 post-finalization closes. Rootless contracts must prove hard boundaries and
 tail>=1 behavior remain outside the gate.
 
+## Deferred optimization evidence gates
+
+The following ideas stay in the maintained test plan even when they are not the
+active experiment.
+
+- **ID58 same-filled:** opportunity collection is offline from immutable fixture
+  bytes and trace events. It must not add a production hot-path scan merely to
+  measure prevalence. Zero pages are excluded because zero elision is already
+  a separate qualified representation.
+- **ID59 dedup:** trace evidence uses exact 4KiB byte equality, not hashes alone,
+  to classify same-page rewrites and resident duplicate payloads. Synthetic
+  fixture-pool reuse is not a production prevalence claim. An active dedup test
+  later requires byte-exact collision verification and refcount/COW/GC/discard
+  failure-path coverage.
+- **ID60 read coalescing:** first report the already-collected same-extent share
+  of Kread pairs. New coalescing may operate only on reads already queued; no
+  grace timer or future-arrival wait is allowed. Acceptance requires lower READ
+  request reduction with no p99 regression and unchanged byte oracle.
+- **ID61 background GC:** before creating a worker, add an owned-RAM phase that
+  measures foreground-GC stall/headroom during useful I/O. Qualification must
+  include total GC lower READ/WRITE traffic, reserve safety, useful throughput,
+  p95/p99 and exact final image.
+- **ID38 K>1:** current evidence keeps it on hold. Reopening requires sustained
+  ready-run pressure while K=1 is busy, lower queue headroom >1 on the target
+  model, and a separate >=5-pair K=1/K=2 comparison. Never infer K>1 usefulness
+  from raw device hwq depth alone.
+- **ID62 real device:** current host-safety rules prohibit collection. Do not add
+  a physical-device path, environment toggle or alternate public test command
+  to bypass that gate.
+
 ## Open qualification gaps
 
 The next architecture experiment is an immutable ping-pong WRITE pipeline:

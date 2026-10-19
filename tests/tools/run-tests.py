@@ -201,6 +201,23 @@ LOWER_INFLIGHT_INT_FIELDS = (
 LOWER_INFLIGHT_FLOAT_FIELDS = (
     "read_time_weighted", "write_time_weighted", "total_time_weighted")
 LOWER_INFLIGHT_FIELDS = LOWER_INFLIGHT_INT_FIELDS + LOWER_INFLIGHT_FLOAT_FIELDS
+WORKLOAD_OPPORTUNITY_FIELDS = (
+    "measured_write_ops", "measured_unique_write_payloads",
+    "nonzero_same_filled_write_ops", "same_page_rewrite_ops",
+    "resident_duplicate_write_ops", "final_live_unique_payloads",
+    "final_live_duplicate_pages", "final_live_nonzero_same_filled_pages")
+
+
+def workload_opportunity_record(obj):
+    record = obj.get("workload_opportunity")
+    if not isinstance(record, dict) or record.get("scope") != (
+            "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS"):
+        return None
+    if any(type(record.get(field)) is not int or record[field] < 0
+           for field in WORKLOAD_OPPORTUNITY_FIELDS):
+        return None
+    return {"scope": record["scope"],
+            **{field: record[field] for field in WORKLOAD_OPPORTUNITY_FIELDS}}
 
 
 def lower_inflight_record(obj):
@@ -737,6 +754,7 @@ def parse_sessions(output):
                     "mixed_replay_cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                     "mixed_replay_peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
                     "lower_inflight": lower_inflight_record(obj),
+                    "workload_opportunity": workload_opportunity_record(obj),
                     "kernel_write_path": obj.get("kernel_write_path"),
                     "packed_read": None,
                 }
@@ -1047,6 +1065,23 @@ def write_saturation_verdict(sessions):
     """Validate bounded QD controls plus five matched fast-QD8 rounds."""
     regimes = {}
     expected_total = 0
+    opportunity = verdict.get("workload_opportunity")
+    if isinstance(opportunity, dict):
+        print("\n  Workload content opportunity — trace/fixture only; not kernel savings.")
+        print_table(
+            ("writes", "same-filled", "same-page", "resident-dup", "uniq payloads"),
+            [(
+                opportunity["measured_write_ops"],
+                opportunity["nonzero_same_filled_write_ops"],
+                opportunity["same_page_rewrite_ops"],
+                opportunity["resident_duplicate_write_ops"],
+                opportunity["measured_unique_write_payloads"],
+            )])
+        print("  Final live: "
+              f"{opportunity['final_live_unique_payloads']} unique payloads; "
+              f"{opportunity['final_live_duplicate_pages']} pages in duplicate sets; "
+              f"{opportunity['final_live_nonzero_same_filled_pages']} nonzero same-filled.")
+
     for regime in MODEL_ORDER:
         rows = [row for row in sessions if row.get("regime") == regime]
         expected_shape = []
@@ -1283,6 +1318,14 @@ def benchmark_verdicts(sessions):
         return {"overall": "INCOMPLETE",
                 "reason": "exactly 14 modeled RAM-only sessions required"}
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
+    opportunities = [
+        row["arms"][candidate].get("workload_opportunity")
+        for row in all_rows for candidate in ("off", "swapz")]
+    if (any(record is None for record in opportunities) or
+            any(record != opportunities[0] for record in opportunities[1:])):
+        return {"overall": "INCOMPLETE",
+                "reason": "workload opportunity evidence missing or mismatched"}
+    workload_opportunity = opportunities[0]
     for row in all_rows:
         timed = row["arms"].get("swapz", {}).get("kernel_write_path")
         error = timed_window_error(timed)
@@ -1551,6 +1594,7 @@ def benchmark_verdicts(sessions):
             "bound that can miss short current slices; separately reported "
             "non-sleeping phase floors are the trusted in-callback evidence",
         "physical_media": "NOT_TESTED",
+        "workload_opportunity": workload_opportunity,
         "statistical_confidence":
             "FAST_MIXED_FIVE_MATCHED_PAIRS_WITH_PAIRED_95PCT_CI; "
             "SLOW_TWO_OBSERVATIONS_PER_MODE",
@@ -1929,9 +1973,10 @@ def print_bench(result):
                 f"{rnd['lower_read_requests']:.1f}",
                 f"{rnd['read_p99_ms']:.2f}",
                 f"{(seq['parallel_read_pairs'] + rnd['parallel_read_pairs']) / 2:.1f}",
+                f"{(seq['parallel_read_same_extent_pairs'] + rnd['parallel_read_same_extent_pairs']) / 2:.1f}",
             ))
         print_table(("parallel", "seq KiB", "seq req", "seq p99",
-                     "rnd KiB", "rnd req", "rnd p99", "pairs"), rows)
+                     "rnd KiB", "rnd req", "rnd p99", "pairs", "same-ext"), rows)
         seq_ci = parallel_ab["paired"]["sequential"]["p99_change_fraction"]
         rnd_ci = parallel_ab["paired"]["seeded_random"]["p99_change_fraction"]
         print("  p99 on/off paired 95% CI: "

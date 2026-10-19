@@ -471,6 +471,13 @@ class PairReplayContract(unittest.TestCase):
                 manifest = json.loads((plan / "manifest.json").read_text())
                 self.assertEqual(manifest["fixture_pages"], 16)
                 self.assertEqual(manifest["measure_ops"], 128)
+                opportunity = manifest["workload_opportunity"]
+                self.assertEqual(
+                    opportunity["scope"],
+                    "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS")
+                self.assertGreater(opportunity["measured_write_ops"], 0)
+                self.assertGreaterEqual(
+                    opportunity["measured_unique_write_payloads"], 1)
                 reports = []
                 for candidate in ("off", "swapz"):
                     path = root / f"swapz-replay-{candidate}.bin"
@@ -491,6 +498,7 @@ class PairReplayContract(unittest.TestCase):
                 self.assertEqual(result["verdict"], "PASS_IDENTICAL_LOGICAL_INPUT")
                 self.assertEqual(result["fixture_sha256"], manifest["fixture_sha256"])
                 self.assertEqual(result["trace_sha256"], manifest["trace_sha256"])
+                self.assertEqual(result["workload_opportunity"], opportunity)
                 self.assertEqual(len(result["results"]), 2)
                 self.assertEqual(result["performance_qualification"],
                                  "ROOTLESS_NOT_DEVICE_EVIDENCE")
@@ -506,6 +514,7 @@ class PairReplayContract(unittest.TestCase):
                     self.assertEqual(record["warmup_ops"], 32)
                     self.assertEqual(record["verified_pages"], 64)
                     self.assertEqual(record["verdict"], "PASS")
+                    self.assertEqual(record["workload_opportunity"], opportunity)
                     rates = record["throughput_mbps"]
                     self.assertGreater(rates["logical_total_mbps"], 0)
                     self.assertIsNone(rates["lower_write_mbps"])
@@ -730,6 +739,35 @@ class PairReplayContract(unittest.TestCase):
             swapz["source_sha"] = "2" * 40
             with self.assertRaisesRegex(ValueError, "revision mismatch"):
                 compare()
+
+    def test_workload_opportunity_is_offline_exact_content_evidence(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("swapz_replay_opportunity", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        repeated_a = b"A" * PAGE
+        repeated_b = b"B" * PAGE
+        varied = bytes(range(256)) * 16
+        self.assertTrue(module.nonzero_same_filled_page(repeated_a))
+        self.assertFalse(module.nonzero_same_filled_page(b"\x00" * PAGE))
+        self.assertFalse(module.nonzero_same_filled_page(varied))
+        events = [
+            {"op": "W", "phase": "warmup", "page": 0, "fixture": 2},
+            {"op": "W", "phase": "measure", "page": 1, "fixture": 0},
+            {"op": "W", "phase": "measure", "page": 2, "fixture": 2},
+            {"op": "W", "phase": "measure", "page": 3, "fixture": 0},
+        ]
+        evidence = module.workload_opportunity(
+            events, [repeated_a, repeated_b, varied], 4)
+        self.assertEqual(evidence["measured_write_ops"], 3)
+        self.assertEqual(evidence["measured_unique_write_payloads"], 2)
+        self.assertEqual(evidence["nonzero_same_filled_write_ops"], 2)
+        self.assertEqual(evidence["same_page_rewrite_ops"], 2)
+        self.assertEqual(evidence["resident_duplicate_write_ops"], 3)
+        self.assertEqual(evidence["final_live_unique_payloads"], 2)
+        self.assertEqual(evidence["final_live_duplicate_pages"], 4)
+        self.assertEqual(evidence["final_live_nonzero_same_filled_pages"], 2)
+        self.assertIn("NOT_KERNEL_SAVINGS", evidence["scope"])
 
     def test_throughput_invalid_times_counts_and_lower_sectors_fail_closed(self):
         import importlib.util
