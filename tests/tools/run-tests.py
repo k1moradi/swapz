@@ -1039,7 +1039,7 @@ def benchmark_verdicts(sessions):
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
-                            CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            SINGLE_TAIL_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
             "kernel_gauges": {
