@@ -700,3 +700,8 @@ Under `max_read_blocks_per_record == 1`, selectively fetched payload blocks are
 not added to reusable residency either. A later logical read must exercise its
 own bounded lower payload callback; an injected failure on that callback must
 still fail the read and invalidate the volatile header cache.
+
+Source coverage for partial extent residency must assert semantic gates rather
+than obsolete spellings: metadata hits merge block-zero into the mask, reusable
+payload residency is limited to multi-block extents outside the explicit
+one-block budget, and `read_cached_full` is likewise multi-block/budget-gated.

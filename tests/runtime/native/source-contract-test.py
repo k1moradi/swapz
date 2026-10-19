@@ -490,9 +490,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
         process = body("swapz_process")
         self.assertIn("read_cached_block_mask", engine_h)
+        self.assertIn("read_extent_cache", engine_h)
         self.assertIn("engine->read_cached_block_mask = 0", invalidate)
+        self.assertIn("read_extent_lru_valid", invalidate)
         self.assertIn("cached_mask = cached_metadata ?", read)
-        self.assertIn("cached_mask = 1U", read)
+        self.assertIn("cached_mask |= 1U", read)
         self.assertIn("(1U << initial_blocks) - 1U", read)
         self.assertIn("while (start <= last && (cached_mask & (1U << start)))",
                       read)
@@ -500,20 +502,21 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       read)
         payload_read = read.index("engine->io.read_blocks",
                                   read.index("if (last >= start)"))
-        residency_gate = read.index("if (observed.extent_blocks == 4)",
+        residency_gate = read.index("if (observed.extent_blocks > 1 &&",
                                     payload_read)
         self.assertLess(payload_read, residency_gate)
+        self.assertIn("engine->max_read_blocks_per_record != 1",
+                      read[residency_gate:residency_gate + 300])
         self.assertLess(residency_gate,
                         read.index("cached_mask |=", residency_gate))
         self.assertIn("engine->read_cached_block_mask = cached_mask", read)
-        self.assertIn("engine->read_cached_full = observed.extent_blocks == 4 ?",
+        self.assertIn("engine->read_cached_full = observed.extent_blocks > 1 &&",
                       read)
-        self.assertIn(
-            "cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U)",
-            read)
-        self.assertIn("cached_full || initial_blocks == 2", read)
-        self.assertIn("if (op != REQ_OP_READ ||", process)
+        self.assertIn("engine->max_read_blocks_per_record != 1",
+                      read[read.index("engine->read_cached_full ="):])
+        self.assertIn("swapz_read_extent_lru_commit(engine", read)
         self.assertIn("swapz_invalidate_read_caches(ctx)", process)
+
 
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):
         engine = (ROOT / "src/kernel/engine.c").read_text()
