@@ -1221,7 +1221,12 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->physical_read_blocks += count;
 		engine->read_payload_requests++;
 		engine->read_payload_blocks += count;
-		if (observed.extent_blocks > 1)
+		/* The explicit one-block budget is selective-I/O semantics, not a
+		 * prefetch/residency mode. Do not retain payload blocks there: the
+		 * next logical read must independently exercise its bounded lower
+		 * payload callback and fail closed if that callback fails. */
+		if (observed.extent_blocks > 1 &&
+		    engine->max_read_blocks_per_record != 1)
 			for (block = start; block < start + count; ++block)
 				cached_mask |= (swapz_u8)(1U << block);
 	}

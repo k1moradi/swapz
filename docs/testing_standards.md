@@ -695,3 +695,8 @@ contract. `read_cached_full` denotes reusable multi-block extent residency; it
 must remain false for one-block extents and when `max_read_blocks_per_record ==
 1`, even though `read_cache_valid` and the exact block mask may be populated.
 The shared extent cache is bypassed under the one-block budget.
+
+Under `max_read_blocks_per_record == 1`, selectively fetched payload blocks are
+not added to reusable residency either. A later logical read must exercise its
+own bounded lower payload callback; an injected failure on that callback must
+still fail the read and invalidate the volatile header cache.
