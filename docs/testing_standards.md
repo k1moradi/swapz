@@ -70,33 +70,21 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `c8ba1180310878141f2179a3ce0fa6d95f93f049` passed all five
-stages and published the canonical report as
-`b0dc69a00c01a8301d553e3d109b963a7b15a10b`.
+Source `7f3c447e28e7198b076eddb6a85ded54245456e2` passed all five stages
+and published the canonical report as
+`6de1a3602ac9285095b4acb7d799715357d95883`.
 
-Slow-model mixed async reached 7.11 MB/s WRITE versus 7.09 sync and 7.84 raw;
-fast-model mixed async reached 21.37 versus 19.81 sync and 18.85 raw. The
-write-only pilot remains directional: fast QD8 async reached 26.61 versus
-20.57 MB/s (+29.4%), while fast QD4 regressed -2.6% and QD32 improved +2.6%.
+On the faster model, mixed async/sync reached 23.46/23.93 MB/s with
+960.4/822.6 lower WRITE requests and no confirmed >=5% async gain. The active
+ID53 cutoff closed 31.5 deferred singletons and recorded 13.8 next WRITEs before
+the original deadline, so ID53 is rejected and the next source restores ID50's
+ordinary deadline.
 
-Exact publish attribution is qualified. Slow publication was 21.3 ms:
-12.4 ms final-image payload CRC plus 8.9 ms authority/liveness work. Fast
-publication was 18.2 ms: 9.9 ms CRC plus 8.3 ms authority. The final
-`bulk_scratch` payload CRC remains mandatory.
-
-The lower-WRITE starvation probe also answered its question. Slow-model mean
-unclaimed preparation queue depth was 0.00 at both lower-WRITE start and end;
-fast-model means were only 0.11/0.07. Extra credits or preparation workers are
-therefore not qualified as standalone changes to the current synchronous
-ownership model.
-
-Loaded live-GC distribution is qualified on owned RAM: 20 victims, 20
-rotations, 20 distinct victim segments, 1/1 min/max evictions, nonzero GC
-READ/WRITE traffic and byte-exact verification of all 4096 pages.
-
-Packed-read lower I/O dominates CPU copy/decode attribution. The slow-model
-packed p99 remained worse than raw and the fast model did not earn a faster
-verdict, so read batching must be latency-first rather than fill-delay based.
+Fast write-only QD8 is the confirmed positive scheduling point: five matched
+rounds show +20.8% async/sync with paired 95% CI [+7.0%, +34.5%] and 524
+async lower WRITE requests. Same-cache Kread remains inconclusive: sequential
+p99 is -9.4%, CI [-23.1%, +4.3%], and random is -0.8%, CI
+[-14.6%, +12.9%].
 
 ## Open qualification gaps
 
@@ -666,17 +654,16 @@ and clear the deferral.
 Both `swapz_retained_target_close_ready()` and
 `swapz_retained_pack_close_ready()` must refuse a deferred singleton. The
 second admitted record clears the deferral, and real nonempty flushes, hard
-boundaries and true empty burst boundaries clear it as well. ID50 itself adds no
-timer or arrival wait. Its ID53 successor may reprogram the existing retention
-hrtimer to an earlier measured age cutoff; it must not allocate a second timer,
-sleep, spin or wait for a future arrival.
+boundaries and true empty burst boundaries clear it as well. After ID53
+rejection, source/native contracts must prove no shorter singleton deadline,
+cutoff watermark or hrtimer reprogramming remains: the ordinary first-record
+deadline is the only retained deadline.
 
-Loaded qualification compares against source `1be728162202...`. On the fast
-mixed async arm, sampled-tail one-page PACK_READY closes should fall materially
-from ~78 and lower WRITE requests should move toward the 840-request sync
-control. The read-bypass/wave counters must not absorb the removed tail closes.
-Reject the candidate if lower WRITE bytes grow materially, useful mixed
-throughput/read p99 regress, or slow mixed/write-only window geometry regresses.
+The owner-qualified ID50 mechanism remains active after the ID53 rollback.
+Qualification must preserve exact deferred-singleton lifecycle conservation,
+prevent sampled-tail singleton PACK_READY closes from reappearing under
+read-bypass/wave labels, and reject any successor that materially grows lower
+WRITE bytes/requests or regresses useful mixed throughput/read tails.
 
 ### Deferred-singleton outcome attribution
 
@@ -704,40 +691,43 @@ must be a separate source revision after owner evidence.
 
 ID52 extends ID51 without changing policy. Timed replay validation must require
 that the four companion-age bins sum to `single_tail_companions` and the four
-deadline-age bins sum to `win1_deadline_deferred_tail`. For companion and
-deadline service attribution, lower-done and read-bypass counts cannot exceed
-the terminal total, and the both count cannot exceed either subset. The report
-must print both age rows and both L/R/B service rows.
+deadline-age bins sum to `win1_deadline_deferred_tail`. After the ID53
+rollback, the four passive companion sub-bins 1001-1250/1251-1500/1501-1750/
+>1750 us must sum exactly to the aggregate >1000 us companion bin. For
+companion and deadline service attribution, lower-done and read-bypass counts
+cannot exceed the terminal total, and the both count cannot exceed either
+subset. The report must print both original age rows, the upper-tail companion
+row and both L/R/B service rows.
 
 Interpretation is predeclared: an event such as lower-W completion or READ
 service is not a candidate early-close discriminator if it commonly occurs
 before companion resolutions as well as deadline resolutions. A successor
 policy requires a separate source revision after owner evidence.
 
-### Deferred-singleton age-cutoff qualification
+### Rejected ID53 rollback and passive attribution qualification
 
-ID53 is the bounded successor to completed ID52 evidence. Production code may
-use a one-millisecond deadline only while
-`retained_single_tail_deferred && batch_count == 1`, and only as
-`min(original_deadline, deferred_start + 1 ms)`. A companion must restore the
-ordinary deadline by clearing the deferred state. The same retention hrtimer is
-reused/reprogrammed; no second timer or future-arrival wait is permitted.
+Owner evidence rejected the fixed 1 ms active cutoff: 13.8 of 31.5 cutoff
+closes were followed by an ordinary WRITE before the original deadline. Direct
+source/native coverage must therefore prove `SWAPZ_SINGLE_TAIL_CUTOFF_NS`,
+the single-tail cutoff deadline helper and cutoff/watermark production counters
+are absent, while ID50 still blocks a one-record deferred singleton until a
+companion or the ordinary deadline.
 
-Direct C/source coverage must prove the effective deadline is bounded,
-reversible after a companion, and cannot train the full-deadline learned
-singleton bypass. Timed telemetry must expose
-`single_tail_age_cutoff_closes` and
-`single_tail_cutoff_late_companions`, require cutoff closes <= deferred
-deadline terminals and late companions <= cutoff closes, and print the compact
-`deferred 1ms cutoff/late` row. An early cutoff preserves the original
-deadline only as an attribution watermark: the next ordinary WRITE before that
-time counts one miss but is never delayed; ordering boundaries clear the
-watermark.
+ID54 PACK_READY attribution is measurement only. Every timed PACK_READY close
+must increment exactly one of `pack_close_tail_target`,
+`pack_close_burst_target` or `pack_close_service_dry`; their sum must equal
+`close_pack_ready`. `pack_close_tail_target_le4` must not exceed the tail
+counter. Rootless replay/report fixtures must fail closed on broken
+conservation and display the compact tail<=4/tail/burst/dry row.
 
-Reject ID53 if miss rate is material, lower WRITE bytes/requests rise
-materially, useful throughput or read tails regress, or lifecycle/order/failure
-gates change. A favorable synthetic result remains policy evidence only for the
-tested RAM models.
+ID24 worker CPU attribution is also measurement only. Status and timed deltas
+must expose `ordered_worker_cpu_ns`, `prep_worker_cpu_ns` and
+`read_worker_cpu_ns`, and the report must show worker CPU beside callback wall.
+Source coverage pins `READ_ONCE(current->se.sum_exec_runtime)` boundary
+sampling and preserves callback-wall counters. Treat the CPU values as
+scheduler-accounted sampled lower bounds, because the current unaccounted slice
+may be absent from a direct sample; they are not a correctness or performance
+pass criterion by themselves.
 
 ### Same-cache Kread A/B confirmation
 

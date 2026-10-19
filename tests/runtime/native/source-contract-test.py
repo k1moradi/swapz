@@ -880,21 +880,27 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         process = body("swapz_process")
         parallel_batch = body("swapz_try_parallel_read_batch")
         self.assertIn("ctx->single_tail_deferred_start_ns = ktime_get_ns()", sample)
-        self.assertIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS 1000000ULL", DM)
-        self.assertIn("swapz_window_single_tail_deadline_ns(", DM)
-        self.assertIn("ctx->single_tail_age_cutoff_closes++", flush)
-        self.assertIn("ctx->single_tail_cutoff_original_deadline_ns", flush)
-        self.assertIn("ctx->single_tail_cutoff_late_companions++", accept)
+        self.assertNotIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS", DM)
+        self.assertNotIn("swapz_window_single_tail_deadline_ns(", DM)
+        self.assertNotIn("single_tail_age_cutoff_closes", DM)
+        self.assertNotIn("single_tail_cutoff_late_companions", DM)
+        self.assertNotIn("single_tail_cutoff_original_deadline_ns", DM)
+        deadline = body("swapz_retention_deadline_ns")
+        self.assertIn("swapz_window_retention_deadline_ns(", deadline)
+        self.assertNotIn("single_tail_deferred_start_ns", deadline)
         self.assertIn("!ctx->retained_single_tail_deferred", worker)
-        for field in ("single_tail_age_cutoff_closes",
-                      "single_tail_cutoff_late_companions"):
-            self.assertIn(field + "=%llu", status)
-            self.assertIn("ctx->" + field, status)
         self.assertIn("ctx->single_tail_lower_done_seen = false", sample)
         self.assertIn("ctx->single_tail_read_bypass_seen = false", sample)
         self.assertIn("elapsed <= 250000ULL", terminal)
         self.assertIn("elapsed <= 500000ULL", terminal)
         self.assertIn("elapsed <= 1000000ULL", terminal)
+        self.assertIn("elapsed <= 1250000ULL", terminal)
+        self.assertIn("elapsed <= 1500000ULL", terminal)
+        self.assertIn("elapsed <= 1750000ULL", terminal)
+        self.assertIn("single_tail_companion_age_1001_1250us", terminal)
+        self.assertIn("single_tail_companion_age_1251_1500us", terminal)
+        self.assertIn("single_tail_companion_age_1501_1750us", terminal)
+        self.assertIn("single_tail_companion_age_gt1750us", terminal)
         self.assertIn("single_tail_companion_after_lower_done", terminal)
         self.assertIn("single_tail_deadline_after_read_bypass", terminal)
         self.assertIn("single_tail_deadline_after_both", terminal)
@@ -906,6 +912,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                 ("single_tail_comp_age_251_500us", "single_tail_companion_age_251_500us"),
                 ("single_tail_comp_age_501_1000us", "single_tail_companion_age_501_1000us"),
                 ("single_tail_comp_age_gt1000us", "single_tail_companion_age_gt1000us"),
+                ("single_tail_comp_age_1001_1250us", "single_tail_companion_age_1001_1250us"),
+                ("single_tail_comp_age_1251_1500us", "single_tail_companion_age_1251_1500us"),
+                ("single_tail_comp_age_1501_1750us", "single_tail_companion_age_1501_1750us"),
+                ("single_tail_comp_age_gt1750us", "single_tail_companion_age_gt1750us"),
                 ("single_tail_deadline_age_le250us", "single_tail_deadline_age_le250us"),
                 ("single_tail_deadline_age_251_500us", "single_tail_deadline_age_251_500us"),
                 ("single_tail_deadline_age_501_1000us", "single_tail_deadline_age_501_1000us"),
@@ -919,7 +929,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertIn(label + "=%llu", status)
             self.assertIn("ctx->" + member, status)
 
-    def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
+    def test_worker_wall_and_scheduler_cpu_attribution_are_separate(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         lower = body("swapz_lower")
         accept = body("swapz_accept_write")
@@ -950,13 +960,22 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("e->pack_wall_ns +=", engine_prepare)
         self.assertIn("e->publish_wall_ns +=", engine_complete)
         self.assertIn("ctx->gc_wall_ns +=", flush)
+        self.assertIn("#include <linux/sched.h>", DM)
         self.assertNotIn("#include <linux/sched/cputime.h>", DM)
         self.assertNotIn("task_cputime_adjusted(current", DM)
-        self.assertNotIn("current->se.sum_exec_runtime", DM)
+        cpu_sample = body("swapz_worker_cpu_sample")
+        self.assertIn("READ_ONCE(current->se.sum_exec_runtime)", cpu_sample)
+        self.assertIn("cpu_start_ns = swapz_worker_cpu_sample()", producer)
+        self.assertIn("cpu_start_ns = swapz_worker_cpu_sample()", worker)
+        slot_worker = body("swapz_read_slot_worker")
+        self.assertIn("cpu_start_ns = swapz_worker_cpu_sample()", slot_worker)
+        self.assertIn("ctx->preparation_worker_cpu_ns", producer)
+        self.assertIn("ctx->ordered_worker_cpu_ns", worker)
+        self.assertIn("slot->ctx->read_worker_cpu_ns", slot_worker)
         self.assertEqual(producer.count("return;"),
-                         producer.count("swapz_account_worker_wall("))
+                         producer.count("swapz_account_worker_runtime("))
         self.assertEqual(worker.count("return;"),
-                         worker.count("swapz_account_worker_wall("))
+                         worker.count("swapz_account_worker_runtime("))
         for key in ("lz4_wall_ns", "decode_wall_ns", "read_copy_wall_ns",
                     "read_copy_bytes", "read_engine_nonio_wall_ns",
                     "window_sort_wall_ns", "window_commit_wall_ns",
@@ -964,8 +983,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "engine_pack_wall_ns", "engine_publish_wall_ns",
                     "engine_publish_crc_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
-                    "ordered_worker_wall_ns", "gc_wall_ns",
-                    "ordered_crc_wall_ns",
+                    "ordered_worker_wall_ns", "ordered_worker_cpu_ns",
+                    "read_worker_cpu_ns", "gc_wall_ns", "ordered_crc_wall_ns",
                     "prep_lower_write_samples",
                     "prep_lower_write_start_queued",
                     "prep_lower_write_start_nonempty",
@@ -979,6 +998,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->preparation_crc_wall_ns", status)
         self.assertIn("prep_worker_wall_ns=%llu", status)
         self.assertIn("ctx->preparation_worker_wall_ns", status)
+        self.assertIn("ordered_worker_cpu_ns=%llu", status)
+        self.assertIn("ctx->ordered_worker_cpu_ns", status)
+        self.assertIn("prep_worker_cpu_ns=%llu", status)
+        self.assertIn("ctx->preparation_worker_cpu_ns", status)
+        self.assertIn("read_worker_cpu_ns=%llu", status)
+        self.assertIn("ctx->read_worker_cpu_ns", status)
         self.assertIn("engine_prehashed_records=%u", status)
         self.assertIn("ctx->engine.prehashed_records", status)
         self.assertIn("batch_snapshot_crc_wall_ns=%llu", status)
@@ -1118,20 +1143,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_order_window(ctx)", flush)
         self.assertIn("swapz_engine_write_window_batched_read_cap", flush)
 
-    def test_retention_timer_rearms_only_when_effective_deadline_changes(self):
+    def test_retention_timer_keeps_ordinary_pinned_deadline(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         worker = body("swapz_worker")
         status = body("swapz_status")
-        self.assertIn("swapz_retention_timer_needs_rearm(", policy)
-        self.assertIn("queued_deadline_ns != desired_deadline_ns", policy)
+        self.assertIn("swapz_retention_timer_needs_arm(", policy)
+        self.assertIn("swapz_window_timer_enabled(retain_ms) && !queued", policy)
+        self.assertNotIn("swapz_retention_timer_needs_rearm(", policy)
+        self.assertNotIn("hrtimer_get_expires(", worker)
         self.assertIn("hrtimer_is_queued(&ctx->retention_timer)", worker)
-        self.assertIn("hrtimer_get_expires(", worker)
-        self.assertIn("desired_deadline = swapz_retention_deadline_ns(ctx)", worker)
+        self.assertIn("ns_to_ktime(swapz_retention_deadline_ns(ctx))", worker)
         self.assertLess(worker.index("hrtimer_is_queued(&ctx->retention_timer)"),
                         worker.index("hrtimer_start(&ctx->retention_timer"))
         self.assertIn("ctx->retain_timer_arms++", worker)
         self.assertIn("ctx->retain_timer_arm_skips++", worker)
-        self.assertIn("ns_to_ktime(desired_deadline)", worker)
         self.assertIn("HRTIMER_MODE_ABS", worker)
         self.assertIn("retain_timer_arm_skips=%llu", status)
         self.assertIn("ctx->retain_timer_arm_skips", status)
@@ -1237,7 +1262,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->packed_early_commits++", worker)
         self.assertIn("swapz_flush_window(ctx)", writer)
         self.assertIn("swapz_flush_window(ctx)", worker)
-        self.assertIn("close_pack_ready=%llu packed_early_commits=%llu", status)
+        self.assertIn("close_pack_ready=%llu", status)
+        for field in ("pack_close_tail_target", "pack_close_tail_target_le4",
+                      "pack_close_burst_target", "pack_close_service_dry"):
+            self.assertIn(field + "=%llu", status)
+            self.assertIn("ctx->" + field, status)
+        self.assertIn("SWAPZ_PACK_CLOSE_TAIL_TARGET", writer)
+        self.assertIn("SWAPZ_PACK_CLOSE_BURST_TARGET", writer)
+        self.assertIn("SWAPZ_PACK_CLOSE_SERVICE_DRY", worker)
+        self.assertIn("pack_close_cause", flush)
+        self.assertIn("ctx->pack_close_tail_target++", flush)
+        self.assertIn("ctx->pack_close_tail_target_le4++", flush)
+        self.assertIn("ctx->pack_close_burst_target++", flush)
+        self.assertIn("ctx->pack_close_service_dry++", flush)
+        self.assertIn("packed_early_commits=%llu", status)
         self.assertIn("single_pack_deferrals=%llu accepted_burst_extensions=%llu", status)
         self.assertIn("accepted_burst_tail_flushes=%llu", status)
         self.assertIn("accepted_burst_read_caps=%llu", status)
@@ -1262,6 +1300,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("counters[key] = after[key]", replay)
         self.assertIn("TIMED_WINDOW_COUNTER_FIELDS", runner)
         self.assertIn("def timed_window_error", runner)
+        self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)
+        self.assertIn("single_tail_comp_age_1001_1250us", runner)
+        self.assertIn("ordered_worker_cpu_ns", runner)
+        self.assertIn("read_worker_cpu_ns", runner)
         self.assertIn('"kernel_write_path": obj.get("kernel_write_path")',
                       runner)
         self.assertIn(
@@ -1282,16 +1324,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         ctr = body("swapz_ctr")
         status = body("swapz_status")
         self.assertIn("ctx->window_first_ns", deadline)
-        self.assertIn("swapz_window_single_tail_deadline_ns", deadline)
-        self.assertIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS", deadline)
+        self.assertIn("swapz_window_retention_deadline_ns", deadline)
+        self.assertNotIn("swapz_window_single_tail_deadline_ns", deadline)
+        self.assertNotIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS", DM)
+        self.assertNotIn("single_tail_deferred_start_ns", deadline)
         self.assertIn("swapz_window_deadline_expired", expiry)
         self.assertIn("swapz_retention_deadline_ns(ctx)", expiry)
         self.assertIn("ktime_get_ns()", expiry)
         self.assertNotIn("nsecs_to_jiffies64", DM)
         self.assertNotIn("swapz_retention_delay", DM)
         self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
-        self.assertIn("desired_deadline = swapz_retention_deadline_ns(ctx)", worker)
-        self.assertIn("ns_to_ktime(desired_deadline)", worker)
+        self.assertIn("swapz_retention_timer_needs_arm(", worker)
+        self.assertIn("ns_to_ktime(swapz_retention_deadline_ns(ctx))", worker)
         self.assertIn("HRTIMER_MODE_ABS", worker)
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", wake)
         self.assertIn("if (ctx->accepting)", wake)

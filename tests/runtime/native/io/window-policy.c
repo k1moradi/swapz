@@ -280,33 +280,27 @@ static int test_timer_cancel_only_for_enabled_retention(void)
 	return 0;
 }
 
-static int test_timer_rearm_tracks_effective_deadline(void)
+static int test_timer_arm_requires_retention_and_unqueued_timer(void)
 {
-	const unsigned long long ordinary = 3000000ULL;
-	const unsigned long long cutoff = 2000000ULL;
+	unsigned int retain;
 
-	CHECK(!swapz_retention_timer_needs_rearm(0, 0, 0, ordinary));
-	CHECK(swapz_retention_timer_needs_rearm(2, 0, 0, ordinary));
-	CHECK(!swapz_retention_timer_needs_rearm(2, 1, ordinary, ordinary));
-	CHECK(swapz_retention_timer_needs_rearm(2, 1, ordinary, cutoff));
-	CHECK(swapz_retention_timer_needs_rearm(2, 1, cutoff, ordinary));
+	CHECK(!swapz_retention_timer_needs_arm(0, 0));
+	CHECK(!swapz_retention_timer_needs_arm(0, 1));
+	for (retain = 1; retain <= 4; ++retain) {
+		CHECK(swapz_retention_timer_needs_arm((swapz_u8)retain, 0));
+		CHECK(!swapz_retention_timer_needs_arm((swapz_u8)retain, 1));
+	}
 	return 0;
 }
 
-static int test_deferred_singleton_deadline_is_bounded_and_reversible(void)
+static int test_ordinary_retention_deadline_is_pinned(void)
 {
 	const unsigned long long first = 1000000ULL;
-	const unsigned long long deferred = 1500000ULL;
 
 	CHECK(swapz_window_retention_deadline_ns(first, 2) == 3000000ULL);
-	CHECK(swapz_window_single_tail_deadline_ns(
-		first, 2, deferred, 1000000ULL) == 2500000ULL);
-	CHECK(swapz_window_single_tail_deadline_ns(
-		first, 2, 0, 1000000ULL) == 3000000ULL);
-	CHECK(swapz_window_single_tail_deadline_ns(
-		first, 1, deferred, 1000000ULL) == 2000000ULL);
-	CHECK(!swapz_window_deadline_expired(2500000ULL, 2499999ULL));
-	CHECK(swapz_window_deadline_expired(2500000ULL, 2500000ULL));
+	CHECK(!swapz_window_deadline_expired(3000000ULL, 2999999ULL));
+	CHECK(swapz_window_deadline_expired(3000000ULL, 3000000ULL));
+	CHECK(swapz_window_retention_deadline_ns(first, 0) == 0);
 	return 0;
 }
 
@@ -400,8 +394,8 @@ int main(void)
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
-	CHECK(test_timer_rearm_tracks_effective_deadline() == 0); passed++;
-	CHECK(test_deferred_singleton_deadline_is_bounded_and_reversible() == 0); passed++;
+	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;
+	CHECK(test_ordinary_retention_deadline_is_pinned() == 0); passed++;
 	CHECK(test_uniform_compressed_identity_sort_safety() == 0); passed++;
 	CHECK(test_section_wall_ns_never_underflows() == 0); passed++;
 	CHECK(test_disabled_or_missing_timestamp_expires() == 0); passed++;

@@ -178,6 +178,9 @@ class PublicMakeContract(unittest.TestCase):
                     "lower_write_wall_ns": 30000000,
                     "ordered_worker_wall_ns": 52000000,
                     "prep_worker_wall_ns": 5000000,
+                    "ordered_worker_cpu_ns": 16000000,
+                    "prep_worker_cpu_ns": 3000000,
+                    "read_worker_cpu_ns": 1000000,
                     "prep_wait_wall_ns": 500000,
                     "prep_lower_write_overlap_ns": 5000000,
                     "prep_lower_write_samples": 5,
@@ -199,6 +202,10 @@ class PublicMakeContract(unittest.TestCase):
                     "close_idle": 4,
                     "close_deadline": 2,
                     "close_pack_ready": 14,
+                    "pack_close_tail_target": 5,
+                    "pack_close_tail_target_le4": 4,
+                    "pack_close_burst_target": 6,
+                    "pack_close_service_dry": 3,
                     "win1_idle": 1,
                     "win1_deadline": 2,
                     "win1_pack_ready": 1,
@@ -292,6 +299,7 @@ class PublicMakeContract(unittest.TestCase):
                     "read_two_block_skips": 128,
                     "parallel_read_pairs": 128,
                     "parallel_read_same_extent_pairs": 64,
+                    "read_worker_cpu_ns": 1000000,
                                 } if is_swapz else None),
                             }
                             for key in ("sequential", "seeded_random")

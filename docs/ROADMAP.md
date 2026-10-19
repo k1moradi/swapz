@@ -8,44 +8,47 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner qualification of `4edf2d60a9275fb9e57e7eb605bce6c02c2a1263`
+Owner qualification of `7f3c447e28e7198b076eddb6a85ded54245456e2`
 passed all five stages; report-only commit
-`70dea7aa36611df541823b711f918d78c4f4a163` is the canonical result. These
+`6de1a3602ac9285095b4acb7d799715357d95883` is the canonical result. These
 remain owned-RAM `null_blk` synthetic models, not physical-media claims.
 
-ID52 answered its diagnostic question. On the fast mixed model 107.5 deferred
-singletons resolve as 76.0 companions and 31.5 one-page deadlines. Companion
-ages are 52.8/19.0/3.2/1.0 in <=250/251-500/501-1000/>1000 us bins, while all
-31.5 deadline resolutions are >1000 us. Lower-W completion and READ bypass
-occur in both terminal classes, so service events are rejected as close
-discriminators. Age is the only clean discriminator in this evidence.
+ID53 is refuted. On the fast mixed model the active 1 ms cutoff closed 31.5
+deferred singletons and 13.8 (43.8%) were followed by a plain WRITE before the
+original deadline. Fast mixed async/sync was 23.46/23.93 MB/s with
+960.4/822.6 lower WRITE requests. The successor source restores ID50's ordinary
+first-record retention deadline and removes every active ID53 cutoff/watermark
+counter.
 
-ID53 is the bounded successor experiment. Only a sampled singleton already in
-`retained_single_tail_deferred` may use an effective deadline of
-`min(original deadline, deferred start + 1 ms)`. It reuses the existing
-retention hrtimer; a companion restores the ordinary deadline. The experiment
-counts age-cutoff closes and a next-WRITE-before-original-deadline
-`late_companion` miss signal. Cutoff closes must not train the unrelated
-full-deadline singleton fast-close heuristic.
+ID50 remains strongly supported as a mechanism: fast D/C/DL/I/O is
+105.4/73.9/31.5/0/0. The rollback keeps ID51/ID52 passive lifecycle/service
+evidence and refines companion ages above 1 ms into
+1001-1250/1251-1500/1501-1750/>1750 us sub-bins. No age threshold changes
+policy in this revision.
 
-ID39 now has controlled same-source/same-cache evidence in its favor. Kread-off
-versus Kread-on fast p99 is 5.57/5.21 ms sequential and 5.65/4.98 ms random,
-while lower traffic is effectively unchanged/slightly lower and Kread-on
-executes about 333 parallel pairs. The successor harness now collects five
-same-cache matched rounds with paired 95% confidence intervals; policy remains
-unchanged until that owner-loaded confirmation passes.
+ID37 now has statistically positive evidence at fast write-only QD8. Five
+matched async/sync rounds give +20.8% useful throughput with a paired 95% CI of
+[+7.0%, +34.5%], while async keeps the intended 524 lower WRITE requests.
+This confirms usefulness at that point only; fast mixed remains unconfirmed and
+still carries substantially more lower requests in async.
 
-ID50 remains Class 4. The latest fast mixed async/sync result is 23.72/22.27
-MB/s with 905.5/925 lower WRITE requests, while write-only QD8 is
-28.27/20.65 MB/s async/sync with 524 lower requests. These are encouraging
-directional results. The successor harness now gives fast mixed and fast
-write-only QD8 five matched rounds with paired 95% confidence intervals while
-keeping the slow model and other QDs as bounded controls.
+ID39 remains Class 4. Five same-cache matched Kread rounds give sequential p99
+-9.4% with CI [-23.1%, +4.3%] and random p99 -0.8% with
+CI [-14.6%, +12.9%]. Both intervals cross zero, so change no READ algorithm.
 
-Existing fast mixed 2-4-record windows are 158.0 async versus 149.5 sync, only
-about a 5.7% excess. That is not enough to justify another multi-tail hot-path
-histogram or policy. Keep the existing window bins while repeated runs determine
-whether the excess persists.
+The fast mixed fragmentation question is now concrete. Async has 823.4
+PACK_READY closes versus 717.6 sync (+105.8), and win2+win3_4 is
+185.4 versus 99.8 (+85.6). ID54 therefore adds passive, mutually exclusive
+PACK_READY primary-cause counters for sampled tail target, learned burst target,
+and service-proven dry closure, plus a <=4 subset of tail-target closes. The
+counters must conserve exactly to `close_pack_ready`.
+
+ID24 is also instrumented for the next owner run. Ordered, preparation and read
+helper workers sample `current->se.sum_exec_runtime` at worker boundaries.
+This excludes sleep/runqueue wall time but is deliberately described as a
+scheduler-accounted sampled lower bound: a direct read can miss the current
+unaccounted scheduler slice. Compare it with callback wall before proposing
+more workers or affinity.
 
 ## Current bottleneck ranking
 
@@ -56,16 +59,15 @@ non-I/O is 54.9/36.6 ms. Snapshot pause CRC remains only 1.7/1.1 ms; planner and
 explicit copy costs are secondary.
 
 READ amplification is no longer the active defect. The shared extent cache is
-qualified independently, and the same-cache toggle now shows Kread improving
-both sequential and random p99 without traffic inflation. The remaining READ
-gate is statistical repeatability, not another concurrency redesign.
+qualified independently. Five matched same-cache Kread rounds leave both p99
+confidence intervals crossing zero, so the READ path stays unchanged unless
+more focused evidence is worth collecting.
 
-WRITE fragmentation is now narrower. ID50 still removes sampled-tail one-page
-PACK_READY closes; in the latest fast mixed run async uses 905.5 lower WRITE
-requests versus 925 sync while reaching 23.72 versus 22.27 MB/s. Run-to-run
-variation remains large enough that the >=5 matched-pair gate is mandatory.
-ID53 tests only whether the measured >1 ms true-tail cluster can be shortened
-without losing companions or inflating requests.
+WRITE fragmentation is again the leading scheduling question on the fast mixed
+model. Async uses 960.4 lower WRITE requests versus 822.6 sync. The +137.8
+request gap tracks +136.6 total windows almost one-for-one; +105.8 of the window
+excess is PACK_READY, with +85.6 extra win2/win3_4 closes. ID54 now attributes
+those PACK_READY closes passively before another scheduling policy is attempted.
 
 ## Optimization evidence table
 
@@ -93,7 +95,7 @@ changes.
 | 12 | Split stage/pause hash/hole-clear/control residual | **1 completed snapshot measurement** | Reconfirmed at ~1.7/1.1 ms pause with ~8.6/6.2 ms residual after subtraction. Full-transaction hashing stays; the snapshot-scope optimization question is closed. Further residual splitting is optional attribution only. |
 | 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
 | 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. |
-| 15 | >=5 counterbalanced pairs for mixed/QD points | **4 evidence harness implemented** | Fast mixed and fast QD8 now run five adjacent counterbalanced matched rounds with paired 95% CIs. Other QDs remain directional controls; owner-loaded evidence is still required before promotion. |
+| 15 | >=5 counterbalanced pairs for mixed/QD points | **1 evidence gate implemented** | The owner run produced five matched fast mixed, fast QD8 and Kread comparisons. Keep the harness; only fast write-only QD8 has a CI excluding zero in the useful direction. |
 | 16 | N=2/4 preparation workers in old single-credit design | **5** | Refuted as formulated. |
 | 17 | Pointer handoff solely to remove current copies | **5** | Reconfirmed: explicit copies are only ~5.1 ms slow / 3.5 ms fast. |
 | 18 | Rewrite bounded DP planner | **5** | Reconfirmed: planner is ~6.3 ms slow / 4.4 ms fast and is not dominant. |
@@ -102,7 +104,7 @@ changes.
 | 21 | Direct LZ4 decompression into read BIO | **5** | Reconfirmed: read-copy wall is ~1.1-1.4 ms while lower READ wall is ~100-675 ms. |
 | 22 | DMA/hardware offload for current 4KiB copies | **5** | Wrong bottleneck. |
 | 23 | Per-CPU independent authorities on one shared device | **5** | Reject; fragments ordering, GC and global packing. |
-| 24 | Trustworthy kernel-worker on-CPU attribution | **6** | Priority rises on the fast model: lower WRITE/K=1 occupancy is shallow while write-only low/mid-QD still trails raw. Callback wall is not CPU time, so trustworthy on-CPU evidence is required before CPU-topology changes. |
+| 24 | Trustworthy kernel-worker on-CPU attribution | **4 instrumentation implemented pending owner evidence** | Ordered/preparation/read-helper workers now report scheduler-accounted sampled CPU from `current->se.sum_exec_runtime` beside callback wall. Treat it as a lower-bound diagnostic because the current unaccounted slice can be missed; use it before N=2/affinity changes. |
 | 25 | Async lower-I/O state machine with immutable run ownership | **1** | Owner-loaded qualification reconfirms the ownership/publication machinery. Keep the infrastructure; K=1 scheduling policy remains separate. |
 | 26 | NUMA-local preparation domains | **6** | Hardware-blocked. |
 | 27 | One swapz target per NUMA node with node-local backing | **6** | Deployment topology only. |
@@ -115,9 +117,9 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **4 confirmation harness implemented** | Latest fast QD8 is +36.9% async/sync with 524 lower requests and fast mixed is +6.5%. The next owner run supplies five matched fast QD8/mixed rounds with paired CIs; change no scheduling before that evidence. |
+| 37 | K=1 ping-pong WRITE pipeline | **1 at fast write-only QD8; mixed policy pending** | Five matched fast QD8 rounds confirm +20.8% async/sync, 95% CI [+7.0%, +34.5%], with 524 lower requests. Keep K=1 infrastructure; do not generalize the result to fast mixed, where async still has 960.4 vs 822.6 requests and no confirmed throughput gain. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Stronger hold. Serial hwq=1 has no parallel service slot. Fast hwq=64 has capacity, but K=1 run occupancy is only ~0.09 and preparation backlog is shallow; there is no sustained ready-run pressure for K>1 yet. |
-| 39 | Latency-first bounded parallel READ service | **4 confirmation harness implemented** | Same-cache Kread-on improves fast sequential p99 5.57 -> 5.21 ms and random 5.65 -> 4.98 ms with unchanged/slightly lower traffic. The next owner run supplies five matched toggles and paired CIs before promotion. |
+| 39 | Latency-first bounded parallel READ service | **4 evidence inconclusive** | Five matched same-cache rounds are sequential -9.4% p99, CI [-23.1%, +4.3%], and random -0.8%, CI [-14.6%, +12.9%]. Keep the algorithm unchanged; more focused evidence is optional, not a promotion. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
@@ -128,10 +130,11 @@ changes.
 | 47 | Explicit ordering-boundary singleton reset | **1** | Qualified correctness/measurement hygiene. PREFLUSH/FUA/discard/shutdown/other reset learned singleton state, including empty fsync PREFLUSH; ordinary idle/deadline closes do not. |
 | 48 | Fast mixed one-page PACK_READY cause attribution | **1 completed measurement** | Repaired-read confirmation is 78.0 tail-target / 24.2 read-bypass / 0 wave-interruption, with slow 0/0/0. Sampled singleton tails remain dominant; read-bypass/wave as the primary root cause is refuted. |
 | 49 | 16-entry shared multi-extent READ residency cache | **1** | Reconfirmed again on hwq=1: 2830 KiB / 400.5 requests / 14.33 ms sequential and 2498 KiB / 624.5 / 22.21 ms random. Keep the 256KiB ordered-owner cache and exact invalidation. |
-| 50 | Sampled-single-tail PACK_READY deferral | **4 mechanism strongly supported; policy pending repeated evidence** | Latest fast D/C/DL/I/O is 107.5/76.0/31.5/0/0. Keep ID50; ID53 tests only a measured age bound for the true-tail subset rather than service-event closure. |
-| 51 | Deferred-singleton outcome attribution | **1 completed measurement** | Reconfirmed fast D/C/DL/I/O = 107.5/76.0/31.5/0/0 with exact conservation. Retain counters through the ID53/ID50 decision. |
-| 52 | Deferred-singleton timing/service discrimination | **1 completed measurement** | Age separates strongly: 75/76 fast companions resolve within 1 ms while every observed deadline tail is >1 ms. Lower-W completion and READ bypass occur in both classes and are rejected as discriminators. |
-| 53 | 1 ms deferred-singleton age cutoff | **4 bounded experiment implemented pending owner evidence** | Only ID50's deferred sampled singleton gets the shorter effective deadline. Reuse the existing hrtimer, preserve the original deadline as hard upper bound, count cutoff closes and late would-be companions, and reject on request/latency/correctness regression. |
+| 50 | Sampled-single-tail PACK_READY deferral | **1 mechanism retained** | Fast D/C/DL/I/O remains 105.4/73.9/31.5/0/0. Restore the ordinary retention deadline after ID53's rejection; keep passive lifecycle/timing telemetry while residual fragmentation is diagnosed. |
+| 51 | Deferred-singleton outcome attribution | **1 completed measurement** | Reconfirmed fast D/C/DL/I/O = 105.4/73.9/31.5/0/0 with exact conservation. Retain counters through the rollback/fragmentation diagnosis. |
+| 52 | Deferred-singleton timing/service discrimination | **1 completed measurement; passive refinement retained** | Service events remain refuted as discriminators. Because active ID53 changed closed-loop arrivals, the rollback adds passive >1 ms companion sub-bins under the full deadline before considering any later threshold. |
+| 53 | 1 ms deferred-singleton age cutoff | **5 refuted / reverted** | 31.5 cutoff closes produced 13.8 next-WRITE-before-original-deadline observations (43.8%). Fast mixed async also had 960.4 vs 822.6 sync lower requests and no confirmed >=5% gain. Remove the active cutoff and watermark; restore ID50's ordinary deadline. |
+| 54 | Passive PACK_READY primary-cause attribution | **4 instrumentation implemented pending owner evidence** | Attribute every PACK_READY window exactly once to retained-tail target, learned burst target, or service-proven dry closure; also count tail-target closes <=4. Require exact conservation to `close_pack_ready` before changing policy. |
 
 
 ## What the pinned queue experiment establishes
@@ -180,19 +183,19 @@ before any on-disk-format change.
 
 ## Immediate work queue
 
-1. Owner-qualify ID53 together with the strengthened evidence matrix. Reject the
-   1 ms cutoff if late-companion misses are material, lower WRITE
-   bytes/requests rise materially, useful throughput/read tails regress, or any
-   lifecycle/order gate fails.
-2. Promote ID39 only if >=5 same-cache matched Kread toggles retain the latency
-   advantage with unchanged lower traffic. Change no READ algorithm meanwhile.
-3. Use >=5 matched fast write-only QD8 and mixed QD32 observations to decide
-   K=1 ping-pong/ID50. Keep QD1/QD4/QD32 directional controls and do not add a
-   new WRITE scheduling heuristic before this gate.
-4. Collect trustworthy kernel-worker on-CPU attribution before N=2 preparation
-   workers or CPU-topology changes; keep K>1 lower-WRITE slots rejected.
-5. Then run bounded owned-RAM dead-segment DISCARD/TRIM, huge/compound-page
-   coverage and heavy-CPU/low-RAM qualification.
+1. Owner-qualify the ID53 rollback plus passive ID52 upper-tail, ID24 worker-CPU
+   and ID54 PACK_READY-cause telemetry. No new active scheduling heuristic is
+   present in this revision.
+2. Use ID54 to determine whether the fast mixed async PACK_READY excess is
+   dominated by <=4 sampled-tail targets, learned burst targets, or
+   service-proven dry closure. Only then design a scheduling successor.
+3. Reconfirm fast QD8 remains positive after the rollback and compare fast mixed
+   request geometry against the 7f3c447 control. Keep K=1; do not add K>1 slots.
+4. Keep ID39 unchanged. Collect more same-cache Kread pairs only if narrowing
+   the sequential-latency CI is worth the qualification cost.
+5. Use ID24 scheduler-accounted CPU/wall ratios before N=2 preparation workers
+   or topology/affinity experiments; then proceed with bounded DISCARD/TRIM,
+   huge/compound-page coverage and heavy-CPU/low-RAM qualification.
 
 ## NUMA / deployment topology
 

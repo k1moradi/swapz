@@ -641,7 +641,8 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
-                      "parallel_read_same_extent_pairs")
+                      "parallel_read_same_extent_pairs",
+                      "read_worker_cpu_ns")
 
 
 def kernel_read_snapshot(path, identity):
@@ -707,13 +708,24 @@ SINGLE_TAIL_TIMING_FIELDS = (
     "single_tail_comp_age_501_1000us", "single_tail_comp_age_gt1000us",
     "single_tail_deadline_age_le250us", "single_tail_deadline_age_251_500us",
     "single_tail_deadline_age_501_1000us", "single_tail_deadline_age_gt1000us")
+SINGLE_TAIL_COMP_UPPER_FIELDS = (
+    "single_tail_comp_age_1001_1250us",
+    "single_tail_comp_age_1251_1500us",
+    "single_tail_comp_age_1501_1750us",
+    "single_tail_comp_age_gt1750us")
 SINGLE_TAIL_SERVICE_FIELDS = (
     "single_tail_comp_after_lower_done", "single_tail_comp_after_read_bypass",
     "single_tail_comp_after_both", "single_tail_deadline_after_lower_done",
     "single_tail_deadline_after_read_bypass", "single_tail_deadline_after_both")
-ID52_FIELDS = SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_SERVICE_FIELDS
-ID53_FIELDS = (
-    "single_tail_age_cutoff_closes", "single_tail_cutoff_late_companions")
+ID52_FIELDS = (
+    SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_COMP_UPPER_FIELDS +
+    SINGLE_TAIL_SERVICE_FIELDS)
+PACK_CLOSE_FIELDS = (
+    "pack_close_tail_target", "pack_close_tail_target_le4",
+    "pack_close_burst_target", "pack_close_service_dry")
+PACK_CLOSE_PRIMARY_FIELDS = (
+    "pack_close_tail_target", "pack_close_burst_target",
+    "pack_close_service_dry")
 DEADLINE_CONTEXT_FIELDS = (
     "deadline_before_bio", "deadline_after_read",
     "deadline_worker_with_local", "deadline_worker_empty")
@@ -726,7 +738,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + ID53_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "write_copy_wall_ns", "write_copy_bytes", "direct_lz4_input_pages",
@@ -737,7 +749,9 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "engine_prehashed_records", "batch_snapshot_crc_wall_ns",
     "batch_pause_crc_wall_ns", "batch_resume_crc_wall_ns",
     "prep_crc_wall_ns", "ordered_crc_wall_ns", "lower_write_wall_ns",
-    "ordered_worker_wall_ns", "prep_worker_wall_ns", "prep_wait_wall_ns",
+    "ordered_worker_wall_ns", "prep_worker_wall_ns",
+    "ordered_worker_cpu_ns", "prep_worker_cpu_ns", "read_worker_cpu_ns",
+    "prep_wait_wall_ns",
     "prep_lower_write_overlap_ns", "prep_lower_write_samples",
     "prep_lower_write_start_queued", "prep_lower_write_start_nonempty",
     "prep_lower_write_end_queued", "prep_lower_write_end_nonempty",
@@ -811,11 +825,14 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz deferred companion age accounting")
     if sum(counters[field] for field in SINGLE_TAIL_TIMING_FIELDS[4:]) != counters["win1_deadline_deferred_tail"]:
         raise ValueError("inconsistent swapz deferred deadline age accounting")
-    if (counters["single_tail_age_cutoff_closes"] >
-            counters["win1_deadline_deferred_tail"] or
-            counters["single_tail_cutoff_late_companions"] >
-            counters["single_tail_age_cutoff_closes"]):
-        raise ValueError("inconsistent swapz deferred cutoff accounting")
+    if (sum(counters[field] for field in SINGLE_TAIL_COMP_UPPER_FIELDS) !=
+            counters["single_tail_comp_age_gt1000us"]):
+        raise ValueError("inconsistent swapz deferred companion upper-tail accounting")
+    if (sum(counters[field] for field in PACK_CLOSE_PRIMARY_FIELDS) !=
+            counters["close_pack_ready"] or
+            counters["pack_close_tail_target_le4"] >
+            counters["pack_close_tail_target"]):
+        raise ValueError("inconsistent swapz PACK_READY close attribution")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),

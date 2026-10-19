@@ -93,10 +93,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
         before = dict(zip(fields, (10, 4, 5, 3000, 100, 50, 4096, 200,
-                                   2, 1, 1, 1, 0, 0, 0)))
+                                   2, 1, 1, 1, 0, 0, 0, 1000)))
         after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
                                   100050, 4198400, 500200,
-                                  402, 102, 321, 201, 200, 8, 3)))
+                                  402, 102, 321, 201, 200, 8, 3, 101000)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -117,6 +117,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_two_block_skips"], 200)
         self.assertEqual(measured["parallel_read_pairs"], 8)
         self.assertEqual(measured["parallel_read_same_extent_pairs"], 3)
+        self.assertEqual(measured["read_worker_cpu_ns"], 100000)
         # A high reuse rate may make metadata requests fewer than payload
         # requests; this is valid as long as lower payload blocks match.
         self.assertEqual(module.kernel_read_delta(
@@ -177,10 +178,17 @@ class PairReplayContract(unittest.TestCase):
             "lower_write_wall_ns": 300,
             "ordered_worker_wall_ns": 400,
             "prep_worker_wall_ns": 40,
+            "ordered_worker_cpu_ns": 100,
+            "prep_worker_cpu_ns": 20,
+            "read_worker_cpu_ns": 10,
             "prep_wait_wall_ns": 10,
             "prep_lower_write_overlap_ns": 20,
             "windows": 1,
             "close_pack_ready": 1,
+            "pack_close_tail_target": 1,
+            "pack_close_tail_target_le4": 1,
+            "pack_close_burst_target": 0,
+            "pack_close_service_dry": 0,
             "retained_burst_target": 4,
             "prep_lower_write_samples": 2,
             "prep_lower_write_start_queued": 1,
@@ -214,10 +222,17 @@ class PairReplayContract(unittest.TestCase):
             "lower_write_wall_ns": 60300,
             "ordered_worker_wall_ns": 70400,
             "prep_worker_wall_ns": 4040,
+            "ordered_worker_cpu_ns": 30100,
+            "prep_worker_cpu_ns": 2020,
+            "read_worker_cpu_ns": 1010,
             "prep_wait_wall_ns": 510,
             "prep_lower_write_overlap_ns": 5020,
             "windows": 4,
             "close_pack_ready": 4,
+            "pack_close_tail_target": 2,
+            "pack_close_tail_target_le4": 2,
+            "pack_close_burst_target": 1,
+            "pack_close_service_dry": 1,
             "retained_burst_target": 8,
             "prep_lower_write_samples": 7,
             "prep_lower_write_start_queued": 5,
@@ -267,6 +282,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["lower_write_wall_ns"], 60000)
         self.assertEqual(delta["ordered_worker_wall_ns"], 70000)
         self.assertEqual(delta["prep_worker_wall_ns"], 4000)
+        self.assertEqual(delta["ordered_worker_cpu_ns"], 30000)
+        self.assertEqual(delta["prep_worker_cpu_ns"], 2000)
+        self.assertEqual(delta["read_worker_cpu_ns"], 1000)
         self.assertEqual(delta["engine_prehashed_records"], 100)
         self.assertEqual(delta["batch_snapshot_crc_wall_ns"], 250000)
         self.assertEqual(delta["batch_pause_crc_wall_ns"], 100000)
@@ -274,6 +292,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["retained_burst_target"], 8)
         self.assertEqual(delta["windows"], 3)
         self.assertEqual(delta["close_pack_ready"], 3)
+        self.assertEqual(delta["pack_close_tail_target"], 1)
+        self.assertEqual(delta["pack_close_tail_target_le4"], 1)
+        self.assertEqual(delta["pack_close_burst_target"], 1)
+        self.assertEqual(delta["pack_close_service_dry"], 1)
         self.assertEqual(delta["prep_crc_wall_ns"], 500)
         self.assertEqual(delta["ordered_crc_wall_ns"], 700)
         self.assertEqual(delta["engine_publish_crc_wall_ns"], 1000)
@@ -324,6 +346,12 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "service attribution"):
             module.kernel_write_delta(
                 before, dict(after, single_tail_comp_after_both=2))
+        with self.assertRaisesRegex(ValueError, "PACK_READY"):
+            module.kernel_write_delta(
+                before, dict(after, pack_close_burst_target=2))
+        with self.assertRaisesRegex(ValueError, "upper-tail"):
+            module.kernel_write_delta(
+                before, dict(after, single_tail_comp_age_gt1000us=1))
         with self.assertRaisesRegex(ValueError, "retained burst target"):
             module.kernel_write_delta(
                 before, dict(after, retained_burst_target=0))

@@ -95,13 +95,24 @@ SINGLE_TAIL_TIMING_FIELDS = (
     "single_tail_comp_age_501_1000us", "single_tail_comp_age_gt1000us",
     "single_tail_deadline_age_le250us", "single_tail_deadline_age_251_500us",
     "single_tail_deadline_age_501_1000us", "single_tail_deadline_age_gt1000us")
+SINGLE_TAIL_COMP_UPPER_FIELDS = (
+    "single_tail_comp_age_1001_1250us",
+    "single_tail_comp_age_1251_1500us",
+    "single_tail_comp_age_1501_1750us",
+    "single_tail_comp_age_gt1750us")
 SINGLE_TAIL_SERVICE_FIELDS = (
     "single_tail_comp_after_lower_done", "single_tail_comp_after_read_bypass",
     "single_tail_comp_after_both", "single_tail_deadline_after_lower_done",
     "single_tail_deadline_after_read_bypass", "single_tail_deadline_after_both")
-ID52_FIELDS = SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_SERVICE_FIELDS
-ID53_FIELDS = (
-    "single_tail_age_cutoff_closes", "single_tail_cutoff_late_companions")
+ID52_FIELDS = (
+    SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_COMP_UPPER_FIELDS +
+    SINGLE_TAIL_SERVICE_FIELDS)
+PACK_CLOSE_FIELDS = (
+    "pack_close_tail_target", "pack_close_tail_target_le4",
+    "pack_close_burst_target", "pack_close_service_dry")
+PACK_CLOSE_PRIMARY_FIELDS = (
+    "pack_close_tail_target", "pack_close_burst_target",
+    "pack_close_service_dry")
 DEADLINE_CONTEXT_LABELS = (
     ("deadline_before_bio", "before-bio"),
     ("deadline_after_read", "after-read"),
@@ -116,7 +127,8 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
-                      "parallel_read_same_extent_pairs")
+                      "parallel_read_same_extent_pairs",
+                      "read_worker_cpu_ns")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 PREPARATION_FIELDS = (
@@ -132,7 +144,7 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + ID53_FIELDS + DEADLINE_CONTEXT_FIELDS +
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS +
     BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
@@ -147,6 +159,7 @@ KERNEL_WRITE_FIELDS = (
     "batch_resume_crc_wall_ns", "prep_crc_wall_ns",
     "ordered_crc_wall_ns", "lower_write_wall_ns",
     "ordered_worker_wall_ns", "prep_worker_wall_ns",
+    "ordered_worker_cpu_ns", "prep_worker_cpu_ns", "read_worker_cpu_ns",
     "prep_wait_wall_ns", "prep_lower_write_overlap_ns",
     "prep_lower_write_samples", "prep_lower_write_start_queued",
     "prep_lower_write_start_nonempty", "prep_lower_write_end_queued",
@@ -200,11 +213,14 @@ def timed_window_error(record):
         return "timed deferred companion age attribution is inconsistent"
     if sum(record[field] for field in SINGLE_TAIL_TIMING_FIELDS[4:]) != record["win1_deadline_deferred_tail"]:
         return "timed deferred deadline age attribution is inconsistent"
-    if (record["single_tail_age_cutoff_closes"] >
-            record["win1_deadline_deferred_tail"] or
-            record["single_tail_cutoff_late_companions"] >
-            record["single_tail_age_cutoff_closes"]):
-        return "timed deferred cutoff attribution is inconsistent"
+    if (sum(record[field] for field in SINGLE_TAIL_COMP_UPPER_FIELDS) !=
+            record["single_tail_comp_age_gt1000us"]):
+        return "timed deferred companion upper-tail attribution is inconsistent"
+    if (sum(record[field] for field in PACK_CLOSE_PRIMARY_FIELDS) !=
+            record["close_pack_ready"] or
+            record["pack_close_tail_target_le4"] >
+            record["pack_close_tail_target"]):
+        return "timed PACK_READY close attribution is inconsistent"
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
@@ -1423,7 +1439,7 @@ def benchmark_verdicts(sessions):
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
-                            SINGLE_TAIL_FIELDS + ID52_FIELDS + ID53_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
             "kernel_gauges": {
@@ -1442,7 +1458,9 @@ def benchmark_verdicts(sessions):
         "endurance": "PROXY_ONLY: lower RAM device writes, no flash endurance",
         "packed_read": "MEASURED_4MIB_QD32_NO_COLD_CACHE_PROOF",
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
-        "cpu_scope": "replay userspace CPU only; kernel callback wall is not CPU time",
+        "cpu_scope":
+            "kernel worker CPU uses scheduler-accounted sum_exec_runtime deltas; "
+            "direct samples may conservatively miss the current unaccounted slice",
         "physical_media": "NOT_TESTED",
         "statistical_confidence":
             "FAST_MIXED_FIVE_MATCHED_PAIRS_WITH_PAIRED_95PCT_CI; "
@@ -1590,9 +1608,13 @@ def print_bench(result):
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
                 ("ordered callback",
-                 f"{asynchronous['mixed_ordered_worker_wall_ns'] / 1e6:.1f}", "wall"),
+                 f"{asynchronous['mixed_ordered_worker_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_ordered_worker_cpu_ns'] / 1e6:.1f} CPU"),
                 ("prep callback",
-                 f"{asynchronous['mixed_prep_worker_wall_ns'] / 1e6:.1f}", "wall"),
+                 f"{asynchronous['mixed_prep_worker_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_prep_worker_cpu_ns'] / 1e6:.1f} CPU"),
+                ("read helper", "-",
+                 f"{asynchronous['mixed_read_worker_cpu_ns'] / 1e6:.1f} CPU"),
                 ("scheduling", "-",
                  f"{asynchronous['mixed_prep_wait_wall_ns'] / 1e6:.2f} wait"),
             ])
@@ -1626,14 +1648,21 @@ def print_bench(result):
                  f"{counters['win1_deadline_deferred_tail']:.1f}/"
                  f"{counters['win1_idle_deferred_tail']:.1f}/"
                  f"{counters['single_tail_other_clears']:.1f}"),
-                ("deferred 1ms cutoff/late",
-                 f"{counters['single_tail_age_cutoff_closes']:.1f}/"
-                 f"{counters['single_tail_cutoff_late_companions']:.1f}"),
+                ("PACK_READY tail<=4/tail/burst/dry",
+                 f"{counters['pack_close_tail_target_le4']:.1f}/"
+                 f"{counters['pack_close_tail_target']:.1f}/"
+                 f"{counters['pack_close_burst_target']:.1f}/"
+                 f"{counters['pack_close_service_dry']:.1f}"),
                 ("deferred C age <=250/500/1000/>",
                  f"{counters['single_tail_comp_age_le250us']:.1f}/"
                  f"{counters['single_tail_comp_age_251_500us']:.1f}/"
                  f"{counters['single_tail_comp_age_501_1000us']:.1f}/"
                  f"{counters['single_tail_comp_age_gt1000us']:.1f}"),
+                ("deferred C >1ms <=1.25/1.50/1.75/>",
+                 f"{counters['single_tail_comp_age_1001_1250us']:.1f}/"
+                 f"{counters['single_tail_comp_age_1251_1500us']:.1f}/"
+                 f"{counters['single_tail_comp_age_1501_1750us']:.1f}/"
+                 f"{counters['single_tail_comp_age_gt1750us']:.1f}"),
                 ("deferred DL age <=250/500/1000/>",
                  f"{counters['single_tail_deadline_age_le250us']:.1f}/"
                  f"{counters['single_tail_deadline_age_251_500us']:.1f}/"
@@ -1729,7 +1758,7 @@ def print_bench(result):
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
             ("write-only", "fast QD8: 5 matched pairs + paired CI; others directional"),
-            ("CPU", "replay CPU only; kernel callback wall is not CPU time"),
+            ("CPU", "worker scheduler-accounted CPU is reported beside callback wall"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
             ("Full telemetry", "test_results.json.xz"),

@@ -61,6 +61,9 @@ def timed_kernel_write(*, mode, target=8):
         "lower_write_wall_ns": 30000000,
         "ordered_worker_wall_ns": 52000000,
         "prep_worker_wall_ns": 5000000,
+        "ordered_worker_cpu_ns": 16000000,
+        "prep_worker_cpu_ns": 3000000,
+        "read_worker_cpu_ns": 1000000,
         "prep_wait_wall_ns": 500000,
         "prep_lower_write_overlap_ns": 5000000,
         "prep_lower_write_samples": 5,
@@ -82,6 +85,10 @@ def timed_kernel_write(*, mode, target=8):
         "close_idle": 4,
         "close_deadline": 2,
         "close_pack_ready": 14,
+        "pack_close_tail_target": 5,
+        "pack_close_tail_target_le4": 4,
+        "pack_close_burst_target": 6,
+        "pack_close_service_dry": 3,
         "win1_idle": 1,
         "win1_deadline": 2,
         "win1_pack_ready": 1,
@@ -146,6 +153,7 @@ def arm(candidate, *, mode, regime):
                     "read_two_block_skips": 128,
                     "parallel_read_pairs": 128,
                     "parallel_read_same_extent_pairs": 64,
+                    "read_worker_cpu_ns": 1000000,
                 } if swapz else None),
                 "replay_cpu_user_s": .15,
                 "replay_cpu_system_s": .12,
@@ -551,6 +559,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["mixed_lower_write_wall_ns"], 30000000)
         self.assertEqual(slow["columns"]["sync"]["mixed_ordered_worker_wall_ns"], 52000000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_wall_ns"], 5000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_ordered_worker_cpu_ns"], 16000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_prep_worker_cpu_ns"], 3000000)
+        self.assertEqual(slow["columns"]["async"]["mixed_read_worker_cpu_ns"], 1000000)
         self.assertEqual(slow["columns"]["async"]["mixed_engine_prehashed_records"], 2500)
         self.assertEqual(
             slow["columns"]["async"]["mixed_batch_snapshot_crc_wall_ns"], 250000)
@@ -568,6 +579,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["accepted_burst_read_caps"], 4)
         self.assertEqual(slow["kernel_counters"]["windows"], 20)
         self.assertEqual(slow["kernel_counters"]["close_pack_ready"], 14)
+        self.assertEqual(slow["kernel_counters"]["pack_close_tail_target"], 5)
+        self.assertEqual(slow["kernel_counters"]["pack_close_tail_target_le4"], 4)
+        self.assertEqual(slow["kernel_counters"]["pack_close_burst_target"], 6)
+        self.assertEqual(slow["kernel_counters"]["pack_close_service_dry"], 3)
         self.assertEqual(slow["kernel_counters"]["close_idle"], 4)
         self.assertEqual(slow["kernel_counters"]["close_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_deadline"], 2)
@@ -581,7 +596,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_gauges"]["retained_burst_target"], 8)
         self.assertEqual(data["gc"], "SEPARATE_LOADED_EVIDENCE_REQUIRED")
         self.assertEqual(data["physical_media"], "NOT_TESTED")
-        self.assertIn("kernel callback wall is not CPU time", data["cpu_scope"])
+        self.assertIn("scheduler-accounted", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
 
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
@@ -622,7 +637,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("lower-W queue start/end", rendered)
         self.assertIn("lower-W nonempty start/end", rendered)
         self.assertIn("deferred tail D/C/DL/I/O", rendered)
-        self.assertIn("deferred 1ms cutoff/late", rendered)
+        self.assertIn("PACK_READY tail<=4/tail/burst/dry", rendered)
+        self.assertIn("deferred C >1ms <=1.25/1.50/1.75/>", rendered)
+        self.assertIn("CPU", rendered)
         self.assertIn("deferred C age <=250/500/1000/>", rendered)
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)

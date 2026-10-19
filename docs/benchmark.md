@@ -31,9 +31,13 @@ Exclude fixture generation, device provisioning, worker allocation, buffer setup
 
 Report replay-process CPU separately from kernel callback wall residency.
 Callback wall is not CPU time: ordered callback wall includes synchronous
-lower-I/O sleep and callback wall may include scheduler delay. Use explicit
-LZ4/CRC/copy/plan/pack/publish timers for hot-path attribution. RAM-backed 4MiB
-read tests are not cold physical swap-in.
+lower-I/O sleep and callback wall may include scheduler delay. ID24 additionally
+reports scheduler-accounted sampled worker CPU from
+`current->se.sum_exec_runtime` for ordered, preparation and read-helper work.
+Direct boundary samples may conservatively miss the current unaccounted
+scheduler slice, so treat them as a lower-bound discriminator rather than
+cycle-exact accounting. Use explicit LZ4/CRC/copy/plan/pack/publish timers for
+hot-path attribution. RAM-backed 4MiB read tests are not cold physical swap-in.
 
 Window-size bins, close reasons, one-page close reasons, deadline contexts,
 burst-learning counters, preparation counters and GC-victim attribution are
@@ -53,44 +57,43 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `4edf2d60a9275fb9e57e7eb605bce6c02c2a1263`
-(report-only `70dea7aa36611df541823b711f918d78c4f4a163`) passed all five
+Owner-qualified source `7f3c447e28e7198b076eddb6a85ded54245456e2`
+(report-only `6de1a3602ac9285095b4acb7d799715357d95883`) passed all five
 stages. It is synthetic owned-RAM evidence only.
 
-ID52 now answers the deferred-singleton discrimination question. Fast mixed
-D/C/DL/I/O is 107.5/76.0/31.5/0/0. Companion ages are
-52.8/19.0/3.2/1.0 in <=250/251-500/501-1000/>1000 us bins, while deadline
-ages are 0/0/0/31.5. Thus 75/76 companion resolutions occur within 1 ms and
-all observed true deadline tails survive beyond 1 ms. Lower-W completion and
-READ-bypass events occur before both terminal classes, so neither is a safe
-early-close discriminator.
+ID53 is rejected. Fast mixed measured 31.5 active 1 ms cutoff closes and 13.8
+next ordinary WRITEs before the original deadline, a 43.8% miss signal. The
+same run measured async/sync 23.46/23.93 MB/s and 960.4/822.6 lower WRITE
+requests. The successor restores ID50's full ordinary first-record deadline and
+removes the active cutoff/watermark counters.
 
-ID53 is a separate source experiment based on that result. It changes only an
-already-deferred sampled singleton: its effective deadline becomes the earlier
-of the original first-record deadline and one millisecond after the deferral
-sample. The existing retention hrtimer is reprogrammed when the effective
-deadline changes; no second timer or arrival wait is added. The report counts
-actual age-cutoff closes and any next ordinary WRITE that arrives before the
-original deadline after such a close. The latter is the direct
-misclassification signal.
+ID50 remains useful: fast D/C/DL/I/O is 105.4/73.9/31.5/0/0. ID51/ID52 stay
+passive. Because active early completion can itself alter a closed-loop
+workload's future submissions, the rollback refines only the passive companion
+survival curve above 1 ms into 1001-1250/1251-1500/1501-1750/>1750 us bins.
 
-ID39 also moved from ambiguity to positive controlled evidence. With source,
-fixture, trace and the shared extent cache fixed, Kread-off/on sequential p99
-is 5.57/5.21 ms and random p99 is 5.65/4.98 ms. Lower bytes/requests are
-unchanged or slightly lower with Kread enabled, and enabled sessions execute
-parallel pairs. The candidate harness now repeats five same-cache matched
-off/on rounds and reports paired 95% confidence intervals before promotion.
+ID37 is confirmed at fast write-only QD8: five matched rounds show async
+24.81 versus sync 20.54 MB/s, +20.8%, with paired 95% CI
+[+7.0%, +34.5%] and 524 async lower WRITE requests. This does not promote a
+universal mixed policy: fast mixed has no confirmed >=5% async gain.
 
-Fast mixed async/sync is 23.72/22.27 MB/s with 905.5/925 lower WRITE requests.
-Fast write-only QD8 is 28.27/20.65 MB/s async/sync with 524 lower requests and
-QD32 is 41.62/38.17 with 139. Those are useful directional signals for the K=1
-ping-pong path. The candidate harness now repeats fast mixed and fast QD8 as
-five matched rounds with paired 95% confidence intervals; the other QDs remain
-directional controls.
+ID39 remains inconclusive. Five matched same-cache Kread rounds show sequential
+p99 -9.4% with CI [-23.1%, +4.3%] and random -0.8% with
+CI [-14.6%, +12.9%]. Both intervals cross zero; no READ-policy change follows.
 
-Existing fast mixed 2-4-record windows total 158.0 async versus 149.5 sync.
-That modest excess does not justify another multi-tail policy or hot-path
-histogram yet; preserve the current bins through repeated evidence instead.
+Fast mixed exposes a concrete fragmentation target: async has 823.4 PACK_READY
+closes versus 717.6 sync (+105.8), while win2+win3_4 is 185.4 versus 99.8
+(+85.6). Total async windows exceed sync by 136.6, nearly the entire +137.8
+lower-WRITE-request gap. ID54 therefore records each PACK_READY close under
+exactly one primary trigger: sampled retained-tail target, learned burst target,
+or service-proven dry close. A tail-target <=4 subset answers the small-window
+question directly; the primary counters must sum exactly to
+`close_pack_ready`.
+
+ID24 accompanies that passive experiment. Worker callback wall remains, and
+ordered/preparation/read-helper worker boundaries add scheduler-accounted
+sampled CPU. This evidence decides whether fast QD4/QD8/mixed deficits justify
+CPU-topology or worker-count experiments; it does not itself change scheduling.
 
 ## Confirmation gate
 

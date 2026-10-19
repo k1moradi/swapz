@@ -339,30 +339,16 @@ A post-PACK admitted-tail sample of exactly one WRITE is timing evidence, not
 packed geometry. It may grow `retained_burst_target`, but it must not set a
 one-shot `retained_tail_target == 1` or authorize an early one-record
 PACK_READY close. The ordered owner records this state with
-`retained_single_tail_deferred`. ID53 may shorten only this state's effective
-deadline to `min(original first-record deadline, deferred start + 1 ms)`.
-The original deadline remains the hard upper bound. The existing retention
-hrtimer is reprogrammed when the effective deadline changes; no second timer,
-sleep, spin or future-arrival wait is added.
+`retained_single_tail_deferred`.
 
-While that state is active and `batch_count == 1`, both admission target closure
-and worker service-proven closure must return false. This prevents carried
-read-bypass/wave-interruption evidence from relabeling the same singleton as a
-different PACK_READY cause. A second admitted record clears the deferral and
-restores the ordinary deadline. Any real nonempty flush, hard boundary, or true
-empty burst boundary also clears the state. The one-millisecond age cutoff uses
-the existing DEADLINE close path and must not train
-`singleton_deadline_streak`/`singleton_fast_close`, because it did not wait
-the full ordinary deadline.
-
-Existing one-page PACK_READY T/R/W attribution remains unchanged. ID53 adds
-only `single_tail_age_cutoff_closes` and
-`single_tail_cutoff_late_companions`. After an early cutoff, the next ordinary
-WRITE increments the late-companion counter only if it arrives before the
-original deadline; it is never delayed or rejected. Ordering boundaries clear
-the pending observation. Qualify the cutoff only if misses stay negligible and
-slow-model geometry, lower bytes/requests, useful throughput, read tails,
-ordering and fail-closed ownership do not regress.
+ID53 is rejected. A deferred singleton uses the same ordinary absolute
+first-record deadline as every other retained window. There is no shorter
+singleton deadline, deadline watermark, second timer, sleep, spin or
+future-arrival wait. While the deferral is active and `batch_count == 1`, both
+admission target closure and worker service-proven closure return false. A
+second admitted record resolves the companion; a real nonempty flush, hard
+boundary or true empty burst boundary clears the state through the existing
+lifecycle accounting.
 
 ### Deferred-singleton lifecycle attribution
 
@@ -389,12 +375,38 @@ completion of an existing async lower-W run may set the lower-done flag;
 successful independent retained READ service may set the read-bypass flag.
 Neither event may close, extend or otherwise alter the retained window.
 
-Only companion and one-page deadline terminal outcomes receive age histograms,
-using fixed <=250 us, 251-500 us, 501-1000 us and >1000 us buckets. The four
-companion bins must sum exactly to `single_tail_companions`; the four deadline
-bins must sum exactly to `win1_deadline_deferred_tail`. Lower-done/read-bypass
-counters are overlapping subsets; the both counter is a subset of each. Other
-and idle terminal outcomes reset observation state without being reclassified.
+Only companion and one-page deadline terminal outcomes receive the original
+<=250 us, 251-500 us, 501-1000 us and >1000 us histograms. The four companion
+bins must sum exactly to `single_tail_companions`; the four deadline bins must
+sum exactly to `win1_deadline_deferred_tail`. After ID53 rejection, companion
+observations in the aggregate >1000 us bin are also partitioned passively into
+1001-1250, 1251-1500, 1501-1750 and >1750 us; those four sub-bins must sum
+exactly to the aggregate >1000 us companion bin. None changes retention policy.
+Lower-done/read-bypass counters remain overlapping subsets; the both counter is
+a subset of each. Other and idle terminal outcomes reset observation state
+without being reclassified.
+
+### PACK_READY primary-cause attribution
+
+Every real `SWAPZ_CLOSE_PACK_READY` window has exactly one diagnostic primary
+cause captured immediately before the close: a nonzero
+`retained_tail_target`, the learned `retained_burst_target`, or
+service-proven dry closure below target. The cumulative primary counters must
+sum exactly to `close_pack_ready` at quiescent measurement boundaries.
+`pack_close_tail_target_le4` is a subset of the tail-target counter and records
+only closes whose actual window count is <=4. This attribution is passive: it
+must not alter any readiness predicate, target, timer, ownership or completion.
+
+### Worker scheduler-accounted CPU attribution
+
+Keep callback wall residency and worker CPU attribution separate. At
+ordered/preparation/read-helper worker boundaries, sample
+`READ_ONCE(current->se.sum_exec_runtime)` and accumulate nonnegative deltas in
+dedicated counters. These samples exclude lower-I/O sleep and runqueue wall
+delay, but a direct sample can conservatively miss the current scheduler slice
+that has not yet been charged into `sum_exec_runtime`; therefore the counters
+are a sampled lower-bound diagnostic, not cycle-exact CPU time. Do not call an
+unexported scheduler helper from the module merely to sharpen this measurement.
 
 ### Parallel-read diagnostic control
 

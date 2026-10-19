@@ -46,7 +46,6 @@
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_MAX_RETAIN_MS 4U
 #define SWAPZ_SINGLETON_DEADLINE_STREAK 2U
-#define SWAPZ_SINGLE_TAIL_CUTOFF_NS 1000000ULL
 
 /*
  * Experimental opt-in: a separate bounded LZ4 producer may prepare future
@@ -145,6 +144,14 @@ enum swapz_window_close_reason {
 	SWAPZ_CLOSE_SHUTDOWN,
 	SWAPZ_CLOSE_OTHER,
 	SWAPZ_CLOSE_REASON_COUNT,
+};
+
+/* Diagnostic-only primary trigger for each PACK_READY close. */
+enum swapz_pack_close_cause {
+	SWAPZ_PACK_CLOSE_NONE,
+	SWAPZ_PACK_CLOSE_TAIL_TARGET,
+	SWAPZ_PACK_CLOSE_BURST_TARGET,
+	SWAPZ_PACK_CLOSE_SERVICE_DRY,
 };
 
 struct swapz_dm {
@@ -323,9 +330,8 @@ struct swapz_dm {
 	swapz_u8 retained_burst_target;
 	swapz_u8 retained_tail_target;
 	/* A one-record post-PACK sample is too timing-sensitive to authorize
-	 * another PACK_READY close. ID53 bounds only this state to a measured
-	 * one-millisecond age while retaining the original window deadline as a
-	 * hard upper bound; no other retained window uses the shorter deadline. */
+	 * another PACK_READY close. Keep that singleton open until a companion
+	 * joins or the ordinary first-record retention deadline expires. */
 	bool retained_single_tail_deferred;
 	/* Exact lifecycle attribution for every sampled singleton deferral. */
 	u64 single_tail_deferrals;
@@ -333,17 +339,18 @@ struct swapz_dm {
 	u64 win1_deadline_deferred_tail;
 	u64 win1_idle_deferred_tail;
 	u64 single_tail_other_clears;
-	/* ID52 evidence remains as acceptance telemetry for the ID53 successor. */
+	/* ID52 passive timing/service state; no field changes closure policy. */
 	u64 single_tail_deferred_start_ns;
-	u64 single_tail_age_cutoff_closes;
-	u64 single_tail_cutoff_late_companions;
-	u64 single_tail_cutoff_original_deadline_ns;
 	bool single_tail_lower_done_seen;
 	bool single_tail_read_bypass_seen;
 	u64 single_tail_companion_age_le250us;
 	u64 single_tail_companion_age_251_500us;
 	u64 single_tail_companion_age_501_1000us;
 	u64 single_tail_companion_age_gt1000us;
+	u64 single_tail_companion_age_1001_1250us;
+	u64 single_tail_companion_age_1251_1500us;
+	u64 single_tail_companion_age_1501_1750us;
+	u64 single_tail_companion_age_gt1750us;
 	u64 single_tail_deadline_age_le250us;
 	u64 single_tail_deadline_age_251_500us;
 	u64 single_tail_deadline_age_501_1000us;
@@ -366,6 +373,12 @@ struct swapz_dm {
 	u64 win1_pack_tail_target;
 	u64 win1_pack_read_bypass;
 	u64 win1_pack_wave_interrupted;
+	/* Mutually exclusive primary attribution for every PACK_READY window. */
+	enum swapz_pack_close_cause next_pack_close_cause;
+	u64 pack_close_tail_target;
+	u64 pack_close_tail_target_le4;
+	u64 pack_close_burst_target;
+	u64 pack_close_service_dry;
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -445,12 +458,16 @@ struct swapz_dm {
 	u64 lower_read_wall_ns;
 	u64 lower_write_wall_ns;
 	/*
-	 * Callback residency wall time. Preparation does not intentionally
-	 * sleep; ordered residency includes synchronous lower I/O and any
-	 * scheduler delay, so these are diagnostics and never CPU-time claims.
+	 * Callback residency wall time includes sleep and scheduler delay.
+	 * Scheduler-accounted worker CPU samples intentionally exclude those
+	 * intervals; direct sum_exec_runtime reads can conservatively miss the
+	 * current unaccounted slice but never turn sleep into CPU time.
 	 */
 	u64 ordered_worker_wall_ns;
 	u64 preparation_worker_wall_ns;
+	u64 ordered_worker_cpu_ns;
+	u64 preparation_worker_cpu_ns;
+	u64 read_worker_cpu_ns;
 	u64 preparation_crc_wall_ns;
 	u64 ordered_crc_wall_ns;
 	/* Completed synchronous lower WRITE callbacks by wall-wait duration;
@@ -466,9 +483,18 @@ struct swapz_dm {
 	u64 io_failures;
 };
 
-static void swapz_account_worker_wall(u64 *counter, u64 start_ns)
+static u64 swapz_worker_cpu_sample(void)
 {
-	*counter += swapz_elapsed_ns(start_ns, ktime_get_ns());
+	return READ_ONCE(current->se.sum_exec_runtime);
+}
+
+static void swapz_account_worker_runtime(u64 *wall_counter, u64 wall_start_ns,
+					 u64 *cpu_counter, u64 cpu_start_ns)
+{
+	u64 cpu_end_ns = swapz_worker_cpu_sample();
+
+	*wall_counter += swapz_elapsed_ns(wall_start_ns, ktime_get_ns());
+	*cpu_counter += swapz_elapsed_ns(cpu_start_ns, cpu_end_ns);
 }
 
 /*
@@ -1030,6 +1056,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 	struct swapz_bio_ref *entry;
 	unsigned long flags;
 	u64 wall_start_ns = ktime_get_ns();
+	u64 cpu_start_ns = swapz_worker_cpu_sample();
 
 	for (;;) {
 		struct swapz_prepared_page *prepared;
@@ -1049,16 +1076,20 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * exhausted, leave all remaining entries claimable by inline steal.
 		 */
 		if (down_trylock(&ctx->preparation_slots)) {
-			swapz_account_worker_wall(&ctx->preparation_worker_wall_ns,
-						wall_start_ns);
+			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->preparation_worker_cpu_ns,
+						 cpu_start_ns);
 			return;
 		}
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
 			up(&ctx->preparation_slots);
-			swapz_account_worker_wall(&ctx->preparation_worker_wall_ns,
-						wall_start_ns);
+			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->preparation_worker_cpu_ns,
+						 cpu_start_ns);
 			return;
 		}
 		/*
@@ -1091,9 +1122,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
-				swapz_account_worker_wall(
+				swapz_account_worker_runtime(
 					&ctx->preparation_worker_wall_ns,
-					wall_start_ns);
+					wall_start_ns,
+					&ctx->preparation_worker_cpu_ns,
+					cpu_start_ns);
 				return;
 			}
 			entry = list_last_entry(&ctx->preparation_incoming,
@@ -1114,9 +1147,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 			complete(&entry->preparation_finished);
 			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 			    !atomic_read(&ctx->preparation_tail_credit)) {
-				swapz_account_worker_wall(
+				swapz_account_worker_runtime(
 					&ctx->preparation_worker_wall_ns,
-					wall_start_ns);
+					wall_start_ns,
+					&ctx->preparation_worker_cpu_ns,
+					cpu_start_ns);
 				return;
 			}
 			continue;
@@ -1137,9 +1172,11 @@ static void swapz_preparation_worker(struct work_struct *work)
 				if (tail_claim &&
 				    !atomic_read(&ctx->lower_write_active) &&
 				    !atomic_read(&ctx->preparation_tail_credit)) {
-					swapz_account_worker_wall(
+					swapz_account_worker_runtime(
 						&ctx->preparation_worker_wall_ns,
-						wall_start_ns);
+						wall_start_ns,
+						&ctx->preparation_worker_cpu_ns,
+						cpu_start_ns);
 					return;
 				}
 				continue;
@@ -1199,8 +1236,10 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 */
 		if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
 		    !atomic_read(&ctx->preparation_tail_credit)) {
-			swapz_account_worker_wall(&ctx->preparation_worker_wall_ns,
-						wall_start_ns);
+			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->preparation_worker_cpu_ns,
+						 cpu_start_ns);
 			return;
 		}
 	}
@@ -1663,23 +1702,10 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 {
 	swapz_u8 committed = 0, index, count = ctx->batch_count;
 	swapz_u8 gc_attempts = 0;
-	u64 close_observed_ns = ktime_get_ns();
-	u64 original_deadline_ns = swapz_window_retention_deadline_ns(
-		ctx->window_first_ns, ctx->retain_ms);
-	u64 effective_deadline_ns = swapz_window_single_tail_deadline_ns(
-		ctx->window_first_ns, ctx->retain_ms,
-		ctx->retained_single_tail_deferred && count == 1U ?
-		ctx->single_tail_deferred_start_ns : 0,
-		SWAPZ_SINGLE_TAIL_CUTOFF_NS);
-	bool single_tail_age_cutoff =
-		ctx->retained_single_tail_deferred && count == 1U &&
-		ctx->next_window_close == SWAPZ_CLOSE_DEADLINE &&
-		effective_deadline_ns && original_deadline_ns &&
-		effective_deadline_ns < original_deadline_ns &&
-		close_observed_ns >= effective_deadline_ns &&
-		close_observed_ns < original_deadline_ns;
 	bool needs_fua = false;
 	bool packed_close = ctx->next_window_close == SWAPZ_CLOSE_PACK_READY;
+	enum swapz_pack_close_cause pack_close_cause =
+		ctx->next_pack_close_cause;
 	bool win1_pack_tail_target = count == 1U && packed_close &&
 		ctx->retained_tail_target == 1U;
 	bool win1_pack_read_bypass = count == 1U && packed_close &&
@@ -1734,11 +1760,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	if (deferred_single_tail && (count || hard_boundary)) {
 		if (count == 1U && close_reason == SWAPZ_CLOSE_DEADLINE) {
 			ctx->win1_deadline_deferred_tail++;
-			if (single_tail_age_cutoff) {
-				ctx->single_tail_age_cutoff_closes++;
-				ctx->single_tail_cutoff_original_deadline_ns =
-					original_deadline_ns;
-			}
 			swapz_account_single_tail_terminal(ctx, false, true);
 		} else if (count == 1U && close_reason == SWAPZ_CLOSE_IDLE) {
 			ctx->win1_idle_deferred_tail++;
@@ -1749,11 +1770,6 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		}
 		ctx->retained_single_tail_deferred = false;
 	}
-	/* Ordering/terminal boundaries invalidate a pending missed-companion
-	 * observation. The age-cutoff close itself deliberately preserves it
-	 * until the next ordinary WRITE or its original deadline. */
-	if (hard_boundary && !single_tail_age_cutoff)
-		ctx->single_tail_cutoff_original_deadline_ns = 0;
 
 	/*
 	 * An empty flush is not a committed write window. In particular, a READ
@@ -1775,6 +1791,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->retained_wave_interrupted = true;
 		}
 		ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
+		ctx->next_pack_close_cause = SWAPZ_PACK_CLOSE_NONE;
 		ctx->window_first_ns = 0;
 		return 0;
 	}
@@ -1840,6 +1857,24 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->window_age_gt_1000us++;
 	ctx->window_close_reasons[close_reason]++;
 	ctx->next_window_close = SWAPZ_CLOSE_UNKNOWN;
+	if (packed_close) {
+		switch (pack_close_cause) {
+		case SWAPZ_PACK_CLOSE_TAIL_TARGET:
+			ctx->pack_close_tail_target++;
+			if (count <= 4U)
+				ctx->pack_close_tail_target_le4++;
+			break;
+		case SWAPZ_PACK_CLOSE_BURST_TARGET:
+			ctx->pack_close_burst_target++;
+			break;
+		case SWAPZ_PACK_CLOSE_SERVICE_DRY:
+			ctx->pack_close_service_dry++;
+			break;
+		default:
+			break;
+		}
+	}
+	ctx->next_pack_close_cause = SWAPZ_PACK_CLOSE_NONE;
 	/* An independent READ can fail while older writes are only prepared.
 	 * Complete their original owners once, without ordering/staging or
 	 * submitting any unpublished bytes after the target has failed. */
@@ -2058,7 +2093,6 @@ accounted:
 	}
 	ctx->batch_count = 0;
 	if (error || committed != count) {
-		ctx->single_tail_cutoff_original_deadline_ns = 0;
 		ctx->retained_chain_completed = 0;
 		ctx->pack_close_pending_tail_sample = false;
 		ctx->retained_window_read_bypasses = 0;
@@ -2217,8 +2251,19 @@ static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
 		(*to500)++;
 	else if (elapsed <= 1000000ULL)
 		(*to1000)++;
-	else
+	else {
 		(*gt1000)++;
+		if (companion) {
+			if (elapsed <= 1250000ULL)
+				ctx->single_tail_companion_age_1001_1250us++;
+			else if (elapsed <= 1500000ULL)
+				ctx->single_tail_companion_age_1251_1500us++;
+			else if (elapsed <= 1750000ULL)
+				ctx->single_tail_companion_age_1501_1750us++;
+			else
+				ctx->single_tail_companion_age_gt1750us++;
+		}
+	}
 	swapz_reset_single_tail_observation(ctx);
 }
 
@@ -2320,14 +2365,9 @@ static bool swapz_retained_target_close_ready(struct swapz_dm *ctx)
 		ctx->retained_tail_target);
 }
 
-static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
+static bool swapz_service_proven_dry_pack(const struct swapz_dm *ctx)
 {
-	bool service_proven_dry_pack;
-
-	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
-		return false;
-	service_proven_dry_pack =
-		!ctx->retained_tail_target && ctx->batch_count &&
+	return !ctx->retained_tail_target && ctx->batch_count &&
 		(((ctx->retained_chain_completed ||
 		   ctx->retained_window_read_bypasses) &&
 		  (ctx->single_pack_deferred ||
@@ -2335,7 +2375,15 @@ static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 		 ((ctx->retained_window_read_bypasses ||
 		   ctx->retained_wave_interrupted) &&
 		  ctx->batch_count < 4U));
+}
 
+static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
+{
+	bool service_proven_dry_pack;
+
+	if (ctx->retained_single_tail_deferred && ctx->batch_count == 1U)
+		return false;
+	service_proven_dry_pack = swapz_service_proven_dry_pack(ctx);
 	return swapz_window_burst_close_ready(
 		ctx->single_pack_deferred, service_proven_dry_pack,
 		ctx->batch_count, ctx->retained_burst_target,
@@ -2357,17 +2405,6 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
 	const u8 *input = NULL;
 	void *mapped_input = NULL;
-	u64 now_ns;
-
-	/* Attribution only: observe whether the next ordinary WRITE would have
-	 * joined before the original deadline after an experimental age cutoff. */
-	now_ns = ktime_get_ns();
-	if (ctx->single_tail_cutoff_original_deadline_ns) {
-		if (swapz_plain_retained_write(bio) &&
-		    now_ns < ctx->single_tail_cutoff_original_deadline_ns)
-			ctx->single_tail_cutoff_late_companions++;
-		ctx->single_tail_cutoff_original_deadline_ns = 0;
-	}
 	swapz_u8 i;
 	u64 section_start;
 	swapz_u32 payload_crc32c = 0;
@@ -2611,6 +2648,9 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		 */
 		if (swapz_retained_target_close_ready(ctx) &&
 		    !ctx->worker_has_immediate_followup) {
+			ctx->next_pack_close_cause = ctx->retained_tail_target ?
+				SWAPZ_PACK_CLOSE_TAIL_TARGET :
+				SWAPZ_PACK_CLOSE_BURST_TARGET;
 			ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 			ctx->packed_early_commits++;
 			if (ctx->accepted_burst_pack_ready)
@@ -2745,8 +2785,13 @@ static void swapz_read_slot_worker(struct work_struct *work)
 {
 	struct swapz_read_slot *slot =
 		container_of(work, struct swapz_read_slot, work);
+	u64 cpu_start_ns = swapz_worker_cpu_sample();
+	u64 cpu_end_ns;
 
 	slot->error = swapz_read_slot_run(slot);
+	cpu_end_ns = swapz_worker_cpu_sample();
+	slot->ctx->read_worker_cpu_ns +=
+		swapz_elapsed_ns(cpu_start_ns, cpu_end_ns);
 	complete(&slot->done);
 }
 
@@ -3287,17 +3332,13 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
  * may finish ALL previously accepted BIOs without building a potentially
  * unbounded chain of requeued delayed works during drain_workqueue().
  */
-/* The ordinary first-record deadline remains the hard upper bound. ID53 may
- * shorten only an actively deferred sampled singleton to one millisecond from
- * its observation point. A companion restores the ordinary deadline because
- * retained_single_tail_deferred is cleared exactly once. */
+/* Every retained window, including a deferred sampled singleton, uses only
+ * the ordinary first-record absolute deadline. ID53's shorter active cutoff
+ * was rejected by owner evidence and is intentionally absent here. */
 static u64 swapz_retention_deadline_ns(struct swapz_dm *ctx)
 {
-	return swapz_window_single_tail_deadline_ns(
-		ctx->window_first_ns, ctx->retain_ms,
-		ctx->retained_single_tail_deferred && ctx->batch_count == 1U ?
-		ctx->single_tail_deferred_start_ns : 0,
-		SWAPZ_SINGLE_TAIL_CUTOFF_NS);
+	return swapz_window_retention_deadline_ns(
+		ctx->window_first_ns, ctx->retain_ms);
 }
 
 static bool swapz_retention_expired(struct swapz_dm *ctx)
@@ -3329,6 +3370,7 @@ static void swapz_worker(struct work_struct *work)
 	unsigned long flags;
 	unsigned int remaining;
 	u64 wall_start_ns = ktime_get_ns();
+	u64 cpu_start_ns = swapz_worker_cpu_sample();
 
 	for (;;) {
 		if (READ_ONCE(ctx->inflight_write.active) &&
@@ -3480,6 +3522,12 @@ static void swapz_worker(struct work_struct *work)
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
 			    !swapz_retention_expired(ctx)) {
+				ctx->next_pack_close_cause =
+					swapz_service_proven_dry_pack(ctx) ?
+					SWAPZ_PACK_CLOSE_SERVICE_DRY :
+					(ctx->retained_tail_target ?
+					 SWAPZ_PACK_CLOSE_TAIL_TARGET :
+					 SWAPZ_PACK_CLOSE_BURST_TARGET);
 				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
 				ctx->packed_early_commits++;
 				if (ctx->accepted_burst_pack_ready)
@@ -3509,19 +3557,6 @@ static void swapz_worker(struct work_struct *work)
 				ctx->next_window_close = SWAPZ_CLOSE_FULL;
 			else if (ctx->retain_ms &&
 				 swapz_retention_expired(ctx)) {
-				u64 observed_ns = ktime_get_ns();
-				u64 ordinary_deadline =
-					swapz_window_retention_deadline_ns(
-						ctx->window_first_ns, ctx->retain_ms);
-				u64 effective_deadline =
-					swapz_retention_deadline_ns(ctx);
-				bool age_cutoff_preempts =
-					ctx->retained_single_tail_deferred &&
-					ctx->batch_count == 1U &&
-					effective_deadline && ordinary_deadline &&
-					effective_deadline < ordinary_deadline &&
-					observed_ns < ordinary_deadline;
-
 				ctx->next_window_close = SWAPZ_CLOSE_DEADLINE;
 				if (!list_empty(&local)) {
 					ctx->deadline_worker_with_local++;
@@ -3529,13 +3564,7 @@ static void swapz_worker(struct work_struct *work)
 					ctx->singleton_fast_close = false;
 				} else {
 					ctx->deadline_worker_empty++;
-					if (ctx->batch_count == 1U &&
-					    age_cutoff_preempts) {
-						/* A 1ms cutoff is not evidence that the full
-						 * retained deadline repeatedly found no companion. */
-						ctx->singleton_deadline_streak = 0;
-						ctx->singleton_fast_close = false;
-					} else if (ctx->batch_count == 1U) {
+					if (ctx->batch_count == 1U) {
 						if (ctx->singleton_deadline_streak <
 						    SWAPZ_SINGLETON_DEADLINE_STREAK)
 							ctx->singleton_deadline_streak++;
@@ -3600,50 +3629,47 @@ static void swapz_worker(struct work_struct *work)
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_IDLE;
 				swapz_flush_window(ctx);
-				swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-							wall_start_ns);
+				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->ordered_worker_cpu_ns,
+						 cpu_start_ns);
 				return;
 			}
 			if (ctx->batch_count &&
 			    swapz_window_timer_enabled(ctx->retain_ms) &&
 			    ctx->accepting && !ctx->failed) {
-				/* Reuse the one retention hrtimer. A deferred singleton
-				 * may move its effective expiry earlier; a companion moves
-				 * it back to the ordinary first-record deadline. */
-				{
-					bool queued = hrtimer_is_queued(&ctx->retention_timer);
-					u64 desired_deadline = swapz_retention_deadline_ns(ctx);
-					u64 queued_deadline = queued ?
-						(u64)ktime_to_ns(hrtimer_get_expires(
-							&ctx->retention_timer)) : 0;
-
-					if (swapz_retention_timer_needs_rearm(
-							ctx->retain_ms, queued, queued_deadline,
-							desired_deadline)) {
-						ctx->retain_timer_arms++;
-						hrtimer_start(&ctx->retention_timer,
-							ns_to_ktime(desired_deadline),
-							HRTIMER_MODE_ABS);
-					} else {
-						ctx->retain_timer_arm_skips++;
-					}
+				if (swapz_retention_timer_needs_arm(
+						ctx->retain_ms,
+						hrtimer_is_queued(&ctx->retention_timer))) {
+					ctx->retain_timer_arms++;
+					hrtimer_start(&ctx->retention_timer,
+						ns_to_ktime(swapz_retention_deadline_ns(ctx)),
+						HRTIMER_MODE_ABS);
+				} else {
+					ctx->retain_timer_arm_skips++;
 				}
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-							wall_start_ns);
+				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->ordered_worker_cpu_ns,
+						 cpu_start_ns);
 				return;
 			}
 			if (ctx->batch_count && !ctx->accepting) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				ctx->next_window_close = SWAPZ_CLOSE_SHUTDOWN;
 				swapz_flush_window(ctx);
-				swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-							wall_start_ns);
+				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->ordered_worker_cpu_ns,
+						 cpu_start_ns);
 				return;
 			}
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-						wall_start_ns);
+			swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+					 wall_start_ns,
+					 &ctx->ordered_worker_cpu_ns,
+					 cpu_start_ns);
 			return;
 		}
 		if (ctx->accepting) {
@@ -3654,8 +3680,10 @@ static void swapz_worker(struct work_struct *work)
 			ctx->worker_requeues++;
 			mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			swapz_account_worker_wall(&ctx->ordered_worker_wall_ns,
-						wall_start_ns);
+			swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+					 wall_start_ns,
+					 &ctx->ordered_worker_cpu_ns,
+					 cpu_start_ns);
 			return;
 		}
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -4297,14 +4325,16 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "win1_pack_tail_target=%llu win1_pack_read_bypass=%llu "
 		       "win1_pack_wave_interrupted=%llu "
 		       "single_tail_deferrals=%llu single_tail_companions=%llu "
-		       "single_tail_age_cutoff_closes=%llu "
-		       "single_tail_cutoff_late_companions=%llu "
 		       "win1_deadline_deferred_tail=%llu "
 		       "win1_idle_deferred_tail=%llu single_tail_other_clears=%llu "
 		       "single_tail_comp_age_le250us=%llu "
 		       "single_tail_comp_age_251_500us=%llu "
 		       "single_tail_comp_age_501_1000us=%llu "
 		       "single_tail_comp_age_gt1000us=%llu "
+		       "single_tail_comp_age_1001_1250us=%llu "
+		       "single_tail_comp_age_1251_1500us=%llu "
+		       "single_tail_comp_age_1501_1750us=%llu "
+		       "single_tail_comp_age_gt1750us=%llu "
 		       "single_tail_deadline_age_le250us=%llu "
 		       "single_tail_deadline_age_251_500us=%llu "
 		       "single_tail_deadline_age_501_1000us=%llu "
@@ -4348,13 +4378,18 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "read_engine_nonio_wall_ns=%llu "
 		       "lower_read_wall_ns=%llu lower_write_wall_ns=%llu "
 		       "ordered_worker_wall_ns=%llu prep_worker_wall_ns=%llu "
+		       "ordered_worker_cpu_ns=%llu prep_worker_cpu_ns=%llu "
+		       "read_worker_cpu_ns=%llu "
 		       "write_wait_le1ms=%llu write_wait_1to4ms=%llu "
 		       "write_wait_gt4ms=%llu gc_wall_ns=%llu "
 		       "close_deadline=%llu "
 		       "deadline_before_bio=%llu deadline_after_read=%llu "
 		       "deadline_worker_with_local=%llu deadline_worker_empty=%llu "
 		       "retained_read_bypasses=%llu "
-		       "close_pack_ready=%llu packed_early_commits=%llu "
+		       "close_pack_ready=%llu "
+		       "pack_close_tail_target=%llu pack_close_tail_target_le4=%llu "
+		       "pack_close_burst_target=%llu pack_close_service_dry=%llu "
+		       "packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
 		       "retained_burst_target=%u "
@@ -4446,8 +4481,6 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->win1_pack_wave_interrupted,
 		       ctx->single_tail_deferrals,
 		       ctx->single_tail_companions,
-		       ctx->single_tail_age_cutoff_closes,
-		       ctx->single_tail_cutoff_late_companions,
 		       ctx->win1_deadline_deferred_tail,
 		       ctx->win1_idle_deferred_tail,
 		       ctx->single_tail_other_clears,
@@ -4455,6 +4488,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->single_tail_companion_age_251_500us,
 		       ctx->single_tail_companion_age_501_1000us,
 		       ctx->single_tail_companion_age_gt1000us,
+		       ctx->single_tail_companion_age_1001_1250us,
+		       ctx->single_tail_companion_age_1251_1500us,
+		       ctx->single_tail_companion_age_1501_1750us,
+		       ctx->single_tail_companion_age_gt1750us,
 		       ctx->single_tail_deadline_age_le250us,
 		       ctx->single_tail_deadline_age_251_500us,
 		       ctx->single_tail_deadline_age_501_1000us,
@@ -4510,6 +4547,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->lower_read_wall_ns, ctx->lower_write_wall_ns,
 		       ctx->ordered_worker_wall_ns,
 		       ctx->preparation_worker_wall_ns,
+		       ctx->ordered_worker_cpu_ns,
+		       ctx->preparation_worker_cpu_ns,
+		       ctx->read_worker_cpu_ns,
 		       ctx->write_wait_le_1ms, ctx->write_wait_1_to_4ms,
 		       ctx->write_wait_gt_4ms, ctx->gc_wall_ns,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_DEADLINE],
@@ -4517,6 +4557,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->deadline_worker_with_local, ctx->deadline_worker_empty,
 		       ctx->retained_read_bypasses,
 		       ctx->window_close_reasons[SWAPZ_CLOSE_PACK_READY],
+		       ctx->pack_close_tail_target,
+		       ctx->pack_close_tail_target_le4,
+		       ctx->pack_close_burst_target,
+		       ctx->pack_close_service_dry,
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,
