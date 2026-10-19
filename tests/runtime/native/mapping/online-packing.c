@@ -26,6 +26,8 @@ static swapz_u8 scratch_write[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_read[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_metadata_cache[
 	SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES];
+static swapz_u8 scratch_extent_cache[
+	SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 originals[64][2072];
 
 struct memory_disk {
@@ -357,6 +359,122 @@ static int test_four_block_extent_reuses_each_payload_block_once(void)
 	return 0;
 }
 
+static int test_extent_lru_reuses_eight_interleaved_extents(void)
+{
+	struct swapz_compressed_page pages[56];
+	swapz_u8 output[3568], committed;
+	swapz_u16 length = 0;
+	swapz_u32 extent, record, start;
+
+	CHECK(setup() == 0);
+	memset(scratch_metadata_cache, 0, sizeof(scratch_metadata_cache));
+	memset(scratch_extent_cache, 0, sizeof(scratch_extent_cache));
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.read_extent_cache = scratch_extent_cache;
+	engine.max_read_blocks_per_record = 0;
+	prepare(pages, 56, 0, 0);
+	for (extent = 0; extent < 8; ++extent) {
+		committed = 0;
+		CHECK(write_window_sequential(pages + extent * 7U, 7,
+					      &committed) == 0);
+		CHECK(committed == 7);
+		start = maps[extent * 7U].start_block;
+		for (record = 0; record < 7; ++record) {
+			CHECK(maps[extent * 7U + record].start_block == start);
+			CHECK(maps[extent * 7U + record].extent_blocks == 4);
+		}
+	}
+
+	disk.read_blocks = 0;
+	memset(disk.read_block_hits, 0, sizeof(disk.read_block_hits));
+	swapz_engine_invalidate_read_cache(&engine);
+	for (record = 0; record < 7; ++record)
+		for (extent = 0; extent < 8; ++extent) {
+			swapz_u32 logical = extent * 7U + record;
+
+			CHECK(swapz_engine_read_page(&engine, logical, output,
+						   sizeof(output), &length) == 0);
+			CHECK(length == 2072);
+			CHECK(!memcmp(output, originals[logical], length));
+		}
+	CHECK(disk.read_blocks == 8U * 4U);
+	for (extent = 0; extent < 8; ++extent) {
+		start = maps[extent * 7U].start_block;
+		for (record = 0; record < 4; ++record)
+			CHECK(disk.read_block_hits[start + record] == 1);
+	}
+	CHECK(engine.read_extent_lru_clock != 0);
+	swapz_engine_invalidate_read_cache(&engine);
+	CHECK(engine.read_extent_lru_clock == 0);
+	for (extent = 0; extent < SWAPZ_READ_EXTENT_CACHE_ENTRIES; ++extent)
+		CHECK(engine.read_extent_lru_valid[extent] == 0);
+	return 0;
+}
+
+static int test_prime_absorb_preserves_shared_read_residency(void)
+{
+	struct swapz_compressed_page pages[7];
+	struct swapz_engine slot, probe;
+	swapz_u8 slot_scratch[SWAPZ_MAX_EXTENT_BYTES];
+	swapz_u8 probe_scratch[SWAPZ_MAX_EXTENT_BYTES];
+	swapz_u8 output[3568], committed = 0;
+	swapz_u16 length = 0;
+	swapz_u32 start;
+	swapz_u8 slot_mask;
+	swapz_u8 *saved_extent_cache;
+
+	CHECK(setup() == 0);
+	memset(scratch_metadata_cache, 0, sizeof(scratch_metadata_cache));
+	memset(scratch_extent_cache, 0, sizeof(scratch_extent_cache));
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.read_extent_cache = scratch_extent_cache;
+	engine.max_read_blocks_per_record = 0;
+	prepare(pages, 7, 0, 0);
+	CHECK(write_window_sequential(pages, 7, &committed) == 0);
+	CHECK(committed == 7);
+	start = maps[0].start_block;
+	CHECK(swapz_engine_read_page(&engine, 0, output,
+				     sizeof(output), &length) == 0);
+
+	memset(&slot, 0, sizeof(slot));
+	memset(slot_scratch, 0, sizeof(slot_scratch));
+	slot.authority = &authority;
+	slot.io.opaque = &disk;
+	slot.io.read_blocks = lower_read;
+	slot.max_read_blocks_per_record = 0;
+	slot.read_scratch = slot_scratch;
+	swapz_engine_prime_read_slot(&engine, &slot, start, 4);
+	CHECK(slot.read_cache_valid == 1);
+	CHECK(slot.read_cached_start_block == start);
+	CHECK(slot.read_cached_extent_blocks == 4);
+	CHECK(slot.read_cached_block_mask != 0);
+	CHECK(swapz_engine_read_page(&slot, 1, output,
+				     sizeof(output), &length) == 0);
+	slot_mask = slot.read_cached_block_mask;
+	CHECK(slot_mask != 0);
+	swapz_engine_absorb_read_slot(&engine, &slot);
+
+	memset(&probe, 0, sizeof(probe));
+	memset(probe_scratch, 0, sizeof(probe_scratch));
+	probe.read_scratch = probe_scratch;
+	swapz_engine_prime_read_slot(&engine, &probe, start, 4);
+	CHECK(probe.read_cache_valid == 1);
+	CHECK((probe.read_cached_block_mask & slot_mask) == slot_mask);
+
+	/* Absorb also publishes block zero into the master's metadata LRU. */
+	saved_extent_cache = engine.read_extent_cache;
+	engine.read_extent_cache = NULL;
+	engine.read_cache_valid = 0;
+	memset(&probe, 0, sizeof(probe));
+	memset(probe_scratch, 0, sizeof(probe_scratch));
+	probe.read_scratch = probe_scratch;
+	swapz_engine_prime_read_slot(&engine, &probe, start, 4);
+	CHECK(probe.read_cache_valid == 1);
+	CHECK(probe.read_cached_block_mask == 1U);
+	engine.read_extent_cache = saved_extent_cache;
+	return 0;
+}
+
 static int test_full_extent_corruption_rejected(void)
 {
 	struct swapz_compressed_page pages[7];
@@ -605,6 +723,8 @@ int main(void)
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
 	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;
+	CHECK(test_extent_lru_reuses_eight_interleaved_extents() == 0); completed++;
+	CHECK(test_prime_absorb_preserves_shared_read_residency() == 0); completed++;
 	CHECK(test_full_extent_corruption_rejected() == 0); completed++;
 	CHECK(test_torn_extent_quarantined_without_authority() == 0); completed++;
 	CHECK(test_failure_second_extent_reports_prefix() == 0); completed++;

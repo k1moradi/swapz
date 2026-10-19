@@ -8,76 +8,60 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner qualification of `89fe7116b8800b417b351f32a7305b3ed7abd261`
-passed all five stages; the canonical report was published as report-only commit
-`179c66b8fa975677f6426de5ebc511ad72d608ef`. These remain owned-RAM
-`null_blk` synthetic models, not physical-media claims.
+Owner qualification of `bd3f5886b61a28667585ce13032f8e83065dce85`
+passed all five stages; report-only commit
+`571d99e69adfb2462e0047e155ea1e3022119908` is the canonical result. These
+remain owned-RAM `null_blk` synthetic models, not physical-media claims.
 
-The timed-boundary correction removed prefill, warmup and packed-read population
-from scheduling evidence. On the serial-depth slow model, measured mixed QD32
-now has zero one-page PACK_READY closes, zero one-page deadline closes and zero
-worker-empty deadlines. Its async useful WRITE remains 7.05 MB/s versus 2.68
-raw while lower WRITE requests fall from 12301 to about 544.5. The product gain
-therefore remains compression/global aggregation, not extra WRITE concurrency.
+The naive private-slot Kread=2 experiment answered the concurrency question but
+failed the efficiency gate. Fast mixed lower READ peak rose from one to 2.0 and
+fast packed random p99 improved to 3.58 ms, but packed lower traffic increased
+materially: slow sequential/random became 4446/6546 KiB and 635.5/1017.5
+requests; fast became 4916/6388 KiB and 738.5/1011 requests. The depth-one model
+therefore regressed badly, and the fast latency win was bought with unacceptable
+physical read amplification. That implementation is rejected.
 
-The faster depth-64 model reaches 22.32 MB/s async WRITE versus 21.78 sync and
-19.24 raw. Async remains NO_SIGNIFICANT_ASYNC_GAIN versus sync and uses about
-932.5 lower WRITE requests versus 853.5 sync. K=1 slot occupancy remains about
-0.09 of mixed wall. Write-only QD8 still has a positive but directional +12.3%
-async/sync signal; QD1 is -10.1%, QD4 -1.0% and QD32 +1.6%. No K>1 WRITE work
-is justified before repeated matched pairs.
+The cause is architectural rather than evidence against READ concurrency itself:
+private slots had no 512-entry metadata cache, shared no multi-extent residency
+with the master, and coalesced only immediately adjacent siblings. The next ID39
+candidate keeps one shared ordered-owner cache (512 metadata blocks plus 16
+multi-block extents), primes private slots before dispatch, absorbs validated
+residency after join, groups siblings across the already-admitted independent
+READ prefix, and disables the slot path entirely when backing `nr_requests == 1`.
 
-Clean timed telemetry exposes a model-specific retained-window issue rather than
-a global one. Faster mixed QD32 records about 89 one-page PACK_READY closes,
-29.8 one-page deadline closes and 50.2 worker-empty deadlines per pair, while
-the serial model records zero for all three. The next instrumentation attributes
-every one-page PACK_READY close to sampled tail, retained read-bypass or wave-
-interruption evidence before any closure policy changes.
+ID48 is now answered. Fast mixed one-page PACK_READY attribution is about
+79.8 tail-target / 17.8 read-bypass / 0 wave-interruption per pair: sampled
+one-record tails dominate, so the earlier read-bypass-focused closure hypothesis
+is refuted. Keep closure policy unchanged while the read baseline is repaired,
+then remeasure the same attribution before changing tail sampling.
 
-The 4-block payload-residency cache is owner-qualified and retained. Slow packed
-sequential reads are 3056 KiB / 457.5 lower requests with 16.85 ms p99 and
-random reads 2528 KiB / 632 requests with 22.79 ms p99; both beat raw latency.
-Fast packed reads still report NOT_FASTER despite lower bytes/requests: sequential
-3358 KiB / 548.5 requests / 5.01 ms p99 and random 2480 KiB / 620 requests /
-5.22 ms p99. Raw fast READ depth reaches about 3.8 while swapz remains at one,
-so bounded latency-first READ parallelism is the next concurrency experiment.
+ID12 is also narrowed. Snapshot CRC totals about 3.5 ms slow / 2.2 ms fast, but
+pause contributes only 1.8/1.0 ms outside publish; resume is 1.7/1.2 ms already
+inside publication. Residual after subtracting pause remains about 9.0/5.8 ms.
+Keep full-`struct swapz_tx` hashing and attribute the remaining residual before
+any hash-scope experiment.
 
-Snapshot CRC attribution is now measurable but still combines two accounting
-regions: total pause+resume snapshot CRC is about 3.3 ms slow / 2.4 ms fast;
-pause belongs to commit residual while resume is already inside publish. The
-next source splits those two counters while preserving the exact full-
-`struct swapz_tx` hash. No active-prefix hash change is qualified yet.
-
-Loaded live GC again passes with 20 victims, 20 rotations, 20 distinct victim
-segments, 1/1 min/max evictions and byte-exact verification of all 4096 logical
-pages. The rejected bound-worker, overlap-as-objective, grace-timer, freeze-
-then-compress and iterator-side `nth_page()` experiments remain rejected.
+WRITE evidence remains directional. Slow mixed async is 7.00 MB/s versus 6.95
+sync and 2.68 raw with about 545.5 lower requests. Fast mixed async is 24.36
+versus 24.51 sync and 19.94 raw, so async/sync is still not a qualified gain.
+Fast write-only QD8 is +29.8% async/sync in one pair, while QD1/QD4/QD32 are
++5.9/+3.4/+2.4%; >=5 matched pairs remain mandatory before policy promotion.
+Live GC, suspend/resume and fail-closed fault qualification remain green.
 
 ## Current bottleneck ranking
 
-These wall counters overlap and must not be added as if they formed one serial
-timeline. The table ranks measured mixed-WRITE cost/importance from the
-`89fe711...` owner run, not an additive runtime budget. Snapshot CRC pause and
-resume are not yet separately measured in this baseline.
+These overlapping wall counters are diagnostic, not additive. From the
+`bd3f588...` mixed run, lower WRITE remains the largest measured WRITE-path
+wall (605.2 ms slow / 183.2 ms fast), LZ4 preparation is 142.9/76.3 ms, and
+commit non-I/O is 56.2/35.7 ms. Snapshot pause CRC explains only 1.8/1.0 ms;
+the residual after that subtraction is still 9.0/5.8 ms. Planner and explicit
+copy costs remain secondary.
 
-| Rank | Serial-depth slow model | Wall | Parallel-depth fast model | Wall | Interpretation |
-|---:|---|---:|---|---:|---|
-| 1 | Lower WRITE wall | **603.5 ms** | Lower WRITE wall | **185.5 ms** | Dominant measured WRITE-path wall; K=1 occupancy is still shallow. |
-| 2 | LZ4 preparation | **141.3 ms** | LZ4 preparation | **79.6 ms** | Largest CPU preparation phase. |
-| 3 | Commit non-I/O total | **54.4 ms** | Commit non-I/O total | **40.3 ms** | Serialized CPU/control envelope. |
-| 4 | Publish total | **22.8 ms** | Publish total | **18.1 ms** | Includes resume snapshot CRC plus finish/publication work. |
-| 5 | Pack | **15.0 ms** | Pack | **10.0 ms** | Material but below LZ4/lower I/O. |
-| 6 | Payload CRC during preparation | **14.8 ms** | Publish authority/liveness | **9.1 ms** | Integrity/control work remains secondary. |
-| 7 | Final-image publish CRC | **12.0 ms** | Final-image publish CRC | **9.0 ms** | Mandatory final immutable-image integrity boundary. |
-| 8 | Publish authority/liveness | **10.8 ms** | Payload CRC during preparation | **8.3 ms** | Authority includes resume snapshot hashing in this baseline. |
-| 9 | Commit residual before pause split | **10.2 ms** | Commit residual before pause split | **7.7 ms** | Contains pause snapshot CRC plus other stage/control work; the candidate splits it. |
-| 10 | Planner | **6.4 ms** | Planner | **4.6 ms** | Not a planner-rewrite target. |
-| 11 | Explicit RAM copies | **5.0 ms** | Explicit RAM copies | **3.5 ms** | Too small to justify complex copy/DMA work. |
-
-Packed READ lower wall remains dominant over CPU: about 487.7/672.3 ms slow
-sequential/random versus 7.1/7.8 ms engine non-I/O, and 105.1/119.1 ms fast
-versus 6.2/6.7 ms engine non-I/O. Fast raw READs reach sampled depth about 3.8
-while swapz remains at one; Kread=2 is intended to test that queue-depth gap.
+READ evidence is more decisive: the naive Kread=2 path raised fast lower READ
+depth to 2 but increased lower traffic up to ~1.6x. The next READ experiment
+must preserve cache locality while retaining depth; additional WRITE slots are
+still unsupported because K=1 occupancy is only about 0.10 and preparation
+backlog remains shallow.
 
 ## Optimization evidence table
 
@@ -102,10 +86,10 @@ changes.
 | 9 | Precompute payload CRC during preparation | **1** | Qualified; keep. |
 | 10 | Validate immutable metadata once during finish | **1** | Qualified; keep. |
 | 11 | Split final-image publish CRC from authority/liveness | **1 completed measurement** | Reconfirmed: final CRC is 12.0/22.1 ms slow and 8.8/17.2 ms fast. It is a major publish subphase, not the global bottleneck. |
-| 12 | Split stage/pause hash/hole-clear/control residual | **4 instrumentation refined pending owner evidence** | Total snapshot CRC is ~3.3/2.4 ms but crosses accounting regions. Pause and resume now have separate timers while the full-struct hash remains unchanged; only pause may be reconciled out of commit residual. |
+| 12 | Split stage/pause hash/hole-clear/control residual | **4 attribution continues** | Pause/resume split answered the snapshot question: pause is only ~1.8/1.0 ms, leaving ~9.0/5.8 ms residual after subtraction. Keep full-transaction hashing and split the remaining residual before optimizing. |
 | 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
 | 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. |
-| 15 | >=5 counterbalanced pairs for mixed/QD points | **6** | Decisive WRITE-policy gate: mixed still has two pairs/mode and write-only one pair/QD. Fast QD8 is +12.3% async/sync while QD1 is -10.1%; do not promote a QD-sensitive policy without confidence intervals. |
+| 15 | >=5 counterbalanced pairs for mixed/QD points | **6** | Decisive WRITE-policy gate. Fast QD8 is +29.8% async/sync in the latest one-pair pilot and other QDs are positive, but fast mixed async remains slightly below sync. Repeat >=5 matched pairs before policy promotion. |
 | 16 | N=2/4 preparation workers in old single-credit design | **5** | Refuted as formulated. |
 | 17 | Pointer handoff solely to remove current copies | **5** | Reconfirmed: explicit copies are only ~5.1 ms slow / 3.5 ms fast. |
 | 18 | Rewrite bounded DP planner | **5** | Reconfirmed: planner is ~6.3 ms slow / 4.4 ms fast and is not dominant. |
@@ -127,9 +111,9 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **4 conditional** | Serial mixed is neutral and fast mixed is only +2.5% while using more lower requests than sync. Fast write-only QD8 remains +12.3%, but QD1/QD4 regress. Keep opt-in pending >=5 matched pairs. |
+| 37 | K=1 ping-pong WRITE pipeline | **4 conditional** | Latest fast write-only QD8 is +29.8% and all write-only QDs are directionally positive, but fast mixed async is 24.36 vs 24.51 sync and evidence remains one pair/QD. Keep opt-in pending >=5 matched pairs. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Stronger hold. Serial hwq=1 has no parallel service slot. Fast hwq=64 has capacity, but K=1 run occupancy is only ~0.09 and preparation backlog is shallow; there is no sustained ready-run pressure for K>1 yet. |
-| 39 | Latency-first bounded parallel READ service | **4 implemented pending owner evidence** | Duplicate-I/O baseline is now qualified. Production adds exactly Kread=2 with private slot engines/scratch, same-extent residency reuse, strict dependency gates, immediate service and ordered-owner join/merge. Fast raw reaches READ depth ~3.8 while swapz baseline is 1; slow hwq=1 must not regress. |
+| 39 | Latency-first bounded parallel READ service | **4 revised experiment implemented; naive form rejected** | `bd3f588...` proved depth-2 latency potential but failed lower-I/O/serial gates because private slots fragmented caches. Revised candidate gates depth-one media off, adds a 16-slot ordered-owner extent cache, primes/absorbs private slots, and groups same-extent followers across the ready independent-READ prefix. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
@@ -138,7 +122,7 @@ changes.
 | 45 | 4-block extent payload block-residency cache | **1** | Owner-qualified; keep. Slow packed sequential p99 improved to 16.85 ms with 3056 KiB / 457.5 lower requests, and native C proves each block of a seven-record 16KiB extent is fetched at most once before invalidation. |
 | 46 | Timed-interval scheduling telemetry hygiene | **1 completed measurement** | Qualified. Mixed/write-only scheduling conclusions now use kernel snapshots strictly around measured waves; full-process prefill/warmup counters are not evidence. |
 | 47 | Explicit ordering-boundary singleton reset | **1** | Qualified correctness/measurement hygiene. PREFLUSH/FUA/discard/shutdown/other reset learned singleton state, including empty fsync PREFLUSH; ordinary idle/deadline closes do not. |
-| 48 | Fast mixed one-page PACK_READY cause attribution | **4 instrumentation implemented pending owner evidence** | Faster mixed has ~89 timed one-page PACK_READY closes while slow has zero. Attribute every close mutually exclusively to sampled tail, retained read-bypass or wave interruption before changing closure policy. |
+| 48 | Fast mixed one-page PACK_READY cause attribution | **1 completed measurement** | Latest fast mixed split is ~79.8 tail-target / 17.8 read-bypass / 0 wave-interruption. Tail sampling dominates; the earlier read-bypass-focused root cause is refuted. Preserve counters for one repaired-read-baseline confirmation before changing policy. |
 
 ## What the pinned queue experiment establishes
 
@@ -186,23 +170,21 @@ before any on-disk-format change.
 
 ## Immediate work queue
 
-1. Owner-qualify bounded Kread=2. Require fast lower READ peak/depth and packed-read
-   p99/useful throughput to improve without increased lower bytes/requests; the
-   serial hwq=1 model must not regress. Same-extent pairs should demonstrate
-   private-slot residency reuse.
-2. Read the new ID 48 split. Do not change `swapz_retained_pack_close_ready()`
-   unless one measured cause dominates the fast-model singleton PACK_READY
-   population and a surgical change preserves write-only QD4/QD8/QD32 geometry.
-3. Read the ID 12 pause/resume split. Reconcile only pause CRC out of commit
-   residual. Keep full-transaction hashing until a separately reviewed active-
-   prefix experiment is justified by the pause-side cost.
-4. Run >=5 counterbalanced matched pairs for fast mixed QD32 and write-only
-   QD1/QD8 before promoting or deleting K=1 WRITE scheduling.
-5. Keep K=1 WRITE ping-pong opt-in and do not add K=2/4/8 lower-WRITE slots.
-6. Add trustworthy kernel-worker on-CPU attribution before multi-worker or CPU-
-   topology changes.
-7. Run the bounded owned-RAM dead-segment DISCARD/TRIM experiment, then the
-   huge/compound-page coverage and heavy-CPU/low-RAM gates.
+1. Owner-qualify the cache-coherent, queue-gated ID39 revision. Depth-one must
+   use zero parallel batches and recover the serialized packed-read baseline;
+   depth-64 should retain READ peak >1 without increasing lower bytes/requests
+   versus the qualified `89fe711...` cache baseline.
+2. Re-read ID48 on that repaired READ baseline. Do not change PACK_READY policy
+   yet. If tail-target still dominates, instrument/adjust tail sampling rather
+   than the minority read-bypass branch.
+3. Split the remaining ID12 9.0/5.8 ms residual into stage/control/hole-clear/
+   allocation-validation buckets; keep full transaction snapshot hashing.
+4. Run >=5 counterbalanced fast write-only QD8 pairs plus QD1 and mixed-QD32
+   controls before promoting/deleting K=1 WRITE scheduling.
+5. Collect trustworthy kernel-worker on-CPU attribution before N=2 preparation
+   workers or CPU-topology changes; keep K>1 lower-WRITE slots rejected.
+6. Then run bounded owned-RAM dead-segment DISCARD/TRIM, huge/compound-page
+   coverage and heavy-CPU/low-RAM qualification.
 
 ## NUMA / deployment topology
 

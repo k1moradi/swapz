@@ -53,37 +53,39 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-At owner-qualified source `89fe7116b8800b417b351f32a7305b3ed7abd261`
-(report-only commit `179c66b8fa975677f6426de5ebc511ad72d608ef`):
+Owner-qualified source `bd3f5886b61a28667585ce13032f8e83065dce85`
+(report-only `571d99e69adfb2462e0047e155ea1e3022119908`) confirms that the
+first Kread=2 implementation is not retainable as a performance policy.
 
-- serial-depth mixed async reaches 7.05 MB/s WRITE versus 7.03 sync and 2.68
-  raw, with about 544.5 lower WRITE requests versus 12301 raw;
-- faster-depth mixed async reaches 22.32 MB/s versus 21.78 sync and 19.24 raw,
-  with 932.5 lower WRITE requests versus 853.5 sync;
-- clean timed slow mixed has 0 one-page PACK_READY, 0 one-page deadline and 0
-  worker-empty deadline closes; fast mixed has about 89 / 29.8 / 50.2;
-- slow packed sequential/random p99 is 16.85/22.79 ms and qualifies FASTER;
-  fast packed sequential/random p99 is 5.01/5.22 ms but the official packed
-  verdict remains NOT_FASTER;
-- fast raw lower READ peak reaches about 3.8 while swapz remains at 1, making
-  bounded READ parallelism the next concurrency experiment;
-- batch snapshot CRC totals about 3.3 ms slow / 2.4 ms fast, but pause belongs
-  outside publish while resume is already inside publish authority.
+It achieved the intended fast lower READ depth of 2 and reduced fast packed
+random p99 to 3.58 ms, but cache fragmentation increased physical READ work.
+Relative to the qualified pre-Kread cache baseline, slow sequential/random
+lower traffic rose to 4446/6546 KiB and 635.5/1017.5 requests; fast rose to
+4916/6388 KiB and 738.5/1011 requests. The serial model therefore regressed and
+the fast latency win violates the endurance-first lower-I/O gate.
 
-The current candidate therefore adds exactly Kread=2 for already-admitted safe
-READ pairs. One helper read slot and the ordered worker use independent engine
-state and scratch; the ordered owner joins both before merging counters or
-completing BIOs. Same-extent siblings stay on one private slot to preserve block
-residency. There is no read fill delay and no second mapping/publication owner.
-The source also splits pause/resume snapshot-CRC attribution and classifies each
-one-page PACK_READY close without changing either hash coverage or retained-
-window policy.
+The next candidate keeps one shared ordered-owner cache: the existing 512-entry
+metadata LRU plus a fixed 16-entry (256KiB) multi-block extent cache. Private
+read slots are primed from that cache before dispatch and absorbed only after a
+successful join. The worker scans only the already-admitted independent READ
+prefix, selects at most two physical extents and groups all siblings for those
+extents. No write/barrier/dependency is crossed and no future-arrival wait is
+introduced. Backing queues with `nr_requests == 1` bypass the slot path entirely
+and use the original serialized reader.
 
-Lower READ wall for two parallel slots is reported as summed per-slot busy wall
-and may overlap in elapsed time; lower-device in-flight telemetry is the proof
-of achieved concurrency. Owner qualification must therefore judge useful read
-latency/throughput together with lower bytes/requests and sampled lower depth,
-not by subtracting summed busy-wall counters as if they were serial.
+The same owner run completed two attribution questions without policy changes.
+One-page PACK_READY causes are about 79.8 sampled-tail / 17.8 read-bypass / 0
+wave-interruption on the fast model, so tail sampling—not the read-bypass branch
+—is the dominant next scheduling question. Snapshot CRC is 3.5/2.2 ms total
+slow/fast, but pause is only 1.8/1.0 ms; residual after pause remains 9.0/5.8 ms,
+so full-transaction hashing stays unchanged.
+
+For the revised Kread experiment, success requires simultaneous latency and I/O
+efficiency: depth-one results must recover the serialized baseline; depth-64
+must show lower READ peak >1 and better useful packed-read latency without a
+material increase in sequential or random lower bytes/requests versus the
+`89fe711...` cache baseline. Summed slot busy wall may overlap and is not an
+elapsed-time concurrency metric.
 
 ## Confirmation gate
 

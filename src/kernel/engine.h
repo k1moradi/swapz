@@ -4,6 +4,7 @@
 #include "authority.h"
 #define SWAPZ_BULK_BLOCKS 64U
 #define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U
+#define SWAPZ_READ_EXTENT_CACHE_ENTRIES 16U
 #define SWAPZ_PARALLEL_READ_SLOTS 2U
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
@@ -146,6 +147,16 @@ struct swapz_engine {
 	swapz_u8 read_metadata_lru_valid[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u32 read_metadata_lru_clock;
 	swapz_u32 read_metadata_lru_hits;
+	/* Ordered-owner shared extent residency. Each fixed slot stores only
+	 * blocks proven fetched for one immutable 4/8/16KiB extent. Helpers are
+	 * primed from this cache before dispatch and absorbed only after join. */
+	swapz_u8 *read_extent_cache; /* entries * SWAPZ_MAX_EXTENT_BYTES */
+	swapz_u32 read_extent_lru_start_blocks[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
+	swapz_u32 read_extent_lru_ages[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
+	swapz_u8 read_extent_lru_extent_blocks[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
+	swapz_u8 read_extent_lru_block_masks[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
+	swapz_u8 read_extent_lru_valid[SWAPZ_READ_EXTENT_CACHE_ENTRIES];
+	swapz_u32 read_extent_lru_clock;
 	/* Lower callbacks, not block-queue requests; byte deltas are independent. */
 	swapz_u32 read_full_extent_requests;
 	swapz_u32 read_full_extent_cache_hits;
@@ -204,6 +215,14 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine);
  * and authority pointers are intentionally not transferred. */
 void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
 				       struct swapz_engine *source);
+/* Ordered-owner cache synchronization for private read engines. Neither helper
+ * performs lower I/O or changes mapping authority. */
+void swapz_engine_prime_read_slot(const struct swapz_engine *master,
+				  struct swapz_engine *slot,
+				  swapz_u32 start_block,
+				  swapz_u8 extent_blocks);
+void swapz_engine_absorb_read_slot(struct swapz_engine *master,
+				   struct swapz_engine *slot);
 /* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
 int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			 swapz_u8 *payload, swapz_u16 payload_capacity,

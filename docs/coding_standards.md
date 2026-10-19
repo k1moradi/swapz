@@ -582,24 +582,35 @@ fence.
 
 ### Bounded parallel READ ownership
 
-Parallel READ service is capped at `SWAPZ_PARALLEL_READ_SLOTS == 2`. It is an
-I/O-latency experiment, not a second authority. The ordered worker remains the
-sole owner of mapping mutation, retained-window state, global accounting and
-upper-BIO completion. A helper may only execute a read already proven independent
-of collector/in-flight generations, using its own `struct swapz_engine`, 16KiB
-read scratch, compressed buffer and output page. Helper lower-I/O callbacks
-write only slot-local counters; the ordered owner joins before merging them.
+Parallel READ service is capped at `SWAPZ_PARALLEL_READ_SLOTS == 2` and is
+eligible only when the backing blk-mq queue exposes request depth greater than
+one. This is a bounded queue-capacity gate, not a generic device-speed
+classifier. A depth-one backing path must use the original serialized reader
+with no read-slot workqueue or slot allocation.
 
-Never share mutable engine read-cache fields between concurrently executing read
-slots. Same-extent siblings must use one private slot so validated block
-residency can be reused rather than duplicated. Different extents may occupy the
-two slots concurrently. There is no grace interval, fill timer or future-arrival
-wait: a lone READ keeps the existing immediate path. Any write, discard, GC
-mutation or ordering barrier invalidates the main read cache and every private
-slot cache before reuse.
+The ordered worker remains the sole mapping, cache-publication, retained-window,
+global-accounting and upper-BIO completion owner. The master engine owns the
+512-entry metadata LRU and a 16-entry immutable extent-residency cache. Read
+helpers have private engine state/scratch only. Before dispatch the ordered
+worker may prime a helper from master residency; after join it may absorb only
+successfully validated helper residency and telemetry. Helpers never mutate
+shared cache state, authority or upper BIO completion.
 
-A concurrent read failure fails closed through the ordered owner. The helper
-must not stage/finish transactions, publish maps or call `bio_endio`. Teardown
-closes admission and drains both the ordered and read workqueues before freeing
-slot scratch. Read busy-wall counters from parallel slots are sums of overlapping
-slot time and must not be interpreted as elapsed serial wall.
+Within one already-admitted contiguous independent-READ prefix, the ordered
+worker may select at most two physical extents and collect all siblings for
+those extents. It may reorder only across earlier BIOs that are themselves
+independent READs; the first write, barrier or dependent READ ends the scan.
+There is no grace interval, fill timer, spin, sleep or wait for future arrivals.
+A lone eligible READ keeps the existing immediate serialized path.
+
+The shared extent cache is fixed at 16 * 16KiB = 256KiB per target. Each slot
+stores only blocks proven fetched for one immutable extent, with an exact block
+mask. The 512-entry metadata LRU remains the block-zero fallback. Every
+write/GC/discard/barrier mutation fence invalidates the master one-extent cache,
+metadata LRU, shared extent cache and private-slot residency before authority
+changes. Cache reuse never skips generation/descriptor/payload CRC validation.
+
+A concurrent read failure fails closed through the ordered owner. Teardown
+closes admission and drains read work before freeing scratch. Parallel-slot
+lower READ wall is a sum of overlapping busy intervals and is not elapsed pair
+wall; lower in-flight depth plus end-to-end latency/traffic remain the evidence.

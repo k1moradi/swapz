@@ -655,29 +655,37 @@ until owner evidence identifies a dominant cause.
 
 ### Bounded Kread=2 qualification
 
-Source coverage must prove exactly two bounded read slots, private read-engine
-scratch/state, a one-active-helper `WQ_MEM_RECLAIM | WQ_UNBOUND` queue, and no
-helper-side mapping mutation or upper-BIO completion. Direct production-C
-coverage must exercise private read-telemetry merge and prove that transferring
-counters does not invalidate private extent residency.
+The owner-qualified `bd3f5886b61a...` implementation is a rejected
+implementation of the latency-first READ idea: it raised fast lower READ peak
+to 2 and improved fast random p99, but fragmented metadata/extent residency and
+increased lower READ bytes/requests by roughly 35-159%, including a severe
+serial-depth regression. A faster latency result that spends substantially more
+physical I/O fails the endurance-first acceptance gate.
 
-Loaded acceptance requires byte-exact output, unchanged dependency/barrier and
-fail-closed behavior, no material increase in lower READ bytes/requests, and no
-serial-depth regression. On the fast model, lower in-flight READ telemetry must
-show whether the candidate actually raises service depth above the prior peak
-of one; packed-read p99/useful throughput must improve if the experiment is to
-be retained. Same-extent pair counters may demonstrate residency reuse but are
-not a performance verdict by themselves. A lone READ must never wait for a
-second read.
+The revised experiment must prove exactly two bounded slots, queue-depth gating
+through the backing request queue, no slot allocation/workqueue at depth one,
+private helper engine state, and ordered-owner-only shared cache mutation. Direct
+production-C coverage must prove a 16-entry extent cache retains eight
+interleaved four-block extents without duplicate block reads, and that
+`swapz_engine_prime_read_slot()` / `swapz_engine_absorb_read_slot()` preserve
+extent residency plus metadata-LRU reuse across helper execution.
 
-Because two synchronous slot callbacks can overlap, reported lower READ wall is
-the sum of slot busy intervals, not necessarily elapsed pair wall. Use sampled
-lower in-flight depth and end-to-end latency/throughput for concurrency claims.
+Loaded acceptance is stricter than the report's latency-only `FASTER` label.
+The depth-one model must return to the serialized baseline with no material
+lower-byte/request or p99 regression. On the depth-64 model, Kread=2 must again
+raise lower READ depth above one and improve useful packed-read latency, while
+sequential and random lower bytes/requests stay at or below the qualified
+`89fe711...` cache baseline within ordinary run noise. Any candidate that buys
+latency with material read amplification is rejected.
 
-Source-contract assertions must follow current ownership helpers rather than freeze
-retired body-local syntax. When cache invalidation moves behind the all-read-slot
-invalidation wrapper, assert that wrapper at mutation call sites and assert the
-main/private engine invalidations inside the wrapper. A finite worker quantum may
-consume two BIOs for one joined Kread pair, so source coverage must require
-`remaining -= processed_bios`, default `processed_bios = 1`, and the explicit
-paired value 2 instead of requiring the retired one-BIO `remaining--` spelling.
+The ready-prefix scan stops at the first non-independent BIO. Pulling a later
+sibling is allowed only across skipped BIOs that are themselves independent
+READs; no write/barrier/dependency may be crossed. A single eligible READ never
+waits for a partner. Two synchronous slot callbacks can overlap, so summed lower
+READ busy-wall counters are not elapsed pair wall; use sampled lower in-flight
+depth and end-to-end latency/throughput together with lower bytes/requests.
+
+Source-contract assertions follow ownership helpers rather than retired syntax.
+A grouped dispatch may consume more than two BIOs, so worker-quantum coverage
+must require `remaining -= processed_bios` and an exact processed count returned
+by the grouped-read helper rather than a hard-coded paired value.
