@@ -70,63 +70,44 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `1352e46f3051315eab273ae11c0a5a9bd54ce340` passed all five stages
-and published the canonical report as
-`e25f0a0d0e1c3b4ea65e7297593f5b10d4dffe27`.
+Source `1b1e3ee1a3914185b64c8d6e887c20e8f1e82863` passed all five
+stages and published report `e35c51e0f9fd5d9459ac116805d13d5a13150bb5`.
+It decisively rejects ID57: fast write-only QD8 is -41.1% async/sync,
+CI [-45.8%,-36.4%]; fast mixed has no confirmed gain and adds 271.6 lower
+WRITE requests, CI [+192.9,+350.3]. The next source restores pre-ID57 ID56
+sampling/closure and must be owner-qualified before the regression is called
+repaired.
 
-Fast mixed async/sync is 23.12/22.63 MB/s with 977.6/883.2 lower WRITE
-requests. Five matched pairs give +2.2%, CI [-3.2%,+7.7%], while absolute
-request delta is +94.4 CI [+14.3,+174.5]. Fast QD8 is +23.1%,
-CI [+8.4%,+37.9%]. Fast QD4 is +1.4%, CI [-0.7%,+3.6%], and returns to
-directional status. Kread is inconclusive in this generation.
-
-ID56 reports fast async post-PACK tail0/inflight 604.2 versus zero sync; tail1
-and tail2+ while active are 116.4 and 70.4. The same condition also appears on
-slow async without a throughput difference, so ID57 must be qualified as a
-controlled scheduling intervention rather than assumed beneficial.
-
-ID57 gates only early PACK_READY while K=1 lower completion is pending and
-preserves only zero-tail pending evidence across active/finalization-only
-passes. Timed telemetry must expose busy admission/worker deferrals, zero-tail
-deferrals, completion-only holds, zero/one/many resolutions, aborts and
-post-finalization closes. Rootless contracts must prove hard boundaries and
-tail>=1 behavior remain outside the gate.
+Latest Kread same-cache A/B is inconclusive, while 99.2 of 328.5 grouped pairs
+contain same-extent siblings. Current offline opportunity reports zero nonzero
+same-filled writes and intentionally fixture-biased exact-content duplication.
 
 ## Deferred optimization evidence gates
 
-The following ideas stay in the maintained test plan even when they are not the
-active experiment.
-
-- **ID58 same-filled:** opportunity collection is offline from immutable fixture
-  bytes and trace events. It must not add a production hot-path scan merely to
-  measure prevalence. Zero pages are excluded because zero elision is already
-  a separate qualified representation.
-- **ID59 dedup:** trace evidence uses exact 4KiB byte equality, not hashes alone,
-  to classify same-page rewrites and resident duplicate payloads. Synthetic
-  fixture-pool reuse is not a production prevalence claim. An active dedup test
-  later requires byte-exact collision verification and refcount/COW/GC/discard
-  failure-path coverage.
-  The compact console summary is emitted only from a successfully validated
-  mixed-matrix verdict; write-saturation parsing must not depend on this
-  opportunity record.
-  Rootless public-Make fixtures must synthesize the same opportunity schema so
-  the mocked loaded matrix cannot bypass or accidentally fail the report
-  contract.
-- **ID60 read coalescing:** first report the already-collected same-extent share
-  of Kread pairs. New coalescing may operate only on reads already queued; no
-  grace timer or future-arrival wait is allowed. Acceptance requires lower READ
-  request reduction with no p99 regression and unchanged byte oracle.
-- **ID61 background GC:** before creating a worker, add an owned-RAM phase that
-  measures foreground-GC stall/headroom during useful I/O. Qualification must
-  include total GC lower READ/WRITE traffic, reserve safety, useful throughput,
-  p95/p99 and exact final image.
-- **ID38 K>1:** current evidence keeps it on hold. Reopening requires sustained
-  ready-run pressure while K=1 is busy, lower queue headroom >1 on the target
-  model, and a separate >=5-pair K=1/K=2 comparison. Never infer K>1 usefulness
-  from raw device hwq depth alone.
-- **ID62 real device:** current host-safety rules prohibit collection. Do not add
-  a physical-device path, environment toggle or alternate public test command
-  to bypass that gate.
+- **ID29 TRIM:** owned lifecycle configures its new RAM `null_blk` with discard
+  support. Every completed segment discard must be exactly 2048 sectors,
+  segment-aligned, and occur only after zero mapping/live authority. Live-GC
+  PASS requires at least one completed discard per committed victim, zero
+  unsupported/failed discards on the owned null device, and byte-exact
+  verification of all 4096 logical pages. Native authority tests must prove a
+  failing recycle hook blocks reuse without mutating allocator state.
+- **ID38 K>1:** passive reverted-baseline counters must conserve
+  PACK_READY+FULL+DEADLINE+fence+other to total ready-wait windows. Records
+  cannot be smaller than windows, max records stays <=64 and attributed wait
+  wall cannot exceed total K=1 finalize wait wall. No K=2 slot is present.
+- **ID58 same-filled:** keep opportunity collection offline; current fixture is
+  zero-opportunity and cannot justify implementation.
+- **ID59 dedup:** exact 4KiB equality remains required. Synthetic 128-payload
+  reuse is not production prevalence; obtain representative lifetime overlap.
+- **ID60/ID63 READ coalescing:** Kread same-extent and distinct-extent adjacency
+  are passive. Adjacent pairs cannot exceed distinct pairs, distinct pairs
+  cannot exceed grouped pairs, and adjacent block totals must be 2..16 blocks
+  per adjacent observation. No read waits for a future BIO and no merged lower
+  request is implemented.
+- **ID61 background GC:** first measure foreground-GC stall/headroom during
+  useful I/O including total GC lower traffic and exact final image.
+- **ID62 real device:** current host-safety rules still prohibit collection.
+  Do not add a physical-device bypass flag or alternate public test command.
 
 ## Open qualification gaps
 
@@ -476,8 +457,11 @@ extend retention or alter completion ownership.
 Live-GC distribution attribution increments a per-segment eviction counter only
 after a successful committed victim rotation. Loaded qualification reports the
 number of distinct victim segments and min/max evictions among used victim
-segments. This establishes synthetic reuse-distribution evidence; it is not a
-physical wear claim and is a prerequisite to any DISCARD/TRIM experiment.
+segments. This establishes synthetic reuse-distribution evidence; it is not a physical
+wear claim. ID29 now uses it as the prerequisite for bounded owned-RAM
+whole-dead-segment DISCARD. The lifecycle device must explicitly expose discard
+support; reports retain completed segment-discard count/sectors and reject
+misaligned, unsupported or failed discard evidence on that owned test device.
 
 Top-level qualification status follows the classified stage result, not a raw
 child exit-code convention. A stage classified FAIL remains overall FAIL even
@@ -776,30 +760,12 @@ ID56 first-observation conservation remains mandatory: the six post-PACK
 tail-size/state buckets (0/1/2+ crossed with active K=1 vs idle) sum exactly to
 `pack_tail_samples`; deferred ID57 re-samples do not double-count that total.
 
-ID57 is an active bounded experiment. Source contracts must pin the busy helper
-to active && !completion_done, require admission and worker PACK_READY paths to
-count-and-defer only while that helper is true, and prove the sampler can return
-with its pending sample/chain intact for zero-tail active or completion-only
-holds. The deferred sample must be retried before processing a nonempty next
-local wave. No new timer, sleep, spin or K>1 slot is allowed.
-
-ID57 lifecycle validation must be boundary-aware. A deferred-zero lifecycle may
-begin before a timed mixed/write-only snapshot and resolve or abort inside that
-interval. Derive the one-bit start/end state from cumulative counters as
-`deferrals - (resolve0 + resolve1 + resolve2plus + aborts)`; each cumulative
-snapshot must yield exactly 0 or 1. Timed conservation is exact only when
-`start + interval_deferrals == interval_terminals + end`. Completion-only
-holds are bounded by `start + interval_deferrals`; post-finalization closes
-remain a same-event subset of timed packed-early closes. Never reject valid
-evidence merely because a lifecycle crosses the measurement boundary.
-Rootless report fixtures must include both a valid carry-in resolution with
-zero same-interval deferrals and an impossible cumulative lifecycle that fails
-closed.
-
-Synthetic ID57 fixtures must preserve the same subset invariants as runtime
-telemetry: a nonzero post-finalization close requires a corresponding packed
-early close, and source-string contracts must follow the current three-argument
-tail-sampler call rather than pinning its pre-ID57 signature.
+ID57 production intervention counters are removed with the rollback. Rootless and
+source contracts instead require the old ID56 observational tail sampler,
+absence of K=1-busy PACK_READY suppression/zero-tail hold state, and the new
+passive ID38 ready-wait accounting described above. The owner run must verify
+that fast write-only QD8 returns toward the pre-ID57 target-8/no-deadline
+geometry and that fast mixed service-dry/request fragmentation does not remain.
 
 ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain

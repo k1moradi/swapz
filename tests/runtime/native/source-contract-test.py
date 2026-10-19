@@ -1116,6 +1116,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("parallel_reads_enabled=%u", status)
         self.assertIn("parallel_read_pairs=%llu", status)
         self.assertIn("parallel_read_same_extent_pairs=%llu", status)
+        self.assertIn("parallel_read_distinct_extent_pairs=%llu", status)
+        self.assertIn("parallel_read_adjacent_extent_pairs=%llu", status)
+        self.assertIn("parallel_read_adjacent_extent_blocks=%llu", status)
         self.assertNotIn("swapz_retained_pack_close_ready", batch)
         retained_close = body("swapz_retained_pack_close_ready")
         service_dry = body("swapz_service_proven_dry_pack")
@@ -1266,7 +1269,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("list_splice_tail_init(&ctx->incoming, &local)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
-        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx, &local, false)"),
+        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx, &local)"),
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
@@ -1290,15 +1293,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "pack_tail_zero_idle", "pack_tail_one_inflight",
                       "pack_tail_one_idle", "pack_tail_many_inflight",
                       "pack_tail_many_idle", "burst_target_grows",
-                      "burst_target_shrinks", "pack_tail_zero_deferrals",
-                      "pack_tail_zero_finalize_holds",
-                      "pack_tail_deferred_resolve_zero",
-                      "pack_tail_deferred_resolve_one",
-                      "pack_tail_deferred_resolve_many",
-                      "pack_tail_zero_deferred_aborts",
-                      "pack_ready_busy_deferrals_admission",
-                      "pack_ready_busy_deferrals_worker",
-                      "pack_ready_post_finalize_closes"):
+                      "burst_target_shrinks",
+                      "k1_ready_wait_windows", "k1_ready_wait_records",
+                      "k1_ready_wait_wall_ns", "k1_ready_wait_max_records",
+                      "k1_ready_wait_pack_ready", "k1_ready_wait_full",
+                      "k1_ready_wait_deadline", "k1_ready_wait_fence",
+                      "k1_ready_wait_other"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
         self.assertIn("SWAPZ_PACK_CLOSE_TAIL_TARGET", writer)
@@ -1315,34 +1315,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->pack_close_burst_count_le4++", flush)
         self.assertIn("ctx->pack_close_burst_overshoot++", flush)
         sample = body("swapz_sample_pack_tail_locked")
-        busy = body("swapz_inflight_write_busy")
-        self.assertIn("READ_ONCE(ctx->inflight_write.active)", busy)
-        self.assertIn("!completion_done(&ctx->inflight_write.lower_done)", busy)
         self.assertIn("READ_ONCE(ctx->inflight_write.active)", sample)
-        self.assertIn("hold_zero_after_finalize", sample)
         self.assertIn("ctx->pack_tail_samples++", sample)
         for field in ("pack_tail_zero_inflight", "pack_tail_zero_idle",
                       "pack_tail_one_inflight", "pack_tail_one_idle",
                       "pack_tail_many_inflight", "pack_tail_many_idle",
-                      "burst_target_grows", "pack_tail_zero_deferrals",
-                      "pack_tail_zero_finalize_holds",
-                      "pack_tail_deferred_resolve_zero",
-                      "pack_tail_deferred_resolve_one",
-                      "pack_tail_deferred_resolve_many"):
+                      "burst_target_grows"):
             self.assertIn("ctx->" + field + "++", sample)
-        deferred = sample.index("ctx->pack_tail_zero_deferrals++")
-        consume = sample.index("ctx->pack_close_pending_tail_sample = false")
-        self.assertIn("return;", sample[deferred:consume])
-        self.assertIn("ctx->burst_target_shrinks++", worker)
-        self.assertIn("swapz_inflight_write_busy(ctx)", writer)
-        self.assertIn("ctx->pack_ready_busy_deferrals_admission++", writer)
-        self.assertIn("swapz_inflight_write_busy(ctx)", worker)
-        self.assertIn("ctx->pack_ready_busy_deferrals_worker++", worker)
-        self.assertIn("bool finalized_inflight = false", worker)
-        self.assertIn("bool processed_any = false", worker)
-        self.assertIn("ctx->pack_tail_zero_deferred && !list_empty(&local)", worker)
-        self.assertIn("finalized_inflight && !processed_any", worker)
-        self.assertIn("ctx->pack_ready_post_finalize_closes++", worker)
+        self.assertNotIn("pack_tail_zero_deferred", DM)
+        self.assertNotIn("pack_ready_busy_deferrals", DM)
+        self.assertNotIn("hold_zero_after_finalize", DM)
+        self.assertNotIn("swapz_inflight_write_busy", DM)
+        self.assertIn("ctx->k1_ready_wait_windows++", flush)
+        self.assertIn("!completion_done(&ctx->inflight_write.lower_done)", flush)
+        self.assertIn("ctx->pipeline_finalize_wait_wall_ns", flush)
         self.assertIn("SWAPZ_BURST_CLOSE_ADMISSION", writer)
         self.assertIn("SWAPZ_BURST_CLOSE_WORKER", worker)
         self.assertIn("ctx->next_burst_close_target =", writer)
@@ -1363,6 +1349,29 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("cap3", flush)
         self.assertIn("ctx->window_close_reasons[close_reason]++", flush)
 
+    def test_dead_segment_trim_is_post_deadness_and_advisory(self):
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        gc = body("swapz_gc_compact_one")
+        discard = body("swapz_discard_dead_segment")
+        status = body("swapz_status")
+        self.assertIn("a->dead_segment_recycle", authority)
+        self.assertLess(authority.index("if (used && a->dead_segment_recycle)"),
+                        authority.index("memset(a->live_records + start"))
+        self.assertIn("swapz_gc_commit_rotation(a, victim)", gc)
+        self.assertLess(gc.index("swapz_gc_commit_rotation(a, victim)"),
+                        gc.index("swapz_discard_dead_segment(ctx, victim)"))
+        self.assertIn("a->active_start / SWAPZ_SEGMENT_BLOCKS == segment", discard)
+        self.assertIn("a->batch_segment == segment", discard)
+        self.assertIn("ctx->inflight_write.run.start_block / SWAPZ_SEGMENT_BLOCKS == segment", discard)
+        self.assertIn("bdev_max_discard_sectors(ctx->backing->bdev)", discard)
+        self.assertIn("blkdev_issue_discard(ctx->backing->bdev", discard)
+        self.assertIn("error == -EOPNOTSUPP", discard)
+        for field in ("segment_discards_eligible", "segment_discards_issued",
+                      "segment_discards_completed", "segment_discards_unsupported",
+                      "segment_discards_failed", "segment_discard_sectors",
+                      "segment_discard_wall_ns"):
+            self.assertIn(field + "=%llu", status)
+
     def test_timed_window_telemetry_uses_measurement_snapshots(self):
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
@@ -1376,19 +1385,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)
         self.assertIn("BURST_CLOSE_DETAIL_FIELDS", runner)
         self.assertIn("TAIL_SAMPLE_FIELDS", runner)
-        self.assertIn("ID57_FIELDS", runner)
-        self.assertIn("ID57_STATE_FIELDS", runner)
-        self.assertIn("ID57_TERMINAL_FIELDS", runner)
+        self.assertIn("K1_READY_WAIT_FIELDS", runner)
         self.assertIn("burst_close_detail_delta_paired_95pct_ci", runner)
         self.assertIn("Mixed burst-close split", runner)
         self.assertIn("Mixed post-PACK tail samples", runner)
-        self.assertIn("ID57 K=1 collector intervention", runner)
+        self.assertIn("K=1 ready wait win/records/ms", runner)
         self.assertIn("pack_close_burst_admission", replay)
-        self.assertIn("pack_tail_zero_deferrals", replay)
-        self.assertIn("def id57_deferred_state(snapshot)", replay)
-        self.assertIn('counters["pack_tail_zero_deferred_start"]', replay)
-        self.assertIn('counters["pack_tail_zero_deferred_end"]', replay)
         self.assertIn("pack_tail_zero_inflight", replay)
+        self.assertIn("k1_ready_wait_windows", replay)
+        self.assertIn("pipeline_finalize_wait_wall_ns", replay)
         self.assertIn("pack_close_burst_target_5_8", replay)
         self.assertIn("single_tail_comp_age_1001_1250us", runner)
         self.assertIn("ordered_worker_cpu_ns", runner)

@@ -693,6 +693,9 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
                       "parallel_read_same_extent_pairs",
+                      "parallel_read_distinct_extent_pairs",
+                      "parallel_read_adjacent_extent_pairs",
+                      "parallel_read_adjacent_extent_blocks",
                       "read_worker_cpu_ns")
 
 
@@ -729,7 +732,15 @@ def kernel_read_delta(before, after):
             counters["read_two_block_skips"] > counters["read_meta_reqs"] or
             counters["read_full_cache_hits"] > counters["read_meta_cache_hits"]):
         raise ValueError("inconsistent swapz read request accounting")
-    if counters["parallel_read_same_extent_pairs"] > counters["parallel_read_pairs"]:
+    if (counters["parallel_read_same_extent_pairs"] > counters["parallel_read_pairs"] or
+            counters["parallel_read_distinct_extent_pairs"] >
+            counters["parallel_read_pairs"] or
+            counters["parallel_read_adjacent_extent_pairs"] >
+            counters["parallel_read_distinct_extent_pairs"] or
+            counters["parallel_read_adjacent_extent_blocks"] <
+            2 * counters["parallel_read_adjacent_extent_pairs"] or
+            counters["parallel_read_adjacent_extent_blocks"] >
+            16 * counters["parallel_read_adjacent_extent_pairs"]):
         raise ValueError("inconsistent swapz parallel read accounting")
     return counters
 
@@ -786,18 +797,12 @@ TAIL_SAMPLE_FIELDS = (
     "pack_tail_one_inflight", "pack_tail_one_idle",
     "pack_tail_many_inflight", "pack_tail_many_idle",
     "burst_target_grows", "burst_target_shrinks")
-ID57_FIELDS = (
-    "pack_tail_zero_deferrals", "pack_tail_zero_finalize_holds",
-    "pack_tail_deferred_resolve_zero", "pack_tail_deferred_resolve_one",
-    "pack_tail_deferred_resolve_many", "pack_tail_zero_deferred_aborts",
-    "pack_ready_busy_deferrals_admission",
-    "pack_ready_busy_deferrals_worker",
-    "pack_ready_post_finalize_closes")
-ID57_TERMINAL_FIELDS = (
-    "pack_tail_deferred_resolve_zero", "pack_tail_deferred_resolve_one",
-    "pack_tail_deferred_resolve_many", "pack_tail_zero_deferred_aborts")
-ID57_STATE_FIELDS = (
-    "pack_tail_zero_deferred_start", "pack_tail_zero_deferred_end")
+K1_READY_WAIT_FIELDS = (
+    "k1_ready_wait_windows", "k1_ready_wait_records",
+    "k1_ready_wait_wall_ns", "k1_ready_wait_max_records",
+    "k1_ready_wait_pack_ready", "k1_ready_wait_full",
+    "k1_ready_wait_deadline", "k1_ready_wait_fence",
+    "k1_ready_wait_other")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -813,7 +818,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + ID57_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -834,6 +839,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "prep_lower_write_start_queued", "prep_lower_write_start_nonempty",
     "prep_lower_write_end_queued", "prep_lower_write_end_nonempty",
     "pipeline_async_runs", "pipeline_active_wall_ns",
+    "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target",)
@@ -859,14 +865,6 @@ def kernel_write_snapshot(path, identity):
     return counters
 
 
-def id57_deferred_state(snapshot):
-    active = (snapshot["pack_tail_zero_deferrals"] -
-              sum(snapshot[field] for field in ID57_TERMINAL_FIELDS))
-    if active not in (0, 1):
-        raise ValueError("inconsistent swapz ID57 cumulative lifecycle")
-    return active
-
-
 def kernel_write_delta(before, after):
     if before is None and after is None:
         return None
@@ -876,10 +874,6 @@ def kernel_write_delta(before, after):
                 for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
-    start_deferred = id57_deferred_state(before)
-    end_deferred = id57_deferred_state(after)
-    counters["pack_tail_zero_deferred_start"] = start_deferred
-    counters["pack_tail_zero_deferred_end"] = end_deferred
     for key in KERNEL_WRITE_GAUGE_FIELDS:
         counters[key] = after[key]
     if not 1 <= counters["retained_burst_target"] <= 64:
@@ -942,14 +936,18 @@ def kernel_write_delta(before, after):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             counters["pack_tail_samples"]):
         raise ValueError("inconsistent swapz post-pack tail-sample attribution")
-    id57_terminals = sum(counters[field] for field in ID57_TERMINAL_FIELDS)
-    if (start_deferred + counters["pack_tail_zero_deferrals"] !=
-            id57_terminals + end_deferred or
-            counters["pack_tail_zero_finalize_holds"] >
-            start_deferred + counters["pack_tail_zero_deferrals"] or
-            counters["pack_ready_post_finalize_closes"] >
-            counters["packed_early_commits"]):
-        raise ValueError("inconsistent swapz ID57 intervention attribution")
+    k1_reasons = sum(counters[field] for field in (
+        "k1_ready_wait_pack_ready", "k1_ready_wait_full",
+        "k1_ready_wait_deadline", "k1_ready_wait_fence",
+        "k1_ready_wait_other"))
+    if (k1_reasons != counters["k1_ready_wait_windows"] or
+            counters["k1_ready_wait_records"] < counters["k1_ready_wait_windows"] or
+            counters["k1_ready_wait_max_records"] > 64 or
+            (counters["k1_ready_wait_windows"] == 0 and
+             counters["k1_ready_wait_max_records"] != 0) or
+            counters["k1_ready_wait_wall_ns"] >
+            counters["pipeline_finalize_wait_wall_ns"]):
+        raise ValueError("inconsistent swapz K=1 ready-wait attribution")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),

@@ -77,6 +77,12 @@ def timed_kernel_write(*, mode, target=8):
         "prep_lower_write_end_nonempty": 1,
         "pipeline_async_runs": 4 if mode else 0,
         "pipeline_active_wall_ns": 800000000 if mode else 0,
+        "pipeline_finalize_wait_wall_ns": 5000000 if mode else 0,
+        "k1_ready_wait_windows": 2 if mode else 0,
+        "k1_ready_wait_records": 12 if mode else 0,
+        "k1_ready_wait_wall_ns": 4000000 if mode else 0,
+        "k1_ready_wait_max_records": 8 if mode else 0,
+        "k1_ready_wait_pack_ready": 2 if mode else 0,
         "write_wait_le1ms": 2,
         "write_wait_1to4ms": 2,
         "write_wait_gt4ms": 1,
@@ -109,15 +115,6 @@ def timed_kernel_write(*, mode, target=8):
         "pack_tail_many_idle": 1 if mode else 3,
         "burst_target_grows": 3 if mode else 2,
         "burst_target_shrinks": 2 if mode else 1,
-        "pack_tail_zero_deferrals": 2 if mode else 0,
-        "pack_tail_zero_finalize_holds": 1 if mode else 0,
-        "pack_tail_deferred_resolve_zero": 0,
-        "pack_tail_deferred_resolve_one": 1 if mode else 0,
-        "pack_tail_deferred_resolve_many": 1 if mode else 0,
-        "pack_tail_zero_deferred_aborts": 0,
-        "pack_ready_busy_deferrals_admission": 3 if mode else 0,
-        "pack_ready_busy_deferrals_worker": 1 if mode else 0,
-        "pack_ready_post_finalize_closes": 1 if mode else 0,
         "win1_idle": 1,
         "win1_deadline": 2,
         "win1_pack_ready": 1,
@@ -182,6 +179,9 @@ def arm(candidate, *, mode, regime):
                     "read_two_block_skips": 128,
                     "parallel_read_pairs": 128,
                     "parallel_read_same_extent_pairs": 64,
+                    "parallel_read_distinct_extent_pairs": 64,
+                    "parallel_read_adjacent_extent_pairs": 24,
+                    "parallel_read_adjacent_extent_blocks": 144,
                     "read_worker_cpu_ns": 1000000,
                 } if swapz else None),
                 "replay_cpu_user_s": .15,
@@ -284,7 +284,7 @@ def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
-           "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 verified_pages:4096",
+           "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
@@ -415,6 +415,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["gc_victim_min_evictions"], 1)
         self.assertEqual(loaded["gc_victim_max_evictions"], 3)
         self.assertEqual(loaded["gc_verified_pages"], 4096)
+        self.assertEqual(loaded["gc_segment_discards"], 12)
+        self.assertEqual(loaded["gc_segment_discard_sectors"], 24576)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
         self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
@@ -424,7 +426,8 @@ class ReportContract(unittest.TestCase):
             "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 "
             "read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 "
             "distinct:6 victim_min:1 victim_max:3 last:11->29 "
-            "verified_pages:4096\n", "")
+            "discards:12 discard_sectors:24576 discard_unsupported:0 "
+            "discard_failed:0 verified_pages:4096\n", "")
         self.assertEqual(runner.parse_loaded_correctness(missing_gc)["overall"],
                          "INCOMPLETE")
 
@@ -647,17 +650,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["pack_tail_zero_idle"], 1.5)
         self.assertEqual(slow["kernel_counters"]["burst_target_grows"], 2.5)
         self.assertEqual(slow["kernel_counters"]["burst_target_shrinks"], 1.5)
-        self.assertEqual(
-            slow["columns"]["async"]["mixed_pack_tail_zero_deferred_start"], 0)
-        self.assertEqual(
-            slow["columns"]["async"]["mixed_pack_tail_zero_deferred_end"], 0)
-        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_deferrals"], 1)
-        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_finalize_holds"], 0.5)
-        self.assertEqual(slow["kernel_counters"]["pack_tail_deferred_resolve_one"], 0.5)
-        self.assertEqual(slow["kernel_counters"]["pack_tail_deferred_resolve_many"], 0.5)
-        self.assertEqual(slow["kernel_counters"]["pack_ready_busy_deferrals_admission"], 1.5)
-        self.assertEqual(slow["kernel_counters"]["pack_ready_busy_deferrals_worker"], 0.5)
-        self.assertEqual(slow["kernel_counters"]["pack_ready_post_finalize_closes"], 0.5)
+        self.assertEqual(slow["kernel_counters"]["k1_ready_wait_windows"], 1)
+        self.assertEqual(slow["kernel_counters"]["k1_ready_wait_records"], 6)
+        self.assertEqual(slow["kernel_counters"]["k1_ready_wait_pack_ready"], 1)
         self.assertEqual(slow["kernel_counters"]["close_idle"], 4)
         self.assertEqual(slow["kernel_counters"]["close_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_deadline"], 2)
@@ -717,8 +712,10 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Mixed PACK_READY causes", rendered)
         self.assertIn("Mixed burst-close split", rendered)
         self.assertIn("Mixed post-PACK tail samples", rendered)
-        self.assertIn("ID57 K=1 collector intervention", rendered)
-        self.assertIn("carry S/E", rendered)
+        self.assertIn("segment TRIM", rendered)
+        self.assertIn("adj-ext", rendered)
+        self.assertIn("K=1 ready wait win/records/ms", rendered)
+        self.assertIn("K=1 ready wait P/F/D/X/O", rendered)
         self.assertIn("Fast mixed burst-close async-sync paired 95% CI", rendered)
         self.assertIn("async-sync", rendered)
         self.assertIn("Fast mixed async-sync paired 95% CI", rendered)
@@ -801,18 +798,9 @@ class ReportContract(unittest.TestCase):
                          "INCOMPLETE")
         sessions = runner.parse_sessions(synthetic_log())
         sessions[1]["arms"]["swapz"]["kernel_write_path"][
-            "pack_tail_deferred_resolve_many"] = 3
+            "k1_ready_wait_full"] = 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
-
-        sessions = runner.parse_sessions(synthetic_log())
-        carried = sessions[0]["arms"]["swapz"]["kernel_write_path"]
-        carried["pack_tail_zero_deferred_start"] = 1
-        carried["pack_tail_zero_deferrals"] = 0
-        carried["pack_tail_deferred_resolve_many"] = 1
-        carried["pack_tail_zero_deferred_end"] = 0
-        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
-                         "PASS_BOUNDED_RAM_MATRIX")
 
     def test_close_and_deadline_accounting_fail_closed(self):
         sessions = runner.parse_sessions(synthetic_log())

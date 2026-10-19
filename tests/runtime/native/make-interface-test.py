@@ -194,6 +194,12 @@ class PublicMakeContract(unittest.TestCase):
                     "prep_lower_write_end_nonempty": 1,
                     "pipeline_async_runs": 4 if mode else 0,
                     "pipeline_active_wall_ns": 800000000 if mode else 0,
+                    "pipeline_finalize_wait_wall_ns": 5000000 if mode else 0,
+                    "k1_ready_wait_windows": 2 if mode else 0,
+                    "k1_ready_wait_records": 12 if mode else 0,
+                    "k1_ready_wait_wall_ns": 4000000 if mode else 0,
+                    "k1_ready_wait_max_records": 8 if mode else 0,
+                    "k1_ready_wait_pack_ready": 2 if mode else 0,
                     "write_wait_le1ms": 2,
                     "write_wait_1to4ms": 2,
                     "write_wait_gt4ms": 1,
@@ -324,6 +330,9 @@ class PublicMakeContract(unittest.TestCase):
                     "read_two_block_skips": 128,
                     "parallel_read_pairs": 128,
                     "parallel_read_same_extent_pairs": 64,
+                    "parallel_read_distinct_extent_pairs": 64,
+                    "parallel_read_adjacent_extent_pairs": 24,
+                    "parallel_read_adjacent_extent_blocks": 144,
                     "read_worker_cpu_ns": 1000000,
                                 } if is_swapz else None),
                             }
@@ -350,6 +359,9 @@ class PublicMakeContract(unittest.TestCase):
                     if not enabled:
                         phase["kernel_read_path"]["parallel_read_pairs"] = 0
                         phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 0
+                        phase["kernel_read_path"]["parallel_read_distinct_extent_pairs"] = 0
+                        phase["kernel_read_path"]["parallel_read_adjacent_extent_pairs"] = 0
+                        phase["kernel_read_path"]["parallel_read_adjacent_extent_blocks"] = 0
                 return json.dumps(record, sort_keys=True)
 
             def mock_write_arm(candidate, qd, mode):
@@ -387,7 +399,7 @@ class PublicMakeContract(unittest.TestCase):
 
             records = [
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
-                "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 verified_pages:4096",
+                "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
                 "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
                 "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
                 "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",

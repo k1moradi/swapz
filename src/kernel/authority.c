@@ -175,8 +175,17 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 		/*
 		 * Segment has no authoritative records and no pending writes.
 		 * The previous contents are disposable swap bytes, not durable
-		 * data. Reuse the WHOLE segment; stage never crosses its edge.
+		 * data. Give the production target one serialized advisory-reclaim
+		 * hook before reuse, but only when this segment was written before.
 		 */
+		if (used && a->dead_segment_recycle) {
+			int error = a->dead_segment_recycle(
+				a->dead_segment_recycle_opaque, segment);
+
+			if (error)
+				return error;
+		}
+		/* Reuse the WHOLE segment; stage never crosses its edge. */
 		memset(a->live_records + start, 0,
 		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->live_records));
 		memset(a->extent_classes + start, 0,

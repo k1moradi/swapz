@@ -59,80 +59,73 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `1352e46f3051315eab273ae11c0a5a9bd54ce340`
-(report-only `e25f0a0d0e1c3b4ea65e7297593f5b10d4dffe27`) passed all five
-stages. It is synthetic owned-RAM evidence only.
+Owner-qualified source `1b1e3ee1a3914185b64c8d6e887c20e8f1e82863`
+(report-only `e35c51e0f9fd5d9459ac116805d13d5a13150bb5`) passed all five
+stages. It is synthetic owned-RAM evidence only and **rejects ID57**.
 
-Fast mixed async/sync is 23.12/22.63 MB/s with 977.6/883.2 lower WRITE
-requests. Five matched pairs give +2.2%, CI [-3.2%,+7.7%], and absolute request
-delta +94.4 CI [+14.3,+174.5]. The async throughput gain is not established and
-the fragmentation penalty is significant.
+Fast write-only QD8 async/sync is 11.85/20.17 MB/s, paired -41.1% with
+95% CI [-45.8%,-36.4%]. Fast mixed async/sync is 23.26/23.09 MB/s,
+paired +0.8% CI [-3.2%,+4.8%], while async adds 271.6 lower WRITE requests
+CI [+192.9,+350.3]. Fast mixed burst closes fall by 15.2 while service-dry
+closes rise by 263.4; write-only QD8 learns target 12 and closes 274.8 windows
+by deadline. The candidate therefore restores the pre-ID57/ID56 closure and
+tail-sampling behavior before evaluating anything else.
 
-ID54/55 remain stable: tail async-minus-sync is -41.2
-CI [-71.1,-11.3], learned burst +90.2 [+36.9,+143.5], service-dry +30.4
-[+3.5,+57.3]. Burst closes are admission-only; count17-64 is +66.2
-[+26.4,+106.0] and overshoot +71.4 [+27.5,+115.3].
+The pre-ID57 `1352e46...` owner result remains the rollback control: fast QD8
+was +23.1% async/sync, CI [+8.4%,+37.9%]. A successful rollback must reproduce
+the deep-window/no-deadline geometry rather than merely improve from -41%.
 
-ID56 proves the temporal asymmetry directly. Fast sync has no post-PACK samples
-while K=1 is active. Async records 604.2 tail0/inflight, 116.4 tail1/inflight
-and 70.4 tail2+/inflight. Slow async also records 482.0 tail0/inflight while
-sync/async throughput is equal, so the observation alone is not a universal
-performance predicate.
-
-ID57 is the bounded active test. A pending early PACK_READY close is suppressed
-only while the previous detached lower write is active and not yet complete.
-A zero pending tail sample is preserved while K=1 is active and across the
-immediate completion-only worker pass, then resolved before processing the next
-already-admitted wave. No new wait/timer/concurrency is added; FULL, DEADLINE,
-ordering boundaries, tail>=1 handling, ID50 and K=1 publication/completion
-ownership remain unchanged.
-
-Latest fast write-only QD8 is +23.1%, paired CI [+8.4%,+37.9%]. Fast QD4
-five-pair confirmation is +1.4%, CI [-0.7%,+3.6%], so QD4 returns to a
-directional control. Latest Kread same-cache result is inconclusive
-(seq -10.3% [-22.5,+1.9]%; random -0.5% [-11.0,+9.9]%) and remains unchanged.
+Latest same-cache Kread A/B is inconclusive: sequential p99 +4.6%
+[-8.7,+17.8]%, random -4.5% [-16.1,+7.2]%. Kread-on observes 328.5 grouped
+pairs and 99.2 same-extent pairs. Keep Kread=2 unchanged.
 
 ## Confirmation gate
 
-Do not claim a QD performance improvement until that specific QD/regime has at least five counterbalanced matched rounds, an appropriate paired confidence interval, unchanged correctness, provenance equality and no unacceptable regression in lower bytes, read tails, CPU/RAM or GC. The current confirmation harness qualifies fast mixed QD32, fast write-only QD8 and the same-cache Kread toggle for this statistical gate; QD1/QD4/QD32 write-only remain directional controls.
+Do not claim a QD performance improvement until that specific QD/regime has at
+least five counterbalanced matched rounds, paired confidence intervals,
+unchanged correctness/provenance and no unacceptable lower-byte/request,
+read-tail, CPU/RAM or GC regression. Fast QD8 remains the confirmatory
+write-only control; QD1/QD4/QD32 are directional.
 
 ## Deferred idea evidence
 
-The benchmark keeps future optimization ideas visible without turning them into
-current performance claims.
+**ID29 whole-dead-segment TRIM.** The candidate issues exactly one-segment
+(256 blocks / 1MiB / 2048 sectors) lower DISCARD only after serialized authority
+proves a previously written segment has zero authoritative mappings/live
+records. Foreground recycle calls the hook immediately before reuse. A GC victim
+is eligible only after successful committed role rotation makes it a dead
+reserve. Unsupported or lower-media DISCARD failure is counted and advisory;
+it cannot make data dead, publish mappings or authorize reuse. The owned
+`null_blk` lifecycle explicitly enables discard and must prove aligned
+completed requests while all 4096 pages remain byte-exact.
 
-**Same-filled pages and exact-content dedup (IDs 58/59).** Trace preparation now
-computes a deterministic `workload_opportunity` record from the exact fixture
-bytes and logical event stream before any device I/O. It reports measured write
-count, unique measured payloads, nonzero same-filled writes (one repeated
-64-bit word across the 4KiB page), exact same-page rewrites, writes whose exact
-payload is already resident on another logical page, and final live
-unique/duplicate/same-filled populations. This is a synthetic trace/fixture
-opportunity measurement only. It does not estimate kernel CPU cost, metadata
-cost, lower-byte savings or real swap-workload prevalence.
+**IDs 58/59 content opportunity.** The current synthetic trace reports zero
+nonzero same-filled writes. It reports 12,301 resident-duplicate opportunities
+from only 128 unique payloads and 1,024 final duplicate pages; because the
+fixture deliberately reuses that pool, this is analyzer/architecture evidence,
+not real swap prevalence.
 
-**READ coalescing (ID60).** The existing same-cache Kread evidence already
-records `parallel_read_pairs` and `parallel_read_same_extent_pairs` for each
-sequential/random pass. Use their ratio as the first gate. An active coalescing
-experiment must show fewer lower READ requests/bytes without increasing p99;
-it may combine only reads already waiting for service and must not wait for a
-future read to manufacture a batch.
+**ID60/ID63 READ coalescing.** Same-extent grouping is ~30% of current Kread
+pairs but the latest A/B is not a qualified benefit. ID63 therefore measures a
+separate passive question: among the two distinct immutable extents already
+selected for one Kread dispatch, are the full physical ranges adjacent in one
+segment and <=64KiB total? Report distinct pairs, adjacent pairs and adjacent
+blocks separately for sequential/random. Do not delay a read, merge requests,
+or call this exact saved-I/O evidence yet.
 
-**Background GC (ID61).** Current live-GC qualification proves correctness and
-accounts lower GC I/O, but it is not evidence for a background worker. Required
-pre-implementation evidence is foreground GC wall/stall contribution during
-useful I/O, reserve/headroom pressure and latency/throughput impact under
-bounded owned-RAM pressure. Compare useful work including all GC lower traffic.
+**ID38 K>1.** The rollback adds passive K=1 ready-wait attribution only. Count
+nonempty flush windows observed while the active lower completion is genuinely
+unfinished, total/max records, exact completion-wait wall and close cause
+(PACK_READY/FULL/DEADLINE/fence/other). K=2 remains blocked until repeated
+reverted-baseline evidence shows sustained ready-run pressure and lower queue
+headroom.
 
-**K>1 (ID38).** A second lower-WRITE slot is gated on sustained ready-run
-pressure while K=1 is genuinely busy plus demonstrated lower-device queue
-headroom. ID57 busy-PACK_READY deferrals are relevant evidence, but a counter
-alone is not a win: K=2 would still require matched throughput, request/byte,
-read-tail and correctness qualification.
+**ID61 background GC.** Current lifecycle proves 20 distributed victim
+rotations, not a useful-I/O stall. Measure foreground GC stall and reserve
+headroom under bounded pressure before adding a worker.
 
-**Physical media (ID62).** No current benchmark may collect this evidence.
-Physical-device behavior/endurance remains separately authorized future work;
-RAM `null_blk` results must never be relabeled as device results.
+**ID62 physical media.** No current benchmark may collect this evidence.
+ID29 qualification on RAM does not authorize physical storage or active swap.
 
 ## Physical media
 

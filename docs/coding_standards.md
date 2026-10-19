@@ -440,17 +440,48 @@ detached `inflight_write.active` versus idle. These six buckets conserve to
 `pack_tail_samples`. Count a burst-target grow/shrink only when the existing
 helper actually changes the target.
 
-ID57 is a bounded policy experiment, not a new scheduling layer. Define “K=1
-busy” strictly as `inflight_write.active && !completion_done(lower_done)`.
-While busy, a below-max, pre-deadline PACK_READY decision may be postponed
-because `swapz_flush_window()` could only wait for that same lower completion;
-FULL, DEADLINE, duplicate/RAW/zero/FUA/PREFLUSH/DISCARD/read-conflict/shutdown
-boundaries remain immediate. A pending post-PACK zero-tail observation may be
-preserved while K=1 is active and across the immediate worker iteration that
-finalized that run but processed no admitted BIO. It must be resolved before
-processing the next already-admitted local wave. Tail>=1 uses the prior
-sampling semantics. No future-arrival wait, new timer, sleep, spin, second lower
-slot or callback-owned authority publication is permitted.
+ID57 is rejected and reverted. Owner evidence showed that preserving a zero-tail
+sample and prior completed-chain width across K=1 completion can contaminate the
+next closed-loop wave, inflate the learned target beyond the active QD and arm
+service-proven dry closure from stale service evidence. Post-PACK tail sampling
+returns to the ID56 observational rule: every sample is consumed in its current
+admitted-wave context. PACK_READY is never suppressed merely because K=1 lower
+I/O is unfinished. Do not restore ID57 counters or policy without a new isolated
+hypothesis.
+
+### Whole-dead-segment lower DISCARD
+
+ID29 is an advisory media-reclamation optimization, never an authority
+transition. The authority may call one production hook only after a previously
+written 1MiB segment is proven wholly dead and immediately before foreground/GC
+reuse. A committed GC victim may be trimmed only after role rotation succeeds
+and it has become a dead reserve. Exact segment mapping counts and all 256
+physical live-record counts must be zero first.
+
+The Device Mapper hook runs on the serialized owner, rejects internal ownership
+inconsistency before reuse, and never trims the currently named foreground OPEN
+segment. It issues one segment-aligned lower DISCARD only when the backing queue
+advertises support. EOPNOTSUPP and real lower DISCARD errors are diagnostic and
+nonfatal because TRIM cannot create logical deadness; failed TRIM must not
+publish, free, or make any otherwise-live storage reusable.
+
+### Passive K=1 ready-wait evidence
+
+ID38 telemetry may observe a nonempty window entering the existing
+swapz_flush_window ownership boundary while the sole immutable lower run is
+active and its completion is not done. It records windows, records, max window,
+exact wall spent in wait_for_completion and the existing close reason.
+These counters must not wake workers, close windows, change timers, add a slot
+or participate in policy.
+
+### Passive adjacent distinct-extent READ evidence
+
+ID63 runs only inside the already-admitted independent READ batch selected by
+Kread. When two distinct immutable extents are already selected, record whether
+their complete physical ranges are contiguous inside one 1MiB segment and the
+combined range is <=64KiB. This is a layout-opportunity count, not permission
+to issue a merged READ and not exact saved-request accounting. No future-arrival
+wait, new reordering or cache/publication behavior is allowed.
 
 ### Worker scheduler-accounted CPU attribution
 

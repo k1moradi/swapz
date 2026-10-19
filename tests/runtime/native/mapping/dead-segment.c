@@ -20,11 +20,35 @@ static swapz_u16 live[768];
 static swapz_u8 classes[768];
 static swapz_u8 bytes[SWAPZ_BLOCK_BYTES];
 static swapz_u8 data[100];
+static int recycle_hook_calls;
+static swapz_u32 recycle_hook_last_segment;
+static int recycle_hook_error;
+
+static int recycle_hook(void *opaque, swapz_u32 segment)
+{
+	struct swapz_authority *authority = opaque;
+	swapz_u32 block;
+
+	CHECK(authority == &a);
+	CHECK(segment < 3);
+	for (block = segment * SWAPZ_SEGMENT_BLOCKS;
+	     block < (segment + 1U) * SWAPZ_SEGMENT_BLOCKS; ++block)
+		CHECK(authority->live_records[block] == 0);
+	recycle_hook_calls++;
+	recycle_hook_last_segment = segment;
+	return recycle_hook_error;
+}
 
 static int setup(void)
 {
 	int rc = swapz_authority_init(&a, maps, live, classes, 32, 768);
+
+	recycle_hook_calls = 0;
+	recycle_hook_last_segment = ~(swapz_u32)0;
+	recycle_hook_error = 0;
 	a.reuse_dead_segments = 1;
+	a.dead_segment_recycle = recycle_hook;
+	a.dead_segment_recycle_opaque = &a;
 	return rc;
 }
 
@@ -65,9 +89,30 @@ static int test_recycle_wholly_dead_segment(void)
 	CHECK(live[255] == 0 && !maps[0].valid);
 	CHECK(write_page(1) == 0);
 	CHECK(a.recycled_dead_segments == 1);
+	CHECK(recycle_hook_calls == 1 && recycle_hook_last_segment == 0);
 	CHECK(a.next_block == 1 && a.open_segment == 0);
 	CHECK(maps[1].start_block == 0 && maps[1].valid);
 	CHECK(live[0] == 1 && classes[0] == 1);
+	return 0;
+}
+
+static int test_recycle_hook_failure_preserves_dead_segment(void)
+{
+	int i;
+
+	CHECK(setup() == 0);
+	for (i = 0; i < 256; ++i)
+		CHECK(write_page(0) == 0);
+	CHECK(swapz_discard_page(&a, 0) == 0);
+	recycle_hook_error = -EIO;
+	CHECK(write_page(1) == -EIO);
+	CHECK(recycle_hook_calls == 1 && recycle_hook_last_segment == 0);
+	CHECK(a.recycled_dead_segments == 0);
+	CHECK(a.next_block == 256 && a.open_segment == 0);
+	CHECK(!maps[0].valid && !maps[1].valid);
+	recycle_hook_error = 0;
+	CHECK(write_page(1) == 0);
+	CHECK(recycle_hook_calls == 2 && a.recycled_dead_segments == 1);
 	return 0;
 }
 
@@ -134,6 +179,7 @@ int main(void)
 	int passed = 0;
 
 	CHECK(test_recycle_wholly_dead_segment() == 0); passed++;
+	CHECK(test_recycle_hook_failure_preserves_dead_segment() == 0); passed++;
 	CHECK(test_live_segment_is_never_overwritten() == 0); passed++;
 	CHECK(test_corrupted_liveness_never_reclaims_live_map() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;

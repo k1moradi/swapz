@@ -181,13 +181,14 @@ UUID="SWAPZ-TEST-$TOKEN"
 mkdir "$CONFIG" || fail "cannot create owned null_blk"
 OWN_NULL=1
 note "OWNED_CONFIG=$CONFIG UUID=$UUID"
-for attr in size memory_backed blocksize power index queue_mode submit_queues hw_queue_depth; do
+for attr in size memory_backed blocksize power index queue_mode submit_queues hw_queue_depth discard; do
 	[[ -e "$CONFIG/$attr" ]] || fail "missing configfs attribute $attr"
 done
 # Linux null_blk configfs size unit is MiB. Never use the module default!
 echo 64 > "$CONFIG/size"
 echo 4096 > "$CONFIG/blocksize"
 echo 1 > "$CONFIG/memory_backed"
+echo 1 > "$CONFIG/discard"
 echo 2 > "$CONFIG/queue_mode"
 echo 1 > "$CONFIG/submit_queues"
 echo 1 > "$CONFIG/hw_queue_depth"
@@ -196,8 +197,10 @@ echo 1 > "$CONFIG/hw_queue_depth"
    "$(cat "$CONFIG/hw_queue_depth")" == 1 ]] ||
     fail "owned RAM serial queue geometry rejected"
 echo 1 > "$CONFIG/power"
-[[ "$(cat "$CONFIG/memory_backed")" == 1 ]] && [[ "$(cat "$CONFIG/power")" == 1 ]] ||
-	fail "RAM backing not active"
+[[ "$(cat "$CONFIG/memory_backed")" == 1 &&
+   "$(cat "$CONFIG/discard")" == 1 &&
+   "$(cat "$CONFIG/power")" == 1 ]] ||
+	fail "RAM backing/discard not active"
 INDEX="$(cat "$CONFIG/index")"
 [[ "$INDEX" =~ ^(0|[1-9][0-9]*)$ ]] || fail "invalid configfs index"
 # New null_blk names the block disk after configfs; old kernels use nullbN.
@@ -423,6 +426,18 @@ gc_dead_reuses="$(status_u64 "$gc_after" dead_segment_reuses)" ||
     fail "live-GC status lacks dead-segment reuse count"
 gc_no_headroom="$(status_u64 "$gc_after" gc_no_headroom_skips)" ||
     fail "live-GC status lacks no-headroom skip count"
+gc_discards_eligible="$(status_u64 "$gc_after" segment_discards_eligible)" ||
+    fail "live-GC status lacks discard eligibility count"
+gc_discards_issued="$(status_u64 "$gc_after" segment_discards_issued)" ||
+    fail "live-GC status lacks discard issued count"
+gc_discards_completed="$(status_u64 "$gc_after" segment_discards_completed)" ||
+    fail "live-GC status lacks discard completion count"
+gc_discards_unsupported="$(status_u64 "$gc_after" segment_discards_unsupported)" ||
+    fail "live-GC status lacks discard unsupported count"
+gc_discards_failed="$(status_u64 "$gc_after" segment_discards_failed)" ||
+    fail "live-GC status lacks discard failure count"
+gc_discard_sectors="$(status_u64 "$gc_after" segment_discard_sectors)" ||
+    fail "live-GC status lacks discard sector count"
 note "LIVE_GC_EVIDENCE=victims:$gc_victims rotations:$gc_rotations distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max pages:$gc_pages read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs dead_reuses:$gc_dead_reuses no_headroom:$gc_no_headroom last:$gc_victim->$gc_destination"
 (( $(status_u64 "$gc_after" failed) == 0 &&
    gc_victims >= 2 && gc_rotations == gc_victims &&
@@ -430,9 +445,14 @@ note "LIVE_GC_EVIDENCE=victims:$gc_victims rotations:$gc_rotations distinct:$gc_
    gc_victim_max >= gc_victim_min && gc_victim_max <= gc_victims &&
    gc_pages > 0 && gc_read > 0 && gc_write > 0 &&
    gc_read_reqs > 0 && gc_write_reqs > 0 &&
-   gc_victim != gc_destination )) ||
+   gc_victim != gc_destination &&
+   gc_discards_eligible >= gc_victims &&
+   gc_discards_issued == gc_discards_completed &&
+   gc_discards_completed >= gc_victims &&
+   gc_discards_unsupported == 0 && gc_discards_failed == 0 &&
+   gc_discard_sectors == gc_discards_completed * 2048 )) ||
     fail "loaded live-GC did not prove repeated distributed live evacuation and rotation"
-note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max last:$gc_victim->$gc_destination verified_pages:4096"
+note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max last:$gc_victim->$gc_destination discards:$gc_discards_completed discard_sectors:$gc_discard_sectors discard_unsupported:$gc_discards_unsupported discard_failed:$gc_discards_failed verified_pages:4096"
 dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
 OWN_DM=0
 

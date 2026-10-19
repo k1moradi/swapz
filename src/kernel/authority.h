@@ -43,6 +43,9 @@ struct swapz_tx {
 	struct swapz_tx_record records[SWAPZ_MAX_RECORDS];
 };
 
+typedef int (*swapz_dead_segment_recycle_fn)(void *opaque,
+					      swapz_u32 segment);
+
 struct swapz_authority {
 	struct swapz_map *maps;		/* [logical_pages] */
 	swapz_u16 *live_records;		/* [physical_blocks]; extent START */
@@ -68,6 +71,13 @@ struct swapz_authority {
 	swapz_u32 open_segment;		/* UINT32_MAX before the first allocation */
 	swapz_u32 next_segment_probe;
 	swapz_u32 recycled_dead_segments;
+	/*
+	 * Optional caller hook invoked only after a previously written 1MiB
+	 * segment is proven wholly dead and immediately before allocator reuse.
+	 * A negative return blocks reuse without mutating authority state.
+	 */
+	swapz_dead_segment_recycle_fn dead_segment_recycle;
+	void *dead_segment_recycle_opaque;
 	/*
 	 * Runtime-only opt-in. Preserves old research append-only semantics by
 	 * default; the separately reviewed Device Mapper target enables this.

@@ -137,6 +137,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(
                 before, dict(after, parallel_read_same_extent_pairs=9))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(
+                before, dict(after, parallel_read_adjacent_extent_pairs=6))
 
         bad = subprocess.CompletedProcess(["dmsetup"], 0,
                                           stdout="0 8192 swapz read_meta_reqs=4")
@@ -235,6 +238,12 @@ class PairReplayContract(unittest.TestCase):
             "read_worker_cpu_ns": 1010,
             "prep_wait_wall_ns": 510,
             "prep_lower_write_overlap_ns": 5020,
+            "pipeline_finalize_wait_wall_ns": 9000,
+            "k1_ready_wait_windows": 1,
+            "k1_ready_wait_records": 8,
+            "k1_ready_wait_wall_ns": 7000,
+            "k1_ready_wait_max_records": 8,
+            "k1_ready_wait_pack_ready": 1,
             "windows": 4,
             "close_pack_ready": 4,
             "pack_close_tail_target": 2,
@@ -252,15 +261,6 @@ class PairReplayContract(unittest.TestCase):
             "pack_tail_many_idle": 1,
             "burst_target_grows": 1,
             "burst_target_shrinks": 1,
-            "pack_tail_zero_deferrals": 2,
-            "pack_tail_zero_finalize_holds": 1,
-            "pack_tail_deferred_resolve_zero": 0,
-            "pack_tail_deferred_resolve_one": 1,
-            "pack_tail_deferred_resolve_many": 1,
-            "pack_tail_zero_deferred_aborts": 0,
-            "pack_ready_busy_deferrals_admission": 3,
-            "pack_ready_busy_deferrals_worker": 1,
-            "pack_ready_post_finalize_closes": 1,
             "packed_early_commits": 2,
             "retained_burst_target": 8,
             "prep_lower_write_samples": 7,
@@ -339,15 +339,6 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["pack_tail_many_idle"], 1)
         self.assertEqual(delta["burst_target_grows"], 1)
         self.assertEqual(delta["burst_target_shrinks"], 1)
-        self.assertEqual(delta["pack_tail_zero_deferred_start"], 0)
-        self.assertEqual(delta["pack_tail_zero_deferred_end"], 0)
-        self.assertEqual(delta["pack_tail_zero_deferrals"], 2)
-        self.assertEqual(delta["pack_tail_zero_finalize_holds"], 1)
-        self.assertEqual(delta["pack_tail_deferred_resolve_one"], 1)
-        self.assertEqual(delta["pack_tail_deferred_resolve_many"], 1)
-        self.assertEqual(delta["pack_ready_busy_deferrals_admission"], 3)
-        self.assertEqual(delta["pack_ready_busy_deferrals_worker"], 1)
-        self.assertEqual(delta["pack_ready_post_finalize_closes"], 1)
         self.assertEqual(delta["prep_crc_wall_ns"], 500)
         self.assertEqual(delta["ordered_crc_wall_ns"], 700)
         self.assertEqual(delta["engine_publish_crc_wall_ns"], 1000)
@@ -359,30 +350,17 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["prep_lower_write_end_nonempty"], 2)
         self.assertEqual(delta["prep_wait_wall_ns"], 500)
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
+        self.assertEqual(delta["pipeline_finalize_wait_wall_ns"], 9000)
+        self.assertEqual(delta["k1_ready_wait_windows"], 1)
+        self.assertEqual(delta["k1_ready_wait_records"], 8)
+        self.assertEqual(delta["k1_ready_wait_wall_ns"], 7000)
+        self.assertEqual(delta["k1_ready_wait_pack_ready"], 1)
         self.assertEqual(delta["single_tail_deferrals"], 4)
         self.assertEqual(delta["single_tail_companions"], 2)
         self.assertEqual(delta["single_tail_other_clears"], 2)
         self.assertEqual(delta["single_tail_comp_age_le250us"], 1)
         self.assertEqual(delta["single_tail_comp_age_251_500us"], 1)
         self.assertEqual(delta["single_tail_comp_after_both"], 1)
-
-        # A deferred-zero lifecycle may begin in prefill and resolve after the
-        # timed mixed snapshot. Exact interval conservation therefore includes
-        # the inferred one-bit carry state rather than requiring a new
-        # same-interval deferral.
-        carry_before = dict(before)
-        carry_before["pack_tail_zero_deferrals"] = 1
-        carry_after = dict(carry_before)
-        carry_after["pack_tail_deferred_resolve_many"] = 1
-        carry_delta = module.kernel_write_delta(carry_before, carry_after)
-        self.assertEqual(carry_delta["pack_tail_zero_deferred_start"], 1)
-        self.assertEqual(carry_delta["pack_tail_zero_deferred_end"], 0)
-        self.assertEqual(carry_delta["pack_tail_zero_deferrals"], 0)
-        self.assertEqual(carry_delta["pack_tail_deferred_resolve_many"], 1)
-
-        with self.assertRaisesRegex(ValueError, "cumulative lifecycle"):
-            module.kernel_write_delta(
-                dict(before, pack_tail_deferred_resolve_many=1), after)
 
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)
@@ -425,9 +403,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tail-sample"):
             module.kernel_write_delta(
                 before, dict(after, pack_tail_zero_idle=2))
-        with self.assertRaisesRegex(ValueError, "ID57"):
+        with self.assertRaisesRegex(ValueError, "K=1 ready-wait"):
             module.kernel_write_delta(
-                before, dict(after, pack_tail_deferred_resolve_many=3))
+                before, dict(after, k1_ready_wait_full=2))
         with self.assertRaisesRegex(ValueError, "upper-tail"):
             module.kernel_write_delta(
                 before, dict(after, single_tail_comp_age_251_500us=0,
