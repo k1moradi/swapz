@@ -233,17 +233,52 @@ static inline int swapz_window_timer_enabled(swapz_u8 retain_ms)
 }
 
 /*
- * An existing queued hrtimer already carries the immutable first-record
- * absolute deadline. Starting the same timer again on every empty-queue
- * worker pass buys no additional wakeup, and adds timer-base overhead.
- * The queued snapshot is taken while the serialized worker holds
- * queue_lock. If a callback has already dequeued the timer, a rearm
- * remains permitted; that callback may also schedule another worker.
- * Never skip the FIRST timer arm of a new retained window.
+ * The ordinary retained window keeps its first-record absolute deadline.
+ * A sampled singleton successor may temporarily choose an earlier absolute
+ * deadline from its own observation timestamp. Reuse the same hrtimer: if the
+ * effective deadline changes, reprogram that one timer rather than adding a
+ * second timer, sleep, spin or future-arrival wait.
  */
-static inline int swapz_retention_timer_needs_arm(swapz_u8 retain_ms, int queued)
+static inline unsigned long long swapz_window_retention_deadline_ns(
+		unsigned long long first_ns, swapz_u8 retain_ms)
 {
-	return swapz_window_timer_enabled(retain_ms) && !queued;
+	unsigned long long duration;
+
+	if (!retain_ms || !first_ns)
+		return 0;
+	duration = (unsigned long long)retain_ms * 1000000ULL;
+	return first_ns > ~0ULL - duration ? ~0ULL : first_ns + duration;
+}
+
+static inline unsigned long long swapz_window_single_tail_deadline_ns(
+		unsigned long long first_ns, swapz_u8 retain_ms,
+		unsigned long long deferred_start_ns,
+		unsigned long long cutoff_ns)
+{
+	unsigned long long ordinary =
+		swapz_window_retention_deadline_ns(first_ns, retain_ms);
+	unsigned long long cutoff;
+
+	if (!ordinary || !deferred_start_ns || !cutoff_ns)
+		return ordinary;
+	cutoff = deferred_start_ns > ~0ULL - cutoff_ns ?
+		~0ULL : deferred_start_ns + cutoff_ns;
+	return cutoff < ordinary ? cutoff : ordinary;
+}
+
+static inline int swapz_window_deadline_expired(unsigned long long deadline_ns,
+		unsigned long long now_ns)
+{
+	return !deadline_ns || now_ns >= deadline_ns;
+}
+
+static inline int swapz_retention_timer_needs_rearm(
+		swapz_u8 retain_ms, int queued,
+		unsigned long long queued_deadline_ns,
+		unsigned long long desired_deadline_ns)
+{
+	return swapz_window_timer_enabled(retain_ms) && desired_deadline_ns &&
+		(!queued || queued_deadline_ns != desired_deadline_ns);
 }
 
 /*

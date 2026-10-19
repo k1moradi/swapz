@@ -666,9 +666,10 @@ and clear the deferral.
 Both `swapz_retained_target_close_ready()` and
 `swapz_retained_pack_close_ready()` must refuse a deferred singleton. The
 second admitted record clears the deferral, and real nonempty flushes, hard
-boundaries and true empty burst boundaries clear it as well. No new timer,
-grace interval or future-arrival wait is permitted; a genuine final singleton
-uses the existing pinned retention deadline.
+boundaries and true empty burst boundaries clear it as well. ID50 itself adds no
+timer or arrival wait. Its ID53 successor may reprogram the existing retention
+hrtimer to an earlier measured age cutoff; it must not allocate a second timer,
+sleep, spin or wait for a future arrival.
 
 Loaded qualification compares against source `1be728162202...`. On the fast
 mixed async arm, sampled-tail one-page PACK_READY closes should fall materially
@@ -712,6 +713,31 @@ Interpretation is predeclared: an event such as lower-W completion or READ
 service is not a candidate early-close discriminator if it commonly occurs
 before companion resolutions as well as deadline resolutions. A successor
 policy requires a separate source revision after owner evidence.
+
+### Deferred-singleton age-cutoff qualification
+
+ID53 is the bounded successor to completed ID52 evidence. Production code may
+use a one-millisecond deadline only while
+`retained_single_tail_deferred && batch_count == 1`, and only as
+`min(original_deadline, deferred_start + 1 ms)`. A companion must restore the
+ordinary deadline by clearing the deferred state. The same retention hrtimer is
+reused/reprogrammed; no second timer or future-arrival wait is permitted.
+
+Direct C/source coverage must prove the effective deadline is bounded,
+reversible after a companion, and cannot train the full-deadline learned
+singleton bypass. Timed telemetry must expose
+`single_tail_age_cutoff_closes` and
+`single_tail_cutoff_late_companions`, require cutoff closes <= deferred
+deadline terminals and late companions <= cutoff closes, and print the compact
+`deferred 1ms cutoff/late` row. An early cutoff preserves the original
+deadline only as an attribution watermark: the next ordinary WRITE before that
+time counts one miss but is never delayed; ordering boundaries clear the
+watermark.
+
+Reject ID53 if miss rate is material, lower WRITE bytes/requests rise
+materially, useful throughput or read tails regress, or lifecycle/order/failure
+gates change. A favorable synthetic result remains policy evidence only for the
+tested RAM models.
 
 ### Same-cache Kread A/B diagnostic
 

@@ -339,23 +339,30 @@ A post-PACK admitted-tail sample of exactly one WRITE is timing evidence, not
 packed geometry. It may grow `retained_burst_target`, but it must not set a
 one-shot `retained_tail_target == 1` or authorize an early one-record
 PACK_READY close. The ordered owner records this state with
-`retained_single_tail_deferred` and keeps the existing first-record absolute
-retention deadline unchanged; there is no added timer, sleep, spin or future
-arrival wait.
+`retained_single_tail_deferred`. ID53 may shorten only this state's effective
+deadline to `min(original first-record deadline, deferred start + 1 ms)`.
+The original deadline remains the hard upper bound. The existing retention
+hrtimer is reprogrammed when the effective deadline changes; no second timer,
+sleep, spin or future-arrival wait is added.
 
 While that state is active and `batch_count == 1`, both admission target closure
 and worker service-proven closure must return false. This prevents carried
 read-bypass/wave-interruption evidence from relabeling the same singleton as a
 different PACK_READY cause. A second admitted record clears the deferral and
-normal multi-record target/service rules resume. Any real nonempty flush, hard
-boundary, or true empty burst boundary also clears the state. A genuine final
-singleton therefore drains through the pre-existing deadline/idle machinery,
-not a new scheduling path.
+restores the ordinary deadline. Any real nonempty flush, hard boundary, or true
+empty burst boundary also clears the state. The one-millisecond age cutoff uses
+the existing DEADLINE close path and must not train
+`singleton_deadline_streak`/`singleton_fast_close`, because it did not wait
+the full ordinary deadline.
 
-Existing one-page PACK_READY T/R/W attribution remains unchanged. The policy is
-qualified only if sampled-tail closes fall without migrating into read-bypass or
-wave buckets and without harming slow-model geometry, lower bytes, useful
-throughput, read tail latency, ordering or fail-closed ownership.
+Existing one-page PACK_READY T/R/W attribution remains unchanged. ID53 adds
+only `single_tail_age_cutoff_closes` and
+`single_tail_cutoff_late_companions`. After an early cutoff, the next ordinary
+WRITE increments the late-companion counter only if it arrives before the
+original deadline; it is never delayed or rejected. Ordering boundaries clear
+the pending observation. Qualify the cutoff only if misses stay negligible and
+slow-model geometry, lower bytes/requests, useful throughput, read tails,
+ordering and fail-closed ownership do not regress.
 
 ### Deferred-singleton lifecycle attribution
 

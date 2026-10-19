@@ -69,6 +69,8 @@ SINGLE_TAIL_SERVICE_FIELDS = (
     "single_tail_comp_after_both", "single_tail_deadline_after_lower_done",
     "single_tail_deadline_after_read_bypass", "single_tail_deadline_after_both")
 ID52_FIELDS = SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_SERVICE_FIELDS
+ID53_FIELDS = (
+    "single_tail_age_cutoff_closes", "single_tail_cutoff_late_companions")
 DEADLINE_CONTEXT_LABELS = (
     ("deadline_before_bio", "before-bio"),
     ("deadline_after_read", "after-read"),
@@ -99,7 +101,7 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + DEADLINE_CONTEXT_FIELDS +
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + ID53_FIELDS + DEADLINE_CONTEXT_FIELDS +
     BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
@@ -167,6 +169,11 @@ def timed_window_error(record):
         return "timed deferred companion age attribution is inconsistent"
     if sum(record[field] for field in SINGLE_TAIL_TIMING_FIELDS[4:]) != record["win1_deadline_deferred_tail"]:
         return "timed deferred deadline age attribution is inconsistent"
+    if (record["single_tail_age_cutoff_closes"] >
+            record["win1_deadline_deferred_tail"] or
+            record["single_tail_cutoff_late_companions"] >
+            record["single_tail_age_cutoff_closes"]):
+        return "timed deferred cutoff attribution is inconsistent"
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
@@ -1209,7 +1216,7 @@ def benchmark_verdicts(sessions):
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
-                            SINGLE_TAIL_FIELDS + ID52_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            SINGLE_TAIL_FIELDS + ID52_FIELDS + ID53_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
             "kernel_gauges": {
@@ -1410,6 +1417,9 @@ def print_bench(result):
                  f"{counters['win1_deadline_deferred_tail']:.1f}/"
                  f"{counters['win1_idle_deferred_tail']:.1f}/"
                  f"{counters['single_tail_other_clears']:.1f}"),
+                ("deferred 1ms cutoff/late",
+                 f"{counters['single_tail_age_cutoff_closes']:.1f}/"
+                 f"{counters['single_tail_cutoff_late_companions']:.1f}"),
                 ("deferred C age <=250/500/1000/>",
                  f"{counters['single_tail_comp_age_le250us']:.1f}/"
                  f"{counters['single_tail_comp_age_251_500us']:.1f}/"

@@ -712,6 +712,8 @@ SINGLE_TAIL_SERVICE_FIELDS = (
     "single_tail_comp_after_both", "single_tail_deadline_after_lower_done",
     "single_tail_deadline_after_read_bypass", "single_tail_deadline_after_both")
 ID52_FIELDS = SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_SERVICE_FIELDS
+ID53_FIELDS = (
+    "single_tail_age_cutoff_closes", "single_tail_cutoff_late_companions")
 DEADLINE_CONTEXT_FIELDS = (
     "deadline_before_bio", "deadline_after_read",
     "deadline_worker_with_local", "deadline_worker_empty")
@@ -724,7 +726,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + ID53_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "write_copy_wall_ns", "write_copy_bytes", "direct_lz4_input_pages",
@@ -809,6 +811,11 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz deferred companion age accounting")
     if sum(counters[field] for field in SINGLE_TAIL_TIMING_FIELDS[4:]) != counters["win1_deadline_deferred_tail"]:
         raise ValueError("inconsistent swapz deferred deadline age accounting")
+    if (counters["single_tail_age_cutoff_closes"] >
+            counters["win1_deadline_deferred_tail"] or
+            counters["single_tail_cutoff_late_companions"] >
+            counters["single_tail_age_cutoff_closes"]):
+        raise ValueError("inconsistent swapz deferred cutoff accounting")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),

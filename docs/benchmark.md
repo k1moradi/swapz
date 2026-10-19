@@ -53,41 +53,43 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `8799afcce5ecb729f3c9332d557fb4340c1896ee`
-(report-only `e822eddf23ae26bad920171f00a5befa3f60b4ff`) passed all five
-stages. It is diagnostic evidence on synthetic RAM only.
+Owner-qualified source `4edf2d60a9275fb9e57e7eb605bce6c02c2a1263`
+(report-only `70dea7aa36611df541823b711f918d78c4f4a163`) passed all five
+stages. It is synthetic owned-RAM evidence only.
 
-ID51 closes exactly. Fast mixed deferred-tail D/C/DL/I/O is
-105.0/76.8/28.2/0/0, so about 73% of sampled singletons obtain a companion and
-27% reach the existing deadline. Slow is 0.8/0.8/0/0/0. This supports ID50's
-transient-singleton mechanism but does not identify a safe earlier cutoff for
-the deadline subset.
+ID52 now answers the deferred-singleton discrimination question. Fast mixed
+D/C/DL/I/O is 107.5/76.0/31.5/0/0. Companion ages are
+52.8/19.0/3.2/1.0 in <=250/251-500/501-1000/>1000 us bins, while deadline
+ages are 0/0/0/31.5. Thus 75/76 companion resolutions occur within 1 ms and
+all observed true deadline tails survive beyond 1 ms. Lower-W completion and
+READ-bypass events occur before both terminal classes, so neither is a safe
+early-close discriminator.
 
-ID49 remains stable on the depth-one model: sequential packed reads are 2830
-KiB / 400.5 requests / 14.33 ms and random reads are 2498 KiB / 624.5 /
-22.21 ms. The fast combined READ path still avoids amplification and reaches
-sampled depth two, but p99 varied to 5.10/5.45 ms and the default report changed
-to NOT_FASTER. The next loaded evidence therefore adds four fast-model sessions
-with `parallel_reads=0,1,1,0`, async preparation fixed off, identical source,
-fixture, trace and shared cache. This diagnostic has two observations per mode
-and is not a confidence-qualified promotion gate.
+ID53 is a separate source experiment based on that result. It changes only an
+already-deferred sampled singleton: its effective deadline becomes the earlier
+of the original first-record deadline and one millisecond after the deferral
+sample. The existing retention hrtimer is reprogrammed when the effective
+deadline changes; no second timer or arrival wait is added. The report counts
+actual age-cutoff closes and any next ordinary WRITE that arrives before the
+original deadline after such a close. The latter is the direct
+misclassification signal.
 
-ID52 is instrumentation only. Each deferred companion/deadline terminal event
-is assigned exactly one age bin: <=250 us, 251-500 us, 501-1000 us, or >1000 us.
-For each terminal class, overlapping subset counters record lower-W completion,
-independent READ bypass, and both-before-resolution. Age-bin sums must equal the
-corresponding ID51 terminal counts and service subsets may never exceed totals.
-No ID52 field participates in a closure decision.
+ID39 also moved from ambiguity to positive controlled evidence. With source,
+fixture, trace and the shared extent cache fixed, Kread-off/on sequential p99
+is 5.57/5.21 ms and random p99 is 5.65/4.98 ms. Lower bytes/requests are
+unchanged or slightly lower with Kread enabled, and enabled sessions execute
+parallel pairs. The result still has only two observations per mode, so the
+next evidence matrix repeats matched toggles before promotion.
 
-The console now also prints existing timed mixed window-size bins for sync and
-async (1, 2, 3-4, 5-8, 9-16, 17-64 plus PACK_READY/DEADLINE/IDLE totals). Use
-those existing counters before adding a sampled-tail-size histogram: only a
-persistent async excess of small windows justifies that next evidence step.
+Fast mixed async/sync is 23.72/22.27 MB/s with 905.5/925 lower WRITE requests.
+Fast write-only QD8 is 28.27/20.65 MB/s async/sync with 524 lower requests and
+QD32 is 41.62/38.17 with 139. Those are useful directional signals for the K=1
+ping-pong path, not confirmation: mixed has two observations/mode and
+write-only one pair/QD.
 
-The latest fast mixed async/sync result is 23.26/22.83 MB/s with 961/853 lower
-WRITE requests, while the prior run had the opposite throughput ordering. That
-run-to-run sign change is evidence for the >=5 matched-pair requirement, not a
-new WRITE policy conclusion.
+Existing fast mixed 2-4-record windows total 158.0 async versus 149.5 sync.
+That modest excess does not justify another multi-tail policy or hot-path
+histogram yet; preserve the current bins through repeated evidence instead.
 
 ## Confirmation gate
 

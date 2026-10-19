@@ -879,6 +879,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         process = body("swapz_process")
         parallel_batch = body("swapz_try_parallel_read_batch")
         self.assertIn("ctx->single_tail_deferred_start_ns = ktime_get_ns()", sample)
+        self.assertIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS 1000000ULL", DM_TARGET)
+        self.assertIn("swapz_window_single_tail_deadline_ns(", DM_TARGET)
+        self.assertIn("ctx->single_tail_age_cutoff_closes++", flush)
+        self.assertIn("ctx->single_tail_cutoff_original_deadline_ns", flush)
+        self.assertIn("ctx->single_tail_cutoff_late_companions++", accept)
+        self.assertIn("!ctx->retained_single_tail_deferred", worker)
+        for field in ("single_tail_age_cutoff_closes",
+                      "single_tail_cutoff_late_companions"):
+            self.assertIn(field + "=%llu", status)
+            self.assertIn("ctx->" + field, status)
         self.assertIn("ctx->single_tail_lower_done_seen = false", sample)
         self.assertIn("ctx->single_tail_read_bypass_seen = false", sample)
         self.assertIn("elapsed <= 250000ULL", terminal)
@@ -1104,19 +1114,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_order_window(ctx)", flush)
         self.assertIn("swapz_engine_write_window_batched_read_cap", flush)
 
-    def test_alpha16_no_rearm_of_already_queued_retention_timer(self):
+    def test_retention_timer_rearms_only_when_effective_deadline_changes(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         worker = body("swapz_worker")
         status = body("swapz_status")
-        self.assertIn("swapz_retention_timer_needs_arm(", policy)
-        self.assertIn("swapz_window_timer_enabled(retain_ms) && !queued", policy)
+        self.assertIn("swapz_retention_timer_needs_rearm(", policy)
+        self.assertIn("queued_deadline_ns != desired_deadline_ns", policy)
         self.assertIn("hrtimer_is_queued(&ctx->retention_timer)", worker)
-        self.assertIn("swapz_retention_timer_needs_arm(ctx->retain_ms", worker)
+        self.assertIn("hrtimer_get_expires(", worker)
+        self.assertIn("desired_deadline = swapz_retention_deadline_ns(ctx)", worker)
         self.assertLess(worker.index("hrtimer_is_queued(&ctx->retention_timer)"),
                         worker.index("hrtimer_start(&ctx->retention_timer"))
         self.assertIn("ctx->retain_timer_arms++", worker)
         self.assertIn("ctx->retain_timer_arm_skips++", worker)
-        self.assertIn("ctx->window_first_ns +", worker)
+        self.assertIn("ns_to_ktime(desired_deadline)", worker)
         self.assertIn("HRTIMER_MODE_ABS", worker)
         self.assertIn("retain_timer_arm_skips=%llu", status)
         self.assertIn("ctx->retain_timer_arm_skips", status)
