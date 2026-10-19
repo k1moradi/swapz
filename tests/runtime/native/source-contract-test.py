@@ -846,7 +846,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->retained_tail_target = tail", sample)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
-        self.assertIn("swapz_sample_pack_tail_locked(ctx, &local, false)", worker)
+        self.assertIn("swapz_sample_pack_tail_locked(ctx, &local)", worker)
         self.assertIn("swapz_window_shrink_burst_target(", worker)
         self.assertIn("!ctx->retained_chain_completed", worker)
         target_ready = body("swapz_retained_target_close_ready")
