@@ -874,6 +874,39 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "single_tail_other_clears"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
+        terminal = body("swapz_account_single_tail_terminal")
+        finalize = body("swapz_finalize_inflight_write")
+        process = body("swapz_process")
+        parallel_batch = body("swapz_try_parallel_read_batch")
+        self.assertIn("ctx->single_tail_deferred_start_ns = ktime_get_ns()", sample)
+        self.assertIn("ctx->single_tail_lower_done_seen = false", sample)
+        self.assertIn("ctx->single_tail_read_bypass_seen = false", sample)
+        self.assertIn("elapsed <= 250000ULL", terminal)
+        self.assertIn("elapsed <= 500000ULL", terminal)
+        self.assertIn("elapsed <= 1000000ULL", terminal)
+        self.assertIn("single_tail_companion_after_lower_done", terminal)
+        self.assertIn("single_tail_deadline_after_read_bypass", terminal)
+        self.assertIn("single_tail_deadline_after_both", terminal)
+        self.assertIn("ctx->single_tail_lower_done_seen = true", finalize)
+        self.assertIn("swapz_note_single_tail_read_bypass(ctx)", process)
+        self.assertIn("swapz_note_single_tail_read_bypass(ctx)", parallel_batch)
+        for field in (
+                "single_tail_comp_age_le250us",
+                "single_tail_comp_age_251_500us",
+                "single_tail_comp_age_501_1000us",
+                "single_tail_comp_age_gt1000us",
+                "single_tail_deadline_age_le250us",
+                "single_tail_deadline_age_251_500us",
+                "single_tail_deadline_age_501_1000us",
+                "single_tail_deadline_age_gt1000us",
+                "single_tail_comp_after_lower_done",
+                "single_tail_comp_after_read_bypass",
+                "single_tail_comp_after_both",
+                "single_tail_deadline_after_lower_done",
+                "single_tail_deadline_after_read_bypass",
+                "single_tail_deadline_after_both"):
+            self.assertIn(field + "=%llu", status)
+            self.assertIn("ctx->" + field, status)
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -1037,6 +1070,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         retained_close = body("swapz_retained_pack_close_ready")
         self.assertIn("ctx->batch_count < 4U", retained_close)
         self.assertNotIn("ctx->batch_count >= 2U", retained_close)
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        self.assertIn("--parallel-reads 0|1", pair)
+        self.assertIn('"parallel_reads=$PARALLEL_READS"', pair)
+        self.assertIn("parallel_reads_enabled=$expected_parallel", pair)
+        self.assertIn("for parallel_reads in 0 1 1 0", loaded)
+        self.assertIn("START_PARALLEL_READ_AB=", loaded)
+        self.assertIn("def parse_parallel_read_ab", runner)
+        self.assertIn("PASS_PARALLEL_READ_AB_DIAGNOSTIC", runner)
+        self.assertIn('kernel["parallel_read_pairs"]', runner)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()

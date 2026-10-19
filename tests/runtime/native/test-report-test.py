@@ -186,6 +186,18 @@ def arm(candidate, *, mode, regime):
 
 
 
+def parallel_arm(enabled):
+    record = arm("swapz", mode=0, regime="ssd_emulated")
+    for phase in record["packed_read"]["passes"].values():
+        if not enabled:
+            phase["kernel_read_path"]["parallel_read_pairs"] = 0
+            phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 0
+        else:
+            phase["kernel_read_path"]["parallel_read_pairs"] = 128
+            phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 64
+    return record
+
+
 def write_arm(candidate, *, qd, regime, mode):
     swapz = candidate == "swapz"
     raw = 8.0 if regime == "sd_emulated" else 20.0
@@ -244,6 +256,21 @@ def synthetic_log():
                 out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
+    spec = runner.MODEL_SPECS["ssd_emulated"]
+    for index, enabled in enumerate((0, 1, 1, 0)):
+        out.append(f"START_PARALLEL_READ_AB={enabled}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        raw = arm("off", mode=0, regime="ssd_emulated")
+        swapz = parallel_arm(enabled)
+        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_PARALLEL_READ_AB={enabled}")
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
         out.append(f"START_WRITE_SATURATION_REGIME={regime}")
@@ -318,6 +345,8 @@ class ReportContract(unittest.TestCase):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
+        self.assertIn("START_PARALLEL_READ_AB=", loaded)
+        self.assertIn("--parallel-reads", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertNotIn("swapon ", loaded)
         self.assertNotIn("swapoff ", loaded)
@@ -363,6 +392,12 @@ class ReportContract(unittest.TestCase):
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
         self.assertEqual(len(sessions), 8)
+        parallel = runner.parse_parallel_read_ab(synthetic_log())
+        self.assertEqual([row["parallel_reads"] for row in parallel], [0, 1, 1, 0])
+        diagnostic = runner.parallel_read_ab_verdict(parallel)
+        self.assertEqual(diagnostic["overall"], "PASS_PARALLEL_READ_AB_DIAGNOSTIC")
+        self.assertEqual(diagnostic["modes"]["0"]["sequential"]["parallel_read_pairs"], 0)
+        self.assertGreater(diagnostic["modes"]["1"]["sequential"]["parallel_read_pairs"], 0)
         self.assertEqual([s["async_prepare"] for s in sessions],
                          [0, 1, 1, 0] * 2)
         self.assertEqual([s["regime"] for s in sessions],
@@ -563,6 +598,10 @@ class ReportContract(unittest.TestCase):
         self.assertIn("lower-W queue start/end", rendered)
         self.assertIn("lower-W nonempty start/end", rendered)
         self.assertIn("deferred tail D/C/DL/I/O", rendered)
+        self.assertIn("deferred C age <=250/500/1000/>", rendered)
+        self.assertIn("deferred DL service L/R/B", rendered)
+        self.assertIn("Mixed window bins; close=P/D/I", rendered)
+        self.assertIn("ID39 SAME-CACHE PARALLEL READ A/B", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)

@@ -53,40 +53,41 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `5694d55e092a2d234d9466cce5416672db8b082e`
-(report-only `0490a84ef7515182a8db0bdf287ca598ccaf8674`) passed all five
-stages.
+Owner-qualified source `8799afcce5ecb729f3c9332d557fb4340c1896ee`
+(report-only `e822eddf23ae26bad920171f00a5befa3f60b4ff`) passed all five
+stages. It is diagnostic evidence on synthetic RAM only.
 
-ID50 precisely removed the mechanism it targeted. Fast mixed async
-`win1_pack_tail_target` fell from about 78 to 0 while read-bypass stayed about
-24 and wave-interruption stayed 0. Lower WRITE requests fell from 1005.5 to
-952.5, reducing the async-over-sync request excess by about 20%, but useful
-async/sync WRITE remained 22.95/23.63 MB/s and one-page deadline closes reached
-53.2. Request reduction alone therefore does not promote ID50. ID51 now records
-the terminal outcome of every deferred singleton before any follow-on policy.
+ID51 closes exactly. Fast mixed deferred-tail D/C/DL/I/O is
+105.0/76.8/28.2/0/0, so about 73% of sampled singletons obtain a companion and
+27% reach the existing deadline. Slow is 0.8/0.8/0/0/0. This supports ID50's
+transient-singleton mechanism but does not identify a safe earlier cutoff for
+the deadline subset.
 
-ID49 remains independently qualified on the depth-one model: packed sequential
-is 2824 KiB / 399.5 requests / 13.84 ms and random is 2492 KiB / 623 requests /
-22.47 ms. On the depth-64 model the combined cache-coherent Kread path reaches
-READ peak 2.0 and now reports 2828 KiB / 405 requests / 4.59 ms sequential and
-2472 KiB / 618 requests / 5.11 ms random, earning FASTER. The next READ evidence
-must hold the cache/layout fixed and toggle only parallel service.
+ID49 remains stable on the depth-one model: sequential packed reads are 2830
+KiB / 400.5 requests / 14.33 ms and random reads are 2498 KiB / 624.5 /
+22.21 ms. The fast combined READ path still avoids amplification and reaches
+sampled depth two, but p99 varied to 5.10/5.45 ms and the default report changed
+to NOT_FASTER. The next loaded evidence therefore adds four fast-model sessions
+with `parallel_reads=0,1,1,0`, async preparation fixed off, identical source,
+fixture, trace and shared cache. This diagnostic has two observations per mode
+and is not a confidence-qualified promotion gate.
 
-The kernel therefore exposes a read-only module parameter
-`parallel_reads=0/1`, defaulting to 1. The runtime queue-depth gate remains in
-force, so depth-one media stay serialized regardless of the parameter. This is
-an A/B control only; default `make test` behavior is unchanged.
+ID52 is instrumentation only. Each deferred companion/deadline terminal event
+is assigned exactly one age bin: <=250 us, 251-500 us, 501-1000 us, or >1000 us.
+For each terminal class, overlapping subset counters record lower-W completion,
+independent READ bypass, and both-before-resolution. Age-bin sums must equal the
+corresponding ID51 terminal counts and service subsets may never exceed totals.
+No ID52 field participates in a closure decision.
 
-ID51 uses five monotonic counters: deferrals, companion resolutions, one-page
-deadline resolutions, one-page idle resolutions and other clears. Every timed
-quiescent interval must satisfy
-`deferrals = companions + deadline + idle + other`; deadline/idle subsets may
-never exceed the corresponding one-page close counters. The operator console
-prints them as `deferred tail D/C/DL/I/O`.
+The console now also prints existing timed mixed window-size bins for sync and
+async (1, 2, 3-4, 5-8, 9-16, 17-64 plus PACK_READY/DEADLINE/IDLE totals). Use
+those existing counters before adding a sampled-tail-size histogram: only a
+persistent async excess of small windows justifies that next evidence step.
 
-Snapshot hashing remains unchanged. The latest pause-side CRC remains about
-1.7 ms slow / 1.1 ms fast, so transaction-hash scope is not an active
-optimization target.
+The latest fast mixed async/sync result is 23.26/22.83 MB/s with 961/853 lower
+WRITE requests, while the prior run had the opposite throughput ordering. That
+run-to-run sign change is evidence for the >=5 matched-pair requirement, not a
+new WRITE policy conclusion.
 
 ## Confirmation gate
 

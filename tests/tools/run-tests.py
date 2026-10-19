@@ -59,6 +59,16 @@ SINGLE_TAIL_FIELDS = (
     "single_tail_deferrals", "single_tail_companions",
     "win1_deadline_deferred_tail", "win1_idle_deferred_tail",
     "single_tail_other_clears")
+SINGLE_TAIL_TIMING_FIELDS = (
+    "single_tail_comp_age_le250us", "single_tail_comp_age_251_500us",
+    "single_tail_comp_age_501_1000us", "single_tail_comp_age_gt1000us",
+    "single_tail_deadline_age_le250us", "single_tail_deadline_age_251_500us",
+    "single_tail_deadline_age_501_1000us", "single_tail_deadline_age_gt1000us")
+SINGLE_TAIL_SERVICE_FIELDS = (
+    "single_tail_comp_after_lower_done", "single_tail_comp_after_read_bypass",
+    "single_tail_comp_after_both", "single_tail_deadline_after_lower_done",
+    "single_tail_deadline_after_read_bypass", "single_tail_deadline_after_both")
+ID52_FIELDS = SINGLE_TAIL_TIMING_FIELDS + SINGLE_TAIL_SERVICE_FIELDS
 DEADLINE_CONTEXT_LABELS = (
     ("deadline_before_bio", "before-bio"),
     ("deadline_after_read", "after-read"),
@@ -89,7 +99,7 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + DEADLINE_CONTEXT_FIELDS +
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + DEADLINE_CONTEXT_FIELDS +
     BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
@@ -153,6 +163,18 @@ def timed_window_error(record):
         return "timed deferred deadline attribution is inconsistent"
     if record["win1_idle_deferred_tail"] > record["win1_idle"]:
         return "timed deferred idle attribution is inconsistent"
+    if sum(record[field] for field in SINGLE_TAIL_TIMING_FIELDS[:4]) != record["single_tail_companions"]:
+        return "timed deferred companion age attribution is inconsistent"
+    if sum(record[field] for field in SINGLE_TAIL_TIMING_FIELDS[4:]) != record["win1_deadline_deferred_tail"]:
+        return "timed deferred deadline age attribution is inconsistent"
+    for total, lower, read, both in (
+            ("single_tail_companions", "single_tail_comp_after_lower_done",
+             "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
+            ("win1_deadline_deferred_tail", "single_tail_deadline_after_lower_done",
+             "single_tail_deadline_after_read_bypass", "single_tail_deadline_after_both")):
+        if (record[lower] > record[total] or record[read] > record[total] or
+                record[both] > record[lower] or record[both] > record[read]):
+            return "timed deferred singleton service attribution is inconsistent"
     if (record["batch_pause_crc_wall_ns"] +
             record["batch_resume_crc_wall_ns"] !=
             record["batch_snapshot_crc_wall_ns"]):
@@ -470,8 +492,13 @@ def run_stage(title, command, result, *, parse_bench=False):
     except OSError as exc:
         output, rc = type(exc).__name__, 127
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
+    parallel_read_sessions = parse_parallel_read_ab(output) if parse_bench else []
+    parallel_read_diagnostic = (parallel_read_ab_verdict(parallel_read_sessions)
+                                if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
-                      loaded_correctness.get("overall") != "PASS")
+                      (loaded_correctness.get("overall") != "PASS" or
+                       parallel_read_diagnostic.get("overall") !=
+                       "PASS_PARALLEL_READ_AB_DIAGNOSTIC"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -503,6 +530,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                 "PASS_BOUNDED_RAM_MATRIX"):
             result["benchmarks"]["verdicts"]["gc"] = (
                 "LIVE_VICTIMS_EXERCISED_OWNED_RAM")
+        result["benchmarks"]["parallel_read_ab_sessions"] = parallel_read_sessions
+        result["benchmarks"]["parallel_read_ab"] = parallel_read_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -520,7 +549,8 @@ def parse_sessions(output):
         line = line.strip()
         if line.startswith("START_OWNED_RAM_REGIME="):
             regime = line.partition("=")[2]
-        elif line.startswith("START_WRITE_SATURATION_REGIME="):
+        elif line.startswith(("START_PARALLEL_READ_AB=",
+                              "START_WRITE_SATURATION_REGIME=")):
             current = None
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
             current = {"async_prepare": int(line.rsplit("=", 1)[-1]),
@@ -626,6 +656,138 @@ def parse_sessions(output):
                     current["trace_sha256"] = obj["trace_sha256"]
     return sessions
 
+
+
+def parse_parallel_read_ab(output):
+    """Parse the four fast-model same-cache Kread diagnostic sessions."""
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = re.fullmatch(r"START_PARALLEL_READ_AB=([01])", line)
+        if match:
+            current = {"parallel_reads": int(match.group(1)), "status": "INCOMPLETE",
+                       "order": "unknown", "device_model": None, "swapz": None}
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
+                line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+                continue
+            packed = obj.get("packed_read") or {}
+            passes = {}
+            for mode in ("sequential", "seeded_random"):
+                phase = (packed.get("passes") or {}).get(mode) or {}
+                lower = phase.get("lower_io") or {}
+                passes[mode] = {
+                    "logical_bytes": phase.get("logical_bytes"),
+                    "verified_pages": phase.get("verified_pages"),
+                    "verified_image_sha256": phase.get("verified_image_sha256"),
+                    "useful_read_mbps": phase.get("useful_read_mbps"),
+                    "read_p99_ms": phase.get("read_p99_ms"),
+                    "lower_read_bytes": lower.get("lower_read_bytes"),
+                    "lower_read_requests": lower.get("lower_read_requests"),
+                    "kernel_read_path": phase.get("kernel_read_path"),
+                }
+            current["swapz"] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "logical_image_sha256": packed.get("logical_image_sha256"),
+                "packed_close_delta": packed.get("packed_close_delta"),
+                "passes": passes,
+            }
+        else:
+            done = re.fullmatch(r"PASS_PARALLEL_READ_AB=([01])", line)
+            if done and int(done.group(1)) == current["parallel_reads"]:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def parallel_read_ab_verdict(sessions):
+    """Validate a two-observation-per-mode diagnostic; never claim confidence."""
+    if len(sessions) != 4 or [row.get("parallel_reads") for row in sessions] != [0, 1, 1, 0]:
+        return {"overall": "INCOMPLETE", "reason": "four Kread 0/1/1/0 sessions required"}
+    expected = MODEL_SPECS["ssd_emulated"]
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("order") != (
+                "swapz-first" if index % 2 else "off-first"):
+            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic order/status mismatch"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic device model mismatch"}
+        arm = row.get("swapz")
+        if not isinstance(arm, dict) or not re.fullmatch(r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
+            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic source missing"}
+        if not isinstance(arm.get("packed_close_delta"), int) or arm["packed_close_delta"] <= 0:
+            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic packed population missing"}
+        for mode in ("sequential", "seeded_random"):
+            phase = arm["passes"].get(mode)
+            if not isinstance(phase, dict) or phase.get("logical_bytes") != 4194304 or phase.get("verified_pages") != 1024:
+                return {"overall": "INCOMPLETE", "reason": "Kread diagnostic packed read incomplete"}
+            if any(not isinstance(phase.get(key), (int, float)) or phase[key] < 0
+                   for key in ("useful_read_mbps", "read_p99_ms",
+                               "lower_read_bytes", "lower_read_requests")):
+                return {"overall": "INCOMPLETE", "reason": "Kread diagnostic metrics missing"}
+            kernel = phase.get("kernel_read_path")
+            if not isinstance(kernel, dict) or any(type(kernel.get(field)) is not int or kernel[field] < 0
+                    for field in KERNEL_READ_FIELDS):
+                return {"overall": "INCOMPLETE", "reason": "Kread diagnostic C telemetry missing"}
+            if not row["parallel_reads"] and kernel["parallel_read_pairs"]:
+                return {"overall": "INCOMPLETE", "reason": "Kread-off arm executed parallel pairs"}
+    if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
+            len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
+        return {"overall": "INCONCLUSIVE", "reason": "Kread diagnostic provenance mismatch"}
+
+    modes = {}
+    for enabled in (0, 1):
+        rows = [row["swapz"] for row in sessions if row["parallel_reads"] == enabled]
+        passes = {}
+        for mode in ("sequential", "seeded_random"):
+            phases = [row["passes"][mode] for row in rows]
+            passes[mode] = {
+                "useful_read_mbps": statistics.mean(p["useful_read_mbps"] for p in phases),
+                "read_p99_ms": statistics.mean(p["read_p99_ms"] for p in phases),
+                "lower_read_bytes": statistics.mean(p["lower_read_bytes"] for p in phases),
+                "lower_read_requests": statistics.mean(p["lower_read_requests"] for p in phases),
+                "parallel_read_pairs": statistics.mean(
+                    p["kernel_read_path"]["parallel_read_pairs"] for p in phases),
+                "parallel_read_same_extent_pairs": statistics.mean(
+                    p["kernel_read_path"]["parallel_read_same_extent_pairs"] for p in phases),
+            }
+        modes[str(enabled)] = passes
+    return {
+        "overall": "PASS_PARALLEL_READ_AB_DIAGNOSTIC",
+        "pairs_per_mode": 2,
+        "confidence": "NOT_ESTABLISHED_TWO_OBSERVATIONS_PER_MODE",
+        "device_model": expected,
+        "modes": modes,
+        "interpretation": "SAME_SOURCE_SHARED_CACHE_KREAD_TOGGLE_SYNTHETIC_RAM_ONLY",
+    }
 
 
 def parse_write_saturation(output):
@@ -1039,7 +1201,7 @@ def benchmark_verdicts(sessions):
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
-                            SINGLE_TAIL_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            SINGLE_TAIL_FIELDS + ID52_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
             "kernel_gauges": {
@@ -1153,6 +1315,22 @@ def print_bench(result):
                   f"{columns[mode]['mixed_pipeline_active_peak']:.0f}"))
                 for mode in COLUMNS
             ])
+        print("  Mixed window bins; close=P/D/I")
+        print_table(
+            ("mode", "1", "2", "3-4", "5-8", "9-16", "17-64", "P/D/I"),
+            [
+                (mode,
+                 f"{columns[mode]['mixed_win1']:.1f}",
+                 f"{columns[mode]['mixed_win2']:.1f}",
+                 f"{columns[mode]['mixed_win3_4']:.1f}",
+                 f"{columns[mode]['mixed_win5_8']:.1f}",
+                 f"{columns[mode]['mixed_win9_16']:.1f}",
+                 f"{columns[mode]['mixed_win17_64']:.1f}",
+                 f"{columns[mode]['mixed_close_pack_ready']:.1f}/"
+                 f"{columns[mode]['mixed_close_deadline']:.1f}/"
+                 f"{columns[mode]['mixed_close_idle']:.1f}")
+                for mode in ("sync", "async")
+            ])
         print("  Async pipeline — wall timings overlap; callback rows include scheduler delay.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
@@ -1224,6 +1402,24 @@ def print_bench(result):
                  f"{counters['win1_deadline_deferred_tail']:.1f}/"
                  f"{counters['win1_idle_deferred_tail']:.1f}/"
                  f"{counters['single_tail_other_clears']:.1f}"),
+                ("deferred C age <=250/500/1000/>",
+                 f"{counters['single_tail_comp_age_le250us']:.1f}/"
+                 f"{counters['single_tail_comp_age_251_500us']:.1f}/"
+                 f"{counters['single_tail_comp_age_501_1000us']:.1f}/"
+                 f"{counters['single_tail_comp_age_gt1000us']:.1f}"),
+                ("deferred DL age <=250/500/1000/>",
+                 f"{counters['single_tail_deadline_age_le250us']:.1f}/"
+                 f"{counters['single_tail_deadline_age_251_500us']:.1f}/"
+                 f"{counters['single_tail_deadline_age_501_1000us']:.1f}/"
+                 f"{counters['single_tail_deadline_age_gt1000us']:.1f}"),
+                ("deferred C service L/R/B",
+                 f"{counters['single_tail_comp_after_lower_done']:.1f}/"
+                 f"{counters['single_tail_comp_after_read_bypass']:.1f}/"
+                 f"{counters['single_tail_comp_after_both']:.1f}"),
+                ("deferred DL service L/R/B",
+                 f"{counters['single_tail_deadline_after_lower_done']:.1f}/"
+                 f"{counters['single_tail_deadline_after_read_bypass']:.1f}/"
+                 f"{counters['single_tail_deadline_after_both']:.1f}"),
                 ("lower-W queue start/end",
                  f"{asynchronous['mixed_prep_lower_write_start_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}/"
                  f"{asynchronous['mixed_prep_lower_write_end_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}"),
@@ -1243,6 +1439,30 @@ def print_bench(result):
                 ("lower WRITE", async_criteria["lower_write_savings"]),
                 ("packed read", async_criteria["packed_4mib_sequential"]),
             ])
+
+    parallel_ab = result["benchmarks"].get("parallel_read_ab", {})
+    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_AB_DIAGNOSTIC":
+        print("\n  ID39 SAME-CACHE PARALLEL READ A/B — diagnostic only")
+        rows = []
+        for enabled in ("0", "1"):
+            seq = parallel_ab["modes"][enabled]["sequential"]
+            rnd = parallel_ab["modes"][enabled]["seeded_random"]
+            rows.append((
+                enabled,
+                f"{seq['lower_read_bytes'] / 1024:.0f}",
+                f"{seq['lower_read_requests']:.1f}",
+                f"{seq['read_p99_ms']:.2f}",
+                f"{rnd['lower_read_bytes'] / 1024:.0f}",
+                f"{rnd['lower_read_requests']:.1f}",
+                f"{rnd['read_p99_ms']:.2f}",
+                f"{(seq['parallel_read_pairs'] + rnd['parallel_read_pairs']) / 2:.1f}",
+            ))
+        print_table(("parallel", "seq KiB", "seq req", "seq p99",
+                     "rnd KiB", "rnd req", "rnd p99", "pairs"), rows)
+        print("  A/B LIMITATION: two observations/mode; no confidence interval.")
+    else:
+        print("\n  ID39 parallel READ A/B: NOT QUALIFIED "
+              f"({parallel_ab.get('reason', parallel_ab.get('overall', 'NOT_RUN'))})")
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":

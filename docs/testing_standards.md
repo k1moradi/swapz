@@ -699,6 +699,35 @@ plumbing cannot silently omit the new lifecycle evidence. ID51 answers where
 ID50 work goes; it does not itself justify another retention rule. Any successor
 must be a separate source revision after owner evidence.
 
+### Deferred-singleton timing/service evidence
+
+ID52 extends ID51 without changing policy. Timed replay validation must require
+that the four companion-age bins sum to `single_tail_companions` and the four
+deadline-age bins sum to `win1_deadline_deferred_tail`. For companion and
+deadline service attribution, lower-done and read-bypass counts cannot exceed
+the terminal total, and the both count cannot exceed either subset. The report
+must print both age rows and both L/R/B service rows.
+
+Interpretation is predeclared: an event such as lower-W completion or READ
+service is not a candidate early-close discriminator if it commonly occurs
+before companion resolutions as well as deadline resolutions. A successor
+policy requires a separate source revision after owner evidence.
+
+### Same-cache Kread A/B diagnostic
+
+The loaded test runs exactly four SSD_EMULATED sessions in order
+`parallel_reads=0,1,1,0`, with `async_prepare=0`, identical source/fixture/trace
+and alternating raw/swapz replay order. The Kread-off arm must report zero
+`parallel_read_pairs`; Kread-on must report activity. Each packed pass remains
+4 MiB/1024 verified pages. Compare seq/random p99, useful throughput and lower
+bytes/requests. Two observations per mode are diagnostic only; promotion still
+requires repeated evidence.
+
+The standard mixed report must also expose existing sync/async window bins
+(win1, win2, win3_4, win5_8, win9_16, win17_64) plus PACK_READY/DEADLINE/IDLE
+close totals. Do not add multi-tail kernel instrumentation unless these existing
+bins leave the residual fragmentation question unresolved.
+
 ### Bounded Kread=2 qualification
 
 The owner-qualified `bd3f5886b61a...` implementation is a rejected

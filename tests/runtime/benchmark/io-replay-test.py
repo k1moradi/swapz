@@ -232,6 +232,20 @@ class PairReplayContract(unittest.TestCase):
             "win1_deadline_deferred_tail": 0,
             "win1_idle_deferred_tail": 0,
             "single_tail_other_clears": 2,
+            "single_tail_comp_age_le250us": 1,
+            "single_tail_comp_age_251_500us": 1,
+            "single_tail_comp_age_501_1000us": 0,
+            "single_tail_comp_age_gt1000us": 0,
+            "single_tail_deadline_age_le250us": 0,
+            "single_tail_deadline_age_251_500us": 0,
+            "single_tail_deadline_age_501_1000us": 0,
+            "single_tail_deadline_age_gt1000us": 0,
+            "single_tail_comp_after_lower_done": 1,
+            "single_tail_comp_after_read_bypass": 1,
+            "single_tail_comp_after_both": 1,
+            "single_tail_deadline_after_lower_done": 0,
+            "single_tail_deadline_after_read_bypass": 0,
+            "single_tail_deadline_after_both": 0,
         })
         fake = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
@@ -274,6 +288,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["single_tail_deferrals"], 4)
         self.assertEqual(delta["single_tail_companions"], 2)
         self.assertEqual(delta["single_tail_other_clears"], 2)
+        self.assertEqual(delta["single_tail_comp_age_le250us"], 1)
+        self.assertEqual(delta["single_tail_comp_age_251_500us"], 1)
+        self.assertEqual(delta["single_tail_comp_after_both"], 1)
 
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)
@@ -301,6 +318,12 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "deferred singleton"):
             module.kernel_write_delta(
                 before, dict(after, win1_deadline_deferred_tail=2))
+        with self.assertRaisesRegex(ValueError, "companion age"):
+            module.kernel_write_delta(
+                before, dict(after, single_tail_comp_age_le250us=2))
+        with self.assertRaisesRegex(ValueError, "service attribution"):
+            module.kernel_write_delta(
+                before, dict(after, single_tail_comp_after_both=2))
         with self.assertRaisesRegex(ValueError, "retained burst target"):
             module.kernel_write_delta(
                 before, dict(after, retained_burst_target=0))

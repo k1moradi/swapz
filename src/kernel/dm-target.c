@@ -331,6 +331,25 @@ struct swapz_dm {
 	u64 win1_deadline_deferred_tail;
 	u64 win1_idle_deferred_tail;
 	u64 single_tail_other_clears;
+	/* ID52: diagnostic timing/service state for the current deferred
+	 * singleton plus terminal histograms. No field changes closure policy. */
+	u64 single_tail_deferred_start_ns;
+	bool single_tail_lower_done_seen;
+	bool single_tail_read_bypass_seen;
+	u64 single_tail_companion_age_le250us;
+	u64 single_tail_companion_age_251_500us;
+	u64 single_tail_companion_age_501_1000us;
+	u64 single_tail_companion_age_gt1000us;
+	u64 single_tail_deadline_age_le250us;
+	u64 single_tail_deadline_age_251_500us;
+	u64 single_tail_deadline_age_501_1000us;
+	u64 single_tail_deadline_age_gt1000us;
+	u64 single_tail_companion_after_lower_done;
+	u64 single_tail_companion_after_read_bypass;
+	u64 single_tail_companion_after_both;
+	u64 single_tail_deadline_after_lower_done;
+	u64 single_tail_deadline_after_read_bypass;
+	u64 single_tail_deadline_after_both;
 	swapz_u8 retained_chain_completed;
 	bool pack_close_pending_tail_sample;
 	u64 window_records_total;
@@ -651,6 +670,8 @@ static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
 	ctx->pipeline_active_wall_ns +=
 		swapz_elapsed_ns(inflight->lower_start_ns, ktime_get_ns());
 	WRITE_ONCE(inflight->active, false);
+	if (ctx->retained_single_tail_deferred)
+		ctx->single_tail_lower_done_seen = true;
 	if (error || committed != inflight->count) {
 		error = error ? error : -EIO;
 		swapz_fail(ctx, error);
@@ -1688,12 +1709,16 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->singleton_fast_close = false;
 	}
 	if (deferred_single_tail && (count || hard_boundary)) {
-		if (count == 1U && close_reason == SWAPZ_CLOSE_DEADLINE)
+		if (count == 1U && close_reason == SWAPZ_CLOSE_DEADLINE) {
 			ctx->win1_deadline_deferred_tail++;
-		else if (count == 1U && close_reason == SWAPZ_CLOSE_IDLE)
+			swapz_account_single_tail_terminal(ctx, false, true);
+		} else if (count == 1U && close_reason == SWAPZ_CLOSE_IDLE) {
 			ctx->win1_idle_deferred_tail++;
-		else
+			swapz_account_single_tail_terminal(ctx, false, false);
+		} else {
 			ctx->single_tail_other_clears++;
+			swapz_account_single_tail_terminal(ctx, false, false);
+		}
 		ctx->retained_single_tail_deferred = false;
 	}
 
@@ -2106,6 +2131,69 @@ static bool swapz_plain_retained_write(const struct bio *bio)
 	return bio_op(bio) == REQ_OP_WRITE && bio_sectors(bio) &&
 		!(bio->bi_opf & (REQ_PREFLUSH | REQ_FUA));
 }
+static void swapz_reset_single_tail_observation(struct swapz_dm *ctx)
+{
+	ctx->single_tail_deferred_start_ns = 0;
+	ctx->single_tail_lower_done_seen = false;
+	ctx->single_tail_read_bypass_seen = false;
+}
+
+static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
+					       bool companion,
+					       bool deadline)
+{
+	u64 now = ktime_get_ns();
+	u64 elapsed = ctx->single_tail_deferred_start_ns &&
+		now >= ctx->single_tail_deferred_start_ns ?
+		now - ctx->single_tail_deferred_start_ns : 0;
+	u64 *le250, *to500, *to1000, *gt1000;
+
+	if (!companion && !deadline) {
+		swapz_reset_single_tail_observation(ctx);
+		return;
+	}
+	if (companion) {
+		le250 = &ctx->single_tail_companion_age_le250us;
+		to500 = &ctx->single_tail_companion_age_251_500us;
+		to1000 = &ctx->single_tail_companion_age_501_1000us;
+		gt1000 = &ctx->single_tail_companion_age_gt1000us;
+		if (ctx->single_tail_lower_done_seen)
+			ctx->single_tail_companion_after_lower_done++;
+		if (ctx->single_tail_read_bypass_seen)
+			ctx->single_tail_companion_after_read_bypass++;
+		if (ctx->single_tail_lower_done_seen &&
+		    ctx->single_tail_read_bypass_seen)
+			ctx->single_tail_companion_after_both++;
+	} else {
+		le250 = &ctx->single_tail_deadline_age_le250us;
+		to500 = &ctx->single_tail_deadline_age_251_500us;
+		to1000 = &ctx->single_tail_deadline_age_501_1000us;
+		gt1000 = &ctx->single_tail_deadline_age_gt1000us;
+		if (ctx->single_tail_lower_done_seen)
+			ctx->single_tail_deadline_after_lower_done++;
+		if (ctx->single_tail_read_bypass_seen)
+			ctx->single_tail_deadline_after_read_bypass++;
+		if (ctx->single_tail_lower_done_seen &&
+		    ctx->single_tail_read_bypass_seen)
+			ctx->single_tail_deadline_after_both++;
+	}
+	if (elapsed <= 250000ULL)
+		(*le250)++;
+	else if (elapsed <= 500000ULL)
+		(*to500)++;
+	else if (elapsed <= 1000000ULL)
+		(*to1000)++;
+	else
+		(*gt1000)++;
+	swapz_reset_single_tail_observation(ctx);
+}
+
+static void swapz_note_single_tail_read_bypass(struct swapz_dm *ctx)
+{
+	if (ctx->retained_single_tail_deferred)
+		ctx->single_tail_read_bypass_seen = true;
+}
+
 static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 					  struct list_head *local)
 {
@@ -2154,6 +2242,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	if (ctx->retained_single_tail_deferred) {
 		ctx->single_tail_other_clears++;
 		ctx->retained_single_tail_deferred = false;
+		swapz_account_single_tail_terminal(ctx, false, false);
 	}
 	if (tail) {
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
@@ -2162,6 +2251,9 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		if (tail == 1U) {
 			ctx->retained_tail_target = 0;
 			ctx->single_tail_deferrals++;
+			ctx->single_tail_deferred_start_ns = ktime_get_ns();
+			ctx->single_tail_lower_done_seen = false;
+			ctx->single_tail_read_bypass_seen = false;
 			ctx->retained_single_tail_deferred = true;
 		} else {
 			ctx->retained_tail_target = tail;
@@ -2221,6 +2313,7 @@ static void swapz_resolve_single_tail_companion(struct swapz_dm *ctx)
 	if (!ctx->retained_single_tail_deferred || ctx->batch_count < 2U)
 		return;
 	ctx->single_tail_companions++;
+	swapz_account_single_tail_terminal(ctx, true, false);
 	ctx->retained_single_tail_deferred = false;
 }
 
@@ -2959,6 +3052,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 			(unsigned int)ctx->retained_window_read_bypasses + selected;
 
 		ctx->retained_read_bypasses += selected;
+		swapz_note_single_tail_read_bypass(ctx);
 		ctx->retained_window_read_bypasses = (swapz_u8)min_t(
 			unsigned int, bypasses, SWAPZ_MAX_RECORDS);
 		if (ctx->window_first_ns && elapsed) {
@@ -3036,6 +3130,7 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 			/* BIOs may have arrived while synchronous lower READ I/O ran. */
 			swapz_refresh_accepted_followup(ctx);
 			ctx->retained_read_bypasses++;
+			swapz_note_single_tail_read_bypass(ctx);
 			if (ctx->retained_window_read_bypasses < SWAPZ_MAX_RECORDS)
 				ctx->retained_window_read_bypasses++;
 			/*
@@ -3413,6 +3508,7 @@ static void swapz_worker(struct work_struct *work)
 				ctx->retained_tail_target = 0;
 				if (ctx->retained_single_tail_deferred) {
 					ctx->single_tail_other_clears++;
+					swapz_account_single_tail_terminal(ctx, false, false);
 					ctx->retained_single_tail_deferred = false;
 				}
 				ctx->pack_close_pending_tail_sample = false;
@@ -4125,6 +4221,20 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "single_tail_deferrals=%llu single_tail_companions=%llu "
 		       "win1_deadline_deferred_tail=%llu "
 		       "win1_idle_deferred_tail=%llu single_tail_other_clears=%llu "
+		       "single_tail_comp_age_le250us=%llu "
+		       "single_tail_comp_age_251_500us=%llu "
+		       "single_tail_comp_age_501_1000us=%llu "
+		       "single_tail_comp_age_gt1000us=%llu "
+		       "single_tail_deadline_age_le250us=%llu "
+		       "single_tail_deadline_age_251_500us=%llu "
+		       "single_tail_deadline_age_501_1000us=%llu "
+		       "single_tail_deadline_age_gt1000us=%llu "
+		       "single_tail_comp_after_lower_done=%llu "
+		       "single_tail_comp_after_read_bypass=%llu "
+		       "single_tail_comp_after_both=%llu "
+		       "single_tail_deadline_after_lower_done=%llu "
+		       "single_tail_deadline_after_read_bypass=%llu "
+		       "single_tail_deadline_after_both=%llu "
 		       "window_gc_pressure=%llu "
 		       "age_le100us=%llu age_101_1000us=%llu "
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
@@ -4259,6 +4369,20 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->win1_deadline_deferred_tail,
 		       ctx->win1_idle_deferred_tail,
 		       ctx->single_tail_other_clears,
+		       ctx->single_tail_companion_age_le250us,
+		       ctx->single_tail_companion_age_251_500us,
+		       ctx->single_tail_companion_age_501_1000us,
+		       ctx->single_tail_companion_age_gt1000us,
+		       ctx->single_tail_deadline_age_le250us,
+		       ctx->single_tail_deadline_age_251_500us,
+		       ctx->single_tail_deadline_age_501_1000us,
+		       ctx->single_tail_deadline_age_gt1000us,
+		       ctx->single_tail_companion_after_lower_done,
+		       ctx->single_tail_companion_after_read_bypass,
+		       ctx->single_tail_companion_after_both,
+		       ctx->single_tail_deadline_after_lower_done,
+		       ctx->single_tail_deadline_after_read_bypass,
+		       ctx->single_tail_deadline_after_both,
 		       ctx->window_gc_pressure,
 		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
 		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,

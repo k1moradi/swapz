@@ -374,6 +374,29 @@ subsets must not exceed their corresponding one-page close counters. Do not use
 these counters to change policy in the same source revision that introduces the
 measurement.
 
+### Deferred-singleton timing/service diagnostics
+
+ID52 must remain observational. Starting a sampled singleton records one
+monotonic timestamp and clears two per-lifecycle service flags. Ordered
+completion of an existing async lower-W run may set the lower-done flag;
+successful independent retained READ service may set the read-bypass flag.
+Neither event may close, extend or otherwise alter the retained window.
+
+Only companion and one-page deadline terminal outcomes receive age histograms,
+using fixed <=250 us, 251-500 us, 501-1000 us and >1000 us buckets. The four
+companion bins must sum exactly to `single_tail_companions`; the four deadline
+bins must sum exactly to `win1_deadline_deferred_tail`. Lower-done/read-bypass
+counters are overlapping subsets; the both counter is a subset of each. Other
+and idle terminal outcomes reset observation state without being reclassified.
+
+### Parallel-read diagnostic control
+
+The read-only `parallel_reads` module parameter is an evidence control, not a
+runtime auto-tuning policy. Loaded A/B qualification may set it to 0 or 1 only
+through the private owned-RAM helper. Queue depth remains an independent safety
+gate. Kread-off must allocate no read slots/workqueue and execute zero parallel
+pairs; Kread-on must prove pair activity before latency comparisons are used.
+
 ### Opposite-end asynchronous preparation
 
 The ordered worker owns FIFO execution and may atomically reserve an unclaimed

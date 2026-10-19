@@ -114,6 +114,25 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
+# ID39 same-cache Kread diagnostic: four counterbalanced fast-model sessions
+# vary only the read-only module parameter. async_prepare stays off so WRITE
+# scheduling does not change the packed-read experiment. This is diagnostic
+# evidence (two sessions/mode), not the >=5-pair promotion gate.
+index=0
+for parallel_reads in 0 1 1 0; do
+    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --parallel-reads "$parallel_reads"
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_PARALLEL_READ_AB=%s\n' "$parallel_reads"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_PARALLEL_READ_AB=%s\n' "$parallel_reads"
+    (( index += 1 ))
+done
+
 # Bounded write-only saturation pilot: one sync and one async same-work pair
 # at each QD/model. This validates queue-depth direction and recurring-run
 # cost only; the roadmap's >=5 counterbalanced pairs and confidence interval
@@ -147,4 +166,4 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, eight mixed pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: write-only pilot has one pair per mode/QD; confirmatory confidence is NOT established.'
+printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, eight mixed pairs, four Kread A/B diagnostic pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: diagnostic/read and write-only pilots are not confirmatory statistics.'

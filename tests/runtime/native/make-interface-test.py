@@ -311,6 +311,14 @@ class PublicMakeContract(unittest.TestCase):
                         "lower_read_requests": 4
                     }
                 }, sort_keys=True)
+            def mock_parallel_arm(enabled):
+                record = json.loads(mock_arm("swapz", 0))
+                for phase in record["packed_read"]["passes"].values():
+                    if not enabled:
+                        phase["kernel_read_path"]["parallel_read_pairs"] = 0
+                        phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 0
+                return json.dumps(record, sort_keys=True)
+
             def mock_write_arm(candidate, qd, mode):
                 is_swapz = candidate == "swapz"
                 logical = 4096 * 4096
@@ -367,6 +375,16 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
+            cap, ns, irq, queue_mode, submit_queues, hw_depth = (80, 150000, 2, 2, 1, 64)
+            for index, enabled in enumerate((0, 1, 1, 0)):
+                records.extend((
+                    f"START_PARALLEL_READ_AB={enabled}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
+                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
+                    mock_parallel_arm(enabled) if index % 2 else mock_arm("off", 0),
+                    mock_arm("off", 0) if index % 2 else mock_parallel_arm(enabled),
+                    f"PASS_PARALLEL_READ_AB={enabled}",
+                ))
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_WRITE_SATURATION_REGIME={regime}")
                 index = 0

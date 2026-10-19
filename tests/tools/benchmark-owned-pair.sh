@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -16,6 +16,7 @@ WARMUP_OPS=256
 MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
+PARALLEL_READS=1
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
@@ -35,6 +36,13 @@ SHARED_PLAN=""
 # Only make test supplies its freshly made immutable workload directory.
 if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Explicit same-source Kread A/B control. The module parameter defaults on;
+# only make test may supply this bounded suffix before device provisioning.
+if [[ $# -ge 3 && ${@: -2:1} == --parallel-reads &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    PARALLEL_READS="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Explicitly permit asynchronous preparation on the QD32 medium experiment.
@@ -181,7 +189,7 @@ SWAPS_ID="$(printf '%s
     fail "cannot parse initial host swap identity"
 SOURCE="$(git rev-parse HEAD)"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE PARALLEL_READS=$PARALLEL_READS LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -370,7 +378,7 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -402,6 +410,9 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:spac
     fail 'unexpected swapz retained policy after owned DM creation'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
+expected_parallel=$(( PARALLEL_READS && HW_QUEUE_DEPTH > 1 ? 1 : 0 ))
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" ||
+    fail 'loaded swapz parallel-read gate does not match selected benchmark arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||
     fail 'owned DM backing dependency mismatch'
 for (( n=0; n<50; ++n )); do
