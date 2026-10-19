@@ -139,10 +139,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ASYNC_PREPARE && !WRITE_ONLY_QD", pair)
         self.assertIn("def parse_write_saturation", reporter)
         self.assertIn("PASS_WRITE_SATURATION_EVIDENCE", reporter)
-        self.assertIn("FAST_QD4_QD8_PAIRED_95PCT_CI", reporter)
-        self.assertIn("fast_qd4_paired", reporter)
+        self.assertIn("FAST_QD8_PAIRED_95PCT_CI", reporter)
+        self.assertNotIn("fast_qd4_paired", reporter)
         self.assertIn("fast_qd8_paired", reporter)
-        self.assertIn("$qd == 4 || $qd == 8", loaded)
+        self.assertIn("$qd == 8", loaded)
+        self.assertNotIn("$qd == 4 || $qd == 8", loaded)
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
 
 
@@ -1265,7 +1266,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("list_splice_tail_init(&ctx->incoming, &local)"),
                         worker.index("ctx->accepted_burst_tail_flushes++"))
-        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx, &local)"),
+        self.assertLess(worker.index("swapz_sample_pack_tail_locked(ctx, &local, false)"),
                         worker.index("list_splice_tail_init(&ctx->incoming, &local)"))
         self.assertLess(worker.index("ctx->accepted_burst_tail_flushes++"),
                         worker.index("ctx->worker_has_immediate_followup = false"))
@@ -1289,7 +1290,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "pack_tail_zero_idle", "pack_tail_one_inflight",
                       "pack_tail_one_idle", "pack_tail_many_inflight",
                       "pack_tail_many_idle", "burst_target_grows",
-                      "burst_target_shrinks"):
+                      "burst_target_shrinks", "pack_tail_zero_deferrals",
+                      "pack_tail_zero_finalize_holds",
+                      "pack_tail_deferred_resolve_zero",
+                      "pack_tail_deferred_resolve_one",
+                      "pack_tail_deferred_resolve_many",
+                      "pack_tail_zero_deferred_aborts",
+                      "pack_ready_busy_deferrals_admission",
+                      "pack_ready_busy_deferrals_worker",
+                      "pack_ready_post_finalize_closes"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
         self.assertIn("SWAPZ_PACK_CLOSE_TAIL_TARGET", writer)
@@ -1306,18 +1315,34 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->pack_close_burst_count_le4++", flush)
         self.assertIn("ctx->pack_close_burst_overshoot++", flush)
         sample = body("swapz_sample_pack_tail_locked")
+        busy = body("swapz_inflight_write_busy")
+        self.assertIn("READ_ONCE(ctx->inflight_write.active)", busy)
+        self.assertIn("!completion_done(&ctx->inflight_write.lower_done)", busy)
         self.assertIn("READ_ONCE(ctx->inflight_write.active)", sample)
+        self.assertIn("hold_zero_after_finalize", sample)
         self.assertIn("ctx->pack_tail_samples++", sample)
         for field in ("pack_tail_zero_inflight", "pack_tail_zero_idle",
                       "pack_tail_one_inflight", "pack_tail_one_idle",
                       "pack_tail_many_inflight", "pack_tail_many_idle",
-                      "burst_target_grows"):
+                      "burst_target_grows", "pack_tail_zero_deferrals",
+                      "pack_tail_zero_finalize_holds",
+                      "pack_tail_deferred_resolve_zero",
+                      "pack_tail_deferred_resolve_one",
+                      "pack_tail_deferred_resolve_many"):
             self.assertIn("ctx->" + field + "++", sample)
-        self.assertLess(sample.index("ctx->pack_tail_samples++"),
-                        sample.index("if (ctx->retained_single_tail_deferred)"))
-        self.assertIn("ctx->pack_close_pending_tail_sample = false", sample)
-        self.assertNotIn("if (inflight)\n\t\treturn", sample)
+        deferred = sample.index("ctx->pack_tail_zero_deferrals++")
+        consume = sample.index("ctx->pack_close_pending_tail_sample = false")
+        self.assertIn("return;", sample[deferred:consume])
         self.assertIn("ctx->burst_target_shrinks++", worker)
+        self.assertIn("swapz_inflight_write_busy(ctx)", writer)
+        self.assertIn("ctx->pack_ready_busy_deferrals_admission++", writer)
+        self.assertIn("swapz_inflight_write_busy(ctx)", worker)
+        self.assertIn("ctx->pack_ready_busy_deferrals_worker++", worker)
+        self.assertIn("bool finalized_inflight = false", worker)
+        self.assertIn("bool processed_any = false", worker)
+        self.assertIn("ctx->pack_tail_zero_deferred && !list_empty(&local)", worker)
+        self.assertIn("finalized_inflight && !processed_any", worker)
+        self.assertIn("ctx->pack_ready_post_finalize_closes++", worker)
         self.assertIn("SWAPZ_BURST_CLOSE_ADMISSION", writer)
         self.assertIn("SWAPZ_BURST_CLOSE_WORKER", worker)
         self.assertIn("ctx->next_burst_close_target =", writer)
@@ -1351,10 +1376,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)
         self.assertIn("BURST_CLOSE_DETAIL_FIELDS", runner)
         self.assertIn("TAIL_SAMPLE_FIELDS", runner)
+        self.assertIn("ID57_FIELDS", runner)
         self.assertIn("burst_close_detail_delta_paired_95pct_ci", runner)
         self.assertIn("Mixed burst-close split", runner)
         self.assertIn("Mixed post-PACK tail samples", runner)
+        self.assertIn("ID57 K=1 collector intervention", runner)
         self.assertIn("pack_close_burst_admission", replay)
+        self.assertIn("pack_tail_zero_deferrals", replay)
         self.assertIn("pack_tail_zero_inflight", replay)
         self.assertIn("pack_close_burst_target_5_8", replay)
         self.assertIn("single_tail_comp_age_1001_1250us", runner)

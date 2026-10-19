@@ -409,6 +409,17 @@ struct swapz_dm {
 	u64 pack_tail_many_idle;
 	u64 burst_target_grows;
 	u64 burst_target_shrinks;
+	/* ID57: bounded K=1 collector/tail-sample intervention evidence. */
+	bool pack_tail_zero_deferred;
+	u64 pack_tail_zero_deferrals;
+	u64 pack_tail_zero_finalize_holds;
+	u64 pack_tail_deferred_resolve_zero;
+	u64 pack_tail_deferred_resolve_one;
+	u64 pack_tail_deferred_resolve_many;
+	u64 pack_tail_zero_deferred_aborts;
+	u64 pack_ready_busy_deferrals_admission;
+	u64 pack_ready_busy_deferrals_worker;
+	u64 pack_ready_post_finalize_closes;
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -666,6 +677,12 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 	}
 	ctx->pipeline_async_runs++;
 	return 0;
+}
+
+static bool swapz_inflight_write_busy(struct swapz_dm *ctx)
+{
+	return READ_ONCE(ctx->inflight_write.active) &&
+		!completion_done(&ctx->inflight_write.lower_done);
 }
 
 static int swapz_finalize_inflight_write(struct swapz_dm *ctx, bool wait)
@@ -1815,6 +1832,9 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			ctx->single_pack_deferred = false;
 			ctx->accepted_burst_pack_ready = false;
 			ctx->retained_tail_target = 0;
+			if (ctx->pack_tail_zero_deferred)
+				ctx->pack_tail_zero_deferred_aborts++;
+			ctx->pack_tail_zero_deferred = false;
 			ctx->pack_close_pending_tail_sample = false;
 			ctx->retained_chain_completed = 0;
 			ctx->retained_window_read_bypasses = 0;
@@ -2153,6 +2173,9 @@ accounted:
 	ctx->batch_count = 0;
 	if (error || committed != count) {
 		ctx->retained_chain_completed = 0;
+		if (ctx->pack_tail_zero_deferred)
+			ctx->pack_tail_zero_deferred_aborts++;
+		ctx->pack_tail_zero_deferred = false;
 		ctx->pack_close_pending_tail_sample = false;
 		ctx->retained_window_read_bypasses = 0;
 		ctx->retained_wave_interrupted = false;
@@ -2162,11 +2185,18 @@ accounted:
 	if (chain_continues) {
 		unsigned int chain = (unsigned int)ctx->retained_chain_completed + count;
 
+		if (ctx->pack_tail_zero_deferred) {
+			ctx->pack_tail_zero_deferred_aborts++;
+			ctx->pack_tail_zero_deferred = false;
+		}
 		ctx->retained_chain_completed = (swapz_u8)min_t(
 			unsigned int, chain, ctx->max_window);
 		ctx->pack_close_pending_tail_sample = packed_close;
 	} else {
 		ctx->retained_chain_completed = 0;
+		if (ctx->pack_tail_zero_deferred)
+			ctx->pack_tail_zero_deferred_aborts++;
+		ctx->pack_tail_zero_deferred = false;
 		ctx->pack_close_pending_tail_sample = false;
 	}
 	/*
@@ -2333,7 +2363,8 @@ static void swapz_note_single_tail_read_bypass(struct swapz_dm *ctx)
 }
 
 static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
-					  struct list_head *local)
+					  struct list_head *local,
+					  bool hold_zero_after_finalize)
 {
 	struct swapz_bio_ref *entry;
 	swapz_u8 tail = 0;
@@ -2376,27 +2407,48 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		}
 	}
 	/*
-	 * ID56 is observation only. In particular, do not defer/consume a sample
-	 * differently based on K=1 state here: first measure whether async is
-	 * actually declaring an empty post-PACK_READY tail before its detached
-	 * lower write and upper completions have finished.
+	 * ID56 classifies the first observation exactly once. ID57 may preserve
+	 * only a zero observation while K=1 is still busy, or across the immediate
+	 * completion-only worker pass that just bio_endio()'d the prior run. A
+	 * preserved sample is resolved before processing the next admitted wave,
+	 * so it observes already-accepted followers without waiting for future I/O.
 	 */
 	inflight = READ_ONCE(ctx->inflight_write.active);
-	ctx->pack_tail_samples++;
-	if (!tail) {
-		if (inflight)
-			ctx->pack_tail_zero_inflight++;
+	if (!ctx->pack_tail_zero_deferred) {
+		ctx->pack_tail_samples++;
+		if (!tail) {
+			if (inflight)
+				ctx->pack_tail_zero_inflight++;
+			else
+				ctx->pack_tail_zero_idle++;
+		} else if (tail == 1U) {
+			if (inflight)
+				ctx->pack_tail_one_inflight++;
+			else
+				ctx->pack_tail_one_idle++;
+		} else if (inflight) {
+			ctx->pack_tail_many_inflight++;
+		} else {
+			ctx->pack_tail_many_idle++;
+		}
+	}
+	if (!tail && (inflight || hold_zero_after_finalize)) {
+		if (!ctx->pack_tail_zero_deferred) {
+			ctx->pack_tail_zero_deferred = true;
+			ctx->pack_tail_zero_deferrals++;
+		} else if (hold_zero_after_finalize) {
+			ctx->pack_tail_zero_finalize_holds++;
+		}
+		return;
+	}
+	if (ctx->pack_tail_zero_deferred) {
+		if (!tail)
+			ctx->pack_tail_deferred_resolve_zero++;
+		else if (tail == 1U)
+			ctx->pack_tail_deferred_resolve_one++;
 		else
-			ctx->pack_tail_zero_idle++;
-	} else if (tail == 1U) {
-		if (inflight)
-			ctx->pack_tail_one_inflight++;
-		else
-			ctx->pack_tail_one_idle++;
-	} else if (inflight) {
-		ctx->pack_tail_many_inflight++;
-	} else {
-		ctx->pack_tail_many_idle++;
+			ctx->pack_tail_deferred_resolve_many++;
+		ctx->pack_tail_zero_deferred = false;
 	}
 	/* A later sample supersedes any still-open deferred singleton. Account
 	 * that old lifecycle before starting a new one so cumulative counters
@@ -2735,6 +2787,10 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		 */
 		if (swapz_retained_target_close_ready(ctx) &&
 		    !ctx->worker_has_immediate_followup) {
+			if (swapz_inflight_write_busy(ctx)) {
+				ctx->pack_ready_busy_deferrals_admission++;
+				return 0;
+			}
 			ctx->next_pack_close_cause = ctx->retained_tail_target ?
 				SWAPZ_PACK_CLOSE_TAIL_TARGET :
 				SWAPZ_PACK_CLOSE_BURST_TARGET;
@@ -3467,10 +3523,14 @@ static void swapz_worker(struct work_struct *work)
 	u64 cpu_start_ns = swapz_worker_cpu_sample();
 
 	for (;;) {
+		bool finalized_inflight = false;
+		bool processed_any = false;
+
 		if (READ_ONCE(ctx->inflight_write.active) &&
 		    completion_done(&ctx->inflight_write.lower_done)) {
 			int inflight_error = swapz_finalize_inflight_write(ctx, false);
 
+			finalized_inflight = !READ_ONCE(ctx->inflight_write.active);
 			if (inflight_error && ctx->batch_count) {
 				ctx->next_window_close = SWAPZ_CLOSE_OTHER;
 				swapz_flush_window(ctx);
@@ -3479,6 +3539,8 @@ static void swapz_worker(struct work_struct *work)
 		remaining = SWAPZ_WORK_QUANTUM_BIOS;
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
+		if (ctx->pack_tail_zero_deferred && !list_empty(&local))
+			swapz_sample_pack_tail_locked(ctx, &local, false);
 		/*
 		 * A finite accepted wave with at least two unclaimed WRITE
 		 * preparations is direct FIFO-distance evidence: the ordered worker
@@ -3587,6 +3649,7 @@ static void swapz_worker(struct work_struct *work)
 			 * dm_per_bio_data entry must not be dereferenced afterwards.
 			 */
 		processed_bio:
+			processed_any = true;
 			if (!inline_preparation || !ctx->retain_ms ||
 			    !ctx->batch_count || ctx->singleton_fast_close ||
 			    ctx->failed || !READ_ONCE(ctx->accepting))
@@ -3600,7 +3663,7 @@ static void swapz_worker(struct work_struct *work)
 			 */
 			if (remaining > 1U && list_empty(&local)) {
 				spin_lock_irqsave(&ctx->queue_lock, flags);
-				swapz_sample_pack_tail_locked(ctx, &local);
+				swapz_sample_pack_tail_locked(ctx, &local, false);
 				if (!list_empty(&ctx->incoming)) {
 					list_splice_tail_init(&ctx->incoming, &local);
 					ctx->worker_has_immediate_followup = true;
@@ -3616,6 +3679,10 @@ static void swapz_worker(struct work_struct *work)
 			    ctx->batch_count && !ctx->failed &&
 			    READ_ONCE(ctx->accepting) &&
 			    !swapz_retention_expired(ctx)) {
+				if (swapz_inflight_write_busy(ctx)) {
+					ctx->pack_ready_busy_deferrals_worker++;
+					goto pack_ready_deferred;
+				}
 				ctx->next_pack_close_cause =
 					swapz_service_proven_dry_pack(ctx) ?
 					SWAPZ_PACK_CLOSE_SERVICE_DRY :
@@ -3635,6 +3702,7 @@ static void swapz_worker(struct work_struct *work)
 					ctx->accepted_burst_tail_flushes++;
 				swapz_flush_window(ctx);
 			}
+		pack_ready_deferred:
 			ctx->worker_has_immediate_followup = false;
 			if (!(remaining & 7U))
 				cond_resched();
@@ -3701,7 +3769,8 @@ static void swapz_worker(struct work_struct *work)
 		}
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
-		swapz_sample_pack_tail_locked(ctx, &local);
+		swapz_sample_pack_tail_locked(
+			ctx, &local, finalized_inflight && !processed_any);
 		if (!list_empty(&local))
 			list_splice_init(&local, &ctx->incoming);
 		if (list_empty(&ctx->incoming)) {
@@ -3710,7 +3779,11 @@ static void swapz_worker(struct work_struct *work)
 			 * invocation has reached a real burst boundary. Do not let read or
 			 * forced-fence service evidence leak into a later unrelated wave.
 			 */
-			if (!ctx->batch_count) {
+			if (!ctx->batch_count &&
+			    !(ctx->pack_close_pending_tail_sample &&
+			      ctx->pack_tail_zero_deferred &&
+			      (READ_ONCE(ctx->inflight_write.active) ||
+			       (finalized_inflight && !processed_any)))) {
 				ctx->retained_window_read_bypasses = 0;
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
@@ -3720,7 +3793,40 @@ static void swapz_worker(struct work_struct *work)
 					swapz_account_single_tail_terminal(ctx, false, false);
 					ctx->retained_single_tail_deferred = false;
 				}
+				if (ctx->pack_tail_zero_deferred)
+					ctx->pack_tail_zero_deferred_aborts++;
+				ctx->pack_tail_zero_deferred = false;
 				ctx->pack_close_pending_tail_sample = false;
+			}
+			if (finalized_inflight && !processed_any &&
+			    ctx->batch_count && ctx->accepting && !ctx->failed &&
+			    !swapz_retention_expired(ctx) &&
+			    swapz_retained_pack_close_ready(ctx)) {
+				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				ctx->next_pack_close_cause =
+					swapz_service_proven_dry_pack(ctx) ?
+					SWAPZ_PACK_CLOSE_SERVICE_DRY :
+					(ctx->retained_tail_target ?
+					 SWAPZ_PACK_CLOSE_TAIL_TARGET :
+					 SWAPZ_PACK_CLOSE_BURST_TARGET);
+				if (ctx->next_pack_close_cause ==
+				    SWAPZ_PACK_CLOSE_BURST_TARGET) {
+					ctx->next_burst_close_site =
+						SWAPZ_BURST_CLOSE_WORKER;
+					ctx->next_burst_close_target =
+						ctx->retained_burst_target;
+				}
+				ctx->next_window_close = SWAPZ_CLOSE_PACK_READY;
+				ctx->packed_early_commits++;
+				ctx->pack_ready_post_finalize_closes++;
+				if (ctx->accepted_burst_pack_ready)
+					ctx->accepted_burst_tail_flushes++;
+				swapz_flush_window(ctx);
+				swapz_account_worker_runtime(&ctx->ordered_worker_wall_ns,
+						 wall_start_ns,
+						 &ctx->ordered_worker_cpu_ns,
+						 cpu_start_ns);
+				return;
 			}
 			/*
 			 * Once repeated full-deadline singleton closes prove that no
@@ -4513,6 +4619,15 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "pack_tail_one_inflight=%llu pack_tail_one_idle=%llu "
 		       "pack_tail_many_inflight=%llu pack_tail_many_idle=%llu "
 		       "burst_target_grows=%llu burst_target_shrinks=%llu "
+		       "pack_tail_zero_deferrals=%llu "
+		       "pack_tail_zero_finalize_holds=%llu "
+		       "pack_tail_deferred_resolve_zero=%llu "
+		       "pack_tail_deferred_resolve_one=%llu "
+		       "pack_tail_deferred_resolve_many=%llu "
+		       "pack_tail_zero_deferred_aborts=%llu "
+		       "pack_ready_busy_deferrals_admission=%llu "
+		       "pack_ready_busy_deferrals_worker=%llu "
+		       "pack_ready_post_finalize_closes=%llu "
 		       "packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
@@ -4708,6 +4823,15 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_tail_many_idle,
 		       ctx->burst_target_grows,
 		       ctx->burst_target_shrinks,
+		       ctx->pack_tail_zero_deferrals,
+		       ctx->pack_tail_zero_finalize_holds,
+		       ctx->pack_tail_deferred_resolve_zero,
+		       ctx->pack_tail_deferred_resolve_one,
+		       ctx->pack_tail_deferred_resolve_many,
+		       ctx->pack_tail_zero_deferred_aborts,
+		       ctx->pack_ready_busy_deferrals_admission,
+		       ctx->pack_ready_busy_deferrals_worker,
+		       ctx->pack_ready_post_finalize_closes,
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,

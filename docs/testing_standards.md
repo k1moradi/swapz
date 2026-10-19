@@ -48,7 +48,7 @@ The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms 
 
 Both arms of every session carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered. The five fast matched deltas use a two-sided Student-t 95% confidence interval with four degrees of freedom. Report both the paired mean and interval; do not replace paired analysis with an interval over unpaired arm means.
 
-The write-only QD1/4/8/32 sweep keeps slow QDs and fast QD1/QD32 directional. Fast QD4 and fast QD8 each use the same ten-session confirmation sequence and report paired 95% confidence intervals for useful throughput, lower requests and lower bytes. A claim about QD1 or QD32 still requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared ten-session sequence, the fast-QD4/QD8 mode selection and the mode-array loops so changing the evidence shape cannot silently bypass parser contracts.
+The write-only QD1/4/8/32 sweep keeps slow QDs and fast QD1/QD4/QD32 directional. Fast QD8 uses the ten-session confirmation sequence and reports paired 95% confidence intervals for useful throughput, lower requests and lower bytes. Fast QD4 previously received five matched rounds and returned to directional status after its CI crossed zero. A new promotion claim for QD1/QD4/QD32 requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared sequence and fast-QD8-only mode selection.
 
 ## Report contract
 
@@ -70,22 +70,27 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `66a0d67bc09d91536a0c3bdc72aa7d0f2edacecf` passed all five stages
+Source `1352e46f3051315eab273ae11c0a5a9bd54ce340` passed all five stages
 and published the canonical report as
-`0956f85e9e49191ab0f68d01c738dca1def1162c`.
+`e25f0a0d0e1c3b4ea65e7297593f5b10d4dffe27`.
 
-Fast mixed async/sync is 23.52/22.70 MB/s with 938.2/891.8 lower WRITE
-requests. Five matched pairs give +3.7%, CI [+1.3%,+6.0%], with absolute
-request delta +46.4 CI [+8.1,+84.7]. Latest fast QD8 is +17.6%,
-CI [+1.3%,+33.9%]. Same-cache Kread sequential p99 is -12.1%,
-CI [-20.4%,-3.7%]; random is inconclusive.
+Fast mixed async/sync is 23.12/22.63 MB/s with 977.6/883.2 lower WRITE
+requests. Five matched pairs give +2.2%, CI [-3.2%,+7.7%], while absolute
+request delta is +94.4 CI [+14.3,+174.5]. Fast QD8 is +23.1%,
+CI [+8.4%,+37.9%]. Fast QD4 is +1.4%, CI [-0.7%,+3.6%], and returns to
+directional status. Kread is inconclusive in this generation.
 
-ID54/55 localize the residual fast async fragmentation to admission-side
-learned burst-target closes: burst +108.0 CI [+64.3,+151.7], worker closes 0,
-actual count17-64 +84.0 CI [+45.5,+122.5], and overshoot +82.4
-CI [+49.4,+115.4]. The final retained target delta is insignificant, so no
-small-target gate is authorized. ID56 collects tail-sample timing versus active
-K=1 state before any sampling-policy successor.
+ID56 reports fast async post-PACK tail0/inflight 604.2 versus zero sync; tail1
+and tail2+ while active are 116.4 and 70.4. The same condition also appears on
+slow async without a throughput difference, so ID57 must be qualified as a
+controlled scheduling intervention rather than assumed beneficial.
+
+ID57 gates only early PACK_READY while K=1 lower completion is pending and
+preserves only zero-tail pending evidence across active/finalization-only
+passes. Timed telemetry must expose busy admission/worker deferrals, zero-tail
+deferrals, completion-only holds, zero/one/many resolutions, aborts and
+post-finalization closes. Rootless contracts must prove hard boundaries and
+tail>=1 behavior remain outside the gate.
 
 ## Open qualification gaps
 
@@ -731,14 +736,18 @@ The compact report prints sync/async/delta plus fast paired confidence intervals
 Source contracts prove admission/worker snapshot the existing learned target
 without changing readiness.
 
-ID56 remains measurement only. The six post-PACK tail-size/state buckets
-(0/1/2+ crossed with active K=1 vs idle) must sum exactly to
-`pack_tail_samples`. Grow/shrink counters increment only on a real target
-change. Source contracts must prove `READ_ONCE(inflight_write.active)` is used
-only for attribution: the existing sample is still consumed unconditionally
-and no readiness, timer, target or completion rule changes. Replay/report
-contracts fail closed on broken conservation and show the per-mode tail-sample
-split before any active successor.
+ID56 first-observation conservation remains mandatory: the six post-PACK
+tail-size/state buckets (0/1/2+ crossed with active K=1 vs idle) sum exactly to
+`pack_tail_samples`; deferred ID57 re-samples do not double-count that total.
+
+ID57 is an active bounded experiment. Source contracts must pin the busy helper
+to active && !completion_done, require admission and worker PACK_READY paths to
+count-and-defer only while that helper is true, and prove the sampler can return
+with its pending sample/chain intact for zero-tail active or completion-only
+holds. The deferred sample must be retried before processing a nonempty next
+local wave. Resolution/abort totals may not exceed deferrals, completion-only
+holds may not exceed deferrals, and post-finalization closes may not exceed
+packed early closes. No new timer, sleep, spin or K>1 slot is allowed.
 
 ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain

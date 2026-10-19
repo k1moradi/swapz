@@ -23,7 +23,7 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The write-only sweep uses QD1/4/8/32, 0% reads, finite unpaced waves and exact final verification. Fast QD4 and QD8 each receive ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD32 remain directional controls.
+The write-only sweep uses QD1/4/8/32, 0% reads, finite unpaced waves and exact final verification. Fast QD8 receives ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4/QD32 remain directional controls. Fast QD4 previously received one five-pair confirmation and returned to directional status after its CI crossed zero.
 
 ## Timed boundaries
 
@@ -59,39 +59,42 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `66a0d67bc09d91536a0c3bdc72aa7d0f2edacecf`
-(report-only `0956f85e9e49191ab0f68d01c738dca1def1162c`) passed all five
+Owner-qualified source `1352e46f3051315eab273ae11c0a5a9bd54ce340`
+(report-only `e25f0a0d0e1c3b4ea65e7297593f5b10d4dffe27`) passed all five
 stages. It is synthetic owned-RAM evidence only.
 
-Fast mixed async/sync is 23.52/22.70 MB/s with 938.2/891.8 lower WRITE
-requests. Five matched pairs give +3.7% throughput, 95% CI [+1.3%,+6.0%],
-and an absolute request delta +46.4 CI [+8.1,+84.7]. Async remains
-statistically faster but does not clear the >=5% materiality threshold.
+Fast mixed async/sync is 23.12/22.63 MB/s with 977.6/883.2 lower WRITE
+requests. Five matched pairs give +2.2%, CI [-3.2%,+7.7%], and absolute request
+delta +94.4 CI [+14.3,+174.5]. The async throughput gain is not established and
+the fragmentation penalty is significant.
 
-ID54 remains stable: tail-target async-minus-sync is -60.0
-CI [-82.7,-37.3], learned burst-target +108.0 CI [+64.3,+151.7], and
-service-dry -15.4 with CI crossing zero. ID55 localizes every learned
-burst-target close to admission (18.0 sync / 126.0 async; worker 0/0).
-The excess spans all target bins and is dominated by actual count 17-64
-(+84.0 CI [+45.5,+122.5]) and overshoot (+82.4
-CI [+49.4,+115.4]); final retained target is not significantly lower.
-Therefore neither a small-tail nor generic small-target gate is justified.
-ID56 now passively measures post-PACK tail=0/1/2+ while K=1 is active versus
-idle, plus actual burst-target grows/shrinks, before any sampling-policy change.
+ID54/55 remain stable: tail async-minus-sync is -41.2
+CI [-71.1,-11.3], learned burst +90.2 [+36.9,+143.5], service-dry +30.4
+[+3.5,+57.3]. Burst closes are admission-only; count17-64 is +66.2
+[+26.4,+106.0] and overshoot +71.4 [+27.5,+115.3].
 
-ID37 fast QD8 confirms for a third owner-qualified five-pair generation:
-+17.6%, CI [+1.3%,+33.9%]. Fast QD4 is +9.2% directionally and now receives
-the same five-pair confirmation. ID39 latest same-cache sequential p99 is
--12.1%, CI [-20.4%,-3.7%], while random is inconclusive; keep bounded Kread=2.
+ID56 proves the temporal asymmetry directly. Fast sync has no post-PACK samples
+while K=1 is active. Async records 604.2 tail0/inflight, 116.4 tail1/inflight
+and 70.4 tail2+/inflight. Slow async also records 482.0 tail0/inflight while
+sync/async throughput is equal, so the observation alone is not a universal
+performance predicate.
 
-ID24 boundary scheduler samples remain lower bounds. Fast prep callback is
-52.2 ms wall / 2.2 ms scheduler delta with a 36.8 ms measured non-sleeping
-phase floor; ordered is 960.4 / 277.6 / 88.3 ms. Do not infer worker-count or
-affinity policy from the boundary sample alone.
+ID57 is the bounded active test. A pending early PACK_READY close is suppressed
+only while the previous detached lower write is active and not yet complete.
+A zero pending tail sample is preserved while K=1 is active and across the
+immediate completion-only worker pass, then resolved before processing the next
+already-admitted wave. No new wait/timer/concurrency is added; FULL, DEADLINE,
+ordering boundaries, tail>=1 handling, ID50 and K=1 publication/completion
+ownership remain unchanged.
+
+Latest fast write-only QD8 is +23.1%, paired CI [+8.4%,+37.9%]. Fast QD4
+five-pair confirmation is +1.4%, CI [-0.7%,+3.6%], so QD4 returns to a
+directional control. Latest Kread same-cache result is inconclusive
+(seq -10.3% [-22.5,+1.9]%; random -0.5% [-11.0,+9.9]%) and remains unchanged.
 
 ## Confirmation gate
 
-Do not claim a QD performance improvement until that specific QD/regime has at least five counterbalanced matched rounds, an appropriate paired confidence interval, unchanged correctness, provenance equality and no unacceptable regression in lower bytes, read tails, CPU/RAM or GC. The current confirmation harness qualifies fast mixed QD32, fast write-only QD4/QD8 and the same-cache Kread toggle for this statistical gate; QD1/QD32 write-only remain directional controls.
+Do not claim a QD performance improvement until that specific QD/regime has at least five counterbalanced matched rounds, an appropriate paired confidence interval, unchanged correctness, provenance equality and no unacceptable regression in lower bytes, read tails, CPU/RAM or GC. The current confirmation harness qualifies fast mixed QD32, fast write-only QD8 and the same-cache Kread toggle for this statistical gate; QD1/QD4/QD32 write-only remain directional controls.
 
 ## Physical media
 

@@ -735,6 +735,13 @@ TAIL_SAMPLE_FIELDS = (
     "pack_tail_one_inflight", "pack_tail_one_idle",
     "pack_tail_many_inflight", "pack_tail_many_idle",
     "burst_target_grows", "burst_target_shrinks")
+ID57_FIELDS = (
+    "pack_tail_zero_deferrals", "pack_tail_zero_finalize_holds",
+    "pack_tail_deferred_resolve_zero", "pack_tail_deferred_resolve_one",
+    "pack_tail_deferred_resolve_many", "pack_tail_zero_deferred_aborts",
+    "pack_ready_busy_deferrals_admission",
+    "pack_ready_busy_deferrals_worker",
+    "pack_ready_post_finalize_closes")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -750,7 +757,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + ID57_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -867,6 +874,17 @@ def kernel_write_delta(before, after):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             counters["pack_tail_samples"]):
         raise ValueError("inconsistent swapz post-pack tail-sample attribution")
+    if (sum(counters[field] for field in (
+                "pack_tail_deferred_resolve_zero",
+                "pack_tail_deferred_resolve_one",
+                "pack_tail_deferred_resolve_many",
+                "pack_tail_zero_deferred_aborts")) >
+            counters["pack_tail_zero_deferrals"] or
+            counters["pack_tail_zero_finalize_holds"] >
+            counters["pack_tail_zero_deferrals"] or
+            counters["pack_ready_post_finalize_closes"] >
+            counters["packed_early_commits"]):
+        raise ValueError("inconsistent swapz ID57 intervention attribution")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),

@@ -405,14 +405,23 @@ count overshot target. Site totals, target bins and count bins must each
 conserve exactly to `pack_close_burst_target`. This is diagnostic state only;
 it must not alter `swapz_window_burst_close_ready()` or learned-target updates.
 
-ID56 is also measurement only. Every consumed post-PACK_READY tail sample must
-increment exactly one tail-size/state bucket: tail 0, 1 or 2+, crossed with
-detached `inflight_write.active` versus idle. These six buckets must conserve
-exactly to `pack_tail_samples`. Count a burst-target grow/shrink only when the
-existing helper actually changes the target. ID56 must not defer sampling,
-preserve/clear chain state differently, alter a target, arm a timer, or change
-upper BIO completion. An active successor is a separate experiment after owner
-evidence localizes the timing mechanism.
+ID56 is measurement only. Every first post-PACK_READY tail observation
+increments exactly one tail-size/state bucket: tail 0, 1 or 2+, crossed with
+detached `inflight_write.active` versus idle. These six buckets conserve to
+`pack_tail_samples`. Count a burst-target grow/shrink only when the existing
+helper actually changes the target.
+
+ID57 is a bounded policy experiment, not a new scheduling layer. Define “K=1
+busy” strictly as `inflight_write.active && !completion_done(lower_done)`.
+While busy, a below-max, pre-deadline PACK_READY decision may be postponed
+because `swapz_flush_window()` could only wait for that same lower completion;
+FULL, DEADLINE, duplicate/RAW/zero/FUA/PREFLUSH/DISCARD/read-conflict/shutdown
+boundaries remain immediate. A pending post-PACK zero-tail observation may be
+preserved while K=1 is active and across the immediate worker iteration that
+finalized that run but processed no admitted BIO. It must be resolved before
+processing the next already-admitted local wave. Tail>=1 uses the prior
+sampling semantics. No future-arrival wait, new timer, sleep, spin, second lower
+slot or callback-owned authority publication is permitted.
 
 ### Worker scheduler-accounted CPU attribution
 
