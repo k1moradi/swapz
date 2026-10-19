@@ -399,6 +399,16 @@ struct swapz_dm {
 	u64 pack_close_burst_count_9_16;
 	u64 pack_close_burst_count_17_64;
 	u64 pack_close_burst_overshoot;
+	/* ID56: passive post-PACK_READY tail-sample timing evidence. */
+	u64 pack_tail_samples;
+	u64 pack_tail_zero_inflight;
+	u64 pack_tail_zero_idle;
+	u64 pack_tail_one_inflight;
+	u64 pack_tail_one_idle;
+	u64 pack_tail_many_inflight;
+	u64 pack_tail_many_idle;
+	u64 burst_target_grows;
+	u64 burst_target_shrinks;
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -2329,6 +2339,7 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	swapz_u8 tail = 0;
 	swapz_u8 room;
 	bool prefix_open = true;
+	bool inflight;
 
 	/*
 	 * Sample only after a real PACK_READY lower write. Sampling before the
@@ -2364,6 +2375,29 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			room--;
 		}
 	}
+	/*
+	 * ID56 is observation only. In particular, do not defer/consume a sample
+	 * differently based on K=1 state here: first measure whether async is
+	 * actually declaring an empty post-PACK_READY tail before its detached
+	 * lower write and upper completions have finished.
+	 */
+	inflight = READ_ONCE(ctx->inflight_write.active);
+	ctx->pack_tail_samples++;
+	if (!tail) {
+		if (inflight)
+			ctx->pack_tail_zero_inflight++;
+		else
+			ctx->pack_tail_zero_idle++;
+	} else if (tail == 1U) {
+		if (inflight)
+			ctx->pack_tail_one_inflight++;
+		else
+			ctx->pack_tail_one_idle++;
+	} else if (inflight) {
+		ctx->pack_tail_many_inflight++;
+	} else {
+		ctx->pack_tail_many_idle++;
+	}
 	/* A later sample supersedes any still-open deferred singleton. Account
 	 * that old lifecycle before starting a new one so cumulative counters
 	 * conserve exactly at quiescent boundaries. */
@@ -2373,9 +2407,13 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 		swapz_account_single_tail_terminal(ctx, false, false);
 	}
 	if (tail) {
+		swapz_u8 old_target = ctx->retained_burst_target;
+
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
 			ctx->retained_burst_target, ctx->retained_chain_completed,
 			tail, ctx->max_window);
+		if (ctx->retained_burst_target != old_target)
+			ctx->burst_target_grows++;
 		if (tail == 1U) {
 			ctx->retained_tail_target = 0;
 			ctx->single_tail_deferrals++;
@@ -3640,11 +3678,17 @@ static void swapz_worker(struct work_struct *work)
 						if ((ctx->single_pack_deferred ||
 						     ctx->accepted_burst_pack_ready) &&
 						    !ctx->retained_tail_target &&
-						    !ctx->retained_chain_completed)
+						    !ctx->retained_chain_completed) {
+							swapz_u8 old_target =
+								ctx->retained_burst_target;
+
 							ctx->retained_burst_target =
 								swapz_window_shrink_burst_target(
 									ctx->retained_burst_target,
 									ctx->batch_count);
+							if (ctx->retained_burst_target != old_target)
+								ctx->burst_target_shrinks++;
+						}
 					}
 				}
 			} else {
@@ -4464,6 +4508,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "pack_close_burst_count_9_16=%llu "
 		       "pack_close_burst_count_17_64=%llu "
 		       "pack_close_burst_overshoot=%llu "
+		       "pack_tail_samples=%llu "
+		       "pack_tail_zero_inflight=%llu pack_tail_zero_idle=%llu "
+		       "pack_tail_one_inflight=%llu pack_tail_one_idle=%llu "
+		       "pack_tail_many_inflight=%llu pack_tail_many_idle=%llu "
+		       "burst_target_grows=%llu burst_target_shrinks=%llu "
 		       "packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
@@ -4650,6 +4699,15 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_close_burst_count_9_16,
 		       ctx->pack_close_burst_count_17_64,
 		       ctx->pack_close_burst_overshoot,
+		       ctx->pack_tail_samples,
+		       ctx->pack_tail_zero_inflight,
+		       ctx->pack_tail_zero_idle,
+		       ctx->pack_tail_one_inflight,
+		       ctx->pack_tail_one_idle,
+		       ctx->pack_tail_many_inflight,
+		       ctx->pack_tail_many_idle,
+		       ctx->burst_target_grows,
+		       ctx->burst_target_shrinks,
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,

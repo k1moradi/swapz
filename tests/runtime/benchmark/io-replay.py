@@ -730,6 +730,11 @@ BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
     "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
     "pack_close_burst_overshoot")
+TAIL_SAMPLE_FIELDS = (
+    "pack_tail_samples", "pack_tail_zero_inflight", "pack_tail_zero_idle",
+    "pack_tail_one_inflight", "pack_tail_one_idle",
+    "pack_tail_many_inflight", "pack_tail_many_idle",
+    "burst_target_grows", "burst_target_shrinks")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -745,7 +750,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -856,6 +861,12 @@ def kernel_write_delta(before, after):
                 "pack_close_burst_count_17_64")) != burst or
             counters["pack_close_burst_overshoot"] > burst):
         raise ValueError("inconsistent swapz burst-target close attribution")
+    if (sum(counters[field] for field in (
+                "pack_tail_zero_inflight", "pack_tail_zero_idle",
+                "pack_tail_one_inflight", "pack_tail_one_idle",
+                "pack_tail_many_inflight", "pack_tail_many_idle")) !=
+            counters["pack_tail_samples"]):
+        raise ValueError("inconsistent swapz post-pack tail-sample attribution")
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),

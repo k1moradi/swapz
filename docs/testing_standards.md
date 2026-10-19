@@ -48,7 +48,7 @@ The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms 
 
 Both arms of every session carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered. The five fast matched deltas use a two-sided Student-t 95% confidence interval with four degrees of freedom. Report both the paired mean and interval; do not replace paired analysis with an interval over unpaired arm means.
 
-The write-only QD1/4/8/32 sweep stays directional except for fast QD8. Slow QD1/4/8/32 and fast QD1/QD4/QD32 each run one sync and one async observation. Fast QD8 uses the same ten-session confirmation sequence and reports paired 95% confidence intervals for useful throughput, lower requests and lower bytes. A claim about any other QD still requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared ten-session sequence and the mode-array loops rather than the retired literal four-session loop, so changing the evidence shape cannot silently bypass parser contracts.
+The write-only QD1/4/8/32 sweep keeps slow QDs and fast QD1/QD32 directional. Fast QD4 and fast QD8 each use the same ten-session confirmation sequence and report paired 95% confidence intervals for useful throughput, lower requests and lower bytes. A claim about QD1 or QD32 still requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared ten-session sequence, the fast-QD4/QD8 mode selection and the mode-array loops so changing the evidence shape cannot silently bypass parser contracts.
 
 ## Report contract
 
@@ -70,22 +70,22 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `f6d658ddf767cd6d209a203e7860ef232e65d7b4` passed all five stages
+Source `66a0d67bc09d91536a0c3bdc72aa7d0f2edacecf` passed all five stages
 and published the canonical report as
-`dec12b4edebf1a47e2e7f08bcc1f3a54adeab56e`.
+`0956f85e9e49191ab0f68d01c738dca1def1162c`.
 
-Fast mixed async/sync is 23.93/22.91 MB/s with 907.4/854.2 lower WRITE
-requests. Five matched pairs give +4.47% throughput, 95% CI
-[+3.20%, +5.73%]; this is positive but below the >=5% materiality threshold.
-Fast QD8 independently reconfirms K=1 at +14.4%, CI [+6.6%, +22.2%], with
-524 requests. Same-cache Kread seeded-random p99 is -4.9%,
-CI [-9.1%, -0.7%], with identical traffic; sequential is -8.8%,
-CI [-18.2%, +0.7%].
+Fast mixed async/sync is 23.52/22.70 MB/s with 938.2/891.8 lower WRITE
+requests. Five matched pairs give +3.7%, CI [+1.3%,+6.0%], with absolute
+request delta +46.4 CI [+8.1,+84.7]. Latest fast QD8 is +17.6%,
+CI [+1.3%,+33.9%]. Same-cache Kread sequential p99 is -12.1%,
+CI [-20.4%,-3.7%]; random is inconclusive.
 
-Per-mode ID54 evidence shows async-minus-sync learned burst-target closes
-+74.2, CI [+21.2,+127.2], while tail-target closes are -58.4,
-CI [-73.1,-43.7]. Do not apply a small-tail policy successor from this run.
-ID55 collects only learned burst-target site/geometry evidence.
+ID54/55 localize the residual fast async fragmentation to admission-side
+learned burst-target closes: burst +108.0 CI [+64.3,+151.7], worker closes 0,
+actual count17-64 +84.0 CI [+45.5,+122.5], and overshoot +82.4
+CI [+49.4,+115.4]. The final retained target delta is insignificant, so no
+small-target gate is authorized. ID56 collects tail-sample timing versus active
+K=1 state before any sampling-policy successor.
 
 ## Open qualification gaps
 
@@ -727,12 +727,18 @@ ID55 remains measurement only. For every learned burst-target close,
 `pack_close_burst_admission + pack_close_burst_worker` must equal
 `pack_close_burst_target`; the four learned-target bins and four actual-count
 bins must independently sum to that same total, and overshoot cannot exceed it.
-Source contracts must prove admission/worker snapshot the existing learned
-target without changing any readiness predicate. Assertions should follow the
-actual accumulator mapped to a status label (for example
-`ordered_lz4_wall_ns` is emitted from `ctx->lz4_wall_ns`) rather than assume
-the label is a same-named struct member, and must tolerate ordinary source line
-wrapping. Replay/report contracts fail closed on any broken conservation.
+The compact report prints sync/async/delta plus fast paired confidence intervals.
+Source contracts prove admission/worker snapshot the existing learned target
+without changing readiness.
+
+ID56 remains measurement only. The six post-PACK tail-size/state buckets
+(0/1/2+ crossed with active K=1 vs idle) must sum exactly to
+`pack_tail_samples`. Grow/shrink counters increment only on a real target
+change. Source contracts must prove `READ_ONCE(inflight_write.active)` is used
+only for attribution: the existing sample is still consumed unconditionally
+and no readiness, timer, target or completion rule changes. Replay/report
+contracts fail closed on broken conservation and show the per-mode tail-sample
+split before any active successor.
 
 ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain

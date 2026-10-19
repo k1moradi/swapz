@@ -8,57 +8,61 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner qualification of `f6d658ddf767cd6d209a203e7860ef232e65d7b4`
+Owner qualification of `66a0d67bc09d91536a0c3bdc72aa7d0f2edacecf`
 passed all five stages; report-only commit
-`dec12b4edebf1a47e2e7f08bcc1f3a54adeab56e` is the canonical result. These
+`0956f85e9e49191ab0f68d01c738dca1def1162c` is the canonical result. These
 remain owned-RAM `null_blk` synthetic models, not physical-media claims.
 
-The ID53 rollback is qualified and confirms the rejection. Fast mixed async
-lower WRITE requests fell to 907.4 versus 854.2 sync, reducing the prior
-async-over-sync request gap from +137.8 to +53.2. PACK_READY excess fell from
-+105.8 to +43.6 and win2+win3_4 excess from +85.6 to +41.0. Async WRITE now
-averages 23.93 versus 22.91 MB/s sync; the five matched throughput delta is
-+4.47% with 95% CI [+3.20%, +5.73%]. This is statistically positive but does
-not clear the predeclared >=5% material-gain gate.
+Fast mixed async remains statistically faster than sync but still misses the
+predeclared >=5% materiality gate: 23.52 versus 22.70 MB/s, paired +3.7% with
+95% CI [+1.3%, +6.0%]. The async lower-WRITE request penalty is +46.4 requests,
+CI [+8.1,+84.7], so residual fragmentation remains real.
 
 ID50 remains qualified with the ordinary deadline. Fast D/C/DL/I/O is
-98.8/65.8/33.0/0/0. Only 1.5 of 65.8 companions arrive after 1 ms under passive
-full-deadline observation, split 0.7/0.3/0.2/0.3 across
-1001-1250/1251-1500/1501-1750/>1750 us. Do not infer another active age cutoff
-from those passive bins because ID53 proved that early completion changes the
-closed-loop arrival process.
+110.8/78.3/32.5/0/0 and only 2.0 companion resolutions occur after 1 ms. ID53
+therefore stays permanently rejected; no active age cutoff is justified.
 
-ID37 is now repeatably qualified at fast write-only QD8. Five matched rounds
-give +14.4% async/sync with 95% CI [+6.6%, +22.2%] and 524 async lower WRITE
-requests, independently reproducing the previous five-pair positive result.
-Keep K=1 infrastructure; no evidence justifies K>1 lower-WRITE slots.
+ID37 is now repeatedly qualified at fast write-only QD8. The latest five matched
+rounds give +17.6% async/sync, 95% CI [+1.3%, +33.9%], following the earlier
++20.8% and +14.4% confirmations. Fast QD4 is +9.2% directionally and now merits
+the same five-pair confirmation. Keep K=1 infrastructure; no evidence justifies
+K>1 lower-WRITE slots.
 
-ID39 gained real support. Five same-cache Kread rounds give seeded-random p99
--4.9% with 95% CI [-9.1%, -0.7%] at identical 2484 KiB / 621 lower traffic.
-Sequential p99 is -8.8% with CI [-18.2%, +0.7%]. Keep the bounded Kread=2
-implementation; change no READ algorithm while optional confirmation narrows the
-sequential interval.
+ID39 remains qualified as a bounded Kread=2 mechanism. The latest same-cache
+five-pair result makes sequential p99 significant at -12.1%,
+CI [-20.4%,-3.7%], while seeded-random is -0.7% with a CI crossing zero. The
+previous qualification showed the opposite pattern (random significant,
+sequential near-significant). Across runs the useful tail benefit varies by
+access pattern, but physical traffic does not inflate. Keep Kread=2 unchanged.
 
-ID54 answered the primary-cause question once the committed JSON is read
-per-mode rather than averaging sync and async. Fast sync/async PACK_READY causes
-are tail<=4 52.4/44.8, tail 120.8/62.4, burst 23.8/98.0 and dry 594.2/622.0.
-Across the five matched pairs, async-minus-sync tail is -58.4
-CI [-73.1,-43.7], learned burst-target is +74.2 CI [+21.2,+127.2], and
-service-dry is +27.8 with CI crossing zero. The small-tail hypothesis is
-refuted for the residual async excess.
+ID54 again isolates learned burst-target closure. Fast sync/async PACK_READY
+causes are tail<=4 56.2/48.0, tail 127.8/67.8, burst 18.0/126.0 and
+service-dry 628.4/613.0. Five matched async-minus-sync deltas are tail -60.0
+CI [-82.7,-37.3], learned burst +108.0 CI [+64.3,+151.7], and service-dry
+-15.4 with a CI crossing zero.
 
-ID55 is the passive successor: subdivide learned burst-target PACK_READY closes
-by admission-vs-worker decision site, learned-target bin, actual close-size bin
-and overshoot. It changes no readiness predicate. Exact conservation determines
-whether the remaining fragmentation comes from a lower learned target, a
-particular decision site, or count overshoot before any policy successor.
+ID55 is now a completed measurement. Every learned burst-target close in both
+modes occurs at admission: 18.0/126.0 sync/async; worker-tail is 0/0. The async
+excess spans all learned-target bins rather than one small target:
+<=4 +12.6 CI [+6.2,+19.0], 5-8 +23.4 [+6.0,+40.8], 9-16 +22.8
+[+14.3,+31.3], and 17-64 +49.2 [+15.4,+83.0]. Actual close-count excess is
+concentrated even more strongly at 17-64: +84.0 CI [+45.5,+122.5].
+Overshoot contributes +82.4 CI [+49.4,+115.4]. The final retained burst target
+is 27.8 sync versus 26.0 async, delta -1.8 with CI crossing zero. Therefore
+neither a small-tail gate nor a generic small-target gate is supported.
 
-ID24's boundary `sum_exec_runtime` sample is now known to undercount short
-non-sleeping workqueue callbacks. Keep it only as a scheduler-accounted lower
-bound. The report additionally exposes separate ordered/preparation LZ4 and copy
-timers and derives non-sleeping measured-phase floors from existing synchronous
-phase timers; trustworthy total worker CPU still requires external scheduler
-accounting before N=2/affinity decisions.
+ID56 is the passive successor. It partitions every post-PACK_READY tail sample
+by tail=0/1/2+ and whether a detached K=1 write is still active, and counts
+actual retained-burst target grows/shrinks. This directly tests the remaining
+code-level hypothesis that async consumes an empty tail sample before lower
+completion/upper BIO release. ID56 changes no readiness predicate, sample
+consumption rule, target rule or timer.
+
+ID24's boundary `sum_exec_runtime` sample remains only a lower bound. The
+latest fast preparation callback reports 52.2 ms wall, only 2.2 ms scheduler
+delta, but 36.8 ms of independently measured non-sleeping phases. Ordered
+callback is 960.4 ms wall, 277.6 ms scheduler delta, with an 88.3 ms measured
+phase floor. Do not use the boundary metric alone to justify N=2 or affinity.
 
 ## Current bottleneck ranking
 
@@ -69,16 +73,17 @@ non-I/O is 54.9/36.6 ms. Snapshot pause CRC remains only 1.7/1.1 ms; planner and
 explicit copy costs are secondary.
 
 READ amplification is no longer the active defect. The shared extent cache is
-qualified independently. Five matched same-cache Kread rounds leave both p99
-confidence intervals crossing zero, so the READ path stays unchanged unless
-more focused evidence is worth collecting.
+qualified independently and bounded Kread=2 remains useful without traffic
+inflation. The latest five-pair run makes sequential p99 significant
+(-12.1%, CI [-20.4%,-3.7%]); the prior run made seeded-random significant.
+Keep the READ algorithm unchanged rather than broadening concurrency.
 
 WRITE fragmentation remains the leading scheduling question on the fast mixed
-model, but the ID53 rollback recovered most of the damage. Async now uses 907.4
-lower WRITE requests versus 854.2 sync. Per-mode ID54 evidence rules out
-sampled-tail closure as the residual cause: tail-target closes fall by 58.4
-while learned burst-target closes rise by 74.2. ID55 now localizes that burst
-bucket without changing scheduling.
+model. Async uses 938.2 lower WRITE requests versus 891.8 sync. ID54/55 now
+localize the residual difference to admission-side learned burst-target closure
+(+108.0), predominantly large-count/overshoot behavior rather than a smaller
+final target. ID56 now tests whether premature post-PACK tail sampling while
+K=1 is still active is the upstream cause before any scheduling rule changes.
 
 ## Optimization evidence table
 
@@ -115,7 +120,7 @@ changes.
 | 21 | Direct LZ4 decompression into read BIO | **5** | Reconfirmed: read-copy wall is ~1.1-1.4 ms while lower READ wall is ~100-675 ms. |
 | 22 | DMA/hardware offload for current 4KiB copies | **5** | Wrong bottleneck. |
 | 23 | Per-CPU independent authorities on one shared device | **5** | Reject; fragments ordering, GC and global packing. |
-| 24 | Trustworthy kernel-worker on-CPU attribution | **2 boundary metric insufficient; phase-floor successor implemented** | Direct `sum_exec_runtime` boundary deltas materially undercount short non-sleeping callbacks (fast prep 51.2 ms wall vs 2.1 ms sampled CPU). Keep the counter only as a lower bound; report non-sleeping measured-phase floors and require external scheduler accounting before N=2/affinity decisions. |
+| 24 | Trustworthy kernel-worker on-CPU attribution | **2 boundary metric insufficient; phase floors retained** | Latest fast prep is 52.2 ms callback wall / 2.2 ms scheduler delta / 36.8 ms measured non-sleeping floor; ordered is 960.4 / 277.6 / 88.3 ms. Keep boundary deltas only as lower bounds and require external scheduler accounting before N=2/affinity decisions. |
 | 25 | Async lower-I/O state machine with immutable run ownership | **1** | Owner-loaded qualification reconfirms the ownership/publication machinery. Keep the infrastructure; K=1 scheduling policy remains separate. |
 | 26 | NUMA-local preparation domains | **6** | Hardware-blocked. |
 | 27 | One swapz target per NUMA node with node-local backing | **6** | Deployment topology only. |
@@ -128,9 +133,9 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **1 qualified at fast write-only QD8; mixed policy pending** | A second independent five-pair run confirms +14.4% async/sync, 95% CI [+6.6%, +22.2%], with 524 requests. Fast mixed is statistically positive +4.47% but still below the >=5% materiality gate and carries +53.2 lower requests. |
+| 37 | K=1 ping-pong WRITE pipeline | **1 qualified at fast write-only QD8; QD4 confirmation ready** | Third consecutive fast-QD8 five-pair result is +17.6%, CI [+1.3%,+33.9%]. Fast QD4 is +9.2% directional and now gets five matched pairs. Mixed is +3.7% CI [+1.3,+6.0]% but carries +46.4 lower requests. Keep K=1; do not add slots. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Stronger hold. Serial hwq=1 has no parallel service slot. Fast hwq=64 has capacity, but K=1 run occupancy is only ~0.09 and preparation backlog is shallow; there is no sustained ready-run pressure for K>1 yet. |
-| 39 | Latency-first bounded parallel READ service | **1 bounded mechanism supported; sequential confirmation optional** | Seeded-random p99 is -4.9%, CI [-9.1%, -0.7%], with identical lower traffic; sequential is -8.8%, CI [-18.2%, +0.7%]. Keep Kread=2 and its queue gate; do not broaden the algorithm. |
+| 39 | Latency-first bounded parallel READ service | **1 bounded mechanism qualified / keep** | Latest sequential p99 is -12.1%, CI [-20.4%,-3.7%]; random is -0.7% and inconclusive. Prior qualification significantly favored random. Benefits vary by access pattern without traffic inflation; keep Kread=2 and do not broaden depth. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
@@ -141,12 +146,13 @@ changes.
 | 47 | Explicit ordering-boundary singleton reset | **1** | Qualified correctness/measurement hygiene. PREFLUSH/FUA/discard/shutdown/other reset learned singleton state, including empty fsync PREFLUSH; ordinary idle/deadline closes do not. |
 | 48 | Fast mixed one-page PACK_READY cause attribution | **1 completed measurement** | Repaired-read confirmation is 78.0 tail-target / 24.2 read-bypass / 0 wave-interruption, with slow 0/0/0. Sampled singleton tails remain dominant; read-bypass/wave as the primary root cause is refuted. |
 | 49 | 16-entry shared multi-extent READ residency cache | **1** | Reconfirmed again on hwq=1: 2830 KiB / 400.5 requests / 14.33 ms sequential and 2498 KiB / 624.5 / 22.21 ms random. Keep the 256KiB ordered-owner cache and exact invalidation. |
-| 50 | Sampled-single-tail PACK_READY deferral | **1 qualified / keep** | After rollback, fast D/C/DL/I/O is 98.8/65.8/33.0/0/0 and request/window geometry materially recovers. Keep the ordinary deadline; do not add another active age cutoff. |
+| 50 | Sampled-single-tail PACK_READY deferral | **1 qualified / keep** | Latest fast D/C/DL/I/O is 110.8/78.3/32.5/0/0; only 2.0 companions resolve after 1 ms. Keep the ordinary deadline; do not add another active age cutoff. |
 | 51 | Deferred-singleton outcome attribution | **1 completed measurement** | Reconfirmed fast D/C/DL/I/O = 98.8/65.8/33.0/0/0 with exact conservation. Retain counters while residual fragmentation is localized. |
 | 52 | Deferred-singleton timing/service discrimination | **1 completed measurement** | Full-deadline passive data returns to only 1.5/65.8 companions >1 ms. Together with ID53's feedback artifact, this closes the age-threshold path: retain diagnostics only; do not implement another cutoff. |
 | 53 | 1 ms deferred-singleton age cutoff | **5 refuted / reverted** | 31.5 cutoff closes produced 13.8 next-WRITE-before-original-deadline observations (43.8%). Fast mixed async also had 960.4 vs 822.6 sync lower requests and no confirmed >=5% gain. Remove the active cutoff and watermark; restore ID50's ordinary deadline. |
-| 54 | Passive PACK_READY primary-cause attribution | **1 completed measurement** | Per-mode fast evidence shows tail-target -58.4 CI [-73.1,-43.7], burst-target +74.2 CI [+21.2,+127.2], dry +27.8 with CI crossing zero. Residual async excess is not a small-tail problem; fix reporting and investigate learned burst-target closure. |
-| 55 | Learned burst-target PACK_READY site/geometry attribution | **4 instrumentation implemented pending owner evidence** | Split burst closes by admission/worker site, learned target bin, actual count bin and overshoot with exact conservation to `pack_close_burst_target`. No readiness or target policy changes. |
+| 54 | Passive PACK_READY primary-cause attribution | **1 completed measurement** | Latest five-pair fast evidence strengthens the split: tail -60.0 CI [-82.7,-37.3], learned burst +108.0 CI [+64.3,+151.7], dry -15.4 inconclusive. Small-tail/service-dry policy changes are refuted for the residual excess. |
+| 55 | Learned burst-target PACK_READY site/geometry attribution | **1 completed measurement** | All burst closes are admission-side (18.0/126.0 sync/async; worker 0/0). Excess spans all target bins; count17-64 is +84.0 CI [+45.5,+122.5] and overshoot +82.4 [+49.4,+115.4]. Final target delta is insignificant. Do not gate only small targets. |
+| 56 | Post-PACK tail-sample timing vs detached K=1 state | **4 instrumentation implemented pending owner evidence** | Count tail=0/1/2+ separately while `inflight_write.active` vs idle, plus actual burst-target grows/shrinks. Exact sample conservation; no policy/timer/target change. If async-only tail=0-inflight dominates, a later bounded fix may defer only that zero-tail consumption until K=1 finalization. |
 
 
 ## What the pinned queue experiment establishes
@@ -195,17 +201,19 @@ before any on-disk-format change.
 
 ## Immediate work queue
 
-1. Owner-qualify ID55 plus the corrected per-mode ID54/paired-CI report. Do not
-   change burst-target readiness in the same revision.
-2. Use ID55 to decide whether the +74.2 fast async burst-target delta is
-   admission-site, worker-site, lower learned-target, or overshoot driven.
-   Only then design a bounded scheduling successor.
-3. Keep ID37 K=1 and ID39 Kread=2 unchanged. Fast QD8 is repeatably qualified;
-   Kread random latency is significant and sequential confirmation is optional.
-4. Treat ID24 `sum_exec_runtime` only as a lower bound. Use the new measured
-   non-sleeping phase floors and obtain trustworthy scheduler tracing before
-   N=2 preparation workers or CPU-topology/affinity experiments.
-5. Proceed independently with bounded owned-RAM DISCARD/TRIM (ID29),
+1. Owner-qualify passive ID56 and the expanded fast-QD4/QD8 five-pair harness.
+   Keep all window readiness, target and timer policy unchanged in this source.
+2. If ID56 shows that async disproportionately consumes `tail == 0` while
+   `inflight_write.active`, implement one bounded successor that preserves the
+   pending tail sample/serviced chain until K=1 finalization before accepting
+   zero as a real burst boundary. Do not alter tail==1 ID50 deferral.
+3. If ID56 does not localize that path, add only the smallest missing
+   grow/shrink antecedent evidence; do not gate small targets generically.
+4. Keep ID37 K=1 and ID39 Kread=2 unchanged. Use fast QD4 confirmation to
+   locate K=1's usefulness threshold; QD8 remains a regression control.
+5. Obtain trustworthy external scheduler CPU accounting before N=2
+   preparation workers or affinity experiments.
+6. Proceed independently with bounded owned-RAM DISCARD/TRIM (ID29),
    huge/compound-page coverage (ID43), and heavy-CPU/low-RAM qualification.
 
 ## NUMA / deployment topology

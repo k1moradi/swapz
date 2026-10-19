@@ -405,6 +405,15 @@ count overshot target. Site totals, target bins and count bins must each
 conserve exactly to `pack_close_burst_target`. This is diagnostic state only;
 it must not alter `swapz_window_burst_close_ready()` or learned-target updates.
 
+ID56 is also measurement only. Every consumed post-PACK_READY tail sample must
+increment exactly one tail-size/state bucket: tail 0, 1 or 2+, crossed with
+detached `inflight_write.active` versus idle. These six buckets must conserve
+exactly to `pack_tail_samples`. Count a burst-target grow/shrink only when the
+existing helper actually changes the target. ID56 must not defer sampling,
+preserve/clear chain state differently, alter a target, arm a timer, or change
+upper BIO completion. An active successor is a separate experiment after owner
+evidence localizes the timing mechanism.
+
 ### Worker scheduler-accounted CPU attribution
 
 Keep callback wall residency and worker CPU attribution separate. At

@@ -117,6 +117,11 @@ BURST_CLOSE_DETAIL_FIELDS = (
     "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
     "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
     "pack_close_burst_overshoot")
+TAIL_SAMPLE_FIELDS = (
+    "pack_tail_samples", "pack_tail_zero_inflight", "pack_tail_zero_idle",
+    "pack_tail_one_inflight", "pack_tail_one_idle",
+    "pack_tail_many_inflight", "pack_tail_many_idle",
+    "burst_target_grows", "burst_target_shrinks")
 PACK_CLOSE_PRIMARY_FIELDS = (
     "pack_close_tail_target", "pack_close_burst_target",
     "pack_close_service_dry")
@@ -151,7 +156,7 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + DEADLINE_CONTEXT_FIELDS +
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + DEADLINE_CONTEXT_FIELDS +
     BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
@@ -244,6 +249,12 @@ def timed_window_error(record):
                 "pack_close_burst_count_17_64")) != burst or
             record["pack_close_burst_overshoot"] > burst):
         return "timed burst-target close attribution is inconsistent"
+    if (sum(record[field] for field in (
+                "pack_tail_zero_inflight", "pack_tail_zero_idle",
+                "pack_tail_one_inflight", "pack_tail_one_idle",
+                "pack_tail_many_inflight", "pack_tail_many_idle")) !=
+            record["pack_tail_samples"]):
+        return "timed post-pack tail-sample attribution is inconsistent"
     for total, lower, read, both in (
             ("single_tail_companions", "single_tail_comp_after_lower_done",
              "single_tail_comp_after_read_bypass", "single_tail_comp_after_both"),
@@ -1008,7 +1019,7 @@ def parse_write_saturation(output):
 
 
 def write_saturation_verdict(sessions):
-    """Validate bounded QD controls plus five matched fast-QD8 rounds."""
+    """Validate bounded QD controls plus five matched fast-QD4/QD8 rounds."""
     regimes = {}
     expected_total = 0
     for regime in MODEL_ORDER:
@@ -1016,7 +1027,7 @@ def write_saturation_verdict(sessions):
         expected_shape = []
         for qd in (1, 4, 8, 32):
             modes = (CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd == 8 else (0, 1))
+                     if regime == "ssd_emulated" and qd in (4, 8) else (0, 1))
             expected_shape.extend((qd, mode) for mode in modes)
         expected_total += len(expected_shape)
         shape = [(row.get("qd"), row.get("async_prepare")) for row in rows]
@@ -1097,7 +1108,7 @@ def write_saturation_verdict(sessions):
         regimes[regime] = rows
     if len(sessions) != expected_total:
         return {"overall": "INCOMPLETE",
-                "reason": "exactly 24 write-only evidence sessions required"}
+                "reason": "exactly 32 write-only evidence sessions required"}
     if len({row["source_sha"] for row in sessions}) != 1 or \
             len({row.get("fixture_sha256") for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
@@ -1173,40 +1184,45 @@ def write_saturation_verdict(sessions):
                 })
         summaries[regime] = points
 
-    fast_qd8 = [row for row in regimes["ssd_emulated"]
-                if row["qd"] == 8]
-    try:
-        qd8_pairs = matched_binary_pairs(fast_qd8, "async_prepare")
-    except ValueError as exc:
-        return {"overall": "INCOMPLETE",
-                "reason": "fast QD8: " + str(exc)}
-    throughput, requests, lower_bytes = [], [], []
-    for pair in qd8_pairs:
-        sync = pair[0]["arms"]["swapz"]
-        asynchronous = pair[1]["arms"]["swapz"]
-        throughput.append(
-            asynchronous["input_write_mbps"] /
-            sync["input_write_mbps"] - 1.0)
-        requests.append(
-            asynchronous["lower_write_requests"] /
-            sync["lower_write_requests"] - 1.0)
-        lower_bytes.append(
-            asynchronous["lower_write_bytes"] /
-            sync["lower_write_bytes"] - 1.0)
-
-    return {
-        "overall": "PASS_WRITE_SATURATION_EVIDENCE",
-        "fast_qd8_matched_pairs": 5,
-        "confidence":
-            "FAST_QD8_PAIRED_95PCT_CI_OTHER_QDS_DIRECTIONAL",
-        "fast_qd8_paired": {
+    paired_fast = {}
+    for qd in (4, 8):
+        fast_rows = [row for row in regimes["ssd_emulated"]
+                     if row["qd"] == qd]
+        try:
+            pairs = matched_binary_pairs(fast_rows, "async_prepare")
+        except ValueError as exc:
+            return {"overall": "INCOMPLETE",
+                    "reason": f"fast QD{qd}: " + str(exc)}
+        throughput, requests, lower_bytes = [], [], []
+        for pair in pairs:
+            sync = pair[0]["arms"]["swapz"]
+            asynchronous = pair[1]["arms"]["swapz"]
+            throughput.append(
+                asynchronous["input_write_mbps"] /
+                sync["input_write_mbps"] - 1.0)
+            requests.append(
+                asynchronous["lower_write_requests"] /
+                sync["lower_write_requests"] - 1.0)
+            lower_bytes.append(
+                asynchronous["lower_write_bytes"] /
+                sync["lower_write_bytes"] - 1.0)
+        paired_fast[qd] = {
             "throughput_change_fraction": paired_ci95(throughput),
             "lower_requests_change_fraction": paired_ci95(requests),
             "lower_bytes_change_fraction": paired_ci95(lower_bytes),
-        },
+        }
+
+    return {
+        "overall": "PASS_WRITE_SATURATION_EVIDENCE",
+        "fast_qd4_matched_pairs": 5,
+        "fast_qd8_matched_pairs": 5,
+        "confidence":
+            "FAST_QD4_QD8_PAIRED_95PCT_CI_QD1_QD32_DIRECTIONAL",
+        "fast_qd4_paired": paired_fast[4],
+        "fast_qd8_paired": paired_fast[8],
         "regimes": summaries,
         "interpretation":
-            "SYNTHETIC_RAM_QD8_CONFIRMATION_OTHER_QDS_DIRECTIONAL",
+            "SYNTHETIC_RAM_QD4_QD8_CONFIRMATION_QD1_QD32_DIRECTIONAL",
     }
 
 
@@ -1420,6 +1436,8 @@ def benchmark_verdicts(sessions):
             pair_request_deltas = []
             pair_request_absolute_deltas = []
             cause_deltas = {field: [] for field in PACK_CLOSE_FIELDS}
+            burst_detail_deltas = {
+                field: [] for field in BURST_CLOSE_DETAIL_FIELDS}
             for pair in mixed_pairs:
                 sync = pair[0]["arms"]["swapz"]
                 asynchronous = pair[1]["arms"]["swapz"]
@@ -1436,12 +1454,20 @@ def benchmark_verdicts(sessions):
                     cause_deltas[field].append(
                         asynchronous["kernel_write_path"][field] -
                         sync["kernel_write_path"][field])
+                for field in BURST_CLOSE_DETAIL_FIELDS:
+                    burst_detail_deltas[field].append(
+                        asynchronous["kernel_write_path"][field] -
+                        sync["kernel_write_path"][field])
             throughput_ci = paired_ci95(pair_deltas)
             request_ci = paired_ci95(pair_request_deltas)
             request_absolute_ci = paired_ci95(pair_request_absolute_deltas)
             cause_ci = {
                 field: paired_ci95(values)
                 for field, values in cause_deltas.items()
+            }
+            burst_detail_ci = {
+                field: paired_ci95(values)
+                for field, values in burst_detail_deltas.items()
             }
             if throughput_ci["low"] >= .05:
                 throughput_result = "CONFIRMED_5PCT_GAIN"
@@ -1458,6 +1484,8 @@ def benchmark_verdicts(sessions):
                 "lower_request_absolute_delta_paired_95pct_ci":
                     request_absolute_ci,
                 "pack_ready_cause_delta_paired_95pct_ci": cause_ci,
+                "burst_close_detail_delta_paired_95pct_ci":
+                    burst_detail_ci,
                 "caution": "Synthetic RAM model; five matched pairs",
             }
         else:
@@ -1479,7 +1507,7 @@ def benchmark_verdicts(sessions):
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
                             "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
-                            SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
+                            SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
             "kernel_gauges": {
@@ -1629,6 +1657,53 @@ def print_bench(result):
                  *(f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
                    for field in pack_fields))
             ])
+        print("  Mixed burst-close split")
+        burst_fields = (
+            "pack_close_burst_admission", "pack_close_burst_worker",
+            "pack_close_burst_target_le4", "pack_close_burst_target_5_8",
+            "pack_close_burst_target_9_16", "pack_close_burst_target_17_64",
+            "pack_close_burst_count_le4", "pack_close_burst_count_5_8",
+            "pack_close_burst_count_9_16", "pack_close_burst_count_17_64",
+            "pack_close_burst_overshoot")
+        print_table(
+            ("mode", "adm/wrk", "t<=4/5-8/9-16/17+", "c<=4/5-8/9-16/17+", "over"),
+            [
+                (mode,
+                 f"{columns[mode]['mixed_pack_close_burst_admission']:.1f}/"
+                 f"{columns[mode]['mixed_pack_close_burst_worker']:.1f}",
+                 "/".join(f"{columns[mode][f'mixed_{field}']:.1f}"
+                          for field in burst_fields[2:6]),
+                 "/".join(f"{columns[mode][f'mixed_{field}']:.1f}"
+                          for field in burst_fields[6:10]),
+                 f"{columns[mode]['mixed_pack_close_burst_overshoot']:.1f}")
+                for mode in ("sync", "async")
+            ] + [
+                ("async-sync",
+                 f"{columns['async']['mixed_pack_close_burst_admission'] - columns['sync']['mixed_pack_close_burst_admission']:+.1f}/"
+                 f"{columns['async']['mixed_pack_close_burst_worker'] - columns['sync']['mixed_pack_close_burst_worker']:+.1f}",
+                 "/".join(
+                     f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
+                     for field in burst_fields[2:6]),
+                 "/".join(
+                     f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
+                     for field in burst_fields[6:10]),
+                 f"{columns['async']['mixed_pack_close_burst_overshoot'] - columns['sync']['mixed_pack_close_burst_overshoot']:+.1f}")
+            ])
+        print("  Mixed post-PACK tail samples")
+        tail_rows = []
+        for mode in ("sync", "async"):
+            tail_rows.append((
+                mode,
+                f"{columns[mode]['mixed_pack_tail_zero_inflight']:.1f}/"
+                f"{columns[mode]['mixed_pack_tail_zero_idle']:.1f}",
+                f"{columns[mode]['mixed_pack_tail_one_inflight']:.1f}/"
+                f"{columns[mode]['mixed_pack_tail_one_idle']:.1f}",
+                f"{columns[mode]['mixed_pack_tail_many_inflight']:.1f}/"
+                f"{columns[mode]['mixed_pack_tail_many_idle']:.1f}",
+                f"{columns[mode]['mixed_burst_target_grows']:.1f}/"
+                f"{columns[mode]['mixed_burst_target_shrinks']:.1f}"))
+        print_table(("mode", "0 I/N", "1 I/N", "2+ I/N", "grow/shrink"),
+                    tail_rows)
         if regime == "ssd_emulated":
             mixed_ab = data["criteria"]["async_vs_sync"]
             throughput_ci = mixed_ab["paired_95pct_ci"]
@@ -1654,6 +1729,27 @@ def print_bench(result):
                 ("metric", "mean", "low", "high"),
                 [(label, f"{mean:+.1f}", f"{low:+.1f}", f"{high:+.1f}")
                  for label, mean, low, high in ci_rows])
+            burst_ci = mixed_ab[
+                "burst_close_detail_delta_paired_95pct_ci"]
+            print("  Fast mixed burst-close async-sync paired 95% CI")
+            burst_ci_rows = []
+            for label, field in (
+                    ("admission", "pack_close_burst_admission"),
+                    ("worker", "pack_close_burst_worker"),
+                    ("target<=4", "pack_close_burst_target_le4"),
+                    ("target5-8", "pack_close_burst_target_5_8"),
+                    ("target9-16", "pack_close_burst_target_9_16"),
+                    ("target17+", "pack_close_burst_target_17_64"),
+                    ("count<=4", "pack_close_burst_count_le4"),
+                    ("count5-8", "pack_close_burst_count_5_8"),
+                    ("count9-16", "pack_close_burst_count_9_16"),
+                    ("count17+", "pack_close_burst_count_17_64"),
+                    ("overshoot", "pack_close_burst_overshoot")):
+                interval = burst_ci[field]
+                burst_ci_rows.append((
+                    label, f"{interval['mean']:+.1f}",
+                    f"{interval['low']:+.1f}", f"{interval['high']:+.1f}"))
+            print_table(("metric", "mean", "low", "high"), burst_ci_rows)
         print("  Async pipeline — wall timings overlap; callback rows include scheduler delay.")
         print_table(
             ("stage", "busy ms", "overlap/stall ms"),
@@ -1839,7 +1935,7 @@ def print_bench(result):
         [
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
-            ("write-only", "fast QD8: 5 matched pairs + paired CI; others directional"),
+            ("write-only", "fast QD4/QD8: 5 matched pairs + paired CI; QD1/QD32 directional"),
             ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
@@ -1904,11 +2000,13 @@ def print_bench(result):
             print("  Async windows; close=P/D/I")
             print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
-        qd8_ci = saturation["fast_qd8_paired"]["throughput_change_fraction"]
-        print("  Fast QD8 A/S paired 95% CI: "
-              f"{qd8_ci['mean'] * 100:+.1f}% "
-              f"[{qd8_ci['low'] * 100:+.1f},{qd8_ci['high'] * 100:+.1f}]%")
-        print("  Other QDs remain directional controls.")
+        for qd in (4, 8):
+            qd_ci = saturation[f"fast_qd{qd}_paired"][
+                "throughput_change_fraction"]
+            print(f"  Fast QD{qd} A/S paired 95% CI: "
+                  f"{qd_ci['mean'] * 100:+.1f}% "
+                  f"[{qd_ci['low'] * 100:+.1f},{qd_ci['high'] * 100:+.1f}]%")
+        print("  QD1/QD32 remain directional controls.")
     else:
         print("\n  Write-only saturation evidence: NOT QUALIFIED "
               f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")

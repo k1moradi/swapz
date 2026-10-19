@@ -246,6 +246,12 @@ class PairReplayContract(unittest.TestCase):
             "pack_close_burst_target_5_8": 1,
             "pack_close_burst_count_5_8": 1,
             "pack_close_burst_overshoot": 0,
+            "pack_tail_samples": 3,
+            "pack_tail_zero_inflight": 1,
+            "pack_tail_zero_idle": 1,
+            "pack_tail_many_idle": 1,
+            "burst_target_grows": 1,
+            "burst_target_shrinks": 1,
             "retained_burst_target": 8,
             "prep_lower_write_samples": 7,
             "prep_lower_write_start_queued": 5,
@@ -317,6 +323,12 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["pack_close_burst_worker"], 0)
         self.assertEqual(delta["pack_close_burst_target_5_8"], 1)
         self.assertEqual(delta["pack_close_burst_count_5_8"], 1)
+        self.assertEqual(delta["pack_tail_samples"], 3)
+        self.assertEqual(delta["pack_tail_zero_inflight"], 1)
+        self.assertEqual(delta["pack_tail_zero_idle"], 1)
+        self.assertEqual(delta["pack_tail_many_idle"], 1)
+        self.assertEqual(delta["burst_target_grows"], 1)
+        self.assertEqual(delta["burst_target_shrinks"], 1)
         self.assertEqual(delta["prep_crc_wall_ns"], 500)
         self.assertEqual(delta["ordered_crc_wall_ns"], 700)
         self.assertEqual(delta["engine_publish_crc_wall_ns"], 1000)
@@ -373,6 +385,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "burst-target"):
             module.kernel_write_delta(
                 before, dict(after, pack_close_burst_worker=1))
+        with self.assertRaisesRegex(ValueError, "tail-sample"):
+            module.kernel_write_delta(
+                before, dict(after, pack_tail_zero_idle=2))
         with self.assertRaisesRegex(ValueError, "upper-tail"):
             module.kernel_write_delta(
                 before, dict(after, single_tail_comp_age_251_500us=0,

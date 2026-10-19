@@ -411,7 +411,7 @@ class PublicMakeContract(unittest.TestCase):
                 index = 0
                 for qd in (1, 4, 8, 32):
                     modes = (confirmation
-                             if regime == "ssd_emulated" and qd == 8
+                             if regime == "ssd_emulated" and qd in (4, 8)
                              else (0, 1))
                     for mode in modes:
                         records.extend((
@@ -558,6 +558,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)
         self.assertIn('for parallel_reads in "${confirmation_modes[@]}"', loaded)
         self.assertIn("for qd in 1 4 8 32", loaded)
+        self.assertIn("$qd == 4 || $qd == 8", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
         self.assertLess(loaded.index("tests/tools/deploy-nullblk.sh"),

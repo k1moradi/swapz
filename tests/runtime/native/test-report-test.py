@@ -100,6 +100,15 @@ def timed_kernel_write(*, mode, target=8):
         "pack_close_burst_count_le4": 1,
         "pack_close_burst_count_5_8": 5,
         "pack_close_burst_overshoot": 1,
+        "pack_tail_samples": 6,
+        "pack_tail_zero_inflight": 2 if mode else 0,
+        "pack_tail_zero_idle": 1 if mode else 2,
+        "pack_tail_one_inflight": 1 if mode else 0,
+        "pack_tail_one_idle": 0 if mode else 1,
+        "pack_tail_many_inflight": 1 if mode else 0,
+        "pack_tail_many_idle": 1 if mode else 3,
+        "burst_target_grows": 3 if mode else 2,
+        "burst_target_shrinks": 2 if mode else 1,
         "win1_idle": 1,
         "win1_deadline": 2,
         "win1_pack_ready": 1,
@@ -298,7 +307,8 @@ def synthetic_log():
         index = 0
         for qd in (1, 4, 8, 32):
             modes = (runner.CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd == 8 else (0, 1))
+                     if regime == "ssd_emulated" and qd in (4, 8)
+                     else (0, 1))
             for mode in modes:
                 out.append(
                     f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
@@ -455,12 +465,15 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
         self.assertTrue(all("kernel_status" not in session for session in sessions))
 
-    def test_write_saturation_evidence_repeats_only_fast_qd8(self):
+    def test_write_saturation_evidence_repeats_fast_qd4_and_qd8(self):
         sessions = runner.parse_write_saturation(synthetic_log())
-        self.assertEqual(len(sessions), 24)
+        self.assertEqual(len(sessions), 32)
         verdict = runner.write_saturation_verdict(sessions)
         self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_EVIDENCE")
+        self.assertEqual(verdict["fast_qd4_matched_pairs"], 5)
         self.assertEqual(verdict["fast_qd8_matched_pairs"], 5)
+        self.assertEqual(
+            verdict["fast_qd4_paired"]["throughput_change_fraction"]["n"], 5)
         self.assertEqual(
             verdict["fast_qd8_paired"]["throughput_change_fraction"]["n"], 5)
         self.assertIn("PAIRED_95PCT_CI", verdict["confidence"])
@@ -483,8 +496,11 @@ class ReportContract(unittest.TestCase):
             [(p["qd"], p["mode"]) for p in verdict["regimes"]["sd_emulated"]],
             [(1, "sync"), (1, "async"), (4, "sync"), (4, "async"),
              (8, "sync"), (8, "async"), (32, "sync"), (32, "async")])
+        fast_qd4 = [p for p in verdict["regimes"]["ssd_emulated"]
+                    if p["qd"] == 4]
         fast_qd8 = [p for p in verdict["regimes"]["ssd_emulated"]
                     if p["qd"] == 8]
+        self.assertEqual([p["observations"] for p in fast_qd4], [5, 5])
         self.assertEqual([p["observations"] for p in fast_qd8], [5, 5])
         broken = runner.parse_write_saturation(synthetic_log())
         broken[0]["arms"]["off"]["logical_read_bytes"] = 4096
@@ -605,6 +621,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["pack_close_burst_count_le4"], 1)
         self.assertEqual(slow["kernel_counters"]["pack_close_burst_count_5_8"], 5)
         self.assertEqual(slow["kernel_counters"]["pack_close_burst_overshoot"], 1)
+        self.assertEqual(slow["kernel_counters"]["pack_tail_samples"], 6)
+        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_inflight"], 1)
+        self.assertEqual(slow["kernel_counters"]["pack_tail_zero_idle"], 1.5)
+        self.assertEqual(slow["kernel_counters"]["burst_target_grows"], 2.5)
+        self.assertEqual(slow["kernel_counters"]["burst_target_shrinks"], 1.5)
         self.assertEqual(slow["kernel_counters"]["close_idle"], 4)
         self.assertEqual(slow["kernel_counters"]["close_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_deadline"], 2)
@@ -660,6 +681,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("lower-W nonempty start/end", rendered)
         self.assertIn("deferred tail D/C/DL/I/O", rendered)
         self.assertIn("Mixed PACK_READY causes", rendered)
+        self.assertIn("Mixed burst-close split", rendered)
+        self.assertIn("Mixed post-PACK tail samples", rendered)
+        self.assertIn("Fast mixed burst-close async-sync paired 95% CI", rendered)
         self.assertIn("async-sync", rendered)
         self.assertIn("Fast mixed async-sync paired 95% CI", rendered)
         self.assertIn("ordered measured floor", rendered)
@@ -675,8 +699,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SATURATION EVIDENCE", rendered)
+        self.assertIn("Fast QD4 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
-        self.assertIn("Other QDs remain directional controls.", rendered)
+        self.assertIn("QD1/QD32 remain directional controls.", rendered)
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)
@@ -731,6 +756,11 @@ class ReportContract(unittest.TestCase):
             "accepted_burst_read_caps"] = 7
         sessions[0]["arms"]["swapz"]["kernel_write_path"][
             "accepted_burst_extensions"] = 6
+        self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
+                         "INCOMPLETE")
+        sessions = runner.parse_sessions(synthetic_log())
+        sessions[0]["arms"]["swapz"]["kernel_write_path"][
+            "pack_tail_zero_idle"] += 1
         self.assertEqual(runner.benchmark_verdicts(sessions)["overall"],
                          "INCOMPLETE")
 
