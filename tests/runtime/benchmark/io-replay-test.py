@@ -261,6 +261,7 @@ class PairReplayContract(unittest.TestCase):
             "pack_ready_busy_deferrals_admission": 3,
             "pack_ready_busy_deferrals_worker": 1,
             "pack_ready_post_finalize_closes": 1,
+            "packed_early_commits": 2,
             "retained_burst_target": 8,
             "prep_lower_write_samples": 7,
             "prep_lower_write_start_queued": 5,

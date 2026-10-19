@@ -749,6 +749,11 @@ local wave. Resolution/abort totals may not exceed deferrals, completion-only
 holds may not exceed deferrals, and post-finalization closes may not exceed
 packed early closes. No new timer, sleep, spin or K>1 slot is allowed.
 
+Synthetic ID57 fixtures must preserve the same subset invariants as runtime
+telemetry: a nonzero post-finalization close requires a corresponding packed
+early close, and source-string contracts must follow the current three-argument
+tail-sampler call rather than pinning its pre-ID57 signature.
+
 ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain
 `ordered_worker_cpu_ns`, `prep_worker_cpu_ns` and `read_worker_cpu_ns` as
