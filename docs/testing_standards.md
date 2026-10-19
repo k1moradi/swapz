@@ -782,3 +782,7 @@ Source coverage for partial extent residency must assert semantic gates rather
 than obsolete spellings: metadata hits merge block-zero into the mask, reusable
 payload residency is limited to multi-block extents outside the explicit
 one-block budget, and `read_cached_full` is likewise multi-block/budget-gated.
+
+ID52 status labels may abbreviate `companion` as `comp` for operator output,
+but source contracts must bind each label to the exact backing struct member so
+schema spelling and production accounting cannot silently diverge.

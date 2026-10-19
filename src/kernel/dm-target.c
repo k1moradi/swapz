@@ -1651,6 +1651,10 @@ static void swapz_window_admit_clock(struct swapz_dm *ctx)
 		ctx->window_first_ns = ktime_get_ns();
 }
 
+static void swapz_account_single_tail_terminal(struct swapz_dm *ctx,
+					       bool companion,
+					       bool deadline);
+
 static int swapz_flush_window(struct swapz_dm *ctx)
 {
 	swapz_u8 committed = 0, index, count = ctx->batch_count;

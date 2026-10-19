@@ -890,23 +890,23 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->single_tail_lower_done_seen = true", finalize)
         self.assertIn("swapz_note_single_tail_read_bypass(ctx)", process)
         self.assertIn("swapz_note_single_tail_read_bypass(ctx)", parallel_batch)
-        for field in (
-                "single_tail_comp_age_le250us",
-                "single_tail_comp_age_251_500us",
-                "single_tail_comp_age_501_1000us",
-                "single_tail_comp_age_gt1000us",
-                "single_tail_deadline_age_le250us",
-                "single_tail_deadline_age_251_500us",
-                "single_tail_deadline_age_501_1000us",
-                "single_tail_deadline_age_gt1000us",
-                "single_tail_comp_after_lower_done",
-                "single_tail_comp_after_read_bypass",
-                "single_tail_comp_after_both",
-                "single_tail_deadline_after_lower_done",
-                "single_tail_deadline_after_read_bypass",
-                "single_tail_deadline_after_both"):
-            self.assertIn(field + "=%llu", status)
-            self.assertIn("ctx->" + field, status)
+        for label, member in (
+                ("single_tail_comp_age_le250us", "single_tail_companion_age_le250us"),
+                ("single_tail_comp_age_251_500us", "single_tail_companion_age_251_500us"),
+                ("single_tail_comp_age_501_1000us", "single_tail_companion_age_501_1000us"),
+                ("single_tail_comp_age_gt1000us", "single_tail_companion_age_gt1000us"),
+                ("single_tail_deadline_age_le250us", "single_tail_deadline_age_le250us"),
+                ("single_tail_deadline_age_251_500us", "single_tail_deadline_age_251_500us"),
+                ("single_tail_deadline_age_501_1000us", "single_tail_deadline_age_501_1000us"),
+                ("single_tail_deadline_age_gt1000us", "single_tail_deadline_age_gt1000us"),
+                ("single_tail_comp_after_lower_done", "single_tail_companion_after_lower_done"),
+                ("single_tail_comp_after_read_bypass", "single_tail_companion_after_read_bypass"),
+                ("single_tail_comp_after_both", "single_tail_companion_after_both"),
+                ("single_tail_deadline_after_lower_done", "single_tail_deadline_after_lower_done"),
+                ("single_tail_deadline_after_read_bypass", "single_tail_deadline_after_read_bypass"),
+                ("single_tail_deadline_after_both", "single_tail_deadline_after_both")):
+            self.assertIn(label + "=%llu", status)
+            self.assertIn("ctx->" + member, status)
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
