@@ -568,6 +568,8 @@ class ReportContract(unittest.TestCase):
             runner.parse_write_saturation(synthetic_log()))
         report = {"benchmarks": {
             "verdicts": verdicts,
+            "parallel_read_ab": runner.parallel_read_ab_verdict(
+                runner.parse_parallel_read_ab(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}

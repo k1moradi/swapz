@@ -786,3 +786,7 @@ one-block budget, and `read_cached_full` is likewise multi-block/budget-gated.
 ID52 status labels may abbreviate `companion` as `comp` for operator output,
 but source contracts must bind each label to the exact backing struct member so
 schema spelling and production accounting cannot silently diverge.
+
+Rootless console-report coverage must pass the parsed ID39 diagnostic object to
+the printer; a display assertion is not valid against a report that omits the
+A/B evidence object entirely.
