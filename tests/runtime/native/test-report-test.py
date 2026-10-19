@@ -54,6 +54,8 @@ def timed_kernel_write(*, mode, target=8):
         "engine_publish_auth_wall_ns": 2000000,
         "engine_prehashed_records": 2500,
         "batch_snapshot_crc_wall_ns": 250000,
+        "batch_pause_crc_wall_ns": 100000,
+        "batch_resume_crc_wall_ns": 150000,
         "prep_crc_wall_ns": 700000,
         "ordered_crc_wall_ns": 1300000,
         "lower_write_wall_ns": 30000000,
@@ -83,6 +85,9 @@ def timed_kernel_write(*, mode, target=8):
         "win1_idle": 1,
         "win1_deadline": 2,
         "win1_pack_ready": 1,
+        "win1_pack_tail_target": 1,
+        "win1_pack_read_bypass": 0,
+        "win1_pack_wave_interrupted": 0,
         "deadline_before_bio": 1,
         "deadline_worker_empty": 1,
         "packed_early_commits": 8,
@@ -139,6 +144,8 @@ def arm(candidate, *, mode, regime):
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
+                    "parallel_read_pairs": 128,
+                    "parallel_read_same_extent_pairs": 64,
                 } if swapz else None),
                 "replay_cpu_user_s": .15,
                 "replay_cpu_system_s": .12,
@@ -229,8 +236,8 @@ def synthetic_log():
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 retained_burst_target=4 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0 prep_lower_write_overlap_starts=0 prep_wave_kicks=0")
-            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 retained_burst_target=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1 prep_lower_write_overlap_starts=42 prep_wave_kicks=5")
+            out.append("SWAPZ_STATUS_BEFORE=windows=0 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=0 close_pack_ready=0 packed_early_commits=0 single_pack_deferrals=0 accepted_burst_extensions=0 accepted_burst_tail_flushes=0 accepted_burst_read_caps=0 retained_burst_target=4 one_page_windows=0 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=0 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=0 win1_pack_ready=0 win1_pack_tail_target=0 win1_pack_read_bypass=0 win1_pack_wave_interrupted=0 deadline_before_bio=0 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=0 prep_producer_head_claims=0 prep_producer_tail_claims=0 prep_ordered_inline=0 prep_ordered_handoffs=0 prep_ordered_waits=0 prep_lower_write_overlap_starts=0 prep_wave_kicks=0")
+            out.append("SWAPZ_STATUS_AFTER=windows=20 close_unknown=0 close_full=0 close_duplicate=0 close_zero=0 close_fua=0 close_raw=0 close_read_conflict=0 close_read_unrelated=0 close_discard=0 close_preflush=0 close_quantum=0 close_idle=0 close_shutdown=0 close_other=0 close_deadline=2 close_pack_ready=18 packed_early_commits=8 single_pack_deferrals=24 accepted_burst_extensions=6 accepted_burst_tail_flushes=5 accepted_burst_read_caps=4 retained_burst_target=8 one_page_windows=4 gc_victims=0 gc_role_rotations=0 win1_unknown=0 win1_full=0 win1_duplicate=0 win1_zero=0 win1_fua=0 win1_raw=0 win1_read_conflict=0 win1_read_unrelated=1 win1_discard=0 win1_preflush=0 win1_quantum=0 win1_idle=0 win1_shutdown=0 win1_other=0 win1_deadline=2 win1_pack_ready=1 win1_pack_tail_target=1 win1_pack_read_bypass=0 win1_pack_wave_interrupted=0 deadline_before_bio=1 deadline_after_read=0 deadline_worker_with_local=0 deadline_worker_empty=1 prep_producer_head_claims=2 prep_producer_tail_claims=3 prep_ordered_inline=4 prep_ordered_handoffs=3 prep_ordered_waits=1 prep_lower_write_overlap_starts=42 prep_wave_kicks=5")
             for candidate in (("swapz", "off") if i % 2 else ("off", "swapz")):
                 out.append(json.dumps(arm(candidate, mode=mode, regime=regime)))
             if mode:
@@ -462,6 +469,8 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
+        self.assertEqual(slow["columns"]["sync"]["sequential_parallel_read_pairs"], 128)
+        self.assertEqual(slow["columns"]["sync"]["sequential_parallel_read_same_extent_pairs"], 64)
         self.assertEqual(slow["columns"]["sync"]["mixed_physical_write_reqs"], 5)
         self.assertEqual(slow["columns"]["async"]["mixed_write_wait_gt4ms"], 1)
         self.assertEqual(slow["columns"]["sync"]["mixed_write_copy_wall_ns"], 3000000)
@@ -488,6 +497,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["async"]["mixed_engine_prehashed_records"], 2500)
         self.assertEqual(
             slow["columns"]["async"]["mixed_batch_snapshot_crc_wall_ns"], 250000)
+        self.assertEqual(
+            slow["columns"]["async"]["mixed_batch_pause_crc_wall_ns"], 100000)
+        self.assertEqual(
+            slow["columns"]["async"]["mixed_batch_resume_crc_wall_ns"], 150000)
         self.assertEqual(slow["columns"]["async"]["mixed_prep_wait_wall_ns"], 500000)
         self.assertEqual(
             slow["columns"]["async"]["mixed_prep_lower_write_overlap_ns"], 5000000)
@@ -502,6 +515,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["kernel_counters"]["close_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_deadline"], 2)
         self.assertEqual(slow["kernel_counters"]["win1_pack_ready"], 1)
+        self.assertEqual(slow["kernel_counters"]["win1_pack_tail_target"], 1)
+        self.assertEqual(slow["kernel_counters"]["win1_pack_read_bypass"], 0)
+        self.assertEqual(slow["kernel_counters"]["win1_pack_wave_interrupted"], 0)
         self.assertEqual(slow["kernel_counters"]["win1_idle"], 1)
         self.assertEqual(slow["kernel_counters"]["deadline_before_bio"], 1)
         self.assertEqual(slow["kernel_counters"]["deadline_worker_empty"], 1)

@@ -354,6 +354,27 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 	}
 }
 
+void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
+				       struct swapz_engine *source)
+{
+	if (!destination || !source || destination == source)
+		return;
+#define SWAPZ_MERGE_READ_COUNTER(field) do { \
+		destination->field += source->field; \
+		source->field = 0; \
+	} while (0)
+	SWAPZ_MERGE_READ_COUNTER(physical_read_blocks);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_requests);
+	SWAPZ_MERGE_READ_COUNTER(read_payload_requests);
+	SWAPZ_MERGE_READ_COUNTER(read_payload_blocks);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_cache_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_lru_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_full_extent_requests);
+	SWAPZ_MERGE_READ_COUNTER(read_full_extent_cache_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_two_block_skips);
+#undef SWAPZ_MERGE_READ_COUNTER
+}
+
 static int swapz_engine_write_window_planned(struct swapz_engine *engine,
 			    const struct swapz_compressed_page *pages,
 			    swapz_u8 count, swapz_u8 *committed_pages,

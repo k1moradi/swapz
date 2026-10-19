@@ -640,7 +640,36 @@ Explicit invalidation and a subsequent production write must clear payload
 residency. Device Mapper source coverage must retain the existing non-READ
 mutation fence so discard/barrier/write paths cannot reuse stale payload blocks.
 
-Transaction-snapshot CRC attribution is measurement only. Pause/resume continue
-to hash the complete `struct swapz_tx` until owner evidence shows that this
-work is material; adding the timer must not change hash length, identity checks
-or publication semantics.
+Transaction-snapshot CRC attribution is measurement only. Pause and resume must
+have separate wall counters whose sum exactly equals the retained aggregate.
+Pause is outside engine publish and may be reconciled from commit residual;
+resume is already inside publish authority and must not be subtracted twice.
+Both paths continue to hash the complete `struct swapz_tx`; adding the split
+must not change hash length, identity checks or publication semantics.
+
+One-page PACK_READY cause attribution is also observational. For every timed
+`win1_pack_ready`, exactly one of sampled-tail-target, retained-read-bypass or
+wave-interruption counters must increment. Their sum must equal
+`win1_pack_ready` in replay and report validation. Do not change closure policy
+until owner evidence identifies a dominant cause.
+
+### Bounded Kread=2 qualification
+
+Source coverage must prove exactly two bounded read slots, private read-engine
+scratch/state, a one-active-helper `WQ_MEM_RECLAIM | WQ_UNBOUND` queue, and no
+helper-side mapping mutation or upper-BIO completion. Direct production-C
+coverage must exercise private read-telemetry merge and prove that transferring
+counters does not invalidate private extent residency.
+
+Loaded acceptance requires byte-exact output, unchanged dependency/barrier and
+fail-closed behavior, no material increase in lower READ bytes/requests, and no
+serial-depth regression. On the fast model, lower in-flight READ telemetry must
+show whether the candidate actually raises service depth above the prior peak
+of one; packed-read p99/useful throughput must improve if the experiment is to
+be retained. Same-extent pair counters may demonstrate residency reuse but are
+not a performance verdict by themselves. A lone READ must never wait for a
+second read.
+
+Because two synchronous slot callbacks can overlap, reported lower READ wall is
+the sum of slot busy intervals, not necessarily elapsed pair wall. Use sampled
+lower in-flight depth and end-to-end latency/throughput for concurrency claims.

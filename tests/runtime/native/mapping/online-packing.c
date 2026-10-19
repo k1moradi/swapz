@@ -530,6 +530,44 @@ static int test_read_budget_tradeoff_on_uniform_2072(void)
 	return 0;
 }
 
+static int test_private_read_telemetry_merge_preserves_cache_state(void)
+{
+	struct swapz_engine source;
+
+	CHECK(setup() == 0);
+	memset(&source, 0, sizeof(source));
+	engine.physical_read_blocks = 7;
+	engine.read_payload_requests = 3;
+	source.physical_read_blocks = 5;
+	source.read_metadata_requests = 2;
+	source.read_payload_requests = 4;
+	source.read_payload_blocks = 6;
+	source.read_metadata_cache_hits = 1;
+	source.read_full_extent_cache_hits = 2;
+	source.read_cache_valid = 1;
+	source.read_cached_start_block = 123;
+	source.read_cached_extent_blocks = 4;
+	source.read_cached_block_mask = 0x0fU;
+
+	swapz_engine_merge_read_telemetry(&engine, &source);
+	CHECK(engine.physical_read_blocks == 12);
+	CHECK(engine.read_metadata_requests == 2);
+	CHECK(engine.read_payload_requests == 7);
+	CHECK(engine.read_payload_blocks == 6);
+	CHECK(engine.read_metadata_cache_hits == 1);
+	CHECK(engine.read_full_extent_cache_hits == 2);
+	CHECK(source.physical_read_blocks == 0);
+	CHECK(source.read_metadata_requests == 0);
+	CHECK(source.read_payload_requests == 0);
+	CHECK(source.read_payload_blocks == 0);
+	/* Telemetry transfer must not steal or invalidate private residency. */
+	CHECK(source.read_cache_valid == 1);
+	CHECK(source.read_cached_start_block == 123);
+	CHECK(source.read_cached_extent_blocks == 4);
+	CHECK(source.read_cached_block_mask == 0x0fU);
+	return 0;
+}
+
 static int test_mapping_length_mismatch_stops_before_payload_io(void)
 {
 	struct swapz_compressed_page pages[7];
@@ -574,6 +612,7 @@ int main(void)
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
 	CHECK(test_read_budget_tradeoff_on_uniform_2072() == 0); completed++;
 	CHECK(test_mapping_length_mismatch_stops_before_payload_io() == 0); completed++;
+	CHECK(test_private_read_telemetry_merge_preserves_cache_state() == 0); completed++;
 	free(disk.storage);
 	printf("SWAPZ_EXACT_ENGINE_TESTS_PASS=%d\n", completed);
 	return 0;

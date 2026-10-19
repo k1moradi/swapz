@@ -579,3 +579,27 @@ descriptor and payload CRC validation still runs before returning a logical
 page. This optimization may remove duplicate reads of sibling records but must
 not turn cached bytes into mapping authority or weaken the existing mutation
 fence.
+
+### Bounded parallel READ ownership
+
+Parallel READ service is capped at `SWAPZ_PARALLEL_READ_SLOTS == 2`. It is an
+I/O-latency experiment, not a second authority. The ordered worker remains the
+sole owner of mapping mutation, retained-window state, global accounting and
+upper-BIO completion. A helper may only execute a read already proven independent
+of collector/in-flight generations, using its own `struct swapz_engine`, 16KiB
+read scratch, compressed buffer and output page. Helper lower-I/O callbacks
+write only slot-local counters; the ordered owner joins before merging them.
+
+Never share mutable engine read-cache fields between concurrently executing read
+slots. Same-extent siblings must use one private slot so validated block
+residency can be reused rather than duplicated. Different extents may occupy the
+two slots concurrently. There is no grace interval, fill timer or future-arrival
+wait: a lone READ keeps the existing immediate path. Any write, discard, GC
+mutation or ordering barrier invalidates the main read cache and every private
+slot cache before reuse.
+
+A concurrent read failure fails closed through the ordered owner. The helper
+must not stage/finish transactions, publish maps or call `bio_endio`. Teardown
+closes admission and drains both the ordered and read workqueues before freeing
+slot scratch. Read busy-wall counters from parallel slots are sums of overlapping
+slot time and must not be interpreted as elapsed serial wall.

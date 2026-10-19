@@ -4,6 +4,7 @@
 #include "authority.h"
 #define SWAPZ_BULK_BLOCKS 64U
 #define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U
+#define SWAPZ_PARALLEL_READ_SLOTS 2U
 
 /* Bit-exact 4KiB zero-page test; no false-positive compressed content. */
 int swapz_page_is_zero(const swapz_u8 *page);
@@ -198,6 +199,11 @@ int swapz_engine_write_window_batched(struct swapz_engine *engine,
 /* Caller-owned and serialized: invalidate before writes, discards and barriers.
  * Never invalidate from a concurrent preparation producer. */
 void swapz_engine_invalidate_read_cache(struct swapz_engine *engine);
+/* Serialized owner transfers diagnostic read counters from a private read
+ * engine after its bounded concurrent operation has joined. Cache residency
+ * and authority pointers are intentionally not transferred. */
+void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
+				       struct swapz_engine *source);
 /* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
 int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			 swapz_u8 *payload, swapz_u16 payload_capacity,

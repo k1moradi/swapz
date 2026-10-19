@@ -116,6 +116,10 @@ struct swapz_authority {
 	 * This measures the existing full-struct CRC only; it changes no
 	 * transaction identity, protection scope or publication semantics. */
 	unsigned long long batch_snapshot_crc_wall_ns;
+	/* Phase split for the same unchanged full-transaction snapshot hash.
+	 * pause is outside engine publish; resume is inside publish authority. */
+	unsigned long long batch_pause_crc_wall_ns;
+	unsigned long long batch_resume_crc_wall_ns;
 };
 
 /*

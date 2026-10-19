@@ -53,43 +53,37 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `5036137fa7cdbb155cf9b0189079011d49b74de3`
-passed all five stages; the canonical report was published as
-`fd6d46fe5ba022bd6a744ceac260104324d1117d`.
+At owner-qualified source `89fe7116b8800b417b351f32a7305b3ed7abd261`
+(report-only commit `179c66b8fa975677f6426de5ebc511ad72d608ef`):
 
-- On the slow serial-depth model (`hw_queue_depth=1`), mixed raw reaches
-  2.68 MB/s WRITE and 0.89 MB/s READ. swapz reaches 7.08/2.35 sync and
-  7.05/2.34 async. Async therefore adds no meaningful gain over sync, but the
-  product path itself is about 2.6x faster for useful WRITE while reducing
-  lower WRITE requests from 12301 to about 546.
-- Observed slow lower depth never exceeds one. The async K=1 run slot is active
-  only ~0.08 of mixed wall, preparation backlog is 0.00/0.00 at lower-WRITE
-  boundaries, and LZ4/lower-WRITE overlap is ~0.2 ms. The serial-model win is
-  compression/aggregation, not pipeline overlap.
-- Slow packed reads now qualify FASTER: sequential p99 falls 34.20 -> 18.33 ms
-  and seeded-random 34.31 -> 23.67 ms while lower traffic also falls.
-- On the faster `hw_queue_depth=64` model, mixed raw/sync/async WRITE is
-  19.54/21.63/22.45 MB/s. Async is +3.8% versus sync but remains
-  NO_SIGNIFICANT_ASYNC_GAIN with only two pairs/mode. Lower WRITE requests are
-  ~908 async versus 12301 raw.
-- Fast raw traffic reaches sampled lower peaks above one (about 4 READ and 6.2
-  WRITE averaged across pairs), while swapz remains near peak one. The K=1
-  WRITE slot is active only ~0.09 of mixed wall, so current evidence points more
-  strongly to READ serialization/on-CPU work than to insufficient WRITE slots.
-- Fast packed reads improve numerically but remain NOT_FASTER under the
-  qualification gate.
-- Write-only QD8 remains the narrow async signal on the faster model:
-  19.40 -> 23.78 MB/s (+22.6%) versus sync, but raw is 45.84 MB/s and the pilot
-  has one pair only. On the serial model async adds only +1.2% at QD8.
-- Mixed WRITE attribution is ~605.8/179.4 ms lower WRITE and ~140.4/80.0 ms LZ4
-  slow/fast. Commit non-I/O is ~52.7/38.1 ms; final publish CRC is 12.0/8.8 ms.
-  CRC remains a material integrity subphase, not the global bottleneck.
+- serial-depth mixed async reaches 7.05 MB/s WRITE versus 7.03 sync and 2.68
+  raw, with about 544.5 lower WRITE requests versus 12301 raw;
+- faster-depth mixed async reaches 22.32 MB/s versus 21.78 sync and 19.24 raw,
+  with 932.5 lower WRITE requests versus 853.5 sync;
+- clean timed slow mixed has 0 one-page PACK_READY, 0 one-page deadline and 0
+  worker-empty deadline closes; fast mixed has about 89 / 29.8 / 50.2;
+- slow packed sequential/random p99 is 16.85/22.79 ms and qualifies FASTER;
+  fast packed sequential/random p99 is 5.01/5.22 ms but the official packed
+  verdict remains NOT_FASTER;
+- fast raw lower READ peak reaches about 3.8 while swapz remains at 1, making
+  bounded READ parallelism the next concurrency experiment;
+- batch snapshot CRC totals about 3.3 ms slow / 2.4 ms fast, but pause belongs
+  outside publish while resume is already inside publish authority.
 
-Interpretation: the corrected serial-depth experiment validates swapz's core
-compression/aggregation goal on a high-latency one-slot lower device. It does
-not validate K=1 async WRITE scheduling as a default optimization. The faster
-model now supplies direct evidence for a bounded parallel READ experiment and
-for better on-CPU attribution before adding WRITE slots or workers.
+The current candidate therefore adds exactly Kread=2 for already-admitted safe
+READ pairs. One helper read slot and the ordered worker use independent engine
+state and scratch; the ordered owner joins both before merging counters or
+completing BIOs. Same-extent siblings stay on one private slot to preserve block
+residency. There is no read fill delay and no second mapping/publication owner.
+The source also splits pause/resume snapshot-CRC attribution and classifies each
+one-page PACK_READY close without changing either hash coverage or retained-
+window policy.
+
+Lower READ wall for two parallel slots is reported as summed per-slot busy wall
+and may overlap in elapsed time; lower-device in-flight telemetry is the proof
+of achieved concurrency. Owner qualification must therefore judge useful read
+latency/throughput together with lower bytes/requests and sampled lower depth,
+not by subtracting summed busy-wall counters as if they were serial.
 
 ## Confirmation gate
 

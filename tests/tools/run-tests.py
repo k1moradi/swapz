@@ -52,6 +52,9 @@ ONE_PAGE_CLOSE_LABELS = (
     ("win1_deadline", "deadline"), ("win1_pack_ready", "pack-ready"),
 )
 ONE_PAGE_CLOSE_FIELDS = tuple(field for field, _ in ONE_PAGE_CLOSE_LABELS)
+WIN1_PACK_CAUSE_FIELDS = (
+    "win1_pack_tail_target", "win1_pack_read_bypass",
+    "win1_pack_wave_interrupted")
 DEADLINE_CONTEXT_LABELS = (
     ("deadline_before_bio", "before-bio"),
     ("deadline_after_read", "after-read"),
@@ -65,7 +68,8 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_copy_bytes", "read_engine_nonio_wall_ns",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
-                      "read_two_block_skips")
+                      "read_two_block_skips", "parallel_read_pairs",
+                      "parallel_read_same_extent_pairs")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 PREPARATION_FIELDS = (
@@ -81,7 +85,7 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    DEADLINE_CONTEXT_FIELDS + BURST_COUNTER_FIELDS + ("gc_victims",))
+    WIN1_PACK_CAUSE_FIELDS + DEADLINE_CONTEXT_FIELDS + BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
 KERNEL_WRITE_FIELDS = (
@@ -91,7 +95,8 @@ KERNEL_WRITE_FIELDS = (
     "engine_plan_wall_ns", "engine_pack_wall_ns",
     "engine_publish_wall_ns", "engine_publish_crc_wall_ns",
     "engine_publish_auth_wall_ns", "engine_prehashed_records",
-    "batch_snapshot_crc_wall_ns", "prep_crc_wall_ns",
+    "batch_snapshot_crc_wall_ns", "batch_pause_crc_wall_ns",
+    "batch_resume_crc_wall_ns", "prep_crc_wall_ns",
     "ordered_crc_wall_ns", "lower_write_wall_ns",
     "ordered_worker_wall_ns", "prep_worker_wall_ns",
     "prep_wait_wall_ns", "prep_lower_write_overlap_ns",
@@ -131,6 +136,12 @@ def timed_window_error(record):
         return "timed window close-reason accounting is inconsistent"
     if sum(record[field] for field in ONE_PAGE_CLOSE_FIELDS) != record["one_page_windows"]:
         return "timed one-page close-reason accounting is inconsistent"
+    if sum(record[field] for field in WIN1_PACK_CAUSE_FIELDS) != record["win1_pack_ready"]:
+        return "timed one-page PACK_READY attribution is inconsistent"
+    if (record["batch_pause_crc_wall_ns"] +
+            record["batch_resume_crc_wall_ns"] !=
+            record["batch_snapshot_crc_wall_ns"]):
+        return "batch snapshot CRC phase accounting is inconsistent"
     if sum(record[field] for field in DEADLINE_CONTEXT_FIELDS) != record["close_deadline"]:
         return "timed deadline-context accounting is inconsistent"
     if (record["accepted_burst_tail_flushes"] >
@@ -949,10 +960,12 @@ def benchmark_verdicts(sessions):
                     diagnostics = [item.get("kernel_read_path") for item in reads]
                     if any(not isinstance(record, dict) or
                            any(type(record.get(field)) is not int or
-                               record[field] < 0 for field in KERNEL_READ_FIELDS)
+                               record[field] < 0 for field in KERNEL_READ_FIELDS) or
+                           record["parallel_read_same_extent_pairs"] >
+                               record["parallel_read_pairs"]
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
-                                "reason": f"{regime}: missing measured swapz {mode} C read counters"}
+                                "reason": f"{regime}: missing/inconsistent measured swapz {mode} C read counters"}
                     for field in KERNEL_READ_FIELDS:
                         columns[name][f"{mode}_{field}"] = statistics.mean(
                             record[field] for record in diagnostics)
@@ -1010,7 +1023,7 @@ def benchmark_verdicts(sessions):
                 key: statistics.mean(row["kernel_counter_delta"][key]
                                      for row in rows)
                 for key in (BURST_COUNTER_FIELDS + ("windows",
-                            "one_page_windows", "gc_victims") +
+                            "one_page_windows", "gc_victims") + WIN1_PACK_CAUSE_FIELDS +
                             CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
                             DEADLINE_CONTEXT_FIELDS)
             },
@@ -1151,10 +1164,12 @@ def print_bench(result):
                 ("publish authority",
                  f"{asynchronous['mixed_engine_publish_auth_wall_ns'] / 1e6:.1f}", "-"),
                 ("batch snapshot CRC",
-                 f"{asynchronous['mixed_batch_snapshot_crc_wall_ns'] / 1e6:.1f}", "-"),
+                 f"{asynchronous['mixed_batch_snapshot_crc_wall_ns'] / 1e6:.1f}",
+                 f"{asynchronous['mixed_batch_pause_crc_wall_ns'] / 1e6:.1f}/"
+                 f"{asynchronous['mixed_batch_resume_crc_wall_ns'] / 1e6:.1f} pause/resume"),
                 ("engine residual",
-                 f"{max(0.0, asynchronous['mixed_window_commit_nonio_wall_ns'] - asynchronous['mixed_engine_plan_wall_ns'] - asynchronous['mixed_engine_pack_wall_ns'] - asynchronous['mixed_engine_publish_wall_ns']) / 1e6:.1f}",
-                 "-"),
+                 f"{max(0.0, asynchronous['mixed_window_commit_nonio_wall_ns'] - asynchronous['mixed_engine_plan_wall_ns'] - asynchronous['mixed_engine_pack_wall_ns'] - asynchronous['mixed_engine_publish_wall_ns'] - asynchronous['mixed_batch_pause_crc_wall_ns']) / 1e6:.1f}",
+                 "after pause CRC"),
                 ("lower WRITE",
                  f"{asynchronous['mixed_lower_write_wall_ns'] / 1e6:.1f}", "-"),
                 ("ordered callback",
@@ -1184,6 +1199,10 @@ def print_bench(result):
                 ("one-page pack/deadline",
                  f"{counters['win1_pack_ready']:.1f}/"
                  f"{counters['win1_deadline']:.1f}"),
+                ("win1 pack T/R/W",
+                 f"{counters['win1_pack_tail_target']:.1f}/"
+                 f"{counters['win1_pack_read_bypass']:.1f}/"
+                 f"{counters['win1_pack_wave_interrupted']:.1f}"),
                 ("lower-W queue start/end",
                  f"{asynchronous['mixed_prep_lower_write_start_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}/"
                  f"{asynchronous['mixed_prep_lower_write_end_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}"),

@@ -93,10 +93,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
         before = dict(zip(fields, (10, 4, 5, 3000, 100, 50, 4096, 200,
-                                   2, 1, 1, 1, 0)))
+                                   2, 1, 1, 1, 0, 0, 0)))
         after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
                                   100050, 4198400, 500200,
-                                  402, 102, 321, 201, 200)))
+                                  402, 102, 321, 201, 200, 8, 3)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -115,6 +115,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_full_extent_reqs"], 320)
         self.assertEqual(measured["read_full_cache_hits"], 200)
         self.assertEqual(measured["read_two_block_skips"], 200)
+        self.assertEqual(measured["parallel_read_pairs"], 8)
+        self.assertEqual(measured["parallel_read_same_extent_pairs"], 3)
         # A high reuse rate may make metadata requests fewer than payload
         # requests; this is valid as long as lower payload blocks match.
         self.assertEqual(module.kernel_read_delta(
@@ -131,6 +133,9 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_read_delta(before, dict(after, read_full_cache_hits=500))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_two_block_skips=850))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(
+                before, dict(after, parallel_read_same_extent_pairs=9))
 
         bad = subprocess.CompletedProcess(["dmsetup"], 0,
                                           stdout="0 8192 swapz read_meta_reqs=4")
@@ -165,6 +170,8 @@ class PairReplayContract(unittest.TestCase):
             "engine_publish_auth_wall_ns": 20,
             "engine_prehashed_records": 1,
             "batch_snapshot_crc_wall_ns": 3,
+            "batch_pause_crc_wall_ns": 1,
+            "batch_resume_crc_wall_ns": 2,
             "prep_crc_wall_ns": 5,
             "ordered_crc_wall_ns": 7,
             "lower_write_wall_ns": 300,
@@ -200,6 +207,8 @@ class PairReplayContract(unittest.TestCase):
             "engine_publish_auth_wall_ns": 2020,
             "engine_prehashed_records": 101,
             "batch_snapshot_crc_wall_ns": 250003,
+            "batch_pause_crc_wall_ns": 100001,
+            "batch_resume_crc_wall_ns": 150002,
             "prep_crc_wall_ns": 505,
             "ordered_crc_wall_ns": 707,
             "lower_write_wall_ns": 60300,
@@ -241,6 +250,8 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["prep_worker_wall_ns"], 4000)
         self.assertEqual(delta["engine_prehashed_records"], 100)
         self.assertEqual(delta["batch_snapshot_crc_wall_ns"], 250000)
+        self.assertEqual(delta["batch_pause_crc_wall_ns"], 100000)
+        self.assertEqual(delta["batch_resume_crc_wall_ns"], 150000)
         self.assertEqual(delta["retained_burst_target"], 8)
         self.assertEqual(delta["windows"], 3)
         self.assertEqual(delta["close_pack_ready"], 3)
@@ -270,6 +281,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "publish attribution"):
             module.kernel_write_delta(
                 before, dict(after, engine_publish_crc_wall_ns=2011))
+        with self.assertRaisesRegex(ValueError, "snapshot CRC"):
+            module.kernel_write_delta(
+                before, dict(after, batch_resume_crc_wall_ns=150003))
         with self.assertRaisesRegex(ValueError, "queue attribution"):
             module.kernel_write_delta(
                 before, dict(after, prep_lower_write_start_nonempty=8))

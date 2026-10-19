@@ -640,7 +640,8 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_copy_bytes", "read_engine_nonio_wall_ns",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_full_extent_reqs", "read_full_cache_hits",
-                      "read_two_block_skips")
+                      "read_two_block_skips", "parallel_read_pairs",
+                      "parallel_read_same_extent_pairs")
 
 
 def kernel_read_snapshot(path, identity):
@@ -676,6 +677,8 @@ def kernel_read_delta(before, after):
             counters["read_two_block_skips"] > counters["read_meta_reqs"] or
             counters["read_full_cache_hits"] > counters["read_meta_cache_hits"]):
         raise ValueError("inconsistent swapz read request accounting")
+    if counters["parallel_read_same_extent_pairs"] > counters["parallel_read_pairs"]:
+        raise ValueError("inconsistent swapz parallel read accounting")
     return counters
 
 
@@ -692,6 +695,9 @@ ONE_PAGE_CLOSE_FIELDS = (
     "win1_fua", "win1_raw", "win1_read_conflict", "win1_read_unrelated",
     "win1_discard", "win1_preflush", "win1_quantum", "win1_idle",
     "win1_shutdown", "win1_other", "win1_deadline", "win1_pack_ready")
+WIN1_PACK_CAUSE_FIELDS = (
+    "win1_pack_tail_target", "win1_pack_read_bypass",
+    "win1_pack_wave_interrupted")
 DEADLINE_CONTEXT_FIELDS = (
     "deadline_before_bio", "deadline_after_read",
     "deadline_worker_with_local", "deadline_worker_empty")
@@ -704,7 +710,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "write_copy_wall_ns", "write_copy_bytes", "direct_lz4_input_pages",
@@ -713,6 +719,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "engine_pack_wall_ns", "engine_publish_wall_ns",
     "engine_publish_crc_wall_ns", "engine_publish_auth_wall_ns",
     "engine_prehashed_records", "batch_snapshot_crc_wall_ns",
+    "batch_pause_crc_wall_ns", "batch_resume_crc_wall_ns",
     "prep_crc_wall_ns", "ordered_crc_wall_ns", "lower_write_wall_ns",
     "ordered_worker_wall_ns", "prep_worker_wall_ns", "prep_wait_wall_ns",
     "prep_lower_write_overlap_ns", "prep_lower_write_samples",
@@ -774,6 +781,12 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz timed close-reason accounting")
     if sum(counters[field] for field in ONE_PAGE_CLOSE_FIELDS) != counters["one_page_windows"]:
         raise ValueError("inconsistent swapz timed one-page accounting")
+    if sum(counters[field] for field in WIN1_PACK_CAUSE_FIELDS) != counters["win1_pack_ready"]:
+        raise ValueError("inconsistent swapz timed one-page PACK_READY attribution")
+    if (counters["batch_pause_crc_wall_ns"] +
+            counters["batch_resume_crc_wall_ns"] !=
+            counters["batch_snapshot_crc_wall_ns"]):
+        raise ValueError("inconsistent swapz batch snapshot CRC attribution")
     if sum(counters[field] for field in DEADLINE_CONTEXT_FIELDS) != counters["close_deadline"]:
         raise ValueError("inconsistent swapz timed deadline accounting")
     if (counters["accepted_burst_tail_flushes"] >
