@@ -1986,12 +1986,23 @@ def print_bench(result):
                 f"{rnd['read_p99_ms']:.2f}",
                 f"{(seq['parallel_read_pairs'] + rnd['parallel_read_pairs']) / 2:.1f}",
                 f"{(seq['parallel_read_same_extent_pairs'] + rnd['parallel_read_same_extent_pairs']) / 2:.1f}",
-                f"{(seq['parallel_read_distinct_extent_pairs'] + rnd['parallel_read_distinct_extent_pairs']) / 2:.1f}",
-                f"{(seq['parallel_read_adjacent_extent_pairs'] + rnd['parallel_read_adjacent_extent_pairs']) / 2:.1f}",
             ))
         print_table(("parallel", "seq KiB", "seq req", "seq p99",
-                     "rnd KiB", "rnd req", "rnd p99", "pairs", "same-ext",
-                     "dist-ext", "adj-ext"), rows)
+                     "rnd KiB", "rnd req", "rnd p99", "pairs", "same-ext"), rows)
+        enabled = parallel_ab["modes"]["1"]
+        print("  ID63 adjacent distinct-extent opportunity")
+        print_table(
+            ("read", "dist-ext", "adj-ext", "adj blocks"),
+            [
+                ("seq",
+                 f"{enabled['sequential']['parallel_read_distinct_extent_pairs']:.1f}",
+                 f"{enabled['sequential']['parallel_read_adjacent_extent_pairs']:.1f}",
+                 f"{enabled['sequential']['parallel_read_adjacent_extent_blocks']:.1f}"),
+                ("rnd",
+                 f"{enabled['seeded_random']['parallel_read_distinct_extent_pairs']:.1f}",
+                 f"{enabled['seeded_random']['parallel_read_adjacent_extent_pairs']:.1f}",
+                 f"{enabled['seeded_random']['parallel_read_adjacent_extent_blocks']:.1f}"),
+            ])
         seq_ci = parallel_ab["paired"]["sequential"]["p99_change_fraction"]
         rnd_ci = parallel_ab["paired"]["seeded_random"]["p99_change_fraction"]
         print("  p99 on/off paired 95% CI: "
