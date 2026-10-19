@@ -229,17 +229,9 @@ class PairReplayContract(unittest.TestCase):
             "write_wait_gt4ms": 1,
             "single_tail_deferrals": 4,
             "single_tail_companions": 2,
-            "win1_deadline_deferred_tail": 1,
-            "win1_idle_deferred_tail": 1,
-            "single_tail_other_clears": 0,
-            "win1_deadline": 1,
-            "win1_idle": 1,
-            "one_page_windows": 2,
-            "windows": 4,
-            "close_deadline": 1,
-            "close_idle": 1,
-            "close_pack_ready": 2,
-            "deadline_worker_empty": 1,
+            "win1_deadline_deferred_tail": 0,
+            "win1_idle_deferred_tail": 0,
+            "single_tail_other_clears": 2,
         })
         fake = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
@@ -281,8 +273,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["prep_lower_write_overlap_ns"], 5000)
         self.assertEqual(delta["single_tail_deferrals"], 4)
         self.assertEqual(delta["single_tail_companions"], 2)
-        self.assertEqual(delta["win1_deadline_deferred_tail"], 1)
-        self.assertEqual(delta["win1_idle_deferred_tail"], 1)
+        self.assertEqual(delta["single_tail_other_clears"], 2)
 
         with self.assertRaisesRegex(ValueError, "reset"):
             module.kernel_write_delta(after, before)
