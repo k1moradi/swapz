@@ -106,6 +106,9 @@ active experiment.
   fixture-pool reuse is not a production prevalence claim. An active dedup test
   later requires byte-exact collision verification and refcount/COW/GC/discard
   failure-path coverage.
+  The compact console summary is emitted only from a successfully validated
+  mixed-matrix verdict; write-saturation parsing must not depend on this
+  opportunity record.
 - **ID60 read coalescing:** first report the already-collected same-extent share
   of Kread pairs. New coalescing may operate only on reads already queued; no
   grace timer or future-arrival wait is allowed. Acceptance requires lower READ

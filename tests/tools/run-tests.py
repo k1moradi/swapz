@@ -1065,23 +1065,6 @@ def write_saturation_verdict(sessions):
     """Validate bounded QD controls plus five matched fast-QD8 rounds."""
     regimes = {}
     expected_total = 0
-    opportunity = verdict.get("workload_opportunity")
-    if isinstance(opportunity, dict):
-        print("\n  Workload content opportunity — trace/fixture only; not kernel savings.")
-        print_table(
-            ("writes", "same-filled", "same-page", "resident-dup", "uniq payloads"),
-            [(
-                opportunity["measured_write_ops"],
-                opportunity["nonzero_same_filled_write_ops"],
-                opportunity["same_page_rewrite_ops"],
-                opportunity["resident_duplicate_write_ops"],
-                opportunity["measured_unique_write_payloads"],
-            )])
-        print("  Final live: "
-              f"{opportunity['final_live_unique_payloads']} unique payloads; "
-              f"{opportunity['final_live_duplicate_pages']} pages in duplicate sets; "
-              f"{opportunity['final_live_nonzero_same_filled_pages']} nonzero same-filled.")
-
     for regime in MODEL_ORDER:
         rows = [row for row in sessions if row.get("regime") == regime]
         expected_shape = []
@@ -1626,6 +1609,23 @@ def print_bench(result):
         print("  Benchmark matrix: NOT QUALIFIED "
               f"({verdict.get('reason', verdict.get('overall', 'NOT_RUN'))})")
         return
+
+    opportunity = verdict.get("workload_opportunity")
+    if isinstance(opportunity, dict):
+        print("\n  Workload content opportunity — trace/fixture only; not kernel savings.")
+        print_table(
+            ("writes", "same-filled", "same-page", "resident-dup", "uniq payloads"),
+            [(
+                opportunity["measured_write_ops"],
+                opportunity["nonzero_same_filled_write_ops"],
+                opportunity["same_page_rewrite_ops"],
+                opportunity["resident_duplicate_write_ops"],
+                opportunity["measured_unique_write_payloads"],
+            )])
+        print("  Final live: "
+              f"{opportunity['final_live_unique_payloads']} unique payloads; "
+              f"{opportunity['final_live_duplicate_pages']} pages in duplicate sets; "
+              f"{opportunity['final_live_nonzero_same_filled_pages']} nonzero same-filled.")
 
     for regime in MODEL_ORDER:
         data = verdict["regimes"][regime]
