@@ -718,7 +718,10 @@ must increment exactly one of `pack_close_tail_target`,
 `pack_close_burst_target` or `pack_close_service_dry`; their sum must equal
 `close_pack_ready`. `pack_close_tail_target_le4` must not exceed the tail
 counter. Rootless replay/report fixtures must fail closed on broken
-conservation and display the compact tail<=4/tail/burst/dry row.
+conservation and display the compact tail<=4/tail/burst/dry row. Source
+contracts may follow a factored service-dry helper, but must assert the same
+batch/read-bypass/wave-interruption predicate in the helper that actually owns
+the decision.
 
 ID24 worker CPU attribution is also measurement only. Status and timed deltas
 must expose `ordered_worker_cpu_ns`, `prep_worker_cpu_ns` and
