@@ -357,6 +357,23 @@ qualified only if sampled-tail closes fall without migrating into read-bypass or
 wave buckets and without harming slow-model geometry, lower bytes, useful
 throughput, read tail latency, ordering or fail-closed ownership.
 
+### Deferred-singleton lifecycle attribution
+
+ID50 policy changes are frozen while ID51 is active. Each transition into
+`retained_single_tail_deferred` increments exactly one deferral. That state must
+terminate exactly once as a companion WRITE, a one-page DEADLINE close, a
+one-page IDLE close, or an explicit other clear. A later tail sample that
+supersedes an unresolved singleton counts the previous lifecycle as other before
+starting a new one. Empty hard boundaries and true empty burst boundaries must
+also account before clearing state.
+
+At drained/quiescent measurement boundaries the cumulative and timed-delta
+conservation law is exact:
+`deferrals == companions + deadline + idle + other`. The deadline and idle
+subsets must not exceed their corresponding one-page close counters. Do not use
+these counters to change policy in the same source revision that introduces the
+measurement.
+
 ### Opposite-end asynchronous preparation
 
 The ordered worker owns FIFO execution and may atomically reserve an unclaimed
@@ -608,7 +625,9 @@ fence.
 
 Parallel READ service is capped at `SWAPZ_PARALLEL_READ_SLOTS == 2` and is
 eligible only when the backing blk-mq queue exposes request depth greater than
-one. This is a bounded queue-capacity gate, not a generic device-speed
+one. A read-only module parameter `parallel_reads`, default true, may disable
+the service for same-source A/B evidence; it never overrides the queue-depth
+safety gate. This is a bounded queue-capacity gate, not a generic device-speed
 classifier. A depth-one backing path must use the original serialized reader
 with no read-slot workqueue or slot allocation.
 

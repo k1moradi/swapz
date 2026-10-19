@@ -698,6 +698,10 @@ ONE_PAGE_CLOSE_FIELDS = (
 WIN1_PACK_CAUSE_FIELDS = (
     "win1_pack_tail_target", "win1_pack_read_bypass",
     "win1_pack_wave_interrupted")
+SINGLE_TAIL_FIELDS = (
+    "single_tail_deferrals", "single_tail_companions",
+    "win1_deadline_deferred_tail", "win1_idle_deferred_tail",
+    "single_tail_other_clears")
 DEADLINE_CONTEXT_FIELDS = (
     "deadline_before_bio", "deadline_after_read",
     "deadline_worker_with_local", "deadline_worker_empty")
@@ -710,7 +714,7 @@ WINDOW_INTERVAL_FIELDS = (
     "win9_16", "win17_64", "packed_early_commits",
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
-) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + DEADLINE_CONTEXT_FIELDS
+) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + DEADLINE_CONTEXT_FIELDS
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "write_copy_wall_ns", "write_copy_bytes", "direct_lz4_input_pages",
@@ -783,6 +787,14 @@ def kernel_write_delta(before, after):
         raise ValueError("inconsistent swapz timed one-page accounting")
     if sum(counters[field] for field in WIN1_PACK_CAUSE_FIELDS) != counters["win1_pack_ready"]:
         raise ValueError("inconsistent swapz timed one-page PACK_READY attribution")
+    if (counters["single_tail_deferrals"] !=
+            counters["single_tail_companions"] +
+            counters["win1_deadline_deferred_tail"] +
+            counters["win1_idle_deferred_tail"] +
+            counters["single_tail_other_clears"] or
+            counters["win1_deadline_deferred_tail"] > counters["win1_deadline"] or
+            counters["win1_idle_deferred_tail"] > counters["win1_idle"]):
+        raise ValueError("inconsistent swapz deferred singleton accounting")
     if (counters["batch_pause_crc_wall_ns"] +
             counters["batch_resume_crc_wall_ns"] !=
             counters["batch_snapshot_crc_wall_ns"]):

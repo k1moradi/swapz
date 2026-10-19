@@ -53,42 +53,40 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `1be728162202b46e23d5e64996d7d0d57b42d4cd`
-(report-only `a68888b95ed298f6f7cdb33e80cb3cda3d231205`) passed all five
-stages and resolves the cache-versus-parallelism question more cleanly.
+Owner-qualified source `5694d55e092a2d234d9466cce5416672db8b082e`
+(report-only `0490a84ef7515182a8db0bdf287ca598ccaf8674`) passed all five
+stages.
 
-The 16-entry shared extent cache is independently useful because the depth-one
-model disables Kread=2 entirely. Slow packed sequential improved from the
-qualified pre-Kread 3056 KiB / 457.5 requests / 16.85 ms to 2824 / 400.5 /
-14.02; random lower traffic is 2506 KiB / 626.5 requests. This promotes the
-shared multi-extent residency mechanism independently of any concurrency claim.
+ID50 precisely removed the mechanism it targeted. Fast mixed async
+`win1_pack_tail_target` fell from about 78 to 0 while read-bypass stayed about
+24 and wave-interruption stayed 0. Lower WRITE requests fell from 1005.5 to
+952.5, reducing the async-over-sync request excess by about 20%, but useful
+async/sync WRITE remained 22.95/23.63 MB/s and one-page deadline closes reached
+53.2. Request reduction alone therefore does not promote ID50. ID51 now records
+the terminal outcome of every deferred singleton before any follow-on policy.
 
-On the depth-64 model the cache-coherent Kread path reaches sampled READ peak
-2.0 while avoiding the rejected private-slot amplification. Packed sequential
-is 2878 KiB / 433.5 requests / 4.64 ms and random is 2392 KiB / 598 requests /
-5.71 ms. Lower traffic is better than the qualified cache baseline, but random
-p99 remains worse than the prior 5.22 ms; Kread therefore needs an isolated
-same-cache on/off A/B before promotion.
+ID49 remains independently qualified on the depth-one model: packed sequential
+is 2824 KiB / 399.5 requests / 13.84 ms and random is 2492 KiB / 623 requests /
+22.47 ms. On the depth-64 model the combined cache-coherent Kread path reaches
+READ peak 2.0 and now reports 2828 KiB / 405 requests / 4.59 ms sequential and
+2472 KiB / 618 requests / 5.11 ms random, earning FASTER. The next READ evidence
+must hold the cache/layout fixed and toggle only parallel service.
 
-Fast mixed WRITE exposes the next bounded scheduling experiment. Sync is 24.11
-MB/s with 840 lower WRITE requests; async is 23.40 MB/s with 1005.5 requests.
-One-page PACK_READY attribution is 78.0 sampled-tail / 24.2 read-bypass / 0
-wave-interruption, reproducing tail dominance after the READ repair. ID50 keeps
-all current timers and geometry but refuses to convert a post-PACK sample of one
-WRITE into an immediate one-shot PACK_READY target. The sampled singleton stays
-open until a second record joins or the existing absolute retention deadline
-expires. It also cannot be closed immediately by carried read-bypass/wave
-evidence, preventing attribution from merely moving buckets.
+The kernel therefore exposes a read-only module parameter
+`parallel_reads=0/1`, defaulting to 1. The runtime queue-depth gate remains in
+force, so depth-one media stay serialized regardless of the parameter. This is
+an A/B control only; default `make test` behavior is unchanged.
 
-Snapshot hashing remains unchanged. Pause-side snapshot CRC is only 1.7 ms slow
-/ 1.1 ms fast, leaving 8.6/6.2 ms residual after pause attribution; this closes
-the hash-scope optimization question.
+ID51 uses five monotonic counters: deferrals, companion resolutions, one-page
+deadline resolutions, one-page idle resolutions and other clears. Every timed
+quiescent interval must satisfy
+`deferrals = companions + deadline + idle + other`; deadline/idle subsets may
+never exceed the corresponding one-page close counters. The operator console
+prints them as `deferred tail D/C/DL/I/O`.
 
-ID50 acceptance is simultaneous: fast `win1_pack_tail_target` should collapse
-from ~78, `win1_pack_read_bypass` must not absorb those closes, async lower
-WRITE requests should move materially toward sync without increasing lower
-bytes, and useful mixed throughput/read p99 plus slow mixed/write-only window
-geometry must not regress. No conclusion is valid from request reduction alone.
+Snapshot hashing remains unchanged. The latest pause-side CRC remains about
+1.7 ms slow / 1.1 ms fast, so transaction-hash scope is not an active
+optimization target.
 
 ## Confirmation gate
 

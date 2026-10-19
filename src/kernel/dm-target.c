@@ -58,6 +58,11 @@ module_param_named(async_prepare, swapz_async_prepare, bool, 0444);
 MODULE_PARM_DESC(async_prepare,
 		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O");
 
+static bool swapz_parallel_reads = true;
+module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
+MODULE_PARM_DESC(parallel_reads,
+		 "Enable bounded Kread=2 parallel read service on multi-depth queues");
+
 struct swapz_prepared_page {
 	int length;
 	bool zero;
@@ -320,6 +325,12 @@ struct swapz_dm {
 	 * another PACK_READY close. Keep that singleton open until a companion
 	 * joins or the original retention deadline expires. */
 	bool retained_single_tail_deferred;
+	/* Exact lifecycle attribution for every sampled singleton deferral. */
+	u64 single_tail_deferrals;
+	u64 single_tail_companions;
+	u64 win1_deadline_deferred_tail;
+	u64 win1_idle_deferred_tail;
+	u64 single_tail_other_clears;
 	swapz_u8 retained_chain_completed;
 	bool pack_close_pending_tail_sample;
 	u64 window_records_total;
@@ -1654,6 +1665,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		close_reason == SWAPZ_CLOSE_IDLE ||
 		close_reason == SWAPZ_CLOSE_QUANTUM;
 	bool chain_continues;
+	bool deferred_single_tail = ctx->retained_single_tail_deferred;
 	bool async_submitted = false;
 	int error = 0;
 
@@ -1675,8 +1687,15 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		ctx->singleton_deadline_streak = 0;
 		ctx->singleton_fast_close = false;
 	}
-	if (count || hard_boundary)
+	if (deferred_single_tail && (count || hard_boundary)) {
+		if (count == 1U && close_reason == SWAPZ_CLOSE_DEADLINE)
+			ctx->win1_deadline_deferred_tail++;
+		else if (count == 1U && close_reason == SWAPZ_CLOSE_IDLE)
+			ctx->win1_idle_deferred_tail++;
+		else
+			ctx->single_tail_other_clears++;
 		ctx->retained_single_tail_deferred = false;
+	}
 
 	/*
 	 * An empty flush is not a committed write window. In particular, a READ
@@ -2129,21 +2148,27 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 			room--;
 		}
 	}
+	/* A later sample supersedes any still-open deferred singleton. Account
+	 * that old lifecycle before starting a new one so cumulative counters
+	 * conserve exactly at quiescent boundaries. */
+	if (ctx->retained_single_tail_deferred) {
+		ctx->single_tail_other_clears++;
+		ctx->retained_single_tail_deferred = false;
+	}
 	if (tail) {
 		ctx->retained_burst_target = swapz_window_grow_burst_target(
 			ctx->retained_burst_target, ctx->retained_chain_completed,
 			tail, ctx->max_window);
 		if (tail == 1U) {
 			ctx->retained_tail_target = 0;
+			ctx->single_tail_deferrals++;
 			ctx->retained_single_tail_deferred = true;
 		} else {
 			ctx->retained_tail_target = tail;
-			ctx->retained_single_tail_deferred = false;
 		}
 	} else {
 		ctx->retained_chain_completed = 0;
 		ctx->retained_tail_target = 0;
-		ctx->retained_single_tail_deferred = false;
 	}
 	ctx->pack_close_pending_tail_sample = false;
 }
@@ -2189,6 +2214,14 @@ static bool swapz_retained_pack_close_ready(struct swapz_dm *ctx)
 		ctx->single_pack_deferred, service_proven_dry_pack,
 		ctx->batch_count, ctx->retained_burst_target,
 		ctx->retained_tail_target);
+}
+
+static void swapz_resolve_single_tail_companion(struct swapz_dm *ctx)
+{
+	if (!ctx->retained_single_tail_deferred || ctx->batch_count < 2U)
+		return;
+	ctx->single_tail_companions++;
+	ctx->retained_single_tail_deferred = false;
 }
 
 static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
@@ -2371,8 +2404,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			.length = SWAPZ_BLOCK_BYTES,
 			.raw = 1,
 		};
-		if (ctx->batch_count >= 2U)
-			ctx->retained_single_tail_deferred = false;
+		swapz_resolve_single_tail_companion(ctx);
 		if (READ_ONCE(ctx->inflight_write.active))
 			ctx->pipeline_collected_pages++;
 		if (bio->bi_opf & REQ_FUA) {
@@ -2407,8 +2439,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		.payload_crc32c_valid = payload_crc32c_valid,
 	};
 	ctx->batch_count++;
-	if (ctx->batch_count >= 2U)
-		ctx->retained_single_tail_deferred = false;
+	swapz_resolve_single_tail_companion(ctx);
 	if (READ_ONCE(ctx->inflight_write.active))
 		ctx->pipeline_collected_pages++;
 	/*
@@ -3380,7 +3411,10 @@ static void swapz_worker(struct work_struct *work)
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
 				ctx->retained_tail_target = 0;
-				ctx->retained_single_tail_deferred = false;
+				if (ctx->retained_single_tail_deferred) {
+					ctx->single_tail_other_clears++;
+					ctx->retained_single_tail_deferred = false;
+				}
 				ctx->pack_close_pending_tail_sample = false;
 			}
 			/*
@@ -3796,7 +3830,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* blk-mq initializes nr_requests from the tag-set queue depth. This is
 	 * only a bounded queue-capacity gate: depth-one media stays on the exact
 	 * serialized read path; deeper queues may qualify for Kread=2. */
-	ctx->parallel_reads_enabled =
+	ctx->parallel_reads_enabled = swapz_parallel_reads &&
 		bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
@@ -4088,6 +4122,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "win1_deadline=%llu win1_pack_ready=%llu "
 		       "win1_pack_tail_target=%llu win1_pack_read_bypass=%llu "
 		       "win1_pack_wave_interrupted=%llu "
+		       "single_tail_deferrals=%llu single_tail_companions=%llu "
+		       "win1_deadline_deferred_tail=%llu "
+		       "win1_idle_deferred_tail=%llu single_tail_other_clears=%llu "
 		       "window_gc_pressure=%llu "
 		       "age_le100us=%llu age_101_1000us=%llu "
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
@@ -4217,6 +4254,11 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->win1_pack_tail_target,
 		       ctx->win1_pack_read_bypass,
 		       ctx->win1_pack_wave_interrupted,
+		       ctx->single_tail_deferrals,
+		       ctx->single_tail_companions,
+		       ctx->win1_deadline_deferred_tail,
+		       ctx->win1_idle_deferred_tail,
+		       ctx->single_tail_other_clears,
 		       ctx->window_gc_pressure,
 		       ctx->window_age_le_100us, ctx->window_age_101_1000us,
 		       ctx->window_age_gt_1000us, ctx->window_age_sum_ns,

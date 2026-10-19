@@ -835,7 +835,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("base_completed", sample)
         self.assertIn("if (tail == 1U)", sample)
         self.assertIn("ctx->retained_tail_target = 0", sample)
+        self.assertIn("ctx->single_tail_deferrals++", sample)
         self.assertIn("ctx->retained_single_tail_deferred = true", sample)
+        self.assertIn("ctx->single_tail_other_clears++", sample)
         self.assertIn("ctx->retained_tail_target = tail", sample)
         self.assertIn("ctx->retained_single_tail_deferred = false", sample)
         self.assertNotIn("ctx->single_pack_deferred && !ctx->retained_tail_target", sample)
@@ -858,11 +860,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("retained_burst_target=%u", status)
         self.assertIn("if (count < 2U)", policy)
         accept = body("swapz_accept_write")
-        self.assertIn("if (ctx->batch_count >= 2U)", accept)
-        self.assertIn("ctx->retained_single_tail_deferred = false", accept)
-        self.assertIn("if (count || hard_boundary)", flush)
-        self.assertIn("ctx->retained_single_tail_deferred = false", flush)
-        self.assertIn("ctx->retained_single_tail_deferred = false", worker)
+        companion = body("swapz_resolve_single_tail_companion")
+        self.assertIn("swapz_resolve_single_tail_companion(ctx)", accept)
+        self.assertIn("ctx->single_tail_companions++", companion)
+        self.assertIn("ctx->retained_single_tail_deferred = false", companion)
+        self.assertIn("bool deferred_single_tail = ctx->retained_single_tail_deferred", flush)
+        self.assertIn("ctx->win1_deadline_deferred_tail++", flush)
+        self.assertIn("ctx->win1_idle_deferred_tail++", flush)
+        self.assertIn("ctx->single_tail_other_clears++", flush)
+        self.assertIn("ctx->single_tail_other_clears++", worker)
+        for field in ("single_tail_deferrals", "single_tail_companions",
+                      "win1_deadline_deferred_tail", "win1_idle_deferred_tail",
+                      "single_tail_other_clears"):
+            self.assertIn(field + "=%llu", status)
+            self.assertIn("ctx->" + field, status)
 
     def test_alpha18_worker_phase_wall_times_are_cumulative_not_cpu(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -1007,6 +1018,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_engine_invalidate_read_cache(&ctx->engine)", invalidation)
         self.assertIn("swapz_engine_invalidate_read_cache(&ctx->read_slots[slot].engine)",
                       invalidation)
+        self.assertIn("static bool swapz_parallel_reads = true;", DM)
+        self.assertIn("module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444)", DM)
+        self.assertIn("ctx->parallel_reads_enabled = swapz_parallel_reads &&", ctor)
         self.assertIn("bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U", ctor)
         self.assertIn("if (ctx->parallel_reads_enabled)", ctor)
         self.assertIn("SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES", ctor)

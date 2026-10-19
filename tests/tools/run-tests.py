@@ -55,6 +55,10 @@ ONE_PAGE_CLOSE_FIELDS = tuple(field for field, _ in ONE_PAGE_CLOSE_LABELS)
 WIN1_PACK_CAUSE_FIELDS = (
     "win1_pack_tail_target", "win1_pack_read_bypass",
     "win1_pack_wave_interrupted")
+SINGLE_TAIL_FIELDS = (
+    "single_tail_deferrals", "single_tail_companions",
+    "win1_deadline_deferred_tail", "win1_idle_deferred_tail",
+    "single_tail_other_clears")
 DEADLINE_CONTEXT_LABELS = (
     ("deadline_before_bio", "before-bio"),
     ("deadline_after_read", "after-read"),
@@ -85,7 +89,8 @@ BURST_COUNTER_FIELDS = (
     "accepted_burst_read_caps")
 TIMED_WINDOW_COUNTER_FIELDS = (
     WINDOW_SIZE_FIELDS + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS +
-    WIN1_PACK_CAUSE_FIELDS + DEADLINE_CONTEXT_FIELDS + BURST_COUNTER_FIELDS + ("gc_victims",))
+    WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + DEADLINE_CONTEXT_FIELDS +
+    BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
 KERNEL_WRITE_FIELDS = (
@@ -138,6 +143,16 @@ def timed_window_error(record):
         return "timed one-page close-reason accounting is inconsistent"
     if sum(record[field] for field in WIN1_PACK_CAUSE_FIELDS) != record["win1_pack_ready"]:
         return "timed one-page PACK_READY attribution is inconsistent"
+    if (record["single_tail_deferrals"] !=
+            record["single_tail_companions"] +
+            record["win1_deadline_deferred_tail"] +
+            record["win1_idle_deferred_tail"] +
+            record["single_tail_other_clears"]):
+        return "timed deferred-singleton conservation is inconsistent"
+    if record["win1_deadline_deferred_tail"] > record["win1_deadline"]:
+        return "timed deferred deadline attribution is inconsistent"
+    if record["win1_idle_deferred_tail"] > record["win1_idle"]:
+        return "timed deferred idle attribution is inconsistent"
     if (record["batch_pause_crc_wall_ns"] +
             record["batch_resume_crc_wall_ns"] !=
             record["batch_snapshot_crc_wall_ns"]):
@@ -1203,6 +1218,12 @@ def print_bench(result):
                  f"{counters['win1_pack_tail_target']:.1f}/"
                  f"{counters['win1_pack_read_bypass']:.1f}/"
                  f"{counters['win1_pack_wave_interrupted']:.1f}"),
+                ("deferred tail D/C/DL/I/O",
+                 f"{counters['single_tail_deferrals']:.1f}/"
+                 f"{counters['single_tail_companions']:.1f}/"
+                 f"{counters['win1_deadline_deferred_tail']:.1f}/"
+                 f"{counters['win1_idle_deferred_tail']:.1f}/"
+                 f"{counters['single_tail_other_clears']:.1f}"),
                 ("lower-W queue start/end",
                  f"{asynchronous['mixed_prep_lower_write_start_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}/"
                  f"{asynchronous['mixed_prep_lower_write_end_queued'] / max(1.0, asynchronous['mixed_prep_lower_write_samples']):.2f}"),

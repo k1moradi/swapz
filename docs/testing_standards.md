@@ -677,6 +677,26 @@ control. The read-bypass/wave counters must not absorb the removed tail closes.
 Reject the candidate if lower WRITE bytes grow materially, useful mixed
 throughput/read p99 regress, or slow mixed/write-only window geometry regresses.
 
+### Deferred-singleton outcome attribution
+
+ID51 is instrumentation only. Production code must expose cumulative
+`single_tail_deferrals`, `single_tail_companions`,
+`win1_deadline_deferred_tail`, `win1_idle_deferred_tail` and
+`single_tail_other_clears`. Direct source coverage must prove every clear site
+accounts before clearing and that companion admission resolves exactly once.
+
+The mixed benchmark snapshots these counters around the same timed waves as the
+existing window telemetry. Because every closed-loop wave is fully acknowledged
+before the next wave and the final snapshot follows `fsync`, no deferred
+singleton may straddle a timed boundary. Both replay validation and report
+validation therefore require exact delta conservation:
+`D == C + DL + I + O`, with `DL <= win1_deadline` and
+`I <= win1_idle`. Missing or inconsistent telemetry fails qualification.
+
+The operator report must print the compact row `deferred tail D/C/DL/I/O`.
+ID51 answers where ID50 work goes; it does not itself justify another retention
+rule. Any successor must be a separate source revision after owner evidence.
+
 ### Bounded Kread=2 qualification
 
 The owner-qualified `bd3f5886b61a...` implementation is a rejected
@@ -688,7 +708,9 @@ physical I/O fails the endurance-first acceptance gate.
 
 The revised experiment must prove exactly two bounded slots, queue-depth gating
 through the backing request queue, no slot allocation/workqueue at depth one,
-private helper engine state, and ordered-owner-only shared cache mutation. Direct
+private helper engine state, and ordered-owner-only shared cache mutation. The
+read-only `parallel_reads` module parameter defaults true and may disable Kread
+for same-cache A/B evidence; depth-one remains serialized even when enabled. Direct
 production-C coverage must prove a 16-entry extent cache retains eight
 interleaved four-block extents without duplicate block reads, and that
 `swapz_engine_prime_read_slot()` / `swapz_engine_absorb_read_slot()` preserve
