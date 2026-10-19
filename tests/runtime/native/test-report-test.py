@@ -842,7 +842,7 @@ class ReportContract(unittest.TestCase):
         stage = report["stages"][-1]
         self.assertEqual(stage["status"], "FAIL")
         self.assertEqual(stage["failed_phase"], "parallel READ A/B evidence")
-        self.assertIn("Kread diagnostic", stage["diagnostic"])
+        self.assertIn("Kread confirmation", stage["diagnostic"])
 
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created

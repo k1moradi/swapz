@@ -756,7 +756,8 @@ without material traffic inflation; a confidence interval is evidence, not a
 license to ignore the physical-I/O gate. If lifecycle qualification passes but
 this A/B contract fails, the loaded stage must fail with the A/B evidence reason
 rather than attempting to read a lifecycle failure reason from a passing
-lifecycle result.
+lifecycle result. Failure-path report fixtures must identify the Kread
+confirmation reason explicitly rather than the retired diagnostic label.
 
 The standard mixed report must also expose existing sync/async window bins
 (win1, win2, win3_4, win5_8, win9_16, win17_64) plus PACK_READY/DEADLINE/IDLE
