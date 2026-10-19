@@ -351,7 +351,8 @@ class PairReplayContract(unittest.TestCase):
                 before, dict(after, pack_close_burst_target=2))
         with self.assertRaisesRegex(ValueError, "upper-tail"):
             module.kernel_write_delta(
-                before, dict(after, single_tail_comp_age_gt1000us=1))
+                before, dict(after, single_tail_comp_age_251_500us=0,
+                             single_tail_comp_age_gt1000us=1))
         with self.assertRaisesRegex(ValueError, "retained burst target"):
             module.kernel_write_delta(
                 before, dict(after, retained_burst_target=0))
