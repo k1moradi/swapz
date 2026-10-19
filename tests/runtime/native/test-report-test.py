@@ -244,7 +244,9 @@ def synthetic_log():
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
         out.append(f"START_OWNED_RAM_REGIME={regime}")
-        for i, mode in enumerate((0, 1, 1, 0)):
+        modes = (runner.CONFIRMATION_SEQUENCE
+                 if regime == "ssd_emulated" else (0, 1, 1, 0))
+        for i, mode in enumerate(modes):
             out.append(f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
             out.append("REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first")
             out.append("PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
@@ -257,7 +259,7 @@ def synthetic_log():
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
-    for index, enabled in enumerate((0, 1, 1, 0)):
+    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_PARALLEL_READ_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
@@ -276,7 +278,9 @@ def synthetic_log():
         out.append(f"START_WRITE_SATURATION_REGIME={regime}")
         index = 0
         for qd in (1, 4, 8, 32):
-            for mode in (0, 1):
+            modes = (runner.CONFIRMATION_SEQUENCE
+                     if regime == "ssd_emulated" and qd == 8 else (0, 1))
+            for mode in modes:
                 out.append(
                     f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
                 out.append("REPLAY_ORDER=swapz-first" if index % 2 else
@@ -391,11 +395,16 @@ class ReportContract(unittest.TestCase):
 
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
-        self.assertEqual(len(sessions), 8)
+        self.assertEqual(len(sessions), 14)
         parallel = runner.parse_parallel_read_ab(synthetic_log())
-        self.assertEqual([row["parallel_reads"] for row in parallel], [0, 1, 1, 0])
+        self.assertEqual([row["parallel_reads"] for row in parallel],
+                         list(runner.CONFIRMATION_SEQUENCE))
         diagnostic = runner.parallel_read_ab_verdict(parallel)
-        self.assertEqual(diagnostic["overall"], "PASS_PARALLEL_READ_AB_DIAGNOSTIC")
+        self.assertEqual(diagnostic["overall"],
+                         "PASS_PARALLEL_READ_AB_CONFIRMATION")
+        self.assertEqual(diagnostic["matched_pairs"], 5)
+        self.assertEqual(
+            diagnostic["paired"]["sequential"]["p99_change_fraction"]["n"], 5)
         self.assertEqual(diagnostic["modes"]["0"]["sequential"]["parallel_read_pairs"], 0)
         self.assertGreater(diagnostic["modes"]["1"]["sequential"]["parallel_read_pairs"], 0)
         inactive = runner.parse_parallel_read_ab(synthetic_log())
@@ -404,12 +413,14 @@ class ReportContract(unittest.TestCase):
         rejected = runner.parallel_read_ab_verdict(inactive)
         self.assertEqual(rejected["overall"], "INCOMPLETE")
         self.assertIn("executed no parallel pairs", rejected["reason"])
-        self.assertEqual([s["async_prepare"] for s in sessions],
-                         [0, 1, 1, 0] * 2)
-        self.assertEqual([s["regime"] for s in sessions],
-                         [regime for regime in runner.MODEL_ORDER for _ in range(4)])
+        self.assertEqual(
+            [s["async_prepare"] for s in sessions],
+            [0, 1, 1, 0] + list(runner.CONFIRMATION_SEQUENCE))
+        self.assertEqual(
+            [s["regime"] for s in sessions],
+            ["sd_emulated"] * 4 + ["ssd_emulated"] * 10)
         self.assertEqual([s["order"] for s in sessions],
-                         ["off-first", "swapz-first"] * 4)
+                         ["off-first", "swapz-first"] * 7)
         self.assertTrue(all(s["status"] == "PASS" for s in sessions))
         for j, session in enumerate(sessions):
             self.assertEqual(session["device_model"],
@@ -417,7 +428,7 @@ class ReportContract(unittest.TestCase):
                               for k in ("cap_mib_s", "completion_nsec", "irqmode",
                                         "queue_mode", "submit_queues",
                                         "hw_queue_depth")})
-            if j % 4 in (1, 2):
+            if session["async_prepare"]:
                 self.assertEqual(session["overlap_starts"], 42)
             else:
                 self.assertNotIn("overlap_starts", session)
@@ -425,13 +436,15 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
         self.assertTrue(all("kernel_status" not in session for session in sessions))
 
-    def test_write_saturation_pilot_is_separate_and_not_confirmatory(self):
+    def test_write_saturation_evidence_repeats_only_fast_qd8(self):
         sessions = runner.parse_write_saturation(synthetic_log())
-        self.assertEqual(len(sessions), 16)
+        self.assertEqual(len(sessions), 24)
         verdict = runner.write_saturation_verdict(sessions)
-        self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_PILOT")
-        self.assertEqual(verdict["pairs_per_mode_qd"], 1)
-        self.assertIn("NOT_ESTABLISHED", verdict["confidence"])
+        self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_EVIDENCE")
+        self.assertEqual(verdict["fast_qd8_matched_pairs"], 5)
+        self.assertEqual(
+            verdict["fast_qd8_paired"]["throughput_change_fraction"]["n"], 5)
+        self.assertIn("PAIRED_95PCT_CI", verdict["confidence"])
         self.assertEqual(
             verdict["regimes"]["sd_emulated"][2]["retained_burst_target"], 4)
         self.assertEqual(
@@ -451,6 +464,9 @@ class ReportContract(unittest.TestCase):
             [(p["qd"], p["mode"]) for p in verdict["regimes"]["sd_emulated"]],
             [(1, "sync"), (1, "async"), (4, "sync"), (4, "async"),
              (8, "sync"), (8, "async"), (32, "sync"), (32, "async")])
+        fast_qd8 = [p for p in verdict["regimes"]["ssd_emulated"]
+                    if p["qd"] == 8]
+        self.assertEqual([p["observations"] for p in fast_qd8], [5, 5])
         broken = runner.parse_write_saturation(synthetic_log())
         broken[0]["arms"]["off"]["logical_read_bytes"] = 4096
         self.assertEqual(runner.write_saturation_verdict(broken)["overall"],
@@ -615,8 +631,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
-        self.assertIn("WRITE-ONLY SATURATION PILOT", rendered)
-        self.assertIn("directional only", rendered)
+        self.assertIn("WRITE-ONLY SATURATION EVIDENCE", rendered)
+        self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
+        self.assertIn("Other QDs remain directional controls.", rendered)
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)

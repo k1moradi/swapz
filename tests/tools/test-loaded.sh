@@ -84,14 +84,19 @@ assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_acc
 PY
 
 # Two representative delay-modeled RAM-backed environments provide paired
-# write/read evidence. Drop the uncapped and bandwidth-only repeats from
-# every mandatory run: old evidence remains in Git history, while neither
-# resembles actual SD/SSD latency. Keep four counterbalanced pairs per
-# environment (two sync and two async) and all owned-device safety gates.
+# write/read evidence. Slow remains a bounded directional control. Fast runs
+# five adjacent counterbalanced sync/async rounds so the report can compute a
+# paired 95% confidence interval without changing the workload or policy.
+confirmation_modes=(0 1 1 0 0 1 1 0 0 1)
 for regime in sd_emulated ssd_emulated; do
     printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
     index=0
-    for async_prepare in 0 1 1 0; do
+    if [[ $regime == ssd_emulated ]]; then
+        modes=("${confirmation_modes[@]}")
+    else
+        modes=(0 1 1 0)
+    fi
+    for async_prepare in "${modes[@]}"; do
         arguments=(--run-owned-ram-pair --profile medium
                    --retain-ms 2 --unpaced)
         case "$regime" in
@@ -114,12 +119,11 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# ID39 same-cache Kread diagnostic: four counterbalanced fast-model sessions
-# vary only the read-only module parameter. async_prepare stays off so WRITE
-# scheduling does not change the packed-read experiment. This is diagnostic
-# evidence (two sessions/mode), not the >=5-pair promotion gate.
+# ID39 same-cache Kread confirmation: five adjacent counterbalanced fast-model
+# rounds vary only the read-only module parameter. async_prepare stays off so
+# WRITE scheduling cannot contaminate the packed-read comparison.
 index=0
-for parallel_reads in 0 1 1 0; do
+for parallel_reads in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --parallel-reads "$parallel_reads"
@@ -133,15 +137,19 @@ for parallel_reads in 0 1 1 0; do
     (( index += 1 ))
 done
 
-# Bounded write-only saturation pilot: one sync and one async same-work pair
-# at each QD/model. This validates queue-depth direction and recurring-run
-# cost only; the roadmap's >=5 counterbalanced pairs and confidence interval
-# remain required before any confirmatory performance claim.
+# Write-only controls stay one sync/async observation per point except fast
+# QD8, whose large directional ping-pong signal now receives five adjacent
+# counterbalanced rounds and a paired confidence interval.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
     index=0
     for qd in 1 4 8 32; do
-        for async_prepare in 0 1; do
+        if [[ $regime == ssd_emulated && $qd == 8 ]]; then
+            modes=("${confirmation_modes[@]}")
+        else
+            modes=(0 1)
+        fi
+        for async_prepare in "${modes[@]}"; do
             arguments=(--run-owned-ram-pair --profile medium
                        --retain-ms 2 --unpaced)
             case "$regime" in
@@ -157,13 +165,17 @@ for regime in sd_emulated ssd_emulated; do
             if (( index % 2 )); then
                 arguments+=(--swapz-first)
             fi
-            printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
+            printf 'START_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
+                "$qd" "$async_prepare"
             "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-            printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n'                 "$qd" "$async_prepare"
+            printf 'PASS_WRITE_SATURATION_PAIR_QD=%s ASYNC_PREPARE=%s\n' \
+                "$qd" "$async_prepare"
             (( index += 1 ))
         done
     done
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-printf '%s\n'     'PASS_LOADED_TEST_EXECUTION: smoke, eight mixed pairs, four Kread A/B diagnostic pairs, and sixteen write-only QD pilot pairs completed.'     'PERFORMANCE_WIN=UNDETERMINED: diagnostic/read and write-only pilots are not confirmatory statistics.'
+printf '%s\n' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 Kread sessions, and 24 write-only sessions completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, Kread, and fast QD8 now carry five matched rounds with paired 95% CIs.'

@@ -123,7 +123,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "[`src/kernel/VERSION`](../src/kernel/VERSION)", README)
         self.assertIn("single source of truth", README)
 
-    def test_write_saturation_pilot_stays_private_bounded_and_write_only(self):
+    def test_write_saturation_evidence_stays_private_bounded_and_write_only(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         reporter = (ROOT / "tests/tools/run-tests.py").read_text()
@@ -138,8 +138,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PACKED_READ=0", pair)
         self.assertIn("ASYNC_PREPARE && !WRITE_ONLY_QD", pair)
         self.assertIn("def parse_write_saturation", reporter)
-        self.assertIn("PASS_WRITE_SATURATION_PILOT", reporter)
-        self.assertIn("NOT_ESTABLISHED_ONE_PAIR_PER_MODE_QD", reporter)
+        self.assertIn("PASS_WRITE_SATURATION_EVIDENCE", reporter)
+        self.assertIn("FAST_QD8_PAIRED_95PCT_CI", reporter)
+        self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
 
 
     def test_lz4_foreground_size_histogram_is_attempt_side_only(self):
@@ -1086,10 +1087,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("--parallel-reads 0|1", pair)
         self.assertIn('"parallel_reads=$PARALLEL_READS"', pair)
         self.assertIn("parallel_reads_enabled=$expected_parallel", pair)
-        self.assertIn("for parallel_reads in 0 1 1 0", loaded)
+        self.assertIn('for parallel_reads in "${confirmation_modes[@]}"', loaded)
         self.assertIn("START_PARALLEL_READ_AB=", loaded)
         self.assertIn("def parse_parallel_read_ab", runner)
-        self.assertIn("PASS_PARALLEL_READ_AB_DIAGNOSTIC", runner)
+        self.assertIn("PASS_PARALLEL_READ_AB_CONFIRMATION", runner)
+        self.assertIn("CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)",
+                      runner)
+        self.assertIn("def paired_ci95", runner)
         self.assertIn('kernel["parallel_read_pairs"]', runner)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):

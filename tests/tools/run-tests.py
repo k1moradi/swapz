@@ -28,6 +28,37 @@ MODEL_SPECS = {
                      "purpose": "SYNTHETIC_HIGHER_BANDWIDTH_LOWER_DELAY_QUEUED_DEPTH64"},
 }
 MODEL_ORDER = tuple(MODEL_SPECS)
+# Five adjacent matched rounds with mode order alternated between rounds.
+CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
+PAIRED_CI95_T_N5 = 2.7764451051977987
+
+
+def paired_ci95(values):
+    if len(values) != 5 or any(not isinstance(value, (int, float))
+                               for value in values):
+        raise ValueError("five numeric matched deltas required")
+    center = statistics.mean(values)
+    half_width = PAIRED_CI95_T_N5 * statistics.stdev(values) / math.sqrt(5)
+    return {
+        "n": 5,
+        "mean": center,
+        "low": center - half_width,
+        "high": center + half_width,
+    }
+
+
+def matched_binary_pairs(rows, field):
+    if len(rows) != len(CONFIRMATION_SEQUENCE) or             [row.get(field) for row in rows] != list(CONFIRMATION_SEQUENCE):
+        raise ValueError("five counterbalanced matched rounds required")
+    pairs = []
+    for index in range(0, len(rows), 2):
+        first, second = rows[index:index + 2]
+        pairs.append({
+            first[field]: first,
+            second[field]: second,
+        })
+    return pairs
+
 CLOSE_REASON_LABELS = (
     ("close_unknown", "unknown"), ("close_full", "full"),
     ("close_duplicate", "duplicate"), ("close_zero", "zero"),
@@ -505,7 +536,7 @@ def run_stage(title, command, result, *, parse_bench=False):
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        parallel_read_diagnostic.get("overall") !=
-                       "PASS_PARALLEL_READ_AB_DIAGNOSTIC"))
+                       "PASS_PARALLEL_READ_AB_CONFIRMATION"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -738,70 +769,118 @@ def parse_parallel_read_ab(output):
 
 
 def parallel_read_ab_verdict(sessions):
-    """Validate a two-observation-per-mode diagnostic; never claim confidence."""
-    if len(sessions) != 4 or [row.get("parallel_reads") for row in sessions] != [0, 1, 1, 0]:
-        return {"overall": "INCOMPLETE", "reason": "four Kread 0/1/1/0 sessions required"}
+    """Validate five same-cache matched Kread rounds and report paired CIs."""
+    try:
+        pairs = matched_binary_pairs(sessions, "parallel_reads")
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE", "reason": str(exc)}
     expected = MODEL_SPECS["ssd_emulated"]
     for index, row in enumerate(sessions):
         if row.get("status") != "PASS" or row.get("order") != (
                 "swapz-first" if index % 2 else "off-first"):
-            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic order/status mismatch"}
+            return {"overall": "INCOMPLETE",
+                    "reason": "Kread confirmation order/status mismatch"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(model.get(key) != expected[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
-            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic device model mismatch"}
+            return {"overall": "INCOMPLETE",
+                    "reason": "Kread confirmation device model mismatch"}
         arm = row.get("swapz")
-        if not isinstance(arm, dict) or not re.fullmatch(r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
-            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic source missing"}
-        if not isinstance(arm.get("packed_close_delta"), int) or arm["packed_close_delta"] <= 0:
-            return {"overall": "INCOMPLETE", "reason": "Kread diagnostic packed population missing"}
+        if not isinstance(arm, dict) or not re.fullmatch(
+                r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
+            return {"overall": "INCOMPLETE",
+                    "reason": "Kread confirmation source missing"}
+        if not isinstance(arm.get("packed_close_delta"), int) or                 arm["packed_close_delta"] <= 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "Kread confirmation packed population missing"}
         for mode in ("sequential", "seeded_random"):
             phase = arm["passes"].get(mode)
-            if not isinstance(phase, dict) or phase.get("logical_bytes") != 4194304 or phase.get("verified_pages") != 1024:
-                return {"overall": "INCOMPLETE", "reason": "Kread diagnostic packed read incomplete"}
-            if any(not isinstance(phase.get(key), (int, float)) or phase[key] < 0
-                   for key in ("useful_read_mbps", "read_p99_ms",
-                               "lower_read_bytes", "lower_read_requests")):
-                return {"overall": "INCOMPLETE", "reason": "Kread diagnostic metrics missing"}
+            if not isinstance(phase, dict) or                     phase.get("logical_bytes") != 4194304 or                     phase.get("verified_pages") != 1024:
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread confirmation packed read incomplete"}
+            if any(not isinstance(phase.get(key), (int, float)) or
+                   phase[key] < 0 for key in
+                   ("useful_read_mbps", "read_p99_ms",
+                    "lower_read_bytes", "lower_read_requests")):
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread confirmation metrics missing"}
             kernel = phase.get("kernel_read_path")
-            if not isinstance(kernel, dict) or any(type(kernel.get(field)) is not int or kernel[field] < 0
-                    for field in KERNEL_READ_FIELDS):
-                return {"overall": "INCOMPLETE", "reason": "Kread diagnostic C telemetry missing"}
+            if not isinstance(kernel, dict) or any(
+                    type(kernel.get(name)) is not int or kernel[name] < 0
+                    for name in KERNEL_READ_FIELDS):
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread confirmation C telemetry missing"}
             if not row["parallel_reads"] and kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE", "reason": "Kread-off arm executed parallel pairs"}
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread-off arm executed parallel pairs"}
             if row["parallel_reads"] and not kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE", "reason": "Kread-on arm executed no parallel pairs"}
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread-on arm executed no parallel pairs"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
-        return {"overall": "INCONCLUSIVE", "reason": "Kread diagnostic provenance mismatch"}
+        return {"overall": "INCONCLUSIVE",
+                "reason": "Kread confirmation provenance mismatch"}
 
     modes = {}
     for enabled in (0, 1):
-        rows = [row["swapz"] for row in sessions if row["parallel_reads"] == enabled]
+        rows = [row["swapz"] for row in sessions
+                if row["parallel_reads"] == enabled]
         passes = {}
         for mode in ("sequential", "seeded_random"):
             phases = [row["passes"][mode] for row in rows]
             passes[mode] = {
-                "useful_read_mbps": statistics.mean(p["useful_read_mbps"] for p in phases),
-                "read_p99_ms": statistics.mean(p["read_p99_ms"] for p in phases),
-                "lower_read_bytes": statistics.mean(p["lower_read_bytes"] for p in phases),
-                "lower_read_requests": statistics.mean(p["lower_read_requests"] for p in phases),
+                "useful_read_mbps":
+                    statistics.mean(p["useful_read_mbps"] for p in phases),
+                "read_p99_ms":
+                    statistics.mean(p["read_p99_ms"] for p in phases),
+                "lower_read_bytes":
+                    statistics.mean(p["lower_read_bytes"] for p in phases),
+                "lower_read_requests":
+                    statistics.mean(p["lower_read_requests"] for p in phases),
                 "parallel_read_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_pairs"] for p in phases),
+                    p["kernel_read_path"]["parallel_read_pairs"]
+                    for p in phases),
                 "parallel_read_same_extent_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_same_extent_pairs"] for p in phases),
+                    p["kernel_read_path"]["parallel_read_same_extent_pairs"]
+                    for p in phases),
             }
         modes[str(enabled)] = passes
+
+    paired = {}
+    for mode in ("sequential", "seeded_random"):
+        p99, throughput, lower_bytes, lower_requests = [], [], [], []
+        for pair in pairs:
+            off = pair[0]["swapz"]["passes"][mode]
+            on = pair[1]["swapz"]["passes"][mode]
+            if not off["read_p99_ms"] or not off["useful_read_mbps"] or \
+                    not off["lower_read_bytes"] or not off["lower_read_requests"]:
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread confirmation zero denominator"}
+            p99.append(on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
+            throughput.append(
+                on["useful_read_mbps"] / off["useful_read_mbps"] - 1.0)
+            lower_bytes.append(
+                on["lower_read_bytes"] / off["lower_read_bytes"] - 1.0)
+            lower_requests.append(
+                on["lower_read_requests"] / off["lower_read_requests"] - 1.0)
+        paired[mode] = {
+            "p99_change_fraction": paired_ci95(p99),
+            "throughput_change_fraction": paired_ci95(throughput),
+            "lower_bytes_change_fraction": paired_ci95(lower_bytes),
+            "lower_requests_change_fraction": paired_ci95(lower_requests),
+        }
     return {
-        "overall": "PASS_PARALLEL_READ_AB_DIAGNOSTIC",
-        "pairs_per_mode": 2,
-        "confidence": "NOT_ESTABLISHED_TWO_OBSERVATIONS_PER_MODE",
+        "overall": "PASS_PARALLEL_READ_AB_CONFIRMATION",
+        "matched_pairs": 5,
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
         "device_model": expected,
         "modes": modes,
-        "interpretation": "SAME_SOURCE_SHARED_CACHE_KREAD_TOGGLE_SYNTHETIC_RAM_ONLY",
+        "paired": paired,
+        "interpretation":
+            "SAME_SOURCE_SHARED_CACHE_KREAD_TOGGLE_SYNTHETIC_RAM_ONLY",
     }
 
 
@@ -890,39 +969,49 @@ def parse_write_saturation(output):
 
 
 def write_saturation_verdict(sessions):
-    """Validate the one-pair-per-point pilot without claiming confidence."""
-    expected_shape = [(qd, mode) for qd in (1, 4, 8, 32) for mode in (0, 1)]
+    """Validate bounded QD controls plus five matched fast-QD8 rounds."""
     regimes = {}
+    expected_total = 0
     for regime in MODEL_ORDER:
         rows = [row for row in sessions if row.get("regime") == regime]
+        expected_shape = []
+        for qd in (1, 4, 8, 32):
+            modes = (CONFIRMATION_SEQUENCE
+                     if regime == "ssd_emulated" and qd == 8 else (0, 1))
+            expected_shape.extend((qd, mode) for mode in modes)
+        expected_total += len(expected_shape)
         shape = [(row.get("qd"), row.get("async_prepare")) for row in rows]
         if shape != expected_shape:
             return {"overall": "INCOMPLETE",
-                    "reason": f"{regime}: QD1/4/8/32 sync+async pilot required"}
+                    "reason": f"{regime}: write-only evidence shape mismatch"}
         expected = MODEL_SPECS[regime]
         for index, row in enumerate(rows):
-            if row.get("status") != "PASS" or set(row.get("arms", {})) != {"off", "swapz"}:
+            if row.get("status") != "PASS" or                     set(row.get("arms", {})) != {"off", "swapz"}:
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: incomplete write-only pair"}
-            provenance_error = paired_provenance_error(row, f"{regime}: write-only")
+            provenance_error = paired_provenance_error(
+                row, f"{regime}: write-only")
             if provenance_error is not None:
                 return provenance_error
-            if row.get("order") != ("swapz-first" if index % 2 else "off-first"):
+            if row.get("order") != (
+                    "swapz-first" if index % 2 else "off-first"):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only replay order mismatch"}
             model = row.get("device_model")
             if not isinstance(model, dict) or any(
                     model.get(key) != expected[key]
-                    for key in ("cap_mib_s", "completion_nsec", "irqmode", "queue_mode", "submit_queues", "hw_queue_depth")):
+                    for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                                "queue_mode", "submit_queues",
+                                "hw_queue_depth")):
                 return {"overall": "INCOMPLETE",
                         "reason": f"{regime}: write-only device model mismatch"}
             timed = row["arms"].get("swapz", {}).get("kernel_write_path")
-            if (not isinstance(timed, dict) or
-                    any(type(timed.get(field)) is not int or timed[field] < 0
-                        for field in KERNEL_WRITE_FIELDS) or
-                    timed_window_error(timed) is not None):
+            if not isinstance(timed, dict) or any(
+                    type(timed.get(field)) is not int or timed[field] < 0
+                    for field in KERNEL_WRITE_FIELDS) or                     timed_window_error(timed) is not None:
                 return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: write-only timed window attribution missing"}
+                        "reason":
+                            f"{regime}: write-only timed attribution missing"}
             row["timed_window_delta"] = {
                 field: timed[field] for field in TIMED_WINDOW_COUNTER_FIELDS
             }
@@ -937,72 +1026,150 @@ def write_saturation_verdict(sessions):
                     timed["pipeline_async_runs"] or
                     timed["pipeline_active_wall_ns"]):
                 return {"overall": "INCOMPLETE",
-                        "reason": f"{regime}: write-only sync arm used async run occupancy"}
+                        "reason":
+                            f"{regime}: write-only sync arm used async run"}
             for arm in row["arms"].values():
-                required = ("input_write_mbps", "output_lower_write_mbps",
-                            "logical_write_bytes", "logical_read_bytes",
-                            "lower_write_bytes", "lower_write_requests",
-                            "write_p99_ms", "seconds")
-                if any(not isinstance(arm.get(key), (int, float)) for key in required):
+                required = (
+                    "input_write_mbps", "output_lower_write_mbps",
+                    "logical_write_bytes", "logical_read_bytes",
+                    "lower_write_bytes", "lower_write_requests",
+                    "write_p99_ms", "seconds")
+                if any(not isinstance(arm.get(key), (int, float))
+                       for key in required):
                     return {"overall": "INCOMPLETE",
                             "reason": f"{regime}: write-only metrics missing"}
                 if arm["logical_read_bytes"] != 0:
                     return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: write-only trace contained logical reads"}
-                if arm["logical_write_bytes"] <= 0 or arm["lower_write_bytes"] <= 0:
+                            "reason":
+                                f"{regime}: write-only trace contained reads"}
+                if arm["logical_write_bytes"] <= 0 or                         arm["lower_write_bytes"] <= 0:
                     return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: write-only byte accounting invalid"}
+                            "reason":
+                                f"{regime}: write-only byte accounting invalid"}
                 if lower_inflight_error(arm.get("lower_inflight")) is not None:
                     return {"overall": "INCOMPLETE",
-                            "reason": f"{regime}: write-only lower in-flight telemetry invalid"}
-            if not re.fullmatch(r"[0-9a-f]{40}", row.get("source_sha", "")):
+                            "reason":
+                                f"{regime}: write-only in-flight invalid"}
+            if not re.fullmatch(r"[0-9a-f]{40}",
+                                row.get("source_sha", "")):
                 return {"overall": "INCONCLUSIVE",
-                        "reason": f"{regime}: write-only source SHA unavailable"}
+                        "reason":
+                            f"{regime}: write-only source SHA unavailable"}
         regimes[regime] = rows
-    if len(sessions) != len(MODEL_ORDER) * 8:
+    if len(sessions) != expected_total:
         return {"overall": "INCOMPLETE",
-                "reason": "exactly sixteen write-only pilot pairs required"}
+                "reason": "exactly 24 write-only evidence sessions required"}
     if len({row["source_sha"] for row in sessions}) != 1 or \
             len({row.get("fixture_sha256") for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
-                "reason": "write-only source/fixture differs across pilot"}
+                "reason": "write-only source/fixture differs"}
     for regime, rows in regimes.items():
         for qd in (1, 4, 8, 32):
-            traces = {row.get("trace_sha256") for row in rows if row["qd"] == qd}
+            traces = {row.get("trace_sha256") for row in rows
+                      if row["qd"] == qd}
             if None in traces or len(traces) != 1:
                 return {"overall": "INCONCLUSIVE",
-                        "reason": f"{regime}: QD{qd} write-only trace mismatch"}
+                        "reason":
+                            f"{regime}: QD{qd} write-only trace mismatch"}
+
+    summaries = {}
+    for regime, rows in regimes.items():
+        points = []
+        for qd in (1, 4, 8, 32):
+            for enabled in (0, 1):
+                group = [row for row in rows
+                         if row["qd"] == qd and
+                         row["async_prepare"] == enabled]
+                def arm_mean(candidate, field):
+                    return statistics.mean(
+                        row["arms"][candidate][field] for row in group)
+                def dict_mean(key, fields):
+                    return {
+                        field: statistics.mean(row[key][field] for row in group)
+                        for field in fields
+                    }
+                lower_fields = tuple(LOWER_INFLIGHT_FIELDS)
+                points.append({
+                    "qd": qd,
+                    "mode": "async" if enabled else "sync",
+                    "observations": len(group),
+                    "raw_write_mbps": arm_mean("off", "input_write_mbps"),
+                    "swapz_write_mbps":
+                        arm_mean("swapz", "input_write_mbps"),
+                    "swapz_to_raw_write_ratio": statistics.mean(
+                        row["arms"]["swapz"]["input_write_mbps"] /
+                        row["arms"]["off"]["input_write_mbps"]
+                        for row in group),
+                    "swapz_logical_to_lower_ratio": statistics.mean(
+                        row["arms"]["swapz"]["logical_write_bytes"] /
+                        row["arms"]["swapz"]["lower_write_bytes"]
+                        for row in group),
+                    "raw_lower_write_requests":
+                        arm_mean("off", "lower_write_requests"),
+                    "swapz_lower_write_requests":
+                        arm_mean("swapz", "lower_write_requests"),
+                    "raw_write_p99_ms": arm_mean("off", "write_p99_ms"),
+                    "swapz_write_p99_ms":
+                        arm_mean("swapz", "write_p99_ms"),
+                    "timed_window_delta": dict_mean(
+                        "timed_window_delta", TIMED_WINDOW_COUNTER_FIELDS),
+                    "window_delta":
+                        dict_mean("window_delta", SATURATION_WINDOW_FIELDS),
+                    "preparation_delta":
+                        dict_mean("preparation_delta", PREPARATION_FIELDS),
+                    "retained_burst_target": statistics.mean(
+                        row["retained_burst_target"] for row in group),
+                    "raw_lower_inflight": {
+                        field: statistics.mean(
+                            row["arms"]["off"]["lower_inflight"][field]
+                            for row in group)
+                        for field in lower_fields
+                    },
+                    "swapz_lower_inflight": {
+                        field: statistics.mean(
+                            row["arms"]["swapz"]["lower_inflight"][field]
+                            for row in group)
+                        for field in lower_fields
+                    },
+                })
+        summaries[regime] = points
+
+    fast_qd8 = [row for row in regimes["ssd_emulated"]
+                if row["qd"] == 8]
+    try:
+        qd8_pairs = matched_binary_pairs(fast_qd8, "async_prepare")
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE",
+                "reason": "fast QD8: " + str(exc)}
+    throughput, requests, lower_bytes = [], [], []
+    for pair in qd8_pairs:
+        sync = pair[0]["arms"]["swapz"]
+        asynchronous = pair[1]["arms"]["swapz"]
+        throughput.append(
+            asynchronous["input_write_mbps"] /
+            sync["input_write_mbps"] - 1.0)
+        requests.append(
+            asynchronous["lower_write_requests"] /
+            sync["lower_write_requests"] - 1.0)
+        lower_bytes.append(
+            asynchronous["lower_write_bytes"] /
+            sync["lower_write_bytes"] - 1.0)
+
     return {
-        "overall": "PASS_WRITE_SATURATION_PILOT",
-        "pairs_per_mode_qd": 1,
-        "confidence": "NOT_ESTABLISHED_ONE_PAIR_PER_MODE_QD",
-        "regimes": {
-            regime: [{
-                "qd": row["qd"],
-                "mode": "async" if row["async_prepare"] else "sync",
-                "raw_write_mbps": row["arms"]["off"]["input_write_mbps"],
-                "swapz_write_mbps": row["arms"]["swapz"]["input_write_mbps"],
-                "swapz_to_raw_write_ratio": (
-                    row["arms"]["swapz"]["input_write_mbps"] /
-                    row["arms"]["off"]["input_write_mbps"]),
-                "swapz_logical_to_lower_ratio": (
-                    row["arms"]["swapz"]["logical_write_bytes"] /
-                    row["arms"]["swapz"]["lower_write_bytes"]),
-                "raw_lower_write_requests": row["arms"]["off"]["lower_write_requests"],
-                "swapz_lower_write_requests": row["arms"]["swapz"]["lower_write_requests"],
-                "raw_write_p99_ms": row["arms"]["off"]["write_p99_ms"],
-                "swapz_write_p99_ms": row["arms"]["swapz"]["write_p99_ms"],
-                "timed_window_delta": row["timed_window_delta"],
-                "window_delta": row["window_delta"],
-                "preparation_delta": row["preparation_delta"],
-                "retained_burst_target": row["retained_burst_target"],
-                "raw_lower_inflight": row["arms"]["off"]["lower_inflight"],
-                "swapz_lower_inflight": row["arms"]["swapz"]["lower_inflight"],
-            } for row in rows]
-            for regime, rows in regimes.items()
+        "overall": "PASS_WRITE_SATURATION_EVIDENCE",
+        "fast_qd8_matched_pairs": 5,
+        "confidence":
+            "FAST_QD8_PAIRED_95PCT_CI_OTHER_QDS_DIRECTIONAL",
+        "fast_qd8_paired": {
+            "throughput_change_fraction": paired_ci95(throughput),
+            "lower_requests_change_fraction": paired_ci95(requests),
+            "lower_bytes_change_fraction": paired_ci95(lower_bytes),
         },
-        "interpretation": "SYNTHETIC_RAM_QD_DIRECTION_ONLY_NOT_CONFIRMATORY",
+        "regimes": summaries,
+        "interpretation":
+            "SYNTHETIC_RAM_QD8_CONFIRMATION_OTHER_QDS_DIRECTIONAL",
     }
+
 
 def mean(items, key):
     vals = [arm[key] for arm in items if isinstance(arm.get(key), (int, float))]
@@ -1014,13 +1181,17 @@ def benchmark_verdicts(sessions):
     regimes = {}
     for regime in MODEL_ORDER:
         rows = [s for s in sessions if s.get("regime") == regime]
-        if len(rows) != 4 or [s.get("async_prepare") for s in rows] != [0, 1, 1, 0] \
-                or any(s.get("status") != "PASS" or
+        expected_modes = (list(CONFIRMATION_SEQUENCE)
+                          if regime == "ssd_emulated" else [0, 1, 1, 0])
+        if len(rows) != len(expected_modes) or \
+                [s.get("async_prepare") for s in rows] != expected_modes or \
+                any(s.get("status") != "PASS" or
                        set(s.get("arms", {})) != {"off", "swapz"} or
                        s.get("order") != ("swapz-first" if i % 2 else "off-first")
                        for i, s in enumerate(rows)):
             return {"overall": "INCOMPLETE",
-                    "reason": f"{regime}: four valid ABBA/ABAB pairs required"}
+                    "reason":
+                        f"{regime}: required counterbalanced sessions missing"}
         expected = MODEL_SPECS[regime]
         for row in rows:
             actual = row.get("device_model")
@@ -1033,8 +1204,9 @@ def benchmark_verdicts(sessions):
             if provenance_error is not None:
                 return provenance_error
         regimes[regime] = rows
-    if len(sessions) != len(MODEL_ORDER) * 4:
-        return {"overall": "INCOMPLETE", "reason": "exactly eight modeled RAM-only pairs required"}
+    if len(sessions) != 14:
+        return {"overall": "INCOMPLETE",
+                "reason": "exactly 14 modeled RAM-only sessions required"}
     all_rows = [row for regime in MODEL_ORDER for row in regimes[regime]]
     for row in all_rows:
         timed = row["arms"].get("swapz", {}).get("kernel_write_path")
@@ -1199,14 +1371,49 @@ def benchmark_verdicts(sessions):
             }
         delta = (columns["async"]["input_write_mbps"] /
                  columns["sync"]["input_write_mbps"] - 1)
-        criteria["async_vs_sync"] = {
-            "write_gain_fraction": delta,
-            "write_throughput": (
-                "PRELIMINARY_5PCT_GAIN" if delta >= .05 else
-                "PRELIMINARY_5PCT_LOSS" if delta <= -.05 else
-                "NO_SIGNIFICANT_ASYNC_GAIN"),
-            "caution": "Only two observations per mode; no confidence interval",
-        }
+        if regime == "ssd_emulated":
+            try:
+                mixed_pairs = matched_binary_pairs(rows, "async_prepare")
+            except ValueError as exc:
+                return {"overall": "INCOMPLETE",
+                        "reason": f"{regime}: {exc}"}
+            pair_deltas = []
+            pair_request_deltas = []
+            for pair in mixed_pairs:
+                sync = pair[0]["arms"]["swapz"]
+                asynchronous = pair[1]["arms"]["swapz"]
+                pair_deltas.append(
+                    asynchronous["input_write_mbps"] /
+                    sync["input_write_mbps"] - 1.0)
+                pair_request_deltas.append(
+                    asynchronous["lower_write_requests"] /
+                    sync["lower_write_requests"] - 1.0)
+            throughput_ci = paired_ci95(pair_deltas)
+            request_ci = paired_ci95(pair_request_deltas)
+            if throughput_ci["low"] >= .05:
+                throughput_result = "CONFIRMED_5PCT_GAIN"
+            elif throughput_ci["high"] <= -.05:
+                throughput_result = "CONFIRMED_5PCT_LOSS"
+            else:
+                throughput_result = "NO_CONFIRMED_5PCT_GAIN"
+            criteria["async_vs_sync"] = {
+                "write_gain_fraction": throughput_ci["mean"],
+                "write_throughput": throughput_result,
+                "matched_pairs": 5,
+                "paired_95pct_ci": throughput_ci,
+                "lower_request_change_paired_95pct_ci": request_ci,
+                "caution": "Synthetic RAM model; five matched pairs",
+            }
+        else:
+            criteria["async_vs_sync"] = {
+                "write_gain_fraction": delta,
+                "write_throughput": (
+                    "PRELIMINARY_5PCT_GAIN" if delta >= .05 else
+                    "PRELIMINARY_5PCT_LOSS" if delta <= -.05 else
+                    "NO_SIGNIFICANT_ASYNC_GAIN"),
+                "caution":
+                    "Only two observations per mode; no confidence interval",
+            }
         verdicts[regime] = {
             "columns": columns, "criteria": criteria,
             "device_model": MODEL_SPECS[regime],
@@ -1237,7 +1444,9 @@ def benchmark_verdicts(sessions):
         "gc": "SEPARATE_LOADED_EVIDENCE_REQUIRED",
         "cpu_scope": "replay userspace CPU only; kernel callback wall is not CPU time",
         "physical_media": "NOT_TESTED",
-        "statistical_confidence": "EXPLORATORY: two pairs per mode/regime, materiality 5%, no CI",
+        "statistical_confidence":
+            "FAST_MIXED_FIVE_MATCHED_PAIRS_WITH_PAIRED_95PCT_CI; "
+            "SLOW_TWO_OBSERVATIONS_PER_MODE",
         "real_swap_device": "NOT_AUTHORIZED_NOT_TESTED",
     }
 
@@ -1459,8 +1668,8 @@ def print_bench(result):
             ])
 
     parallel_ab = result["benchmarks"].get("parallel_read_ab", {})
-    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_AB_DIAGNOSTIC":
-        print("\n  ID39 SAME-CACHE PARALLEL READ A/B — diagnostic only")
+    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_AB_CONFIRMATION":
+        print("\n  ID39 SAME-CACHE PARALLEL READ A/B — five matched rounds")
         rows = []
         for enabled in ("0", "1"):
             seq = parallel_ab["modes"][enabled]["sequential"]
@@ -1477,7 +1686,13 @@ def print_bench(result):
             ))
         print_table(("parallel", "seq KiB", "seq req", "seq p99",
                      "rnd KiB", "rnd req", "rnd p99", "pairs"), rows)
-        print("  A/B LIMITATION: two observations/mode; no confidence interval.")
+        seq_ci = parallel_ab["paired"]["sequential"]["p99_change_fraction"]
+        rnd_ci = parallel_ab["paired"]["seeded_random"]["p99_change_fraction"]
+        print("  p99 on/off paired 95% CI: "
+              f"seq {seq_ci['mean'] * 100:+.1f}% "
+              f"[{seq_ci['low'] * 100:+.1f},{seq_ci['high'] * 100:+.1f}]%; "
+              f"rnd {rnd_ci['mean'] * 100:+.1f}% "
+              f"[{rnd_ci['low'] * 100:+.1f},{rnd_ci['high'] * 100:+.1f}]%")
     else:
         print("\n  ID39 parallel READ A/B: NOT QUALIFIED "
               f"({parallel_ab.get('reason', parallel_ab.get('overall', 'NOT_RUN'))})")
@@ -1512,8 +1727,8 @@ def print_bench(result):
         ("scope", "value"),
         [
             ("media", "synthetic RAM only"),
-            ("mixed statistics", "two pairs/mode; no confidence interval"),
-            ("write-only", "one pair/QD; directional only"),
+            ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
+            ("write-only", "fast QD8: 5 matched pairs + paired CI; others directional"),
             ("CPU", "replay CPU only; kernel callback wall is not CPU time"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
@@ -1521,8 +1736,8 @@ def print_bench(result):
         ])
 
     saturation = result["benchmarks"].get("write_saturation", {})
-    if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT":
-        print("\n  WRITE-ONLY SATURATION PILOT — directional only")
+    if saturation.get("overall") == "PASS_WRITE_SATURATION_EVIDENCE":
+        print("\n  WRITE-ONLY SATURATION EVIDENCE")
         for regime in MODEL_ORDER:
             cfg = MODEL_SPECS[regime]
             points = saturation["regimes"][regime]
@@ -1578,9 +1793,13 @@ def print_bench(result):
             print("  Async windows; close=P/D/I")
             print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
-        print("  PILOT LIMITATION: one pair per point; no confirmatory verdict.")
+        qd8_ci = saturation["fast_qd8_paired"]["throughput_change_fraction"]
+        print("  Fast QD8 A/S paired 95% CI: "
+              f"{qd8_ci['mean'] * 100:+.1f}% "
+              f"[{qd8_ci['low'] * 100:+.1f},{qd8_ci['high'] * 100:+.1f}]%")
+        print("  Other QDs remain directional controls.")
     else:
-        print("\n  Write-only saturation pilot: NOT QUALIFIED "
+        print("\n  Write-only saturation evidence: NOT QUALIFIED "
               f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")
 
 
@@ -1771,14 +1990,14 @@ def main():
                 benchmark["overall"] = "INCONCLUSIVE"
                 benchmark["reason"] = "Loaded benchmark source Git ID mismatched tested checkout"
         saturation = result["benchmarks"]["write_saturation"]
-        if saturation.get("overall") == "PASS_WRITE_SATURATION_PILOT" and \
+        if saturation.get("overall") == "PASS_WRITE_SATURATION_EVIDENCE" and \
                 re.fullmatch(r"[0-9a-f]{40}", result["tested_commit_sha"]):
             if any(session.get("source_sha") != result["tested_commit_sha"]
                    for session in result["benchmarks"]["write_saturation_sessions"]):
                 saturation["overall"] = "INCONCLUSIVE"
-                saturation["reason"] = "Write-only pilot source Git ID mismatched tested checkout"
+                saturation["reason"] = "Write-only evidence source Git ID mismatched tested checkout"
         if benchmark.get("overall") != "PASS_BOUNDED_RAM_MATRIX" or \
-                saturation.get("overall") != "PASS_WRITE_SATURATION_PILOT":
+                saturation.get("overall") != "PASS_WRITE_SATURATION_EVIDENCE":
             result["overall"] = "FAIL"
             exit_code = 1
     write_report(result)

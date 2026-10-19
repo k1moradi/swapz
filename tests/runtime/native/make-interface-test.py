@@ -361,9 +361,11 @@ class PublicMakeContract(unittest.TestCase):
             ]
             specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),
                      ("ssd_emulated", 80, 150000, 2, 2, 1, 64))
+            confirmation = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_OWNED_RAM_REGIME={regime}")
-                for i, mode in enumerate((0, 1, 1, 0)):
+                modes = confirmation if regime == "ssd_emulated" else (0, 1, 1, 0)
+                for i, mode in enumerate(modes):
                     records.extend((
                         f"START_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                         "REPLAY_ORDER=swapz-first" if i % 2 else "REPLAY_ORDER=off-first",
@@ -376,7 +378,7 @@ class PublicMakeContract(unittest.TestCase):
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (80, 150000, 2, 2, 1, 64)
-            for index, enabled in enumerate((0, 1, 1, 0)):
+            for index, enabled in enumerate(confirmation):
                 records.extend((
                     f"START_PARALLEL_READ_AB={enabled}",
                     "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
@@ -389,7 +391,10 @@ class PublicMakeContract(unittest.TestCase):
                 records.append(f"START_WRITE_SATURATION_REGIME={regime}")
                 index = 0
                 for qd in (1, 4, 8, 32):
-                    for mode in (0, 1):
+                    modes = (confirmation
+                             if regime == "ssd_emulated" and qd == 8
+                             else (0, 1))
+                    for mode in modes:
                         records.extend((
                             f"START_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}",
                             "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",

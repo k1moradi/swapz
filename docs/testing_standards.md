@@ -22,7 +22,7 @@ A complete run includes:
 2. Direct production-C native tests plus source, build-interface, report and packaging contracts.
 3. Kernel W=1 build.
 4. Kernel W=2 build.
-5. Owned RAM-backed `null_blk` correctness, lifecycle/fault checks, matched mixed benchmark pairs and the bounded write-only QD pilot.
+5. Owned RAM-backed `null_blk` correctness, lifecycle/fault checks, matched mixed benchmark evidence and bounded write-only QD evidence.
 
 Stages are ordered and fail fast. Privileged device sessions must never overlap. If noninteractive privilege or safe owned-device provisioning is unavailable, the complete run reports BLOCKED rather than silently skipping loaded work.
 
@@ -44,11 +44,11 @@ Cleanup never force-removes uncertain resources. If identity or teardown is ambi
 
 ## Benchmark pairing and provenance
 
-The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms completion and 80 MiB/s with 0.15 ms completion. Each model has four counterbalanced pairs across synchronous/asynchronous preparation. The control candidate is `off`; the product candidate is `swapz`.
+The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms completion and 80 MiB/s with 0.15 ms completion. The slow model remains a bounded four-session directional control (two sync, two async). The fast model runs ten sessions in the fixed sequence `0,1,1,0,0,1,1,0,0,1`, which forms five adjacent counterbalanced sync/async matched rounds. The control candidate inside every session is `off`; the product candidate is `swapz`.
 
-Both arms of every pair carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered.
+Both arms of every session carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered. The five fast matched deltas use a two-sided Student-t 95% confidence interval with four degrees of freedom. Report both the paired mean and interval; do not replace paired analysis with an interval over unpaired arm means.
 
-The write-only saturation pilot uses QD1/4/8/32 under the same two models with one sync and one async pair per QD. Until at least five counterbalanced pairs per mode/QD/regime and confidence intervals are implemented, it is directional only.
+The write-only QD1/4/8/32 sweep stays directional except for fast QD8. Slow QD1/4/8/32 and fast QD1/QD4/QD32 each run one sync and one async observation. Fast QD8 uses the same ten-session confirmation sequence and reports paired 95% confidence intervals for useful throughput, lower requests and lower bytes. A claim about any other QD still requires its own >=5 matched rounds.
 
 ## Report contract
 
@@ -739,19 +739,24 @@ materially, useful throughput or read tails regress, or lifecycle/order/failure
 gates change. A favorable synthetic result remains policy evidence only for the
 tested RAM models.
 
-### Same-cache Kread A/B diagnostic
+### Same-cache Kread A/B confirmation
 
-The loaded test runs exactly four SSD_EMULATED sessions in order
-`parallel_reads=0,1,1,0`, with `async_prepare=0`, identical source/fixture/trace
-and alternating raw/swapz replay order. The Kread-off arm must report zero
-`parallel_read_pairs`; every Kread-on packed pass must report positive pair
-activity before latency comparisons are accepted. Each packed pass remains
-4 MiB/1024 verified pages. Compare seq/random p99, useful throughput and lower
-bytes/requests. Two observations per mode are diagnostic only; promotion still
-requires repeated evidence. If lifecycle qualification passes but this A/B
-contract fails, the loaded stage must fail with the A/B diagnostic reason rather
-than attempting to read a lifecycle failure reason from a passing lifecycle
-result.
+The loaded test runs exactly ten SSD_EMULATED sessions in fixed order
+`parallel_reads=0,1,1,0,0,1,1,0,0,1`, with `async_prepare=0`, identical
+source/fixture/trace and alternating raw/swapz replay order. Adjacent sessions
+form five counterbalanced Kread-off/on matched rounds. The Kread-off arm must
+report zero `parallel_read_pairs`; every Kread-on packed pass must report
+positive pair activity before latency comparisons are accepted. Each packed
+pass remains 4 MiB/1024 verified pages.
+
+For sequential and seeded-random reads, report paired on/off change fractions
+and two-sided Student-t 95% confidence intervals for p99, useful throughput,
+lower bytes and lower requests. Promotion requires a repeatable latency benefit
+without material traffic inflation; a confidence interval is evidence, not a
+license to ignore the physical-I/O gate. If lifecycle qualification passes but
+this A/B contract fails, the loaded stage must fail with the A/B evidence reason
+rather than attempting to read a lifecycle failure reason from a passing
+lifecycle result.
 
 The standard mixed report must also expose existing sync/async window bins
 (win1, win2, win3_4, win5_8, win9_16, win17_64) plus PACK_READY/DEADLINE/IDLE

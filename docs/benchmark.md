@@ -21,9 +21,9 @@ Mandatory loaded benchmarking uses newly owned RAM-backed `null_blk` only:
 
 These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results. Every timed arm samples the positively identified lower device's block-layer READ/WRITE in-flight counters and reports sampled boundary depth, peak and time-weighted mean. swapz mixed arms also report K=1 immutable-run slot occupancy from async submission through ordered publication.
 
-The mixed QD32 matrix uses four counterbalanced pairs per model across sync/async preparation. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks.
+The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The write-only pilot uses QD1/4/8/32, 0% reads, finite unpaced waves, one sync and one async pair per QD/model, and exact final verification. One pair is exploratory only.
+The write-only sweep uses QD1/4/8/32, 0% reads, finite unpaced waves and exact final verification. Fast QD8 receives ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4/QD32 retain one sync and one async directional observation.
 
 ## Timed boundaries
 
@@ -78,14 +78,15 @@ ID39 also moved from ambiguity to positive controlled evidence. With source,
 fixture, trace and the shared extent cache fixed, Kread-off/on sequential p99
 is 5.57/5.21 ms and random p99 is 5.65/4.98 ms. Lower bytes/requests are
 unchanged or slightly lower with Kread enabled, and enabled sessions execute
-parallel pairs. The result still has only two observations per mode, so the
-next evidence matrix repeats matched toggles before promotion.
+parallel pairs. The candidate harness now repeats five same-cache matched
+off/on rounds and reports paired 95% confidence intervals before promotion.
 
 Fast mixed async/sync is 23.72/22.27 MB/s with 905.5/925 lower WRITE requests.
 Fast write-only QD8 is 28.27/20.65 MB/s async/sync with 524 lower requests and
 QD32 is 41.62/38.17 with 139. Those are useful directional signals for the K=1
-ping-pong path, not confirmation: mixed has two observations/mode and
-write-only one pair/QD.
+ping-pong path. The candidate harness now repeats fast mixed and fast QD8 as
+five matched rounds with paired 95% confidence intervals; the other QDs remain
+directional controls.
 
 Existing fast mixed 2-4-record windows total 158.0 async versus 149.5 sync.
 That modest excess does not justify another multi-tail policy or hot-path
@@ -93,7 +94,7 @@ histogram yet; preserve the current bins through repeated evidence instead.
 
 ## Confirmation gate
 
-Do not claim a QD performance improvement until each mode/QD/regime has at least five counterbalanced matched pairs, an appropriate confidence interval, unchanged correctness, provenance equality and no unacceptable regression in lower bytes, read tails, CPU/RAM or GC.
+Do not claim a QD performance improvement until that specific QD/regime has at least five counterbalanced matched rounds, an appropriate paired confidence interval, unchanged correctness, provenance equality and no unacceptable regression in lower bytes, read tails, CPU/RAM or GC. The current confirmation harness qualifies only fast mixed QD32, fast write-only QD8 and the same-cache Kread toggle for this statistical gate; the remaining QDs are controls, not confirmed performance claims.
 
 ## Physical media
 

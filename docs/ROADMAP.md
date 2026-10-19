@@ -31,14 +31,16 @@ full-deadline singleton fast-close heuristic.
 ID39 now has controlled same-source/same-cache evidence in its favor. Kread-off
 versus Kread-on fast p99 is 5.57/5.21 ms sequential and 5.65/4.98 ms random,
 while lower traffic is effectively unchanged/slightly lower and Kread-on
-executes about 333 parallel pairs. This is two observations per mode, so the
-mechanism remains pending >=5 matched confirmation rather than policy changes.
+executes about 333 parallel pairs. The successor harness now collects five
+same-cache matched rounds with paired 95% confidence intervals; policy remains
+unchanged until that owner-loaded confirmation passes.
 
 ID50 remains Class 4. The latest fast mixed async/sync result is 23.72/22.27
 MB/s with 905.5/925 lower WRITE requests, while write-only QD8 is
 28.27/20.65 MB/s async/sync with 524 lower requests. These are encouraging
-directional results, but mixed still has two observations per mode and
-write-only one pair per point. Repeated matched evidence is the next gate.
+directional results. The successor harness now gives fast mixed and fast
+write-only QD8 five matched rounds with paired 95% confidence intervals while
+keeping the slow model and other QDs as bounded controls.
 
 Existing fast mixed 2-4-record windows are 158.0 async versus 149.5 sync, only
 about a 5.7% excess. That is not enough to justify another multi-tail hot-path
@@ -91,7 +93,7 @@ changes.
 | 12 | Split stage/pause hash/hole-clear/control residual | **1 completed snapshot measurement** | Reconfirmed at ~1.7/1.1 ms pause with ~8.6/6.2 ms residual after subtraction. Full-transaction hashing stays; the snapshot-scope optimization question is closed. Further residual splitting is optional attribution only. |
 | 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
 | 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. |
-| 15 | >=5 counterbalanced pairs for mixed/QD points | **4 evidence collection ready** | Decisive WRITE-policy gate. Latest fast QD8 is +36.9% async/sync and fast mixed is +6.5%, but current samples are still one pair/QD and two observations/mode. Run >=5 matched fast QD8 and mixed pairs with paired uncertainty before promotion. |
+| 15 | >=5 counterbalanced pairs for mixed/QD points | **4 evidence harness implemented** | Fast mixed and fast QD8 now run five adjacent counterbalanced matched rounds with paired 95% CIs. Other QDs remain directional controls; owner-loaded evidence is still required before promotion. |
 | 16 | N=2/4 preparation workers in old single-credit design | **5** | Refuted as formulated. |
 | 17 | Pointer handoff solely to remove current copies | **5** | Reconfirmed: explicit copies are only ~5.1 ms slow / 3.5 ms fast. |
 | 18 | Rewrite bounded DP planner | **5** | Reconfirmed: planner is ~6.3 ms slow / 4.4 ms fast and is not dominant. |
@@ -113,9 +115,9 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **4 confirmation pending** | Latest fast write-only QD8 is +36.9% async/sync with 524 lower requests and QD32 is +9.1% with 139; fast mixed is +6.5%. Keep opt-in and change no scheduling until >=5 matched confirmation. |
+| 37 | K=1 ping-pong WRITE pipeline | **4 confirmation harness implemented** | Latest fast QD8 is +36.9% async/sync with 524 lower requests and fast mixed is +6.5%. The next owner run supplies five matched fast QD8/mixed rounds with paired CIs; change no scheduling before that evidence. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5** | Stronger hold. Serial hwq=1 has no parallel service slot. Fast hwq=64 has capacity, but K=1 run occupancy is only ~0.09 and preparation backlog is shallow; there is no sustained ready-run pressure for K>1 yet. |
-| 39 | Latency-first bounded parallel READ service | **4 confirmation pending** | Same-cache Kread-on improves fast sequential p99 5.57 -> 5.21 ms and random 5.65 -> 4.98 ms with unchanged/slightly lower traffic and positive parallel activity. Repeat >=5 matched toggles before promotion. |
+| 39 | Latency-first bounded parallel READ service | **4 confirmation harness implemented** | Same-cache Kread-on improves fast sequential p99 5.57 -> 5.21 ms and random 5.65 -> 4.98 ms with unchanged/slightly lower traffic. The next owner run supplies five matched toggles and paired CIs before promotion. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
