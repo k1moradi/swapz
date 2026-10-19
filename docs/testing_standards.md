@@ -718,10 +718,14 @@ policy requires a separate source revision after owner evidence.
 The loaded test runs exactly four SSD_EMULATED sessions in order
 `parallel_reads=0,1,1,0`, with `async_prepare=0`, identical source/fixture/trace
 and alternating raw/swapz replay order. The Kread-off arm must report zero
-`parallel_read_pairs`; Kread-on must report activity. Each packed pass remains
+`parallel_read_pairs`; every Kread-on packed pass must report positive pair
+activity before latency comparisons are accepted. Each packed pass remains
 4 MiB/1024 verified pages. Compare seq/random p99, useful throughput and lower
 bytes/requests. Two observations per mode are diagnostic only; promotion still
-requires repeated evidence.
+requires repeated evidence. If lifecycle qualification passes but this A/B
+contract fails, the loaded stage must fail with the A/B diagnostic reason rather
+than attempting to read a lifecycle failure reason from a passing lifecycle
+result.
 
 The standard mixed report must also expose existing sync/async window bins
 (win1, win2, win3_4, win5_8, win9_16, win17_64) plus PACK_READY/DEADLINE/IDLE

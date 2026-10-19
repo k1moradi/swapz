@@ -398,6 +398,12 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(diagnostic["overall"], "PASS_PARALLEL_READ_AB_DIAGNOSTIC")
         self.assertEqual(diagnostic["modes"]["0"]["sequential"]["parallel_read_pairs"], 0)
         self.assertGreater(diagnostic["modes"]["1"]["sequential"]["parallel_read_pairs"], 0)
+        inactive = runner.parse_parallel_read_ab(synthetic_log())
+        next(row for row in inactive if row["parallel_reads"] == 1)["swapz"]["passes"][
+            "sequential"]["kernel_read_path"]["parallel_read_pairs"] = 0
+        rejected = runner.parallel_read_ab_verdict(inactive)
+        self.assertEqual(rejected["overall"], "INCOMPLETE")
+        self.assertIn("executed no parallel pairs", rejected["reason"])
         self.assertEqual([s["async_prepare"] for s in sessions],
                          [0, 1, 1, 0] * 2)
         self.assertEqual([s["regime"] for s in sessions],
@@ -796,6 +802,29 @@ class ReportContract(unittest.TestCase):
                               stage["failed_phase"])
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
+
+    def test_parallel_read_diagnostic_failure_reports_its_own_reason(self):
+        broken = synthetic_log().replace("PASS_PARALLEL_READ_AB=1\n", "", 1)
+        fake_process = type("FakeProcess", (), {
+            "stdout": broken,
+            "returncode": 0,
+        })()
+        original_run = runner.subprocess.run
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        try:
+            runner.subprocess.run = lambda *args, **kwargs: fake_process
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    runner.run_stage("Owned RAM smoke and 8 pairs",
+                                     ["unused"], report, parse_bench=True), 1)
+        finally:
+            runner.subprocess.run = original_run
+
+        stage = report["stages"][-1]
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["failed_phase"], "parallel READ A/B evidence")
+        self.assertIn("Kread diagnostic", stage["diagnostic"])
 
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created

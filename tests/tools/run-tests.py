@@ -513,8 +513,14 @@ def run_stage(title, command, result, *, parse_bench=False):
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
         if marker_failure:
-            record["failed_phase"] = "owned RAM lifecycle evidence"
-            record["diagnostic"] = loaded_correctness["reason"]
+            if loaded_correctness.get("overall") != "PASS":
+                record["failed_phase"] = "owned RAM lifecycle evidence"
+                record["diagnostic"] = loaded_correctness.get(
+                    "reason", "Loaded correctness evidence is incomplete")
+            else:
+                record["failed_phase"] = "parallel READ A/B evidence"
+                record["diagnostic"] = parallel_read_diagnostic.get(
+                    "reason", "Kread diagnostic evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -757,6 +763,8 @@ def parallel_read_ab_verdict(sessions):
                 return {"overall": "INCOMPLETE", "reason": "Kread diagnostic C telemetry missing"}
             if not row["parallel_reads"] and kernel["parallel_read_pairs"]:
                 return {"overall": "INCOMPLETE", "reason": "Kread-off arm executed parallel pairs"}
+            if row["parallel_reads"] and not kernel["parallel_read_pairs"]:
+                return {"overall": "INCOMPLETE", "reason": "Kread-on arm executed no parallel pairs"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
