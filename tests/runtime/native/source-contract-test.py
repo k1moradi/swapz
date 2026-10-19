@@ -19,7 +19,7 @@ README = (ROOT / "docs/README.md").read_text()
 
 
 def body(symbol: str) -> str:
-    match = re.search(r"static\s+(?:int|void|bool|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
+    match = re.search(r"static\s+(?:int|void|bool|u64|unsigned\s+long|enum\s+hrtimer_restart|const\s+u8\s*\*)\s*" + re.escape(symbol) +
                       r"\s*\([^;]*?\)\s*\{", DM, re.S)
     if not match:
         raise AssertionError(f"Missing production symbol {symbol}")
@@ -879,8 +879,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         process = body("swapz_process")
         parallel_batch = body("swapz_try_parallel_read_batch")
         self.assertIn("ctx->single_tail_deferred_start_ns = ktime_get_ns()", sample)
-        self.assertIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS 1000000ULL", DM_TARGET)
-        self.assertIn("swapz_window_single_tail_deadline_ns(", DM_TARGET)
+        self.assertIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS 1000000ULL", DM)
+        self.assertIn("swapz_window_single_tail_deadline_ns(", DM)
         self.assertIn("ctx->single_tail_age_cutoff_closes++", flush)
         self.assertIn("ctx->single_tail_cutoff_original_deadline_ns", flush)
         self.assertIn("ctx->single_tail_cutoff_late_companions++", accept)
@@ -1267,6 +1267,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             "Never use full-process window counters for the QD pilot", runner)
 
     def test_alpha12_retention_has_absolute_timer_and_drain(self):
+        deadline = body("swapz_retention_deadline_ns")
         expiry = body("swapz_retention_expired")
         wake = body("swapz_retention_wake")
         process = body("swapz_process")
@@ -1276,14 +1277,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         drain = body("swapz_drain")
         ctr = body("swapz_ctr")
         status = body("swapz_status")
-        self.assertIn("ctx->window_first_ns", expiry)
-        self.assertIn("swapz_window_retention_expired", expiry)
-        self.assertIn("ktime_get_ns(), ctx->retain_ms", expiry)
+        self.assertIn("ctx->window_first_ns", deadline)
+        self.assertIn("swapz_window_single_tail_deadline_ns", deadline)
+        self.assertIn("SWAPZ_SINGLE_TAIL_CUTOFF_NS", deadline)
+        self.assertIn("swapz_window_deadline_expired", expiry)
+        self.assertIn("swapz_retention_deadline_ns(ctx)", expiry)
+        self.assertIn("ktime_get_ns()", expiry)
         self.assertNotIn("nsecs_to_jiffies64", DM)
         self.assertNotIn("swapz_retention_delay", DM)
         self.assertIn("hrtimer_start(&ctx->retention_timer", worker)
-        self.assertIn("ctx->window_first_ns +", worker)
-        self.assertIn("ctx->retain_ms * 1000000ULL", worker)
+        self.assertIn("desired_deadline = swapz_retention_deadline_ns(ctx)", worker)
+        self.assertIn("ns_to_ktime(desired_deadline)", worker)
         self.assertIn("HRTIMER_MODE_ABS", worker)
         self.assertIn("spin_lock_irqsave(&ctx->queue_lock", wake)
         self.assertIn("if (ctx->accepting)", wake)
