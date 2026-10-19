@@ -689,3 +689,9 @@ Source-contract assertions follow ownership helpers rather than retired syntax.
 A grouped dispatch may consume more than two BIOs, so worker-quantum coverage
 must require `remaining -= processed_bios` and an exact processed count returned
 by the grouped-read helper rather than a hard-coded paired value.
+
+The existing one-block selective-read budget remains an exact compatibility
+contract. `read_cached_full` denotes reusable multi-block extent residency; it
+must remain false for one-block extents and when `max_read_blocks_per_record ==
+1`, even though `read_cache_valid` and the exact block mask may be populated.
+The shared extent cache is bypassed under the one-block budget.

@@ -1238,8 +1238,12 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	 * and payload-CRC validation. Any error path leaves the cache invalid. */
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
-	engine->read_cached_full = cached_mask ==
-		(swapz_u8)((1U << observed.extent_blocks) - 1U);
+	/* Preserve the qualified one-block/selective-read contract: "full" is
+	 * reusable multi-block extent residency, never merely a fetched 4KiB
+	 * metadata block. The exact block mask remains authoritative either way. */
+	engine->read_cached_full = observed.extent_blocks > 1 &&
+		engine->max_read_blocks_per_record != 1 &&
+		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
 	engine->read_cached_block_mask = cached_mask;
 	engine->read_cache_valid = 1;
 	if (cached_metadata)
