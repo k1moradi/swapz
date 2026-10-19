@@ -104,6 +104,9 @@ same-filled writes and intentionally fixture-biased exact-content duplication.
   cannot exceed grouped pairs, and adjacent block totals must be 2..16 blocks
   per adjacent observation. No read waits for a future BIO and no merged lower
   request is implemented.
+  The console keeps the established compact ID39 matrix and prints ID63
+  distinct/adjacent/block opportunity in a separate narrow table; complete
+  counters remain in the JSON report.
 - **ID61 background GC:** first measure foreground-GC stall/headroom during
   useful I/O including total GC lower traffic and exact final image.
 - **ID62 real device:** current host-safety rules still prohibit collection.

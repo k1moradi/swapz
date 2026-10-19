@@ -1989,6 +1989,8 @@ def print_bench(result):
             ))
         print_table(("parallel", "seq KiB", "seq req", "seq p99",
                      "rnd KiB", "rnd req", "rnd p99", "pairs", "same-ext"), rows)
+        # Keep passive ID63 evidence separate from the Kread matrix so the
+        # operator summary remains compact while JSON retains every counter.
         enabled = parallel_ab["modes"]["1"]
         print("  ID63 adjacent distinct-extent opportunity")
         print_table(
