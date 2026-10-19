@@ -259,6 +259,19 @@ class PublicMakeContract(unittest.TestCase):
                     "total_time_weighted": read_mean + 0.5,
                 }
 
+            def mock_opportunity():
+                return {
+                    "scope": "TRACE_FIXTURE_OPPORTUNITY_ONLY_NOT_KERNEL_SAVINGS",
+                    "measured_write_ops": 100,
+                    "measured_unique_write_payloads": 20,
+                    "nonzero_same_filled_write_ops": 5,
+                    "same_page_rewrite_ops": 7,
+                    "resident_duplicate_write_ops": 30,
+                    "final_live_unique_payloads": 18,
+                    "final_live_duplicate_pages": 40,
+                    "final_live_nonzero_same_filled_pages": 3,
+                }
+
             def mock_arm(candidate, mode):
                 is_swapz = candidate == "swapz"
                 return json.dumps({
@@ -274,6 +287,7 @@ class PublicMakeContract(unittest.TestCase):
                     "mixed_replay_cpu_system_s": 0.08,
                     "mixed_replay_peak_rss_kb": 10000,
                     "lower_inflight": mock_lower_inflight(True),
+                    "workload_opportunity": mock_opportunity(),
                     "kernel_write_path": (
                         mock_kernel_write(mode, 8) if is_swapz else None),
                     "packed_read": {

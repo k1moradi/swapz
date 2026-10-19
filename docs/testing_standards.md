@@ -109,6 +109,9 @@ active experiment.
   The compact console summary is emitted only from a successfully validated
   mixed-matrix verdict; write-saturation parsing must not depend on this
   opportunity record.
+  Rootless public-Make fixtures must synthesize the same opportunity schema so
+  the mocked loaded matrix cannot bypass or accidentally fail the report
+  contract.
 - **ID60 read coalescing:** first report the already-collected same-extent share
   of Kread pairs. New coalescing may operate only on reads already queued; no
   grace timer or future-arrival wait is allowed. Acceptance requires lower READ
