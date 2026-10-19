@@ -118,11 +118,36 @@ experiment must show fewer lower READ requests/bytes without increasing p99;
 it may combine only reads already waiting for service and must not wait for a
 future read to manufacture a batch.
 
+**Adjacent distinct-extent READ coalescing (ID63).** This is *not* the
+same-extent sibling case covered by ID60. Current owner-qualified sequential
+owned-RAM evidence for the shared read cache reports 2830 KiB / 400.5 lower
+READ requests (~7.1 KiB/request); it signals possible per-request overhead,
+not that those requests were physically contiguous or simultaneously queued.
+Neither Kread's `parallel_read_same_extent_pairs` nor average request size can
+measure the adjacent-distinct-extent opportunity. The first gate is a passive
+count within already-admitted, independent READ prefixes of: immutable physical
+extent adjacency, queue-time overlap, the exact blocks each read needs after
+cache residency, avoidable lower READ requests, extra blocks a merged span would
+read, and ordering barriers. Report sequential and seeded-random separately.
+Only then consider a bounded (initially <=64 KiB) merged lower READ as an
+independent opt-in A/B against unchanged Kread=2; require byte-exact output,
+per-record metadata/payload integrity, stable authority/GC ownership, zero
+additional lower READ bytes, fewer lower READ requests, no read p95/p99 or useful
+throughput regression, and no future-arrival wait. Do not extrapolate a request
+count or endurance saving from the current synthetic averages.
+
 **Background GC (ID61).** Current live-GC qualification proves correctness and
 accounts lower GC I/O, but it is not evidence for a background worker. Required
 pre-implementation evidence is foreground GC wall/stall contribution during
 useful I/O, reserve/headroom pressure and latency/throughput impact under
 bounded owned-RAM pressure. Compare useful work including all GC lower traffic.
+
+**Dead-segment DISCARD/TRIM (ID29).** Existing synthetic GC victim-distribution
+and lower-I/O counters are prerequisites, not proof of a media wear benefit.
+For a future separately controlled experiment, report eligibility/alignment,
+unsupported or failed lower DISCARD behavior, segment role/liveness invariants,
+number of reclaimed segments, and all lower WRITE/READ/DISCARD requests and
+bytes without claiming an SSD FTL reduction from RAM `null_blk` results.
 
 **K>1 (ID38).** A second lower-WRITE slot is gated on sustained ready-run
 pressure while K=1 is genuinely busy plus demonstrated lower-device queue

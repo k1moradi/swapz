@@ -116,6 +116,22 @@ active experiment.
   of Kread pairs. New coalescing may operate only on reads already queued; no
   grace timer or future-arrival wait is allowed. Acceptance requires lower READ
   request reduction with no p99 regression and unchanged byte oracle.
+- **ID63 adjacent distinct-extent READ coalescing:** the ID60 same-extent
+  pair ratio does not answer whether physically contiguous *different* extents
+  are queued together. Before any lower-I/O merger, collect passive opportunity
+  counts from already-admitted independent READ prefixes: physical adjacency,
+  immutable authority/generation, cache-resident blocks, actually required
+  block spans, excess-read-byte risk and barriers. A later bounded opt-in must
+  compare at least five matched sequential/random pairs against Kread=2 using
+  identical trace/fixture/source, with byte-exact upper readback, per-record
+  CRC verification, cache invalidation and GC/overwrite races, fault/short-I/O
+  handling, fewer lower READ requests, no more lower READ bytes and no read-tail
+  regression. Never delay service to await future BIOs.
+- **ID29 dead-segment DISCARD/TRIM:** separately qualify RAM-only support,
+  alignment, failure/unsupported fallbacks, exact whole-dead-segment ownership,
+  ordering relative to rotation/reallocation and all lower traffic. No lower
+  DISCARD submission may authorize reclaim of live or pending data. FTL wear
+  benefit requires separate owner-approved physical-media evidence.
 - **ID61 background GC:** before creating a worker, add an owned-RAM phase that
   measures foreground-GC stall/headroom during useful I/O. Qualification must
   include total GC lower READ/WRITE traffic, reserve safety, useful throughput,
