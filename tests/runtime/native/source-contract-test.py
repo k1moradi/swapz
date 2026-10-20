@@ -1292,13 +1292,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn('"neon"', dispatch)
         self.assertIn("__builtin_cpu_supports(\"avx2\")", dispatch)
 
-        self.assertIn("#include <emmintrin.h>", sse2)
-        self.assertIn("_mm_sub_epi64", sse2)
-        self.assertIn("#include <immintrin.h>", avx2)
-        self.assertIn("_mm256_sub_epi64", avx2)
-        self.assertIn("_mm256_zeroupper", avx2)
-        self.assertIn("#include <arm_neon.h>", neon)
-        self.assertIn("vsubq_u64", neon)
+        self.assertIn("__attribute__((vector_size(16)))", sse2)
+        self.assertIn("delta64.u64 = value.u64 - previous.u64", sse2)
+        self.assertIn("__attribute__((vector_size(32)))", avx2)
+        self.assertIn("delta64.u64 = value.u64 - previous.u64", avx2)
+        self.assertIn("Advanced SIMD/NEON", neon)
+        self.assertIn("__attribute__((vector_size(16)))", neon)
 
         self.assertIn("predictor.o", kbuild)
         self.assertIn("predictor-sse2.o predictor-avx2.o", kbuild)
@@ -1324,7 +1323,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("liblz4-dev", workflow)
 
         self.assertIn('#include "predictor.h"', DM)
-        init = body("swapz_dm_init")
+        init_start = DM.index("static int __init swapz_dm_init")
+        init_end = DM.index("static void __exit swapz_dm_exit", init_start)
+        init = DM[init_start:init_end]
         self.assertIn("swapz_predictor_init()", init)
         self.assertNotIn("swapz_predict_delta64(", DM)
         self.assertNotIn('#include "predictor.h"', authority)

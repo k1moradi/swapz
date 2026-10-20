@@ -137,7 +137,10 @@ remains on hold.
   per-negative-profile false calls plus classifier-routed production-planner
   block/extent savings. Source contracts prove static-call kernel dispatch,
   x86 AVX2 CPU+YMM-state gating, SSE2 compatibility fallback, arm64 kernel-mode
-  NEON gating and isolated FPU compiler flags. The unprivileged Make-interface
+  NEON gating and isolated FPU compiler flags. On x86_64 the rootless build must
+  also disassemble the isolated native objects and prove SSE2 `psubq/paddq` and
+  AVX2 `vpsubq/vpaddq` code generation; source-level vector syntax alone is
+  insufficient acceleration evidence. The unprivileged Make-interface
   fixture must emit the same valid evidence schema. Production module init may
   select the backend, but DM data-path/codec/authority/engine code still has no
   predictor transform call and no filter metadata/policy-length surface exists

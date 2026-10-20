@@ -1,53 +1,62 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include <arm_neon.h>
-
 #include "predictor-internal.h"
+
+/*
+ * AArch64 integer vector extensions lower to the mandatory Advanced SIMD/NEON
+ * ISA when this translation unit is built with the kernel FPU flags.
+ */
+typedef unsigned long long swapz_u64x2
+	__attribute__((vector_size(16)));
+typedef swapz_u32 swapz_u32x4 __attribute__((vector_size(16)));
+
+union swapz_neon128 {
+	swapz_u64x2 u64;
+	swapz_u32x4 u32;
+};
+
+static int swapz_small_nonzero_delta32_value(swapz_u32 delta)
+{
+	return delta && (swapz_u32)(delta + 128U) <= 255U;
+}
+
+static int swapz_small_nonzero_delta64_value(unsigned long long delta)
+{
+	return delta && (unsigned long long)(delta + 0x8000ULL) <= 0xffffULL;
+}
 
 static swapz_u32 swapz_predict_delta64_score_two_neon(
 						const swapz_u8 *input,
 						swapz_u32 first,
 						swapz_u32 second)
 {
-	uint64x2_t previous =
-		vdupq_n_u64(swapz_predictor_load64(input + first));
-	uint64x2_t current = vdupq_n_u64(swapz_predictor_load64(
-		input + first + SWAPZ_PREDICTOR_U64_BYTES));
-	uint64x2_t delta64;
-	int64x2_t signed_delta64;
-	int64x2_t sign_extended16;
-	uint64x2_t fit64;
-	uint32x4_t delta32;
-	int32x4_t signed_delta32;
-	int32x4_t sign_extended8;
-	uint32x4_t fit8;
+	union swapz_neon128 previous;
+	union swapz_neon128 value;
+	union swapz_neon128 delta64;
+	union swapz_neon128 delta32;
 	swapz_u32 score = 0;
+	swapz_u32 pair;
 
-	previous = vsetq_lane_u64(
-		swapz_predictor_load64(input + second), previous, 1);
-	current = vsetq_lane_u64(swapz_predictor_load64(
-		input + second + SWAPZ_PREDICTOR_U64_BYTES), current, 1);
-	delta64 = vsubq_u64(current, previous);
-	signed_delta64 = vreinterpretq_s64_u64(delta64);
-	sign_extended16 = vshrq_n_s64(vshlq_n_s64(signed_delta64, 48), 48);
-	fit64 = vandq_u64(vceqq_s64(signed_delta64, sign_extended16),
-			 vmvnq_u64(vceqq_u64(delta64, vdupq_n_u64(0))));
-	delta32 = vsubq_u32(vreinterpretq_u32_u64(current),
-			   vreinterpretq_u32_u64(previous));
-	signed_delta32 = vreinterpretq_s32_u32(delta32);
-	sign_extended8 = vshrq_n_s32(vshlq_n_s32(signed_delta32, 24), 24);
-	fit8 = vandq_u32(vceqq_s32(signed_delta32, sign_extended8),
-			 vmvnq_u32(vceqq_u32(delta32, vdupq_n_u32(0))));
+	previous.u64[0] = swapz_predictor_load64(input + first);
+	previous.u64[1] = swapz_predictor_load64(input + second);
+	value.u64[0] = swapz_predictor_load64(
+		input + first + SWAPZ_PREDICTOR_U64_BYTES);
+	value.u64[1] = swapz_predictor_load64(
+		input + second + SWAPZ_PREDICTOR_U64_BYTES);
+	delta64.u64 = value.u64 - previous.u64;
+	delta32.u32 = value.u32 - previous.u32;
 
-	if (vgetq_lane_u64(fit64, 0))
-		score += 2U;
-	else
-		score += (swapz_u32)(vgetq_lane_u32(fit8, 0) != 0) +
-			 (swapz_u32)(vgetq_lane_u32(fit8, 1) != 0);
-	if (vgetq_lane_u64(fit64, 1))
-		score += 2U;
-	else
-		score += (swapz_u32)(vgetq_lane_u32(fit8, 2) != 0) +
-			 (swapz_u32)(vgetq_lane_u32(fit8, 3) != 0);
+	for (pair = 0; pair < 2U; ++pair) {
+		if (swapz_small_nonzero_delta64_value(delta64.u64[pair]))
+			score += 2U;
+		else {
+			swapz_u32 lane = 2U * pair;
+
+			score += swapz_small_nonzero_delta32_value(
+				delta32.u32[lane]);
+			score += swapz_small_nonzero_delta32_value(
+				delta32.u32[lane + 1U]);
+		}
+	}
 	return score;
 }
 
@@ -80,22 +89,26 @@ swapz_u32 swapz_predict_delta64_neon(const swapz_u8 *input,
 	swapz_u32 offset = SWAPZ_PREDICTOR_U64_BYTES;
 
 	swapz_predictor_store64(output, swapz_predictor_load64(input));
-	for (; offset + 16U <= SWAPZ_BLOCK_BYTES; offset += 16U) {
-		uint64x2_t current = vreinterpretq_u64_u8(
-			vld1q_u8(input + offset));
-		uint64x2_t previous = vreinterpretq_u64_u8(
-			vld1q_u8(input + offset - 8U));
+	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x2)) {
+		swapz_u64x2 value;
+		swapz_u64x2 previous;
+		swapz_u64x2 delta;
 
-		vst1q_u8(output + offset,
-			 vreinterpretq_u8_u64(vsubq_u64(current, previous)));
+		memcpy(&value, input + offset, sizeof(value));
+		memcpy(&previous, input + offset - SWAPZ_PREDICTOR_U64_BYTES,
+		       sizeof(previous));
+		delta = value - previous;
+		memcpy(output + offset, &delta, sizeof(delta));
 	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += 8U) {
-		unsigned long long current =
+	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
+		unsigned long long value =
 			swapz_predictor_load64(input + offset);
 		unsigned long long previous =
-			swapz_predictor_load64(input + offset - 8U);
+			swapz_predictor_load64(
+				input + offset - SWAPZ_PREDICTOR_U64_BYTES);
 
-		swapz_predictor_store64(output + offset, current - previous);
+		swapz_predictor_store64(output + offset, value - previous);
 	}
 	return 0;
 }
@@ -106,18 +119,22 @@ void swapz_unpredict_delta64_neon(const swapz_u8 *input, swapz_u8 *output)
 	swapz_u32 offset = SWAPZ_PREDICTOR_U64_BYTES;
 
 	swapz_predictor_store64(output, previous);
-	for (; offset + 16U <= SWAPZ_BLOCK_BYTES; offset += 16U) {
-		uint64x2_t delta =
-			vreinterpretq_u64_u8(vld1q_u8(input + offset));
-		uint64x2_t shifted =
-			vextq_u64(vdupq_n_u64(0), delta, 1);
-		uint64x2_t prefix = vaddq_u64(delta, shifted);
+	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x2)) {
+		union swapz_neon128 delta;
+		union swapz_neon128 prefix;
+		swapz_u64x2 shifted;
+		swapz_u64x2 base;
 
-		prefix = vaddq_u64(prefix, vdupq_n_u64(previous));
-		vst1q_u8(output + offset, vreinterpretq_u8_u64(prefix));
-		previous = vgetq_lane_u64(prefix, 1);
+		memcpy(&delta.u64, input + offset, sizeof(delta.u64));
+		shifted = (swapz_u64x2){0ULL, delta.u64[0]};
+		prefix.u64 = delta.u64 + shifted;
+		base = (swapz_u64x2){previous, previous};
+		prefix.u64 += base;
+		memcpy(output + offset, &prefix.u64, sizeof(prefix.u64));
+		previous = prefix.u64[1];
 	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += 8U) {
+	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
 		previous += swapz_predictor_load64(input + offset);
 		swapz_predictor_store64(output + offset, previous);
 	}

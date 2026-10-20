@@ -1,54 +1,58 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include <emmintrin.h>
-
 #include "predictor-internal.h"
+
+typedef unsigned long long swapz_u64x2
+	__attribute__((vector_size(16)));
+typedef swapz_u32 swapz_u32x4 __attribute__((vector_size(16)));
+
+union swapz_vec128 {
+	swapz_u64x2 u64;
+	swapz_u32x4 u32;
+};
+
+static int swapz_small_nonzero_delta32_value(swapz_u32 delta)
+{
+	return delta && (swapz_u32)(delta + 128U) <= 255U;
+}
+
+static int swapz_small_nonzero_delta64_value(unsigned long long delta)
+{
+	return delta && (unsigned long long)(delta + 0x8000ULL) <= 0xffffULL;
+}
 
 static swapz_u32 swapz_predict_delta64_score_two_sse2(
 						const swapz_u8 *input,
 						swapz_u32 first,
 						swapz_u32 second)
 {
-	__m128i previous = _mm_set_epi64x(
-		(long long)swapz_predictor_load64(input + second),
-		(long long)swapz_predictor_load64(input + first));
-	__m128i current = _mm_set_epi64x(
-		(long long)swapz_predictor_load64(
-			input + second + SWAPZ_PREDICTOR_U64_BYTES),
-		(long long)swapz_predictor_load64(
-			input + first + SWAPZ_PREDICTOR_U64_BYTES));
-	__m128i delta64 = _mm_sub_epi64(current, previous);
-	__m128i zero = _mm_setzero_si128();
-	__m128i sign16 =
-		_mm_srai_epi32(_mm_slli_epi32(delta64, 16), 31);
-	__m128i pair_sign =
-		_mm_shuffle_epi32(sign16, _MM_SHUFFLE(2, 2, 0, 0));
-	int low_ok = _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(
-		_mm_srai_epi32(delta64, 16), pair_sign)));
-	int high_ok = _mm_movemask_ps(_mm_castsi128_ps(
-		_mm_cmpeq_epi32(delta64, pair_sign)));
-	__m128i low16 = _mm_and_si128(delta64, _mm_set1_epi32(0xffff));
-	int zero16 = _mm_movemask_ps(_mm_castsi128_ps(
-		_mm_cmpeq_epi32(low16, zero)));
-	__m128i delta32 = _mm_sub_epi32(current, previous);
-	__m128i sign8 =
-		_mm_srai_epi32(_mm_slli_epi32(delta32, 24), 31);
-	int fit8 = _mm_movemask_ps(_mm_castsi128_ps(_mm_cmpeq_epi32(
-		_mm_srai_epi32(delta32, 8), sign8)));
-	int zero32 = _mm_movemask_ps(_mm_castsi128_ps(
-		_mm_cmpeq_epi32(delta32, zero)));
-	int lane8 = fit8 & ~zero32;
+	union swapz_vec128 previous;
+	union swapz_vec128 value;
+	union swapz_vec128 delta64;
+	union swapz_vec128 delta32;
 	swapz_u32 score = 0;
+	swapz_u32 pair;
 
-	if ((low_ok & 0x1) && (high_ok & 0x2) && !(zero16 & 0x1))
-		score += 2U;
-	else
-		score += (swapz_u32)((lane8 & 0x1) != 0) +
-			 (swapz_u32)((lane8 & 0x2) != 0);
-	if ((low_ok & 0x4) && (high_ok & 0x8) && !(zero16 & 0x4))
-		score += 2U;
-	else
-		score += (swapz_u32)((lane8 & 0x4) != 0) +
-			 (swapz_u32)((lane8 & 0x8) != 0);
+	previous.u64[0] = swapz_predictor_load64(input + first);
+	previous.u64[1] = swapz_predictor_load64(input + second);
+	value.u64[0] = swapz_predictor_load64(
+		input + first + SWAPZ_PREDICTOR_U64_BYTES);
+	value.u64[1] = swapz_predictor_load64(
+		input + second + SWAPZ_PREDICTOR_U64_BYTES);
+	delta64.u64 = value.u64 - previous.u64;
+	delta32.u32 = value.u32 - previous.u32;
+
+	for (pair = 0; pair < 2U; ++pair) {
+		if (swapz_small_nonzero_delta64_value(delta64.u64[pair]))
+			score += 2U;
+		else {
+			swapz_u32 lane = 2U * pair;
+
+			score += swapz_small_nonzero_delta32_value(
+				delta32.u32[lane]);
+			score += swapz_small_nonzero_delta32_value(
+				delta32.u32[lane + 1U]);
+		}
+	}
 	return score;
 }
 
@@ -81,22 +85,26 @@ swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input,
 	swapz_u32 offset = SWAPZ_PREDICTOR_U64_BYTES;
 
 	swapz_predictor_store64(output, swapz_predictor_load64(input));
-	for (; offset + 16U <= SWAPZ_BLOCK_BYTES; offset += 16U) {
-		__m128i current =
-			_mm_loadu_si128((const __m128i *)(input + offset));
-		__m128i previous =
-			_mm_loadu_si128((const __m128i *)(input + offset - 8U));
+	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x2)) {
+		swapz_u64x2 value;
+		swapz_u64x2 previous;
+		swapz_u64x2 delta;
 
-		_mm_storeu_si128((__m128i *)(output + offset),
-				 _mm_sub_epi64(current, previous));
+		memcpy(&value, input + offset, sizeof(value));
+		memcpy(&previous, input + offset - SWAPZ_PREDICTOR_U64_BYTES,
+		       sizeof(previous));
+		delta = value - previous;
+		memcpy(output + offset, &delta, sizeof(delta));
 	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += 8U) {
-		unsigned long long current =
+	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
+		unsigned long long value =
 			swapz_predictor_load64(input + offset);
 		unsigned long long previous =
-			swapz_predictor_load64(input + offset - 8U);
+			swapz_predictor_load64(
+				input + offset - SWAPZ_PREDICTOR_U64_BYTES);
 
-		swapz_predictor_store64(output + offset, current - previous);
+		swapz_predictor_store64(output + offset, value - previous);
 	}
 	return 0;
 }
@@ -107,19 +115,22 @@ void swapz_unpredict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output)
 	swapz_u32 offset = SWAPZ_PREDICTOR_U64_BYTES;
 
 	swapz_predictor_store64(output, previous);
-	for (; offset + 16U <= SWAPZ_BLOCK_BYTES; offset += 16U) {
-		__m128i delta =
-			_mm_loadu_si128((const __m128i *)(input + offset));
-		__m128i prefix = _mm_add_epi64(
-			delta, _mm_slli_si128(delta, SWAPZ_PREDICTOR_U64_BYTES));
+	for (; offset + sizeof(swapz_u64x2) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x2)) {
+		union swapz_vec128 delta;
+		union swapz_vec128 prefix;
+		swapz_u64x2 shifted;
+		swapz_u64x2 base;
 
-		prefix = _mm_add_epi64(prefix,
-				      _mm_set1_epi64x((long long)previous));
-		_mm_storeu_si128((__m128i *)(output + offset), prefix);
-		previous = (unsigned long long)_mm_cvtsi128_si64(
-			_mm_srli_si128(prefix, SWAPZ_PREDICTOR_U64_BYTES));
+		memcpy(&delta.u64, input + offset, sizeof(delta.u64));
+		shifted = (swapz_u64x2){0ULL, delta.u64[0]};
+		prefix.u64 = delta.u64 + shifted;
+		base = (swapz_u64x2){previous, previous};
+		prefix.u64 += base;
+		memcpy(output + offset, &prefix.u64, sizeof(prefix.u64));
+		previous = prefix.u64[1];
 	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += 8U) {
+	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
 		previous += swapz_predictor_load64(input + offset);
 		swapz_predictor_store64(output + offset, previous);
 	}

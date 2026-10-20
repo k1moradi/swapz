@@ -1,7 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include <immintrin.h>
-
 #include "predictor-internal.h"
+
+typedef unsigned long long swapz_u64x4
+	__attribute__((vector_size(32)));
+typedef swapz_u32 swapz_u32x8 __attribute__((vector_size(32)));
+
+union swapz_vec256 {
+	swapz_u64x4 u64;
+	swapz_u32x8 u32;
+};
+
+static int swapz_small_nonzero_delta32_value(swapz_u32 delta)
+{
+	return delta && (swapz_u32)(delta + 128U) <= 255U;
+}
+
+static int swapz_small_nonzero_delta64_value(unsigned long long delta)
+{
+	return delta && (unsigned long long)(delta + 0x8000ULL) <= 0xffffULL;
+}
 
 static swapz_u32 swapz_predict_delta64_score_four_avx2(
 						const swapz_u8 *input,
@@ -10,53 +27,34 @@ static swapz_u32 swapz_predict_delta64_score_four_avx2(
 						swapz_u32 third,
 						swapz_u32 fourth)
 {
-	__m256i previous = _mm256_set_epi64x(
-		(long long)swapz_predictor_load64(input + fourth),
-		(long long)swapz_predictor_load64(input + third),
-		(long long)swapz_predictor_load64(input + second),
-		(long long)swapz_predictor_load64(input + first));
-	__m256i current = _mm256_set_epi64x(
-		(long long)swapz_predictor_load64(
-			input + fourth + SWAPZ_PREDICTOR_U64_BYTES),
-		(long long)swapz_predictor_load64(
-			input + third + SWAPZ_PREDICTOR_U64_BYTES),
-		(long long)swapz_predictor_load64(
-			input + second + SWAPZ_PREDICTOR_U64_BYTES),
-		(long long)swapz_predictor_load64(
-			input + first + SWAPZ_PREDICTOR_U64_BYTES));
-	__m256i delta64 = _mm256_sub_epi64(current, previous);
-	__m256i zero = _mm256_setzero_si256();
-	__m256i sign16 =
-		_mm256_srai_epi32(_mm256_slli_epi32(delta64, 16), 31);
-	__m256i pair_sign =
-		_mm256_shuffle_epi32(sign16, _MM_SHUFFLE(2, 2, 0, 0));
-	int low_ok = _mm256_movemask_ps(_mm256_castsi256_ps(
-		_mm256_cmpeq_epi32(_mm256_srai_epi32(delta64, 16),
-				   pair_sign)));
-	int high_ok = _mm256_movemask_ps(_mm256_castsi256_ps(
-		_mm256_cmpeq_epi32(delta64, pair_sign)));
-	int zero16 = _mm256_movemask_ps(_mm256_castsi256_ps(
-		_mm256_cmpeq_epi32(_mm256_and_si256(
-			delta64, _mm256_set1_epi32(0xffff)), zero)));
-	__m256i delta32 = _mm256_sub_epi32(current, previous);
-	__m256i sign8 =
-		_mm256_srai_epi32(_mm256_slli_epi32(delta32, 24), 31);
-	int lane8 = _mm256_movemask_ps(_mm256_castsi256_ps(
-		_mm256_cmpeq_epi32(_mm256_srai_epi32(delta32, 8), sign8))) &
-		~_mm256_movemask_ps(_mm256_castsi256_ps(
-			_mm256_cmpeq_epi32(delta32, zero)));
+	union swapz_vec256 previous;
+	union swapz_vec256 value;
+	union swapz_vec256 delta64;
+	union swapz_vec256 delta32;
+	swapz_u32 offsets[4] = { first, second, third, fourth };
 	swapz_u32 score = 0;
 	swapz_u32 pair;
 
 	for (pair = 0; pair < 4U; ++pair) {
-		int low = 1 << (2U * pair);
-		int high = 1 << (2U * pair + 1U);
+		previous.u64[pair] =
+			swapz_predictor_load64(input + offsets[pair]);
+		value.u64[pair] = swapz_predictor_load64(
+			input + offsets[pair] + SWAPZ_PREDICTOR_U64_BYTES);
+	}
+	delta64.u64 = value.u64 - previous.u64;
+	delta32.u32 = value.u32 - previous.u32;
 
-		if ((low_ok & low) && (high_ok & high) && !(zero16 & low))
+	for (pair = 0; pair < 4U; ++pair) {
+		if (swapz_small_nonzero_delta64_value(delta64.u64[pair]))
 			score += 2U;
-		else
-			score += (swapz_u32)((lane8 & low) != 0) +
-				 (swapz_u32)((lane8 & high) != 0);
+		else {
+			swapz_u32 lane = 2U * pair;
+
+			score += swapz_small_nonzero_delta32_value(
+				delta32.u32[lane]);
+			score += swapz_small_nonzero_delta32_value(
+				delta32.u32[lane + 1U]);
+		}
 	}
 	return score;
 }
@@ -73,10 +71,8 @@ swapz_u32 swapz_predict_delta64_sample_score_avx2(const swapz_u8 *input)
 			input, base, base + SWAPZ_PREDICTOR_SUBPAGE_BYTES,
 			base + 2U * SWAPZ_PREDICTOR_SUBPAGE_BYTES,
 			base + 3U * SWAPZ_PREDICTOR_SUBPAGE_BYTES);
-	if (score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE) {
-		_mm256_zeroupper();
+	if (score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE)
 		return 0;
-	}
 	for (offset = SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES;
 	     offset < SWAPZ_PREDICTOR_SUBPAGE_BYTES;
 	     offset += SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES)
@@ -87,7 +83,6 @@ swapz_u32 swapz_predict_delta64_sample_score_avx2(const swapz_u8 *input)
 				base + SWAPZ_PREDICTOR_SUBPAGE_BYTES + offset,
 				base + 2U * SWAPZ_PREDICTOR_SUBPAGE_BYTES + offset,
 				base + 3U * SWAPZ_PREDICTOR_SUBPAGE_BYTES + offset);
-	_mm256_zeroupper();
 	return score;
 }
 
@@ -97,24 +92,27 @@ swapz_u32 swapz_predict_delta64_avx2(const swapz_u8 *input,
 	swapz_u32 offset = SWAPZ_PREDICTOR_U64_BYTES;
 
 	swapz_predictor_store64(output, swapz_predictor_load64(input));
-	for (; offset + 32U <= SWAPZ_BLOCK_BYTES; offset += 32U) {
-		__m256i current =
-			_mm256_loadu_si256((const __m256i *)(input + offset));
-		__m256i previous =
-			_mm256_loadu_si256((const __m256i *)(input + offset - 8U));
+	for (; offset + sizeof(swapz_u64x4) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x4)) {
+		swapz_u64x4 value;
+		swapz_u64x4 previous;
+		swapz_u64x4 delta;
 
-		_mm256_storeu_si256((__m256i *)(output + offset),
-				    _mm256_sub_epi64(current, previous));
+		memcpy(&value, input + offset, sizeof(value));
+		memcpy(&previous, input + offset - SWAPZ_PREDICTOR_U64_BYTES,
+		       sizeof(previous));
+		delta = value - previous;
+		memcpy(output + offset, &delta, sizeof(delta));
 	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += 8U) {
-		unsigned long long current =
+	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
+		unsigned long long value =
 			swapz_predictor_load64(input + offset);
 		unsigned long long previous =
-			swapz_predictor_load64(input + offset - 8U);
+			swapz_predictor_load64(
+				input + offset - SWAPZ_PREDICTOR_U64_BYTES);
 
-		swapz_predictor_store64(output + offset, current - previous);
+		swapz_predictor_store64(output + offset, value - previous);
 	}
-	_mm256_zeroupper();
 	return 0;
 }
 
@@ -124,25 +122,32 @@ void swapz_unpredict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output)
 	swapz_u32 offset = SWAPZ_PREDICTOR_U64_BYTES;
 
 	swapz_predictor_store64(output, previous);
-	for (; offset + 32U <= SWAPZ_BLOCK_BYTES; offset += 32U) {
-		__m256i delta =
-			_mm256_loadu_si256((const __m256i *)(input + offset));
-		__m256i prefix =
-			_mm256_add_epi64(delta, _mm256_slli_si256(delta, 8));
-		__m256i lower_carry = _mm256_permute4x64_epi64(
-			prefix, _MM_SHUFFLE(1, 1, 1, 1));
-		__m256i upper_carry = _mm256_blend_epi32(
-			_mm256_setzero_si256(), lower_carry, 0xf0);
+	for (; offset + sizeof(swapz_u64x4) <= SWAPZ_BLOCK_BYTES;
+	     offset += sizeof(swapz_u64x4)) {
+		union swapz_vec256 delta;
+		union swapz_vec256 prefix;
+		swapz_u64x4 shifted;
+		swapz_u64x4 upper_carry;
+		swapz_u64x4 base;
+		unsigned long long lower_carry;
 
-		prefix = _mm256_add_epi64(prefix, upper_carry);
-		prefix = _mm256_add_epi64(
-			prefix, _mm256_set1_epi64x((long long)previous));
-		_mm256_storeu_si256((__m256i *)(output + offset), prefix);
-		previous = (unsigned long long)_mm256_extract_epi64(prefix, 3);
+		memcpy(&delta.u64, input + offset, sizeof(delta.u64));
+		shifted = (swapz_u64x4){
+			0ULL, delta.u64[0], 0ULL, delta.u64[2]
+		};
+		prefix.u64 = delta.u64 + shifted;
+		lower_carry = prefix.u64[1];
+		upper_carry = (swapz_u64x4){
+			0ULL, 0ULL, lower_carry, lower_carry
+		};
+		prefix.u64 += upper_carry;
+		base = (swapz_u64x4){previous, previous, previous, previous};
+		prefix.u64 += base;
+		memcpy(output + offset, &prefix.u64, sizeof(prefix.u64));
+		previous = prefix.u64[3];
 	}
-	for (; offset < SWAPZ_BLOCK_BYTES; offset += 8U) {
+	for (; offset < SWAPZ_BLOCK_BYTES; offset += SWAPZ_PREDICTOR_U64_BYTES) {
 		previous += swapz_predictor_load64(input + offset);
 		swapz_predictor_store64(output + offset, previous);
 	}
-	_mm256_zeroupper();
 }
