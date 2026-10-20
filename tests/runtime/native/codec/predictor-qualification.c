@@ -12,7 +12,7 @@
 #include "engine.h"
 #include "predictor.h"
 
-#define PREDICTOR_CAP SWAPZ_MAX_COMPRESSED
+#define PREDICTOR_CAP ((int)SWAPZ_MAX_COMPRESSED)
 #define MAX_EVIDENCE_PAGES 1024U
 #define STRUCTURED_KINDS 9U
 #define STRUCTURED_PAGES_PER_KIND 32U
