@@ -448,9 +448,30 @@ def lower_inflight_error(record):
 
 
 def git_sha():
-    cmd = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
-                         text=True, capture_output=True, check=False)
-    return cmd.stdout.strip() if cmd.returncode == 0 else "unknown"
+    """Return the nearest non-report code revision for the current checkout."""
+    def git_text(*args):
+        cmd = subprocess.run(["git", *args], cwd=ROOT, text=True,
+                             capture_output=True, check=False)
+        return cmd.stdout.strip() if cmd.returncode == 0 else None
+
+    current = git_text("rev-parse", "HEAD")
+    if not current or not re.fullmatch(r"[0-9a-f]{40}", current):
+        return "unknown"
+    for _ in range(32):
+        subject = git_text("show", "-s", "--format=%s", current)
+        changed = git_text("diff-tree", "--no-commit-id", "--name-only",
+                           "-r", current)
+        parent = git_text("rev-parse", f"{current}^")
+        if subject is None or changed is None or parent is None:
+            break
+        names = [line for line in changed.splitlines() if line]
+        if (re.fullmatch(r"test: latest run for [0-9a-f]{12} \[skip ci\]",
+                         subject) and names == [GIT_RESULT] and
+                re.fullmatch(r"[0-9a-f]{40}", parent)):
+            current = parent
+            continue
+        break
+    return current
 
 
 def paired_provenance_error(row, label):
@@ -758,10 +779,15 @@ def failure_context(output, *, loaded=True, default_phase=None):
 def run_stage(title, command, result, *, parse_bench=False):
     start = time.monotonic()
     try:
+        child_env = os.environ.copy()
+        tested_source = result.get("tested_commit_sha")
+        if isinstance(tested_source, str) and re.fullmatch(
+                r"[0-9a-f]{40}", tested_source):
+            child_env["SWAPZ_TESTED_SOURCE_SHA"] = tested_source
         proc = subprocess.run(command, cwd=ROOT, text=True, encoding="utf-8",
                               errors="replace", stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, check=False,
-                              pass_fds=jobserver_fds())
+                              pass_fds=jobserver_fds(), env=child_env)
         output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
@@ -2913,14 +2939,12 @@ def git_result(command, *, data=None, timeout=15, env=None):
 
 
 def publish(source_sha):
-    """Publish the one canonical report as a lease-checked main commit.
+    """Publish the canonical report with bounded nonforce retry.
 
-    Qualification runs against an unchanged checkout. After every stage finishes
-    we replace test_results.json.xz and first try the historical direct-child
-    report commit. If main advanced concurrently, retry only when the remote head
-    is a descendant of the exact tested source: rebuild the report-only commit on
-    top of that newer main tree, preserving all newer source bytes, and push
-    normally. No force push, report branch, PR, or source commit is created.
+    source_sha names the nearest non-report code commit. HEAD may already be a
+    generated report-only commit. Publication always builds on the actual main
+    head so report-on-report updates stay fast-forward, while ancestry checks
+    ensure a concurrent source advance still descends from the tested code.
     """
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         return "SKIPPED_GIT_SYNC: tested source commit unavailable"
@@ -2937,9 +2961,6 @@ def publish(source_sha):
         return "SKIPPED_GIT_SYNC: compressed report is unreadable"
 
     env = os.environ.copy()
-    # Never block make test on an interactive Git username/password prompt,
-    # but preserve configured credential helpers/askpass. The operator's
-    # ordinary git pull/push authentication must remain usable here.
     env["GIT_TERMINAL_PROMPT"] = "0"
     if not env.get("GIT_SSH_COMMAND"):
         env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=8"
@@ -2955,7 +2976,8 @@ def publish(source_sha):
     if Path(os.fsdecode(location.stdout).strip()).resolve() != ROOT or \
             branch.stdout.strip() != b"main":
         return "SKIPPED_GIT_SYNC: only the canonical main checkout may publish"
-    if head.stdout.decode("ascii", "replace").strip() != source_sha:
+    head_sha = head.stdout.decode("ascii", "replace").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", head_sha) or git_sha() != source_sha:
         return "SKIPPED_GIT_SYNC: checkout changed during testing"
 
     remote = run("remote", "get-url", "--push", "origin")
@@ -2967,7 +2989,6 @@ def publish(source_sha):
             r"k1moradi/swapz(?:[.]git)?", url):
         return "SKIPPED_GIT_SYNC: origin is not k1moradi/swapz"
 
-    # The freshly written report is the only permitted working-tree change.
     tracked = run("diff", "--quiet", "--", ".", f":(exclude){GIT_RESULT}")
     cached = run("diff", "--cached", "--quiet")
     report_tracked = run("ls-files", "--error-unmatch", "--", GIT_RESULT)
@@ -3014,38 +3035,33 @@ def publish(source_sha):
             return None, "GIT_SYNC_FAILED: invalid report commit"
         return report_sha, None
 
-    report_sha, error = build_report_commit(source_sha)
+    report_sha, error = build_report_commit(head_sha)
     if error:
         return error
     push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
     concurrent_parent = None
 
     if push is None or push.returncode:
-        # A long loaded run can race a normal source commit. Do not lose a
-        # completed FAIL/BLOCKED report merely because main advanced. Refetch
-        # and retry only along the tested source's descendant chain; a rewrite
-        # or divergence is never crossed, and every retry remains nonforce.
         report_sha = None
-        for _ in range(3):
+        for attempt in range(3):
+            time.sleep(2 << attempt)
             fetch = run("fetch", "--no-tags", "origin", "main", timeout=60)
             if fetch is None or fetch.returncode:
-                return ("GIT_SYNC_FAILED: report push rejected and current "
-                        "origin/main could not be fetched noninteractively")
+                continue
             remote_head = run("rev-parse", "FETCH_HEAD")
             if remote_head is None or remote_head.returncode:
-                return "GIT_SYNC_FAILED: fetched origin/main is unavailable"
+                continue
             remote_sha = remote_head.stdout.decode("ascii", "replace").strip()
             if not re.fullmatch(r"[0-9a-f]{40}", remote_sha):
                 return "GIT_SYNC_FAILED: fetched origin/main is malformed"
-            if remote_sha == source_sha:
-                return ("GIT_SYNC_FAILED: nonforce report push rejected or "
-                        "authentication unavailable; local source was not committed")
-            ancestor = run("merge-base", "--is-ancestor", source_sha, remote_sha)
-            if ancestor is None:
-                return "GIT_SYNC_FAILED: could not verify concurrent main ancestry"
-            if ancestor.returncode:
-                return ("GIT_SYNC_FAILED: origin/main no longer descends from "
-                        "the tested source; report remains local")
+            if remote_sha != head_sha:
+                ancestor = run("merge-base", "--is-ancestor",
+                               source_sha, remote_sha)
+                if ancestor is None:
+                    continue
+                if ancestor.returncode:
+                    return ("GIT_SYNC_FAILED: origin/main no longer descends "
+                            "from the tested source; report remains local")
             retry_sha, error = build_report_commit(remote_sha)
             if error:
                 return error
@@ -3053,23 +3069,21 @@ def publish(source_sha):
                         f"{retry_sha}:refs/heads/main", timeout=60)
             if retry is not None and not retry.returncode:
                 report_sha = retry_sha
-                concurrent_parent = remote_sha
+                if remote_sha != head_sha:
+                    concurrent_parent = remote_sha
                 break
         if report_sha is None:
-            return ("GIT_SYNC_FAILED: origin/main advanced repeatedly or "
-                    "authentication failed during bounded report retry")
+            return ("GIT_SYNC_FAILED: report publication failed after bounded "
+                    "noninteractive push/fetch retries")
 
     if concurrent_parent is not None:
-        # Remote publication succeeded without replacing newer source. Refresh
-        # the local checkout only if it is still the exact clean tested source;
-        # otherwise leave owner changes untouched and report remote success.
         head_now = run("rev-parse", "HEAD")
         tracked_now = run("diff", "--quiet", "--", ".",
                           f":(exclude){GIT_RESULT}")
         cached_now = run("diff", "--cached", "--quiet")
         clean_for_refresh = (
             head_now is not None and not head_now.returncode and
-            head_now.stdout.decode("ascii", "replace").strip() == source_sha and
+            head_now.stdout.decode("ascii", "replace").strip() == head_sha and
             tracked_now is not None and not tracked_now.returncode and
             cached_now is not None and not cached_now.returncode)
         if clean_for_refresh:
@@ -3084,10 +3098,7 @@ def publish(source_sha):
                 f"{source_sha[:12]}; local refresh skipped after concurrent "
                 "main advance)")
 
-    # The remote direct-child commit now exists. Advance only the local main ref
-    # with a compare-and-swap, then refresh the index. The working report already
-    # has the exact blob just pushed, so no source/worktree rewrite is needed.
-    local_ref = run("update-ref", "refs/heads/main", report_sha, source_sha)
+    local_ref = run("update-ref", "refs/heads/main", report_sha, head_sha)
     if local_ref is None or local_ref.returncode:
         return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
                 f"{GIT_RESULT} (local main refresh failed)")

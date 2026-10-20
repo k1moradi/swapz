@@ -203,7 +203,11 @@ SWAPS_ID="$(printf '%s
 ' "$SWAPS" |
     swapz_swap_inventory_identity /dev/stdin)" ||
     fail "cannot parse initial host swap identity"
-SOURCE="$(git rev-parse HEAD)"
+SOURCE="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
+[[ "$SOURCE" =~ ^[0-9a-f]{40}$ ]] || fail "invalid tested source revision"
+git merge-base --is-ancestor "$SOURCE" HEAD >/dev/null 2>&1 &&
+    git diff --quiet "$SOURCE..HEAD" -- . ':(exclude)test_results.json.xz' ||
+    fail "tested source does not match checkout code"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
 note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE GUARD_INFLIGHT_ZERO_SHRINK=$GUARD_INFLIGHT_ZERO_SHRINK LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"

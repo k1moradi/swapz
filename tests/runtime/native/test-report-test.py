@@ -1381,12 +1381,10 @@ class ReportContract(unittest.TestCase):
                             (checkout / runner.GIT_RESULT).read_bytes())),
                         original)
 
-                    updated = dict(original,
-                                   source_sha=first_head,
-                                   tested_commit_sha=first_head,
-                                   overall="PASS")
+                    self.assertEqual(runner.git_sha(), source_sha)
+                    updated = dict(original, overall="PASS")
                     runner.write_report(updated)
-                    second = runner.publish(first_head)
+                    second = runner.publish(source_sha)
                     self.assertIn("SYNCED_GIT", second)
                     second_head = git("rev-parse", "HEAD",
                                       cwd=checkout).stdout.strip()
@@ -1402,14 +1400,11 @@ class ReportContract(unittest.TestCase):
                     self.assertEqual(len(list(checkout.glob("*.xz"))), 1)
 
                     (checkout / "source.c").write_text("unsaved owner change\n")
-                    blocked = dict(updated,
-                                   source_sha=second_head,
-                                   tested_commit_sha=second_head,
-                                   overall="FAIL")
+                    blocked = dict(updated, overall="FAIL")
                     runner.write_report(blocked)
                     before = git("--git-dir", str(origin), "rev-parse",
                                  "refs/heads/main", cwd=sandbox).stdout.strip()
-                    self.assertIn("not clean", runner.publish(second_head))
+                    self.assertIn("not clean", runner.publish(source_sha))
                     self.assertEqual(
                         git("--git-dir", str(origin), "rev-parse",
                             "refs/heads/main", cwd=sandbox).stdout.strip(),
@@ -1500,6 +1495,77 @@ class ReportContract(unittest.TestCase):
                         failed)
                     self.assertEqual(git("status", "--porcelain",
                                          cwd=checkout).stdout, "")
+            finally:
+                runner.ROOT, runner.REPORT = old_root, old_report
+
+    def test_git_sync_retries_transient_push_and_fetch_failure(self):
+        """Retry transient publication failures even when main did not move."""
+        import subprocess
+        from unittest import mock
+
+        def git(*args, cwd, check=True):
+            return subprocess.run(["git", *args], cwd=cwd, check=check,
+                                  capture_output=True, text=True, timeout=12)
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-retry-", dir=ROOT / "build/tests") as name:
+            sandbox = Path(name)
+            checkout, origin = sandbox / "checkout", sandbox / "origin.git"
+            checkout.mkdir()
+            git("init", "--bare", str(origin), cwd=sandbox)
+            git("init", cwd=checkout)
+            git("checkout", "-b", "main", cwd=checkout)
+            git("config", "user.name", "test-report CI", cwd=checkout)
+            git("config", "user.email", "test@example.invalid", cwd=checkout)
+            (checkout / "source.c").write_text("source\n")
+            (checkout / runner.GIT_RESULT).write_bytes(
+                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
+            git("commit", "-m", "Tested source", cwd=checkout)
+            source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+            git("remote", "add", "origin", str(origin), cwd=checkout)
+            git("push", "origin", "main", cwd=checkout)
+
+            old_root, old_report, old_git_result = (
+                runner.ROOT, runner.REPORT, runner.git_result)
+            runner.ROOT = checkout
+            runner.REPORT = checkout / runner.GIT_RESULT
+            failures = {"push": 1, "fetch": 1}
+
+            def intercept(command, *, data=None, timeout=15, env=None):
+                if command == ["remote", "get-url", "--push", "origin"]:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=b"git@github.com:k1moradi/swapz.git",
+                        stderr=b"")
+                if command[:2] == ["push", "origin"] and failures["push"]:
+                    failures["push"] -= 1
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout=b"", stderr=b"transient push")
+                if command[:3] == ["fetch", "--no-tags", "origin"] and \
+                        failures["fetch"]:
+                    failures["fetch"] -= 1
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout=b"", stderr=b"transient fetch")
+                return old_git_result(command, data=data, timeout=timeout,
+                                      env=env)
+
+            try:
+                result = {
+                    "schema": "swapz-test-results-v1",
+                    "source_sha": source_sha,
+                    "tested_commit_sha": source_sha,
+                    "overall": "FAIL",
+                }
+                runner.write_report(result)
+                with mock.patch.object(runner, "git_result",
+                                       side_effect=intercept), \
+                     mock.patch.object(runner.time, "sleep") as sleep:
+                    notice = runner.publish(source_sha)
+                self.assertIn("SYNCED_GIT", notice)
+                self.assertEqual(failures, {"push": 0, "fetch": 0})
+                self.assertGreaterEqual(sleep.call_count, 2)
+                self.assertEqual(runner.git_sha(), source_sha)
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 

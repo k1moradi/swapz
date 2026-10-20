@@ -62,7 +62,12 @@ done
 mkdir -p "$ROOT/build/deploy"
 SESSION="$(mktemp -d "$ROOT/build/deploy/session.XXXXXXXX")"
 exec > >(tee -a "$SESSION/session.log") 2>&1
-note "SOURCE_HEAD=$(git rev-parse HEAD)"
+SOURCE_HEAD="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
+[[ "$SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]] || fail "invalid tested source revision"
+git merge-base --is-ancestor "$SOURCE_HEAD" HEAD >/dev/null 2>&1 &&
+    git diff --quiet "$SOURCE_HEAD..HEAD" -- . ':(exclude)test_results.json.xz' ||
+    fail "tested source does not match checkout code"
+note "SOURCE_HEAD=$SOURCE_HEAD"
 note "RUNNING_KERNEL=$(uname -r)"
 note "MODULE_SHA256=$(sha256sum "$MODULE")"
 SWAPS_BEFORE="$(cat /proc/swaps)"

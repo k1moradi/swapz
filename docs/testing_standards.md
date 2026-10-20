@@ -190,18 +190,14 @@ failure-phase/diagnostic, lifecycle and benchmark result for the exact
 `tested_commit_sha`.
 
 After writing the file, `make test` automatically publishes only that report
-to `main` using Git plumbing. It first attempts a nonforce direct-child commit
-of the exact tested source. If that push loses a race to a normal `main`
-advance, the publisher fetches the current remote head, requires the exact
-tested source to remain its ancestor, rebuilds the same report-only change on
-top of the newer main tree, and retries a bounded number of normal nonforce
-pushes. It never crosses divergence, force-pushes, creates a report branch/PR,
-or replaces newer source bytes. Any unrelated tracked/index change still skips
-publication. After concurrent recovery, the local checkout may fast-forward to
-the published descendant only while its tracked source is still clean apart
-from the generated report. Root-owned private session logs are implementation
-details and must not be required for ordinary failure diagnosis once the
-sanitized report has been published.
+to `main` using Git plumbing. `tested_commit_sha` names the nearest
+non-report code revision; generated report-only ancestors modify only
+`test_results.json.xz` and do not become new code revisions. The report is
+built on the actual current main head so report-on-report updates remain normal
+fast-forwards. Transient push/fetch failures receive a bounded exponential
+backoff retry. A moved main head is accepted only when the exact tested source
+remains its ancestor. Divergence, force-push, report branches/PRs, and replacing
+newer source bytes remain forbidden.
 
 
 Rootless incremental-build fixtures mirror the current `src/` and `tests/` layout; they must not recreate removed top-level `tools/` or `userspace/` directories.
@@ -549,14 +545,13 @@ and SSH batch mode so qualification never waits for an interactive password,
 but it must not blank `GIT_ASKPASS` or disable a configured credential
 manager.
 
-A separate `ls-remote` authorization probe is not required. The first
-generated report commit has the exact tested source commit as its parent and is
-pushed normally (never force-pushed) to `main`. If a concurrent descendant
-advance makes that push non-fast-forward, the bounded recovery path uses
-`git fetch origin main` plus `merge-base --is-ancestor` to prove the tested
-source remains in the current main history before constructing a new
-report-only commit whose parent is that fetched head. A rewritten/diverged main
-or repeated race fails closed and leaves the generated report local.
+A separate `ls-remote` authorization probe is not required. Report commits
+are pushed normally (never force-pushed) on the actual current main head, which
+may itself be report-only. After a failed push, bounded retry backs off and
+retries transient fetch/push failures even when origin/main did not move. If it
+did move, `merge-base --is-ancestor` must prove the tested code revision
+remains in current main history before a report-only child of that fetched head
+is attempted. Rewritten/diverged history or exhausted retries fail closed.
 
 ### Generated report versus tracked source cleanliness
 

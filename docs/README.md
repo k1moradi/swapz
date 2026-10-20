@@ -36,14 +36,12 @@ The root Make interface is exactly `make`, `make install`, `make uninstall`, and
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json.xz`, with the latest sanitized PASS/FAIL/BLOCKED test
 and benchmark result and automatically publishes that file directly to
-`main`. The normal report commit is a direct child of the tested source. If
-`main` advances during a long qualification run, publication may retry only
-when the new remote head is a descendant of that exact tested source; the
-report-only commit is then built on the newer main tree so no newer source is
-reverted. Publication is always nonforce and bounded, and divergence still
-fails closed. No report branch or PR is created, and normal diagnosis should
-use the published file rather than requiring the owner to copy private
-root-owned logs.
+`main`. Generated report-only commits are not new source revisions: the next
+run records the nearest non-report code ancestor as `tested_commit_sha` even
+when a report commit is at `HEAD`. Publication retries bounded transient
+push/fetch failures with backoff. A concurrent main advance is accepted only
+when it still descends from the exact tested source; report commits are always
+normal nonforce fast-forwards and never revert newer source bytes.
 
 ## Current evidence
 
