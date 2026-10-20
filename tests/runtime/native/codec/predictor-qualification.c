@@ -21,6 +21,7 @@
 #define TRANSFORM_COUNT 6U
 #define TRANSFORM_DELTA64 3U
 #define THRESHOLD_COUNT 5U
+#define CLASSIFIER_BENCH_REPEATS 256U
 
 typedef swapz_u32 (*predict_fn)(const swapz_u8 *, swapz_u8 *);
 typedef void (*unpredict_fn)(const swapz_u8 *, swapz_u8 *);
@@ -70,15 +71,23 @@ struct threshold_summary {
 	swapz_u32 structured_eligible;
 	swapz_u32 structured_calls;
 	swapz_u32 structured_useful;
+	swapz_u32 routed_baseline_blocks;
+	swapz_u32 routed_candidate_blocks;
+	swapz_u32 routed_baseline_extents;
+	swapz_u32 routed_candidate_extents;
 	struct profile_threshold_summary profiles[NEGATIVE_PROFILE_COUNT];
 };
 
 struct classifier_summary {
 	uint64_t wall_ns;
+	uint64_t benchmark_calls;
 	swapz_u32 pages;
+	swapz_u32 early_abort_pages;
 };
 
 static struct page_evidence evidence[MAX_EVIDENCE_PAGES];
+static swapz_u8 evidence_pages[MAX_EVIDENCE_PAGES][SWAPZ_BLOCK_BYTES];
+static volatile uint64_t classifier_benchmark_sink;
 static swapz_u8 transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 recovered_page[SWAPZ_BLOCK_BYTES];
 static char compressed_page[SWAPZ_BLOCK_BYTES];
@@ -298,10 +307,9 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 	out->structured = structured;
 	out->negative_profile = negative_profile;
 	if (!baseline || baseline > 2024) {
-		start = now_ns();
 		out->classifier_score = swapz_predict_delta64_sample_score(page);
-		classifier->wall_ns += now_ns() - start;
 		classifier->pages++;
+		classifier->early_abort_pages += out->classifier_score == 0;
 		out->classifier_ran = 1;
 	}
 	for (transform_index = 0; transform_index < TRANSFORM_COUNT;
@@ -354,6 +362,7 @@ static int append_generated_negative(swapz_u8 profile,
 		} else {
 			return -EINVAL;
 		}
+		memcpy(evidence_pages[*count], page, sizeof(page));
 		error = evaluate_page(page, 0, profile, &evidence[*count],
 				      summary, classifier);
 		if (error)
@@ -380,6 +389,7 @@ static int append_negative_file(const char *path, swapz_u8 profile,
 			fclose(file);
 			return -E2BIG;
 		}
+		memcpy(evidence_pages[*count], page, sizeof(page));
 		error = evaluate_page(page, 0, profile, &evidence[*count],
 				      summary, classifier);
 		if (error) {
@@ -404,6 +414,7 @@ static int append_negative_file(const char *path, swapz_u8 profile,
 
 static int planner_totals(const struct page_evidence *rows, swapz_u32 count,
 			  unsigned int transform_index, int candidate_mode,
+			  swapz_u32 route_threshold,
 			  swapz_u32 *blocks_out, swapz_u32 *extents_out)
 {
 	swapz_u32 offset = 0;
@@ -427,7 +438,10 @@ static int planner_totals(const struct page_evidence *rows, swapz_u32 count,
 			const struct page_evidence *row = &rows[offset + index];
 			int length = row->baseline_length;
 
-			if (candidate_mode)
+			if (candidate_mode &&
+			    (!route_threshold ||
+			     (row->classifier_ran &&
+			      row->classifier_score >= route_threshold)))
 				length = chosen_length(length,
 					row->candidate_length[transform_index]);
 			if (!length) {
@@ -487,7 +501,36 @@ static void summarize_transform(const struct page_evidence *rows,
 	}
 }
 
-static void summarize_thresholds(const struct page_evidence *rows,
+static int benchmark_classifier(const struct page_evidence *rows,
+				swapz_u32 count,
+				struct classifier_summary *summary)
+{
+	uint64_t calls = 0, sink = 0;
+	uint64_t start, end;
+	unsigned int repeat;
+	swapz_u32 index;
+
+	if (!rows || !summary || !summary->pages)
+		return -EINVAL;
+	start = now_ns();
+	for (repeat = 0; repeat < CLASSIFIER_BENCH_REPEATS; ++repeat)
+		for (index = 0; index < count; ++index)
+			if (rows[index].classifier_ran) {
+				sink += swapz_predict_delta64_sample_score(
+					evidence_pages[index]);
+				calls++;
+			}
+	end = now_ns();
+	classifier_benchmark_sink = sink;
+	if (!start || !end ||
+	    calls != (uint64_t)summary->pages * CLASSIFIER_BENCH_REPEATS)
+		return -EUCLEAN;
+	summary->wall_ns = end - start;
+	summary->benchmark_calls = calls;
+	return 0;
+}
+
+static int summarize_thresholds(const struct page_evidence *rows,
 				 swapz_u32 negative_count,
 				 swapz_u32 structured_start,
 				 swapz_u32 total_count,
@@ -499,6 +542,7 @@ static void summarize_thresholds(const struct page_evidence *rows,
 	     ++threshold_index) {
 		swapz_u32 index;
 		struct threshold_summary *summary = &out[threshold_index];
+		int error;
 
 		summary->threshold = thresholds[threshold_index];
 		for (index = 0; index < total_count; ++index) {
@@ -534,7 +578,20 @@ static void summarize_thresholds(const struct page_evidence *rows,
 				summary->negative_useful += useful;
 			}
 		}
+		error = planner_totals(rows + structured_start,
+			total_count - structured_start, TRANSFORM_DELTA64,
+			0, 0, &summary->routed_baseline_blocks,
+			&summary->routed_baseline_extents);
+		if (!error)
+			error = planner_totals(rows + structured_start,
+				total_count - structured_start, TRANSFORM_DELTA64,
+				1, summary->threshold,
+				&summary->routed_candidate_blocks,
+				&summary->routed_candidate_extents);
+		if (error)
+			return error;
 	}
+	return 0;
 }
 
 int main(int argc, char **argv)
@@ -546,7 +603,7 @@ int main(int argc, char **argv)
 	swapz_u32 count = 0, negative_count, structured_start;
 	swapz_u8 page[SWAPZ_BLOCK_BYTES];
 	unsigned int kind, page_index, transform_index, threshold_index;
-	int argument;
+	int argument, error;
 
 	if (argc != 4) {
 		fprintf(stderr, "predictor qualification requires entropy/mixed/medium fixtures\n");
@@ -581,6 +638,7 @@ int main(int argc, char **argv)
 			if (count >= MAX_EVIDENCE_PAGES)
 				return 1;
 			generate_structured_page(kind, page_index, page);
+			memcpy(evidence_pages[count], page, sizeof(page));
 			error = evaluate_page(page, 1, 0, &evidence[count],
 					      total_summary, &classifier_summary);
 			if (error) {
@@ -591,6 +649,13 @@ int main(int argc, char **argv)
 			}
 			count++;
 		}
+
+	error = benchmark_classifier(evidence, count, &classifier_summary);
+	if (error) {
+		fprintf(stderr, "predictor classifier batch benchmark failed: %d\n",
+			error);
+		return 1;
+	}
 
 	for (transform_index = 0; transform_index < TRANSFORM_COUNT;
 	     ++transform_index) {
@@ -606,12 +671,12 @@ int main(int argc, char **argv)
 			count - structured_start, transform_index,
 			&structured_summary[transform_index]);
 		error = planner_totals(evidence + structured_start,
-			count - structured_start, transform_index, 0,
+			count - structured_start, transform_index, 0, 0,
 			&structured_summary[transform_index].baseline_blocks,
 			&structured_summary[transform_index].baseline_extents);
 		if (!error)
 			error = planner_totals(evidence + structured_start,
-				count - structured_start, transform_index, 1,
+				count - structured_start, transform_index, 1, 0,
 				&structured_summary[transform_index].candidate_blocks,
 				&structured_summary[transform_index].candidate_extents);
 		if (error) {
@@ -619,8 +684,13 @@ int main(int argc, char **argv)
 			return 1;
 		}
 	}
-	summarize_thresholds(evidence, negative_count, structured_start, count,
-			     threshold_summary);
+	error = summarize_thresholds(evidence, negative_count, structured_start,
+				     count, threshold_summary);
+	if (error) {
+		fprintf(stderr, "routed production planner rejected evidence: %d\n",
+			error);
+		return 1;
+	}
 
 	if (!negative_count || structured_start == count ||
 	    !structured_summary[0].adopted ||
@@ -634,12 +704,18 @@ int main(int argc, char **argv)
 	       "\"OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY\","
 	       "\"negative_pages\":%u,\"structured_pages\":%u,"
 	       "\"classifier\":{\"candidate\":\"delta64\","
-	       "\"sample_pairs\":%u,\"eligible_pages\":%u,"
+	       "\"sample_pairs\":%u,\"stage1_pairs\":%u,"
+	       "\"stage1_min_score\":%u,\"eligible_pages\":%u,"
+	       "\"early_abort_pages\":%u,\"benchmark_repeats\":%u,"
+	       "\"benchmark_calls\":%" PRIu64 ","
 	       "\"ns_per_page\":%" PRIu64 "},\"thresholds\":[",
 	       negative_count, count - structured_start,
-	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, classifier_summary.pages,
-	       classifier_summary.pages ?
-	       classifier_summary.wall_ns / classifier_summary.pages : 0);
+	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, SWAPZ_PREDICTOR_STAGE1_PAIRS,
+	       SWAPZ_PREDICTOR_STAGE1_MIN_SCORE, classifier_summary.pages,
+	       classifier_summary.early_abort_pages, CLASSIFIER_BENCH_REPEATS,
+	       classifier_summary.benchmark_calls,
+	       classifier_summary.benchmark_calls ?
+	       classifier_summary.wall_ns / classifier_summary.benchmark_calls : 0);
 	for (threshold_index = 0; threshold_index < THRESHOLD_COUNT;
 	     ++threshold_index) {
 		const struct threshold_summary *item =
@@ -650,11 +726,24 @@ int main(int argc, char **argv)
 		printf("%s{\"threshold\":%u,\"negative_eligible\":%u,"
 		       "\"negative_calls\":%u,\"negative_useful\":%u,"
 		       "\"structured_eligible\":%u,\"structured_calls\":%u,"
-		       "\"structured_useful\":%u,\"negative_profiles\":[",
+		       "\"structured_useful\":%u,"
+		       "\"routed_baseline_blocks\":%u,"
+		       "\"routed_candidate_blocks\":%u,"
+		       "\"routed_blocks_saved\":%ld,"
+		       "\"routed_baseline_extents\":%u,"
+		       "\"routed_candidate_extents\":%u,"
+		       "\"routed_extents_saved\":%ld,"
+		       "\"negative_profiles\":[",
 		       threshold_index ? "," : "", item->threshold,
 		       item->negative_eligible, item->negative_calls,
 		       item->negative_useful, item->structured_eligible,
-		       item->structured_calls, item->structured_useful);
+		       item->structured_calls, item->structured_useful,
+		       item->routed_baseline_blocks, item->routed_candidate_blocks,
+		       (long)item->routed_baseline_blocks -
+			       (long)item->routed_candidate_blocks,
+		       item->routed_baseline_extents, item->routed_candidate_extents,
+		       (long)item->routed_baseline_extents -
+			       (long)item->routed_candidate_extents);
 		for (profile_index = 0; profile_index < NEGATIVE_PROFILE_COUNT;
 		     ++profile_index) {
 			const struct profile_threshold_summary *profile =

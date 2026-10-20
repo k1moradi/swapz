@@ -173,7 +173,7 @@ ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
 ## ID67 offline predictor evidence
 
-ID67a makes no production-format or hot-path change. ID67a.2 uses
+ID67a makes no production-format or hot-path change. ID67a.3 uses
 `anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages plus
 generated zero/repeated-word controls. The sampled delta64 signpost runs only
 after raw LZ4 leaves a page above the rescue threshold and never treats an
@@ -186,12 +186,15 @@ The evaluator compares CL-Delta32x2, cacheline byte-delta, whole-page delta32,
 whole-page delta64, 512-byte-reset delta64 and xor64. Every transform is
 inverted and byte-compared before its measurement is accepted. It records
 transform/inverse/second-LZ4 time, adopted representations, RAW rescues and
->2024 -> <=2024 crossings. A 64-pair pre-transform delta64 signpost reports its
-own ns/page plus thresholds 4/8/16/24/32 and false calls separately for
-zero/repeat/entropy/mixed/medium controls.
-Baseline and candidate length sequences are fed through the production
-`swapz_engine_plan_bounded()`; planned physical 4KiB blocks/extents saved are
-the primary size result. Compression ratio alone is not promotion evidence.
+>2024 -> <=2024 crossings. The ID67a.3 delta64 signpost samples 8 page-wide
+pairs first and returns immediately below score 2; passing pages extend to 32
+evenly strided pairs. Its ns/page is measured by 256 repeated batched eligible
+page sweeps, amortizing timer overhead. Thresholds 4/8/16/24/32 retain
+per-profile false-call reporting.
+Baseline, ungated candidate, and each classifier-routed threshold length
+sequence are fed through the production `swapz_engine_plan_bounded()`; routed
+physical 4KiB blocks/extents saved are the promotion metric. Compression ratio
+or ungated transform savings alone is not promotion evidence.
 
 The output is explicitly labeled
 `OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY` and is sanitized into the official
@@ -204,11 +207,13 @@ structured controls, delta64 saved 60 of 238 planned blocks, CL-Delta32x2 saved
 RAW pages and crossed the <=2024-byte cliff on 96 controls; delta64 rescued the
 same 128 and crossed 128. The first CL signpost was invalid for routing because it counted delta-zero
 raw repetition as positive evidence, producing 76-77 unnecessary calls among
-141 eligible negative controls. ID67a.2 fixes that mathematical bug, measures a
-sampled pre-transform delta64 router by negative profile, and adds a
-512-byte-anchor control to reduce the original whole-page-versus-cacheline
-anchor bias. Production remains gated on the new evidence; no SWZ3 flag is
-promoted by this change.
+141 eligible negative controls. ID67a.2 fixed that mathematical bug: the owner run's threshold 32 produced
+0/141 negative calls and 256/320 useful structured calls, while ungated delta64
+saved 65 planner blocks. Its 385 ns/page single-page timer result is not a
+promotion-quality cost measurement. ID67a.3 therefore keeps delta64 offline,
+adds the two-stage 8->32-pair router, batch-times it, and reports planner savings
+after routing at every threshold. Production remains gated on that evidence; no
+SWZ3 flag is promoted by this change.
 
 ## Physical media
 

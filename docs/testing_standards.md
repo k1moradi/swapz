@@ -130,9 +130,13 @@ remains on hold.
   independently based 512-byte regions are positive controls. Compare
   CL-Delta32x2, cacheline byte-delta, delta32, whole-page delta64,
   512-byte-reset delta64 and xor64; verify exact inverse reconstruction. The
-  rescue signpost is sampled before transformation, ignores zero residuals, and
-  reports per-negative-profile false calls plus production-planner block/extent
-  savings. Thresholds are evidence, not kernel policy. The unprivileged
+  rescue signpost is sampled before transformation, ignores zero residuals,
+  aborts after an 8-pair page-wide first stage when its score is below two, and
+  extends passing pages to 32 strided pairs. Classifier ns/page must come from
+  repeated batched sweeps rather than a timer pair around each page. Every
+  threshold reports per-negative-profile false calls plus classifier-routed
+  production-planner block/extent savings. Thresholds are evidence, not kernel
+  policy. The unprivileged
   Make-interface fixture must emit the same valid predictor evidence as one
   complete stdout line so stage parsing is exercised without privilege. Source
   contracts must prove no production DM/codec/authority/engine translation unit

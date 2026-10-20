@@ -15,7 +15,10 @@
 #define SWAPZ_PREDICTOR_CL_WORDS 8U
 #define SWAPZ_PREDICTOR_CL_DELTA32X2_RESIDUALS 896U
 #define SWAPZ_PREDICTOR_SUBPAGE_BYTES 512U
-#define SWAPZ_PREDICTOR_SAMPLE_PAIRS 64U
+#define SWAPZ_PREDICTOR_STAGE1_PAIRS 8U
+#define SWAPZ_PREDICTOR_STAGE1_MIN_SCORE 2U
+#define SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES 128U
+#define SWAPZ_PREDICTOR_SAMPLE_PAIRS 32U
 
 #if __SIZEOF_LONG_LONG__ != 8
 #error "swapz predictor qualification requires an exact 64-bit unsigned long long"
@@ -222,46 +225,50 @@ static inline void swapz_unpredict_delta32(const swapz_u8 *input,
 }
 
 /*
- * Cheap rescue signpost for whole-page delta64. Sample exactly one adjacent
- * 8-byte pair per 64-byte cacheline before transforming the page. Identical raw
- * words are deliberately NOT positive evidence: plain LZ4 already sees that
- * repetition. A pair contributes two points for a nonzero signed-16-bit u64
- * delta, otherwise one point for each nonzero signed-8-bit u32 lane delta.
+ * Cheap rescue signpost for whole-page delta64. A pair contributes two points
+ * for a nonzero signed-16-bit u64 delta, otherwise one point for each nonzero
+ * signed-8-bit u32 lane delta. Identical raw words deliberately contribute
+ * nothing because plain LZ4 already sees that repetition.
+ */
+static inline swapz_u32 swapz_predict_delta64_pair_score(
+						const swapz_u8 *input)
+{
+	unsigned long long previous = swapz_predictor_load64(input);
+	unsigned long long current =
+		swapz_predictor_load64(input + SWAPZ_PREDICTOR_U64_BYTES);
+
+	if (swapz_predictor_small_nonzero_delta64(current, previous))
+		return 2U;
+	return swapz_predictor_small_nonzero_delta32(
+			(swapz_u32)current, (swapz_u32)previous) +
+		swapz_predictor_small_nonzero_delta32(
+			(swapz_u32)(current >> 32),
+			(swapz_u32)(previous >> 32));
+}
+
+/*
+ * ID67a.3 two-stage strided router. Stage 1 touches one adjacent pair in each
+ * 512-byte region (8 pairs / 128 bytes total). Pages with fewer than two points
+ * stop immediately. Passing pages add three evenly spaced pairs per region for
+ * 32 pairs / 512 bytes total.
  */
 static inline swapz_u32 swapz_predict_delta64_sample_score(
 						const swapz_u8 *input)
 {
 	swapz_u32 score = 0;
-	swapz_u32 line;
+	swapz_u32 base, offset;
 
-	for (line = 0; line < SWAPZ_BLOCK_BYTES;
-	     line += SWAPZ_PREDICTOR_CACHELINE_BYTES) {
-		unsigned long long previous =
-			swapz_predictor_load64(input + line);
-		unsigned long long current =
-			swapz_predictor_load64(input + line +
-					       SWAPZ_PREDICTOR_U64_BYTES);
-
-		if (swapz_predictor_small_nonzero_delta64(current, previous)) {
-			score += 2U;
-		} else {
-			/*
-			 * Reuse the sampled 64-bit words rather than rereading the
-			 * same bytes as four u32 loads. On either endian, the two
-			 * corresponding halves may exchange lane labels, but their
-			 * pairwise deltas and summed score are unchanged.
-			 */
-			swapz_u32 previous0 = (swapz_u32)previous;
-			swapz_u32 current0 = (swapz_u32)current;
-			swapz_u32 previous1 = (swapz_u32)(previous >> 32);
-			swapz_u32 current1 = (swapz_u32)(current >> 32);
-
-			score += swapz_predictor_small_nonzero_delta32(
-				current0, previous0);
-			score += swapz_predictor_small_nonzero_delta32(
-				current1, previous1);
-		}
-	}
+	for (base = 0; base < SWAPZ_BLOCK_BYTES;
+	     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES)
+		score += swapz_predict_delta64_pair_score(input + base);
+	if (score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE)
+		return 0;
+	for (offset = SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES;
+	     offset < SWAPZ_PREDICTOR_SUBPAGE_BYTES;
+	     offset += SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES)
+		for (base = 0; base < SWAPZ_BLOCK_BYTES;
+		     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES)
+			score += swapz_predict_delta64_pair_score(input + base + offset);
 	return score;
 }
 

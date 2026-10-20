@@ -256,9 +256,17 @@ def parse_predictor_evidence(output):
     classifier = record.get("classifier")
     if not isinstance(classifier, dict) or \
             classifier.get("candidate") != "delta64" or \
-            classifier.get("sample_pairs") != 64 or \
+            classifier.get("sample_pairs") != 32 or \
+            classifier.get("stage1_pairs") != 8 or \
+            classifier.get("stage1_min_score") != 2 or \
+            classifier.get("benchmark_repeats") != 256 or \
             type(classifier.get("eligible_pages")) is not int or \
             classifier["eligible_pages"] <= 0 or \
+            type(classifier.get("early_abort_pages")) is not int or \
+            not 0 <= classifier["early_abort_pages"] <= classifier["eligible_pages"] or \
+            type(classifier.get("benchmark_calls")) is not int or \
+            classifier["benchmark_calls"] != \
+            classifier["eligible_pages"] * classifier["benchmark_repeats"] or \
             type(classifier.get("ns_per_page")) is not int or \
             classifier["ns_per_page"] < 0:
         return None
@@ -270,7 +278,9 @@ def parse_predictor_evidence(output):
         return None
     threshold_fields = (
         "negative_eligible", "negative_calls", "negative_useful",
-        "structured_eligible", "structured_calls", "structured_useful")
+        "structured_eligible", "structured_calls", "structured_useful",
+        "routed_baseline_blocks", "routed_candidate_blocks",
+        "routed_baseline_extents", "routed_candidate_extents")
     for row in threshold_rows:
         if any(type(row.get(field)) is not int or row[field] < 0
                for field in threshold_fields):
@@ -278,7 +288,19 @@ def parse_predictor_evidence(output):
         if row["negative_calls"] > row["negative_eligible"] or \
                 row["negative_useful"] > row["negative_calls"] or \
                 row["structured_calls"] > row["structured_eligible"] or \
-                row["structured_useful"] > row["structured_calls"]:
+                row["structured_useful"] > row["structured_calls"] or \
+                type(row.get("routed_blocks_saved")) is not int or \
+                type(row.get("routed_extents_saved")) is not int or \
+                row["routed_baseline_blocks"] <= 0 or \
+                row["routed_candidate_blocks"] <= 0 or \
+                row["routed_baseline_extents"] <= 0 or \
+                row["routed_candidate_extents"] <= 0 or \
+                row["routed_blocks_saved"] != (
+                    row["routed_baseline_blocks"] -
+                    row["routed_candidate_blocks"]) or \
+                row["routed_extents_saved"] != (
+                    row["routed_baseline_extents"] -
+                    row["routed_candidate_extents"]):
             return None
         profiles = row.get("negative_profiles")
         if not isinstance(profiles, list) or \
@@ -2364,17 +2386,22 @@ def print_bench(result):
             ) for row in predictor["transforms"]])
         classifier = predictor["classifier"]
         print("  Sampled delta64 classifier — "
-              f"{classifier['sample_pairs']} pairs; "
-              f"{classifier['ns_per_page']} ns/eligible page")
+              f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
+              f"{classifier['early_abort_pages']}/{classifier['eligible_pages']} "
+              "stage-1 aborts; "
+              f"{classifier['ns_per_page']} ns/eligible page "
+              f"({classifier['benchmark_repeats']} batched repeats)")
         print_table(
             ("score", "neg call/eligible", "neg useful", "struct call/eligible",
-             "struct useful"),
+             "struct useful", "routed blocks", "routed extents"),
             [(
                 row["threshold"],
                 f"{row['negative_calls']}/{row['negative_eligible']}",
                 row["negative_useful"],
                 f"{row['structured_calls']}/{row['structured_eligible']}",
                 row["structured_useful"],
+                f"{row['routed_blocks_saved']:+d}",
+                f"{row['routed_extents_saved']:+d}",
             ) for row in predictor["thresholds"]])
         print("  Negative classifier profile breakdown")
         print_table(

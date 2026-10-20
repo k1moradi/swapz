@@ -569,9 +569,10 @@ dead benchmark sessions merely for historical telemetry.
 ### Offline predictor qualification before any format change
 
 A reversible pre-LZ4 predictor is not production code until native/offline
-evidence shows material physical benefit. The initial candidate is a
-cacheline-reset two-lane 32-bit delta transform, compared against cacheline
-byte-delta, whole-page delta32/delta64 and xor64 controls. Loads/stores must be
+evidence shows material physical benefit. Current evidence promotes whole-page
+delta64 as the routing candidate; CL-Delta32x2 and 512-byte-reset delta64 remain
+comparators, while cacheline byte-delta and whole-page delta32 are baseline
+controls rather than active promotion candidates. Loads/stores must be
 `memcpy`-safe and arithmetic explicitly unsigned.
 
 The current SHAKE-generated benchmark hard regions are negative controls, not a
@@ -582,12 +583,19 @@ separate from the full transform: sample the raw page first, never count a zero
 delta as positive evidence, and report false calls by negative profile.
 The sampled hot loop must cache each loaded 64-bit word and derive any 32-bit
 lane evidence from those cached values rather than rereading the same bytes.
+ID67a.3 uses an 8-pair page-wide first stage; fewer than two points is an
+immediate reject. Passing pages extend to 32 evenly strided pairs. Classifier
+timing must be batched across repeated eligible-page sweeps so two timer calls
+cover many classifier invocations rather than contaminating every page.
 Thresholds are evidence, never kernel policy before measurement.
 
 Every candidate must round-trip exactly. Measure transform, inverse and optional
 second-LZ4 cost. Feed actual compressed-length sequences into the production
 `swapz_engine_plan_bounded()` and report planned 4KiB blocks/extents, RAW
-rescues and packing-cliff crossings. ID67a may place the portable, allocation-free
+rescues and packing-cliff crossings. For every router threshold, also feed the
+classifier-routed delta64 lengths through the same planner and report routed
+blocks/extents saved; ungated transform opportunity alone is not routing
+evidence. ID67a may place the portable, allocation-free
 candidate helpers in `src/kernel/predictor.h` so native tests exercise the
 exact C that a later kernel experiment could reuse, but no production
 translation unit may include that header yet. Do not modify SWZ3 metadata,

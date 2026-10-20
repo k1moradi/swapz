@@ -36,6 +36,12 @@ def predictor_evidence():
             "structured_eligible": 128,
             "structured_calls": 96,
             "structured_useful": 80,
+            "routed_baseline_blocks": 200,
+            "routed_candidate_blocks": 165,
+            "routed_blocks_saved": 35,
+            "routed_baseline_extents": 100,
+            "routed_candidate_extents": 85,
+            "routed_extents_saved": 15,
             "negative_profiles": profiles,
         })
     transforms = []
@@ -62,8 +68,13 @@ def predictor_evidence():
         "structured_pages": 320,
         "classifier": {
             "candidate": "delta64",
-            "sample_pairs": 64,
+            "sample_pairs": 32,
+            "stage1_pairs": 8,
+            "stage1_min_score": 2,
             "eligible_pages": 320,
+            "early_abort_pages": 120,
+            "benchmark_repeats": 256,
+            "benchmark_calls": 81920,
             "ns_per_page": 55,
         },
         "thresholds": thresholds,
@@ -604,6 +615,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(parsed, raw)
         broken = json.loads(json.dumps(raw))
         broken["thresholds"][2]["negative_calls"] = 65
+        self.assertIsNone(runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
+        broken = predictor_evidence()
+        broken["thresholds"][2]["routed_blocks_saved"] += 1
         self.assertIsNone(runner.parse_predictor_evidence(
             "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
         duplicate = (

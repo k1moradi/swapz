@@ -149,7 +149,7 @@ changes.
 | 64 | One-shot in-flight-zero burst-target shrink guard | **1 owner-qualified / keep** | Five matched fast mixed rounds eliminated after-I0 shrinks and reduced burst closes, overshoot and lower WRITE requests without a measured latency penalty. Keep enabled; retain only one directional regression control. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | Owner run proves ID63 request savings persist without the helper and the old fast p99 regression disappears. Legacy helper status/CPU tokens remain zero. Follow-up cleanup rejects all non-ID63 pairs before slot preparation/priming. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Predictive rescue before LZ4 | **4 ID67a.2 evidence collection implemented** | The first native run proved planner opportunity but exposed a classifier bug: CL scoring counted delta-zero raw repetition and caused 76-77 useless negative calls. ID67a.2 excludes zero residuals, adds a 64-pair pre-transform delta64 signpost, per-profile negative evidence, a 512-byte-reset delta64 control and an independently based subpage positive archetype. No codec/authority/DM/SWZ3 path uses the predictor; ID67b remains gated on owner evidence and low false-call cost. |
+| 67 | Predictive rescue before LZ4 | **4 ID67a.3 evidence collection implemented** | Owner ID67a.2 evidence made delta64 the leading candidate (+65 planner blocks) and threshold 32 had 0/141 negative calls with 256/320 useful structured calls, but the per-page timer reported 385 ns. ID67a.3 keeps production untouched, changes the router to an 8-pair early-reject then 32-pair strided sample, batch-times repeated sweeps, and reports planner blocks/extents saved after each routing threshold. ID67b remains gated on this evidence. |
 
 
 ## What the pinned queue experiment establishes
@@ -213,11 +213,10 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 1. Land the post-ID65 cleanup: restore executable test-script modes, promote
    ID65/66 documentation, reject non-ID63 READ pairs before slot
    preparation/priming, and retire standalone ID39/ID60 loaded controls.
-2. Keep ID67 in native/offline evidence. The first structured controls prove
-   physical-block opportunity but favor delta64 over CL-Delta32x2, while the
-   current CL signpost has a high false-positive second-LZ4 rate on eligible
-   SHAKE-derived controls. Refine classifier/corpus evidence before any ID67b
-   SWZ3 metadata or hot-path predictor.
+2. Keep ID67 in native/offline evidence. ID67a.3 now tests the leading delta64
+   candidate with an 8->32-pair early-reject router, batched timing and
+   classifier-routed production-planner savings. Review that evidence before any
+   ID67b SWZ3 metadata or hot-path predictor.
 3. Owner-qualify the implemented ID61 foreground-GC pressure instrumentation on
    owned RAM. The 5-round lifecycle phase now reports useful WRITE wall/p99,
    total foreground-GC wall/fraction, victim-choice wall/calls and exact
