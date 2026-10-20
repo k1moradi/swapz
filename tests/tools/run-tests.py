@@ -1753,9 +1753,6 @@ def burst_guard_ab_verdict(sessions):
 
 
 def parse_write_saturation(output):
-
-
-def parse_write_saturation(output):
     """Parse only the bounded sustained write-only QD pilot."""
     sessions, current, regime = [], None, None
     for line in output.splitlines():

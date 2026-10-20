@@ -118,6 +118,8 @@ remains on hold.
   closes, overshoot and shrink counters. Guard-off must never execute a guarded
   skip; guard-on must never perform an in-flight-zero shrink. Zero guard-on
   skips are valid evidence that the repaired sampling path made ID64 dormant.
+  Rootless Make-interface/source contracts must assert the same ten-arm
+  confirmation sequence so a directional harness cannot silently return.
 - **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
   must now return before slot preparation/priming; no standalone same-extent
   slot execution remains. Fast/serial ID63 retain five-pair confirmation.

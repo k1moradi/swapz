@@ -680,7 +680,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("directional_modes=(0 1)", loaded)
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)
         self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
-        self.assertIn('for guard in "${directional_modes[@]}"', loaded)
+        self.assertIn('for guard in "${confirmation_modes[@]}"', loaded)
         self.assertIn("START_BURST_GUARD_AB=", loaded)
         self.assertIn("PASS_BURST_GUARD_AB=", loaded)
         self.assertIn("--guard-inflight-zero-shrink", loaded)
