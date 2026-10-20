@@ -256,19 +256,22 @@ static inline swapz_u32 swapz_predict_delta64_sample_score(
 						const swapz_u8 *input)
 {
 	swapz_u32 score = 0;
-	swapz_u32 base, offset;
+	swapz_u32 base;
 
 	for (base = 0; base < SWAPZ_BLOCK_BYTES;
 	     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES)
 		score += swapz_predict_delta64_pair_score(input + base);
 	if (score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE)
 		return 0;
-	for (offset = SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES;
-	     offset < SWAPZ_PREDICTOR_SUBPAGE_BYTES;
-	     offset += SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES)
-		for (base = 0; base < SWAPZ_BLOCK_BYTES;
-		     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES)
-			score += swapz_predict_delta64_pair_score(input + base + offset);
+	for (base = 0; base < SWAPZ_BLOCK_BYTES;
+	     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES) {
+		score += swapz_predict_delta64_pair_score(
+			input + base + SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES);
+		score += swapz_predict_delta64_pair_score(
+			input + base + 2U * SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES);
+		score += swapz_predict_delta64_pair_score(
+			input + base + 3U * SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES);
+	}
 	return score;
 }
 

@@ -210,10 +210,14 @@ raw repetition as positive evidence, producing 76-77 unnecessary calls among
 141 eligible negative controls. ID67a.2 fixed that mathematical bug: the owner run's threshold 32 produced
 0/141 negative calls and 256/320 useful structured calls, while ungated delta64
 saved 65 planner blocks. Its 385 ns/page single-page timer result is not a
-promotion-quality cost measurement. ID67a.3 therefore keeps delta64 offline,
-adds the two-stage 8->32-pair router, batch-times it, and reports planner savings
-after routing at every threshold. Production remains gated on that evidence; no
-SWZ3 flag is promoted by this change.
+promotion-quality cost measurement. Initial ID67a.3 rootless native CI measures
+61 ns/eligible page across 118,016 batched calls. Threshold 16 is the first
+tested zero-false-call point and retains 52 of 65 ungated planner blocks saved
+plus 49 extents; thresholds 24/32 produce the same routed geometry. This is
+promising offline evidence, not owner-loaded or production evidence, and it
+still misses the provisional <60 ns/page target by 1 ns. The fixed 24-pair
+second stage is therefore unrolled without changing sample positions before
+owner review. No SWZ3 flag is promoted by this change.
 
 ## Physical media
 

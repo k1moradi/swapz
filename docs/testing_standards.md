@@ -135,8 +135,10 @@ remains on hold.
   extends passing pages to 32 strided pairs. Classifier ns/page must come from
   repeated batched sweeps rather than a timer pair around each page. Every
   threshold reports per-negative-profile false calls plus classifier-routed
-  production-planner block/extent savings. Thresholds are evidence, not kernel
-  policy. The unprivileged
+  production-planner block/extent savings. Console rendering must keep the
+  classifier-call table and routed-planner table separate so every benchmark
+  line remains below the compact-report width contract. Thresholds are evidence,
+  not kernel policy. The unprivileged
   Make-interface fixture must emit the same valid predictor evidence as one
   complete stdout line so stage parsing is exercised without privilege. Source
   contracts must prove no production DM/codec/authority/engine translation unit

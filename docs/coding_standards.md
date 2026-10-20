@@ -584,9 +584,12 @@ delta as positive evidence, and report false calls by negative profile.
 The sampled hot loop must cache each loaded 64-bit word and derive any 32-bit
 lane evidence from those cached values rather than rereading the same bytes.
 ID67a.3 uses an 8-pair page-wide first stage; fewer than two points is an
-immediate reject. Passing pages extend to 32 evenly strided pairs. Classifier
-timing must be batched across repeated eligible-page sweeps so two timer calls
-cover many classifier invocations rather than contaminating every page.
+immediate reject. Passing pages extend to 32 evenly strided pairs. The fixed
+three second-stage positions in each 512-byte region should be expressed
+directly rather than paying a nested offset-loop branch in this intentionally
+tiny classifier. Classifier timing must be batched across repeated eligible-page
+sweeps so two timer calls cover many classifier invocations rather than
+contaminating every page.
 Thresholds are evidence, never kernel policy before measurement.
 
 Every candidate must round-trip exactly. Measure transform, inverse and optional
