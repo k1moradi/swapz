@@ -3360,49 +3360,45 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	    (have1 && slot1->bio_count != selected1))
 		return false;
 
-	/* Priming is serialized and read-only with respect to authority. The
-	 * required-range helpers subtract these already-resident blocks before
-	 * deciding whether ID63 can save a real lower request with zero padding. */
+	/*
+	 * Decide ID63 eligibility directly from ordered-owner residency. This
+	 * scans only fixed cache metadata; it does not copy cached 4KiB blocks
+	 * into private slot scratch for candidates that will be rejected.
+	 */
+	range0 = swapz_engine_required_read_range_cached(
+		&ctx->engine, slot0->logical_pages, slot0->bio_count,
+		start0, blocks0, &req_first0, &req_blocks0);
+	range1 = swapz_engine_required_read_range_cached(
+		&ctx->engine, slot1->logical_pages, slot1->bio_count,
+		start1, blocks1, &req_first1, &req_blocks1);
+	if (!range0 && !range1 && req_blocks0 && req_blocks1) {
+		span_error = swapz_engine_coalesced_span(
+			start0, blocks0, req_first0, req_blocks0,
+			start1, blocks1, req_first1, req_blocks1,
+			&combined_start, &combined_blocks);
+		if (!span_error)
+			coalesce = true;
+	}
+	if (passive_adjacent && !coalesce) {
+		if (!range0 && !range1 && (!req_blocks0 || !req_blocks1))
+			ctx->parallel_read_coalesce_skip_cached++;
+		else if (range0 == -EOPNOTSUPP || range1 == -EOPNOTSUPP)
+			ctx->parallel_read_coalesce_skip_noncontig_slot++;
+		else if (!range0 && !range1 && req_blocks0 && req_blocks1 &&
+			 span_error == -EOPNOTSUPP)
+			ctx->parallel_read_coalesce_skip_gap++;
+		else
+			ctx->parallel_read_coalesce_skip_other++;
+	}
+	/* A rejected pair leaves FIFO ownership untouched and copies no cache data. */
+	if (!coalesce)
+		return false;
+
+	/* Only a proven one-request merge may pay private-slot cache priming. */
 	swapz_engine_prime_read_slot(&ctx->engine, &slot0->engine,
 				     start0, blocks0);
-	if (have1)
-		swapz_engine_prime_read_slot(&ctx->engine, &slot1->engine,
+	swapz_engine_prime_read_slot(&ctx->engine, &slot1->engine,
 				     start1, blocks1);
-	if (have1) {
-		range0 = swapz_engine_required_read_range(
-			&slot0->engine, slot0->logical_pages, slot0->bio_count,
-			start0, blocks0, &req_first0, &req_blocks0);
-		range1 = swapz_engine_required_read_range(
-			&slot1->engine, slot1->logical_pages, slot1->bio_count,
-			start1, blocks1, &req_first1, &req_blocks1);
-		if (ctx->read_coalescing_enabled &&
-		    !range0 && !range1 && req_blocks0 && req_blocks1) {
-			span_error = swapz_engine_coalesced_span(
-				start0, blocks0, req_first0, req_blocks0,
-				start1, blocks1, req_first1, req_blocks1,
-				&combined_start, &combined_blocks);
-			if (!span_error)
-				coalesce = true;
-		}
-		if (ctx->read_coalescing_enabled && passive_adjacent && !coalesce) {
-			if (!range0 && !range1 &&
-			    (!req_blocks0 || !req_blocks1))
-				ctx->parallel_read_coalesce_skip_cached++;
-			else if (range0 == -EOPNOTSUPP ||
-				 range1 == -EOPNOTSUPP)
-				ctx->parallel_read_coalesce_skip_noncontig_slot++;
-			else if (!range0 && !range1 && req_blocks0 &&
-				 req_blocks1 && span_error == -EOPNOTSUPP)
-				ctx->parallel_read_coalesce_skip_gap++;
-			else
-				ctx->parallel_read_coalesce_skip_other++;
-		}
-
-		/* Slot execution is ID63-only. A cache hit, noncontiguous missing
-		 * range or exact-range gap leaves FIFO ownership untouched. */
-		if (!coalesce)
-			return false;
-	}
 
 	/* Ownership transfers only after the exact execution mode is known. */
 	for (index = 0; index < slot0->bio_count; ++index) {
@@ -3482,11 +3478,15 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 				break;
 		}
 
-	/* Cache publication is allowed only after every grouped read and upper
-	 * copy succeeded. Telemetry is merged even on failure. */
-	swapz_merge_read_slot(ctx, slot0, !batch_error);
+	/*
+	 * Lower-I/O/decode telemetry belongs to the completed operation and is
+	 * merged before upper completion. Shared LRU publication is deliberately
+	 * deferred: successful BIOs must not wait for the post-validation cache
+	 * memcpy. Failed batches never publish private residency.
+	 */
+	swapz_merge_read_slot(ctx, slot0, false);
 	if (have1)
-		swapz_merge_read_slot(ctx, slot1, !batch_error);
+		swapz_merge_read_slot(ctx, slot1, false);
 	ctx->parallel_read_pairs++;
 	if ((slot0->bio_count > 1U) || (have1 && slot1->bio_count > 1U))
 		ctx->parallel_read_same_extent_pairs++;
@@ -3535,6 +3535,11 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	if (have1)
 		for (index = 0; index < slot1->bio_count; ++index)
 			swapz_complete(slot1->bios[index], 0);
+	/* BIO ownership ended above. Slot-engine residency is independent of the
+	 * dm_per_bio_data lifetime, so absorb validated cache blocks afterwards. */
+	swapz_engine_absorb_read_slot(&ctx->engine, &slot0->engine);
+	if (have1)
+		swapz_engine_absorb_read_slot(&ctx->engine, &slot1->engine);
 	atomic_set(&ctx->preparation_tail_credit, 0);
 	if (retained_bypass && !ctx->worker_has_immediate_followup &&
 	    swapz_retention_expired(ctx)) {

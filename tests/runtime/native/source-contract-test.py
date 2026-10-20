@@ -1099,6 +1099,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_engine_prime_read_slot", header)
         self.assertIn("swapz_engine_absorb_read_slot", header)
         self.assertIn("swapz_engine_required_read_range", header)
+        self.assertIn("swapz_engine_required_read_range_cached", header)
         self.assertIn("swapz_engine_coalesced_span", header)
         self.assertIn("swapz_engine_coalesce_read_pair", header)
         self.assertIn("read_coalesced_block_mask", header)
@@ -1115,6 +1116,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_engine_prime_read_slot", engine)
         self.assertIn("swapz_engine_absorb_read_slot", engine)
         self.assertIn("int swapz_engine_required_read_range", engine)
+        self.assertIn("int swapz_engine_required_read_range_cached", engine)
         self.assertIn("int swapz_engine_coalesced_span", engine)
         self.assertIn("int swapz_engine_coalesce_read_pair", engine)
         self.assertIn("engine->read_coalesced_block_mask", engine)
@@ -1125,6 +1127,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_read_can_parallel(ctx, entry->bio)", batch)
         self.assertIn("swapz_parallel_read_extent", batch)
         self.assertIn("swapz_engine_prime_read_slot(&ctx->engine", batch)
+        self.assertIn("swapz_engine_required_read_range_cached(", batch)
         self.assertIn("if (!have1 || !ctx->read_coalescing_enabled)", batch)
         self.assertIn("if (!passive_adjacent)", batch)
         self.assertIn("if (!coalesce)", batch)
@@ -1135,6 +1138,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             batch.index("swapz_read_slot_prepare(slot0"))
         self.assertLess(batch.index("if (!passive_adjacent)"),
                         batch.index("swapz_read_slot_prepare(slot0"))
+        self.assertLess(batch.index("swapz_engine_required_read_range_cached("),
+                        batch.index("swapz_engine_prime_read_slot(&ctx->engine"))
+        self.assertLess(batch.index("if (!coalesce)"),
+                        batch.index("swapz_engine_prime_read_slot(&ctx->engine"))
         self.assertLess(batch.index("if (!coalesce)"),
                         batch.index("list_del_init(&entry->list)"))
         self.assertNotIn("queue_work(ctx->read_workqueue", batch)
@@ -1146,6 +1153,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("*processed_out = selected", batch)
         self.assertIn("swapz_copy_bio_accounted(", batch)
         self.assertIn("swapz_complete(slot0->bios[index]", batch)
+        success_complete = batch.rindex("swapz_complete(slot0->bios[index], 0)")
+        success_absorb = batch.rindex(
+            "swapz_engine_absorb_read_slot(&ctx->engine, &slot0->engine)")
+        self.assertLess(success_complete, success_absorb)
         self.assertNotIn("swapz_complete(", slot_run)
         self.assertNotIn("swapz_finish(", slot_run)
         self.assertNotIn("swapz_stage(", slot_run)

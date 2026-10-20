@@ -229,12 +229,22 @@ void swapz_engine_absorb_read_slot(struct swapz_engine *master,
 /*
  * ID63 helpers. required_read_range computes the exact contiguous lower range
  * still missing for one immutable extent after caller-side cache priming.
- * coalesced_span accepts only zero-gap, same-segment ranges.
+ * required_read_range_cached performs the same calculation directly against
+ * the ordered owner's direct/LRU residency without copying cached blocks into a
+ * private slot. coalesced_span accepts only zero-gap, same-segment ranges.
  * coalesce_read_pair performs exactly one lower callback and seeds two private
  * engines; normal per-record generation/CRC validation remains mandatory
  * before shared cache publication.
  */
 int swapz_engine_required_read_range(
+				   const struct swapz_engine *engine,
+				   const swapz_u32 *logical_pages,
+				   swapz_u8 count,
+				   swapz_u32 start_block,
+				   swapz_u8 extent_blocks,
+				   swapz_u8 *first_block,
+				   swapz_u8 *blocks);
+int swapz_engine_required_read_range_cached(
 				   const struct swapz_engine *engine,
 				   const swapz_u32 *logical_pages,
 				   swapz_u8 count,

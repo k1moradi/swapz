@@ -486,8 +486,10 @@ or participate in policy.
 
 ID63 may operate only on the already-admitted independent READ prefix. It never
 waits for another BIO and never crosses a write, barrier or dependent read.
-Shared caches are primed into two private slot engines before eligibility is
-computed.
+Eligibility must first inspect the ordered owner's direct/LRU residency metadata
+without copying cached blocks into private slot scratch. Private slots are
+primed only after the exact missing ranges prove one zero-padding coalesced
+lower request.
 
 Eligibility is based on the exact lower blocks still missing for every grouped
 BIO, not merely full-extent adjacency. Each private extent's missing mask must
@@ -549,10 +551,14 @@ zero.
 `swapz_try_parallel_read_batch()` is ID63-only. After the first immutable-read
 prefix scan, it must reject before slot preparation, a second FIFO walk,
 cache-LRU scans or cached-block memcpy unless read coalescing is enabled and the
-first two distinct extents are physically adjacent in the same segment. After
-priming, any cached/noncontiguous/gapped missing range must still return before
+first two distinct extents are physically adjacent in the same segment. Any cached/noncontiguous/gapped missing range must return before private-slot
+priming and
 BIO ownership transfers. Standalone same-extent slot grouping is retired;
 ordinary `swapz_read()` already reuses the shared extent/metadata caches.
+For a successful ID63 pair, lower-I/O/decode telemetry is committed before upper
+BIO completion, but shared LRU cache absorption must occur only after every
+successful upper BIO has been completed so cache memcpy is off the completion
+critical path.
 
 Fast and serial ID63 qualification keeps `parallel_reads=1` and varies only
 `read_coalesce` for five matched rounds. The off arm is the ordinary FIFO read

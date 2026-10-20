@@ -76,11 +76,15 @@ The historical fast write-only QD8 five-pair result (23.00/20.99 MB/s,
 retained only as burst evidence and does not qualify sustained-QD throughput.
 The next owner run must establish the corrected persistent-worker baseline.
 
-ID63 remains qualified on both synthetic models and retains five-pair
-confirmation. The latest fast A/B reduces sequential lower READ requests by
-about 16%, while the serial model reduces them by about 40%, with zero padding.
-The current source removes the refuted ID39 helper so the next owner run can
-measure ID63 without workqueue dispatch contaminating non-coalesced pairs.
+ID63 remains a qualified request-efficiency mechanism but the latest owner run
+exposed a fast-model latency regression that must be repaired rather than hidden.
+On SSD_EMULATED it reduced sequential lower READ requests by 20.0% with paired
+95% CI [-24.4%,-15.5%] while p99 increased 9.5% [1.7%,17.4%]. On SD_EMULATED
+it reduced requests 41.1% and p99 37.8% with decisive paired intervals. The next
+candidate computes exact missing ranges from shared-cache metadata before any
+private-slot cache memcpy, primes only proven merges, and completes successful
+upper BIOs before shared LRU absorption. It does not disable ID63 by hardware
+queue depth or change lower-read concurrency.
 
 ID39 helper concurrency is retired in current source. The read-only
 `parallel_reads` switch remains a grouping-control compatibility surface;

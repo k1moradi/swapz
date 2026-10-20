@@ -108,7 +108,9 @@ remains on hold.
 - **ID63 adjacent READ coalescing:** retain five matched fast rounds and five
   matched serial-depth rounds. Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
-  stays zero and defensive skip-other stays zero.
+  stays zero and defensive skip-other stays zero. Eligibility must use shared
+  cache metadata without private-slot memcpy, and source contracts must prove
+  successful upper BIO completion precedes shared LRU absorption.
 - **ID64 one-shot in-flight-zero shrink guard:** promotion is complete. Run one
   directional SSD_EMULATED mixed guard-off/on control with
   `async_prepare=1` in both arms. Guard-off must have zero guarded skips;
