@@ -806,7 +806,26 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("All-window close reasons per-pair mean", rendered)
         self.assertNotIn("Timed 4MiB", rendered)
         self.assertNotIn("QD4 sync windows:", rendered)
-        self.assertLess(max(map(len, rendered.splitlines())), 96)
+        # Every stdout table must be directly copy/pasteable as Markdown:
+        # unindented GFM pipe syntax, >=3 separator dashes per column, and a
+        # literal horizontal rule immediately after the last row.
+        lines = rendered.splitlines()
+        table_starts = [
+            index for index in range(len(lines) - 1)
+            if lines[index].startswith("| ") and
+            lines[index + 1].startswith("| ") and
+            all(set(cell.strip()) <= {"-"} and len(cell.strip()) >= 3
+                for cell in lines[index + 1].strip("|").split("|"))
+        ]
+        self.assertGreater(len(table_starts), 10)
+        for start in table_starts:
+            index = start + 2
+            while index < len(lines) and lines[index].startswith("| "):
+                index += 1
+            self.assertLess(index, len(lines))
+            self.assertEqual(lines[index], "---")
+        self.assertNotRegex(rendered, r"(?m)^  \|")
+        self.assertLess(max(map(len, lines)), 96)
 
     def test_mixed_write_diagnostics_missing_or_inconsistent_fails_closed(self):
         sessions = runner.parse_sessions(synthetic_log())

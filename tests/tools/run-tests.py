@@ -1854,21 +1854,23 @@ def benchmark_verdicts(sessions):
 
 
 def print_table(headers, rows):
-    """Print a compact Markdown-style console table."""
+    """Print one valid compact GFM pipe table followed by a horizontal rule."""
+    text_headers = [str(header) for header in headers]
     text_rows = [[str(value) for value in row] for row in rows]
     widths = [
-        max(len(str(headers[index])),
+        max(3, len(text_headers[index]),
             *(len(row[index]) for row in text_rows))
         for index in range(len(headers))
     ]
-    print("  | " + " | ".join(
+    print("| " + " | ".join(
         f"{header:<{widths[index]}}"
-        for index, header in enumerate(headers)) + " |")
-    print("  | " + " | ".join("-" * width for width in widths) + " |")
+        for index, header in enumerate(text_headers)) + " |")
+    print("| " + " | ".join("-" * width for width in widths) + " |")
     for row in text_rows:
-        print("  | " + " | ".join(
+        print("| " + " | ".join(
             f"{value:<{widths[index]}}"
             for index, value in enumerate(row)) + " |")
+    print("---")
 
 
 def print_bench(result):

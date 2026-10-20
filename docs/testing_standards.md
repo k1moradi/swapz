@@ -62,6 +62,12 @@ effects, but suppresses repetitive per-control diagnostics. Detailed cache,
 window and counter evidence remains in the single replace-in-place
 root `test_results.json.xz` report.
 
+Every console table printed by the official `make test` reporter must be an
+unindented GitHub-Flavored Markdown pipe table. Header-separator cells contain
+at least three dashes, and the reporter emits a literal `---` horizontal rule
+immediately after every table. This keeps captured stdout directly
+copy/pasteable as Markdown while preserving the compact <96-column contract.
+
 The retained production counters must describe active decisions only. Closed/rejected diagnostic counters are removed from production and report schemas.
 
 ## Evidence levels
