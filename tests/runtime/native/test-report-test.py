@@ -731,9 +731,9 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
         self.assertTrue(all("kernel_status" not in session for session in sessions))
 
-    def test_write_saturation_evidence_repeats_fast_qd8_and_qd32(self):
+    def test_write_saturation_evidence_repeats_fast_qd4_qd8_and_qd32(self):
         sessions = runner.parse_write_saturation(synthetic_log())
-        self.assertEqual(len(sessions), 32)
+        self.assertEqual(len(sessions), 40)
         verdict = runner.write_saturation_verdict(sessions)
         self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_EVIDENCE")
         self.assertAlmostEqual(
