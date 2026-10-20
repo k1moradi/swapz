@@ -65,6 +65,10 @@ struct swapz_authority {
 	 * supplies this bounded sidecar so dead-segment validation is O(256)
 	 * instead of rescanning every logical page. */
 	swapz_u32 *segment_mapped_pages;
+	/* Optional per-segment GC scores maintained with map publication. */
+	swapz_u32 *segment_gc_live_bytes;
+	swapz_u32 *segment_gc_io_cost;
+	swapz_u16 *segment_gc_min_live_blocks;
 	swapz_u32 segment_count;
 	swapz_u32 gc_destination;
 	swapz_u32 next_block;
@@ -146,6 +150,11 @@ int swapz_enable_segment_rotation(struct swapz_authority *authority,
 int swapz_enable_segment_mapping_counts(struct swapz_authority *authority,
 				      swapz_u32 *segment_mapped_pages,
 				      swapz_u32 segment_count);
+int swapz_enable_segment_gc_accounting(struct swapz_authority *authority,
+				     swapz_u32 *live_bytes,
+				     swapz_u32 *io_cost,
+				     swapz_u16 *min_live_blocks,
+				     swapz_u32 segment_count);
 /* Begin GC into ONE entirely dead reserve segment (not a foreground one).
  * Caller preserves the foreground cursor until commit; no nested GC. */
 int swapz_gc_begin_rotation(struct swapz_authority *authority, swapz_u32 victim);

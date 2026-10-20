@@ -140,7 +140,9 @@ remains on hold.
 - **ID61:** the owned-RAM lifecycle phase now collects foreground-GC pressure
   evidence before any background worker. Exactly five pressure rounds must emit
   useful-WRITE wall/p99; loaded status must show positive total GC wall and
-  victim-choice wall plus exact map/segment/relocation scan counts. The report
+  victim-choice wall plus exact map/segment/relocation scan counts. Incremental
+  victim accounting must keep `gc_choose_map_entries == 0`; relocation-map
+  scans remain observational. The report
   records round-0 baseline p99, maximum later-round p99, GC wall as a
   fraction of useful-WRITE wall, and the existing no-headroom skip count. This
   is observational only: no GC worker,

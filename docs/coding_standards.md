@@ -936,3 +936,15 @@ A grouped read failure fails closed through the ordered owner. Teardown drains
 the ordered worker before freeing read scratch; there is no read-helper work to
 cancel or drain. End-to-end latency plus independently measured lower
 bytes/requests remain the acceptance evidence.
+
+
+### Incremental GC victim accounting
+
+Victim-selection cost metadata is per physical 1MiB segment, never per logical
+4KiB page. The serialized authority updates mapped-page count, live-byte cost,
+conservative I/O cost and proven minimum-live-block cost in the same fail-closed
+publication/discard transition. Score arithmetic is prevalidated before mapping
+mutation. `swapz_gc_choose_victim()` may scan segments but must not rescan
+`logical_pages`; relocation ownership discovery remains a separate measured
+problem and must not gain a per-page reverse index without independent
+evidence.

@@ -148,8 +148,12 @@ scanned and relocation-map entries scanned. Round 0 is
 the pre-pressure latency baseline; the maximum p99 from later rounds is the
 pressure observation. Report GC wall as parts-per-million of useful WRITE wall.
 This is synthetic owned-RAM evidence and must not be relabeled physical-device
-latency. Do not add a background worker until the measured GC fraction/tail
-impact is material with reserve headroom.
+latency. The owner pressure run put foreground GC near 0.8% of useful-write
+wall, refuting a background worker at current geometry. Victim selection now
+maintains per-segment live-byte/I/O/min-block scores with the existing exact
+mapping count, so loaded qualification requires zero
+`gc_choose_map_entries`. The relocation scan remains until native scaling
+evidence shows it is material.
 
 **ID62 physical media.** No current benchmark may collect physical evidence.
 ID29/ID63 RAM qualification does not authorize physical storage or active swap.

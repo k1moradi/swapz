@@ -19,6 +19,11 @@ static swapz_u16 live[1024];
 static swapz_u8 classes[1024];
 static swapz_u8 bytes[4096];
 static swapz_u8 p0[2200], p1[1600];
+static swapz_u8 segment_roles[4];
+static swapz_u32 segment_maps[4];
+static swapz_u32 segment_bytes[4];
+static swapz_u32 segment_io[4];
+static swapz_u16 segment_min_blocks[4];
 
 static int test_bytes_vs_count_victim_policy(void)
 {
@@ -157,6 +162,11 @@ static int test_exact_committed_payload_lengths(void)
 	swapz_u32 pages[2] = { 2, 3 };
 
 	CHECK(swapz_authority_init(&a, maps, live, classes, 32, 1024) == 0);
+	a.reuse_dead_segments = 1;
+	CHECK(swapz_enable_segment_rotation(&a, segment_roles, 4) == 0);
+	CHECK(swapz_enable_segment_mapping_counts(&a, segment_maps, 4) == 0);
+	CHECK(swapz_enable_segment_gc_accounting(
+	      &a, segment_bytes, segment_io, segment_min_blocks, 4) == 0);
 	memset(p0, 0x3a, sizeof(p0));
 	memset(p1, 0x59, sizeof(p1));
 	CHECK(swapz_stage(&a, pages, 2, 1, &tx) == 0);
@@ -172,9 +182,23 @@ static int test_exact_committed_payload_lengths(void)
 	CHECK(swapz_gc_live_byte_cost(&maps[2]) == sizeof(p0) + 16);
 	CHECK(swapz_gc_live_byte_cost(&maps[3]) == sizeof(p1) + 16);
 	CHECK(live[0] == 2);
+	CHECK(segment_maps[0] == 2);
+	CHECK(segment_bytes[0] ==
+	      swapz_gc_live_byte_cost(&maps[2]) +
+	      swapz_gc_live_byte_cost(&maps[3]));
+	CHECK(segment_io[0] ==
+	      swapz_gc_estimated_io_cost(&maps[2]) +
+	      swapz_gc_estimated_io_cost(&maps[3]));
+	CHECK(segment_min_blocks[0] ==
+	      swapz_gc_min_live_blocks(&maps[2]) +
+	      swapz_gc_min_live_blocks(&maps[3]));
 	CHECK(swapz_discard_page(&a, 2) == 0);
 	CHECK(swapz_gc_live_byte_cost(&maps[2]) == 0);
 	CHECK(swapz_gc_live_byte_cost(&maps[3]) == sizeof(p1) + 16);
+	CHECK(segment_maps[0] == 1);
+	CHECK(segment_bytes[0] == swapz_gc_live_byte_cost(&maps[3]));
+	CHECK(segment_io[0] == swapz_gc_estimated_io_cost(&maps[3]));
+	CHECK(segment_min_blocks[0] == swapz_gc_min_live_blocks(&maps[3]));
 	return 0;
 }
 

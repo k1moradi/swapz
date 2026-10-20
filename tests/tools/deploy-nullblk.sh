@@ -523,7 +523,7 @@ note "LIVE_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns ba
    gc_baseline_p99_ns > 0 && gc_pressure_p99_ns > 0 &&
    gc_wall_ns > 0 && gc_choose_wall_ns > 0 &&
    gc_choose_calls >= gc_victims &&
-   gc_choose_map_entries >= gc_victims * 4096 &&
+   gc_choose_map_entries == 0 &&
    gc_choose_segment_entries > 0 &&
    gc_relocation_map_entries >= gc_victims * 4096 )) ||
     fail "loaded live-GC did not prove repeated distributed live evacuation and rotation"

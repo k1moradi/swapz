@@ -274,7 +274,6 @@ struct swapz_dm {
 	u8 *gc_bytes_store;
 	swapz_u32 *gc_scores;  /* authoritative payload+descriptor bytes */
 	swapz_u32 *gc_io_scores; /* conservative read+write cost per victim */
-	swapz_u16 *gc_live_counts; /* count for ties/control comparison */
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	swapz_u32 *gc_segment_evictions; /* successful committed victim rotations */
 	swapz_u32 *segment_mapped_pages; /* exact current logical maps per segment */
@@ -1612,60 +1611,39 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
  */
 static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 {
-	swapz_u32 logical, segment, selected = ~(swapz_u32)0;
+	swapz_u32 segment, selected = ~(swapz_u32)0;
 	swapz_u32 best = ~(swapz_u32)0;
 	swapz_u16 best_count = ~(swapz_u16)0;
 
 	ctx->gc_choose_calls++;
-	memset(ctx->gc_scores, 0,
-	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
-	memset(ctx->gc_live_counts, 0,
-	       (size_t)ctx->segment_count * sizeof(*ctx->gc_live_counts));
-	memset(ctx->gc_io_scores, 0,
-	       (size_t)ctx->segment_count * sizeof(*ctx->gc_io_scores));
-	memset(ctx->gc_min_live_blocks, 0,
-	       (size_t)ctx->segment_count *
-			       sizeof(*ctx->gc_min_live_blocks));
-	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		const struct swapz_map *m = &ctx->maps[logical];
-		swapz_u32 cost, io_cost;
-
-		ctx->gc_choose_map_entries++;
-
-		if (!m->valid)
-			continue;
-		if (m->start_block >= ctx->physical_blocks)
-			return -EUCLEAN;
-		cost = swapz_gc_live_byte_cost(m);
-		io_cost = swapz_gc_estimated_io_cost(m);
-		if (!cost || !io_cost)
-			return -EUCLEAN;
-		segment = m->start_block / SWAPZ_SEGMENT_BLOCKS;
-		if (ctx->gc_scores[segment] > ~(swapz_u32)0 - cost ||
-		    ctx->gc_io_scores[segment] > ~(swapz_u32)0 - io_cost ||
-		    ctx->gc_live_counts[segment] == ~(swapz_u16)0)
-			return -EOVERFLOW;
-		ctx->gc_scores[segment] += cost;
-		ctx->gc_io_scores[segment] += io_cost;
-		ctx->gc_min_live_blocks[segment] +=
-					swapz_gc_min_live_blocks(m);
-		ctx->gc_live_counts[segment]++;
-	}
+	if (ctx->authority.segment_gc_live_bytes != ctx->gc_scores ||
+	    ctx->authority.segment_gc_io_cost != ctx->gc_io_scores ||
+	    ctx->authority.segment_gc_min_live_blocks !=
+		    ctx->gc_min_live_blocks ||
+	    ctx->authority.segment_mapped_pages != ctx->segment_mapped_pages)
+		return -EUCLEAN;
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
-		swapz_u16 count = ctx->gc_live_counts[segment];
-
-		ctx->gc_choose_segment_entries++;
+		swapz_u32 mapped = ctx->segment_mapped_pages[segment];
+		swapz_u16 count;
 		swapz_u32 score;
 
-		/* GC must create *foreground usable* space. Evacuating a
-		 * reserve segment only moves survivors between GC reserves
-		 * and causes false progress followed by foreground ENOSPC. */
-		if (!count || !ctx->segment_roles[segment] ||
+		ctx->gc_choose_segment_entries++;
+		if (mapped > (swapz_u32)(swapz_u16)~0U)
+			return -EUCLEAN;
+		count = (swapz_u16)mapped;
+		if (!count) {
+			if (ctx->gc_scores[segment] ||
+			    ctx->gc_io_scores[segment] ||
+			    ctx->gc_min_live_blocks[segment])
+				return -EUCLEAN;
+			continue;
+		}
+		if (!ctx->gc_scores[segment] || !ctx->gc_io_scores[segment] ||
+		    ctx->gc_min_live_blocks[segment] > count)
+			return -EUCLEAN;
+		if (!ctx->segment_roles[segment] ||
 		    segment == ctx->authority.open_segment)
 			continue;
-		/* Reject a provably non-reclaimable full victim BEFORE paying
-		 * for up to 1MiB of GC reads/writes. Such an eviction could
-		 * only fill its sole reserve destination and return ENOSPC. */
 		if (!swapz_gc_candidate_can_free_block(ctx->gc_scores[segment],
 					      ctx->gc_min_live_blocks[segment])) {
 			ctx->gc_no_headroom_skips++;
@@ -1692,7 +1670,7 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 		return -ENOSPC;
 	*victim = selected;
 	ctx->gc_selected_live_bytes += ctx->gc_scores[selected];
-	ctx->gc_selected_live_records += ctx->gc_live_counts[selected];
+	ctx->gc_selected_live_records += ctx->segment_mapped_pages[selected];
 	ctx->gc_selected_io_cost += ctx->gc_io_scores[selected];
 	return 0;
 }
@@ -4311,7 +4289,6 @@ static void swapz_free(struct swapz_dm *ctx)
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
 	kvfree(ctx->gc_io_scores);
-	kvfree(ctx->gc_live_counts);
 	kvfree(ctx->gc_min_live_blocks);
 	kvfree(ctx->gc_segment_evictions);
 	kvfree(ctx->segment_mapped_pages);
@@ -4472,8 +4449,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				  sizeof(*ctx->gc_scores), GFP_KERNEL);
 	ctx->gc_io_scores = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->gc_io_scores), GFP_KERNEL);
-	ctx->gc_live_counts = kvcalloc(ctx->segment_count,
-				      sizeof(*ctx->gc_live_counts), GFP_KERNEL);
 	ctx->gc_min_live_blocks = kvcalloc(ctx->segment_count,
 					  sizeof(*ctx->gc_min_live_blocks),
 					  GFP_KERNEL);
@@ -4490,7 +4465,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
-	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
+	    !ctx->gc_min_live_blocks ||
 	    !ctx->gc_segment_evictions || !ctx->segment_mapped_pages ||
 	    !ctx->segment_roles) {
 		error = -ENOMEM;
@@ -4517,6 +4492,15 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 						ctx->segment_count);
 	if (error) {
 		ti->error = "Cannot initialize exact segment mapping counts";
+		goto fail;
+	}
+	error = swapz_enable_segment_gc_accounting(&ctx->authority,
+					      ctx->gc_scores,
+					      ctx->gc_io_scores,
+					      ctx->gc_min_live_blocks,
+					      ctx->segment_count);
+	if (error) {
+		ti->error = "Cannot initialize incremental GC victim accounting";
 		goto fail;
 	}
 	ctx->authority.dead_segment_recycle = swapz_discard_dead_segment;

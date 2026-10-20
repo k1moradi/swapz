@@ -614,7 +614,7 @@ def parse_loaded_correctness(output):
             gc_baseline_p99_ns <= 0 or gc_pressure_p99_ns <= 0 or
             gc_wall_ns <= 0 or gc_choose_wall_ns <= 0 or
             gc_choose_calls < gc_victims or
-            gc_choose_map_entries < gc_victims * 4096 or
+            gc_choose_map_entries != 0 or
             gc_choose_segment_entries <= 0 or
             gc_relocation_map_entries < gc_victims * 4096 or
             gc_fraction_ppm !=
@@ -2879,7 +2879,7 @@ def print_bench(result):
                  f"p99 {loaded['gc_baseline_p99_ns'] / 1e6:.2f}->"
                  f"{loaded['gc_pressure_p99_ns'] / 1e6:.2f} ms"),
             ("GC map scans",
-                 f"choose {loaded['gc_choose_map_entries']} / "
+                 f"choose-map {loaded['gc_choose_map_entries']} / "
                  f"relocate {loaded['gc_relocation_map_entries']} entries; "
                  f"choose {loaded['gc_choose_wall_ns'] / 1e6:.2f} ms; "
                  f"no-headroom {loaded['gc_no_headroom_skips']}"),
