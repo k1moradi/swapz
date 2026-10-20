@@ -640,11 +640,15 @@ relocation-map scan counts.
 
 For the current 4096-page oracle, choose/relocation map-entry deltas must be at
 least `gc_victims * 4096`; this proves the full-map scaling cost is actually
-being exercised. The parser recomputes the integer GC-wall fraction and rejects
-missing/inconsistent evidence. Native report and Make-interface fixtures mirror
-the complete marker. No acceptance threshold for “background GC is useful” is
-hardcoded: the owner evidence first determines whether GC wall/tail impact is
-large enough to justify another architecture experiment.
+being exercised. The public `swapz_gc_compact_one()` wrapper owns only complete
+attempt wall attribution; source contracts for victim choice, relocation,
+rotation, trim and GC lower-I/O accounting inspect
+`swapz_gc_compact_one_inner()` so timing instrumentation cannot weaken those
+existing invariants. The parser recomputes the integer GC-wall fraction and
+rejects missing/inconsistent evidence. Native report and Make-interface fixtures
+mirror the complete marker. No acceptance threshold for “background GC is
+useful” is hardcoded: the owner evidence first determines whether GC wall/tail
+impact is large enough to justify another architecture experiment.
 
 ### Native Make-interface benchmark fixture fidelity
 

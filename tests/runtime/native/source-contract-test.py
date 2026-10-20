@@ -74,7 +74,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertGreaterEqual(DM.count("ctx->preparation_queued--"), 2)
 
     def test_gc_tracks_committed_victim_distribution(self):
-        gc = body("swapz_gc_compact_one")
+        gc = body("swapz_gc_compact_one_inner")
         self.assertIn("gc_segment_evictions[victim]", gc)
         self.assertIn("gc_distinct_victims", DM)
         self.assertIn("gc_victim_min_evictions", DM)
@@ -163,7 +163,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("lz4_attempts=%llu lz4_accepted_bytes=%llu", status)
         self.assertIn("lz4_size_3073_3568=%llu lz4_raw_fallback=%llu", status)
         self.assertIn("ctx->lz4_size_bins[5]", status)
-        self.assertNotIn("LZ4_compress_fast(", body("swapz_gc_compact_one"))
+        self.assertNotIn("LZ4_compress_fast(", body("swapz_gc_compact_one_inner"))
 
     def test_exact_zero_write_elides_lower_io_without_losing_ordering(self):
         accept = body("swapz_accept_write")
@@ -337,17 +337,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
     def test_allocation_has_gc_reserve_and_fail_closed_reuse(self):
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_flush_window"))
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_raw_write"))
-        self.assertIn("swapz_gc_choose_victim(ctx,", body("swapz_gc_compact_one"))
+        self.assertIn("swapz_gc_choose_victim(ctx,", body("swapz_gc_compact_one_inner"))
         self.assertIn("live_total += a->live_records[start + off]", AUTH)
         self.assertIn("live_total != a->segment_mapped_pages[segment]", AUTH)
         self.assertIn("swapz_enable_segment_mapping_counts", AUTH)
         self.assertIn("cost = swapz_gc_live_byte_cost(m)", DM)
         self.assertIn("ctx->gc_scores[segment] += cost", DM)
         self.assertIn("swapz_gc_prefer(score, count, best, best_count)", DM)
-        self.assertIn("swapz_engine_read_page(&ctx->engine", body("swapz_gc_compact_one"))
-        self.assertIn("swapz_gc_flush(ctx)", body("swapz_gc_compact_one"))
+        self.assertIn("swapz_engine_read_page(&ctx->engine", body("swapz_gc_compact_one_inner"))
+        self.assertIn("swapz_gc_flush(ctx)", body("swapz_gc_compact_one_inner"))
         self.assertIn("swapz_finish_raw(&ctx->authority", body("swapz_gc_move_raw"))
-        self.assertIn("if (a->live_records[block])", body("swapz_gc_compact_one"))
+        self.assertIn("if (a->live_records[block])", body("swapz_gc_compact_one_inner"))
 
     def test_discard_validates_entire_range_before_mutating(self):
         discard = body("swapz_discard")
@@ -611,7 +611,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("gc_selected_io_estimate", body("swapz_status"))
 
     def test_gc_does_not_consume_or_complete_upper_bios(self):
-        gc = body("swapz_gc_compact_one")
+        gc = body("swapz_gc_compact_one_inner")
         self.assertNotIn("swapz_complete(", gc)
         self.assertIn("ctx->gc_read_bytes", gc)
         self.assertIn("ctx->gc_write_bytes", gc)
@@ -661,7 +661,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
 
     def test_gc_explicitly_forbids_paused_open_and_victim(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
-        gc = body("swapz_gc_compact_one")
+        gc = body("swapz_gc_compact_one_inner")
         for name in ("gc_forbidden_open", "gc_forbidden_victim"):
             self.assertIn(name, authority)
             self.assertIn("a->" + name, gc)
@@ -732,7 +732,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->window_bins[5]++", body("swapz_flush_window"))
         self.assertIn("gc_read_reqs=%llu gc_write_reqs=%llu", DM)
         self.assertIn("ctx->gc_read_reqs += ctx->physical_read_reqs - before_read_reqs",
-                      body("swapz_gc_compact_one"))
+                      body("swapz_gc_compact_one_inner"))
         self.assertIn("flush_delayed_work(&ctx->worker)", drain)
         self.assertLess(worker.index("swapz_flush_window(ctx)"),
                         worker.index("list_splice_init(&local, &ctx->incoming)"))
@@ -1518,7 +1518,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
 
     def test_dead_segment_trim_is_post_deadness_and_advisory(self):
         authority = (ROOT / "src/kernel/authority.c").read_text()
-        gc = body("swapz_gc_compact_one")
+        gc = body("swapz_gc_compact_one_inner")
         discard = body("swapz_discard_dead_segment")
         status = body("swapz_status")
         self.assertIn("a->dead_segment_recycle", authority)
