@@ -194,6 +194,13 @@ struct swapz_dm {
 	u64 parallel_read_coalesced_reqs_saved;
 	u64 parallel_read_coalesced_blocks;
 	u64 parallel_read_coalesce_extra_blocks;
+	/* Passive reason attribution for adjacent pairs that ID63 could not merge.
+	 * The three expected reasons are mutually exclusive; skip_other is a
+	 * defensive invariant bucket and must remain zero in qualification. */
+	u64 parallel_read_coalesce_skip_cached;
+	u64 parallel_read_coalesce_skip_noncontig_slot;
+	u64 parallel_read_coalesce_skip_gap;
+	u64 parallel_read_coalesce_skip_other;
 	/* One bounded LZ4 producer, separate from the ordered I/O worker.
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
@@ -450,6 +457,14 @@ struct swapz_dm {
 	u64 pack_tail_many_idle;
 	u64 burst_target_grows;
 	u64 burst_target_shrinks;
+	/* Passive causal attribution for every actual learned-target shrink. */
+	bool last_pack_tail_zero_inflight;
+	u64 burst_shrink_after_inflight_zero;
+	u64 burst_shrink_after_read_bypass;
+	u64 burst_shrink_other;
+	u64 burst_shrink_target_le8;
+	u64 burst_shrink_target_9_32;
+	u64 burst_shrink_target_gt32;
 	u64 window_gc_pressure;
 	/* First accepted record -> flush entry, excluding physical I/O. */
 	u64 window_first_ns;
@@ -1970,6 +1985,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 */
 	if (!count) {
 		if (hard_boundary) {
+			if (!READ_ONCE(ctx->inflight_write.active))
+				ctx->last_pack_tail_zero_inflight = false;
 			ctx->single_pack_deferred = false;
 			ctx->accepted_burst_pack_ready = false;
 			ctx->retained_tail_target = 0;
@@ -2542,18 +2559,23 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	inflight = READ_ONCE(ctx->inflight_write.active);
 	ctx->pack_tail_samples++;
 	if (!tail) {
-		if (inflight)
+		if (inflight) {
 			ctx->pack_tail_zero_inflight++;
-		else
+			ctx->last_pack_tail_zero_inflight = true;
+		} else {
 			ctx->pack_tail_zero_idle++;
+		}
 	} else if (tail == 1U) {
+		ctx->last_pack_tail_zero_inflight = false;
 		if (inflight)
 			ctx->pack_tail_one_inflight++;
 		else
 			ctx->pack_tail_one_idle++;
 	} else if (inflight) {
+		ctx->last_pack_tail_zero_inflight = false;
 		ctx->pack_tail_many_inflight++;
 	} else {
+		ctx->last_pack_tail_zero_inflight = false;
 		ctx->pack_tail_many_idle++;
 	}
 	/* A later sample supersedes any still-open deferred singleton. Account
@@ -3251,8 +3273,10 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	unsigned int prefix = 0, selected0 = 0, selected1 = 0;
 	unsigned int seen = 0, selected = 0, index;
 	bool have1 = false, retained_bypass, coalesce = false;
+	bool passive_adjacent = false;
 	u64 read_start_ns, read_end_ns;
 	int range0 = -EOPNOTSUPP, range1 = -EOPNOTSUPP;
+	int span_error = -EOPNOTSUPP;
 	int error0 = 0, error1 = 0, batch_error = 0;
 
 	*processed_out = 0;
@@ -3327,6 +3351,13 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		swapz_engine_prime_read_slot(&ctx->engine, &slot1->engine,
 				     start1, blocks1);
 	if (have1) {
+		passive_adjacent =
+			start0 / SWAPZ_SEGMENT_BLOCKS ==
+				start1 / SWAPZ_SEGMENT_BLOCKS &&
+			(swapz_u16)blocks0 + blocks1 <=
+				2U * SWAPZ_MAX_BLOCKS &&
+			(start0 + blocks0 == start1 ||
+			 start1 + blocks1 == start0);
 		range0 = swapz_engine_required_read_range(
 			&slot0->engine, slot0->logical_pages, slot0->bio_count,
 			start0, blocks0, &req_first0, &req_blocks0);
@@ -3334,12 +3365,27 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 			&slot1->engine, slot1->logical_pages, slot1->bio_count,
 			start1, blocks1, &req_first1, &req_blocks1);
 		if (ctx->read_coalescing_enabled &&
-		    !range0 && !range1 && req_blocks0 && req_blocks1 &&
-		    !swapz_engine_coalesced_span(
-			start0, blocks0, req_first0, req_blocks0,
-			start1, blocks1, req_first1, req_blocks1,
-			&combined_start, &combined_blocks))
-			coalesce = true;
+		    !range0 && !range1 && req_blocks0 && req_blocks1) {
+			span_error = swapz_engine_coalesced_span(
+				start0, blocks0, req_first0, req_blocks0,
+				start1, blocks1, req_first1, req_blocks1,
+				&combined_start, &combined_blocks);
+			if (!span_error)
+				coalesce = true;
+		}
+		if (ctx->read_coalescing_enabled && passive_adjacent && !coalesce) {
+			if (!range0 && !range1 &&
+			    (!req_blocks0 || !req_blocks1))
+				ctx->parallel_read_coalesce_skip_cached++;
+			else if (range0 == -EOPNOTSUPP ||
+				 range1 == -EOPNOTSUPP)
+				ctx->parallel_read_coalesce_skip_noncontig_slot++;
+			else if (!range0 && !range1 && req_blocks0 &&
+				 req_blocks1 && span_error == -EOPNOTSUPP)
+				ctx->parallel_read_coalesce_skip_gap++;
+			else
+				ctx->parallel_read_coalesce_skip_other++;
+		}
 
 		/* On a depth-one lower queue, only same-extent grouping or a proven
 		 * one-request ID63 merge may consume multiple BIOs. Otherwise process
@@ -3364,11 +3410,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		}
 		selected += slot1->bio_count;
 		ctx->parallel_read_distinct_extent_pairs++;
-		if (start0 / SWAPZ_SEGMENT_BLOCKS ==
-			start1 / SWAPZ_SEGMENT_BLOCKS &&
-		    (swapz_u16)blocks0 + blocks1 <= 2U * SWAPZ_MAX_BLOCKS &&
-		    (start0 + blocks0 == start1 ||
-		     start1 + blocks1 == start0)) {
+		if (passive_adjacent) {
 			ctx->parallel_read_adjacent_extent_pairs++;
 			ctx->parallel_read_adjacent_extent_blocks +=
 				(swapz_u16)blocks0 + blocks1;
@@ -3929,8 +3971,21 @@ static void swapz_worker(struct work_struct *work)
 								swapz_window_shrink_burst_target(
 									ctx->retained_burst_target,
 									ctx->batch_count);
-							if (ctx->retained_burst_target != old_target)
+							if (ctx->retained_burst_target != old_target) {
 								ctx->burst_target_shrinks++;
+								if (ctx->last_pack_tail_zero_inflight)
+									ctx->burst_shrink_after_inflight_zero++;
+								else if (ctx->retained_window_read_bypasses)
+									ctx->burst_shrink_after_read_bypass++;
+								else
+									ctx->burst_shrink_other++;
+								if (ctx->retained_burst_target <= 8U)
+									ctx->burst_shrink_target_le8++;
+								else if (ctx->retained_burst_target <= 32U)
+									ctx->burst_shrink_target_9_32++;
+								else
+									ctx->burst_shrink_target_gt32++;
+							}
 						}
 					}
 				}
@@ -3954,6 +4009,8 @@ static void swapz_worker(struct work_struct *work)
 			 * forced-fence service evidence leak into a later unrelated wave.
 			 */
 			if (!ctx->batch_count) {
+				if (!READ_ONCE(ctx->inflight_write.active))
+					ctx->last_pack_tail_zero_inflight = false;
 				ctx->retained_window_read_bypasses = 0;
 				ctx->retained_wave_interrupted = false;
 				ctx->retained_chain_completed = 0;
@@ -4776,6 +4833,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "pack_tail_one_inflight=%llu pack_tail_one_idle=%llu "
 		       "pack_tail_many_inflight=%llu pack_tail_many_idle=%llu "
 		       "burst_target_grows=%llu burst_target_shrinks=%llu "
+		       "burst_shrink_after_inflight_zero=%llu "
+		       "burst_shrink_after_read_bypass=%llu "
+		       "burst_shrink_other=%llu "
+		       "burst_shrink_target_le8=%llu "
+		       "burst_shrink_target_9_32=%llu "
+		       "burst_shrink_target_gt32=%llu "
 		       "packed_early_commits=%llu "
 		       "single_pack_deferrals=%llu accepted_burst_extensions=%llu "
 		       "accepted_burst_tail_flushes=%llu accepted_burst_read_caps=%llu "
@@ -4795,6 +4858,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "parallel_read_coalesced_reqs_saved=%llu "
 		       "parallel_read_coalesced_blocks=%llu "
 		       "parallel_read_coalesce_extra_blocks=%llu "
+		       "parallel_read_coalesce_skip_cached=%llu "
+		       "parallel_read_coalesce_skip_noncontig_slot=%llu "
+		       "parallel_read_coalesce_skip_gap=%llu "
+		       "parallel_read_coalesce_skip_other=%llu "
 		       "failed=%u error=%d",
 		       SWAPZ_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -4996,6 +5063,12 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_tail_many_idle,
 		       ctx->burst_target_grows,
 		       ctx->burst_target_shrinks,
+		       ctx->burst_shrink_after_inflight_zero,
+		       ctx->burst_shrink_after_read_bypass,
+		       ctx->burst_shrink_other,
+		       ctx->burst_shrink_target_le8,
+		       ctx->burst_shrink_target_9_32,
+		       ctx->burst_shrink_target_gt32,
 		       ctx->packed_early_commits,
 		       ctx->single_pack_deferrals,
 		       ctx->accepted_burst_extensions,
@@ -5022,6 +5095,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_coalesced_reqs_saved,
 		       ctx->parallel_read_coalesced_blocks,
 		       ctx->parallel_read_coalesce_extra_blocks,
+		       ctx->parallel_read_coalesce_skip_cached,
+		       ctx->parallel_read_coalesce_skip_noncontig_slot,
+		       ctx->parallel_read_coalesce_skip_gap,
+		       ctx->parallel_read_coalesce_skip_other,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

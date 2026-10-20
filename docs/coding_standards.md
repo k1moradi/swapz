@@ -499,6 +499,16 @@ Actual merged pairs, requests saved, blocks fetched and extra blocks are
 separate monotonic counters. Requests saved equals merged pairs for this
 two-range design and extra blocks must stay zero.
 
+Passive rejection attribution is allowed only when ID63 is enabled and the two
+full extents are already physically adjacent under the same segment/size
+bounds. A non-merge is classified once as cache-satisfied, noncontiguous
+per-slot missing mask, adjacent-full-extents whose exact missing subranges have
+a gap, or a defensive other/invariant bucket. These counters never change
+eligibility, cache state, dispatch or completion. Qualification requires the
+defensive other bucket to remain zero; do not force conservation against the
+older passive-adjacent counter on hwq=1 because depth-one fallback can suppress
+that legacy pair counter after the candidate was already observed.
+
 ### Worker scheduler-accounted CPU attribution
 
 Keep callback wall residency and worker CPU attribution separate. At
@@ -517,14 +527,34 @@ Do not call an unexported scheduler helper merely to sharpen this measurement.
 
 The read-only `parallel_reads` and `read_coalesce` module parameters are
 evidence controls, not runtime auto-tuning policy. Loaded A/B qualification may
-set them to 0 or 1 only through the private owned-RAM helper. The ID39 A/B must
-hold `read_coalesce=0`; the ID63 A/B must hold `parallel_reads=1` and vary
-only `read_coalesce`. When off, allocate no read slots,
-coalescing scratch or read workqueue. When on, same-extent grouping and
-single-request ID63 coalescing may run even on a depth-one queue because they do
-not add lower concurrency. Only dispatch of two independent lower READ requests
-uses the helper workqueue and remains gated on `nr_requests > 1`. Do not
-conflate grouping/coalescing capability with parallel lower service.
+set them to 0 or 1 only through the private owned-RAM helper. The fast ID39 A/B
+holds `read_coalesce=0`; the fast and slow ID63 A/Bs hold
+`parallel_reads=1` and vary only `read_coalesce`. The slow ID60 A/B holds
+`read_coalesce=0` and varies only `parallel_reads`.
+
+When grouping is off, allocate no read slots, coalescing scratch or read
+workqueue. When grouping is on, same-extent grouping and single-request ID63
+coalescing may run even on a depth-one queue because they do not add lower
+concurrency. Only dispatch of two independent lower READ requests uses the
+helper workqueue and remains gated on `nr_requests > 1`. A depth-one
+qualification must observe zero read-worker CPU delta. Do not conflate
+grouping/coalescing capability with parallel lower service.
+
+### Passive burst-target shrink attribution
+
+A diagnostic may remember that the most recent post-PACK sample observed
+`tail == 0` while K=1 was active. This boolean is evidence only: it must never
+gate a close, timer, target update, worker wake or I/O. Any nonzero tail sample
+clears it; a truly quiescent hard boundary may clear it once no detached write
+is active.
+
+Every actual `retained_burst_target` shrink is classified exactly once as
+following that in-flight-zero observation, following a read bypass, or other.
+The resulting target is independently binned as <=8, 9..32 or defensive >32;
+each classification set must sum exactly to `burst_target_shrinks`. The >32
+bucket is retained for conservation because the existing shrink helper can
+legally shrink 64 to a value in 33..63. This attribution is passive and cannot
+be used to implement the hypothesized fix in the same evidence commit.
 
 ### Opposite-end asynchronous preparation
 

@@ -94,11 +94,11 @@ class PairReplayContract(unittest.TestCase):
         fields = module.KERNEL_READ_FIELDS
         before = dict(zip(fields, (10, 4, 5, 3000, 100, 50, 4096, 200,
                                    2, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-                                   0, 0, 0, 0, 1000)))
+                                   0, 0, 0, 0, 0, 0, 0, 0, 1000)))
         after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
                                   100050, 4198400, 500200,
                                   402, 102, 321, 201, 200, 8, 3, 5, 2, 12,
-                                  2, 2, 8, 0, 101000)))
+                                  2, 2, 8, 0, 3, 4, 5, 0, 101000)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -126,6 +126,11 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["parallel_read_coalesced_reqs_saved"], 2)
         self.assertEqual(measured["parallel_read_coalesced_blocks"], 8)
         self.assertEqual(measured["parallel_read_coalesce_extra_blocks"], 0)
+        self.assertEqual(measured["parallel_read_coalesce_skip_cached"], 3)
+        self.assertEqual(
+            measured["parallel_read_coalesce_skip_noncontig_slot"], 4)
+        self.assertEqual(measured["parallel_read_coalesce_skip_gap"], 5)
+        self.assertEqual(measured["parallel_read_coalesce_skip_other"], 0)
         self.assertEqual(measured["read_worker_cpu_ns"], 100000)
         # A high reuse rate may make metadata requests fewer than payload
         # requests; this is valid as long as lower payload blocks match.
@@ -276,6 +281,12 @@ class PairReplayContract(unittest.TestCase):
             "pack_tail_many_idle": 1,
             "burst_target_grows": 1,
             "burst_target_shrinks": 1,
+            "burst_shrink_after_inflight_zero": 1,
+            "burst_shrink_after_read_bypass": 0,
+            "burst_shrink_other": 0,
+            "burst_shrink_target_le8": 1,
+            "burst_shrink_target_9_32": 0,
+            "burst_shrink_target_gt32": 0,
             "packed_early_commits": 2,
             "retained_burst_target": 8,
             "prep_lower_write_samples": 7,
@@ -354,6 +365,12 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["pack_tail_many_idle"], 1)
         self.assertEqual(delta["burst_target_grows"], 1)
         self.assertEqual(delta["burst_target_shrinks"], 1)
+        self.assertEqual(delta["burst_shrink_after_inflight_zero"], 1)
+        self.assertEqual(delta["burst_shrink_after_read_bypass"], 0)
+        self.assertEqual(delta["burst_shrink_other"], 0)
+        self.assertEqual(delta["burst_shrink_target_le8"], 1)
+        self.assertEqual(delta["burst_shrink_target_9_32"], 0)
+        self.assertEqual(delta["burst_shrink_target_gt32"], 0)
         self.assertEqual(delta["prep_crc_wall_ns"], 500)
         self.assertEqual(delta["ordered_crc_wall_ns"], 700)
         self.assertEqual(delta["engine_publish_crc_wall_ns"], 1000)
@@ -418,6 +435,9 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tail-sample"):
             module.kernel_write_delta(
                 before, dict(after, pack_tail_zero_idle=2))
+        with self.assertRaisesRegex(ValueError, "burst-shrink"):
+            module.kernel_write_delta(
+                before, dict(after, burst_shrink_after_inflight_zero=0))
         with self.assertRaisesRegex(ValueError, "K=1 ready-wait"):
             module.kernel_write_delta(
                 before, dict(after, k1_ready_wait_full=2))

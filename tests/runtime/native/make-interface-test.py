@@ -621,6 +621,14 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)
         self.assertIn('for parallel_reads in "${confirmation_modes[@]}"', loaded)
+        self.assertIn("START_SD_READ_GROUPING_AB=", loaded)
+        self.assertIn("PASS_SD_READ_GROUPING_AB=", loaded)
+        self.assertIn("START_SD_READ_COALESCE_AB=", loaded)
+        self.assertIn("PASS_SD_READ_COALESCE_AB=", loaded)
+        self.assertGreaterEqual(
+            loaded.count(
+                "--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000"),
+            3)
         self.assertIn("for qd in 1 4 8 32", loaded)
         self.assertIn("$qd == 8", loaded)
         self.assertNotIn("$qd == 4 || $qd == 8", loaded)

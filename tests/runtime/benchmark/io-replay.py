@@ -700,6 +700,10 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_coalesced_reqs_saved",
                       "parallel_read_coalesced_blocks",
                       "parallel_read_coalesce_extra_blocks",
+                      "parallel_read_coalesce_skip_cached",
+                      "parallel_read_coalesce_skip_noncontig_slot",
+                      "parallel_read_coalesce_skip_gap",
+                      "parallel_read_coalesce_skip_other",
                       "read_worker_cpu_ns")
 
 
@@ -809,7 +813,10 @@ TAIL_SAMPLE_FIELDS = (
     "pack_tail_samples", "pack_tail_zero_inflight", "pack_tail_zero_idle",
     "pack_tail_one_inflight", "pack_tail_one_idle",
     "pack_tail_many_inflight", "pack_tail_many_idle",
-    "burst_target_grows", "burst_target_shrinks")
+    "burst_target_grows", "burst_target_shrinks",
+    "burst_shrink_after_inflight_zero", "burst_shrink_after_read_bypass",
+    "burst_shrink_other", "burst_shrink_target_le8",
+    "burst_shrink_target_9_32", "burst_shrink_target_gt32")
 K1_READY_WAIT_FIELDS = (
     "k1_ready_wait_windows", "k1_ready_wait_records",
     "k1_ready_wait_wall_ns", "k1_ready_wait_max_records",
@@ -949,6 +956,15 @@ def kernel_write_delta(before, after):
                 "pack_tail_many_inflight", "pack_tail_many_idle")) !=
             counters["pack_tail_samples"]):
         raise ValueError("inconsistent swapz post-pack tail-sample attribution")
+    if (sum(counters[field] for field in (
+                "burst_shrink_after_inflight_zero",
+                "burst_shrink_after_read_bypass",
+                "burst_shrink_other")) != counters["burst_target_shrinks"] or
+            sum(counters[field] for field in (
+                "burst_shrink_target_le8",
+                "burst_shrink_target_9_32",
+                "burst_shrink_target_gt32")) != counters["burst_target_shrinks"]):
+        raise ValueError("inconsistent swapz burst-shrink attribution")
     k1_reasons = sum(counters[field] for field in (
         "k1_ready_wait_pack_ready", "k1_ready_wait_full",
         "k1_ready_wait_deadline", "k1_ready_wait_fence",

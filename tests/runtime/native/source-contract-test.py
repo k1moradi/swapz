@@ -1140,6 +1140,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("parallel_read_coalesced_reqs_saved=%llu", status)
         self.assertIn("parallel_read_coalesced_blocks=%llu", status)
         self.assertIn("parallel_read_coalesce_extra_blocks=%llu", status)
+        for field in (
+                "parallel_read_coalesce_skip_cached",
+                "parallel_read_coalesce_skip_noncontig_slot",
+                "parallel_read_coalesce_skip_gap",
+                "parallel_read_coalesce_skip_other"):
+            self.assertIn(field + "=%llu", status)
+            self.assertIn("ctx->" + field, status)
+        self.assertIn("passive_adjacent =", batch)
+        self.assertIn("span_error = swapz_engine_coalesced_span", batch)
+        self.assertIn("range0 == -EOPNOTSUPP", batch)
+        self.assertIn("ctx->parallel_read_coalesce_skip_cached++", batch)
+        self.assertIn("ctx->parallel_read_coalesce_skip_noncontig_slot++", batch)
+        self.assertIn("ctx->parallel_read_coalesce_skip_gap++", batch)
+        self.assertIn("ctx->parallel_read_coalesce_skip_other++", batch)
         self.assertIn("swapz_engine_required_read_range", batch)
         self.assertIn("swapz_engine_coalesced_span", batch)
         self.assertIn("swapz_engine_coalesce_read_pair", batch)
@@ -1164,10 +1178,18 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("--read-coalesce 0", loaded)
         self.assertIn("START_READ_COALESCE_AB=", loaded)
         self.assertIn('for read_coalesce in "${confirmation_modes[@]}"', loaded)
+        self.assertIn("START_SD_READ_GROUPING_AB=", loaded)
+        self.assertIn("START_SD_READ_COALESCE_AB=", loaded)
+        self.assertIn("--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000",
+                      loaded)
         self.assertIn("def parse_parallel_read_ab", runner)
         self.assertIn("PASS_PARALLEL_READ_AB_CONFIRMATION", runner)
         self.assertIn("def parse_read_coalesce_ab", runner)
         self.assertIn("PASS_READ_COALESCE_AB_CONFIRMATION", runner)
+        self.assertIn("def parse_sd_read_grouping_ab", runner)
+        self.assertIn("PASS_SD_READ_GROUPING_AB_CONFIRMATION", runner)
+        self.assertIn("def parse_sd_read_coalesce_ab", runner)
+        self.assertIn("PASS_SD_READ_COALESCE_AB_CONFIRMATION", runner)
         self.assertIn("CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)",
                       runner)
         self.assertIn("def paired_ci95", runner)
@@ -1330,6 +1352,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "pack_tail_one_idle", "pack_tail_many_inflight",
                       "pack_tail_many_idle", "burst_target_grows",
                       "burst_target_shrinks",
+                      "burst_shrink_after_inflight_zero",
+                      "burst_shrink_after_read_bypass",
+                      "burst_shrink_other",
+                      "burst_shrink_target_le8",
+                      "burst_shrink_target_9_32",
+                      "burst_shrink_target_gt32",
                       "k1_ready_wait_windows", "k1_ready_wait_records",
                       "k1_ready_wait_wall_ns", "k1_ready_wait_max_records",
                       "k1_ready_wait_pack_ready", "k1_ready_wait_full",
@@ -1358,6 +1386,14 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "pack_tail_many_inflight", "pack_tail_many_idle",
                       "burst_target_grows"):
             self.assertIn("ctx->" + field + "++", sample)
+        self.assertIn("ctx->last_pack_tail_zero_inflight = true", sample)
+        self.assertIn("ctx->last_pack_tail_zero_inflight = false", sample)
+        self.assertIn("ctx->burst_shrink_after_inflight_zero++", worker)
+        self.assertIn("ctx->burst_shrink_after_read_bypass++", worker)
+        self.assertIn("ctx->burst_shrink_other++", worker)
+        self.assertIn("ctx->burst_shrink_target_le8++", worker)
+        self.assertIn("ctx->burst_shrink_target_9_32++", worker)
+        self.assertIn("ctx->burst_shrink_target_gt32++", worker)
         self.assertNotIn("pack_tail_zero_deferred", DM)
         self.assertNotIn("pack_ready_busy_deferrals", DM)
         self.assertNotIn("hold_zero_after_finalize", DM)
@@ -1421,6 +1457,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)
         self.assertIn("BURST_CLOSE_DETAIL_FIELDS", runner)
         self.assertIn("TAIL_SAMPLE_FIELDS", runner)
+        self.assertIn("burst_shrink_after_inflight_zero", runner)
+        self.assertIn("parallel_read_coalesce_skip_noncontig_slot", runner)
         self.assertIn("K1_READY_WAIT_FIELDS", runner)
         self.assertIn("burst_close_detail_delta_paired_95pct_ci", runner)
         self.assertIn("Mixed burst-close split", runner)

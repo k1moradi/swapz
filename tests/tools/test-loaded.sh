@@ -154,6 +154,41 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
+# ID60 depth-one same-extent grouping confirmation: keep adjacent coalescing
+# disabled and vary only read grouping. hwq=1 guarantees the helper read
+# workqueue is not enabled, so this isolates grouping/cache priming itself.
+index=0
+for parallel_reads in "${confirmation_modes[@]}"; do
+    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+               --lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000
+               --read-coalesce 0 --parallel-reads "$parallel_reads"
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_SD_READ_GROUPING_AB=%s\n' "$parallel_reads"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_SD_READ_GROUPING_AB=%s\n' "$parallel_reads"
+    (( index += 1 ))
+done
+
+# ID63 depth-one adjacent coalescing confirmation: keep grouping enabled and
+# vary only exact zero-extra adjacent-range coalescing on the serial model.
+index=0
+for read_coalesce in "${confirmation_modes[@]}"; do
+    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+               --lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000
+               --read-coalesce "$read_coalesce" --parallel-reads 1
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_SD_READ_COALESCE_AB=%s\n' "$read_coalesce"
+    (( index += 1 ))
+done
+
 # Write-only controls stay one sync/async observation per point except fast
 # QD8, whose K=1 gain is repeatedly qualified with five adjacent
 # counterbalanced rounds. QD4 returns to a directional control after its

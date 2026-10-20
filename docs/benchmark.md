@@ -59,42 +59,53 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `7ceefcff88e90ff9eafaa216c830488b4788c660`
-(report-only `f704dc7203bdf843b040392e2ae0597d7f761bfd`) passed all five
+Owner-qualified source `5916c07cde951ad8be05d34435a7705791329333`
+(report-only `12858e8fd51b905441d2ef21b61c7608bc8e94ec`) passed all five
 stages on owned RAM.
 
-The ID57 rollback recovered the confirmatory fast write-only QD8 control:
-24.13/20.36 MB/s async/sync, +18.8% paired, 95% CI [+6.5%,+31.1%].
-Target is exactly 8 and all 512 windows close PACK_READY with zero deadline
-closes. QD4/QD32 also return to exact target geometry with zero deadlines.
-ID57 is refuted and must stay removed.
+The ID57 rollback remains qualified. Fast write-only QD8 is 26.58/20.67 MB/s
+async/sync, +28.4% paired, 95% CI [+15.1%,+41.7%], with target 8 and
+512/0/0 PACK_READY/deadline/idle closes.
 
-Fast mixed async/sync is 23.45/22.82 MB/s, +2.9% CI [-3.4%,+9.1%];
-the lower-request difference is +54.6 CI [-47.9,+157.1]. Service-dry is
-+5.4 CI [-48.2,+59.0]. This is no longer evidence for another active collector
-fix.
+Fast mixed is not a confirmed async throughput win: +1.7%,
+CI [-0.4%,+3.9%]. It does show confirmed request inflation:
++108.8 lower WRITE requests, CI [+78.6,+139.0], with +79.2 admission-side
+burst closes and +61.4 overshoot. The current turn attributes this passively;
+it does not change closure or target policy.
 
 ID29 qualifies on synthetic RAM correctness/alignment: 36 x 1MiB lower
 DISCARDs, 73728 sectors total, 20 GC victims/rotations and 4096 pages verified.
 Physical endurance remains unproven.
 
-Latest ID39 same-cache A/B remains inconclusive: sequential p99 -4.8%
-[-16.7,+7.1]%, random -0.6% [-11.1,+9.9]%.
+ID39 with ID63 forced off remains inconclusive-to-negative: sequential p99
++3.4% [-11.1%,+17.8%], random approximately 0%, and sequential requests
+403.8 -> 409.4. Keep it only until the depth-one isolation answers whether the
+workqueue contributes any independent value.
+
+Fast ID63 is positively qualified for request efficiency: sequential lower
+READ requests 406.2 -> 340.6, -16.2% [-18.7%,-13.6%], with 66.8 actual
+zero-extra merges. Sequential p99 +2.6% [-9.1%,+14.2%] does not establish a
+fast latency win.
 
 ## Confirmation gate
 
-Do not claim ID63 benefit from passive adjacency. The active candidate has its
-own read-only `read_coalesce` control. Its five matched fast-model rounds keep
-`parallel_reads=1` in both arms and vary only coalescing; the existing ID39
-Kread A/B forces coalescing off. The candidate must count actual zero-extra
-merges after cache priming and exact required-block selection. For each merged pair, exactly one lower request is saved and
-`parallel_read_coalesce_extra_blocks` must remain zero. Sequential and
-seeded-random traffic/p99 remain separate.
+ID63 benefit is measured from actual merges, never passive adjacency. The
+five-pair fast A/B keeps `parallel_reads=1` and varies only
+`read_coalesce`; ID39 keeps coalescing off. Fast qualification already
+confirms a lower-request win.
 
-Promotion requires the normal five matched confirmation rounds for the promoted
-fast regime, byte-exact reads, unchanged write/GC correctness, lower READ bytes
-not increased, and a meaningful lower-request reduction without unacceptable
-p99/CPU/RAM regression.
+The next gate adds two independent five-pair SD_EMULATED A/Bs. ID60 keeps
+`read_coalesce=0` and varies only `parallel_reads=0/1`; because hwq=1 makes
+`parallel_reads_enabled=0`, any benefit is same-extent grouping/cache priming,
+not helper concurrency. ID63 then keeps `parallel_reads=1` and varies only
+`read_coalesce=0/1`. Both report paired 95% CIs for sequential/random request
+count and p99, with throughput and lower-byte intervals retained in JSON.
+
+For every full-extent-adjacent pair that does not merge while ID63 is enabled,
+the passive report classifies cache-satisfied, noncontiguous-slot, missing-range
+gap, or defensive-other. The defensive bucket must stay zero. Every merged
+pair remains zero-padding and `parallel_read_coalesce_extra_blocks` must stay
+zero.
 
 ## Deferred idea evidence
 
