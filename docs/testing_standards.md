@@ -135,7 +135,10 @@ remains on hold.
   sole maintained predictor. The classifier is always scalar C. Qualification
   compares scalar/SSE2/AVX2 (or scalar/NEON) full-page transform and inverse
   implementations byte-for-byte, batch-times them independently on the same
-  host, and verifies exact inverse reconstruction.
+  host, and verifies exact inverse reconstruction. The emitted evidence line
+  must remain one parseable JSON object with backend timing preceding threshold
+  rows; malformed evidence fails the official runner even when the C binary
+  itself exits zero.
   The rescue signpost ignores zero residuals, aborts after the 8-pair first
   stage below score two, and extends passing pages to 32 strided pairs.
   Classifier ns/page uses repeated batched sweeps. Every threshold reports

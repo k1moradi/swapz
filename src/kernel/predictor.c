@@ -96,8 +96,11 @@ int swapz_predictor_init(void)
 	if (kernel_fpu_available() && boot_cpu_has(X86_FEATURE_AVX2) &&
 	    cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_avx2);
-		static_call_update(swapz_predictor_inverse_call, swapz_unpredict_sse2);
-		swapz_transform_backend = "avx2"; swapz_inverse_backend = "sse2";
+		/*
+		 * Same-host batched evidence on AVX2 x86 shows the dependency-heavy
+		 * inverse remains faster in scalar C than either vector backend.
+		 */
+		swapz_transform_backend = "avx2"; swapz_inverse_backend = "scalar";
 	} else if (kernel_fpu_available() && boot_cpu_has(X86_FEATURE_XMM2) &&
 		   cpu_has_xfeatures(XFEATURE_MASK_SSE, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_sse2);
@@ -137,8 +140,8 @@ int swapz_predictor_init(void)
 	__builtin_cpu_init();
 	if (__builtin_cpu_supports("avx2")) {
 		swapz_predict_impl = swapz_predict_delta64_avx2;
-		swapz_unpredict_impl = swapz_unpredict_delta64_sse2;
-		swapz_transform_backend = "avx2"; swapz_inverse_backend = "sse2";
+		swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
+		swapz_transform_backend = "avx2"; swapz_inverse_backend = "scalar";
 	} else {
 		swapz_predict_impl = swapz_predict_delta64_sse2;
 		swapz_unpredict_impl = swapz_unpredict_delta64_sse2;

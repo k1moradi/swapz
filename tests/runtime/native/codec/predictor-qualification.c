@@ -825,7 +825,7 @@ int main(int argc, char **argv)
 	       "\"early_abort_pages\":%u,\"benchmark_repeats\":%u,"
 	       "\"benchmark_calls\":%" PRIu64 ","
 	       "\"ns_per_page\":%" PRIu64 ","
-	       "\"scalar_ns_per_page\":%" PRIu64 "},\"thresholds\":[",
+	       "\"scalar_ns_per_page\":%" PRIu64 "}",
 	       negative_count, count - structured_start,
 	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, SWAPZ_PREDICTOR_STAGE1_PAIRS,
 	       SWAPZ_PREDICTOR_STAGE1_MIN_SCORE, classifier_summary.pages,

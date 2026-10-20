@@ -600,10 +600,12 @@ The retained 64-byte cacheline constant is corpus geometry only, not a retired
 predictor model.
 
 The sparse 8->32 classifier is scalar-only and must never enter kernel FPU/SIMD
-state. Full-page transform and inverse dispatch are separate. On AVX2 x86_64
-the forward transform may use AVX2 while inverse remains SSE2 until same-host
-batched evidence proves the wider inverse faster. Qualification batch-times
-scalar/SSE2/AVX2 (or scalar/NEON) independently.
+state. Full-page transform and inverse dispatch are separate. Same-host batched
+x86 evidence selects AVX2 for the forward transform but scalar C for inverse on
+AVX2-capable CPUs; SSE2-only CPUs retain SSE2 transform/inverse pending their
+owner-machine batched comparison. Qualification continues to time scalar/SSE2/
+AVX2 (or scalar/NEON) independently so a later evidence change can alter one
+operation without coupling the others.
 Thresholds are evidence, never kernel policy before measurement.
 
 Delta64 must round-trip exactly, and every selected hardware backend must match

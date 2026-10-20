@@ -217,10 +217,13 @@ patched once at module init and SIMD code is isolated under kernel FPU build/
 state rules. The owner SSE2 machine proved the sparse classifier regresses under vector
 packing (231 ns versus 211 ns scalar), while full-page forward/inverse improve
 (429/550 ns versus 774/767 ns scalar). The classifier is therefore scalar-only.
-Transform and inverse dispatch independently. Qualification batch-times all
-available same-host backends and reports routed CPU ns/page and ns/saved-block.
-Native timing still excludes kernel_fpu_begin/end overhead, so ID67b remains
-gated. No SWZ3 flag is promoted.
+Transform and inverse dispatch independently. Current AVX2 CI batch evidence
+selects AVX2 forward (96 ns/page versus 112 SSE2 and 221 scalar) but scalar
+inverse (190 ns/page versus 312 SSE2 and 452 AVX2); the AVX2 production inverse
+therefore remains scalar. SSE2-only owner policy still awaits the next batched
+owner run. Qualification reports routed CPU ns/page and ns/saved-block. Native
+timing still excludes kernel_fpu_begin/end overhead, so ID67b remains gated. No
+SWZ3 flag is promoted.
 
 ## Physical media
 
