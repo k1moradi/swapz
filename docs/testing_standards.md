@@ -139,7 +139,8 @@ remains on hold.
   x86 AVX2 CPU+YMM-state gating, SSE2 compatibility fallback, arm64 kernel-mode
   NEON gating and isolated FPU compiler flags. On x86_64 the rootless build must
   also disassemble the isolated native objects and prove SSE2 `psubq/paddq` and
-  AVX2 `vpsubq/vpaddq` code generation; source-level vector syntax alone is
+  AVX2 `vpsubq/vpaddq` code generation using literal opcode matching (not a
+  shell-regex word-boundary escape); source-level vector syntax alone is
   insufficient acceleration evidence. The unprivileged Make-interface
   fixture must emit the same valid evidence schema. Production module init may
   select the backend, but DM data-path/codec/authority/engine code still has no

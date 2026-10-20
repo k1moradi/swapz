@@ -21,8 +21,8 @@ bash tests/runtime/native/nullblk-identity-test.sh
 bash tests/runtime/native/quiet-lower-io-test.sh
 bash tests/runtime/native/swap-inventory-test.sh
 if [[ "$(uname -m)" == "x86_64" ]]; then
-  objdump -d build/tests/native/predictor-sse2.o | grep -Eq '\\bpsubq\\b|\\bpaddq\\b'
-  objdump -d build/tests/native/predictor-avx2.o | grep -Eq '\\bvpsubq\\b|\\bvpaddq\\b'
+  objdump -d build/tests/native/predictor-sse2.o | grep -Eq 'psubq|paddq'
+  objdump -d build/tests/native/predictor-avx2.o | grep -Eq 'vpsubq|vpaddq'
 fi
 grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tests/tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tests/tools/deploy-nullblk.sh
