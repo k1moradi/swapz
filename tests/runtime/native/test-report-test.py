@@ -18,15 +18,25 @@ spec.loader.exec_module(runner)
 
 def predictor_evidence():
     thresholds = []
+    profile_pages = {"zero": 32, "repeat": 32,
+                     "entropy": 64, "mixed": 64, "medium": 64}
     for threshold in runner.PREDICTOR_THRESHOLDS:
+        profiles = []
+        for name in runner.PREDICTOR_NEGATIVE_PROFILES:
+            eligible = 0 if name in ("zero", "repeat") else profile_pages[name]
+            profiles.append({
+                "name": name, "pages": profile_pages[name],
+                "eligible": eligible, "calls": 0, "useful": 0,
+            })
         thresholds.append({
             "threshold": threshold,
-            "negative_eligible": 64,
+            "negative_eligible": sum(item["eligible"] for item in profiles),
             "negative_calls": 0,
             "negative_useful": 0,
             "structured_eligible": 128,
             "structured_calls": 96,
             "structured_useful": 80,
+            "negative_profiles": profiles,
         })
     transforms = []
     for index, name in enumerate(runner.PREDICTOR_TRANSFORM_NAMES):
@@ -48,9 +58,14 @@ def predictor_evidence():
         })
     return {
         "scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
-        "negative_pages": 192,
-        "structured_pages": 256,
-        "residual_lanes": 896,
+        "negative_pages": sum(profile_pages.values()),
+        "structured_pages": 320,
+        "classifier": {
+            "candidate": "delta64",
+            "sample_pairs": 64,
+            "eligible_pages": 320,
+            "ns_per_page": 55,
+        },
         "thresholds": thresholds,
         "transforms": transforms,
     }
@@ -917,7 +932,8 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
-        self.assertIn("CL-Delta32x2 classifier thresholds", rendered)
+        self.assertIn("Sampled delta64 classifier", rendered)
+        self.assertIn("Negative classifier profile breakdown", rendered)
         self.assertIn("cl_delta32x2", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)

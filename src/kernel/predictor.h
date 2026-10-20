@@ -14,6 +14,8 @@
 #define SWAPZ_PREDICTOR_U64_BYTES 8U
 #define SWAPZ_PREDICTOR_CL_WORDS 8U
 #define SWAPZ_PREDICTOR_CL_DELTA32X2_RESIDUALS 896U
+#define SWAPZ_PREDICTOR_SUBPAGE_BYTES 512U
+#define SWAPZ_PREDICTOR_SAMPLE_PAIRS 64U
 
 #if __SIZEOF_LONG_LONG__ != 8
 #error "swapz predictor qualification requires an exact 64-bit unsigned long long"
@@ -44,6 +46,23 @@ static inline void swapz_predictor_store64(swapz_u8 *bytes,
 					   unsigned long long value)
 {
 	memcpy(bytes, &value, sizeof(value));
+}
+
+static inline int swapz_predictor_small_nonzero_delta32(swapz_u32 current,
+						 swapz_u32 previous)
+{
+	swapz_u32 delta = current - previous;
+
+	return delta && (swapz_u32)(delta + 128U) <= 255U;
+}
+
+static inline int swapz_predictor_small_nonzero_delta64(
+					unsigned long long current,
+					unsigned long long previous)
+{
+	unsigned long long delta = current - previous;
+
+	return delta && (unsigned long long)(delta + 0x8000ULL) <= 0xffffULL;
 }
 
 /*
@@ -88,9 +107,11 @@ static inline swapz_u32 swapz_predict_cl_delta32x2(const swapz_u8 *input,
 			swapz_predictor_store32(output + offset +
 					       sizeof(swapz_u32), delta1);
 			small_residuals +=
-				(swapz_u32)(delta0 + 128U) <= 255U;
+				swapz_predictor_small_nonzero_delta32(current0,
+								       previous0);
 			small_residuals +=
-				(swapz_u32)(delta1 + 128U) <= 255U;
+				swapz_predictor_small_nonzero_delta32(current1,
+								       previous1);
 			previous0 = current0;
 			previous1 = current1;
 		}
@@ -200,6 +221,53 @@ static inline void swapz_unpredict_delta32(const swapz_u8 *input,
 	}
 }
 
+/*
+ * Cheap rescue signpost for whole-page delta64. Sample exactly one adjacent
+ * 8-byte pair per 64-byte cacheline before transforming the page. Identical raw
+ * words are deliberately NOT positive evidence: plain LZ4 already sees that
+ * repetition. A pair contributes two points for a nonzero signed-16-bit u64
+ * delta, otherwise one point for each nonzero signed-8-bit u32 lane delta.
+ */
+static inline swapz_u32 swapz_predict_delta64_sample_score(
+						const swapz_u8 *input)
+{
+	swapz_u32 score = 0;
+	swapz_u32 line;
+
+	for (line = 0; line < SWAPZ_BLOCK_BYTES;
+	     line += SWAPZ_PREDICTOR_CACHELINE_BYTES) {
+		unsigned long long previous =
+			swapz_predictor_load64(input + line);
+		unsigned long long current =
+			swapz_predictor_load64(input + line +
+					       SWAPZ_PREDICTOR_U64_BYTES);
+
+		if (swapz_predictor_small_nonzero_delta64(current, previous)) {
+			score += 2U;
+		} else {
+			score += swapz_predictor_small_nonzero_delta32(
+				swapz_predictor_load32(input + line +
+					SWAPZ_PREDICTOR_U64_BYTES),
+				swapz_predictor_load32(input + line));
+			score += swapz_predictor_small_nonzero_delta32(
+				swapz_predictor_load32(input + line +
+					SWAPZ_PREDICTOR_U64_BYTES +
+					sizeof(swapz_u32)),
+				swapz_predictor_load32(input + line +
+					sizeof(swapz_u32)));
+		}
+	}
+	return score;
+}
+
+static inline int swapz_predict_should_try_delta64(const swapz_u8 *input,
+						   swapz_u32 threshold)
+{
+	return input && threshold &&
+	       threshold <= 2U * SWAPZ_PREDICTOR_SAMPLE_PAIRS &&
+	       swapz_predict_delta64_sample_score(input) >= threshold;
+}
+
 static inline swapz_u32 swapz_predict_delta64(const swapz_u8 *input,
 					       swapz_u8 *output)
 {
@@ -232,6 +300,55 @@ static inline void swapz_unpredict_delta64(const swapz_u8 *input,
 
 		swapz_predictor_store64(output + offset, current);
 		previous = current;
+	}
+}
+
+/* Eight anchors per page: a middle ground between whole-page delta64 and
+ * cacheline-reset prediction for independently based subpage structures. */
+static inline swapz_u32 swapz_predict_delta64_512(const swapz_u8 *input,
+						   swapz_u8 *output)
+{
+	swapz_u32 base;
+
+	for (base = 0; base < SWAPZ_BLOCK_BYTES;
+	     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES) {
+		unsigned long long previous = swapz_predictor_load64(input + base);
+		swapz_u32 offset;
+
+		swapz_predictor_store64(output + base, previous);
+		for (offset = base + sizeof(previous);
+		     offset < base + SWAPZ_PREDICTOR_SUBPAGE_BYTES;
+		     offset += sizeof(previous)) {
+			unsigned long long current =
+				swapz_predictor_load64(input + offset);
+
+			swapz_predictor_store64(output + offset, current - previous);
+			previous = current;
+		}
+	}
+	return 0;
+}
+
+static inline void swapz_unpredict_delta64_512(const swapz_u8 *input,
+						swapz_u8 *output)
+{
+	swapz_u32 base;
+
+	for (base = 0; base < SWAPZ_BLOCK_BYTES;
+	     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES) {
+		unsigned long long previous = swapz_predictor_load64(input + base);
+		swapz_u32 offset;
+
+		swapz_predictor_store64(output + base, previous);
+		for (offset = base + sizeof(previous);
+		     offset < base + SWAPZ_PREDICTOR_SUBPAGE_BYTES;
+		     offset += sizeof(previous)) {
+			unsigned long long current =
+				previous + swapz_predictor_load64(input + offset);
+
+			swapz_predictor_store64(output + offset, current);
+			previous = current;
+		}
 	}
 }
 

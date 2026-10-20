@@ -220,8 +220,10 @@ WORKLOAD_OPPORTUNITY_FIELDS = (
 
 
 PREDICTOR_TRANSFORM_NAMES = (
-    "cl_delta32x2", "cl_bytedelta8", "delta32", "delta64", "xor64")
-PREDICTOR_THRESHOLDS = (64, 96, 128, 192)
+    "cl_delta32x2", "cl_bytedelta8", "delta32", "delta64",
+    "delta64_512", "xor64")
+PREDICTOR_THRESHOLDS = (4, 8, 16, 24, 32)
+PREDICTOR_NEGATIVE_PROFILES = ("zero", "repeat", "entropy", "mixed", "medium")
 PREDICTOR_TRANSFORM_FIELDS = (
     "adopted", "raw_rescued", "cliff_2024", "saved_payload_bytes",
     "baseline_blocks", "candidate_blocks", "planner_blocks_saved",
@@ -249,8 +251,16 @@ def parse_predictor_evidence(output):
     if type(record.get("negative_pages")) is not int or \
             record["negative_pages"] <= 0 or \
             type(record.get("structured_pages")) is not int or \
-            record["structured_pages"] <= 0 or \
-            record.get("residual_lanes") != 896:
+            record["structured_pages"] <= 0:
+        return None
+    classifier = record.get("classifier")
+    if not isinstance(classifier, dict) or \
+            classifier.get("candidate") != "delta64" or \
+            classifier.get("sample_pairs") != 64 or \
+            type(classifier.get("eligible_pages")) is not int or \
+            classifier["eligible_pages"] <= 0 or \
+            type(classifier.get("ns_per_page")) is not int or \
+            classifier["ns_per_page"] < 0:
         return None
 
     threshold_rows = record.get("thresholds")
@@ -269,6 +279,26 @@ def parse_predictor_evidence(output):
                 row["negative_useful"] > row["negative_calls"] or \
                 row["structured_calls"] > row["structured_eligible"] or \
                 row["structured_useful"] > row["structured_calls"]:
+            return None
+        profiles = row.get("negative_profiles")
+        if not isinstance(profiles, list) or \
+                [item.get("name") if isinstance(item, dict) else None
+                 for item in profiles] != list(PREDICTOR_NEGATIVE_PROFILES):
+            return None
+        for item in profiles:
+            for field in ("pages", "eligible", "calls", "useful"):
+                if type(item.get(field)) is not int or item[field] < 0:
+                    return None
+            if item["eligible"] > item["pages"] or \
+                    item["calls"] > item["eligible"] or \
+                    item["useful"] > item["calls"]:
+                return None
+        if sum(item["eligible"] for item in profiles) != \
+                row["negative_eligible"] or \
+                sum(item["calls"] for item in profiles) != \
+                row["negative_calls"] or \
+                sum(item["useful"] for item in profiles) != \
+                row["negative_useful"]:
             return None
 
     transform_rows = record.get("transforms")
@@ -296,7 +326,7 @@ def parse_predictor_evidence(output):
         "scope": record["scope"],
         "negative_pages": record["negative_pages"],
         "structured_pages": record["structured_pages"],
-        "residual_lanes": record["residual_lanes"],
+        "classifier": classifier,
         "thresholds": threshold_rows,
         "transforms": transform_rows,
     }
@@ -2282,7 +2312,10 @@ def print_bench(result):
                 row["inverse_ns_per_page"],
                 row["second_lz4_ns_per_page"],
             ) for row in predictor["transforms"]])
-        print("  CL-Delta32x2 classifier thresholds")
+        classifier = predictor["classifier"]
+        print("  Sampled delta64 classifier — "
+              f"{classifier['sample_pairs']} pairs; "
+              f"{classifier['ns_per_page']} ns/eligible page")
         print_table(
             ("score", "neg call/eligible", "neg useful", "struct call/eligible",
              "struct useful"),
@@ -2293,6 +2326,14 @@ def print_bench(result):
                 f"{row['structured_calls']}/{row['structured_eligible']}",
                 row["structured_useful"],
             ) for row in predictor["thresholds"]])
+        print("  Negative classifier profile breakdown")
+        print_table(
+            ("score", "profile", "call/eligible", "useful"),
+            [(row["threshold"], profile["name"],
+              f"{profile['calls']}/{profile['eligible']}",
+              profile["useful"])
+             for row in predictor["thresholds"]
+             for profile in row["negative_profiles"]])
 
     verdict = result["benchmarks"]["verdicts"]
     if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":

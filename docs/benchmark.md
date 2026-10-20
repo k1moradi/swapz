@@ -156,19 +156,22 @@ ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
 ## ID67 offline predictor evidence
 
-ID67a makes no production-format or hot-path change. The native evaluator uses
-`anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages as
-negative controls: a useful CL-Delta32x2 signpost should avoid unnecessary
-second-LZ4 work on pages without useful delta structure. Positive controls are
+ID67a makes no production-format or hot-path change. ID67a.2 uses
+`anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages plus
+generated zero/repeated-word controls. The sampled delta64 signpost runs only
+after raw LZ4 leaves a page above the rescue threshold and never treats an
+unchanged adjacent word (delta zero) as predictor evidence. Positive controls are
 generated independently in C and cover pointer arrays, page-table-like entries,
 u32/u64 counters/timestamps, slowly varying floats/doubles, two-field structs and
 cacheline-local mixed structured/high-entropy records.
 
 The evaluator compares CL-Delta32x2, cacheline byte-delta, whole-page delta32,
-delta64 and xor64. Every transform is inverted and byte-compared before its
-measurement is accepted. It records transform/inverse/second-LZ4 time, adopted
-representations, RAW rescues and >2024 -> <=2024 crossings. CL-Delta32x2 also
-reports thresholds 64/96/128/192 against negative and structured eligibility.
+whole-page delta64, 512-byte-reset delta64 and xor64. Every transform is
+inverted and byte-compared before its measurement is accepted. It records
+transform/inverse/second-LZ4 time, adopted representations, RAW rescues and
+>2024 -> <=2024 crossings. A 64-pair pre-transform delta64 signpost reports its
+own ns/page plus thresholds 4/8/16/24/32 and false calls separately for
+zero/repeat/entropy/mixed/medium controls.
 Baseline and candidate length sequences are fed through the production
 `swapz_engine_plan_bounded()`; planned physical 4KiB blocks/extents saved are
 the primary size result. Compression ratio alone is not promotion evidence.
@@ -182,11 +185,13 @@ The first native run is mechanism evidence, not prevalence evidence. On the
 structured controls, delta64 saved 60 of 238 planned blocks, CL-Delta32x2 saved
 53, xor64 43, delta32 14 and cacheline byte-delta zero. CL-Delta32x2 rescued 128
 RAW pages and crossed the <=2024-byte cliff on 96 controls; delta64 rescued the
-same 128 and crossed 128. However, the current CL small-residual signpost called
-second LZ4 on 76-77 of 141 eligible SHAKE-derived negative controls at thresholds
-64/96/128/192 and none produced a useful candidate. Therefore neither the CL
-classifier nor a production transform is promoted; representative content and a
-lower-false-positive routing signal are still required.
+same 128 and crossed 128. The first CL signpost was invalid for routing because it counted delta-zero
+raw repetition as positive evidence, producing 76-77 unnecessary calls among
+141 eligible negative controls. ID67a.2 fixes that mathematical bug, measures a
+sampled pre-transform delta64 router by negative profile, and adds a
+512-byte-anchor control to reduce the original whole-page-versus-cacheline
+anchor bias. Production remains gated on the new evidence; no SWZ3 flag is
+promoted by this change.
 
 ## Physical media
 

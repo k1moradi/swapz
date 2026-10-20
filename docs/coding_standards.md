@@ -570,9 +570,11 @@ byte-delta, whole-page delta32/delta64 and xor64 controls. Loads/stores must be
 
 The current SHAKE-generated benchmark hard regions are negative controls, not a
 positive predictor corpus. Native evidence must also construct deterministic
-pointer/page-table, integer counter/timestamp, float/double and fixed-layout
-struct archetypes. The transform may compute a small-residual classifier during
-the same pass; thresholds are evidence, never hardcoded before measurement.
+pointer/page-table, integer counter/timestamp, float/double, fixed-layout
+struct and independently based subpage archetypes. Routing evidence must be
+separate from the full transform: sample the raw page first, never count a zero
+delta as positive evidence, and report false calls by negative profile.
+Thresholds are evidence, never kernel policy before measurement.
 
 Every candidate must round-trip exactly. Measure transform, inverse and optional
 second-LZ4 cost. Feed actual compressed-length sequences into the production

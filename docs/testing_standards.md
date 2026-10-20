@@ -123,11 +123,14 @@ remains on hold.
 - **ID67 predictive rescue:** evidence-only first. The official rootless stage
   must build/run the native evaluator, emit exactly one sanitized
   `SWAPZ_PREDICTOR_EVIDENCE` record, and fail if it is missing or malformed.
-  SHAKE entropy/mixed/medium pages are negative controls; deterministic native
-  pointer/page-table/integer/float/struct pages are positive controls. Compare
-  CL-Delta32x2, cacheline byte-delta, delta32, delta64 and xor64; verify exact
-  inverse reconstruction; report classifier thresholds 64/96/128/192 and
-  production-planner physical block/extent savings. The unprivileged
+  SHAKE entropy/mixed/medium plus generated zero/repeat pages are negative
+  controls; deterministic native pointer/page-table/integer/float/struct and
+  independently based 512-byte regions are positive controls. Compare
+  CL-Delta32x2, cacheline byte-delta, delta32, whole-page delta64,
+  512-byte-reset delta64 and xor64; verify exact inverse reconstruction. The
+  rescue signpost is sampled before transformation, ignores zero residuals, and
+  reports per-negative-profile false calls plus production-planner block/extent
+  savings. Thresholds are evidence, not kernel policy. The unprivileged
   Make-interface fixture must emit the same valid predictor evidence as one
   complete stdout line so stage parsing is exercised without privilege. Source
   contracts must prove no production DM/codec/authority/engine translation unit

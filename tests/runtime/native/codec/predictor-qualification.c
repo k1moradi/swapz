@@ -14,10 +14,13 @@
 
 #define PREDICTOR_CAP ((int)SWAPZ_MAX_COMPRESSED)
 #define MAX_EVIDENCE_PAGES 1024U
-#define STRUCTURED_KINDS 9U
+#define STRUCTURED_KINDS 10U
 #define STRUCTURED_PAGES_PER_KIND 32U
-#define TRANSFORM_COUNT 5U
-#define THRESHOLD_COUNT 4U
+#define GENERATED_NEGATIVE_PAGES 32U
+#define NEGATIVE_PROFILE_COUNT 5U
+#define TRANSFORM_COUNT 6U
+#define TRANSFORM_DELTA64 3U
+#define THRESHOLD_COUNT 5U
 
 typedef swapz_u32 (*predict_fn)(const swapz_u8 *, swapz_u8 *);
 typedef void (*unpredict_fn)(const swapz_u8 *, swapz_u8 *);
@@ -31,7 +34,9 @@ struct transform {
 struct page_evidence {
 	int baseline_length;
 	int candidate_length[TRANSFORM_COUNT];
-	swapz_u32 cl_score;
+	swapz_u32 classifier_score;
+	swapz_u8 negative_profile;
+	swapz_u8 classifier_ran;
 	int structured;
 };
 
@@ -50,6 +55,13 @@ struct transform_summary {
 	swapz_u32 candidate_extents;
 };
 
+struct profile_threshold_summary {
+	swapz_u32 pages;
+	swapz_u32 eligible;
+	swapz_u32 calls;
+	swapz_u32 useful;
+};
+
 struct threshold_summary {
 	swapz_u32 threshold;
 	swapz_u32 negative_eligible;
@@ -58,6 +70,12 @@ struct threshold_summary {
 	swapz_u32 structured_eligible;
 	swapz_u32 structured_calls;
 	swapz_u32 structured_useful;
+	struct profile_threshold_summary profiles[NEGATIVE_PROFILE_COUNT];
+};
+
+struct classifier_summary {
+	uint64_t wall_ns;
+	swapz_u32 pages;
 };
 
 static struct page_evidence evidence[MAX_EVIDENCE_PAGES];
@@ -73,10 +91,17 @@ static const struct transform transforms[TRANSFORM_COUNT] = {
 	  swapz_unpredict_cl_bytedelta8 },
 	{ "delta32", swapz_predict_delta32, swapz_unpredict_delta32 },
 	{ "delta64", swapz_predict_delta64, swapz_unpredict_delta64 },
+	{ "delta64_512", swapz_predict_delta64_512,
+	  swapz_unpredict_delta64_512 },
 	{ "xor64", swapz_predict_xor64, swapz_unpredict_xor64 },
 };
 
-static const swapz_u32 thresholds[THRESHOLD_COUNT] = { 64U, 96U, 128U, 192U };
+static const char *negative_profile_names[NEGATIVE_PROFILE_COUNT] = {
+	"zero", "repeat", "entropy", "mixed", "medium"
+};
+static const swapz_u32 thresholds[THRESHOLD_COUNT] = {
+	4U, 8U, 16U, 24U, 32U
+};
 
 static uint64_t now_ns(void)
 {
@@ -232,14 +257,34 @@ static void generate_structured_page(unsigned int kind, unsigned int page_index,
 			memcpy(page + index * sizeof(value), &value, sizeof(value));
 		}
 		break;
+	case 9: {
+		unsigned int base;
+
+		for (base = 0; base < SWAPZ_BLOCK_BYTES;
+		     base += SWAPZ_PREDICTOR_SUBPAGE_BYTES) {
+			uint64_t value = ((uint64_t)next_u32(&state) << 32) |
+				next_u32(&state);
+			unsigned int word;
+
+			for (word = 0;
+			     word < SWAPZ_PREDICTOR_SUBPAGE_BYTES / sizeof(value);
+			     ++word) {
+				value += 8U + (next_u32(&state) & 0x3fU);
+				put_u64(page + base + word * sizeof(value), value);
+			}
+		}
+		break;
+	}
 	default:
 		abort();
 	}
 }
 
 static int evaluate_page(const swapz_u8 *page, int structured,
+			 swapz_u8 negative_profile,
 			 struct page_evidence *out,
-			 struct transform_summary *summary)
+			 struct transform_summary *summary,
+			 struct classifier_summary *classifier)
 {
 	unsigned int transform_index;
 	uint64_t start;
@@ -251,14 +296,21 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 	memset(out, 0, sizeof(*out));
 	out->baseline_length = baseline;
 	out->structured = structured;
+	out->negative_profile = negative_profile;
+	if (!baseline || baseline > 2024) {
+		start = now_ns();
+		out->classifier_score = swapz_predict_delta64_sample_score(page);
+		classifier->wall_ns += now_ns() - start;
+		classifier->pages++;
+		out->classifier_ran = 1;
+	}
 	for (transform_index = 0; transform_index < TRANSFORM_COUNT;
 	     ++transform_index) {
 		const struct transform *transform = &transforms[transform_index];
-		swapz_u32 score;
 		int candidate;
 
 		start = now_ns();
-		score = transform->predict(page, transform_page);
+		transform->predict(page, transform_page);
 		summary[transform_index].transform_ns += now_ns() - start;
 
 		start = now_ns();
@@ -273,14 +325,48 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 		if (candidate < 0 || candidate > PREDICTOR_CAP)
 			return -EINVAL;
 		out->candidate_length[transform_index] = candidate;
-		if (!transform_index)
-			out->cl_score = score;
 	}
 	return 0;
 }
 
-static int append_negative_file(const char *path, swapz_u32 *count,
-				struct transform_summary *summary)
+static int append_generated_negative(swapz_u8 profile,
+				     swapz_u32 *count,
+				     struct transform_summary *summary,
+				     struct classifier_summary *classifier)
+{
+	swapz_u8 page[SWAPZ_BLOCK_BYTES];
+	unsigned int page_index;
+
+	for (page_index = 0; page_index < GENERATED_NEGATIVE_PAGES;
+	     ++page_index) {
+		unsigned int offset;
+		uint64_t word = 0x0102030405060708ULL +
+			(uint64_t)page_index * 0x101010101010101ULL;
+		int error;
+
+		if (*count >= MAX_EVIDENCE_PAGES)
+			return -E2BIG;
+		if (profile == 0) {
+			memset(page, 0, sizeof(page));
+		} else if (profile == 1) {
+			for (offset = 0; offset < sizeof(page); offset += sizeof(word))
+				put_u64(page + offset, word);
+		} else {
+			return -EINVAL;
+		}
+		error = evaluate_page(page, 0, profile, &evidence[*count],
+				      summary, classifier);
+		if (error)
+			return error;
+		(*count)++;
+	}
+	return 0;
+}
+
+static int append_negative_file(const char *path, swapz_u8 profile,
+				swapz_u32 *count,
+				struct transform_summary *summary,
+				struct classifier_summary *classifier)
 {
 	FILE *file = fopen(path, "rb");
 	swapz_u8 page[SWAPZ_BLOCK_BYTES];
@@ -294,7 +380,8 @@ static int append_negative_file(const char *path, swapz_u32 *count,
 			fclose(file);
 			return -E2BIG;
 		}
-		error = evaluate_page(page, 0, &evidence[*count], summary);
+		error = evaluate_page(page, 0, profile, &evidence[*count],
+				      summary, classifier);
 		if (error) {
 			fclose(file);
 			return error;
@@ -417,20 +504,31 @@ static void summarize_thresholds(const struct page_evidence *rows,
 		for (index = 0; index < total_count; ++index) {
 			const struct page_evidence *row = &rows[index];
 			int baseline = row->baseline_length;
-			int candidate = row->candidate_length[0];
+			int candidate = row->candidate_length[TRANSFORM_DELTA64];
 			int eligible = !baseline || baseline > 2024;
-			int call = eligible && row->cl_score >= summary->threshold;
+			int call = eligible && row->classifier_ran &&
+				row->classifier_score >= summary->threshold;
 			int useful = call && candidate > 0 &&
 				(!baseline || candidate < baseline);
 			int structured = index >= structured_start;
 
-			if (!eligible)
-				continue;
 			if (structured) {
+				if (!eligible)
+					continue;
 				summary->structured_eligible++;
 				summary->structured_calls += call;
 				summary->structured_useful += useful;
-			} else if (index < negative_count) {
+			} else if (index < negative_count &&
+				   row->negative_profile < NEGATIVE_PROFILE_COUNT) {
+				struct profile_threshold_summary *profile =
+					&summary->profiles[row->negative_profile];
+
+				profile->pages++;
+				if (!eligible)
+					continue;
+				profile->eligible++;
+				profile->calls += call;
+				profile->useful += useful;
 				summary->negative_eligible++;
 				summary->negative_calls += call;
 				summary->negative_useful += useful;
@@ -444,17 +542,28 @@ int main(int argc, char **argv)
 	struct transform_summary total_summary[TRANSFORM_COUNT] = { 0 };
 	struct transform_summary structured_summary[TRANSFORM_COUNT] = { 0 };
 	struct threshold_summary threshold_summary[THRESHOLD_COUNT] = { 0 };
+	struct classifier_summary classifier_summary = { 0 };
 	swapz_u32 count = 0, negative_count, structured_start;
 	swapz_u8 page[SWAPZ_BLOCK_BYTES];
 	unsigned int kind, page_index, transform_index, threshold_index;
 	int argument;
 
-	if (argc < 2) {
-		fprintf(stderr, "predictor qualification requires negative-control fixtures\n");
+	if (argc != 4) {
+		fprintf(stderr, "predictor qualification requires entropy/mixed/medium fixtures\n");
 		return 2;
 	}
+	for (argument = 0; argument < 2; ++argument) {
+		int error = append_generated_negative((swapz_u8)argument, &count,
+						 total_summary,
+						 &classifier_summary);
+
+		if (error)
+			return 1;
+	}
 	for (argument = 1; argument < argc; ++argument) {
-		int error = append_negative_file(argv[argument], &count, total_summary);
+		int error = append_negative_file(argv[argument],
+			(swapz_u8)(argument + 1), &count, total_summary,
+			&classifier_summary);
 
 		if (error) {
 			fprintf(stderr, "negative fixture failed: %s (%d)\n",
@@ -472,7 +581,8 @@ int main(int argc, char **argv)
 			if (count >= MAX_EVIDENCE_PAGES)
 				return 1;
 			generate_structured_page(kind, page_index, page);
-			error = evaluate_page(page, 1, &evidence[count], total_summary);
+			error = evaluate_page(page, 1, 0, &evidence[count],
+					      total_summary, &classifier_summary);
 			if (error) {
 				fprintf(stderr,
 					"structured predictor roundtrip failed kind=%u page=%u error=%d\n",
@@ -523,22 +633,41 @@ int main(int argc, char **argv)
 	printf("SWAPZ_PREDICTOR_EVIDENCE={\"scope\":"
 	       "\"OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY\","
 	       "\"negative_pages\":%u,\"structured_pages\":%u,"
-	       "\"residual_lanes\":%u,\"thresholds\":[",
+	       "\"classifier\":{\"candidate\":\"delta64\","
+	       "\"sample_pairs\":%u,\"eligible_pages\":%u,"
+	       "\"ns_per_page\":%" PRIu64 "},\"thresholds\":[",
 	       negative_count, count - structured_start,
-	       SWAPZ_PREDICTOR_CL_DELTA32X2_RESIDUALS);
+	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, classifier_summary.pages,
+	       classifier_summary.pages ?
+	       classifier_summary.wall_ns / classifier_summary.pages : 0);
 	for (threshold_index = 0; threshold_index < THRESHOLD_COUNT;
 	     ++threshold_index) {
 		const struct threshold_summary *item =
 			&threshold_summary[threshold_index];
 
+		unsigned int profile_index;
+
 		printf("%s{\"threshold\":%u,\"negative_eligible\":%u,"
 		       "\"negative_calls\":%u,\"negative_useful\":%u,"
 		       "\"structured_eligible\":%u,\"structured_calls\":%u,"
-		       "\"structured_useful\":%u}",
+		       "\"structured_useful\":%u,\"negative_profiles\":[",
 		       threshold_index ? "," : "", item->threshold,
 		       item->negative_eligible, item->negative_calls,
 		       item->negative_useful, item->structured_eligible,
 		       item->structured_calls, item->structured_useful);
+		for (profile_index = 0; profile_index < NEGATIVE_PROFILE_COUNT;
+		     ++profile_index) {
+			const struct profile_threshold_summary *profile =
+				&item->profiles[profile_index];
+
+			printf("%s{\"name\":\"%s\",\"pages\":%u,"
+			       "\"eligible\":%u,\"calls\":%u,\"useful\":%u}",
+			       profile_index ? "," : "",
+			       negative_profile_names[profile_index],
+			       profile->pages, profile->eligible,
+			       profile->calls, profile->useful);
+		}
+		printf("]}");
 	}
 	printf("],\"transforms\":[");
 	for (transform_index = 0; transform_index < TRANSFORM_COUNT;
