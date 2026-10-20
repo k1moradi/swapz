@@ -145,7 +145,7 @@ changes.
 | 64 | One-shot in-flight-zero burst-target shrink guard | **1 owner-qualified / keep** | Five matched fast mixed rounds eliminated after-I0 shrinks and reduced burst closes, overshoot and lower WRITE requests without a measured latency penalty. Keep enabled; retain only one directional regression control. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | Owner run proves ID63 request savings persist without the helper and the old fast p99 regression disappears. Legacy helper status/CPU tokens remain zero. Follow-up cleanup rejects all non-ID63 pairs before slot preparation/priming. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Cacheline-reset predictive rescue before LZ4 | **4 offline native-C evidence first** | Compare CL-Delta32x2 against byte-delta/delta32/delta64/xor64 controls on cryptographic-noise negative controls plus deterministic structured binary/numeric archetypes. Score RAW rescues and planner block/extent savings with the real engine; no kernel format/hot-path change until material physical savings are proven. |
+| 67 | Cacheline-reset predictive rescue before LZ4 | **4 ID67a native evidence implemented; production decision pending** | Portable CL-Delta32x2 plus byte-delta/delta32/delta64/xor64 controls now run only in native qualification. SHAKE entropy/mixed/medium pages are negative controls; nine deterministic structured binary/numeric archetypes are positive controls. Every transform must round-trip exactly and resulting lengths are scored through the real bounded planner. No codec/authority/DM/SWZ3 path uses the predictor. |
 
 
 ## What the pinned queue experiment establishes
@@ -209,11 +209,13 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 1. Land the post-ID65 cleanup: restore executable test-script modes, promote
    ID65/66 documentation, reject non-ID63 READ pairs before slot
    preparation/priming, and retire standalone ID39/ID60 loaded controls.
-2. Run ID67a as native/offline evidence only. Use the current SHAKE-generated
-   fixture as a negative control and add deterministic pointer, integer,
-   floating-point and struct-array archetypes. Compare candidate transforms,
-   classifier thresholds and real `swapz_engine_plan_bounded()` block/extent
-   outcomes before considering any SWZ3 filter metadata.
+2. Qualify the implemented ID67a native/offline evaluator. It generates
+   SHAKE entropy/mixed/medium negative controls plus deterministic pointer,
+   page-table, integer, floating-point and struct-array positive controls;
+   compares five reversible transforms and classifier thresholds 64/96/128/192;
+   and reports real `swapz_engine_plan_bounded()` block/extent outcomes.
+   Do not add SWZ3 filter metadata or a hot-path predictor until this evidence
+   shows material physical savings and acceptable transform/LZ4 cost.
 3. Add ID61 foreground-GC pressure evidence on owned RAM. Measure GC wall as a
    fraction of useful-I/O wall, read/write p99 impact, reserve headroom and
    lower GC traffic; separately characterize the current full-map

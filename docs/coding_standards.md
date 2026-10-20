@@ -569,8 +569,12 @@ the same pass; thresholds are evidence, never hardcoded before measurement.
 Every candidate must round-trip exactly. Measure transform, inverse and optional
 second-LZ4 cost. Feed actual compressed-length sequences into the production
 `swapz_engine_plan_bounded()` and report planned 4KiB blocks/extents, RAW
-rescues and packing-cliff crossings. Do not modify SWZ3 metadata, authority,
-Device Mapper hot paths or retained-window policy as part of this offline phase.
+rescues and packing-cliff crossings. ID67a may place the portable, allocation-free
+candidate helpers in `src/kernel/predictor.h` so native tests exercise the
+exact C that a later kernel experiment could reuse, but no production
+translation unit may include that header yet. Do not modify SWZ3 metadata,
+authority, Device Mapper hot paths or retained-window policy as part of this
+offline phase.
 
 ### One-shot in-flight-zero burst-target shrink guard
 

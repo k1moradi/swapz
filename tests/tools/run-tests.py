@@ -219,6 +219,89 @@ WORKLOAD_OPPORTUNITY_FIELDS = (
     "final_live_duplicate_pages", "final_live_nonzero_same_filled_pages")
 
 
+PREDICTOR_TRANSFORM_NAMES = (
+    "cl_delta32x2", "cl_bytedelta8", "delta32", "delta64", "xor64")
+PREDICTOR_THRESHOLDS = (64, 96, 128, 192)
+PREDICTOR_TRANSFORM_FIELDS = (
+    "adopted", "raw_rescued", "cliff_2024", "saved_payload_bytes",
+    "baseline_blocks", "candidate_blocks", "planner_blocks_saved",
+    "baseline_extents", "candidate_extents", "planner_extents_saved",
+    "transform_ns_per_page", "inverse_ns_per_page", "second_lz4_ns_per_page")
+
+
+def parse_predictor_evidence(output):
+    """Sanitize ID67a native/offline evidence emitted by the C evaluator."""
+    prefix = "SWAPZ_PREDICTOR_EVIDENCE="
+    record = None
+    for line in output.splitlines():
+        if not line.startswith(prefix):
+            continue
+        try:
+            candidate = json.loads(line[len(prefix):])
+        except (TypeError, ValueError):
+            return None
+        if record is not None:
+            return None
+        record = candidate
+    if not isinstance(record, dict) or record.get("scope") != (
+            "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY"):
+        return None
+    if type(record.get("negative_pages")) is not int or \
+            record["negative_pages"] <= 0 or \
+            type(record.get("structured_pages")) is not int or \
+            record["structured_pages"] <= 0 or \
+            record.get("residual_lanes") != 896:
+        return None
+
+    threshold_rows = record.get("thresholds")
+    if not isinstance(threshold_rows, list) or \
+            [row.get("threshold") if isinstance(row, dict) else None
+             for row in threshold_rows] != list(PREDICTOR_THRESHOLDS):
+        return None
+    threshold_fields = (
+        "negative_eligible", "negative_calls", "negative_useful",
+        "structured_eligible", "structured_calls", "structured_useful")
+    for row in threshold_rows:
+        if any(type(row.get(field)) is not int or row[field] < 0
+               for field in threshold_fields):
+            return None
+        if row["negative_calls"] > row["negative_eligible"] or \
+                row["negative_useful"] > row["negative_calls"] or \
+                row["structured_calls"] > row["structured_eligible"] or \
+                row["structured_useful"] > row["structured_calls"]:
+            return None
+
+    transform_rows = record.get("transforms")
+    if not isinstance(transform_rows, list) or \
+            [row.get("name") if isinstance(row, dict) else None
+             for row in transform_rows] != list(PREDICTOR_TRANSFORM_NAMES):
+        return None
+    for row in transform_rows:
+        for field in PREDICTOR_TRANSFORM_FIELDS:
+            value = row.get(field)
+            if type(value) is not int:
+                return None
+            if field not in ("planner_blocks_saved", "planner_extents_saved") and \
+                    value < 0:
+                return None
+        if row["baseline_blocks"] <= 0 or row["candidate_blocks"] <= 0 or \
+                row["baseline_extents"] <= 0 or row["candidate_extents"] <= 0:
+            return None
+        if row["planner_blocks_saved"] != (
+                row["baseline_blocks"] - row["candidate_blocks"]) or \
+                row["planner_extents_saved"] != (
+                row["baseline_extents"] - row["candidate_extents"]):
+            return None
+    return {
+        "scope": record["scope"],
+        "negative_pages": record["negative_pages"],
+        "structured_pages": record["structured_pages"],
+        "residual_lanes": record["residual_lanes"],
+        "thresholds": threshold_rows,
+        "transforms": transform_rows,
+    }
+
+
 def workload_opportunity_record(obj):
     record = obj.get("workload_opportunity")
     if not isinstance(record, dict) or record.get("scope") != (
@@ -647,6 +730,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         output, rc = proc.stdout, proc.returncode
     except OSError as exc:
         output, rc = type(exc).__name__, 127
+    predictor_evidence = parse_predictor_evidence(output)
+    predictor_required = title == "Native and rootless contracts"
+    predictor_failure = predictor_required and rc == 0 and predictor_evidence is None
+    if predictor_failure:
+        rc = 1
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
     read_coalesce_sessions = parse_read_coalesce_ab(output) if parse_bench else []
     read_coalesce_diagnostic = (
@@ -681,7 +769,11 @@ def run_stage(title, command, result, *, parse_bench=False):
         # The sanitized report may be published via Git only.
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
-        if marker_failure:
+        if predictor_failure:
+            record["failed_phase"] = "ID67 offline predictor evidence"
+            record["diagnostic"] = (
+                "Native predictor evidence marker missing, malformed or incomplete")
+        elif marker_failure:
             if loaded_correctness.get("overall") != "PASS":
                 record["failed_phase"] = "owned RAM lifecycle evidence"
                 record["diagnostic"] = loaded_correctness.get(
@@ -705,6 +797,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                 output, loaded=parse_bench,
                 default_phase=None if parse_bench else title)
     result["stages"].append(record)
+    if predictor_evidence is not None:
+        result.setdefault("evidence", {})["predictor"] = predictor_evidence
     if parse_bench:
         result["benchmarks"]["loaded_correctness"] = loaded_correctness
         result["benchmarks"]["sessions"] = parse_sessions(output)
@@ -2098,6 +2192,35 @@ def print_table(headers, rows):
 
 
 def print_bench(result):
+    predictor = result.get("evidence", {}).get("predictor")
+    if isinstance(predictor, dict):
+        print("\n  ID67 OFFLINE PREDICTOR EVIDENCE — native controls; not kernel policy")
+        print_table(
+            ("transform", "adopt", "RAW+", "<=2024", "blocks", "extents",
+             "xform ns", "inv ns", "LZ4-2 ns"),
+            [(
+                row["name"],
+                row["adopted"],
+                row["raw_rescued"],
+                row["cliff_2024"],
+                f"{row['planner_blocks_saved']:+d}",
+                f"{row['planner_extents_saved']:+d}",
+                row["transform_ns_per_page"],
+                row["inverse_ns_per_page"],
+                row["second_lz4_ns_per_page"],
+            ) for row in predictor["transforms"]])
+        print("  CL-Delta32x2 classifier thresholds")
+        print_table(
+            ("score", "neg call/eligible", "neg useful", "struct call/eligible",
+             "struct useful"),
+            [(
+                row["threshold"],
+                f"{row['negative_calls']}/{row['negative_eligible']}",
+                row["negative_useful"],
+                f"{row['structured_calls']}/{row['structured_eligible']}",
+                row["structured_useful"],
+            ) for row in predictor["thresholds"]])
+
     verdict = result["benchmarks"]["verdicts"]
     if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
         print("  Benchmark matrix: NOT QUALIFIED "

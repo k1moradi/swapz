@@ -145,20 +145,27 @@ ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
 ## ID67 offline predictor evidence
 
-ID67 starts with no production-format or hot-path change. The current
-`anon-page-fixture.py` SHAKE-generated hard regions are a negative control:
-a useful classifier should reject them without a second LZ4 call. Positive
-evidence comes from deterministic native structured pages representing pointer/
-page-table arrays, u32/u64 counters and timestamps, float/double arrays and
-fixed-layout structs with mixed high-entropy fields.
+ID67a makes no production-format or hot-path change. The native evaluator uses
+`anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages as
+negative controls: a useful CL-Delta32x2 signpost should avoid unnecessary
+second-LZ4 work on pages without useful delta structure. Positive controls are
+generated independently in C and cover pointer arrays, page-table-like entries,
+u32/u64 counters/timestamps, slowly varying floats/doubles, two-field structs and
+cacheline-local mixed structured/high-entropy records.
 
-Compare CL-Delta32x2, cacheline byte-delta, whole-page delta32/delta64 and xor64.
-For each page report baseline LZ4 length, transformed length, classifier score,
-transform/inverse time and second-LZ4 time. Evaluate classifier thresholds
-64/96/128/192. Feed baseline and candidate length sequences through the real
-`swapz_engine_plan_bounded()`; the primary result is planned physical 4KiB
-blocks/extents saved, including RAW->compressed and >2024-><=2024 crossings.
-Compression ratio alone is not promotion evidence.
+The evaluator compares CL-Delta32x2, cacheline byte-delta, whole-page delta32,
+delta64 and xor64. Every transform is inverted and byte-compared before its
+measurement is accepted. It records transform/inverse/second-LZ4 time, adopted
+representations, RAW rescues and >2024 -> <=2024 crossings. CL-Delta32x2 also
+reports thresholds 64/96/128/192 against negative and structured eligibility.
+Baseline and candidate length sequences are fed through the production
+`swapz_engine_plan_bounded()`; planned physical 4KiB blocks/extents saved are
+the primary size result. Compression ratio alone is not promotion evidence.
+
+The output is explicitly labeled
+`OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY` and is sanitized into the official
+report. A later ID67b is permitted only after this evidence is reviewed; the
+native evaluator itself must not be cited as loaded-kernel performance.
 
 ## Physical media
 

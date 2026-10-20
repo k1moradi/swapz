@@ -118,12 +118,16 @@ promotion. Fast write-only QD8 remains confirmed at +8.1%, paired 95% CI
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** evidence-only first. Native tests must include
-  SHAKE/random negative controls plus structured numeric/binary positive
-  archetypes, compare reversible transforms/classifier thresholds, verify exact
-  inverse reconstruction, and evaluate physical block/extent savings through
-  the production bounded planner. No codec/authority/DM format change belongs
-  in ID67a.
+- **ID67 predictive rescue:** evidence-only first. The official rootless stage
+  must build/run the native evaluator, emit exactly one sanitized
+  `SWAPZ_PREDICTOR_EVIDENCE` record, and fail if it is missing or malformed.
+  SHAKE entropy/mixed/medium pages are negative controls; deterministic native
+  pointer/page-table/integer/float/struct pages are positive controls. Compare
+  CL-Delta32x2, cacheline byte-delta, delta32, delta64 and xor64; verify exact
+  inverse reconstruction; report classifier thresholds 64/96/128/192 and
+  production-planner physical block/extent savings. Source contracts must prove
+  no production DM/codec/authority/engine translation unit includes the
+  predictor and no filter metadata/policy-length surface exists in ID67a.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
   background worker.

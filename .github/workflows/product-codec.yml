@@ -25,6 +25,10 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - name: Install native predictor prerequisite
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq liblz4-dev
       - name: Reuse one build directory for native production-C tests
         shell: bash
         run: |

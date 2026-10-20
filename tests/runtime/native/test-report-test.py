@@ -16,6 +16,46 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+def predictor_evidence():
+    thresholds = []
+    for threshold in runner.PREDICTOR_THRESHOLDS:
+        thresholds.append({
+            "threshold": threshold,
+            "negative_eligible": 64,
+            "negative_calls": 0,
+            "negative_useful": 0,
+            "structured_eligible": 128,
+            "structured_calls": 96,
+            "structured_useful": 80,
+        })
+    transforms = []
+    for index, name in enumerate(runner.PREDICTOR_TRANSFORM_NAMES):
+        transforms.append({
+            "name": name,
+            "adopted": 80 - index,
+            "raw_rescued": 20 - index,
+            "cliff_2024": 30 - index,
+            "saved_payload_bytes": 100000 - index * 1000,
+            "baseline_blocks": 200,
+            "candidate_blocks": 160 + index,
+            "planner_blocks_saved": 40 - index,
+            "baseline_extents": 100,
+            "candidate_extents": 80 + index,
+            "planner_extents_saved": 20 - index,
+            "transform_ns_per_page": 1000 + index * 100,
+            "inverse_ns_per_page": 900 + index * 100,
+            "second_lz4_ns_per_page": 5000 + index * 100,
+        })
+    return {
+        "scope": "OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY",
+        "negative_pages": 192,
+        "structured_pages": 256,
+        "residual_lanes": 896,
+        "thresholds": thresholds,
+        "transforms": transforms,
+    }
+
+
 def lower_inflight(*, has_reads):
     read_peak = 1 if has_reads else 0
     read_mean = 0.25 if has_reads else 0.0
@@ -518,6 +558,20 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("swapoff ", loaded)
         self.assertNotIn("/dev/sdb", loaded)
 
+    def test_predictor_evidence_is_sanitized(self):
+        raw = predictor_evidence()
+        parsed = runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n")
+        self.assertEqual(parsed, raw)
+        broken = json.loads(json.dumps(raw))
+        broken["thresholds"][2]["negative_calls"] = 65
+        self.assertIsNone(runner.parse_predictor_evidence(
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(broken) + "\n"))
+        duplicate = (
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n" +
+            "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n")
+        self.assertIsNone(runner.parse_predictor_evidence(duplicate))
+
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
         self.assertEqual(loaded["overall"], "PASS")
@@ -817,7 +871,8 @@ class ReportContract(unittest.TestCase):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
             runner.parse_write_saturation(synthetic_log()))
-        report = {"benchmarks": {
+        report = {"evidence": {"predictor": predictor_evidence()},
+                  "benchmarks": {
             "verdicts": verdicts,
             "read_coalesce_ab": runner.read_coalesce_ab_verdict(
                 runner.parse_read_coalesce_ab(synthetic_log())),
@@ -831,6 +886,9 @@ class ReportContract(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
         rendered = output.getvalue()
+        self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
+        self.assertIn("CL-Delta32x2 classifier thresholds", rendered)
+        self.assertIn("cl_delta32x2", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
         self.assertIn("Lower queue", rendered)

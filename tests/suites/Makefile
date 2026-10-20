@@ -13,10 +13,13 @@ CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
 endif
 CPPFLAGS += -I$(KERNEL)
 
-.PHONY: test-all test-codec test-mapping test-gc test-lower-io clean
-PROGRAMS := codec-roundtrip zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
+.PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor clean
+PROGRAMS := codec-roundtrip predictor-qualification zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
 
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
+predictor-qualification_SRC := $(NATIVE)/codec/predictor-qualification.c $(ENGINE) $(AUTH) $(CODEC)
+predictor-qualification_HDR := $(KERNEL)/predictor.h $(KERNEL)/engine.h $(KERNEL)/codec.h
+predictor-qualification_LDLIBS := -llz4
 zero-write-elision_SRC := $(NATIVE)/mapping/zero-write.c $(ENGINE) $(AUTH) $(CODEC)
 mapping-authority_SRC := $(NATIVE)/mapping/authority.c $(AUTH) $(CODEC)
 transaction-publication_SRC := $(NATIVE)/mapping/transaction-publication.c $(AUTH) $(CODEC)
@@ -40,12 +43,25 @@ $(OUT):
 # Consolidate identical compile recipes, not the individual safety assertions.
 define BUILD_NATIVE
 $(OUT)/$(1): $$($(1)_SRC) $$($(1)_HDR) | $(OUT)
-	$$(CC) $$(CPPFLAGS) $$(CFLAGS) $$($(1)_SRC) -o "$$@"
+	$$(CC) $$(CPPFLAGS) $$(CFLAGS) $$($(1)_SRC) -o "$$@" $$($(1)_LDLIBS)
 endef
 $(foreach name,$(PROGRAMS),$(eval $(call BUILD_NATIVE,$(name))))
 
 test-codec: $(OUT)/codec-roundtrip
 	@set -e; "$(OUT)/codec-roundtrip"
+
+test-predictor: $(OUT)/predictor-qualification
+	@set -e; \
+	  python3 -B "$(ROOT)/tests/runtime/benchmark/anon-page-fixture.py" \
+	    --output-prefix "$(OUT)/predictor-entropy" --pages 64 --weights entropy=100 >/dev/null; \
+	  python3 -B "$(ROOT)/tests/runtime/benchmark/anon-page-fixture.py" \
+	    --output-prefix "$(OUT)/predictor-mixed" --pages 64 --weights mixed=100 >/dev/null; \
+	  python3 -B "$(ROOT)/tests/runtime/benchmark/anon-page-fixture.py" \
+	    --output-prefix "$(OUT)/predictor-medium" --pages 64 --weights medium=100 >/dev/null; \
+	  "$(OUT)/predictor-qualification" \
+	    "$(OUT)/predictor-entropy.bin" \
+	    "$(OUT)/predictor-mixed.bin" \
+	    "$(OUT)/predictor-medium.bin"
 
 test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
 	@set -e; "$(OUT)/zero-write-elision"; "$(OUT)/mapping-authority"; "$(OUT)/transaction-publication"; "$(OUT)/write-verification"; "$(OUT)/dead-segment-reclamation"; "$(OUT)/raw-discard"; "$(OUT)/online-packing"; "$(OUT)/randomized-authority"
@@ -56,7 +72,10 @@ test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-rotation
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy
 	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"
 
-test-all: test-codec test-mapping test-gc test-lower-io
+test-all: test-codec test-predictor test-mapping test-gc test-lower-io
 
 clean:
-	@rm -f $(addprefix $(OUT)/,$(PROGRAMS))
+	@rm -f $(addprefix $(OUT)/,$(PROGRAMS)) \
+		$(OUT)/predictor-entropy.bin $(OUT)/predictor-entropy.json \
+		$(OUT)/predictor-mixed.bin $(OUT)/predictor-mixed.json \
+		$(OUT)/predictor-medium.bin $(OUT)/predictor-medium.json

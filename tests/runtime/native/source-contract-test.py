@@ -1207,6 +1207,52 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("parallel_read_coalesced_reqs_saved", runner)
         self.assertIn("parallel_read_coalesce_extra_blocks", runner)
 
+    def test_id67_predictor_is_offline_only_and_planner_qualified(self):
+        predictor = (ROOT / "src/kernel/predictor.h").read_text()
+        qualification = (
+            ROOT / "tests/runtime/native/codec/predictor-qualification.c").read_text()
+        suites = (ROOT / "tests/suites/Makefile").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        workflow = (ROOT / ".github/workflows/product-codec.yml").read_text()
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        codec = (ROOT / "src/kernel/codec.c").read_text()
+        engine = (ROOT / "src/kernel/engine.c").read_text()
+
+        self.assertIn("swapz_predict_cl_delta32x2", predictor)
+        self.assertIn("swapz_unpredict_cl_delta32x2", predictor)
+        self.assertIn("swapz_predict_cl_bytedelta8", predictor)
+        self.assertIn("swapz_predict_delta32", predictor)
+        self.assertIn("swapz_predict_delta64", predictor)
+        self.assertIn("swapz_predict_xor64", predictor)
+        self.assertIn("(swapz_u32)(delta0 + 128U) <= 255U", predictor)
+        self.assertIn("SWAPZ_PREDICTOR_CL_DELTA32X2_RESIDUALS 896U",
+                      predictor)
+        self.assertIn("swapz_engine_plan_bounded(", qualification)
+        self.assertIn("LZ4_compress_fast", qualification)
+        self.assertIn("planner_blocks_saved", qualification)
+        self.assertIn("raw_rescued", qualification)
+        self.assertIn("cliff_2024", qualification)
+        self.assertIn("SWAPZ_PREDICTOR_EVIDENCE=", qualification)
+        self.assertIn("STRUCTURED_KINDS 9U", qualification)
+        self.assertIn("--weights entropy=100", suites)
+        self.assertIn("--weights mixed=100", suites)
+        self.assertIn("--weights medium=100", suites)
+        self.assertIn("predictor-qualification_LDLIBS := -llz4", suites)
+        self.assertIn("def parse_predictor_evidence", runner)
+        self.assertIn("OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY", runner)
+        self.assertIn("liblz4-dev", workflow)
+
+        # ID67a may compile portable candidate code but may not alter or enter
+        # the production DM/codec/authority/engine paths or SWZ3 interpretation.
+        self.assertNotIn('#include "predictor.h"', DM)
+        self.assertNotIn('#include "predictor.h"', authority)
+        self.assertNotIn('#include "predictor.h"', codec)
+        self.assertNotIn('#include "predictor.h"', engine)
+        self.assertNotIn("SWAPZ_FILTER_CL_DELTA32X2", DM)
+        self.assertNotIn("SWAPZ_FILTER_CL_DELTA32X2", codec)
+        self.assertNotIn("policy_length", DM)
+        self.assertNotIn("payload_filter", codec)
+
     def test_id64_guard_is_read_only_one_shot_and_owner_benchmarked(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
