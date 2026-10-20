@@ -892,3 +892,9 @@ schema spelling and production accounting cannot silently diverge.
 Rootless console-report coverage must pass the parsed ID39 diagnostic object to
 the printer; a display assertion is not valid against a report that omits the
 A/B evidence object entirely.
+
+The unprivileged Make-interface fixture must mirror the current packed-read
+telemetry schema and emit the fast ID39/ID63 plus slow ID60/ID63 marker sets.
+A fake loaded stage is not allowed to bypass new fail-closed fields merely to
+exercise incremental Make behavior; fixture records use the same parser and
+conservation contracts as owner-loaded output.
