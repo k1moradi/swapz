@@ -2864,7 +2864,7 @@ def print_bench(result):
                  f"{loaded['alloc_probe_segments']} segments / "
                  f"{loaded['alloc_probe_full_scans']} full scans; "
                  f"{loaded['alloc_probe_wall_ns'] / 1e6:.2f} ms"),
-                ("logical segment opens",
+                ("segment opens",
                  f"{loaded['segment_program_min']}/"
                  f"{loaded['segment_program_sum'] / loaded['segment_program_segments']:.2f}/"
                  f"{loaded['segment_program_max']} min/mean/max"),
