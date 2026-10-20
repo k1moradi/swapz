@@ -9,64 +9,68 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 Owner qualification of source
-`5916c07cde951ad8be05d34435a7705791329333` passed all five stages and
-published report-only commit `12858e8fd51b905441d2ef21b61c7608bc8e94ec`.
-Evidence remains owned-RAM `null_blk` only. Later report-format-only source
-does not supersede this loaded qualification.
+`64852c6e1b229a8940eea434d20c440fe434406c` passed all five stages and
+published report-only commit `617ab932331d9b44e66f8f839fd1f7975bc545af`.
+Evidence remains newly-created owned-RAM `null_blk` only.
 
-The ID57 rollback remains positively qualified. Fast write-only QD8 is now
-26.58 MB/s async versus 20.67 sync, +28.4% paired with 95% CI
-[+15.1%,+41.7%], target 8 and 512/0/0 PACK_READY/deadline/idle closes.
-ID57 remains Class 3 refuted/reverted; ID37 K=1 remains the qualified write
-pipeline. Fast mixed is a separate warning: async adds +108.8 lower WRITE
-requests, CI [+78.6,+139.0], while throughput is only +1.7%,
-CI [-0.4,+3.9]. Do not change scheduling until passive attribution proves why.
+ID37 K=1 async preparation remains useful at fast write-only QD8 in the latest
+run: 23.00 versus 20.99 MB/s, +9.7% paired with 95% CI [+1.4%,+18.0%].
+The exact target remains 8 with 512 PACK_READY and zero deadline closes in the
+five-pair QD8 confirmation. ID38 remains too small for K>1: fast mixed records
+29.6 ready windows / 87.1 records / 3.58 ms total K=1 completion wait.
 
-ID29 remains qualified on owned RAM: the lifecycle completed 36 exact 1MiB
-segment DISCARDs (73728 sectors) while 20 GC victims/rotations and all 4096
-logical pages verified byte-exact. This is logical/alignment evidence, not
-physical flash endurance evidence.
+ID60 is now refuted as a standalone performance optimization. On the serial
+hwq=1 model with ID63 disabled, grouping changes sequential lower READ requests
+398.0 -> 397.0 (-0.2%, CI [-1.7%,+1.3%]) and p99 13.24 -> 14.00 ms
+(+5.7%, CI [-1.5%,+13.0%]). Keep only a directional regression control.
 
-ID38 remains too small for K>1: fast mixed records 31.2 ready windows / 91
-records / 3.71 ms total K=1 wait. Keep it passive.
+ID63 is strongly qualified. Fast isolated five-pair evidence reduces
+sequential lower READ requests 404.6 -> 343.6, -15.0% with 95% CI
+[-19.3%,-10.8%], with zero extra blocks. Serial-depth isolation reduces
+398.4 -> 248.2, -37.7% with CI [-46.1%,-29.2%]. Of the fast 163.8 adjacent
+sequential pairs, 63.8 merge, 98.4 are already cache-satisfied, only 1.6 have
+an exact-range gap, and noncontiguous/other are zero. The exact zero-padding
+rule therefore already captures nearly all useful uncached adjacency; do not
+broaden it with padding or hole filling.
 
-ID63 is now a qualified request-efficiency optimization on the fast synthetic
-model. Its isolated five-pair A/B reduced sequential lower READ requests from
-406.2 to 340.6, -16.2% with 95% CI [-18.7%,-13.6%], with zero extra blocks.
-Sequential p99 changed +2.6%, CI [-9.1%,+14.2%], so fast latency benefit is not
-confirmed. Of 156.0 passively adjacent sequential pairs, only 66.8 actually
-merged after cache priming and exact missing-range selection.
+Fast mixed attribution now isolates the scheduling defect targeted by ID64.
+Async averages 8.2 learned-target shrinks: 7.6 (92.7%) happen after an
+in-flight zero-tail sample, zero follow read bypass, and only 0.6 are other.
+All 7.6 after-I0 cases shrink to <=8. Sync has zero after-I0 shrinks. This is
+strong mechanism evidence, but the new guard still requires its own matched
+performance A/B before promotion.
 
-The normal serial-depth run also improved sharply versus the previous
-pre-ID63 baseline (sequential async 397 -> 244 lower requests and 15.46 ->
-10.48 ms p99 in the compared owner runs), but depth-one grouping and ID63 were
-enabled together. The next evidence turn therefore isolates ID60 same-extent
-grouping and ID63 coalescing independently with five matched SD-model rounds.
+ID39 helper concurrency remains unhelpful: the owner-qualified fast A/B with
+ID63 disabled showed sequential requests 404.2 -> 407.2 and p99 +0.7%,
+CI [-13.1%,+14.5%], with random p99 also inconclusive. Keep the workqueue
+unchanged during ID64 qualification; treat removal as a later simplification.
 
-ID39 helper concurrency is not a confirmed latency win: with ID63 disabled,
-sequential p99 is +3.4% CI [-11.1%,+17.8] and random is ~0, while sequential
-requests increase from 403.8 to 409.4. Keep the helper until depth-one
-isolation is complete; do not expand it. IDs58/59 remain
-representative-content evidence only.
+ID29 lifecycle evidence remains qualified on owned RAM: 20 victims/rotations,
+20 distinct victims at 1/1 min/max, 4096 verified pages and 36 exact 1MiB
+DISCARDs (73728 sectors). Physical endurance remains unproven.
 
 ## Current bottleneck ranking
 
-The reverted write path is healthy enough that another collector intervention
-is not justified. Fast QD8 has a confirmed async gain and exact target/deadline
-geometry. Fast mixed still shows admission-side burst/overshoot differences,
-but throughput and lower-request deltas are not significantly worse.
+The highest-value active question is now ID64, not broader READ merging or more
+WRITE slots. ID63 has already eliminated the useful adjacent READ requests it
+can remove without amplification, and ID38 exposes only 3.58 ms of K=1 ready
+wait in fast mixed.
 
-ID38 measures only 3.79 ms of genuine ready-window wait in the fast mixed run,
-zero in the slow model. That is useful evidence to keep, but not enough to pay
-for two independent paused authority transactions or a K=2 publication queue.
+ID64 asks a deliberately narrow question: when the post-PACK sampler observed
+`tail == 0` while K=1 was still active, should exactly the next would-be
+learned burst-target shrink be ignored? The experiment must not suppress
+PACK_READY, defer sampling, hold BIO completions, or alter lower-run ownership.
 
-The clearest bounded I/O opportunity is now READ-side request elimination, not
-more WRITE concurrency. ID63's sequential passive adjacency rate is high while
-random adjacency is nearly absent. The active experiment therefore asks a more
-strict question than the passive counter: after shared-cache priming and exact
-per-BIO map requirements are applied, how many pairs still have two nonempty,
-contiguous missing lower ranges that can be fetched by one zero-extra-byte
-request?
+The observation must be one-shot. A guarded shrink candidate consumes it
+immediately; otherwise the first nonempty non-chaining hard boundary consumes
+it. This prevents a stale flag from suppressing genuine later down-adaptation
+after the workload actually falls to lower queue depth.
+
+Qualification keeps async preparation enabled in both ID64 arms and varies
+only the read-only guard control for five counterbalanced fast mixed rounds.
+Already-refuted ID39 and ID60 experiments are retained only as directional
+regression controls to avoid repeating expensive evidence collection on every
+official `make test`. Both fast and slow ID63 five-pair confirmations remain.
 
 ## Optimization evidence table
 
@@ -108,7 +112,7 @@ changes.
 | 26 | NUMA-local preparation domains | **6** | Hardware-blocked. |
 | 27 | One swapz target per NUMA node with node-local backing | **6** | Deployment topology only. |
 | 28 | Sustained live-GC workload | **1** | Reconfirmed with exact mapping counts active: 20 victims/rotations, 20 distinct victims and 4096 verified pages. |
-| 29 | Dead-segment DISCARD/TRIM | **4 bounded implementation pending owner evidence** | Synthetic victim distribution is qualified. The candidate issues advisory, 1MiB-aligned lower DISCARD only after a previously written segment is proven wholly dead, including post-commit GC victims and foreground recycle. Unsupported/media TRIM failure cannot create authority or make live data reclaimable. Owned-RAM qualification must prove exact alignment/counts and byte-exact 4096-page GC. |
+| 29 | Dead-segment DISCARD/TRIM | **1 qualified on owned RAM** | Owner evidence confirms 36 exact 1MiB discards / 73728 sectors, 20 GC victims/rotations and byte-exact 4096-page verification. Keep advisory fail-closed semantics; physical endurance remains unproven. |
 | 30 | Tiny microsecond grace timer | **5** | Refuted and deleted. |
 | 31 | Shared descriptor queue + multiple unbound prep workers | **4 dependent** | Serial still has no preparation backlog and fast remains shallow (~0.21/0.06 at lower-WRITE boundaries). Consider N=2 only after repeated fast-QD8 evidence plus trustworthy on-CPU attribution. |
 | 32 | One affinity-pinned worker per physical core | **3** | Reject affinity form. |
@@ -116,9 +120,9 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **1 qualified at fast write-only QD8; QD4 not confirmed** | Latest fast-QD8 five-pair result is +23.1%, CI [+8.4%,+37.9%]. Fast QD4 five-pair result is +1.4%, CI [-0.7%,+3.6%], so QD4 returns to directional control. Mixed has no significant async gain and carries +94.4 requests. Keep K=1; do not add slots. |
-| 38 | Shared accumulator with K>1 lower-write slots | **4 passive evidence; hold implementation** | Fast mixed measures 30.5 ready windows / 88 records / 3.79 ms total K=1 completion wait; slow measures zero. Keep counters and re-evaluate only if repeated workloads show materially larger wait wall. Do not add K=2 authority state now. |
-| 39 | Latency-first bounded parallel READ service | **1 bounded mechanism keep; latest generation inconclusive** | Latest same-cache A/B: seq p99 +4.6% CI [-8.7%,+17.8%], random -4.5% [-16.1%,+7.2%]. Keep Kread=2 and shared-cache ownership unchanged; do not broaden depth. |
+| 37 | K=1 ping-pong WRITE pipeline | **1 qualified at fast write-only QD8** | Latest owner run: +9.7%, CI [+1.4%,+18.0%], exact target 8 and 512/0/0 PACK_READY/deadline/idle. Mixed remains a separate scheduling problem; keep K=1 and do not add slots. |
+| 38 | Shared accumulator with K>1 lower-write slots | **5 current opportunity too small** | Fast mixed measures 29.6 ready windows / 87.1 records / 3.58 ms total K=1 completion wait. Keep passive counters; do not add K=2 authority state. |
+| 39 | Latency-first bounded parallel READ service | **5 performance refuted; cleanup pending** | Owner-qualified fast A/B with ID63 off: seq requests 404.2 -> 407.2, seq p99 +0.7% CI [-13.1%,+14.5%], random p99 -5.0% [-18.5%,+8.6%]. Keep one directional regression control and defer workqueue removal until after ID64. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
 | 42 | Explicit serial-vs-parallel lower queue model + lower in-flight-depth telemetry | **1 completed measurement** | Owner-qualified. Slow hwq=1 stays at sampled peak depth 1; fast raw reaches >1 while swapz remains at 1. Keep the geometry and telemetry as mandatory evidence for concurrency claims. |
@@ -139,10 +143,11 @@ changes.
 | 57 | K=1-busy PACK_READY gate + completion-aware zero-tail preservation | **3 refuted by owner evidence; reverted** | Two qualified runs reproduce ~-42% fast-QD8 async/sync. Latest is -41.1%, CI [-45.8%,-36.4%], with QD8 target 12 and 274.8 deadlines; fast mixed adds +271.6 lower requests while service-dry closes rise +263.4. Restore ID56/pre-ID57 sampling/closure behavior and remove active ID57 counters. |
 | 58 | Nonzero same-filled-page special representation | **4 low-priority representative-corpus evidence** | Current synthetic trace has 0/12,301 nonzero same-filled writes and 0 final live same-filled pages, so there is no benchmark opportunity. Keep the offline detector; do not add a production representation until representative swap content shows prevalence. |
 | 59 | Exact-content page deduplication / shared payload ownership | **4 representative-corpus + architecture evidence** | Synthetic trace reports 12,301 resident duplicate opportunities from only 128 payloads and 1,024 final duplicate pages. This proves the analyzer, not production prevalence. Measure representative lifetime overlap before implementing collision-free verification, bounded refcounts, generation-safe COW and GC/DISCARD ownership. |
-| 60 | Queued READ grouping within the same immutable extent | **4 five-pair SD isolation ready** | Fast Kread-on sees ~100 same-extent groups, but helper concurrency itself has no confirmed latency benefit. Run five matched hwq=1 rounds with `read_coalesce=0` and only `parallel_reads=0/1` varied; hwq=1 proves no helper workqueue dispatch, isolating same-extent grouping/cache priming. |
+| 60 | Queued READ grouping within the same immutable extent | **5 standalone benefit refuted** | Five matched hwq=1 rounds with ID63 off show seq req -0.2% CI [-1.7%,+1.3%], seq p99 +5.7% [-1.5%,+13.0%], random flat. Keep only a directional control; do not build a separate grouping optimization. |
 | 61 | Background/asynchronous GC instead of foreground collection stalls | **4 dependent evidence** | Lifecycle GC is correct (20 victims/rotations), but timed mixed reports no foreground GC victims. First measure foreground GC stall/headroom during useful pressure; a worker is unjustified until GC materially contributes to latency with reserve headroom. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
-| 63 | Physically adjacent distinct-extent READ coalescing | **1 fast request win; 4 SD isolation** | Fast isolated A/B confirms -16.2% sequential lower READ requests, CI [-18.7%,-13.6%], 66.8 merges and zero extra blocks; fast p99 is not confirmed better. Run five matched hwq=1 rounds with grouping fixed on and only `read_coalesce=0/1` varied. Passive skip attribution must explain cached/noncontiguous/gap rejections and keep the defensive other bucket at zero. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **1 qualified fast + serial request win** | Fast seq req -15.0% CI [-19.3%,-10.8%]; serial seq req -37.7% [-46.1%,-29.2%], zero extra blocks. Unmerged adjacency is overwhelmingly cache-satisfied; noncontiguous is zero and exact-range gaps are tiny. Keep the exact zero-padding design. |
+| 64 | One-shot in-flight-zero burst-target shrink guard | **4 active bounded experiment** | Fast async attribution shows 7.6/8.2 shrinks follow in-flight zero-tail sampling and all 7.6 collapse the target to <=8. Guard only the next real shrink candidate, consume the flag once, and run five matched fast async guard-off/on rounds before promotion. |
 
 
 ## What the pinned queue experiment establishes
@@ -203,23 +208,23 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 
 ## Immediate work queue
 
-1. Run five matched SD ID60 rounds: `read_coalesce=0` in both arms and vary
-   only `parallel_reads=0/1`. Require `read_worker_cpu_ns=0` on hwq=1.
-2. Run five matched SD ID63 rounds: keep `parallel_reads=1` in both arms and
-   vary only `read_coalesce=0/1`. Report paired CIs for sequential/random
-   lower requests and p99, plus throughput/lower-byte CIs in JSON.
-3. Passively classify every full-extent-adjacent ID63 non-merge as
-   cache-satisfied, noncontiguous missing mask, missing-range gap, or defensive
-   other. The other bucket must remain zero.
-4. Passively classify every real burst-target shrink by prior in-flight zero
-   tail/read bypass/other and by new target <=8, 9..32 or defensive >32. Do not
-   use these observations to change scheduling in the same commit.
-5. Only after owner evidence should a separate scheduling fix be considered.
-   Keep ID38 passive and keep ID39 workqueue removal as a later evidence-driven
-   simplification.
-6. Proceed independently with ID43 compound/folio coverage, ID61 GC-pressure
-   qualification, heavy-CPU/low-RAM qualification, and separately authorized
-   ID62 safety work. Do not weaken null_blk-only admission.
+1. Owner-qualify ID64 with five matched SSD_EMULATED QD32 mixed rounds:
+   async preparation on in both arms, vary only
+   `guard_inflight_zero_shrink=0/1`. Require guard-off skip count zero,
+   guard-on positive skip count, and guard-on actual `after-I0` shrinks zero.
+   Report paired CIs for write throughput, lower WRITE requests, read/write
+   p99, burst closes, overshoot and actual shrink count.
+2. Preserve one-shot behavior: a guarded candidate consumes the flag, and the
+   first nonempty non-chaining hard boundary clears any unconsumed flag. Do not
+   reintroduce ID57 PACK_READY suppression or tail-sample deferral.
+3. Keep fast/slow ID63 five-pair confirmation. Keep ID39 and slow ID60 only as
+   one off/on directional controls because their five-pair performance
+   questions are already owner-qualified.
+4. If ID64 wins without QD8/read regressions, promote it and then consider
+   removing the unhelpful ID39 helper workqueue in a separate cleanup.
+5. Continue ID43 compound/folio coverage and ID61 useful-I/O GC-pressure
+   evidence independently. ID62 physical-media work remains separately
+   authorized and must not weaken null_blk-only admission.
 
 ## NUMA / deployment topology
 

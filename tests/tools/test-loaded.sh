@@ -88,6 +88,7 @@ PY
 # five adjacent counterbalanced sync/async rounds so the report can compute a
 # paired 95% confidence interval without changing the workload or policy.
 confirmation_modes=(0 1 1 0 0 1 1 0 0 1)
+directional_modes=(0 1)
 for regime in sd_emulated ssd_emulated; do
     printf 'START_OWNED_RAM_REGIME=%s\n' "$regime"
     index=0
@@ -119,11 +120,28 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# ID39 same-cache Kread confirmation: five adjacent counterbalanced fast-model
-# rounds vary only the read-only module parameter. async_prepare stays off so
-# WRITE scheduling cannot contaminate the packed-read comparison.
+# ID64 active experiment: keep async preparation enabled and vary only the
+# one-shot in-flight-zero shrink guard for five matched fast mixed rounds.
 index=0
-for parallel_reads in "${confirmation_modes[@]}"; do
+for guard in "${confirmation_modes[@]}"; do
+    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --async-prepare
+               --guard-inflight-zero-shrink "$guard"
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_BURST_GUARD_AB=%s\n' "$guard"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_BURST_GUARD_AB=%s\n' "$guard"
+    (( index += 1 ))
+done
+
+# ID39 is owner-refuted as a performance optimization. Keep one fast off/on
+# directional regression control; do not spend five matched rounds on it.
+index=0
+for parallel_reads in "${directional_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --read-coalesce 0 --parallel-reads "$parallel_reads"
@@ -154,11 +172,10 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
-# ID60 depth-one same-extent grouping confirmation: keep adjacent coalescing
-# disabled and vary only read grouping. hwq=1 guarantees the helper read
-# workqueue is not enabled, so this isolates grouping/cache priming itself.
+# ID60 is owner-refuted as a standalone optimization. Keep one hwq=1 off/on
+# directional regression control with ID63 disabled and no helper concurrency.
 index=0
-for parallel_reads in "${confirmation_modes[@]}"; do
+for parallel_reads in "${directional_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000
                --read-coalesce 0 --parallel-reads "$parallel_reads"

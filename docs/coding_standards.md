@@ -526,11 +526,11 @@ Do not call an unexported scheduler helper merely to sharpen this measurement.
 ### Parallel-read diagnostic control
 
 The read-only `parallel_reads` and `read_coalesce` module parameters are
-evidence controls, not runtime auto-tuning policy. Loaded A/B qualification may
-set them to 0 or 1 only through the private owned-RAM helper. The fast ID39 A/B
-holds `read_coalesce=0`; the fast and slow ID63 A/Bs hold
-`parallel_reads=1` and vary only `read_coalesce`. The slow ID60 A/B holds
-`read_coalesce=0` and varies only `parallel_reads`.
+evidence controls, not runtime auto-tuning policy. Loaded qualification may set
+them to 0 or 1 only through the private owned-RAM helper. Fast/slow ID63 keep
+`parallel_reads=1` and vary only `read_coalesce` for five matched rounds.
+Owner-refuted ID39 and ID60 retain only one off/on directional regression
+control with coalescing disabled.
 
 When grouping is off, allocate no read slots, coalescing scratch or read
 workqueue. When grouping is on, same-extent grouping and single-request ID63
@@ -540,21 +540,36 @@ helper workqueue and remains gated on `nr_requests > 1`. A depth-one
 qualification must observe zero read-worker CPU delta. Do not conflate
 grouping/coalescing capability with parallel lower service.
 
-### Passive burst-target shrink attribution
+### One-shot in-flight-zero burst-target shrink guard
 
-A diagnostic may remember that the most recent post-PACK sample observed
-`tail == 0` while K=1 was active. This boolean is evidence only: it must never
-gate a close, timer, target update, worker wake or I/O. Any nonzero tail sample
-clears it; a truly quiescent hard boundary may clear it once no detached write
-is active.
+The passive ID56/ID64 attribution established a narrow timing defect: a
+post-PACK sample may observe `tail == 0` while the detached K=1 lower write is
+still active, clear retained-chain evidence, and leave the following residual
+deadline window looking like a new smaller burst.
 
-Every actual `retained_burst_target` shrink is classified exactly once as
-following that in-flight-zero observation, following a read bypass, or other.
-The resulting target is independently binned as <=8, 9..32 or defensive >32;
-each classification set must sum exactly to `burst_target_shrinks`. The >32
-bucket is retained for conservation because the existing shrink helper can
-legally shrink 64 to a value in 33..63. This attribution is passive and cannot
-be used to implement the hypothesized fix in the same evidence commit.
+The read-only `guard_inflight_zero_shrink` module parameter is an owned-RAM
+A/B control and defaults enabled for the active ID64 candidate. It may affect
+only the deadline learned-target shrink site. It must not suppress PACK_READY,
+defer/re-sample tails, delay upper BIO completion, alter timer expiry, create
+new waits, or change lower-run ownership/publication.
+
+When the ordinary shrink helper produces a different candidate target and both
+the guard and `last_pack_tail_zero_inflight` are true, keep the current target,
+increment `burst_shrink_inflight_zero_skips`, and clear the flag immediately.
+This consumes exactly one exemption. Otherwise apply the unchanged shrink
+helper and retain the existing mutually-exclusive actual-shrink attribution.
+
+A remembered in-flight-zero observation must never leak across unrelated
+windows. Any later nonzero tail sample clears it. A nonempty hard boundary that
+does not continue the retained chain also clears any unconsumed observation.
+Therefore a first residual deadline window may be exempted, but a second
+consecutive deadline window can down-adapt normally if no new in-flight-zero
+sample occurred.
+
+Actual shrinks continue to conserve across after-inflight-zero,
+after-read-bypass/other and <=8/9..32/>32 target bins. Guarded skips are
+separate from `burst_target_shrinks`; they are suppressed candidates, not
+actual target updates.
 
 ### Opposite-end asynchronous preparation
 

@@ -281,6 +281,7 @@ class PairReplayContract(unittest.TestCase):
             "pack_tail_many_idle": 1,
             "burst_target_grows": 1,
             "burst_target_shrinks": 1,
+            "burst_shrink_inflight_zero_skips": 2,
             "burst_shrink_after_inflight_zero": 1,
             "burst_shrink_after_read_bypass": 0,
             "burst_shrink_other": 0,
@@ -365,6 +366,7 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(delta["pack_tail_many_idle"], 1)
         self.assertEqual(delta["burst_target_grows"], 1)
         self.assertEqual(delta["burst_target_shrinks"], 1)
+        self.assertEqual(delta["burst_shrink_inflight_zero_skips"], 2)
         self.assertEqual(delta["burst_shrink_after_inflight_zero"], 1)
         self.assertEqual(delta["burst_shrink_after_read_bypass"], 0)
         self.assertEqual(delta["burst_shrink_other"], 0)

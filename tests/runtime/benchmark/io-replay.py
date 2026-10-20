@@ -814,6 +814,7 @@ TAIL_SAMPLE_FIELDS = (
     "pack_tail_one_inflight", "pack_tail_one_idle",
     "pack_tail_many_inflight", "pack_tail_many_idle",
     "burst_target_grows", "burst_target_shrinks",
+    "burst_shrink_inflight_zero_skips",
     "burst_shrink_after_inflight_zero", "burst_shrink_after_read_bypass",
     "burst_shrink_other", "burst_shrink_target_le8",
     "burst_shrink_target_9_32", "burst_shrink_target_gt32")

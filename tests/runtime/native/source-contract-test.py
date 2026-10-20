@@ -1173,7 +1173,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_grouping_enabled=$expected_grouping", pair)
         self.assertIn("read_coalescing_enabled=$expected_coalescing", pair)
         self.assertIn("parallel_reads_enabled=$expected_parallel", pair)
-        self.assertIn('for parallel_reads in "${confirmation_modes[@]}"', loaded)
+        self.assertIn('for parallel_reads in "${directional_modes[@]}"', loaded)
+        self.assertIn('for guard in "${confirmation_modes[@]}"', loaded)
+        self.assertIn("START_BURST_GUARD_AB=", loaded)
+        self.assertIn("PASS_BURST_GUARD_AB=", loaded)
+        self.assertIn("--guard-inflight-zero-shrink", pair)
+        self.assertIn('"guard_inflight_zero_shrink=$GUARD_INFLIGHT_ZERO_SHRINK"', pair)
+        self.assertIn("guard_inflight_zero_shrink=$GUARD_INFLIGHT_ZERO_SHRINK", pair)
         self.assertIn("START_PARALLEL_READ_AB=", loaded)
         self.assertIn("--read-coalesce 0", loaded)
         self.assertIn("START_READ_COALESCE_AB=", loaded)
@@ -1183,19 +1189,49 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000",
                       loaded)
         self.assertIn("def parse_parallel_read_ab", runner)
-        self.assertIn("PASS_PARALLEL_READ_AB_CONFIRMATION", runner)
+        self.assertIn("PASS_PARALLEL_READ_DIRECTIONAL_CONTROL", runner)
+        self.assertIn("def parse_burst_guard_ab", runner)
+        self.assertIn("PASS_BURST_GUARD_AB_CONFIRMATION", runner)
         self.assertIn("def parse_read_coalesce_ab", runner)
         self.assertIn("PASS_READ_COALESCE_AB_CONFIRMATION", runner)
         self.assertIn("def parse_sd_read_grouping_ab", runner)
-        self.assertIn("PASS_SD_READ_GROUPING_AB_CONFIRMATION", runner)
+        self.assertIn("PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL", runner)
         self.assertIn("def parse_sd_read_coalesce_ab", runner)
         self.assertIn("PASS_SD_READ_COALESCE_AB_CONFIRMATION", runner)
         self.assertIn("CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)",
                       runner)
+        self.assertIn("DIRECTIONAL_SEQUENCE = (0, 1)", runner)
         self.assertIn("def paired_ci95", runner)
         self.assertIn('kernel["parallel_read_pairs"]', runner)
         self.assertIn("parallel_read_coalesced_reqs_saved", runner)
         self.assertIn("parallel_read_coalesce_extra_blocks", runner)
+
+    def test_id64_guard_is_read_only_one_shot_and_owner_benchmarked(self):
+        policy = (ROOT / "src/kernel/window-policy.h").read_text()
+        pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
+        worker = body("swapz_worker")
+        flush = body("swapz_flush_window")
+        ctr = body("swapz_ctr")
+        status = body("swapz_status")
+        self.assertIn("module_param_named(guard_inflight_zero_shrink", DM)
+        self.assertIn("0444", DM[DM.index(
+            "module_param_named(guard_inflight_zero_shrink"):DM.index(
+            "module_param_named(guard_inflight_zero_shrink") + 180])
+        self.assertIn(
+            "ctx->guard_inflight_zero_shrink = swapz_guard_inflight_zero_shrink",
+            ctr)
+        self.assertIn("swapz_window_guard_burst_target_shrink", policy)
+        self.assertIn("candidate_target", worker)
+        self.assertIn("ctx->burst_shrink_inflight_zero_skips++", worker)
+        self.assertIn("ctx->last_pack_tail_zero_inflight = false", worker)
+        self.assertIn("hard_boundary && !chain_continues", flush)
+        self.assertIn("guard_inflight_zero_shrink=%u", status)
+        self.assertIn("burst_shrink_inflight_zero_skips=%llu", status)
+        self.assertIn("--guard-inflight-zero-shrink 0|1", pair)
+        self.assertIn("START_BURST_GUARD_AB=", loaded)
+        self.assertIn("PASS_BURST_GUARD_AB=", loaded)
+        self.assertNotIn("pack_ready_busy_deferrals", DM)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -1352,6 +1388,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "pack_tail_one_idle", "pack_tail_many_inflight",
                       "pack_tail_many_idle", "burst_target_grows",
                       "burst_target_shrinks",
+                      "burst_shrink_inflight_zero_skips",
                       "burst_shrink_after_inflight_zero",
                       "burst_shrink_after_read_bypass",
                       "burst_shrink_other",
@@ -1388,6 +1425,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertIn("ctx->" + field + "++", sample)
         self.assertIn("ctx->last_pack_tail_zero_inflight = true", sample)
         self.assertIn("ctx->last_pack_tail_zero_inflight = false", sample)
+        self.assertIn("swapz_window_guard_burst_target_shrink(", worker)
+        self.assertIn("ctx->burst_shrink_inflight_zero_skips++", worker)
+        self.assertIn("ctx->last_pack_tail_zero_inflight = false", worker)
+        self.assertIn("hard_boundary && !chain_continues", flush)
+        self.assertIn("ctx->last_pack_tail_zero_inflight = false", flush)
         self.assertIn("ctx->burst_shrink_after_inflight_zero++", worker)
         self.assertIn("ctx->burst_shrink_after_read_bypass++", worker)
         self.assertIn("ctx->burst_shrink_other++", worker)
@@ -1457,6 +1499,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)
         self.assertIn("BURST_CLOSE_DETAIL_FIELDS", runner)
         self.assertIn("TAIL_SAMPLE_FIELDS", runner)
+        self.assertIn("burst_shrink_inflight_zero_skips", runner)
         self.assertIn("burst_shrink_after_inflight_zero", runner)
         self.assertIn("parallel_read_coalesce_skip_noncontig_slot", runner)
         self.assertIn("K1_READY_WAIT_FIELDS", runner)

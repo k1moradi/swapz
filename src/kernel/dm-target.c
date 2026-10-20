@@ -68,6 +68,12 @@ module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
 		 "Enable zero-extra adjacent distinct-extent READ coalescing");
 
+static bool swapz_guard_inflight_zero_shrink = true;
+module_param_named(guard_inflight_zero_shrink,
+		   swapz_guard_inflight_zero_shrink, bool, 0444);
+MODULE_PARM_DESC(guard_inflight_zero_shrink,
+		 "Suppress one learned burst-target shrink after an in-flight zero-tail sample");
+
 struct swapz_prepared_page {
 	int length;
 	bool zero;
@@ -204,6 +210,7 @@ struct swapz_dm {
 	/* One bounded LZ4 producer, separate from the ordered I/O worker.
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
+	bool guard_inflight_zero_shrink;
 	struct workqueue_struct *preparation_workqueue;
 	struct work_struct preparation_worker;
 	struct list_head preparation_incoming;
@@ -457,6 +464,7 @@ struct swapz_dm {
 	u64 pack_tail_many_idle;
 	u64 burst_target_grows;
 	u64 burst_target_shrinks;
+	u64 burst_shrink_inflight_zero_skips;
 	/* Passive causal attribution for every actual learned-target shrink. */
 	bool last_pack_tail_zero_inflight;
 	u64 burst_shrink_after_inflight_zero;
@@ -2027,6 +2035,14 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 		 ((close_reason == SWAPZ_CLOSE_ZERO ||
 		   close_reason == SWAPZ_CLOSE_RAW) &&
 		  ctx->worker_has_immediate_followup));
+	/*
+	 * ID64's in-flight-zero exemption belongs to exactly one following
+	 * retained window. A nonempty hard boundary that does not continue the
+	 * chain consumes any unspent observation so it cannot suppress genuine
+	 * later down-adaptation.
+	 */
+	if (hard_boundary && !chain_continues)
+		ctx->last_pack_tail_zero_inflight = false;
 
 	ctx->single_pack_deferred = false;
 	ctx->accepted_burst_pack_ready = false;
@@ -3966,12 +3982,19 @@ static void swapz_worker(struct work_struct *work)
 						    !ctx->retained_chain_completed) {
 							swapz_u8 old_target =
 								ctx->retained_burst_target;
-
-							ctx->retained_burst_target =
+							swapz_u8 candidate_target =
 								swapz_window_shrink_burst_target(
-									ctx->retained_burst_target,
+									old_target,
 									ctx->batch_count);
-							if (ctx->retained_burst_target != old_target) {
+
+							if (candidate_target != old_target &&
+							    swapz_window_guard_burst_target_shrink(
+								ctx->guard_inflight_zero_shrink,
+								ctx->last_pack_tail_zero_inflight)) {
+								ctx->burst_shrink_inflight_zero_skips++;
+								ctx->last_pack_tail_zero_inflight = false;
+							} else if (candidate_target != old_target) {
+								ctx->retained_burst_target = candidate_target;
 								ctx->burst_target_shrinks++;
 								if (ctx->last_pack_tail_zero_inflight)
 									ctx->burst_shrink_after_inflight_zero++;
@@ -4394,6 +4417,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
+	ctx->guard_inflight_zero_shrink = swapz_guard_inflight_zero_shrink;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
@@ -4772,7 +4796,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "age_gt1000us=%llu age_sum_ns=%llu age_max_ns=%llu "
 		       "retain_ms=%u retain_passes=%llu retain_timer_arms=%llu "
 		       "retain_timer_arm_skips=%llu "
-		       "async_prepare=%u prep_lower_write_overlap_starts=%llu "
+		       "async_prepare=%u guard_inflight_zero_shrink=%u "
+		       "prep_lower_write_overlap_starts=%llu "
 		       "prep_lower_write_overlap_ns=%llu prep_wave_kicks=%llu "
 		       "prep_lower_write_samples=%llu "
 		       "prep_lower_write_start_queued=%llu "
@@ -4833,6 +4858,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "pack_tail_one_inflight=%llu pack_tail_one_idle=%llu "
 		       "pack_tail_many_inflight=%llu pack_tail_many_idle=%llu "
 		       "burst_target_grows=%llu burst_target_shrinks=%llu "
+		       "burst_shrink_inflight_zero_skips=%llu "
 		       "burst_shrink_after_inflight_zero=%llu "
 		       "burst_shrink_after_read_bypass=%llu "
 		       "burst_shrink_other=%llu "
@@ -4977,7 +5003,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->window_age_max_ns,
 		       ctx->retain_ms, ctx->retain_worker_passes,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
-		       ctx->async_prepare, ctx->prepared_during_lower_write,
+		       ctx->async_prepare, ctx->guard_inflight_zero_shrink,
+		       ctx->prepared_during_lower_write,
 		       ctx->preparation_lz4_lower_write_overlap_ns,
 		       ctx->preparation_wave_kicks,
 		       ctx->prep_lower_write_samples,
@@ -5063,6 +5090,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->pack_tail_many_idle,
 		       ctx->burst_target_grows,
 		       ctx->burst_target_shrinks,
+		       ctx->burst_shrink_inflight_zero_skips,
 		       ctx->burst_shrink_after_inflight_zero,
 		       ctx->burst_shrink_after_read_bypass,
 		       ctx->burst_shrink_other,

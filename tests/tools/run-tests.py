@@ -30,6 +30,7 @@ MODEL_SPECS = {
 MODEL_ORDER = tuple(MODEL_SPECS)
 # Five adjacent matched rounds with mode order alternated between rounds.
 CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
+DIRECTIONAL_SEQUENCE = (0, 1)
 PAIRED_CI95_T_N5 = 2.7764451051977987
 
 
@@ -122,6 +123,7 @@ TAIL_SAMPLE_FIELDS = (
     "pack_tail_one_inflight", "pack_tail_one_idle",
     "pack_tail_many_inflight", "pack_tail_many_idle",
     "burst_target_grows", "burst_target_shrinks",
+    "burst_shrink_inflight_zero_skips",
     "burst_shrink_after_inflight_zero", "burst_shrink_after_read_bypass",
     "burst_shrink_other", "burst_shrink_target_le8",
     "burst_shrink_target_9_32", "burst_shrink_target_gt32")
@@ -661,16 +663,22 @@ def run_stage(title, command, result, *, parse_bench=False):
     sd_coalesce_diagnostic = (
         sd_read_coalesce_ab_verdict(sd_coalesce_sessions)
         if parse_bench else None)
+    burst_guard_sessions = parse_burst_guard_ab(output) if parse_bench else []
+    burst_guard_diagnostic = (
+        burst_guard_ab_verdict(burst_guard_sessions)
+        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        parallel_read_diagnostic.get("overall") !=
-                       "PASS_PARALLEL_READ_AB_CONFIRMATION" or
+                       "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL" or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_grouping_diagnostic.get("overall") !=
-                       "PASS_SD_READ_GROUPING_AB_CONFIRMATION" or
+                       "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL" or
                        sd_coalesce_diagnostic.get("overall") !=
-                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION"))
+                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
+                       burst_guard_diagnostic.get("overall") !=
+                       "PASS_BURST_GUARD_AB_CONFIRMATION"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -690,7 +698,7 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["diagnostic"] = loaded_correctness.get(
                     "reason", "Loaded correctness evidence is incomplete")
             elif parallel_read_diagnostic.get("overall") != (
-                    "PASS_PARALLEL_READ_AB_CONFIRMATION"):
+                    "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL"):
                 record["failed_phase"] = "parallel READ A/B evidence"
                 record["diagnostic"] = parallel_read_diagnostic.get(
                     "reason", "Kread diagnostic evidence is incomplete")
@@ -700,14 +708,19 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["diagnostic"] = read_coalesce_diagnostic.get(
                     "reason", "ID63 diagnostic evidence is incomplete")
             elif sd_grouping_diagnostic.get("overall") != (
-                    "PASS_SD_READ_GROUPING_AB_CONFIRMATION"):
+                    "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL"):
                 record["failed_phase"] = "SD same-extent grouping A/B evidence"
                 record["diagnostic"] = sd_grouping_diagnostic.get(
                     "reason", "SD ID60 diagnostic evidence is incomplete")
-            else:
+            elif sd_coalesce_diagnostic.get("overall") != (
+                    "PASS_SD_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "SD ID63 diagnostic evidence is incomplete")
+            else:
+                record["failed_phase"] = "ID64 burst-shrink guard A/B evidence"
+                record["diagnostic"] = burst_guard_diagnostic.get(
+                    "reason", "ID64 diagnostic evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -731,6 +744,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["sd_read_grouping_ab"] = sd_grouping_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
         result["benchmarks"]["sd_read_coalesce_ab"] = sd_coalesce_diagnostic
+        result["benchmarks"]["burst_guard_ab_sessions"] = burst_guard_sessions
+        result["benchmarks"]["burst_guard_ab"] = burst_guard_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -750,6 +765,9 @@ def parse_sessions(output):
             regime = line.partition("=")[2]
         elif line.startswith(("START_PARALLEL_READ_AB=",
                               "START_READ_COALESCE_AB=",
+                              "START_SD_READ_GROUPING_AB=",
+                              "START_SD_READ_COALESCE_AB=",
+                              "START_BURST_GUARD_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
             current = None
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
@@ -926,48 +944,46 @@ def parse_parallel_read_ab(output):
 
 
 def parallel_read_ab_verdict(sessions):
-    """Validate five same-cache matched Kread rounds and report paired CIs."""
-    try:
-        pairs = matched_binary_pairs(sessions, "parallel_reads")
-    except ValueError as exc:
-        return {"overall": "INCOMPLETE", "reason": str(exc)}
+    """Validate one directional fast Kread control after ID39 was refuted."""
+    if len(sessions) != len(DIRECTIONAL_SEQUENCE) or \
+            [row.get("parallel_reads") for row in sessions] != list(
+                DIRECTIONAL_SEQUENCE):
+        return {"overall": "INCOMPLETE",
+                "reason": "Kread directional off/on observations required"}
     expected = MODEL_SPECS["ssd_emulated"]
     for index, row in enumerate(sessions):
         if row.get("status") != "PASS" or row.get("order") != (
                 "swapz-first" if index % 2 else "off-first"):
             return {"overall": "INCOMPLETE",
-                    "reason": "Kread confirmation order/status mismatch"}
+                    "reason": "Kread directional order/status mismatch"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(model.get(key) != expected[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
             return {"overall": "INCOMPLETE",
-                    "reason": "Kread confirmation device model mismatch"}
+                    "reason": "Kread directional device model mismatch"}
         arm = row.get("swapz")
         if not isinstance(arm, dict) or not re.fullmatch(
                 r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
             return {"overall": "INCOMPLETE",
-                    "reason": "Kread confirmation source missing"}
-        if not isinstance(arm.get("packed_close_delta"), int) or                 arm["packed_close_delta"] <= 0:
+                    "reason": "Kread directional source missing"}
+        if not isinstance(arm.get("packed_close_delta"), int) or \
+                arm["packed_close_delta"] <= 0:
             return {"overall": "INCOMPLETE",
-                    "reason": "Kread confirmation packed population missing"}
+                    "reason": "Kread directional packed population missing"}
         for mode in ("sequential", "seeded_random"):
             phase = arm["passes"].get(mode)
-            if not isinstance(phase, dict) or                     phase.get("logical_bytes") != 4194304 or                     phase.get("verified_pages") != 1024:
+            if not isinstance(phase, dict) or \
+                    phase.get("logical_bytes") != 4194304 or \
+                    phase.get("verified_pages") != 1024:
                 return {"overall": "INCOMPLETE",
-                        "reason": "Kread confirmation packed read incomplete"}
-            if any(not isinstance(phase.get(key), (int, float)) or
-                   phase[key] < 0 for key in
-                   ("useful_read_mbps", "read_p99_ms",
-                    "lower_read_bytes", "lower_read_requests")):
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread confirmation metrics missing"}
+                        "reason": "Kread directional packed read incomplete"}
             kernel = phase.get("kernel_read_path")
             if not isinstance(kernel, dict) or any(
                     type(kernel.get(name)) is not int or kernel[name] < 0
                     for name in KERNEL_READ_FIELDS):
                 return {"overall": "INCOMPLETE",
-                        "reason": "Kread confirmation C telemetry missing"}
+                        "reason": "Kread directional C telemetry missing"}
             if not row["parallel_reads"] and kernel["parallel_read_pairs"]:
                 return {"overall": "INCOMPLETE",
                         "reason": "Kread-off arm executed parallel pairs"}
@@ -984,95 +1000,38 @@ def parallel_read_ab_verdict(sessions):
                     "parallel_read_coalesce_skip_gap",
                     "parallel_read_coalesce_skip_other")):
                 return {"overall": "INCOMPLETE",
-                        "reason": "Kread A/B was contaminated by ID63 coalescing"}
+                        "reason": "Kread directional control was contaminated by ID63"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
-                "reason": "Kread confirmation provenance mismatch"}
+                "reason": "Kread directional provenance mismatch"}
 
     modes = {}
-    for enabled in (0, 1):
-        rows = [row["swapz"] for row in sessions
-                if row["parallel_reads"] == enabled]
+    for row in sessions:
+        enabled = row["parallel_reads"]
         passes = {}
         for mode in ("sequential", "seeded_random"):
-            phases = [row["passes"][mode] for row in rows]
+            phase = row["swapz"]["passes"][mode]
             passes[mode] = {
-                "useful_read_mbps":
-                    statistics.mean(p["useful_read_mbps"] for p in phases),
-                "read_p99_ms":
-                    statistics.mean(p["read_p99_ms"] for p in phases),
-                "lower_read_bytes":
-                    statistics.mean(p["lower_read_bytes"] for p in phases),
-                "lower_read_requests":
-                    statistics.mean(p["lower_read_requests"] for p in phases),
-                "parallel_read_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_pairs"]
-                    for p in phases),
-                "parallel_read_same_extent_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_same_extent_pairs"]
-                    for p in phases),
-                "parallel_read_distinct_extent_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_distinct_extent_pairs"]
-                    for p in phases),
-                "parallel_read_adjacent_extent_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_adjacent_extent_pairs"]
-                    for p in phases),
-                "parallel_read_adjacent_extent_blocks": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_adjacent_extent_blocks"]
-                    for p in phases),
-                "parallel_read_coalesced_pairs": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_coalesced_pairs"]
-                    for p in phases),
-                "parallel_read_coalesced_reqs_saved": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_coalesced_reqs_saved"]
-                    for p in phases),
-                "parallel_read_coalesced_blocks": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_coalesced_blocks"]
-                    for p in phases),
-                "parallel_read_coalesce_extra_blocks": statistics.mean(
-                    p["kernel_read_path"]["parallel_read_coalesce_extra_blocks"]
-                    for p in phases),
+                "useful_read_mbps": phase["useful_read_mbps"],
+                "read_p99_ms": phase["read_p99_ms"],
+                "lower_read_bytes": phase["lower_read_bytes"],
+                "lower_read_requests": phase["lower_read_requests"],
             }
+            for name in KERNEL_READ_FIELDS:
+                passes[mode][name] = phase["kernel_read_path"][name]
         modes[str(enabled)] = passes
-
-    paired = {}
-    for mode in ("sequential", "seeded_random"):
-        p99, throughput, lower_bytes, lower_requests = [], [], [], []
-        for pair in pairs:
-            off = pair[0]["swapz"]["passes"][mode]
-            on = pair[1]["swapz"]["passes"][mode]
-            if not off["read_p99_ms"] or not off["useful_read_mbps"] or \
-                    not off["lower_read_bytes"] or not off["lower_read_requests"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread confirmation zero denominator"}
-            p99.append(on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
-            throughput.append(
-                on["useful_read_mbps"] / off["useful_read_mbps"] - 1.0)
-            lower_bytes.append(
-                on["lower_read_bytes"] / off["lower_read_bytes"] - 1.0)
-            lower_requests.append(
-                on["lower_read_requests"] / off["lower_read_requests"] - 1.0)
-        paired[mode] = {
-            "p99_change_fraction": paired_ci95(p99),
-            "throughput_change_fraction": paired_ci95(throughput),
-            "lower_bytes_change_fraction": paired_ci95(lower_bytes),
-            "lower_requests_change_fraction": paired_ci95(lower_requests),
-        }
     return {
-        "overall": "PASS_PARALLEL_READ_AB_CONFIRMATION",
-        "matched_pairs": 5,
-        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "overall": "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL",
+        "observations_per_mode": 1,
+        "confidence": "DIRECTIONAL_ONLY_OWNER_QUALIFIED_ID39_HISTORY_RETAINED",
         "device_model": expected,
         "modes": modes,
-        "paired": paired,
         "interpretation":
-            "SAME_SOURCE_SHARED_CACHE_KREAD_TOGGLE_SYNTHETIC_RAM_ONLY",
+            "SAME_SOURCE_SHARED_CACHE_KREAD_DIRECTIONAL_SYNTHETIC_RAM_ONLY",
     }
-
-
 
 def parse_read_coalesce_ab(output):
     """Parse five matched fast-model rounds varying only ID63 coalescing."""
@@ -1531,11 +1490,278 @@ def _sd_read_ab_verdict(sessions, field, kind):
 
 
 def sd_read_grouping_ab_verdict(sessions):
-    return _sd_read_ab_verdict(sessions, "parallel_reads", "grouping")
+    """Directional hwq=1 ID60 regression control after five-pair refutation."""
+    if len(sessions) != len(DIRECTIONAL_SEQUENCE) or \
+            [row.get("parallel_reads") for row in sessions] != list(
+                DIRECTIONAL_SEQUENCE):
+        return {"overall": "INCOMPLETE",
+                "reason": "SD grouping directional off/on observations required"}
+    expected = MODEL_SPECS["sd_emulated"]
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("order") != (
+                "swapz-first" if index % 2 else "off-first"):
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD grouping directional order/status mismatch"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD grouping directional device model mismatch"}
+        arm = row.get("swapz")
+        if not isinstance(arm, dict):
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD grouping directional swapz arm missing"}
+        for mode in ("sequential", "seeded_random"):
+            phase = arm["passes"].get(mode)
+            if not isinstance(phase, dict) or \
+                    phase.get("logical_bytes") != 4194304 or \
+                    phase.get("verified_pages") != 1024:
+                return {"overall": "INCOMPLETE",
+                        "reason": "SD grouping directional packed read incomplete"}
+            kernel = phase.get("kernel_read_path")
+            if not isinstance(kernel, dict) or any(
+                    type(kernel.get(name)) is not int or kernel[name] < 0
+                    for name in KERNEL_READ_FIELDS):
+                return {"overall": "INCOMPLETE",
+                        "reason": "SD grouping directional C telemetry missing"}
+            if kernel["read_worker_cpu_ns"]:
+                return {"overall": "INCOMPLETE",
+                        "reason": "SD grouping directional used read workqueue"}
+            if any(kernel[name] for name in (
+                    "parallel_read_coalesced_pairs",
+                    "parallel_read_coalesced_reqs_saved",
+                    "parallel_read_coalesced_blocks",
+                    "parallel_read_coalesce_extra_blocks",
+                    "parallel_read_coalesce_skip_cached",
+                    "parallel_read_coalesce_skip_noncontig_slot",
+                    "parallel_read_coalesce_skip_gap",
+                    "parallel_read_coalesce_skip_other")):
+                return {"overall": "INCOMPLETE",
+                        "reason": "SD grouping directional contaminated by ID63"}
+        seq_kernel = arm["passes"]["sequential"]["kernel_read_path"]
+        if not row["parallel_reads"] and seq_kernel["parallel_read_pairs"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD grouping-off arm grouped READs"}
+        if row["parallel_reads"] and not seq_kernel[
+                "parallel_read_same_extent_pairs"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD grouping-on arm found no same-extent groups"}
+    if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
+            len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
+        return {"overall": "INCONCLUSIVE",
+                "reason": "SD grouping directional provenance mismatch"}
+    modes = {}
+    for row in sessions:
+        enabled = row["parallel_reads"]
+        passes = {}
+        for mode in ("sequential", "seeded_random"):
+            phase = row["swapz"]["passes"][mode]
+            passes[mode] = {
+                "useful_read_mbps": phase["useful_read_mbps"],
+                "read_p99_ms": phase["read_p99_ms"],
+                "lower_read_bytes": phase["lower_read_bytes"],
+                "lower_read_requests": phase["lower_read_requests"],
+            }
+            for name in KERNEL_READ_FIELDS:
+                passes[mode][name] = phase["kernel_read_path"][name]
+        modes[str(enabled)] = passes
+    return {
+        "overall": "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL",
+        "observations_per_mode": 1,
+        "confidence": "DIRECTIONAL_ONLY_OWNER_QUALIFIED_ID60_HISTORY_RETAINED",
+        "device_model": expected,
+        "modes": modes,
+        "interpretation":
+            "HWQ1_GROUPING_ONLY_NO_READ_WORKQUEUE_DIRECTIONAL_SYNTHETIC_RAM",
+    }
 
 
 def sd_read_coalesce_ab_verdict(sessions):
     return _sd_read_ab_verdict(sessions, "read_coalesce", "coalescing")
+
+
+
+def parse_burst_guard_ab(output):
+    """Parse five matched fast mixed rounds varying only the ID64 guard."""
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = re.fullmatch(r"START_BURST_GUARD_AB=([01])", line)
+        if match:
+            current = {"guard": int(match.group(1)), "status": "INCOMPLETE",
+                       "order": "unknown", "device_model": None, "swapz": None}
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
+                line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            kernel = obj.get("kernel_write_path")
+            current["swapz"] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "logical_write_mbps": rates.get("logical_write_mbps"),
+                "logical_write_bytes": rates.get("logical_write_bytes"),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "read_p99_ms": (
+                    obj.get("read_p99_ns") / 1e6
+                    if isinstance(obj.get("read_p99_ns"), (int, float))
+                    else None),
+                "write_p99_ms": (
+                    obj.get("write_p99_ns") / 1e6
+                    if isinstance(obj.get("write_p99_ns"), (int, float))
+                    else None),
+                "kernel_write_path": kernel,
+            }
+        else:
+            done = re.fullmatch(r"PASS_BURST_GUARD_AB=([01])", line)
+            if done and int(done.group(1)) == current["guard"]:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def burst_guard_ab_verdict(sessions):
+    """Validate the sole active ID64 scheduling experiment."""
+    try:
+        pairs = matched_binary_pairs(sessions, "guard")
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE", "reason": str(exc)}
+    expected = MODEL_SPECS["ssd_emulated"]
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("order") != (
+                "swapz-first" if index % 2 else "off-first"):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64 confirmation order/status mismatch"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64 confirmation device model mismatch"}
+        arm = row.get("swapz")
+        if not isinstance(arm, dict) or not re.fullmatch(
+                r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64 confirmation source missing"}
+        if any(not isinstance(arm.get(key), (int, float)) or arm[key] <= 0
+               for key in ("logical_write_mbps", "logical_write_bytes",
+                           "lower_write_bytes", "lower_write_requests",
+                           "read_p99_ms", "write_p99_ms")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64 confirmation mixed metrics missing"}
+        kernel = arm.get("kernel_write_path")
+        if not isinstance(kernel, dict) or any(
+                type(kernel.get(name)) is not int or kernel[name] < 0
+                for name in KERNEL_WRITE_FIELDS) or timed_window_error(kernel):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64 confirmation C telemetry missing"}
+        if not kernel["pipeline_async_runs"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64 confirmation did not keep async preparation active"}
+        if not row["guard"] and kernel["burst_shrink_inflight_zero_skips"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64-off arm executed guarded skips"}
+        if row["guard"] and kernel["burst_shrink_after_inflight_zero"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID64-on arm still performed an in-flight-zero shrink"}
+    if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
+            len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["trace_sha256"] for row in sessions}) != 1:
+        return {"overall": "INCONCLUSIVE",
+                "reason": "ID64 confirmation provenance mismatch"}
+    if not sum(row["swapz"]["kernel_write_path"][
+            "burst_shrink_inflight_zero_skips"]
+            for row in sessions if row["guard"]):
+        return {"overall": "INCOMPLETE",
+                "reason": "ID64-on arm exercised no one-shot guarded shrink"}
+
+    fields = (
+        "pack_close_burst_target", "pack_close_burst_admission",
+        "pack_close_burst_overshoot", "burst_target_shrinks",
+        "burst_shrink_inflight_zero_skips",
+        "burst_shrink_after_inflight_zero")
+    modes = {}
+    for enabled in (0, 1):
+        rows = [row["swapz"] for row in sessions if row["guard"] == enabled]
+        modes[str(enabled)] = {
+            "logical_write_mbps": statistics.mean(
+                row["logical_write_mbps"] for row in rows),
+            "lower_write_requests": statistics.mean(
+                row["lower_write_requests"] for row in rows),
+            "read_p99_ms": statistics.mean(row["read_p99_ms"] for row in rows),
+            "write_p99_ms": statistics.mean(row["write_p99_ms"] for row in rows),
+            **{field: statistics.mean(
+                row["kernel_write_path"][field] for row in rows)
+               for field in fields},
+        }
+
+    paired = {name: [] for name in (
+        "throughput_change_fraction", "lower_request_delta",
+        "read_p99_change_fraction", "write_p99_change_fraction",
+        "burst_close_delta", "overshoot_delta", "shrink_delta",
+        "after_i0_delta", "guard_skip_delta")}
+    for pair in pairs:
+        off, on = pair[0]["swapz"], pair[1]["swapz"]
+        paired["throughput_change_fraction"].append(
+            on["logical_write_mbps"] / off["logical_write_mbps"] - 1.0)
+        paired["lower_request_delta"].append(
+            on["lower_write_requests"] - off["lower_write_requests"])
+        paired["read_p99_change_fraction"].append(
+            on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
+        paired["write_p99_change_fraction"].append(
+            on["write_p99_ms"] / off["write_p99_ms"] - 1.0)
+        ok, ik = on["kernel_write_path"], off["kernel_write_path"]
+        paired["burst_close_delta"].append(
+            ok["pack_close_burst_target"] - ik["pack_close_burst_target"])
+        paired["overshoot_delta"].append(
+            ok["pack_close_burst_overshoot"] - ik["pack_close_burst_overshoot"])
+        paired["shrink_delta"].append(
+            ok["burst_target_shrinks"] - ik["burst_target_shrinks"])
+        paired["after_i0_delta"].append(
+            ok["burst_shrink_after_inflight_zero"] -
+            ik["burst_shrink_after_inflight_zero"])
+        paired["guard_skip_delta"].append(
+            ok["burst_shrink_inflight_zero_skips"] -
+            ik["burst_shrink_inflight_zero_skips"])
+    return {
+        "overall": "PASS_BURST_GUARD_AB_CONFIRMATION",
+        "matched_pairs": 5,
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "device_model": expected,
+        "modes": modes,
+        "paired": {name: paired_ci95(values)
+                   for name, values in paired.items()},
+        "interpretation":
+            "ASYNC_FIXED_ON_ONLY_ONE_SHOT_INFLIGHT_ZERO_SHRINK_GUARD_TOGGLE",
+    }
 
 
 def parse_write_saturation(output):
@@ -2352,6 +2578,7 @@ def print_bench(result):
         print("  Mixed burst-target shrink attribution")
         shrink_rows = []
         shrink_fields = (
+            "burst_shrink_inflight_zero_skips",
             "burst_shrink_after_inflight_zero",
             "burst_shrink_after_read_bypass",
             "burst_shrink_other",
@@ -2370,7 +2597,7 @@ def print_bench(result):
             *(f"{columns['async'][f'mixed_{field}'] - columns['sync'][f'mixed_{field}']:+.1f}"
               for field in shrink_fields),
         ))
-        print_table(("mode", "after-I0", "after-read", "other",
+        print_table(("mode", "skip-I0", "after-I0", "after-read", "other",
                      "<=8", "9-32", ">32"), shrink_rows)
         if regime == "ssd_emulated":
             mixed_ab = data["criteria"]["async_vs_sync"]
@@ -2553,50 +2780,24 @@ def print_bench(result):
             ])
 
     parallel_ab = result["benchmarks"].get("parallel_read_ab", {})
-    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_AB_CONFIRMATION":
-        print("\n  ID39 SAME-CACHE PARALLEL READ A/B — five matched rounds")
+    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL":
+        print("\n  ID39 SAME-CACHE PARALLEL READ — directional control")
         rows = []
         for enabled in ("0", "1"):
             seq = parallel_ab["modes"][enabled]["sequential"]
             rnd = parallel_ab["modes"][enabled]["seeded_random"]
             rows.append((
                 enabled,
-                f"{seq['lower_read_bytes'] / 1024:.0f}",
                 f"{seq['lower_read_requests']:.1f}",
                 f"{seq['read_p99_ms']:.2f}",
-                f"{rnd['lower_read_bytes'] / 1024:.0f}",
                 f"{rnd['lower_read_requests']:.1f}",
                 f"{rnd['read_p99_ms']:.2f}",
-                f"{(seq['parallel_read_pairs'] + rnd['parallel_read_pairs']) / 2:.1f}",
-                f"{(seq['parallel_read_same_extent_pairs'] + rnd['parallel_read_same_extent_pairs']) / 2:.1f}",
+                f"{seq['parallel_read_same_extent_pairs']:.1f}",
             ))
-        print_table(("parallel", "seq KiB", "seq req", "seq p99",
-                     "rnd KiB", "rnd req", "rnd p99", "pairs", "same-ext"), rows)
-        # Keep passive adjacency visible in the Kread-on arm; active ID63 is
-        # qualified separately below with Kread held on in both arms.
-        enabled = parallel_ab["modes"]["1"]
-        print("  ID63 passive adjacent distinct-extent opportunity")
-        print_table(
-            ("read", "dist", "adj", "blocks"),
-            [
-                ("seq",
-                 f"{enabled['sequential']['parallel_read_distinct_extent_pairs']:.1f}",
-                 f"{enabled['sequential']['parallel_read_adjacent_extent_pairs']:.1f}",
-                 f"{enabled['sequential']['parallel_read_adjacent_extent_blocks']:.1f}"),
-                ("rnd",
-                 f"{enabled['seeded_random']['parallel_read_distinct_extent_pairs']:.1f}",
-                 f"{enabled['seeded_random']['parallel_read_adjacent_extent_pairs']:.1f}",
-                 f"{enabled['seeded_random']['parallel_read_adjacent_extent_blocks']:.1f}"),
-            ])
-        seq_ci = parallel_ab["paired"]["sequential"]["p99_change_fraction"]
-        rnd_ci = parallel_ab["paired"]["seeded_random"]["p99_change_fraction"]
-        print("  p99 on/off paired 95% CI: "
-              f"seq {seq_ci['mean'] * 100:+.1f}% "
-              f"[{seq_ci['low'] * 100:+.1f},{seq_ci['high'] * 100:+.1f}]%; "
-              f"rnd {rnd_ci['mean'] * 100:+.1f}% "
-              f"[{rnd_ci['low'] * 100:+.1f},{rnd_ci['high'] * 100:+.1f}]%")
+        print_table(("parallel", "seq req", "seq p99", "rnd req", "rnd p99",
+                     "same-ext"), rows)
     else:
-        print("\n  ID39 parallel READ A/B: NOT QUALIFIED "
+        print("\n  ID39 parallel READ directional control: NOT QUALIFIED "
               f"({parallel_ab.get('reason', parallel_ab.get('overall', 'NOT_RUN'))})")
 
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
@@ -2662,8 +2863,8 @@ def print_bench(result):
               f"({coalesce_ab.get('reason', coalesce_ab.get('overall', 'NOT_RUN'))})")
 
     sd_grouping_ab = result["benchmarks"].get("sd_read_grouping_ab", {})
-    if sd_grouping_ab.get("overall") == "PASS_SD_READ_GROUPING_AB_CONFIRMATION":
-        print("\n  SD ID60 SAME-EXTENT GROUPING A/B — five matched rounds")
+    if sd_grouping_ab.get("overall") == "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL":
+        print("\n  SD ID60 SAME-EXTENT GROUPING — directional control")
         rows = []
         for enabled in ("0", "1"):
             seq = sd_grouping_ab["modes"][enabled]["sequential"]
@@ -2678,21 +2879,8 @@ def print_bench(result):
             ))
         print_table(("group", "seq req", "seq p99", "rnd req", "rnd p99",
                      "same-ext"), rows)
-        ci_rows = []
-        for label, mode in (("seq", "sequential"),
-                            ("rnd", "seeded_random")):
-            req = sd_grouping_ab["paired"][mode][
-                "lower_requests_change_fraction"]
-            p99 = sd_grouping_ab["paired"][mode]["p99_change_fraction"]
-            ci_rows.extend((
-                (label, "req", f"{req['mean'] * 100:+.1f}%",
-                 f"{req['low'] * 100:+.1f}%", f"{req['high'] * 100:+.1f}%"),
-                (label, "p99", f"{p99['mean'] * 100:+.1f}%",
-                 f"{p99['low'] * 100:+.1f}%", f"{p99['high'] * 100:+.1f}%"),
-            ))
-        print_table(("read", "metric", "mean", "low", "high"), ci_rows)
     else:
-        print("\n  SD ID60 same-extent grouping A/B: NOT QUALIFIED "
+        print("\n  SD ID60 grouping directional control: NOT QUALIFIED "
               f"({sd_grouping_ab.get('reason', sd_grouping_ab.get('overall', 'NOT_RUN'))})")
 
     sd_coalesce_ab = result["benchmarks"].get("sd_read_coalesce_ab", {})
@@ -2747,6 +2935,43 @@ def print_bench(result):
         print("\n  SD ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
 
+    guard_ab = result["benchmarks"].get("burst_guard_ab", {})
+    if guard_ab.get("overall") == "PASS_BURST_GUARD_AB_CONFIRMATION":
+        print("\n  ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — five matched rounds")
+        rows = []
+        for enabled in ("0", "1"):
+            mode = guard_ab["modes"][enabled]
+            rows.append((
+                enabled,
+                f"{mode['logical_write_mbps']:.2f}",
+                f"{mode['lower_write_requests']:.1f}",
+                f"{mode['pack_close_burst_target']:.1f}",
+                f"{mode['pack_close_burst_overshoot']:.1f}",
+                f"{mode['burst_target_shrinks']:.1f}",
+                f"{mode['burst_shrink_inflight_zero_skips']:.1f}",
+            ))
+        print_table(("guard", "W", "W req", "burst", "over", "shrink", "skip-I0"),
+                    rows)
+        ci_rows = []
+        for label, field, scale in (
+                ("W %", "throughput_change_fraction", 100.0),
+                ("W req", "lower_request_delta", 1.0),
+                ("R p99 %", "read_p99_change_fraction", 100.0),
+                ("W p99 %", "write_p99_change_fraction", 100.0),
+                ("burst", "burst_close_delta", 1.0),
+                ("over", "overshoot_delta", 1.0),
+                ("shrink", "shrink_delta", 1.0),
+                ("after-I0", "after_i0_delta", 1.0),
+                ("skip-I0", "guard_skip_delta", 1.0)):
+            ci = guard_ab["paired"][field]
+            ci_rows.append((label, f"{ci['mean'] * scale:+.1f}",
+                            f"{ci['low'] * scale:+.1f}",
+                            f"{ci['high'] * scale:+.1f}"))
+        print_table(("metric", "mean", "low", "high"), ci_rows)
+    else:
+        print("\n  ID64 burst-shrink guard A/B: NOT QUALIFIED "
+              f"({guard_ab.get('reason', guard_ab.get('overall', 'NOT_RUN'))})")
+
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":
         print("\n  Lifecycle")
@@ -2781,7 +3006,8 @@ def print_bench(result):
         [
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
-            ("read isolation", "slow ID60/ID63: 5 matched pairs each + paired CI"),
+            ("read isolation", "ID39/slow ID60 directional; ID63 slow+fast 5 pairs"),
+            ("ID64", "fast mixed: 5 matched guard-off/on pairs + paired CI"),
             ("write-only", "fast QD8: 5 matched pairs + paired CI; QD1/QD4/QD32 directional"),
             ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),

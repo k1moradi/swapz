@@ -76,58 +76,61 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `5916c07cde951ad8be05d34435a7705791329333` passed all five
+Source `64852c6e1b229a8940eea434d20c440fe434406c` passed all five
 stages and published report-only commit
-`12858e8fd51b905441d2ef21b61c7608bc8e94ec`.
+`617ab932331d9b44e66f8f839fd1f7975bc545af`.
 
-The ID57 rollback remains qualified: fast write-only QD8 is +28.4%
-async/sync, CI [+15.1%,+41.7%], target 8 with 512/0/0
-PACK_READY/deadline/idle closes. ID29 remains qualified on owned RAM with 36
-exact 1MiB segment discards, 20 GC victims/rotations and 4096 verified pages.
+Fast write-only QD8 remains qualified at +9.7% async/sync,
+CI [+1.4%,+18.0%], with target 8 and 512/0/0
+PACK_READY/deadline/idle closes. ID38 remains passive at only
+29.6 ready windows / 87.1 records / 3.58 ms wait.
 
-ID38 passive evidence remains small: fast mixed 31.2 ready windows / 91 records
-/ 3.71 ms total K=1 wait. Keep K>1 passive.
+ID60 is owner-refuted as a standalone performance optimization:
+seq requests -0.2% CI [-1.7%,+1.3%], seq p99 +5.7% [-1.5%,+13.0%].
+Its five-pair evidence is historical; current qualification keeps only a
+directional off/on regression control.
 
-Fast ID63 is qualified for request reduction: 406.2 -> 340.6 sequential lower
-READ requests, -16.2% CI [-18.7%,-13.6%], 66.8 actual merges and zero extra
-blocks. Sequential p99 +2.6% CI [-9.1%,+14.2%] is not a confirmed latency win.
-The serial-depth directional run improved much more, but ID60 grouping and ID63
-were simultaneously enabled there; the new five-pair slow isolations must
-partition that effect before either receives a slow latency claim.
+ID63 is owner-qualified on both synthetic models: fast sequential requests
+-15.0% CI [-19.3%,-10.8%] and serial sequential requests -37.7%
+[-46.1%,-29.2%], with zero extra blocks. Non-merge attribution shows
+noncontiguous masks at zero and exact-range gaps near zero; cache satisfaction
+accounts for almost all remaining adjacent pairs.
+
+ID64 passive evidence is strong enough for one bounded active experiment:
+7.6/8.2 fast async learned-target shrinks follow an in-flight zero-tail sample,
+all of those observed shrinks target <=8, while sync records zero after-I0
+shrinks. No performance claim is allowed until the active matched A/B completes.
 
 ## Deferred optimization evidence gates
 
-- **ID38 K>1:** keep the existing conservation rules for passive counters.
-  No second write slot is present in this generation.
-- **ID63 active READ coalescing:** fast qualification uses five matched rounds
-  with grouping enabled in both arms and only `read_coalesce=0/1` varied.
-  The ID39 Kread A/B forces coalescing off. Every merge comes from two already
-  admitted distinct extents after cache priming; each missing mask is one
-  nonempty contiguous range and the ranges are zero-gap adjacent, same-segment
-  and <=8 blocks combined. Requests-saved equals merged pairs, merged blocks
-  are 2..8/pair, and extra blocks stay zero.
-  The slow ID63 isolation repeats five matched rounds at the exact 10 MiB/s,
-  1 ms, hwq=1 model with grouping fixed on and only coalescing varied.
-  `read_worker_cpu_ns` must be zero in every slow arm. When ID63 is enabled,
-  every passively observed full-extent-adjacent non-merge is classified as
-  cache-satisfied, noncontiguous-slot, missing-range gap or defensive other;
-  defensive other must remain zero.
-- **ID60 same-extent grouping isolation:** run five matched hwq=1 rounds with
-  `read_coalesce=0` in both arms and only `parallel_reads=0/1` varied.
-  Grouping-off reports zero grouped pairs; grouping-on must execute
-  same-extent groups; both arms must report zero coalescing/skip telemetry and
-  zero read-worker CPU. Report paired 95% CIs for sequential/random lower
-  requests and p99.
-- **Depth-one READ behavior:** with `parallel_reads=1`, slot grouping and ID63
-  may run when queue depth is one, but no helper workqueue concurrency is
-  permitted. Non-coalescible distinct extents fall back to the ordinary
-  serialized path.
+- **ID38 K>1:** keep passive counters. No second write slot is justified.
+- **ID39 helper concurrency:** five-pair performance evidence is already
+  inconclusive/negative. Keep one fast off/on directional control with ID63
+  disabled until helper removal is separately reviewed.
+- **ID60 same-extent grouping:** five-pair hwq=1 evidence refutes standalone
+  benefit. Keep one off/on directional regression control with
+  `read_coalesce=0` and require zero read-worker CPU.
+- **ID63 adjacent READ coalescing:** retain five matched fast rounds and five
+  matched serial-depth rounds. Every merge remains exact, same-segment,
+  <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
+  stays zero and defensive skip-other stays zero.
+- **ID64 one-shot in-flight-zero shrink guard:** run exactly five matched
+  SSD_EMULATED mixed rounds with `async_prepare=1` in both arms and vary only
+  `guard_inflight_zero_shrink=0/1`. Guard-off must have zero guarded skips.
+  Guard-on must have positive guarded skips and zero actual
+  `burst_shrink_after_inflight_zero`. Report paired CIs for write throughput,
+  absolute lower WRITE requests, mixed read/write p99, burst closes, overshoot,
+  actual shrinks, after-I0 shrinks and guarded skips. The experiment may pass
+  structurally while performance refutes the candidate.
+- **ID64 one-shot lifecycle:** native/source contracts require the guard
+  predicate, immediate flag consumption on a guarded real shrink candidate,
+  and clearing of any unconsumed flag at the first nonempty non-chaining hard
+  boundary. Do not reintroduce PACK_READY suppression or tail deferral.
 - **ID58/59:** representative-content evidence only.
-- **ID61:** measure useful-I/O foreground-GC stall/headroom before background GC.
-  READ-coalescing status fields are independent diagnostics and must not be
-  mistaken for or prohibited by GC cost-accounting contracts; GC still has no
-  synthetic coalesced-byte estimator.
-- **ID62:** current host-safety rules still prohibit physical-device collection.
+- **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
+  background worker.
+- **ID62:** current host-safety rules still prohibit physical-device
+  collection; this experiment does not authorize real storage.
 
 ## Open qualification gaps
 
@@ -893,8 +896,9 @@ Rootless console-report coverage must pass the parsed ID39 diagnostic object to
 the printer; a display assertion is not valid against a report that omits the
 A/B evidence object entirely.
 
-The unprivileged Make-interface fixture must mirror the current packed-read
-telemetry schema and emit the fast ID39/ID63 plus slow ID60/ID63 marker sets.
-A fake loaded stage is not allowed to bypass new fail-closed fields merely to
-exercise incremental Make behavior; fixture records use the same parser and
-conservation contracts as owner-loaded output.
+The unprivileged Make-interface fixture must mirror the current telemetry
+schema and emit the ID64 five-pair marker set, fast/slow ID63 confirmations,
+and the directional ID39/ID60 controls. A fake loaded stage is not allowed to
+bypass new fail-closed fields merely to exercise incremental Make behavior;
+fixture records use the same parser and conservation contracts as owner-loaded
+output.

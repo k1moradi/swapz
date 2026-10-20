@@ -59,53 +59,59 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `5916c07cde951ad8be05d34435a7705791329333`
-(report-only `12858e8fd51b905441d2ef21b61c7608bc8e94ec`) passed all five
+Owner-qualified source `64852c6e1b229a8940eea434d20c440fe434406c`
+(report-only `617ab932331d9b44e66f8f839fd1f7975bc545af`) passed all five
 stages on owned RAM.
 
-The ID57 rollback remains qualified. Fast write-only QD8 is 26.58/20.67 MB/s
-async/sync, +28.4% paired, 95% CI [+15.1%,+41.7%], with target 8 and
-512/0/0 PACK_READY/deadline/idle closes.
+Fast write-only QD8 remains a confirmed K=1 async win: 23.00/20.99 MB/s,
++9.7% paired, 95% CI [+1.4%,+18.0%], target 8 with 512/0/0
+PACK_READY/deadline/idle closes.
 
-Fast mixed is not a confirmed async throughput win: +1.7%,
-CI [-0.4%,+3.9%]. It does show confirmed request inflation:
-+108.8 lower WRITE requests, CI [+78.6,+139.0], with +79.2 admission-side
-burst closes and +61.4 overshoot. The current turn attributes this passively;
-it does not change closure or target policy.
+Fast mixed async/sync remains below the 5% promotion threshold:
++2.2%, CI [-1.5%,+5.8%]. Burst fragmentation is nevertheless confirmed:
++62.2 admission burst closes, CI [+50.0,+74.4], and +48.2 overshoots,
+CI [+38.7,+57.7]. Passive attribution finds 7.6/8.2 async learned-target
+shrinks immediately after an in-flight zero-tail sample, versus zero such
+shrinks in sync.
 
-ID29 qualifies on synthetic RAM correctness/alignment: 36 x 1MiB lower
-DISCARDs, 73728 sectors total, 20 GC victims/rotations and 4096 pages verified.
-Physical endurance remains unproven.
+ID60 is refuted as a standalone optimization on hwq=1: seq requests
+398.0 -> 397.0, -0.2% CI [-1.7%,+1.3%], and seq p99 +5.7%
+[-1.5%,+13.0%].
 
-ID39 with ID63 forced off remains inconclusive-to-negative: sequential p99
-+3.4% [-11.1%,+17.8%], random approximately 0%, and sequential requests
-403.8 -> 409.4. Keep it only until the depth-one isolation answers whether the
-workqueue contributes any independent value.
+ID63 is qualified on both models. Fast seq requests are 404.6 -> 343.6,
+-15.0% CI [-19.3%,-10.8%]; serial seq requests are 398.4 -> 248.2,
+-37.7% CI [-46.1%,-29.2%]. Extra blocks remain zero. Fast non-merges are
+98.4 cache-satisfied, 0 noncontiguous, 1.6 gap; the exact no-padding design is
+already near its useful ceiling.
 
-Fast ID63 is positively qualified for request efficiency: sequential lower
-READ requests 406.2 -> 340.6, -16.2% [-18.7%,-13.6%], with 66.8 actual
-zero-extra merges. Sequential p99 +2.6% [-9.1%,+14.2%] does not establish a
-fast latency win.
+ID39 remains performance-negative/inconclusive and is no longer worth repeated
+five-pair qualification. Keep only a directional regression control until its
+helper workqueue is removed in a later cleanup.
 
 ## Confirmation gate
 
-ID63 benefit is measured from actual merges, never passive adjacency. The
-five-pair fast A/B keeps `parallel_reads=1` and varies only
-`read_coalesce`; ID39 keeps coalescing off. Fast qualification already
-confirms a lower-request win.
+ID64 is the sole active scheduling experiment. Its five matched fast-model
+rounds keep `async_prepare=1` in both arms and vary only the read-only
+`guard_inflight_zero_shrink=0/1` control. The guard-off arm must execute zero
+guarded skips. The guard-on arm must execute at least one guarded skip and must
+execute zero actual `burst_shrink_after_inflight_zero` events.
 
-The next gate adds two independent five-pair SD_EMULATED A/Bs. ID60 keeps
-`read_coalesce=0` and varies only `parallel_reads=0/1`; because hwq=1 makes
-`parallel_reads_enabled=0`, any benefit is same-extent grouping/cache priming,
-not helper concurrency. ID63 then keeps `parallel_reads=1` and varies only
-`read_coalesce=0/1`. Both report paired 95% CIs for sequential/random request
-count and p99, with throughput and lower-byte intervals retained in JSON.
+The guard is one-shot. A real would-be shrink after an in-flight zero-tail
+sample is skipped once and consumes the flag. If no such candidate occurs, the
+first nonempty hard boundary that does not continue the retained chain clears
+the flag. PACK_READY closure, tail sampling, upper BIO completion and K=1
+lower-run ownership remain unchanged.
 
-For every full-extent-adjacent pair that does not merge while ID63 is enabled,
-the passive report classifies cache-satisfied, noncontiguous-slot, missing-range
-gap, or defensive-other. The defensive bucket must stay zero. Every merged
-pair remains zero-padding and `parallel_read_coalesce_extra_blocks` must stay
-zero.
+The report retains paired 95% CIs for guard-on/off write throughput, absolute
+lower WRITE request delta, mixed read/write p99, burst-target closes, overshoot,
+actual shrink count, after-I0 shrink count and guarded-skip count. Performance
+may confirm or refute ID64; structural qualification must not force a positive
+result.
+
+Fast and serial ID63 remain five-pair confirmations because they are promoted
+request-efficiency mechanisms. Owner-refuted ID39 and ID60 are reduced to
+single off/on directional controls to keep official `make test` runtime
+bounded without discarding their historical five-pair evidence.
 
 ## Deferred idea evidence
 

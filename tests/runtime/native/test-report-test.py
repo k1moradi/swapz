@@ -115,9 +115,10 @@ def timed_kernel_write(*, mode, target=8):
         "pack_tail_many_idle": 1 if mode else 3,
         "burst_target_grows": 3 if mode else 2,
         "burst_target_shrinks": 2 if mode else 1,
-        "burst_shrink_after_inflight_zero": 2 if mode else 0,
+        "burst_shrink_inflight_zero_skips": 2 if mode else 0,
+        "burst_shrink_after_inflight_zero": 0,
         "burst_shrink_after_read_bypass": 0,
-        "burst_shrink_other": 0 if mode else 1,
+        "burst_shrink_other": 2 if mode else 1,
         "burst_shrink_target_le8": 1 if mode else 0,
         "burst_shrink_target_9_32": 1,
         "burst_shrink_target_gt32": 0,
@@ -302,6 +303,32 @@ def coalesce_arm(enabled, regime="ssd_emulated"):
     return record
 
 
+def guard_arm(enabled):
+    record = arm("swapz", mode=1, regime="ssd_emulated")
+    kernel = record["kernel_write_path"]
+    if enabled:
+        kernel["burst_shrink_inflight_zero_skips"] = 2
+        kernel["burst_target_shrinks"] = 0
+        kernel["burst_shrink_after_inflight_zero"] = 0
+        kernel["burst_shrink_after_read_bypass"] = 0
+        kernel["burst_shrink_other"] = 0
+        kernel["burst_shrink_target_le8"] = 0
+        kernel["burst_shrink_target_9_32"] = 0
+        kernel["burst_shrink_target_gt32"] = 0
+        record["lower_io"]["lower_write_requests"] = 4
+        record["throughput_mbps"]["logical_write_mbps"] *= 1.05
+    else:
+        kernel["burst_shrink_inflight_zero_skips"] = 0
+        kernel["burst_target_shrinks"] = 2
+        kernel["burst_shrink_after_inflight_zero"] = 2
+        kernel["burst_shrink_after_read_bypass"] = 0
+        kernel["burst_shrink_other"] = 0
+        kernel["burst_shrink_target_le8"] = 1
+        kernel["burst_shrink_target_9_32"] = 1
+        kernel["burst_shrink_target_gt32"] = 0
+    return record
+
+
 def write_arm(candidate, *, qd, regime, mode):
     swapz = candidate == "swapz"
     raw = 8.0 if regime == "sd_emulated" else 20.0
@@ -364,6 +391,20 @@ def synthetic_log():
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
+        out.append(f"START_BURST_GUARD_AB={enabled}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        raw = arm("off", mode=1, regime="ssd_emulated")
+        swapz = guard_arm(enabled)
+        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_BURST_GUARD_AB={enabled}")
+    for index, enabled in enumerate(runner.DIRECTIONAL_SEQUENCE):
         out.append(f"START_PARALLEL_READ_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
@@ -392,7 +433,7 @@ def synthetic_log():
             out.append(json.dumps(record))
         out.append(f"PASS_READ_COALESCE_AB={enabled}")
     spec = runner.MODEL_SPECS["sd_emulated"]
-    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
+    for index, enabled in enumerate(runner.DIRECTIONAL_SEQUENCE):
         out.append(f"START_SD_READ_GROUPING_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
@@ -549,13 +590,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(len(sessions), 14)
         parallel = runner.parse_parallel_read_ab(synthetic_log())
         self.assertEqual([row["parallel_reads"] for row in parallel],
-                         list(runner.CONFIRMATION_SEQUENCE))
+                         list(runner.DIRECTIONAL_SEQUENCE))
         diagnostic = runner.parallel_read_ab_verdict(parallel)
         self.assertEqual(diagnostic["overall"],
-                         "PASS_PARALLEL_READ_AB_CONFIRMATION")
-        self.assertEqual(diagnostic["matched_pairs"], 5)
-        self.assertEqual(
-            diagnostic["paired"]["sequential"]["p99_change_fraction"]["n"], 5)
+                         "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL")
+        self.assertEqual(diagnostic["observations_per_mode"], 1)
         self.assertEqual(diagnostic["modes"]["0"]["sequential"]["parallel_read_pairs"], 0)
         self.assertGreater(diagnostic["modes"]["1"]["sequential"]["parallel_read_pairs"], 0)
         coalesce = runner.parse_read_coalesce_ab(synthetic_log())
@@ -577,14 +616,11 @@ class ReportContract(unittest.TestCase):
 
         sd_grouping = runner.parse_sd_read_grouping_ab(synthetic_log())
         self.assertEqual([row["parallel_reads"] for row in sd_grouping],
-                         list(runner.CONFIRMATION_SEQUENCE))
+                         list(runner.DIRECTIONAL_SEQUENCE))
         sd_grouping_diag = runner.sd_read_grouping_ab_verdict(sd_grouping)
         self.assertEqual(sd_grouping_diag["overall"],
-                         "PASS_SD_READ_GROUPING_AB_CONFIRMATION")
-        self.assertEqual(sd_grouping_diag["matched_pairs"], 5)
-        self.assertEqual(
-            sd_grouping_diag["paired"]["sequential"][
-                "lower_requests_change_fraction"]["n"], 5)
+                         "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL")
+        self.assertEqual(sd_grouping_diag["observations_per_mode"], 1)
         self.assertEqual(
             sd_grouping_diag["modes"]["0"]["sequential"][
                 "parallel_read_pairs"], 0)
@@ -594,6 +630,20 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             sd_grouping_diag["modes"]["1"]["sequential"][
                 "read_worker_cpu_ns"], 0)
+
+        guard = runner.parse_burst_guard_ab(synthetic_log())
+        self.assertEqual([row["guard"] for row in guard],
+                         list(runner.CONFIRMATION_SEQUENCE))
+        guard_diag = runner.burst_guard_ab_verdict(guard)
+        self.assertEqual(guard_diag["overall"],
+                         "PASS_BURST_GUARD_AB_CONFIRMATION")
+        self.assertEqual(guard_diag["matched_pairs"], 5)
+        self.assertGreater(
+            guard_diag["modes"]["1"]["burst_shrink_inflight_zero_skips"], 0)
+        self.assertEqual(
+            guard_diag["modes"]["1"]["burst_shrink_after_inflight_zero"], 0)
+        self.assertEqual(
+            guard_diag["paired"]["throughput_change_fraction"]["n"], 5)
 
         sd_coalesce = runner.parse_sd_read_coalesce_ab(synthetic_log())
         self.assertEqual([row["read_coalesce"] for row in sd_coalesce],
@@ -836,6 +886,8 @@ class ReportContract(unittest.TestCase):
                 runner.parse_sd_read_grouping_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
+            "burst_guard_ab": runner.burst_guard_ab_verdict(
+                runner.parse_burst_guard_ab(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -872,6 +924,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Mixed burst-close split", rendered)
         self.assertIn("Mixed post-PACK tail samples", rendered)
         self.assertIn("Mixed burst-target shrink attribution", rendered)
+        self.assertIn("skip-I0", rendered)
         self.assertIn("after-I0", rendered)
         self.assertIn("segment TRIM", rendered)
         self.assertIn("ID63 passive adjacent distinct-extent opportunity", rendered)
@@ -879,7 +932,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("ID63 active exact-range accounting", rendered)
         self.assertIn("ID63 active non-merge attribution", rendered)
         self.assertIn("noncontig", rendered)
-        self.assertIn("SD ID60 SAME-EXTENT GROUPING A/B", rendered)
+        self.assertIn("SD ID60 SAME-EXTENT GROUPING — directional control", rendered)
         self.assertIn("SD ID63 ADJACENT READ COALESCE A/B", rendered)
         self.assertIn("SD ID63 exact-range attribution", rendered)
         self.assertIn("saved", rendered)
@@ -895,7 +948,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("deferred C age <=250/500/1000/>", rendered)
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)
-        self.assertIn("ID39 SAME-CACHE PARALLEL READ A/B", rendered)
+        self.assertIn("ID39 SAME-CACHE PARALLEL READ — directional control", rendered)
+        self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
@@ -1141,7 +1195,7 @@ class ReportContract(unittest.TestCase):
         stage = report["stages"][-1]
         self.assertEqual(stage["status"], "FAIL")
         self.assertEqual(stage["failed_phase"], "parallel READ A/B evidence")
-        self.assertIn("Kread confirmation", stage["diagnostic"])
+        self.assertIn("Kread directional", stage["diagnostic"])
 
     def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)
