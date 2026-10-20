@@ -30,7 +30,7 @@ Current loaded work is restricted to newly created, positively identified, RAM-b
 
 Most development effort belongs in production kernel C: measured bottlenecks, completion/ordering bugs, layout decisions, read/write paths and GC. Python and shell exist only to qualify the product. Rejected experiments and historical compatibility systems should be removed after their conclusion is captured; Git history is the archive.
 
-The next performance problem is low/medium queue-depth efficiency. The first QD pilot shows large QD1 loss and QD4/QD8 useful-throughput loss despite lower-request savings, while only the slow-model QD32 arm exceeds raw. Optimize only from measured production-C attribution and preserve all correctness gates.
+The next performance problem is low/medium queue-depth efficiency under a trustworthy offered-load driver. The earlier write-only QD pilot used Python-dispatched full-QD waves; submission skew could overlap raw device latency while delaying swapz window formation, so those results are burst controls rather than sustained-QD evidence. Current qualification uses persistent lane-owned workers with no per-I/O main-thread dispatch. Optimize production C only after that corrected evidence and preserve all correctness gates.
 
 Longer-horizon opportunities remain explicit rather than being forgotten:
 nonzero same-filled-page representation, exact-content deduplication, queued

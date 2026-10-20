@@ -23,11 +23,11 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The write-only sweep uses QD1/4/8/32, 0% reads, finite unpaced waves and exact final verification. Fast QD8 receives ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4/QD32 remain directional controls. Fast QD4 previously received one five-pair confirmation and returned to directional status after its CI crossed zero.
+The write-only sweep uses QD1/4/8/32, 0% reads and exact final verification with pre-created persistent lane workers. Warmup completes before a common measured start gate; during measurement each lane issues its next write directly after its prior completion, with no per-I/O Future/main-thread hop and no full-QD wave barrier. Lanes own disjoint logical-page stripes, so cross-lane completion order cannot change the final image. Fast QD8 receives ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4/QD32 remain directional controls.
 
 ## Timed boundaries
 
-Exclude fixture generation, device provisioning, worker allocation, buffer setup and warmup from measured useful throughput. Include the measured I/O and required final drain/fsync. Lower-sector/request deltas cover the same interval.
+Exclude fixture generation, device provisioning, worker allocation, buffer setup and warmup from measured logical throughput. Include the measured I/O and required final drain/fsync. For sustained write-only runs, start lower-I/O/kernel snapshots before releasing the persistent workers' measured start gate. Lower-sector/request deltas cover the same interval.
 
 Report replay-process CPU separately from kernel callback wall residency.
 Callback wall is not CPU time: ordered callback wall includes synchronous
@@ -71,9 +71,10 @@ overshoots 99.8 -> 27.4 and lower WRITE requests 993.4 -> 958.6. Useful write
 throughput changed +0.7%; write/read p99 changed +0.4%/+1.7%. The five-pair
 performance question is closed.
 
-Fast write-only QD8 remains a confirmed K=1 async win from the retained
-five-pair evidence: 23.00/20.99 MB/s, +9.7% paired, 95% CI
-[+1.4%,+18.0%].
+The historical fast write-only QD8 five-pair result (23.00/20.99 MB/s,
++9.7%, 95% CI [+1.4%,+18.0%]) used the retired per-QD wave dispatcher. It is
+retained only as burst evidence and does not qualify sustained-QD throughput.
+The next owner run must establish the corrected persistent-worker baseline.
 
 ID63 remains qualified on both synthetic models and retains five-pair
 confirmation. The latest fast A/B reduces sequential lower READ requests by

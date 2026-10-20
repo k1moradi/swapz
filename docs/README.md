@@ -64,10 +64,12 @@ exact validated `live_records` prefix before any mapping/generation commit.
 Loaded GC/TRIM, suspend/resume and injected lower-WRITE/FLUSH failure evidence
 remained byte-exact and fail-closed.
 
-ID64 remains qualified with only a directional regression control. Fast
-write-only QD8 retains a confirmed K=1 async benefit of +8.1%, paired 95% CI
-[+2.3%,+13.9%]. Physical media and active system swap remain outside the
-authorized safety scope.
+ID64 remains qualified with only a directional regression control. The prior
+fast write-only QD8 +8.1% paired result was collected by the retired per-QD
+wave dispatcher; it remains historical burst evidence only and no longer
+qualifies sustained-QD throughput. Current source uses persistent lane-owned
+write workers for that evidence. Physical media and active system swap remain
+outside the authorized safety scope.
 
 ## Documentation
 

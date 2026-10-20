@@ -134,6 +134,10 @@ def prepare(args):
         raise ValueError("disjoint regions must not overlap")
     if args.iops < 0:
         raise ValueError("rate must be >=0")
+    if args.sustained_write and (args.read_pct != 0 or args.iops != 0):
+        raise ValueError("sustained-write requires unpaced write-only input")
+    if args.sustained_write and args.writer_pages % args.qd:
+        raise ValueError("sustained-write requires writer_pages divisible by QD")
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
     if list(out.iterdir()):
@@ -142,27 +146,38 @@ def prepare(args):
     latest = [i % fixture_pages for i in range(args.logical_pages)]
     events = []
     total = args.warmup_ops + args.measure_ops
-    # A "wave" is a bounded group of QD logically independent pages.
-    # It has an explicit barrier before the next wave. Completion order
-    # inside a wave may vary, but data dependencies and final image cannot.
+    replay_mode = "persistent-write" if args.sustained_write else "qd-waves"
+    # Mixed traces retain explicit independent-QD wave barriers. Sustained
+    # write traces instead assign every worker lane a disjoint logical-page
+    # stripe. Per-lane ordering is deterministic while lanes may overlap.
     for first in range(0, total, args.qd):
         used = set()
         wave = []
         for pos in range(args.qd):
-            write = rng.randrange(100) >= args.read_pct
-            if write:
-                slot = choose_slot(rng, 0, args.writer_pages, used)
+            if args.sustained_write:
+                slot = pos + args.qd * rng.randrange(
+                    args.writer_pages // args.qd)
                 fi = rng.randrange(fixture_pages)
                 kind = "W"
             else:
-                slot = choose_slot(rng, args.reader_start,
-                                   args.reader_pages, used)
-                fi = latest[slot]
-                kind = "R"
+                write = rng.randrange(100) >= args.read_pct
+                if write:
+                    slot = choose_slot(rng, 0, args.writer_pages, used)
+                    fi = rng.randrange(fixture_pages)
+                    kind = "W"
+                else:
+                    slot = choose_slot(rng, args.reader_start,
+                                       args.reader_pages, used)
+                    fi = latest[slot]
+                    kind = "R"
             used.add(slot)
-            wave.append({"seq": first + pos, "phase": "warmup" if first < args.warmup_ops else "measure",
-                         "wave": first // args.qd, "op": kind,
-                         "page": slot, "fixture": fi})
+            event = {"seq": first + pos,
+                     "phase": "warmup" if first < args.warmup_ops else "measure",
+                     "wave": first // args.qd, "op": kind,
+                     "page": slot, "fixture": fi}
+            if args.sustained_write:
+                event["lane"] = pos
+            wave.append(event)
         events.extend(wave)
         for item in wave:
             if item["op"] == "W":
@@ -188,11 +203,15 @@ def prepare(args):
                 "fixture_pages": fixture_pages, "trace_sha256": sha(trace_bytes),
                 "warmup_ops": args.warmup_ops, "measure_ops": args.measure_ops,
                 "read_pct": args.read_pct, "qd": args.qd, "iops": args.iops,
+                "replay_mode": replay_mode,
                 "seed": args.seed, "prefill_sha256": prefill_hash,
                 "expected_post_sha256": post_hash,
                 "write_payload_stream_sha256": h.hexdigest(),
                 "workload_opportunity": opportunity,
-                "algorithm": "fixed-seed independent-QD-waves, deterministic complete 4KiB pages"}
+                "algorithm": (
+                    "fixed-seed persistent lane-owned writes, deterministic complete 4KiB pages"
+                    if args.sustained_write else
+                    "fixed-seed independent-QD-waves, deterministic complete 4KiB pages")}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"manifest": str(out / "manifest.json"), **manifest}, sort_keys=True))
 
@@ -205,6 +224,13 @@ def check_plan(trace_path, manifest, fixture_pages):
     total = manifest["warmup_ops"] + manifest["measure_ops"]
     if len(rows) != total or total % manifest["qd"]:
         raise ValueError("missing/extra logical operations")
+    replay_mode = manifest.get("replay_mode", "qd-waves")
+    if replay_mode not in ("qd-waves", "persistent-write"):
+        raise ValueError("unsupported replay mode")
+    if replay_mode == "persistent-write" and (
+            manifest["read_pct"] != 0 or manifest["iops"] != 0 or
+            manifest["writer_pages"] % manifest["qd"]):
+        raise ValueError("invalid persistent-write manifest")
     latest = [i % fixture_pages for i in range(manifest["logical_pages"])]
     for first in range(0, total, manifest["qd"]):
         wave = rows[first:first + manifest["qd"]]
@@ -218,6 +244,10 @@ def check_plan(trace_path, manifest, fixture_pages):
             page, fi = row["page"], row["fixture"]
             if not 0 <= page < len(latest) or not 0 <= fi < fixture_pages:
                 raise ValueError("out-of-range page / fixture index")
+            if replay_mode == "persistent-write" and (
+                    row.get("lane") != pos or row["op"] != "W" or
+                    page % manifest["qd"] != pos):
+                raise ValueError("persistent-write lane ownership/order mismatch")
             if row["op"] == "W":
                 if page >= manifest["writer_pages"]:
                     raise ValueError("write escaped allowed logical region")
@@ -1168,11 +1198,10 @@ def replay(args):
 
             print(f"BENCH_IO_PHASE={args.candidate}:mixed", file=sys.stderr, flush=True)
             # Allocate reusable QD-slot read buffers before warmup and
-            # measurement. The old hot path did mmap/free for EVERY read.
-            # The throughput clock covers exactly the measured I/O waves,
-            # including their required final device flush.
-            # Pre-split the immutable trace before any benchmark clock;
-            # list slicing is workload preparation, not target I/O.
+            # measurement. Mixed workloads retain explicit QD waves.
+            # Sustained write-only workloads use persistent lane workers:
+            # one Future per lane, never one Future per timed I/O.
+            replay_mode = mf.get("replay_mode", "qd-waves")
             replay_waves = [trace[i:i + mf["qd"]]
                             for i in range(0, len(trace), mf["qd"])]
             mixed_buffers = [mmap.mmap(-1, PAGE) for _ in range(mf["qd"])]
@@ -1213,26 +1242,77 @@ def replay(args):
                     barrier.wait(timeout=10)
                     for job in jobs:
                         job.result(timeout=10)
-                    for wave in replay_waves:
-                        if wave[0]["phase"] == "measure" and measured_start_ns is None:
-                            lower_inflight_sampler.start()
-                            before = lower_stat(identity.get("owned_disk"))
-                            kernel_write_before = kernel_write_snapshot(path, identity)
-                            cpu_before = process_cpu()
-                            measured_start_ns = lower_inflight_sampler.begin()
-                        if mf["iops"] and wave[0]["phase"] == "measure":
-                            due = (measured_start_ns +
-                                   (wave[0]["seq"] - mf["warmup_ops"]) *
-                                   1000000000 // mf["iops"])
-                            remain = due - time.monotonic_ns()
-                            if remain > 0:
-                                time.sleep(remain / 1e9)
-                        futures = [pool.submit(execute, item, slot)
-                                   for slot, item in enumerate(wave)]
-                        for item, future in zip(wave, futures):
-                            elapsed = future.result()  # fail closed on mismatch
-                            if item["phase"] == "measure":
-                                samples[item["op"]].append(elapsed)
+                    if replay_mode == "persistent-write":
+                        lane_events = [[] for _ in range(mf["qd"])]
+                        for item in trace:
+                            lane_events[item["lane"]].append(item)
+                        ready = threading.Barrier(mf["qd"] + 1)
+                        start_gate = threading.Barrier(mf["qd"] + 1)
+
+                        def persistent_write_worker(lane):
+                            durations = []
+                            try:
+                                for item in lane_events[lane]:
+                                    if item["phase"] == "warmup":
+                                        execute(item, lane)
+                                ready.wait(timeout=30)
+                                start_gate.wait(timeout=30)
+                                for item in lane_events[lane]:
+                                    if item["phase"] == "measure":
+                                        durations.append(execute(item, lane))
+                                return durations
+                            except Exception:
+                                ready.abort()
+                                start_gate.abort()
+                                raise
+
+                        persistent_jobs = [
+                            pool.submit(persistent_write_worker, lane)
+                            for lane in range(mf["qd"])
+                        ]
+                        try:
+                            ready.wait(timeout=30)
+                        except threading.BrokenBarrierError as exc:
+                            for job in persistent_jobs:
+                                if job.done():
+                                    job.result()
+                            raise ValueError(
+                                "persistent write workers failed before measurement"
+                            ) from exc
+                        lower_inflight_sampler.start()
+                        before = lower_stat(identity.get("owned_disk"))
+                        kernel_write_before = kernel_write_snapshot(path, identity)
+                        cpu_before = process_cpu()
+                        measured_start_ns = lower_inflight_sampler.begin()
+                        try:
+                            start_gate.wait(timeout=30)
+                        except threading.BrokenBarrierError as exc:
+                            raise ValueError(
+                                "persistent write workers failed at measurement start"
+                            ) from exc
+                        for job in persistent_jobs:
+                            samples["W"].extend(job.result())
+                    else:
+                        for wave in replay_waves:
+                            if wave[0]["phase"] == "measure" and measured_start_ns is None:
+                                lower_inflight_sampler.start()
+                                before = lower_stat(identity.get("owned_disk"))
+                                kernel_write_before = kernel_write_snapshot(path, identity)
+                                cpu_before = process_cpu()
+                                measured_start_ns = lower_inflight_sampler.begin()
+                            if mf["iops"] and wave[0]["phase"] == "measure":
+                                due = (measured_start_ns +
+                                       (wave[0]["seq"] - mf["warmup_ops"]) *
+                                       1000000000 // mf["iops"])
+                                remain = due - time.monotonic_ns()
+                                if remain > 0:
+                                    time.sleep(remain / 1e9)
+                            futures = [pool.submit(execute, item, slot)
+                                       for slot, item in enumerate(wave)]
+                            for item, future in zip(wave, futures):
+                                elapsed = future.result()
+                                if item["phase"] == "measure":
+                                    samples[item["op"]].append(elapsed)
                     # Acknowledged write completion requires final drain.
                     # Buffer and executor teardown are not part of the clock.
                     os.fsync(fd)
@@ -1287,7 +1367,8 @@ def replay(args):
         "prefill_sha256": mf["prefill_sha256"],
         "expected_post_sha256": mf["expected_post_sha256"],
         "verified_post_sha256": post_hash.hexdigest(),
-        "qd": mf["qd"], "layout": mf["layout"], "seed": mf["seed"],
+        "qd": mf["qd"], "layout": mf["layout"],
+        "replay_mode": replay_mode, "seed": mf["seed"],
         "iops_requested": mf["iops"], "warmup_ops": mf["warmup_ops"],
         "measure_ops": mf["measure_ops"], "write_ops": len(samples["W"]),
         "read_ops": len(samples["R"]), "verified_pages": mf["logical_pages"],
@@ -1296,9 +1377,14 @@ def replay(args):
         "mixed_replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
         "mixed_replay_peak_rss_kb": cpu_after[2],
         "cpu_scope": "replay process+threads only; kernel DM workers excluded",
-        "mixed_timed_scope": ("measured logical QD waves and required final fsync; "
-                              "excludes prefill, fixture/trace setup, warmup, "
-                              "buffer allocations, executor startup and post-run oracle"),
+        "mixed_timed_scope": (
+            "persistent lane-owned write workers and required final fsync; "
+            "excludes prefill, fixture/trace setup, warmup, buffer allocations, "
+            "executor startup and post-run oracle"
+            if replay_mode == "persistent-write" else
+            "measured logical QD waves and required final fsync; excludes prefill, "
+            "fixture/trace setup, warmup, buffer allocations, executor startup "
+            "and post-run oracle"),
         "packed_read": packed_read,
         "kernel_write_path": kernel_write_delta(kernel_write_before, kernel_write_after),
         "lower_inflight": lower_inflight,
@@ -1328,7 +1414,7 @@ def compare(args):
     immutable = ("fixture_sha256", "trace_sha256", "write_payload_stream_sha256",
                  "workload_opportunity", "prefill_sha256",
                  "expected_post_sha256", "manifest_sha256",
-                 "qd", "layout", "seed", "iops_requested", "warmup_ops",
+                 "qd", "layout", "replay_mode", "seed", "iops_requested", "warmup_ops",
                  "measure_ops", "read_ops", "write_ops", "verified_pages",
                  "verified_post_sha256")
     for key in immutable:
@@ -1364,10 +1450,16 @@ def compare(args):
     loaded = all(identity and "device" in identity for identity in identities)
     if not (rootless or loaded):
         raise ValueError("INVALID COMPARISON: mixed, missing or unowned arm identity")
+    replay_mode = first.get("replay_mode", "qd-waves")
     output = {"verdict": "PASS_IDENTICAL_LOGICAL_INPUT",
-              "scope": ("exact same fixture, prefill, ordered independent-page "
-                        "operation waves, logical reads, and final oracle; "
-                        "NOT identical per-BIO kernel arrival timing"),
+              "scope": (
+                  "exact same fixture, prefill, lane-owned persistent write streams "
+                  "and final oracle; no per-I/O main-thread dispatch"
+                  if replay_mode == "persistent-write" else
+                  "exact same fixture, prefill, ordered independent-page operation "
+                  "waves, logical reads, and final oracle; NOT identical per-BIO "
+                  "kernel arrival timing"),
+              "replay_mode": replay_mode,
               "fixture_sha256": first["fixture_sha256"],
               "trace_sha256": first["trace_sha256"],
               "write_payload_stream_sha256": first["write_payload_stream_sha256"],
@@ -1468,6 +1560,8 @@ def main():
     prep.add_argument("--warmup-ops", type=int, default=8000)
     prep.add_argument("--measure-ops", type=int, default=24000)
     prep.add_argument("--iops", type=int, default=5000)
+    prep.add_argument("--sustained-write", action="store_true",
+                      help="write-only persistent lane workers without per-wave barriers")
     run = sub.add_parser("run", help="replay one candidate and verify full image")
     run.add_argument("--fixture", required=True)
     run.add_argument("--trace", required=True)

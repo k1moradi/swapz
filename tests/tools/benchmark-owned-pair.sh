@@ -489,11 +489,14 @@ else
     python3 -B tests/runtime/benchmark/anon-page-fixture.py \
         --output-prefix "$SESSION/fixture" --pages 128 --seed 0x51a0a9
 fi
+prepare_replay_args=()
+(( WRITE_ONLY_QD )) && prepare_replay_args+=(--sustained-write)
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \
     --reader-pages 256 --qd "$QD" --read-pct "$READ_PCT" \
-    --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS"
+    --warmup-ops "$WARMUP_OPS" --measure-ops "$MEASURE_OPS" --iops "$IOPS" \
+    "${prepare_replay_args[@]}"
 fi
 note "SWAPZ_STATUS_BEFORE=$(dmsetup status "$DMNAME")"
 PACKED_ARGS=()

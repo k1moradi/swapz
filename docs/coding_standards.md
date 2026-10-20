@@ -28,6 +28,14 @@ State a concrete production-C hypothesis before changing policy. Measure useful 
 
 Remove diagnostic branches and counters after they answer their question. A rejected experiment must not keep consuming hot-path CPU or schema surface.
 
+A benchmark labeled sustained QD must pre-create its worker set before the
+timed interval and must not use per-I/O `Future` submission, main-thread
+completion handoff or a full-QD barrier between successive writes. Write-only
+saturation traces must give each persistent lane disjoint logical-page
+ownership while preserving that lane's operation order, so unconstrained
+cross-lane completion cannot change the final image. A QD-wave driver may be
+kept only when explicitly labeled as burst/wave evidence.
+
 ## Dead-code rule
 
 Keep the working tree centered on code that ships or directly qualifies the current product. Historical reproduction belongs in immutable Git history. Delete alternate implementations, obsolete compatibility harnesses, unused models, stale workflow gates and historical test-only backends once no active product invariant depends on them.

@@ -380,6 +380,7 @@ def write_arm(candidate, *, qd, regime, mode):
         "source_sha": "a" * 40,
         "fixture_sha256": "b" * 64,
         "trace_sha256": (f"{qd:x}" * 64)[:64],
+        "replay_mode": "persistent-write",
         "throughput_mbps": {
             "logical_write_mbps": swapz_rate if swapz else raw,
             "lower_write_mbps": (swapz_rate / 1.40) if swapz else raw,
@@ -743,6 +744,10 @@ class ReportContract(unittest.TestCase):
         broken[0]["arms"]["off"]["logical_read_bytes"] = 4096
         self.assertEqual(runner.write_saturation_verdict(broken)["overall"],
                          "INCOMPLETE")
+        broken = runner.parse_write_saturation(synthetic_log())
+        broken[0]["arms"]["off"]["replay_mode"] = "qd-waves"
+        self.assertEqual(runner.write_saturation_verdict(broken)["overall"],
+                         "INCOMPLETE")
         for field, bad_value in (
                 ("source_sha", "b" * 40),
                 ("fixture_sha256", "c" * 64),
@@ -967,7 +972,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
-        self.assertIn("WRITE-ONLY SATURATION EVIDENCE", rendered)
+        self.assertIn("WRITE-ONLY SUSTAINED-QD EVIDENCE", rendered)
+        self.assertIn("Persistent lane workers", rendered)
         self.assertNotIn("Fast QD4 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
         self.assertIn("QD1/QD4/QD32 remain directional controls.", rendered)

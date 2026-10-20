@@ -446,6 +446,7 @@ class PublicMakeContract(unittest.TestCase):
                     "source_sha": mocked_source_sha,
                     "fixture_sha256": "fake-fixture",
                     "trace_sha256": ("f" * 60) + f"{qd:04x}",
+                    "replay_mode": "persistent-write",
                     "write_p99_ns": 3000000,
                     "seconds": 2,
                     "mixed_replay_cpu_user_s": 0.12,
@@ -696,6 +697,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("$qd == 8", loaded)
         self.assertNotIn("$qd == 4 || $qd == 8", loaded)
         self.assertIn("--write-only-qd", loaded)
+        self.assertIn("--sustained-write", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
         self.assertLess(loaded.index("tests/tools/deploy-nullblk.sh"),
                         loaded.index("tests/tools/benchmark-owned-pair.sh"))

@@ -1581,7 +1581,7 @@ def burst_guard_ab_verdict(sessions):
 
 
 def parse_write_saturation(output):
-    """Parse only the bounded write-only QD pilot; never mix it into QD32."""
+    """Parse only the bounded sustained write-only QD pilot."""
     sessions, current, regime = [], None, None
     for line in output.splitlines():
         line = line.strip()
@@ -1634,6 +1634,7 @@ def parse_write_saturation(output):
                 "source_sha": obj.get("source_sha"),
                 "fixture_sha256": obj.get("fixture_sha256"),
                 "trace_sha256": obj.get("trace_sha256"),
+                "replay_mode": obj.get("replay_mode"),
                 "input_write_mbps": rates.get("logical_write_mbps"),
                 "output_lower_write_mbps": rates.get("lower_write_mbps"),
                 "logical_write_bytes": rates.get("logical_write_bytes"),
@@ -1725,6 +1726,10 @@ def write_saturation_verdict(sessions):
                         "reason":
                             f"{regime}: write-only sync arm used async run"}
             for arm in row["arms"].values():
+                if arm.get("replay_mode") != "persistent-write":
+                    return {"overall": "INCOMPLETE",
+                            "reason":
+                                f"{regime}: write-only replay is not sustained"}
                 required = (
                     "input_write_mbps", "output_lower_write_mbps",
                     "logical_write_bytes", "logical_read_bytes",
@@ -1854,6 +1859,7 @@ def write_saturation_verdict(sessions):
     return {
         "overall": "PASS_WRITE_SATURATION_EVIDENCE",
         "fast_qd8_matched_pairs": 5,
+        "replay_mode": "persistent-write",
         "confidence":
             "FAST_QD8_PAIRED_95PCT_CI_OTHER_QDS_DIRECTIONAL",
         "fast_qd8_paired": {
@@ -1863,7 +1869,7 @@ def write_saturation_verdict(sessions):
         },
         "regimes": summaries,
         "interpretation":
-            "SYNTHETIC_RAM_QD8_CONFIRMATION_OTHER_QDS_DIRECTIONAL",
+            "SYNTHETIC_RAM_SUSTAINED_QD8_CONFIRMATION_OTHER_QDS_DIRECTIONAL",
     }
 
 
@@ -2827,7 +2833,8 @@ def print_bench(result):
 
     saturation = result["benchmarks"].get("write_saturation", {})
     if saturation.get("overall") == "PASS_WRITE_SATURATION_EVIDENCE":
-        print("\n  WRITE-ONLY SATURATION EVIDENCE")
+        print("\n  WRITE-ONLY SUSTAINED-QD EVIDENCE")
+        print("  Persistent lane workers; logical WRITE MB/s, no timed per-I/O Future dispatch.")
         for regime in MODEL_ORDER:
             cfg = MODEL_SPECS[regime]
             points = saturation["regimes"][regime]

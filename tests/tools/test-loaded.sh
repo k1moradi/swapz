@@ -60,14 +60,15 @@ python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --reader-pages 256 --qd 32 --read-pct 25 \
     --warmup-ops 1024 --measure-ops 16384 --iops 0
 # Four immutable unpaced write-only plans reuse the identical fixture and
-# logical volume. This is a bounded QD-shape pilot, not confirmatory statistics.
+# logical volume. Persistent lane-owned workers sustain offered QD without
+# per-I/O Future dispatch or an artificial barrier between completed writes.
 for qd in 1 4 8 32; do
     python3 -B tests/runtime/benchmark/io-replay.py prepare \
         --fixture "$shared_plan/fixture.bin" \
         --output-dir "$shared_plan/plan-write-qd$qd" \
         --logical-pages 1024 --writer-pages 256 --reader-start 512 \
         --reader-pages 256 --qd "$qd" --read-pct 0 \
-        --warmup-ops 256 --measure-ops 4096 --iops 0
+        --warmup-ops 256 --measure-ops 4096 --iops 0 --sustained-write
 done
 
 # Assert the representative fixture remains in the measured ~2KiB class.
@@ -174,10 +175,9 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
-# Write-only controls stay one sync/async observation per point except fast
-# QD8, whose K=1 gain is repeatedly qualified with five adjacent
-# counterbalanced rounds. QD4 returns to a directional control after its
-# five-pair interval crossed zero.
+# Write-only sustained-QD controls stay one sync/async observation per point
+# except fast QD8, which keeps five adjacent counterbalanced rounds. Historical
+# wave-driver QD8 evidence is not reused as sustained-QD qualification.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
     index=0

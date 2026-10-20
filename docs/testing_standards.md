@@ -48,7 +48,7 @@ The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms 
 
 Both arms of every session carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered. The five fast matched deltas use a two-sided Student-t 95% confidence interval with four degrees of freedom. Report both the paired mean and interval; do not replace paired analysis with an interval over unpaired arm means.
 
-The write-only QD1/4/8/32 sweep keeps slow QDs and fast QD1/QD4/QD32 directional. Fast QD8 uses the ten-session confirmation sequence and reports paired 95% confidence intervals for useful throughput, lower requests and lower bytes. Fast QD4 previously received five matched rounds and returned to directional status after its CI crossed zero. A new promotion claim for QD1/QD4/QD32 requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared sequence and fast-QD8-only mode selection.
+The write-only QD1/4/8/32 sweep is sustained offered-load evidence: workers are pre-created, warmup finishes before a common measured start gate, and each worker owns a disjoint ordered logical-page lane. No per-I/O Future submission or full-QD wave barrier is permitted in the timed path. Slow QDs and fast QD1/QD4/QD32 stay directional; fast QD8 uses the ten-session confirmation sequence and paired 95% confidence intervals for logical write throughput, lower requests and lower bytes. Historical wave-driver intervals are burst evidence only and cannot promote sustained-QD performance. A new promotion claim for QD1/QD4/QD32 requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared sequence, persistent replay mode and fast-QD8-only mode selection.
 
 ## Report contract
 
@@ -92,8 +92,10 @@ ID66 is owner-qualified by the same run. Loaded lifecycle evidence retained
 suspend/resume verification and fail-closed injected WRITE/FLUSH behavior.
 
 ID64 remains a directional regression control after its historical five-pair
-promotion. Fast write-only QD8 remains confirmed at +8.1%, paired 95% CI
-[+2.3%,+13.9%]. ID38 remains on hold.
+promotion. The prior fast write-only QD8 +8.1% interval came from the retired
+wave driver and is retained only as historical burst evidence; sustained-QD
+write performance requires a new owner run with persistent lane workers. ID38
+remains on hold.
 
 ## Deferred optimization evidence gates
 
@@ -674,8 +676,9 @@ qualification cannot pass evidence that a real loaded run would reject.
 The write-only saturation parser consumes the same exact owned-RAM device-model
 identity as the mixed benchmark parser. It must validate queue mode,
 submission-queue count and hardware queue depth in addition to bandwidth,
-completion delay and IRQ mode; a private pilot may not silently accept a
-different lower queue geometry from the mixed qualification.
+completion delay and IRQ mode, and it must reject any arm whose replay mode is
+not `persistent-write`; a private pilot may not silently accept a different
+lower queue geometry or the retired wave dispatcher.
 
 
 ### Report-contract fixture model identity
@@ -691,8 +694,9 @@ well as bandwidth, completion delay and IRQ mode, and their expected
 
 The loaded replay snapshots all window-size bins, close reasons, one-page close
 reasons, deadline contexts, retained-burst counters, preparation counters and GC
-victim count immediately before the first measured wave and after the required
-measured final fsync. Reported mixed and write-only scheduling tables use only
+victim count immediately before releasing the first measured wave or
+persistent-worker start gate and after the required measured final fsync.
+Reported mixed and write-only scheduling tables use only
 those interval deltas. The outer helper's full-process `SWAPZ_STATUS_BEFORE`
 and `SWAPZ_STATUS_AFTER` may include prefill, warmup and packed-read population
 and therefore are not report evidence for timed scheduling decisions.
