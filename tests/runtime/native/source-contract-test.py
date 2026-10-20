@@ -1893,8 +1893,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_copy_bio_accounted(entry->bio", producer)
         self.assertIn("swapz_memcpy_accounted(prepared->bytes", producer)
         self.assertIn("swapz_memcpy_accounted(", accept)
-        self.assertIn("async_prepare=%u prep_lower_write_overlap_starts=%llu",
+        self.assertIn("async_prepare=%u guard_inflight_zero_shrink=%u",
                       status)
+        self.assertIn("prep_lower_write_overlap_starts=%llu", status)
         self.assertIn("insmod \"$MODULE\" \"async_prepare=$ASYNC_PREPARE\"",
                       benchmark)
         self.assertIn("--async-prepare", benchmark)

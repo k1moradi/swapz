@@ -126,6 +126,9 @@ shrinks. No performance claim is allowed until the active matched A/B completes.
   predicate, immediate flag consumption on a guarded real shrink candidate,
   and clearing of any unconsumed flag at the first nonempty non-chaining hard
   boundary. Do not reintroduce PACK_READY suppression or tail deferral.
+  Status-schema source contracts assert the async-preparation and guard controls
+  independently; adding the read-only guard field must not make unrelated
+  overlap-counter checks depend on adjacency of status text.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
   background worker.
