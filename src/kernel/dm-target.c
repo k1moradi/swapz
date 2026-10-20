@@ -61,7 +61,12 @@ MODULE_PARM_DESC(async_prepare,
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
 MODULE_PARM_DESC(parallel_reads,
-		 "Enable bounded Kread=2 parallel read service on multi-depth queues");
+		 "Enable bounded read grouping and Kread=2 service");
+
+static bool swapz_read_coalesce = true;
+module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
+MODULE_PARM_DESC(read_coalesce,
+		 "Enable zero-extra adjacent distinct-extent READ coalescing");
 
 struct swapz_prepared_page {
 	int length;
@@ -93,6 +98,7 @@ struct swapz_read_slot {
 	struct swapz_dm *ctx;
 	struct swapz_engine engine;
 	struct bio *bios[SWAPZ_MAX_RECORDS];
+	swapz_u32 logical_pages[SWAPZ_MAX_RECORDS];
 	swapz_u8 bio_count;
 	swapz_u32 start_block;
 	swapz_u8 extent_blocks;
@@ -170,6 +176,11 @@ struct swapz_dm {
 	 * authority/BIO-completion owner; one helper performs only read-only work. */
 	struct workqueue_struct *read_workqueue;
 	struct swapz_read_slot *read_slots;
+	u8 *read_coalesce_scratch; /* 2 * SWAPZ_MAX_EXTENT_BYTES */
+	/* Group/cache/coalesce can run on depth-one media. Only true lower
+	 * concurrency is gated by queue depth >1. */
+	bool read_grouping_enabled;
+	bool read_coalescing_enabled;
 	bool parallel_reads_enabled;
 	u64 parallel_read_pairs;
 	u64 parallel_read_same_extent_pairs;
@@ -178,6 +189,11 @@ struct swapz_dm {
 	u64 parallel_read_distinct_extent_pairs;
 	u64 parallel_read_adjacent_extent_pairs;
 	u64 parallel_read_adjacent_extent_blocks;
+	/* ID63 active zero-extra-byte merges of the exact missing lower ranges. */
+	u64 parallel_read_coalesced_pairs;
+	u64 parallel_read_coalesced_reqs_saved;
+	u64 parallel_read_coalesced_blocks;
+	u64 parallel_read_coalesce_extra_blocks;
 	/* One bounded LZ4 producer, separate from the ordered I/O worker.
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
@@ -3226,19 +3242,22 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 					  unsigned int remaining,
 					  unsigned int *processed_out)
 {
-	struct swapz_bio_ref *entry, *next;
+	struct swapz_bio_ref *entry;
 	struct swapz_read_slot *slot0, *slot1;
-	swapz_u32 start0, start1 = 0, start;
+	swapz_u32 start0, start1 = 0, start, combined_start = 0;
 	swapz_u8 blocks0, blocks1 = 0, blocks;
+	swapz_u8 req_first0 = 0, req_first1 = 0;
+	swapz_u8 req_blocks0 = 0, req_blocks1 = 0, combined_blocks = 0;
 	unsigned int prefix = 0, selected0 = 0, selected1 = 0;
 	unsigned int seen = 0, selected = 0, index;
-	bool have1 = false, retained_bypass;
+	bool have1 = false, retained_bypass, coalesce = false;
 	u64 read_start_ns, read_end_ns;
+	int range0 = -EOPNOTSUPP, range1 = -EOPNOTSUPP;
 	int error0 = 0, error1 = 0, batch_error = 0;
 
 	*processed_out = 0;
-	if (!ctx->parallel_reads_enabled || !ctx->read_workqueue ||
-	    !ctx->read_slots || remaining < 2U || list_empty(local))
+	if (!ctx->read_grouping_enabled || !ctx->read_slots ||
+	    remaining < 2U || list_empty(local))
 		return false;
 	entry = list_first_entry(local, struct swapz_bio_ref, list);
 	if (!swapz_parallel_read_extent(ctx, entry->bio, &start0, &blocks0))
@@ -3266,18 +3285,6 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	}
 	if (!have1 && selected0 < 2U)
 		return false;
-	if (have1) {
-		swapz_u32 segment0 = start0 / SWAPZ_SEGMENT_BLOCKS;
-		swapz_u32 segment1 = start1 / SWAPZ_SEGMENT_BLOCKS;
-		swapz_u16 total_blocks = (swapz_u16)blocks0 + blocks1;
-
-		ctx->parallel_read_distinct_extent_pairs++;
-		if (segment0 == segment1 && total_blocks <= 16U &&
-		    (start0 + blocks0 == start1 || start1 + blocks1 == start0)) {
-			ctx->parallel_read_adjacent_extent_pairs++;
-			ctx->parallel_read_adjacent_extent_blocks += total_blocks;
-		}
-	}
 
 	slot0 = &ctx->read_slots[0];
 	slot1 = &ctx->read_slots[1];
@@ -3285,19 +3292,86 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 	if (have1)
 		swapz_read_slot_prepare(slot1, start1, blocks1);
 
-	list_for_each_entry_safe(entry, next, local, list) {
+	/* First collect descriptors without removing them from FIFO. This lets
+	 * depth-one media decline a non-coalescible two-extent pair with zero
+	 * ownership change and fall back to the ordinary serialized read path. */
+	list_for_each_entry(entry, local, list) {
 		if (seen++ >= prefix)
 			break;
 		if (!swapz_parallel_read_extent(ctx, entry->bio, &start, &blocks))
 			continue;
 		if (start == start0 && blocks == blocks0) {
-			slot0->bios[slot0->bio_count++] = entry->bio;
-			list_del_init(&entry->list);
-			selected++;
+			if (slot0->bio_count >= SWAPZ_MAX_RECORDS)
+				return false;
+			slot0->bios[slot0->bio_count] = entry->bio;
+			slot0->logical_pages[slot0->bio_count++] =
+				(swapz_u32)(entry->bio->bi_iter.bi_sector / SWAPZ_SECTORS);
 		} else if (have1 && start == start1 && blocks == blocks1) {
-			slot1->bios[slot1->bio_count++] = entry->bio;
+			if (slot1->bio_count >= SWAPZ_MAX_RECORDS)
+				return false;
+			slot1->bios[slot1->bio_count] = entry->bio;
+			slot1->logical_pages[slot1->bio_count++] =
+				(swapz_u32)(entry->bio->bi_iter.bi_sector / SWAPZ_SECTORS);
+		}
+	}
+	if (slot0->bio_count != selected0 ||
+	    (have1 && slot1->bio_count != selected1))
+		return false;
+
+	/* Priming is serialized and read-only with respect to authority. The
+	 * required-range helpers subtract these already-resident blocks before
+	 * deciding whether ID63 can save a real lower request with zero padding. */
+	swapz_engine_prime_read_slot(&ctx->engine, &slot0->engine,
+				     start0, blocks0);
+	if (have1)
+		swapz_engine_prime_read_slot(&ctx->engine, &slot1->engine,
+				     start1, blocks1);
+	if (have1) {
+		range0 = swapz_engine_required_read_range(
+			&slot0->engine, slot0->logical_pages, slot0->bio_count,
+			start0, blocks0, &req_first0, &req_blocks0);
+		range1 = swapz_engine_required_read_range(
+			&slot1->engine, slot1->logical_pages, slot1->bio_count,
+			start1, blocks1, &req_first1, &req_blocks1);
+		if (ctx->read_coalescing_enabled &&
+		    !range0 && !range1 && req_blocks0 && req_blocks1 &&
+		    !swapz_engine_coalesced_span(
+			start0, blocks0, req_first0, req_blocks0,
+			start1, blocks1, req_first1, req_blocks1,
+			&combined_start, &combined_blocks))
+			coalesce = true;
+
+		/* On a depth-one lower queue, only same-extent grouping or a proven
+		 * one-request ID63 merge may consume multiple BIOs. Otherwise process
+		 * a same-extent sibling group if present, or leave FIFO untouched. */
+		if (!coalesce && !ctx->parallel_reads_enabled) {
+			if (slot0->bio_count < 2U)
+				return false;
+			have1 = false;
+		}
+	}
+
+	/* Ownership transfers only after the exact execution mode is known. */
+	for (index = 0; index < slot0->bio_count; ++index) {
+		entry = dm_per_bio_data(slot0->bios[index], sizeof(*entry));
+		list_del_init(&entry->list);
+	}
+	selected = slot0->bio_count;
+	if (have1) {
+		for (index = 0; index < slot1->bio_count; ++index) {
+			entry = dm_per_bio_data(slot1->bios[index], sizeof(*entry));
 			list_del_init(&entry->list);
-			selected++;
+		}
+		selected += slot1->bio_count;
+		ctx->parallel_read_distinct_extent_pairs++;
+		if (start0 / SWAPZ_SEGMENT_BLOCKS ==
+			start1 / SWAPZ_SEGMENT_BLOCKS &&
+		    (swapz_u16)blocks0 + blocks1 <= 2U * SWAPZ_MAX_BLOCKS &&
+		    (start0 + blocks0 == start1 ||
+		     start1 + blocks1 == start0)) {
+			ctx->parallel_read_adjacent_extent_pairs++;
+			ctx->parallel_read_adjacent_extent_blocks +=
+				(swapz_u16)blocks0 + blocks1;
 		}
 	}
 	ctx->worker_has_immediate_followup = !list_empty(local);
@@ -3312,18 +3386,29 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 	}
 
-	/* Priming is serialized and read-only with respect to authority. Slots
-	 * never mutate the shared metadata/extent caches while lower I/O overlaps. */
-	swapz_engine_prime_read_slot(&ctx->engine, &slot0->engine,
-				     start0, blocks0);
-	if (have1)
-		swapz_engine_prime_read_slot(&ctx->engine, &slot1->engine,
-				     start1, blocks1);
-
 	retained_bypass = ctx->batch_count && ctx->retain_ms;
 	read_start_ns = ktime_get_ns();
-	if (have1) {
-		if (!queue_work(ctx->read_workqueue, &slot0->work)) {
+	if (have1 && coalesce) {
+		error0 = swapz_engine_coalesce_read_pair(
+			&slot0->engine, &slot1->engine,
+			start0, blocks0, req_first0, req_blocks0,
+			start1, blocks1, req_first1, req_blocks1,
+			ctx->read_coalesce_scratch, 2U * SWAPZ_MAX_BLOCKS);
+		if (!error0) {
+			ctx->parallel_read_coalesced_pairs++;
+			ctx->parallel_read_coalesced_reqs_saved++;
+			ctx->parallel_read_coalesced_blocks += combined_blocks;
+			/* The eligibility rule above requires exact contiguous missing
+			 * ranges. Any nonzero value would be a correctness bug. */
+			ctx->parallel_read_coalesce_extra_blocks += 0;
+			slot0->error = swapz_read_slot_run(slot0);
+			slot1->error = swapz_read_slot_run(slot1);
+			error0 = slot0->error;
+			error1 = slot1->error;
+		}
+	} else if (have1) {
+		if (!ctx->read_workqueue ||
+		    !queue_work(ctx->read_workqueue, &slot0->work)) {
 			slot0->error = -EUCLEAN;
 			complete(&slot0->done);
 		}
@@ -3342,8 +3427,10 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		for (index = 0; index < slot0->bio_count; ++index) {
 			batch_error = swapz_copy_bio_accounted(
 				slot0->bios[index],
-				slot0->read_pages + (size_t)index * SWAPZ_BLOCK_BYTES,
-				true, &ctx->read_copy_wall_ns, &ctx->read_copy_bytes);
+				slot0->read_pages +
+					(size_t)index * SWAPZ_BLOCK_BYTES,
+				true, &ctx->read_copy_wall_ns,
+				&ctx->read_copy_bytes);
 			if (batch_error)
 				break;
 		}
@@ -3352,8 +3439,10 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		for (index = 0; index < slot1->bio_count; ++index) {
 			batch_error = swapz_copy_bio_accounted(
 				slot1->bios[index],
-				slot1->read_pages + (size_t)index * SWAPZ_BLOCK_BYTES,
-				true, &ctx->read_copy_wall_ns, &ctx->read_copy_bytes);
+				slot1->read_pages +
+					(size_t)index * SWAPZ_BLOCK_BYTES,
+				true, &ctx->read_copy_wall_ns,
+				&ctx->read_copy_bytes);
 			if (batch_error)
 				break;
 		}
@@ -4166,6 +4255,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	vfree(ctx->engine.read_scratch);
 	vfree(ctx->engine.read_metadata_cache);
 	vfree(ctx->engine.read_extent_cache);
+	vfree(ctx->read_coalesce_scratch);
 	if (ctx->read_slots) {
 		for (slot = 0; slot < SWAPZ_PARALLEL_READ_SLOTS; ++slot) {
 			vfree(ctx->read_slots[slot].engine.read_scratch);
@@ -4293,7 +4383,10 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* blk-mq initializes nr_requests from the tag-set queue depth. This is
 	 * only a bounded queue-capacity gate: depth-one media stays on the exact
 	 * serialized read path; deeper queues may qualify for Kread=2. */
-	ctx->parallel_reads_enabled = swapz_parallel_reads &&
+	ctx->read_grouping_enabled = swapz_parallel_reads;
+	ctx->read_coalescing_enabled =
+		ctx->read_grouping_enabled && swapz_read_coalesce;
+	ctx->parallel_reads_enabled = ctx->read_grouping_enabled &&
 		bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
@@ -4374,9 +4467,12 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		vzalloc(SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES);
 	ctx->engine.read_extent_cache =
 		vzalloc(SWAPZ_READ_EXTENT_CACHE_ENTRIES * SWAPZ_MAX_EXTENT_BYTES);
-	if (ctx->parallel_reads_enabled)
+	if (ctx->read_grouping_enabled) {
 		ctx->read_slots = kvcalloc(SWAPZ_PARALLEL_READ_SLOTS,
 					   sizeof(*ctx->read_slots), GFP_KERNEL);
+		ctx->read_coalesce_scratch =
+			vzalloc(2U * SWAPZ_MAX_EXTENT_BYTES);
+	}
 	ctx->engine.bulk_scratch = vzalloc(SWAPZ_BULK_BLOCKS * SWAPZ_BLOCK_BYTES);
 	ctx->engine.bulk_txs = kvcalloc(SWAPZ_MAX_RECORDS,
 				       sizeof(*ctx->engine.bulk_txs),
@@ -4387,7 +4483,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
 	    !ctx->engine.read_metadata_cache || !ctx->engine.read_extent_cache ||
-	    (ctx->parallel_reads_enabled && !ctx->read_slots) ||
+	    (ctx->read_grouping_enabled &&
+	     (!ctx->read_slots || !ctx->read_coalesce_scratch)) ||
 	    !ctx->engine.bulk_scratch || !ctx->engine.bulk_txs ||
 	    !ctx->lz4_workmem) {
 		error = -ENOMEM;
@@ -4398,7 +4495,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.io.write_extent = swapz_lower_write;
 	ctx->engine.io.write_run = swapz_lower_write_run;
 	ctx->engine.io.read_blocks = swapz_lower_read;
-	for (read_slot = 0; ctx->parallel_reads_enabled &&
+	for (read_slot = 0; ctx->read_grouping_enabled &&
 	     read_slot < SWAPZ_PARALLEL_READ_SLOTS; ++read_slot) {
 		struct swapz_read_slot *slot = &ctx->read_slots[read_slot];
 
@@ -4688,11 +4785,16 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "read_meta_lru_hits=%u "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
 		       "read_two_block_skips=%u "
+		       "read_grouping_enabled=%u read_coalescing_enabled=%u "
 		       "parallel_reads_enabled=%u "
 		       "parallel_read_pairs=%llu parallel_read_same_extent_pairs=%llu "
 		       "parallel_read_distinct_extent_pairs=%llu "
 		       "parallel_read_adjacent_extent_pairs=%llu "
 		       "parallel_read_adjacent_extent_blocks=%llu "
+		       "parallel_read_coalesced_pairs=%llu "
+		       "parallel_read_coalesced_reqs_saved=%llu "
+		       "parallel_read_coalesced_blocks=%llu "
+		       "parallel_read_coalesce_extra_blocks=%llu "
 		       "failed=%u error=%d",
 		       SWAPZ_ALPHA_VERSION, ctx->logical_write_bytes,
 		       ctx->logical_read_bytes, ctx->physical_write_bytes,
@@ -4908,12 +5010,18 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_full_extent_requests,
 		       ctx->engine.read_full_extent_cache_hits,
 		       ctx->engine.read_two_block_skips,
+		       ctx->read_grouping_enabled,
+		       ctx->read_coalescing_enabled,
 		       ctx->parallel_reads_enabled,
 		       ctx->parallel_read_pairs,
 		       ctx->parallel_read_same_extent_pairs,
 		       ctx->parallel_read_distinct_extent_pairs,
 		       ctx->parallel_read_adjacent_extent_pairs,
 		       ctx->parallel_read_adjacent_extent_blocks,
+		       ctx->parallel_read_coalesced_pairs,
+		       ctx->parallel_read_coalesced_reqs_saved,
+		       ctx->parallel_read_coalesced_blocks,
+		       ctx->parallel_read_coalesce_extra_blocks,
 		       ctx->failed, ctx->last_error);
 		break;
 	case STATUSTYPE_TABLE:

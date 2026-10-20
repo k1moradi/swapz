@@ -126,7 +126,7 @@ index=0
 for parallel_reads in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --parallel-reads "$parallel_reads"
+               --read-coalesce 0 --parallel-reads "$parallel_reads"
                --shared-plan "$shared_plan")
     if (( index % 2 )); then
         arguments+=(--swapz-first)
@@ -134,6 +134,23 @@ for parallel_reads in "${confirmation_modes[@]}"; do
     printf 'START_PARALLEL_READ_AB=%s\n' "$parallel_reads"
     "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
     printf 'PASS_PARALLEL_READ_AB=%s\n' "$parallel_reads"
+    (( index += 1 ))
+done
+
+# ID63 isolated same-cache confirmation: keep Kread=2 enabled and vary only
+# zero-extra adjacent distinct-extent coalescing for five matched fast rounds.
+index=0
+for read_coalesce in "${confirmation_modes[@]}"; do
+    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
+               --read-coalesce "$read_coalesce" --parallel-reads 1
+               --shared-plan "$shared_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_READ_COALESCE_AB=%s\n' "$read_coalesce"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_READ_COALESCE_AB=%s\n' "$read_coalesce"
     (( index += 1 ))
 done
 

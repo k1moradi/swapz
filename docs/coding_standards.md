@@ -474,14 +474,30 @@ exact wall spent in wait_for_completion and the existing close reason.
 These counters must not wake workers, close windows, change timers, add a slot
 or participate in policy.
 
-### Passive adjacent distinct-extent READ evidence
+### Bounded adjacent distinct-extent READ coalescing
 
-ID63 runs only inside the already-admitted independent READ batch selected by
-Kread. When two distinct immutable extents are already selected, record whether
-their complete physical ranges are contiguous inside one 1MiB segment and the
-combined range is <=64KiB. This is a layout-opportunity count, not permission
-to issue a merged READ and not exact saved-request accounting. No future-arrival
-wait, new reordering or cache/publication behavior is allowed.
+ID63 may operate only on the already-admitted independent READ prefix. It never
+waits for another BIO and never crosses a write, barrier or dependent read.
+Shared caches are primed into two private slot engines before eligibility is
+computed.
+
+Eligibility is based on the exact lower blocks still missing for every grouped
+BIO, not merely full-extent adjacency. Each private extent's missing mask must
+collapse to one contiguous range; both ranges must be nonempty, immediately
+adjacent, remain inside one 1MiB segment and total at most 8 blocks / 32KiB.
+Padding or gap reads are forbidden.
+
+One synchronous lower READ may fetch the combined span into preallocated
+scratch. Those bytes are seeded only into private slot residency and are marked
+unvalidated. Normal swapz_engine_read_page validation must still verify SWZ3
+metadata, logical identity, generation, sequence and payload CRC for every
+constituent record before that seed becomes ordinary cache residency. A lower
+I/O, metadata, generation, CRC, decode or upper-copy failure prevents shared
+cache absorption and fails closed under the existing batch contract.
+
+Actual merged pairs, requests saved, blocks fetched and extra blocks are
+separate monotonic counters. Requests saved equals merged pairs for this
+two-range design and extra blocks must stay zero.
 
 ### Worker scheduler-accounted CPU attribution
 
@@ -499,11 +515,16 @@ Do not call an unexported scheduler helper merely to sharpen this measurement.
 
 ### Parallel-read diagnostic control
 
-The read-only `parallel_reads` module parameter is an evidence control, not a
-runtime auto-tuning policy. Loaded A/B qualification may set it to 0 or 1 only
-through the private owned-RAM helper. Queue depth remains an independent safety
-gate. Kread-off must allocate no read slots/workqueue and execute zero parallel
-pairs; Kread-on must prove pair activity before latency comparisons are used.
+The read-only `parallel_reads` and `read_coalesce` module parameters are
+evidence controls, not runtime auto-tuning policy. Loaded A/B qualification may
+set them to 0 or 1 only through the private owned-RAM helper. The ID39 A/B must
+hold `read_coalesce=0`; the ID63 A/B must hold `parallel_reads=1` and vary
+only `read_coalesce`. When off, allocate no read slots,
+coalescing scratch or read workqueue. When on, same-extent grouping and
+single-request ID63 coalescing may run even on a depth-one queue because they do
+not add lower concurrency. Only dispatch of two independent lower READ requests
+uses the helper workqueue and remains gated on `nr_requests > 1`. Do not
+conflate grouping/coalescing capability with parallel lower service.
 
 ### Opposite-end asynchronous preparation
 

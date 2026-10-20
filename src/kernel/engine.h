@@ -133,6 +133,9 @@ struct swapz_engine {
 	swapz_u8 read_cache_valid;
 	swapz_u8 read_cached_full;
 	swapz_u8 read_cached_block_mask;
+	/* Blocks inserted by an ID63 combined lower read but not yet validated
+	 * by a constituent record. Residency is not cache-hit evidence. */
+	swapz_u8 read_coalesced_block_mask;
 	swapz_u32 read_metadata_cache_hits;
 	/*
 	 * Owner-preallocated metadata-only cache. Each slot holds exactly the
@@ -223,6 +226,38 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 				  swapz_u8 extent_blocks);
 void swapz_engine_absorb_read_slot(struct swapz_engine *master,
 				   struct swapz_engine *slot);
+/*
+ * ID63 helpers. required_read_range computes the exact contiguous lower range
+ * still missing for one immutable extent after caller-side cache priming.
+ * coalesced_span accepts only zero-gap, same-segment ranges.
+ * coalesce_read_pair performs exactly one lower callback and seeds two private
+ * engines; normal per-record generation/CRC validation remains mandatory
+ * before shared cache publication.
+ */
+int swapz_engine_required_read_range(
+				   const struct swapz_engine *engine,
+				   const swapz_u32 *logical_pages,
+				   swapz_u8 count,
+				   swapz_u32 start_block,
+				   swapz_u8 extent_blocks,
+				   swapz_u8 *first_block,
+				   swapz_u8 *blocks);
+int swapz_engine_coalesced_span(
+				   swapz_u32 start0, swapz_u8 extent0,
+				   swapz_u8 first0, swapz_u8 blocks0,
+				   swapz_u32 start1, swapz_u8 extent1,
+				   swapz_u8 first1, swapz_u8 blocks1,
+				   swapz_u32 *combined_start,
+				   swapz_u8 *combined_blocks);
+int swapz_engine_coalesce_read_pair(
+				   struct swapz_engine *first,
+				   struct swapz_engine *second,
+				   swapz_u32 start0, swapz_u8 extent0,
+				   swapz_u8 first0, swapz_u8 blocks0,
+				   swapz_u32 start1, swapz_u8 extent1,
+				   swapz_u8 first1, swapz_u8 blocks1,
+				   swapz_u8 *scratch,
+				   swapz_u8 scratch_blocks);
 /* Targeted read: metadata 4KiB plus only the required payload 4KiB blocks. */
 int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			 swapz_u8 *payload, swapz_u16 payload_capacity,

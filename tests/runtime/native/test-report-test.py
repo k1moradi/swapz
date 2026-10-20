@@ -182,6 +182,10 @@ def arm(candidate, *, mode, regime):
                     "parallel_read_distinct_extent_pairs": 64,
                     "parallel_read_adjacent_extent_pairs": 24,
                     "parallel_read_adjacent_extent_blocks": 144,
+                    "parallel_read_coalesced_pairs": 20,
+                    "parallel_read_coalesced_reqs_saved": 20,
+                    "parallel_read_coalesced_blocks": 80,
+                    "parallel_read_coalesce_extra_blocks": 0,
                     "read_worker_cpu_ns": 1000000,
                 } if swapz else None),
                 "replay_cpu_user_s": .15,
@@ -237,12 +241,40 @@ def arm(candidate, *, mode, regime):
 def parallel_arm(enabled):
     record = arm("swapz", mode=0, regime="ssd_emulated")
     for phase in record["packed_read"]["passes"].values():
+        kernel = phase["kernel_read_path"]
         if not enabled:
-            phase["kernel_read_path"]["parallel_read_pairs"] = 0
-            phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 0
+            for field in (
+                    "parallel_read_pairs", "parallel_read_same_extent_pairs",
+                    "parallel_read_distinct_extent_pairs",
+                    "parallel_read_adjacent_extent_pairs",
+                    "parallel_read_adjacent_extent_blocks"):
+                kernel[field] = 0
         else:
-            phase["kernel_read_path"]["parallel_read_pairs"] = 128
-            phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 64
+            kernel["parallel_read_pairs"] = 128
+            kernel["parallel_read_same_extent_pairs"] = 64
+        for field in (
+                "parallel_read_coalesced_pairs",
+                "parallel_read_coalesced_reqs_saved",
+                "parallel_read_coalesced_blocks",
+                "parallel_read_coalesce_extra_blocks"):
+            kernel[field] = 0
+    return record
+
+
+def coalesce_arm(enabled):
+    record = parallel_arm(1)
+    for mode, phase in record["packed_read"]["passes"].items():
+        kernel = phase["kernel_read_path"]
+        if enabled:
+            kernel["parallel_read_coalesced_pairs"] = (
+                20 if mode == "sequential" else 2)
+            kernel["parallel_read_coalesced_reqs_saved"] = (
+                kernel["parallel_read_coalesced_pairs"])
+            kernel["parallel_read_coalesced_blocks"] = (
+                80 if mode == "sequential" else 8)
+            phase["lower_io"]["lower_read_requests"] -= (
+                kernel["parallel_read_coalesced_reqs_saved"])
+            phase["read_p99_ms"] *= .95
     return record
 
 
@@ -321,6 +353,20 @@ def synthetic_log():
         for record in ((swapz, raw) if index % 2 else (raw, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_PARALLEL_READ_AB={enabled}")
+    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
+        out.append(f"START_READ_COALESCE_AB={enabled}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+        raw = arm("off", mode=0, regime="ssd_emulated")
+        swapz = coalesce_arm(enabled)
+        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
+            out.append(json.dumps(record))
+        out.append(f"PASS_READ_COALESCE_AB={enabled}")
     for regime in runner.MODEL_ORDER:
         spec = runner.MODEL_SPECS[regime]
         out.append(f"START_WRITE_SATURATION_REGIME={regime}")
@@ -459,6 +505,19 @@ class ReportContract(unittest.TestCase):
             diagnostic["paired"]["sequential"]["p99_change_fraction"]["n"], 5)
         self.assertEqual(diagnostic["modes"]["0"]["sequential"]["parallel_read_pairs"], 0)
         self.assertGreater(diagnostic["modes"]["1"]["sequential"]["parallel_read_pairs"], 0)
+        coalesce = runner.parse_read_coalesce_ab(synthetic_log())
+        self.assertEqual([row["read_coalesce"] for row in coalesce],
+                         list(runner.CONFIRMATION_SEQUENCE))
+        coalesce_diag = runner.read_coalesce_ab_verdict(coalesce)
+        self.assertEqual(coalesce_diag["overall"],
+                         "PASS_READ_COALESCE_AB_CONFIRMATION")
+        self.assertEqual(coalesce_diag["matched_pairs"], 5)
+        self.assertEqual(
+            coalesce_diag["modes"]["0"]["sequential"][
+                "parallel_read_coalesced_pairs"], 0)
+        self.assertGreater(
+            coalesce_diag["modes"]["1"]["sequential"][
+                "parallel_read_coalesced_reqs_saved"], 0)
         inactive = runner.parse_parallel_read_ab(synthetic_log())
         next(row for row in inactive if row["parallel_reads"] == 1)["swapz"]["passes"][
             "sequential"]["kernel_read_path"]["parallel_read_pairs"] = 0
@@ -677,6 +736,8 @@ class ReportContract(unittest.TestCase):
             "verdicts": verdicts,
             "parallel_read_ab": runner.parallel_read_ab_verdict(
                 runner.parse_parallel_read_ab(synthetic_log())),
+            "read_coalesce_ab": runner.read_coalesce_ab_verdict(
+                runner.parse_read_coalesce_ab(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -713,7 +774,10 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Mixed burst-close split", rendered)
         self.assertIn("Mixed post-PACK tail samples", rendered)
         self.assertIn("segment TRIM", rendered)
-        self.assertIn("adj-ext", rendered)
+        self.assertIn("ID63 passive adjacent distinct-extent opportunity", rendered)
+        self.assertIn("ID63 ADJACENT READ COALESCE A/B", rendered)
+        self.assertIn("ID63 active exact-range accounting", rendered)
+        self.assertIn("saved", rendered)
         self.assertIn("K=1 ready wait win/records/ms", rendered)
         self.assertIn("K=1 ready wait P/F/D/X/O", rendered)
         self.assertIn("Fast mixed burst-close async-sync paired 95% CI", rendered)
@@ -954,6 +1018,29 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(stage["status"], "FAIL")
         self.assertEqual(stage["failed_phase"], "parallel READ A/B evidence")
         self.assertIn("Kread confirmation", stage["diagnostic"])
+
+    def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
+        broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)
+        fake_process = type("FakeProcess", (), {
+            "stdout": broken,
+            "returncode": 0,
+        })()
+        original_run = runner.subprocess.run
+        report = {"schema": "swapz-test-results-v1", "stages": [],
+                  "benchmarks": {"sessions": [], "verdicts": {}}}
+        try:
+            runner.subprocess.run = lambda *args, **kwargs: fake_process
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    runner.run_stage("Owned RAM smoke and 8 pairs",
+                                     ["unused"], report, parse_bench=True), 1)
+        finally:
+            runner.subprocess.run = original_run
+        stage = report["stages"][-1]
+        self.assertEqual(stage["status"], "FAIL")
+        self.assertEqual(stage["failed_phase"],
+                         "adjacent READ coalescing A/B evidence")
+        self.assertIn("confirmation", stage["diagnostic"])
 
     def test_loaded_failure_identifies_failed_phase_without_private_paths(self):
         # This was a real regression: privileged benchmarks created

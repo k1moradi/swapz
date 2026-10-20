@@ -696,6 +696,10 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_distinct_extent_pairs",
                       "parallel_read_adjacent_extent_pairs",
                       "parallel_read_adjacent_extent_blocks",
+                      "parallel_read_coalesced_pairs",
+                      "parallel_read_coalesced_reqs_saved",
+                      "parallel_read_coalesced_blocks",
+                      "parallel_read_coalesce_extra_blocks",
                       "read_worker_cpu_ns")
 
 
@@ -740,7 +744,16 @@ def kernel_read_delta(before, after):
             counters["parallel_read_adjacent_extent_blocks"] <
             2 * counters["parallel_read_adjacent_extent_pairs"] or
             counters["parallel_read_adjacent_extent_blocks"] >
-            16 * counters["parallel_read_adjacent_extent_pairs"]):
+            8 * counters["parallel_read_adjacent_extent_pairs"] or
+            counters["parallel_read_coalesced_pairs"] >
+            counters["parallel_read_adjacent_extent_pairs"] or
+            counters["parallel_read_coalesced_reqs_saved"] !=
+            counters["parallel_read_coalesced_pairs"] or
+            counters["parallel_read_coalesced_blocks"] <
+            2 * counters["parallel_read_coalesced_pairs"] or
+            counters["parallel_read_coalesced_blocks"] >
+            8 * counters["parallel_read_coalesced_pairs"] or
+            counters["parallel_read_coalesce_extra_blocks"] != 0):
         raise ValueError("inconsistent swapz parallel read accounting")
     return counters
 

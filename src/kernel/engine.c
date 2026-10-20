@@ -414,6 +414,7 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 		engine->read_cache_valid = 0;
 		engine->read_cached_full = 0;
 		engine->read_cached_block_mask = 0;
+		engine->read_coalesced_block_mask = 0;
 		/*
 		 * clock==0 is the canonical empty-LRU state. Writes commonly hit
 		 * this fence more than once (process-level mutation plus physical
@@ -468,6 +469,7 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 	slot->read_cache_valid = 0;
 	slot->read_cached_full = 0;
 	slot->read_cached_block_mask = 0;
+	slot->read_coalesced_block_mask = 0;
 	if (master->read_cache_valid &&
 	    master->read_cached_start_block == start_block &&
 	    master->read_cached_extent_blocks == extent_blocks) {
@@ -526,7 +528,10 @@ void swapz_engine_absorb_read_slot(struct swapz_engine *master,
 	if (!master || !slot || master == slot)
 		return;
 	swapz_engine_merge_read_telemetry(master, slot);
-	if (!slot->read_cache_valid || !slot->read_cached_block_mask)
+	/* Never publish lower-read seed bytes that were not validated through
+	 * a constituent record. Successful grouped batches consume this mask. */
+	if (slot->read_coalesced_block_mask ||
+	    !slot->read_cache_valid || !slot->read_cached_block_mask)
 		return;
 	if (master->read_extent_cache &&
 	    master->max_read_blocks_per_record != 1 &&
@@ -544,6 +549,194 @@ void swapz_engine_absorb_read_slot(struct swapz_engine *master,
 		slot->read_cached_start_block,
 		slot->read_cached_extent_blocks,
 		metadata_slot, slot->read_scratch);
+}
+
+static swapz_u8 swapz_block_range_mask(swapz_u8 first, swapz_u8 blocks)
+{
+	return blocks ? (swapz_u8)(((1U << blocks) - 1U) << first) : 0;
+}
+
+int swapz_engine_required_read_range(const struct swapz_engine *engine,
+				     const swapz_u32 *logical_pages,
+				     swapz_u8 count,
+				     swapz_u32 start_block,
+				     swapz_u8 extent_blocks,
+				     swapz_u8 *first_block,
+				     swapz_u8 *blocks)
+{
+	swapz_u8 required = 0, resident = 0, missing;
+	swapz_u8 first, last, index;
+
+	if (!engine || !engine->authority || !logical_pages || !count ||
+	    count > SWAPZ_MAX_RECORDS || !first_block || !blocks ||
+	    !extent_blocks || extent_blocks > SWAPZ_MAX_BLOCKS ||
+	    start_block >= engine->authority->physical_blocks ||
+	    extent_blocks > engine->authority->physical_blocks - start_block)
+		return -EINVAL;
+	if (engine->read_cache_valid &&
+	    engine->read_cached_start_block == start_block &&
+	    engine->read_cached_extent_blocks == extent_blocks)
+		resident = engine->read_cached_block_mask;
+	for (index = 0; index < count; ++index) {
+		const struct swapz_map *map;
+		swapz_u32 logical = logical_pages[index];
+		swapz_u32 payload_first, payload_last, block;
+
+		if (logical >= engine->authority->logical_pages)
+			return -ERANGE;
+		map = &engine->authority->maps[logical];
+		if (!map->valid || map->raw ||
+		    map->start_block != start_block ||
+		    map->extent_blocks != extent_blocks ||
+		    !map->payload_length ||
+		    map->payload_offset >=
+			(swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES ||
+		    map->payload_length >
+			(swapz_u32)extent_blocks * SWAPZ_BLOCK_BYTES -
+			map->payload_offset)
+			return -ESTALE;
+		required |= 1U;
+		payload_first = map->payload_offset / SWAPZ_BLOCK_BYTES;
+		payload_last = ((swapz_u32)map->payload_offset +
+				map->payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+		for (block = payload_first; block <= payload_last; ++block)
+			required |= (swapz_u8)(1U << block);
+	}
+	missing = required & (swapz_u8)~resident;
+	if (!missing) {
+		*first_block = 0;
+		*blocks = 0;
+		return 0;
+	}
+	for (first = 0; first < extent_blocks; ++first)
+		if (missing & (1U << first))
+			break;
+	for (last = extent_blocks; last > 0; --last)
+		if (missing & (1U << (last - 1U))) {
+			last--;
+			break;
+		}
+	*first_block = first;
+	*blocks = last - first + 1U;
+	if (swapz_block_range_mask(*first_block, *blocks) != missing)
+		return -EOPNOTSUPP;
+	return 0;
+}
+
+int swapz_engine_coalesced_span(swapz_u32 start0, swapz_u8 extent0,
+				swapz_u8 first0, swapz_u8 blocks0,
+				swapz_u32 start1, swapz_u8 extent1,
+				swapz_u8 first1, swapz_u8 blocks1,
+				swapz_u32 *combined_start,
+				swapz_u8 *combined_blocks)
+{
+	swapz_u32 phys0, phys1, low, high;
+	swapz_u16 total;
+
+	if (!combined_start || !combined_blocks || !extent0 || !extent1 ||
+	    extent0 > SWAPZ_MAX_BLOCKS || extent1 > SWAPZ_MAX_BLOCKS ||
+	    !blocks0 || !blocks1 ||
+	    first0 >= extent0 || blocks0 > extent0 - first0 ||
+	    first1 >= extent1 || blocks1 > extent1 - first1 ||
+	    (start0 == start1 && extent0 == extent1) ||
+	    start0 > ~(swapz_u32)0 - first0 ||
+	    start1 > ~(swapz_u32)0 - first1)
+		return -EINVAL;
+	phys0 = start0 + first0;
+	phys1 = start1 + first1;
+	if (phys0 > ~(swapz_u32)0 - blocks0 ||
+	    phys1 > ~(swapz_u32)0 - blocks1)
+		return -EINVAL;
+	total = (swapz_u16)blocks0 + blocks1;
+	if (total > 2U * SWAPZ_MAX_BLOCKS)
+		return -EOPNOTSUPP;
+	if (phys0 + blocks0 == phys1) {
+		low = phys0;
+		high = phys1 + blocks1;
+	} else if (phys1 + blocks1 == phys0) {
+		low = phys1;
+		high = phys0 + blocks0;
+	} else {
+		return -EOPNOTSUPP;
+	}
+	if (low / SWAPZ_SEGMENT_BLOCKS !=
+	    (high - 1U) / SWAPZ_SEGMENT_BLOCKS)
+		return -EOPNOTSUPP;
+	*combined_start = low;
+	*combined_blocks = (swapz_u8)total;
+	return 0;
+}
+
+static int swapz_engine_seed_coalesced_range(struct swapz_engine *engine,
+					     swapz_u32 start_block,
+					     swapz_u8 extent_blocks,
+					     swapz_u8 first_block,
+					     swapz_u8 blocks,
+					     const swapz_u8 *bytes)
+{
+	swapz_u8 block_mask;
+
+	if (!engine || !engine->read_scratch || !bytes ||
+	    !extent_blocks || extent_blocks > SWAPZ_MAX_BLOCKS ||
+	    !blocks || first_block >= extent_blocks ||
+	    blocks > extent_blocks - first_block)
+		return -EINVAL;
+	if (engine->read_cache_valid &&
+	    (engine->read_cached_start_block != start_block ||
+	     engine->read_cached_extent_blocks != extent_blocks))
+		return -ESTALE;
+	memcpy(engine->read_scratch + (size_t)first_block * SWAPZ_BLOCK_BYTES,
+	       bytes, (size_t)blocks * SWAPZ_BLOCK_BYTES);
+	block_mask = swapz_block_range_mask(first_block, blocks);
+	engine->read_cached_start_block = start_block;
+	engine->read_cached_extent_blocks = extent_blocks;
+	engine->read_cached_block_mask |= block_mask;
+	engine->read_coalesced_block_mask |= block_mask;
+	engine->read_cached_full = engine->read_cached_block_mask ==
+		(swapz_u8)((1U << extent_blocks) - 1U);
+	engine->read_cache_valid = 1;
+	engine->physical_read_blocks += blocks;
+	return 0;
+}
+
+int swapz_engine_coalesce_read_pair(struct swapz_engine *first,
+				    struct swapz_engine *second,
+				    swapz_u32 start0, swapz_u8 extent0,
+				    swapz_u8 first0, swapz_u8 blocks0,
+				    swapz_u32 start1, swapz_u8 extent1,
+				    swapz_u8 first1, swapz_u8 blocks1,
+				    swapz_u8 *scratch,
+				    swapz_u8 scratch_blocks)
+{
+	swapz_u32 combined_start, phys0, phys1;
+	swapz_u8 combined_blocks;
+	const swapz_u8 *bytes0, *bytes1;
+	int error;
+
+	if (!first || !second || first == second || !scratch ||
+	    !first->io.read_blocks || first->authority != second->authority)
+		return -EINVAL;
+	error = swapz_engine_coalesced_span(start0, extent0, first0, blocks0,
+					   start1, extent1, first1, blocks1,
+					   &combined_start, &combined_blocks);
+	if (error)
+		return error;
+	if (combined_blocks > scratch_blocks)
+		return -ENOSPC;
+	error = first->io.read_blocks(first->io.opaque, combined_start,
+				      combined_blocks, scratch);
+	if (error)
+		return error;
+	phys0 = start0 + first0;
+	phys1 = start1 + first1;
+	bytes0 = scratch + (size_t)(phys0 - combined_start) * SWAPZ_BLOCK_BYTES;
+	bytes1 = scratch + (size_t)(phys1 - combined_start) * SWAPZ_BLOCK_BYTES;
+	error = swapz_engine_seed_coalesced_range(first, start0, extent0,
+						  first0, blocks0, bytes0);
+	if (error)
+		return error;
+	return swapz_engine_seed_coalesced_range(second, start1, extent1,
+						 first1, blocks1, bytes1);
 }
 
 static int swapz_engine_write_window_planned(struct swapz_engine *engine,
@@ -1093,7 +1286,8 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	struct swapz_map observed;
 	const swapz_u8 *stored;
 	swapz_u32 bytes, first, last, start, count, block;
-	swapz_u8 initial_blocks = 1, cached_mask;
+	swapz_u32 payload_first, payload_last;
+	swapz_u8 initial_blocks = 1, cached_mask, coalesced_mask = 0;
 	int error;
 	int cached_metadata, cached_full, lru_cached_metadata;
 	int extent_lru_slot, metadata_lru_slot;
@@ -1133,6 +1327,8 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->read_cached_extent_blocks == observed.extent_blocks;
 	cached_full = cached_metadata && engine->read_cached_full;
 	cached_mask = cached_metadata ? engine->read_cached_block_mask : 0;
+	coalesced_mask = cached_metadata ?
+		engine->read_coalesced_block_mask : 0;
 	extent_lru_slot = engine->max_read_blocks_per_record != 1 ?
 		swapz_read_extent_lru_lookup(engine, observed.start_block,
 					     observed.extent_blocks) : -1;
@@ -1160,6 +1356,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	engine->read_cached_block_mask = 0;
+	engine->read_coalesced_block_mask = 0;
 	if (lru_cached_metadata) {
 		memcpy(engine->read_scratch,
 		       engine->read_metadata_cache +
@@ -1195,9 +1392,11 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	    peek.payload_length != observed.payload_length ||
 	    peek.payload_offset != observed.payload_offset)
 		return -EUCLEAN;
-	first = peek.payload_offset / SWAPZ_BLOCK_BYTES;
-	last = ((swapz_u32)peek.payload_offset +
+	payload_first = peek.payload_offset / SWAPZ_BLOCK_BYTES;
+	payload_last = ((swapz_u32)peek.payload_offset +
 		peek.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+	first = payload_first;
+	last = payload_last;
 	/*
 	 * Block zero is already resident before peek. A compressed record is at
 	 * most SWAPZ_MAX_COMPRESSED bytes, so first..last spans at most two
@@ -1251,9 +1450,21 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
 	engine->read_cached_block_mask = cached_mask;
 	engine->read_cache_valid = 1;
-	if (cached_metadata)
+	/* Seeded combined-read blocks become reusable cache only after this
+	 * record validates its immutable metadata/generation/payload CRC. */
+	{
+		swapz_u8 validated = 1U;
+		swapz_u32 validated_block;
+
+		for (validated_block = payload_first;
+		     validated_block <= payload_last; ++validated_block)
+			validated |= (swapz_u8)(1U << validated_block);
+		engine->read_coalesced_block_mask =
+			coalesced_mask & (swapz_u8)~validated;
+	}
+	if (cached_metadata && !(coalesced_mask & 1U))
 		engine->read_metadata_cache_hits++;
-	if (cached_full)
+	if (cached_full && !coalesced_mask)
 		engine->read_full_extent_cache_hits++;
 	if (lru_cached_metadata)
 		engine->read_metadata_lru_hits++;

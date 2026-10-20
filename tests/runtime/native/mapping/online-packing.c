@@ -24,6 +24,8 @@ static swapz_u16 live[PHYSICAL_BLOCKS];
 static swapz_u8 classes[PHYSICAL_BLOCKS];
 static swapz_u8 scratch_write[SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_read[SWAPZ_MAX_EXTENT_BYTES];
+static swapz_u8 scratch_read_second[SWAPZ_MAX_EXTENT_BYTES];
+static swapz_u8 scratch_coalesced[2U * SWAPZ_MAX_EXTENT_BYTES];
 static swapz_u8 scratch_metadata_cache[
 	SWAPZ_READ_METADATA_CACHE_ENTRIES * SWAPZ_BLOCK_BYTES];
 static swapz_u8 scratch_extent_cache[
@@ -34,6 +36,7 @@ struct memory_disk {
 	swapz_u8 *storage;
 	swapz_u32 write_calls;
 	swapz_u32 write_blocks;
+	swapz_u32 read_calls;
 	swapz_u32 read_blocks;
 	swapz_u32 read_block_hits[PHYSICAL_BLOCKS];
 	swapz_u32 fail_write_on_call;
@@ -78,6 +81,7 @@ static int lower_read(void *opaque, swapz_u32 start, swapz_u8 blocks,
 		return -ERANGE;
 	memcpy(target, m->storage + (size_t)start * SWAPZ_BLOCK_BYTES,
 	       (size_t)blocks * SWAPZ_BLOCK_BYTES);
+	m->read_calls++;
 	m->read_blocks += blocks;
 	for (block = 0; block < blocks; ++block)
 		m->read_block_hits[start + block]++;
@@ -89,6 +93,7 @@ static int setup(void)
 	memset(disk.storage, 0, (size_t)PHYSICAL_BLOCKS * SWAPZ_BLOCK_BYTES);
 	disk.write_calls = 0;
 	disk.write_blocks = 0;
+	disk.read_calls = 0;
 	disk.read_blocks = 0;
 	memset(disk.read_block_hits, 0, sizeof(disk.read_block_hits));
 	disk.fail_write_on_call = 0;
@@ -648,6 +653,126 @@ static int test_read_budget_tradeoff_on_uniform_2072(void)
 	return 0;
 }
 
+static void init_private_read_engine(struct swapz_engine *private,
+				     swapz_u8 *scratch)
+{
+	memset(private, 0, sizeof(*private));
+	memset(scratch, 0, SWAPZ_MAX_EXTENT_BYTES);
+	private->authority = &authority;
+	private->io.opaque = &disk;
+	private->io.read_blocks = lower_read;
+	private->read_scratch = scratch;
+}
+
+static int test_adjacent_distinct_extent_coalescing(void)
+{
+	struct swapz_compressed_page pages[2];
+	struct swapz_engine first, second;
+	swapz_u32 logical0[1] = { 0 }, logical1[1] = { 1 };
+	swapz_u32 combined_start;
+	swapz_u8 committed = 0, first0, first1, blocks0, blocks1;
+	swapz_u8 combined_blocks, output[3568];
+	swapz_u16 length = 0;
+	swapz_u32 corrupt_at;
+	int error;
+
+	CHECK(setup() == 0);
+	prepare(pages, 2, 0, 0);
+	CHECK(write_window_sequential(&pages[0], 1, &committed) == 0);
+	CHECK(committed == 1);
+	committed = 0;
+	CHECK(write_window_sequential(&pages[1], 1, &committed) == 0);
+	CHECK(committed == 1);
+	CHECK(maps[0].valid && maps[1].valid);
+	CHECK(maps[0].extent_blocks == 1 && maps[1].extent_blocks == 1);
+	CHECK(maps[0].start_block + 1U == maps[1].start_block);
+
+	init_private_read_engine(&first, scratch_read);
+	init_private_read_engine(&second, scratch_read_second);
+	CHECK(swapz_engine_required_read_range(&first, logical0, 1,
+			maps[0].start_block, maps[0].extent_blocks,
+			&first0, &blocks0) == 0);
+	CHECK(swapz_engine_required_read_range(&second, logical1, 1,
+			maps[1].start_block, maps[1].extent_blocks,
+			&first1, &blocks1) == 0);
+	CHECK(first0 == 0 && blocks0 == 1 && first1 == 0 && blocks1 == 1);
+	CHECK(swapz_engine_coalesced_span(
+			maps[0].start_block, maps[0].extent_blocks, first0, blocks0,
+			maps[1].start_block, maps[1].extent_blocks, first1, blocks1,
+			&combined_start, &combined_blocks) == 0);
+	CHECK(combined_start == maps[0].start_block && combined_blocks == 2);
+	/* Reverse physical order is equally valid. */
+	CHECK(swapz_engine_coalesced_span(
+			maps[1].start_block, maps[1].extent_blocks, first1, blocks1,
+			maps[0].start_block, maps[0].extent_blocks, first0, blocks0,
+			&combined_start, &combined_blocks) == 0);
+	CHECK(combined_start == maps[0].start_block && combined_blocks == 2);
+	/* A gap or a 1MiB segment crossing is never hidden by padding reads. */
+	CHECK(swapz_engine_coalesced_span(10, 1, 0, 1, 12, 1, 0, 1,
+			&combined_start, &combined_blocks) == -EOPNOTSUPP);
+	CHECK(swapz_engine_coalesced_span(
+			SWAPZ_SEGMENT_BLOCKS - 1U, 1, 0, 1,
+			SWAPZ_SEGMENT_BLOCKS, 1, 0, 1,
+			&combined_start, &combined_blocks) == -EOPNOTSUPP);
+
+	disk.read_calls = 0;
+	disk.read_blocks = 0;
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, maps[0].extent_blocks, first0, blocks0,
+			maps[1].start_block, maps[1].extent_blocks, first1, blocks1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == 0);
+	CHECK(disk.read_calls == 1 && disk.read_blocks == 2);
+	CHECK(first.physical_read_blocks == 1 && second.physical_read_blocks == 1);
+	CHECK(first.read_coalesced_block_mask == 1U);
+	CHECK(second.read_coalesced_block_mask == 1U);
+	CHECK(swapz_engine_read_page(&first, 0, output,
+				     sizeof(output), &length) == 0);
+	CHECK(length == 2072 && !memcmp(output, originals[0], length));
+	CHECK(swapz_engine_read_page(&second, 1, output,
+				     sizeof(output), &length) == 0);
+	CHECK(length == 2072 && !memcmp(output, originals[1], length));
+	CHECK(disk.read_calls == 1);
+	CHECK(first.read_coalesced_block_mask == 0);
+	CHECK(second.read_coalesced_block_mask == 0);
+
+	/* A failed combined lower callback publishes no seeded private residency. */
+	init_private_read_engine(&first, scratch_read);
+	init_private_read_engine(&second, scratch_read_second);
+	disk.fail_reads = 1;
+	disk.read_calls = 0;
+	error = swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, 1, 0, 1,
+			maps[1].start_block, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS);
+	CHECK(error == -EIO && disk.read_calls == 0);
+	CHECK(!first.read_cache_valid && !second.read_cache_valid);
+	disk.fail_reads = 0;
+
+	/* Corruption fetched by the one combined request still fails the normal
+	 * constituent CRC path; private seed bytes never become shared authority. */
+	corrupt_at = maps[1].start_block * SWAPZ_BLOCK_BYTES +
+		maps[1].payload_offset;
+	disk.storage[corrupt_at] ^= 1U;
+	init_private_read_engine(&first, scratch_read);
+	init_private_read_engine(&second, scratch_read_second);
+	disk.read_calls = 0;
+	CHECK(swapz_engine_coalesce_read_pair(
+			&first, &second,
+			maps[0].start_block, 1, 0, 1,
+			maps[1].start_block, 1, 0, 1,
+			scratch_coalesced, 2U * SWAPZ_MAX_BLOCKS) == 0);
+	CHECK(disk.read_calls == 1);
+	CHECK(swapz_engine_read_page(&first, 0, output,
+				     sizeof(output), &length) == 0);
+	CHECK(swapz_engine_read_page(&second, 1, output,
+				     sizeof(output), &length) == -EBADMSG);
+	CHECK(!second.read_cache_valid);
+	disk.storage[corrupt_at] ^= 1U;
+	return 0;
+}
+
 static int test_private_read_telemetry_merge_preserves_cache_state(void)
 {
 	struct swapz_engine source;
@@ -731,6 +856,7 @@ int main(void)
 	CHECK(test_overwrite_old_mapping_survives_failure() == 0); completed++;
 	CHECK(test_lower_read_failure_does_not_fake_bytes() == 0); completed++;
 	CHECK(test_read_budget_tradeoff_on_uniform_2072() == 0); completed++;
+	CHECK(test_adjacent_distinct_extent_coalescing() == 0); completed++;
 	CHECK(test_mapping_length_mismatch_stops_before_payload_io() == 0); completed++;
 	CHECK(test_private_read_telemetry_merge_preserves_cache_state() == 0); completed++;
 	free(disk.storage);

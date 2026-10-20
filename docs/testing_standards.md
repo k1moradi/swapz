@@ -70,47 +70,47 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `1b1e3ee1a3914185b64c8d6e887c20e8f1e82863` passed all five
-stages and published report `e35c51e0f9fd5d9459ac116805d13d5a13150bb5`.
-It decisively rejects ID57: fast write-only QD8 is -41.1% async/sync,
-CI [-45.8%,-36.4%]; fast mixed has no confirmed gain and adds 271.6 lower
-WRITE requests, CI [+192.9,+350.3]. The next source restores pre-ID57 ID56
-sampling/closure and must be owner-qualified before the regression is called
-repaired.
+Source `7ceefcff88e90ff9eafaa216c830488b4788c660` passed all five
+stages and published report-only commit
+`f704dc7203bdf843b040392e2ae0597d7f761bfd`.
 
-Latest Kread same-cache A/B is inconclusive, while 99.2 of 328.5 grouped pairs
-contain same-extent siblings. Current offline opportunity reports zero nonzero
-same-filled writes and intentionally fixture-biased exact-content duplication.
+The ID57 rollback is qualified: fast write-only QD8 is +18.8% async/sync,
+CI [+6.5%,+31.1%], target 8 with 512/0/0 PACK_READY/deadline/idle closes.
+ID29 is qualified on owned RAM with 36 exact 1MiB segment discards, 20 GC
+victims/rotations and 4096 verified logical pages.
+
+ID38 passive evidence is small: fast mixed 30.5 ready windows / 88 records /
+3.79 ms total K=1 wait and zero in the serial-depth model. Keep K>1 passive.
+
+ID63 passive evidence is strong and asymmetric: sequential 207.0 distinct
+pairs / 162.4 adjacent, random 392.2 / 2.6. The next candidate may actively
+coalesce only exact post-cache missing ranges under the rules below.
 
 ## Deferred optimization evidence gates
 
-- **ID29 TRIM:** owned lifecycle configures its new RAM `null_blk` with discard
-  support. Every completed segment discard must be exactly 2048 sectors,
-  segment-aligned, and occur only after zero mapping/live authority. Live-GC
-  PASS requires at least one completed discard per committed victim, zero
-  unsupported/failed discards on the owned null device, and byte-exact
-  verification of all 4096 logical pages. Native authority tests must prove a
-  failing recycle hook blocks reuse without mutating allocator state.
-- **ID38 K>1:** passive reverted-baseline counters must conserve
-  PACK_READY+FULL+DEADLINE+fence+other to total ready-wait windows. Records
-  cannot be smaller than windows, max records stays <=64 and attributed wait
-  wall cannot exceed total K=1 finalize wait wall. No K=2 slot is present.
-- **ID58 same-filled:** keep opportunity collection offline; current fixture is
-  zero-opportunity and cannot justify implementation.
-- **ID59 dedup:** exact 4KiB equality remains required. Synthetic 128-payload
-  reuse is not production prevalence; obtain representative lifetime overlap.
-- **ID60/ID63 READ coalescing:** Kread same-extent and distinct-extent adjacency
-  are passive. Adjacent pairs cannot exceed distinct pairs, distinct pairs
-  cannot exceed grouped pairs, and adjacent block totals must be 2..16 blocks
-  per adjacent observation. No read waits for a future BIO and no merged lower
-  request is implemented.
-  The console keeps the established compact ID39 matrix and prints ID63
-  distinct/adjacent/block opportunity in a separate narrow table; complete
-  counters remain in the JSON report.
-- **ID61 background GC:** first measure foreground-GC stall/headroom during
-  useful I/O including total GC lower traffic and exact final image.
-- **ID62 real device:** current host-safety rules still prohibit collection.
-  Do not add a physical-device bypass flag or alternate public test command.
+- **ID38 K>1:** keep the existing conservation rules for passive counters.
+  No second write slot is present in this generation.
+- **ID63 active READ coalescing:** qualification uses five matched fast-model
+  rounds with Kread enabled in both arms and only `read_coalesce=0/1` varied.
+  The existing ID39 Kread A/B forces `read_coalesce=0` in both arms. Every
+  actual merge must come from two already admitted independent distinct extents. After cache priming, each extent must
+  have one nonempty contiguous missing range; those ranges must be zero-gap
+  adjacent, same-segment and <=8 blocks combined. One merged pair saves exactly
+  one lower request. `parallel_read_coalesced_reqs_saved` must equal merged
+  pairs, merged blocks must be 2..8 per pair, and
+  `parallel_read_coalesce_extra_blocks` must stay zero.
+  Native C tests cover forward/reverse adjacency, gap rejection, segment-boundary
+  rejection, one lower callback, lower-I/O failure and constituent CRC failure.
+  Loaded A/B must show actual merged/request-saved counters and byte-exact output.
+  The off arm must execute zero coalesced pairs; the on arm must execute
+  sequential coalescing before its paired performance interval is accepted.
+- **Depth-one READ behavior:** with `parallel_reads=1`, slot grouping and ID63
+  may run when queue depth is one, but no helper workqueue concurrency is
+  permitted. Non-coalescible distinct extents fall back to the ordinary
+  serialized path.
+- **ID58/59:** representative-content evidence only.
+- **ID61:** measure useful-I/O foreground-GC stall/headroom before background GC.
+- **ID62:** current host-safety rules still prohibit physical-device collection.
 
 ## Open qualification gaps
 

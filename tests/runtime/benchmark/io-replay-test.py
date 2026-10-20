@@ -93,11 +93,12 @@ class PairReplayContract(unittest.TestCase):
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
         before = dict(zip(fields, (10, 4, 5, 3000, 100, 50, 4096, 200,
-                                   2, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1000)))
+                                   2, 1, 1, 1, 0, 0, 0, 0, 0, 0,
+                                   0, 0, 0, 0, 1000)))
         after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
                                   100050, 4198400, 500200,
                                   402, 102, 321, 201, 200, 8, 3, 5, 2, 12,
-                                  101000)))
+                                  2, 2, 8, 0, 101000)))
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -121,6 +122,10 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["parallel_read_distinct_extent_pairs"], 5)
         self.assertEqual(measured["parallel_read_adjacent_extent_pairs"], 2)
         self.assertEqual(measured["parallel_read_adjacent_extent_blocks"], 12)
+        self.assertEqual(measured["parallel_read_coalesced_pairs"], 2)
+        self.assertEqual(measured["parallel_read_coalesced_reqs_saved"], 2)
+        self.assertEqual(measured["parallel_read_coalesced_blocks"], 8)
+        self.assertEqual(measured["parallel_read_coalesce_extra_blocks"], 0)
         self.assertEqual(measured["read_worker_cpu_ns"], 100000)
         # A high reuse rate may make metadata requests fewer than payload
         # requests; this is valid as long as lower payload blocks match.
@@ -144,6 +149,12 @@ class PairReplayContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(
                 before, dict(after, parallel_read_adjacent_extent_pairs=6))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(
+                before, dict(after, parallel_read_coalesced_reqs_saved=4))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(
+                before, dict(after, parallel_read_coalesce_extra_blocks=1))
 
         bad = subprocess.CompletedProcess(["dmsetup"], 0,
                                           stdout="0 8192 swapz read_meta_reqs=4")

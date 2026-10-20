@@ -59,73 +59,71 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `1b1e3ee1a3914185b64c8d6e887c20e8f1e82863`
-(report-only `e35c51e0f9fd5d9459ac116805d13d5a13150bb5`) passed all five
-stages. It is synthetic owned-RAM evidence only and **rejects ID57**.
+Owner-qualified source `7ceefcff88e90ff9eafaa216c830488b4788c660`
+(report-only `f704dc7203bdf843b040392e2ae0597d7f761bfd`) passed all five
+stages on owned RAM.
 
-Fast write-only QD8 async/sync is 11.85/20.17 MB/s, paired -41.1% with
-95% CI [-45.8%,-36.4%]. Fast mixed async/sync is 23.26/23.09 MB/s,
-paired +0.8% CI [-3.2%,+4.8%], while async adds 271.6 lower WRITE requests
-CI [+192.9,+350.3]. Fast mixed burst closes fall by 15.2 while service-dry
-closes rise by 263.4; write-only QD8 learns target 12 and closes 274.8 windows
-by deadline. The candidate therefore restores the pre-ID57/ID56 closure and
-tail-sampling behavior before evaluating anything else.
+The ID57 rollback recovered the confirmatory fast write-only QD8 control:
+24.13/20.36 MB/s async/sync, +18.8% paired, 95% CI [+6.5%,+31.1%].
+Target is exactly 8 and all 512 windows close PACK_READY with zero deadline
+closes. QD4/QD32 also return to exact target geometry with zero deadlines.
+ID57 is refuted and must stay removed.
 
-The pre-ID57 `1352e46...` owner result remains the rollback control: fast QD8
-was +23.1% async/sync, CI [+8.4%,+37.9%]. A successful rollback must reproduce
-the deep-window/no-deadline geometry rather than merely improve from -41%.
+Fast mixed async/sync is 23.45/22.82 MB/s, +2.9% CI [-3.4%,+9.1%];
+the lower-request difference is +54.6 CI [-47.9,+157.1]. Service-dry is
++5.4 CI [-48.2,+59.0]. This is no longer evidence for another active collector
+fix.
 
-Latest same-cache Kread A/B is inconclusive: sequential p99 +4.6%
-[-8.7,+17.8]%, random -4.5% [-16.1,+7.2]%. Kread-on observes 328.5 grouped
-pairs and 99.2 same-extent pairs. Keep Kread=2 unchanged.
+ID29 qualifies on synthetic RAM correctness/alignment: 36 x 1MiB lower
+DISCARDs, 73728 sectors total, 20 GC victims/rotations and 4096 pages verified.
+Physical endurance remains unproven.
+
+Latest ID39 same-cache A/B remains inconclusive: sequential p99 -4.8%
+[-16.7,+7.1]%, random -0.6% [-11.1,+9.9]%.
 
 ## Confirmation gate
 
-Do not claim a QD performance improvement until that specific QD/regime has at
-least five counterbalanced matched rounds, paired confidence intervals,
-unchanged correctness/provenance and no unacceptable lower-byte/request,
-read-tail, CPU/RAM or GC regression. Fast QD8 remains the confirmatory
-write-only control; QD1/QD4/QD32 are directional.
+Do not claim ID63 benefit from passive adjacency. The active candidate has its
+own read-only `read_coalesce` control. Its five matched fast-model rounds keep
+`parallel_reads=1` in both arms and vary only coalescing; the existing ID39
+Kread A/B forces coalescing off. The candidate must count actual zero-extra
+merges after cache priming and exact required-block selection. For each merged pair, exactly one lower request is saved and
+`parallel_read_coalesce_extra_blocks` must remain zero. Sequential and
+seeded-random traffic/p99 remain separate.
+
+Promotion requires the normal five matched confirmation rounds for the promoted
+fast regime, byte-exact reads, unchanged write/GC correctness, lower READ bytes
+not increased, and a meaningful lower-request reduction without unacceptable
+p99/CPU/RAM regression.
 
 ## Deferred idea evidence
 
-**ID29 whole-dead-segment TRIM.** The candidate issues exactly one-segment
-(256 blocks / 1MiB / 2048 sectors) lower DISCARD only after serialized authority
-proves a previously written segment has zero authoritative mappings/live
-records. Foreground recycle calls the hook immediately before reuse. A GC victim
-is eligible only after successful committed role rotation makes it a dead
-reserve. Unsupported or lower-media DISCARD failure is counted and advisory;
-it cannot make data dead, publish mappings or authorize reuse. The owned
-`null_blk` lifecycle explicitly enables discard and must prove aligned
-completed requests while all 4096 pages remain byte-exact.
+**ID38 K>1.** Fast mixed records 30.5 ready windows / 88 records / 3.79 ms
+completion wait; the slow model records zero. Keep this passive. Do not expand
+authority/batch state for a theoretical sub-percent wall opportunity.
 
-**IDs 58/59 content opportunity.** The current synthetic trace reports zero
-nonzero same-filled writes. It reports 12,301 resident-duplicate opportunities
-from only 128 unique payloads and 1,024 final duplicate pages; because the
-fixture deliberately reuses that pool, this is analyzer/architecture evidence,
-not real swap prevalence.
+**ID63 adjacent distinct-extent READ coalescing.** Passive evidence finds
+162.4/207.0 sequential distinct pairs physically adjacent but only 2.6/392.2
+random. The bounded active experiment is stricter: prime private slots from the
+shared caches, derive the exact missing block range for every grouped BIO, and
+merge only when both missing ranges are nonempty, individually contiguous,
+immediately adjacent, in one 1MiB segment and <=8 blocks total. Issue one lower
+READ with no padding, seed only private slot scratch, then run the unchanged
+per-record metadata/generation/CRC/decompression path. Shared cache publication
+still waits for every grouped read and upper copy to succeed.
 
-**ID60/ID63 READ coalescing.** Same-extent grouping is ~30% of current Kread
-pairs but the latest A/B is not a qualified benefit. ID63 therefore measures a
-separate passive question: among the two distinct immutable extents already
-selected for one Kread dispatch, are the full physical ranges adjacent in one
-segment and <=64KiB total? Report distinct pairs, adjacent pairs and adjacent
-blocks separately for sequential/random. Do not delay a read, merge requests,
-or call this exact saved-I/O evidence yet.
+Depth-one media may use same-extent grouping and one-request ID63 coalescing;
+only two-request concurrent Kread dispatch remains gated on lower queue depth
+greater than one.
 
-**ID38 K>1.** The rollback adds passive K=1 ready-wait attribution only. Count
-nonempty flush windows observed while the active lower completion is genuinely
-unfinished, total/max records, exact completion-wait wall and close cause
-(PACK_READY/FULL/DEADLINE/fence/other). K=2 remains blocked until repeated
-reverted-baseline evidence shows sustained ready-run pressure and lower queue
-headroom.
+**IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
+128-payload synthetic duplication. Keep representative-corpus evidence only.
 
-**ID61 background GC.** Current lifecycle proves 20 distributed victim
-rotations, not a useful-I/O stall. Measure foreground GC stall and reserve
-headroom under bounded pressure before adding a worker.
+**ID61 background GC.** Timed mixed I/O sees zero victims; measure foreground GC
+stall/headroom before adding a worker.
 
-**ID62 physical media.** No current benchmark may collect this evidence.
-ID29 qualification on RAM does not authorize physical storage or active swap.
+**ID62 physical media.** No current benchmark may collect physical evidence.
+ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
 ## Physical media
 

@@ -149,6 +149,10 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_distinct_extent_pairs",
                       "parallel_read_adjacent_extent_pairs",
                       "parallel_read_adjacent_extent_blocks",
+                      "parallel_read_coalesced_pairs",
+                      "parallel_read_coalesced_reqs_saved",
+                      "parallel_read_coalesced_blocks",
+                      "parallel_read_coalesce_extra_blocks",
                       "read_worker_cpu_ns")
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
@@ -629,10 +633,16 @@ def run_stage(title, command, result, *, parse_bench=False):
     parallel_read_sessions = parse_parallel_read_ab(output) if parse_bench else []
     parallel_read_diagnostic = (parallel_read_ab_verdict(parallel_read_sessions)
                                 if parse_bench else None)
+    read_coalesce_sessions = parse_read_coalesce_ab(output) if parse_bench else []
+    read_coalesce_diagnostic = (
+        read_coalesce_ab_verdict(read_coalesce_sessions)
+        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        parallel_read_diagnostic.get("overall") !=
-                       "PASS_PARALLEL_READ_AB_CONFIRMATION"))
+                       "PASS_PARALLEL_READ_AB_CONFIRMATION" or
+                       read_coalesce_diagnostic.get("overall") !=
+                       "PASS_READ_COALESCE_AB_CONFIRMATION"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -651,10 +661,15 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "owned RAM lifecycle evidence"
                 record["diagnostic"] = loaded_correctness.get(
                     "reason", "Loaded correctness evidence is incomplete")
-            else:
+            elif parallel_read_diagnostic.get("overall") != (
+                    "PASS_PARALLEL_READ_AB_CONFIRMATION"):
                 record["failed_phase"] = "parallel READ A/B evidence"
                 record["diagnostic"] = parallel_read_diagnostic.get(
                     "reason", "Kread diagnostic evidence is incomplete")
+            else:
+                record["failed_phase"] = "adjacent READ coalescing A/B evidence"
+                record["diagnostic"] = read_coalesce_diagnostic.get(
+                    "reason", "ID63 diagnostic evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -672,6 +687,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                 "LIVE_VICTIMS_EXERCISED_OWNED_RAM")
         result["benchmarks"]["parallel_read_ab_sessions"] = parallel_read_sessions
         result["benchmarks"]["parallel_read_ab"] = parallel_read_diagnostic
+        result["benchmarks"]["read_coalesce_ab_sessions"] = read_coalesce_sessions
+        result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -690,6 +707,7 @@ def parse_sessions(output):
         if line.startswith("START_OWNED_RAM_REGIME="):
             regime = line.partition("=")[2]
         elif line.startswith(("START_PARALLEL_READ_AB=",
+                              "START_READ_COALESCE_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
             current = None
         elif line.startswith("START_OWNED_RAM_PAIR_ASYNC_PREPARE="):
@@ -914,6 +932,13 @@ def parallel_read_ab_verdict(sessions):
             if row["parallel_reads"] and not kernel["parallel_read_pairs"]:
                 return {"overall": "INCOMPLETE",
                         "reason": "Kread-on arm executed no parallel pairs"}
+            if any(kernel[field] for field in (
+                    "parallel_read_coalesced_pairs",
+                    "parallel_read_coalesced_reqs_saved",
+                    "parallel_read_coalesced_blocks",
+                    "parallel_read_coalesce_extra_blocks")):
+                return {"overall": "INCOMPLETE",
+                        "reason": "Kread A/B was contaminated by ID63 coalescing"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
@@ -952,6 +977,18 @@ def parallel_read_ab_verdict(sessions):
                 "parallel_read_adjacent_extent_blocks": statistics.mean(
                     p["kernel_read_path"]["parallel_read_adjacent_extent_blocks"]
                     for p in phases),
+                "parallel_read_coalesced_pairs": statistics.mean(
+                    p["kernel_read_path"]["parallel_read_coalesced_pairs"]
+                    for p in phases),
+                "parallel_read_coalesced_reqs_saved": statistics.mean(
+                    p["kernel_read_path"]["parallel_read_coalesced_reqs_saved"]
+                    for p in phases),
+                "parallel_read_coalesced_blocks": statistics.mean(
+                    p["kernel_read_path"]["parallel_read_coalesced_blocks"]
+                    for p in phases),
+                "parallel_read_coalesce_extra_blocks": statistics.mean(
+                    p["kernel_read_path"]["parallel_read_coalesce_extra_blocks"]
+                    for p in phases),
             }
         modes[str(enabled)] = passes
 
@@ -987,6 +1024,207 @@ def parallel_read_ab_verdict(sessions):
         "paired": paired,
         "interpretation":
             "SAME_SOURCE_SHARED_CACHE_KREAD_TOGGLE_SYNTHETIC_RAM_ONLY",
+    }
+
+
+
+def parse_read_coalesce_ab(output):
+    """Parse five matched fast-model rounds varying only ID63 coalescing."""
+    sessions, current = [], None
+    for line in output.splitlines():
+        line = line.strip()
+        match = re.fullmatch(r"START_READ_COALESCE_AB=([01])", line)
+        if match:
+            current = {"read_coalesce": int(match.group(1)),
+                       "status": "INCOMPLETE", "order": "unknown",
+                       "device_model": None, "swapz": None}
+            sessions.append(current)
+            continue
+        if current is None:
+            continue
+        if line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
+                line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
+        elif line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+                continue
+            packed = obj.get("packed_read") or {}
+            passes = {}
+            for mode in ("sequential", "seeded_random"):
+                phase = (packed.get("passes") or {}).get(mode) or {}
+                lower = phase.get("lower_io") or {}
+                passes[mode] = {
+                    "logical_bytes": phase.get("logical_bytes"),
+                    "verified_pages": phase.get("verified_pages"),
+                    "verified_image_sha256": phase.get("verified_image_sha256"),
+                    "useful_read_mbps": phase.get("useful_read_mbps"),
+                    "read_p99_ms": phase.get("read_p99_ms"),
+                    "lower_read_bytes": lower.get("lower_read_bytes"),
+                    "lower_read_requests": lower.get("lower_read_requests"),
+                    "kernel_read_path": phase.get("kernel_read_path"),
+                }
+            current["swapz"] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "logical_image_sha256": packed.get("logical_image_sha256"),
+                "packed_close_delta": packed.get("packed_close_delta"),
+                "passes": passes,
+            }
+        else:
+            done = re.fullmatch(r"PASS_READ_COALESCE_AB=([01])", line)
+            if done and int(done.group(1)) == current["read_coalesce"]:
+                current["status"] = "PASS"
+                current = None
+    return sessions
+
+
+def read_coalesce_ab_verdict(sessions):
+    """Validate five same-cache rounds holding Kread on and varying only ID63."""
+    try:
+        pairs = matched_binary_pairs(sessions, "read_coalesce")
+    except ValueError as exc:
+        return {"overall": "INCOMPLETE", "reason": str(exc)}
+    expected = MODEL_SPECS["ssd_emulated"]
+    for index, row in enumerate(sessions):
+        if row.get("status") != "PASS" or row.get("order") != (
+                "swapz-first" if index % 2 else "off-first"):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID63 confirmation order/status mismatch"}
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(model.get(key) != expected[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID63 confirmation device model mismatch"}
+        arm = row.get("swapz")
+        if not isinstance(arm, dict) or not re.fullmatch(
+                r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID63 confirmation source missing"}
+        if not isinstance(arm.get("packed_close_delta"), int) or \
+                arm["packed_close_delta"] <= 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID63 confirmation packed population missing"}
+        for mode in ("sequential", "seeded_random"):
+            phase = arm["passes"].get(mode)
+            if not isinstance(phase, dict) or \
+                    phase.get("logical_bytes") != 4194304 or \
+                    phase.get("verified_pages") != 1024:
+                return {"overall": "INCOMPLETE",
+                        "reason": "ID63 confirmation packed read incomplete"}
+            if any(not isinstance(phase.get(key), (int, float)) or
+                   phase[key] < 0 for key in
+                   ("useful_read_mbps", "read_p99_ms",
+                    "lower_read_bytes", "lower_read_requests")):
+                return {"overall": "INCOMPLETE",
+                        "reason": "ID63 confirmation metrics missing"}
+            kernel = phase.get("kernel_read_path")
+            if not isinstance(kernel, dict) or any(
+                    type(kernel.get(name)) is not int or kernel[name] < 0
+                    for name in KERNEL_READ_FIELDS):
+                return {"overall": "INCOMPLETE",
+                        "reason": "ID63 confirmation C telemetry missing"}
+            if not kernel["parallel_read_pairs"]:
+                return {"overall": "INCOMPLETE",
+                        "reason": "ID63 confirmation did not keep Kread active"}
+            if not row["read_coalesce"] and (
+                    kernel["parallel_read_coalesced_pairs"] or
+                    kernel["parallel_read_coalesced_reqs_saved"] or
+                    kernel["parallel_read_coalesced_blocks"] or
+                    kernel["parallel_read_coalesce_extra_blocks"]):
+                return {"overall": "INCOMPLETE",
+                        "reason": "ID63-off arm executed coalescing"}
+        if row["read_coalesce"] and not arm["passes"]["sequential"][
+                "kernel_read_path"]["parallel_read_coalesced_pairs"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID63-on arm executed no sequential coalescing"}
+    if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
+            len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
+            len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
+        return {"overall": "INCONCLUSIVE",
+                "reason": "ID63 confirmation provenance mismatch"}
+
+    modes = {}
+    for enabled in (0, 1):
+        rows = [row["swapz"] for row in sessions
+                if row["read_coalesce"] == enabled]
+        passes = {}
+        for mode in ("sequential", "seeded_random"):
+            phases = [row["passes"][mode] for row in rows]
+            passes[mode] = {
+                "useful_read_mbps":
+                    statistics.mean(p["useful_read_mbps"] for p in phases),
+                "read_p99_ms":
+                    statistics.mean(p["read_p99_ms"] for p in phases),
+                "lower_read_bytes":
+                    statistics.mean(p["lower_read_bytes"] for p in phases),
+                "lower_read_requests":
+                    statistics.mean(p["lower_read_requests"] for p in phases),
+            }
+            for field in (
+                    "parallel_read_pairs",
+                    "parallel_read_same_extent_pairs",
+                    "parallel_read_distinct_extent_pairs",
+                    "parallel_read_adjacent_extent_pairs",
+                    "parallel_read_adjacent_extent_blocks",
+                    "parallel_read_coalesced_pairs",
+                    "parallel_read_coalesced_reqs_saved",
+                    "parallel_read_coalesced_blocks",
+                    "parallel_read_coalesce_extra_blocks"):
+                passes[mode][field] = statistics.mean(
+                    p["kernel_read_path"][field] for p in phases)
+        modes[str(enabled)] = passes
+
+    paired = {}
+    for mode in ("sequential", "seeded_random"):
+        p99, throughput, lower_bytes, lower_requests = [], [], [], []
+        for pair in pairs:
+            off = pair[0]["swapz"]["passes"][mode]
+            on = pair[1]["swapz"]["passes"][mode]
+            if not off["read_p99_ms"] or not off["useful_read_mbps"] or \
+                    not off["lower_read_bytes"] or not off["lower_read_requests"]:
+                return {"overall": "INCOMPLETE",
+                        "reason": "ID63 confirmation zero denominator"}
+            p99.append(on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
+            throughput.append(
+                on["useful_read_mbps"] / off["useful_read_mbps"] - 1.0)
+            lower_bytes.append(
+                on["lower_read_bytes"] / off["lower_read_bytes"] - 1.0)
+            lower_requests.append(
+                on["lower_read_requests"] / off["lower_read_requests"] - 1.0)
+        paired[mode] = {
+            "p99_change_fraction": paired_ci95(p99),
+            "throughput_change_fraction": paired_ci95(throughput),
+            "lower_bytes_change_fraction": paired_ci95(lower_bytes),
+            "lower_requests_change_fraction": paired_ci95(lower_requests),
+        }
+    return {
+        "overall": "PASS_READ_COALESCE_AB_CONFIRMATION",
+        "matched_pairs": 5,
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "device_model": expected,
+        "modes": modes,
+        "paired": paired,
+        "interpretation":
+            "SAME_SOURCE_KREAD_ON_ONLY_ID63_COALESCE_TOGGLE_SYNTHETIC_RAM_ONLY",
     }
 
 
@@ -1448,7 +1686,16 @@ def benchmark_verdicts(sessions):
                            record["parallel_read_adjacent_extent_blocks"] <
                                2 * record["parallel_read_adjacent_extent_pairs"] or
                            record["parallel_read_adjacent_extent_blocks"] >
-                               16 * record["parallel_read_adjacent_extent_pairs"]
+                               8 * record["parallel_read_adjacent_extent_pairs"] or
+                           record["parallel_read_coalesced_pairs"] >
+                               record["parallel_read_adjacent_extent_pairs"] or
+                           record["parallel_read_coalesced_reqs_saved"] !=
+                               record["parallel_read_coalesced_pairs"] or
+                           record["parallel_read_coalesced_blocks"] <
+                               2 * record["parallel_read_coalesced_pairs"] or
+                           record["parallel_read_coalesced_blocks"] >
+                               8 * record["parallel_read_coalesced_pairs"] or
+                           record["parallel_read_coalesce_extra_blocks"] != 0
                            for record in diagnostics):
                         return {"overall": "INCOMPLETE",
                                 "reason": f"{regime}: missing/inconsistent measured swapz {mode} C read counters"}
@@ -1989,12 +2236,12 @@ def print_bench(result):
             ))
         print_table(("parallel", "seq KiB", "seq req", "seq p99",
                      "rnd KiB", "rnd req", "rnd p99", "pairs", "same-ext"), rows)
-        # Keep passive ID63 evidence separate from the Kread matrix so the
-        # operator summary remains compact while JSON retains every counter.
+        # Keep passive adjacency visible in the Kread-on arm; active ID63 is
+        # qualified separately below with Kread held on in both arms.
         enabled = parallel_ab["modes"]["1"]
-        print("  ID63 adjacent distinct-extent opportunity")
+        print("  ID63 passive adjacent distinct-extent opportunity")
         print_table(
-            ("read", "dist-ext", "adj-ext", "adj blocks"),
+            ("read", "dist", "adj", "blocks"),
             [
                 ("seq",
                  f"{enabled['sequential']['parallel_read_distinct_extent_pairs']:.1f}",
@@ -2015,6 +2262,53 @@ def print_bench(result):
     else:
         print("\n  ID39 parallel READ A/B: NOT QUALIFIED "
               f"({parallel_ab.get('reason', parallel_ab.get('overall', 'NOT_RUN'))})")
+
+    coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
+    if coalesce_ab.get("overall") == "PASS_READ_COALESCE_AB_CONFIRMATION":
+        print("\n  ID63 ADJACENT READ COALESCE A/B — five matched rounds")
+        rows = []
+        for enabled in ("0", "1"):
+            seq = coalesce_ab["modes"][enabled]["sequential"]
+            rnd = coalesce_ab["modes"][enabled]["seeded_random"]
+            rows.append((
+                enabled,
+                f"{seq['lower_read_requests']:.1f}",
+                f"{seq['read_p99_ms']:.2f}",
+                f"{rnd['lower_read_requests']:.1f}",
+                f"{rnd['read_p99_ms']:.2f}",
+                f"{seq['parallel_read_coalesced_reqs_saved']:.1f}",
+                f"{rnd['parallel_read_coalesced_reqs_saved']:.1f}",
+            ))
+        print_table(("merge", "seq req", "seq p99", "rnd req", "rnd p99",
+                     "seq saved", "rnd saved"), rows)
+        active = coalesce_ab["modes"]["1"]
+        print("  ID63 active exact-range accounting")
+        print_table(
+            ("read", "dist", "adj", "merged", "blocks", "extra"),
+            [
+                ("seq",
+                 f"{active['sequential']['parallel_read_distinct_extent_pairs']:.1f}",
+                 f"{active['sequential']['parallel_read_adjacent_extent_pairs']:.1f}",
+                 f"{active['sequential']['parallel_read_coalesced_pairs']:.1f}",
+                 f"{active['sequential']['parallel_read_coalesced_blocks']:.1f}",
+                 f"{active['sequential']['parallel_read_coalesce_extra_blocks']:.1f}"),
+                ("rnd",
+                 f"{active['seeded_random']['parallel_read_distinct_extent_pairs']:.1f}",
+                 f"{active['seeded_random']['parallel_read_adjacent_extent_pairs']:.1f}",
+                 f"{active['seeded_random']['parallel_read_coalesced_pairs']:.1f}",
+                 f"{active['seeded_random']['parallel_read_coalesced_blocks']:.1f}",
+                 f"{active['seeded_random']['parallel_read_coalesce_extra_blocks']:.1f}"),
+            ])
+        req_ci = coalesce_ab["paired"]["sequential"]["lower_requests_change_fraction"]
+        p99_ci = coalesce_ab["paired"]["sequential"]["p99_change_fraction"]
+        print("  seq on/off paired 95% CI: "
+              f"req {req_ci['mean'] * 100:+.1f}% "
+              f"[{req_ci['low'] * 100:+.1f},{req_ci['high'] * 100:+.1f}]%; "
+              f"p99 {p99_ci['mean'] * 100:+.1f}% "
+              f"[{p99_ci['low'] * 100:+.1f},{p99_ci['high'] * 100:+.1f}]%")
+    else:
+        print("\n  ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
+              f"({coalesce_ab.get('reason', coalesce_ab.get('overall', 'NOT_RUN'))})")
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":

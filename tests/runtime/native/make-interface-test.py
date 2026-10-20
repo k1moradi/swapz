@@ -333,6 +333,10 @@ class PublicMakeContract(unittest.TestCase):
                     "parallel_read_distinct_extent_pairs": 64,
                     "parallel_read_adjacent_extent_pairs": 24,
                     "parallel_read_adjacent_extent_blocks": 144,
+                    "parallel_read_coalesced_pairs": 20,
+                    "parallel_read_coalesced_reqs_saved": 20,
+                    "parallel_read_coalesced_blocks": 80,
+                    "parallel_read_coalesce_extra_blocks": 0,
                     "read_worker_cpu_ns": 1000000,
                                 } if is_swapz else None),
                             }
@@ -356,12 +360,37 @@ class PublicMakeContract(unittest.TestCase):
             def mock_parallel_arm(enabled):
                 record = json.loads(mock_arm("swapz", 0))
                 for phase in record["packed_read"]["passes"].values():
+                    kernel = phase["kernel_read_path"]
                     if not enabled:
-                        phase["kernel_read_path"]["parallel_read_pairs"] = 0
-                        phase["kernel_read_path"]["parallel_read_same_extent_pairs"] = 0
-                        phase["kernel_read_path"]["parallel_read_distinct_extent_pairs"] = 0
-                        phase["kernel_read_path"]["parallel_read_adjacent_extent_pairs"] = 0
-                        phase["kernel_read_path"]["parallel_read_adjacent_extent_blocks"] = 0
+                        for field in (
+                                "parallel_read_pairs",
+                                "parallel_read_same_extent_pairs",
+                                "parallel_read_distinct_extent_pairs",
+                                "parallel_read_adjacent_extent_pairs",
+                                "parallel_read_adjacent_extent_blocks"):
+                            kernel[field] = 0
+                    for field in (
+                            "parallel_read_coalesced_pairs",
+                            "parallel_read_coalesced_reqs_saved",
+                            "parallel_read_coalesced_blocks",
+                            "parallel_read_coalesce_extra_blocks"):
+                        kernel[field] = 0
+                return json.dumps(record, sort_keys=True)
+
+            def mock_coalesce_arm(enabled):
+                record = json.loads(mock_parallel_arm(1))
+                for key, phase in record["packed_read"]["passes"].items():
+                    kernel = phase["kernel_read_path"]
+                    if enabled:
+                        kernel["parallel_read_coalesced_pairs"] = (
+                            20 if key == "sequential" else 2)
+                        kernel["parallel_read_coalesced_reqs_saved"] = (
+                            kernel["parallel_read_coalesced_pairs"])
+                        kernel["parallel_read_coalesced_blocks"] = (
+                            80 if key == "sequential" else 8)
+                        phase["lower_io"]["lower_read_requests"] -= (
+                            kernel["parallel_read_coalesced_reqs_saved"])
+                        phase["read_p99_ms"] *= .95
                 return json.dumps(record, sort_keys=True)
 
             def mock_write_arm(candidate, qd, mode):
@@ -431,6 +460,15 @@ class PublicMakeContract(unittest.TestCase):
                     mock_parallel_arm(enabled) if index % 2 else mock_arm("off", 0),
                     mock_arm("off", 0) if index % 2 else mock_parallel_arm(enabled),
                     f"PASS_PARALLEL_READ_AB={enabled}",
+                ))
+            for index, enabled in enumerate(confirmation):
+                records.extend((
+                    f"START_READ_COALESCE_AB={enabled}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
+                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
+                    mock_coalesce_arm(enabled) if index % 2 else mock_arm("off", 0),
+                    mock_arm("off", 0) if index % 2 else mock_coalesce_arm(enabled),
+                    f"PASS_READ_COALESCE_AB={enabled}",
                 ))
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_WRITE_SATURATION_REGIME={regime}")

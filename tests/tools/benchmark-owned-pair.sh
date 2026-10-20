@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] [--read-coalesce 0|1] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -17,6 +17,7 @@ MEASURE_OPS=1024
 IOPS=500
 ASYNC_PREPARE=0
 PARALLEL_READS=1
+READ_COALESCE=1
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
@@ -43,6 +44,13 @@ fi
 if [[ $# -ge 3 && ${@: -2:1} == --parallel-reads &&
       ( ${!#} == 0 || ${!#} == 1 ) ]]; then
     PARALLEL_READS="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# Isolated ID63 A/B control. Kread may remain enabled while only the
+# zero-extra adjacent-range merge is toggled.
+if [[ $# -ge 3 && ${@: -2:1} == --read-coalesce &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    READ_COALESCE="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Explicitly permit asynchronous preparation on the QD32 medium experiment.
@@ -378,7 +386,7 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -410,7 +418,13 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])retain_ms=$RETAIN_MS([[:spac
     fail 'unexpected swapz retained policy after owned DM creation'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE([[:space:]]|$)" ||
     fail 'loaded swapz async preparation does not match selected benchmark arm'
+expected_grouping=$PARALLEL_READS
+expected_coalescing=$(( PARALLEL_READS && READ_COALESCE ? 1 : 0 ))
 expected_parallel=$(( PARALLEL_READS && HW_QUEUE_DEPTH > 1 ? 1 : 0 ))
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" ||
+    fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||
+    fail 'loaded swapz read-coalescing gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])parallel_reads_enabled=$expected_parallel([[:space:]]|$)" ||
     fail 'loaded swapz parallel-read gate does not match selected benchmark arm'
 dmsetup deps -o devname "$DMNAME" | grep -Fq "${DISKS[1]}" ||

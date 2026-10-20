@@ -8,67 +8,60 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner qualification of ID57 source
-`1b1e3ee1a3914185b64c8d6e887c20e8f1e82863` passed all five stages;
-report-only commit `e35c51e0f9fd5d9459ac116805d13d5a13150bb5` is the latest
-canonical result. These remain owned-RAM `null_blk` synthetic models, not
-physical-media claims.
+Owner qualification of source
+`7ceefcff88e90ff9eafaa216c830488b4788c660` passed all five stages and
+published report-only commit `f704dc7203bdf843b040392e2ae0597d7f761bfd`.
+Evidence remains owned-RAM `null_blk` only.
 
-The earlier `a32a6ec...` run failed only because the report validator rejected
-a valid ID57 lifecycle crossing a timed boundary. The repaired owner runs now
-answer the performance question: ID57 is **refuted**. Fast write-only QD8 fell
-to 11.85 MB/s async versus 20.17 sync, paired -41.1% with 95% CI
-[-45.8%,-36.4%]. Fast mixed async/sync was 23.26/23.09 MB/s, only +0.8%
-CI [-3.2%,+4.8%], while async added 271.6 lower-WRITE requests
-CI [+192.9,+350.3].
+The ID57 rollback is now positively qualified rather than merely proposed.
+Fast write-only QD8 recovered to 24.13 MB/s async versus 20.36 sync,
++18.8% paired with 95% CI [+6.5%,+31.1%], target 8 and 512/0/0
+PACK_READY/deadline/idle closes. QD4 and QD32 likewise returned to exact
+4/32 targets with zero deadlines. Fast mixed service-dry displacement fell
+back to noise (+5.4, CI [-48.2,+59.0]) and the async-minus-sync lower-request
+difference is no longer confirmed (+54.6, CI [-47.9,+157.1]). ID57 remains
+Class 3 refuted/reverted; ID37 K=1 remains the qualified write pipeline.
 
-The measured failure is consistent with two ID57 feedback paths. Preserving a
-zero post-PACK sample and prior `retained_chain_completed` across K=1
-completion can combine old completed width with the next closed-loop wave:
-fast write-only QD8 ended with learned target 12 and 274.8 deadline closes,
-where the pre-ID57 `1352e46...` control closed QD8 windows at target 8 with
-zero deadlines. In fast mixed, burst-target closes fell by 15.2 but
-service-proven-dry closes rose by 263.4 and 3-4-record windows rose to 250.4
-async versus 52.6 sync. Treat this as the supported root-cause model; the
-rollback qualification must reproduce the former geometry before calling the
-causal repair closed.
+ID29 is qualified on owned RAM: the lifecycle completed 36 exact 1MiB segment
+DISCARDs (73728 sectors) while 20 GC victims/rotations and all 4096 logical
+pages verified byte-exact. This is logical/alignment evidence, not physical
+flash endurance evidence.
 
-ID37/K=1 infrastructure itself remains the rollback target rather than the
-failure: pre-ID57 fast QD8 gave +23.1%, CI [+8.4%,+37.9%]. Revert only the
-ID57 PACK_READY/zero-tail intervention, not immutable-run ownership.
+ID38 passive counters show a real but small fast-mixed K=1 wait opportunity:
+30.5 ready windows / 88 records / 3.79 ms total, all PACK_READY, and zero
+ready-wait wall in the serial-depth model. Keep K>1 passive; the measured
+avoidable wait is too small to justify authority multi-slot expansion now.
 
-ID39 remains bounded/keep but the latest same-cache A/B is inconclusive:
-sequential p99 +4.6% CI [-8.7%,+17.8%], random -4.5%
-CI [-16.1%,+7.2%]. Kread-on observed 328.5 grouped pairs and 99.2 same-extent
-pairs, so same-extent opportunity is material enough to keep measuring but not
-enough to broaden Kread.
+ID63 passive evidence is asymmetric and much stronger: sequential Kread sees
+207.0 distinct-extent pairs and 162.4 physically adjacent pairs, while seeded
+random sees 392.2 distinct pairs but only 2.6 adjacent. The next candidate is a
+bounded active ID63 experiment that merges only the exact post-cache missing
+ranges when they are zero-gap contiguous in one segment. It never waits for a
+future BIO and never reads padding blocks.
 
-The new offline workload-opportunity record reports 0/12,301 nonzero
-same-filled writes (ID58). It reports only 128 unique measured payloads,
-12,301 resident-duplicate opportunities and 1,024 final live pages in duplicate
-sets (ID59), but that magnitude is intentionally synthetic fixture-pool reuse,
-not production prevalence.
+ID39 remains bounded/keep but not a confirmed latency win in the latest
+same-cache A/B: sequential p99 -4.8% CI [-16.7,+7.1], random -0.6%
+CI [-11.1,+9.9]. IDs58/59 remain representative-content evidence only; the
+fixture has zero nonzero same-filled writes and only 128 unique payloads.
 
 ## Current bottleneck ranking
 
-These overlapping wall counters are diagnostic, not additive. In the latest
-mixed run lower WRITE remains the largest measured WRITE-path wall at about
-601.7 ms slow / 177.0 ms fast. LZ4 preparation is 140.8/77.4 ms and commit
-non-I/O is 54.9/36.6 ms. Snapshot pause CRC remains only 1.7/1.1 ms; planner and
-explicit copy costs are secondary.
+The reverted write path is healthy enough that another collector intervention
+is not justified. Fast QD8 has a confirmed async gain and exact target/deadline
+geometry. Fast mixed still shows admission-side burst/overshoot differences,
+but throughput and lower-request deltas are not significantly worse.
 
-READ amplification is no longer the active defect. The shared extent cache is
-qualified independently and bounded Kread=2 remains useful without traffic
-inflation. The latest five-pair run makes sequential p99 significant
-(-12.1%, CI [-20.4%,-3.7%]); the prior run made seeded-random significant.
-Keep the READ algorithm unchanged rather than broadening concurrency.
+ID38 measures only 3.79 ms of genuine ready-window wait in the fast mixed run,
+zero in the slow model. That is useful evidence to keep, but not enough to pay
+for two independent paused authority transactions or a K=2 publication queue.
 
-WRITE fragmentation remains the leading scheduling question on the fast mixed
-model. ID57 worsened the problem to +271.6 async-minus-sync lower WRITE
-requests, CI [+192.9,+350.3], and moved fragmentation from burst-target closes
-into service-proven dry closes. The rollback restores ID56's observational
-tail sampling and removes the ID57 policy. New K>1 work is passive measurement
-only until the reverted K=1 baseline is requalified.
+The clearest bounded I/O opportunity is now READ-side request elimination, not
+more WRITE concurrency. ID63's sequential passive adjacency rate is high while
+random adjacency is nearly absent. The active experiment therefore asks a more
+strict question than the passive counter: after shared-cache priming and exact
+per-BIO map requirements are applied, how many pairs still have two nonempty,
+contiguous missing lower ranges that can be fetched by one zero-extra-byte
+request?
 
 ## Optimization evidence table
 
@@ -119,7 +112,7 @@ changes.
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
 | 37 | K=1 ping-pong WRITE pipeline | **1 qualified at fast write-only QD8; QD4 not confirmed** | Latest fast-QD8 five-pair result is +23.1%, CI [+8.4%,+37.9%]. Fast QD4 five-pair result is +1.4%, CI [-0.7%,+3.6%], so QD4 returns to directional control. Mixed has no significant async gain and carries +94.4 requests. Keep K=1; do not add slots. |
-| 38 | Shared accumulator with K>1 lower-write slots | **4 passive evidence after ID57 rollback** | Do not add K=2 yet. The reverted K=1 candidate records every nonempty ready window that reaches flush while the sole lower run is genuinely unfinished, exact wait wall/records and close cause. Reopen K=2 only if repeated fast-QD8/mixed evidence shows sustained ready-run blocking plus lower-device headroom. |
+| 38 | Shared accumulator with K>1 lower-write slots | **4 passive evidence; hold implementation** | Fast mixed measures 30.5 ready windows / 88 records / 3.79 ms total K=1 completion wait; slow measures zero. Keep counters and re-evaluate only if repeated workloads show materially larger wait wall. Do not add K=2 authority state now. |
 | 39 | Latency-first bounded parallel READ service | **1 bounded mechanism keep; latest generation inconclusive** | Latest same-cache A/B: seq p99 +4.6% CI [-8.7%,+17.8%], random -4.5% [-16.1%,+7.2%]. Keep Kread=2 and shared-cache ownership unchanged; do not broaden depth. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
 | 41 | Per-lane isolated write accumulators / 2xN packing queues | **5** | Reject by default; destroys global packing view and risks request inflation. |
@@ -144,7 +137,7 @@ changes.
 | 60 | Queued READ coalescing within the same immutable extent | **4 evidence collection** | Kread-on now observes 99.2 same-extent groups out of 328.5 grouped pairs (~30%), but latest p99/traffic benefit is inconclusive. Do not add another same-extent mechanism yet; keep immediate dispatch/no-future-wait rule. |
 | 61 | Background/asynchronous GC instead of foreground collection stalls | **4 dependent evidence** | Lifecycle GC is correct (20 victims/rotations), but timed mixed reports no foreground GC victims. First measure foreground GC stall/headroom during useful pressure; a worker is unjustified until GC materially contributes to latency with reserve headroom. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
-| 63 | Physically adjacent distinct-extent READ coalescing | **4 passive evidence implemented** | Count already-selected Kread pairs whose distinct immutable extents are physically contiguous within one segment and <=64KiB total. Report pair/block opportunity only; it is not yet exact request savings because cache residency/selective reads can change lower I/O. No merger or wait is implemented. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **4 bounded active experiment pending owner evidence** | Sequential passive adjacency is 162.4/207.0 distinct pairs versus 2.6/392.2 random. Candidate merges only exact post-cache missing ranges when both are nonempty, zero-gap contiguous, same-segment and <=8 blocks total; one synchronous lower READ seeds private slots, then ordinary generation/CRC/decode validation runs before shared cache publication. |
 
 
 ## What the pinned queue experiment establishes
@@ -193,32 +186,29 @@ before any on-disk-format change.
 
 ## Deferred content/concurrency evidence backlog
 
-These ideas remain durable, but the current candidate changes policy only for
-ID29 and reverts ID57. ID38 and ID63 are passive counters.
+The current candidate changes active policy only for ID63. ID38 remains passive.
 
+- **ID38:** retain ready-wait windows/records/wall/cause; do not implement K=2 from a 3.79 ms fast-mixed opportunity.
 - **ID58:** retain offline same-filled detection; current fixture opportunity is zero.
 - **ID59:** collect representative exact-content reuse/lifetime evidence before shared ownership.
-- **ID60:** retain same-extent prevalence and Kread A/B; no additional coalescer yet.
+- **ID60:** retain same-extent prevalence and Kread A/B; no separate mechanism while ID63 is tested.
 - **ID61:** add foreground-GC stall/reserve-headroom evidence under bounded useful pressure.
-- **ID38:** use reverted-baseline ready-wait windows/records/wall/cause before any K=2 implementation.
-- **ID63:** surface physically adjacent distinct-extent selected-pair prevalence and blocks; no merge yet.
 - **ID62:** physical devices remain outside the current development safety scope.
 
 ## Immediate work queue
 
-1. Owner-qualify the ID57 rollback plus bounded ID29 whole-dead-segment TRIM.
-   Fast QD8 must recover from the ID57 -41.1% regression without lower-byte or
-   read-tail regression; write-only QD4/8/32 deadline geometry is a primary
-   rollback check.
-2. Use the new passive ID38 counters to determine how often a genuinely ready
-   nonempty run waits behind unfinished K=1, how many records it contains, why
-   it closed and how much completion wait wall it experiences. Do not add K=2
-   in this generation.
-3. Use ID63 counters to measure selected distinct-extent adjacency separately
-   for sequential and seeded-random Kread evidence. Do not interpret the count
-   as saved requests until cache/block requirements are modeled.
-4. Keep ID58/59 opportunity collection offline. Obtain representative page
-   content before production representation/dedup work.
+1. Owner-qualify bounded ID63 alone with a five-pair same-cache A/B that keeps
+   Kread enabled in both arms and varies only the read-only coalescing control.
+   Require exact correctness, zero extra lower READ blocks, fewer sequential
+   lower READ requests, no random/request-tail regression, and no WRITE/GC regression.
+2. Keep the separate ID39 Kread A/B with coalescing forced off so its historical
+   meaning does not change. Compare passive adjacent pairs with actual ID63
+   coalesced pairs/request savings.
+   A large drop is useful evidence that cache/selective-read constraints matter;
+   do not call passive pairs saved requests.
+3. Keep ID38 passive. Reopen K=2 only if a later workload shows materially more
+   ready-window wait wall than the current 3.79 ms fast-mixed result.
+4. Keep ID58/59 opportunity collection offline and representative.
 5. Add foreground-GC stall/headroom evidence for ID61 before any background worker.
 6. Proceed independently with ID43 compound/folio coverage and heavy-CPU/low-RAM qualification.
 7. ID62 remains separately authorized future work; do not weaken null_blk-only admission.
