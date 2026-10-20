@@ -1256,6 +1256,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_predict_delta64_sample_score", predictor)
         self.assertIn("swapz_predict_should_try_delta64", predictor)
         self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PAIRS 64U", predictor)
+        sample_start = predictor.index(
+            "static inline swapz_u32 swapz_predict_delta64_sample_score")
+        sample_end = predictor.index(
+            "static inline int swapz_predict_should_try_delta64", sample_start)
+        sample_body = predictor[sample_start:sample_end]
+        self.assertNotIn("swapz_predictor_load32(input + line", sample_body)
+        self.assertIn("(swapz_u32)previous", sample_body)
+        self.assertIn("(swapz_u32)current", sample_body)
+        self.assertIn("(swapz_u32)(previous >> 32)", sample_body)
+        self.assertIn("(swapz_u32)(current >> 32)", sample_body)
         self.assertIn("swapz_predict_delta64_512", predictor)
         self.assertIn("swapz_unpredict_delta64_512", predictor)
         self.assertIn("swapz_engine_plan_bounded(", qualification)

@@ -245,16 +245,21 @@ static inline swapz_u32 swapz_predict_delta64_sample_score(
 		if (swapz_predictor_small_nonzero_delta64(current, previous)) {
 			score += 2U;
 		} else {
+			/*
+			 * Reuse the sampled 64-bit words rather than rereading the
+			 * same bytes as four u32 loads. On either endian, the two
+			 * corresponding halves may exchange lane labels, but their
+			 * pairwise deltas and summed score are unchanged.
+			 */
+			swapz_u32 previous0 = (swapz_u32)previous;
+			swapz_u32 current0 = (swapz_u32)current;
+			swapz_u32 previous1 = (swapz_u32)(previous >> 32);
+			swapz_u32 current1 = (swapz_u32)(current >> 32);
+
 			score += swapz_predictor_small_nonzero_delta32(
-				swapz_predictor_load32(input + line +
-					SWAPZ_PREDICTOR_U64_BYTES),
-				swapz_predictor_load32(input + line));
+				current0, previous0);
 			score += swapz_predictor_small_nonzero_delta32(
-				swapz_predictor_load32(input + line +
-					SWAPZ_PREDICTOR_U64_BYTES +
-					sizeof(swapz_u32)),
-				swapz_predictor_load32(input + line +
-					sizeof(swapz_u32)));
+				current1, previous1);
 		}
 	}
 	return score;

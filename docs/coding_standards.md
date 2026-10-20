@@ -574,6 +574,8 @@ pointer/page-table, integer counter/timestamp, float/double, fixed-layout
 struct and independently based subpage archetypes. Routing evidence must be
 separate from the full transform: sample the raw page first, never count a zero
 delta as positive evidence, and report false calls by negative profile.
+The sampled hot loop must cache each loaded 64-bit word and derive any 32-bit
+lane evidence from those cached values rather than rereading the same bytes.
 Thresholds are evidence, never kernel policy before measurement.
 
 Every candidate must round-trip exactly. Measure transform, inverse and optional
