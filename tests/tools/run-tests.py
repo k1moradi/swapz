@@ -424,12 +424,14 @@ def parse_gc_scan_scale_evidence(output):
                 row.get("victim_records") != 256:
             return None
         for field in ("legacy_score_scan_ns", "incremental_select_ns",
-                      "relocation_scan_ns"):
+                      "relocation_scan_ns", "legacy_dead_probe_ns",
+                      "mapped_dead_probe_ns"):
             if type(row.get(field)) is not int or row[field] <= 0:
                 return None
         clean.append({key: row[key] for key in (
             "logical_pages", "segments", "legacy_score_scan_ns",
             "incremental_select_ns", "relocation_scan_ns",
+            "legacy_dead_probe_ns", "mapped_dead_probe_ns",
             "victim_records")})
     return {"scope": record["scope"], "rows": clean}
 
@@ -659,7 +661,13 @@ def parse_loaded_correctness(output):
             r"gc_wall_ns:(\d+) gc_fraction_ppm:(\d+) "
             r"choose_wall_ns:(\d+) choose_calls:(\d+) "
             r"choose_map_entries:(\d+) choose_segment_entries:(\d+) "
-            r"relocation_map_entries:(\d+) no_headroom_skips:(\d+)$"),
+            r"relocation_map_entries:(\d+) no_headroom_skips:(\d+) "
+            r"alignment_hole_fg:(\d+) alignment_hole_gc:(\d+) "
+            r"run_splits_by_hole:(\d+) alloc_probe_segments:(\d+) "
+            r"alloc_probe_full_scans:(\d+) alloc_probe_wall_ns:(\d+) "
+            r"trim_skipped:(\d+) segment_program_min:(\d+) "
+            r"segment_program_sum:(\d+) segment_program_max:(\d+) "
+            r"segment_program_segments:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
             r"observed_open:(\d+) verified_pages:(\d+)$"),
@@ -693,7 +701,11 @@ def parse_loaded_correctness(output):
      gc_pressure_p99_ns, gc_wall_ns, gc_fraction_ppm,
      gc_choose_wall_ns, gc_choose_calls, gc_choose_map_entries,
      gc_choose_segment_entries, gc_relocation_map_entries,
-     gc_no_headroom_skips) = found["gc_pressure"]
+     gc_no_headroom_skips, alignment_hole_fg, alignment_hole_gc,
+     run_splits_by_hole, alloc_probe_segments, alloc_probe_full_scans,
+     alloc_probe_wall_ns, trim_skipped, segment_program_min,
+     segment_program_sum, segment_program_max,
+     segment_program_segments) = found["gc_pressure"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
@@ -720,6 +732,11 @@ def parse_loaded_correctness(output):
             gc_choose_map_entries != 0 or
             gc_choose_segment_entries <= 0 or
             gc_relocation_map_entries < gc_victims * 4096 or
+            alloc_probe_segments <= 0 or alloc_probe_full_scans <= 0 or
+            alloc_probe_full_scans > alloc_probe_segments or
+            segment_program_segments <= 0 or
+            segment_program_min > segment_program_max or
+            segment_program_sum < segment_program_max or
             gc_fraction_ppm !=
             gc_wall_ns * 1000000 // gc_useful_write_wall_ns):
         return {"overall": "INCOMPLETE",
@@ -763,6 +780,17 @@ def parse_loaded_correctness(output):
         "gc_choose_segment_entries": gc_choose_segment_entries,
         "gc_relocation_map_entries": gc_relocation_map_entries,
         "gc_no_headroom_skips": gc_no_headroom_skips,
+        "alignment_hole_blocks_foreground": alignment_hole_fg,
+        "alignment_hole_blocks_gc": alignment_hole_gc,
+        "run_splits_by_hole": run_splits_by_hole,
+        "alloc_probe_segments": alloc_probe_segments,
+        "alloc_probe_full_scans": alloc_probe_full_scans,
+        "alloc_probe_wall_ns": alloc_probe_wall_ns,
+        "segment_discards_skipped_already_trimmed": trim_skipped,
+        "segment_program_min": segment_program_min,
+        "segment_program_sum": segment_program_sum,
+        "segment_program_max": segment_program_max,
+        "segment_program_segments": segment_program_segments,
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
         "suspend_verified_pages": verified_pages,
@@ -2314,6 +2342,14 @@ def print_bench(result):
                 f"{row['incremental_select_ns'] / 1e6:.3f}",
                 f"{row['relocation_scan_ns'] / 1e6:.3f}",
             ) for row in gc_scale["rows"]])
+        print("  ID71 DEAD-SEGMENT PROBE SCALE — native CPU evidence; no lower I/O")
+        print_table(
+            ("logical pages", "segments", "old probe ms", "mapped probe ms"),
+            [(
+                row["logical_pages"], row["segments"],
+                f"{row['legacy_dead_probe_ns'] / 1e6:.3f}",
+                f"{row['mapped_dead_probe_ns'] / 1e6:.3f}",
+            ) for row in gc_scale["rows"]])
 
     verdict = result["benchmarks"]["verdicts"]
     if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
@@ -2818,7 +2854,20 @@ def print_bench(result):
                  f"{loaded['gc_victim_max_evictions']} min/max"),
                 ("segment TRIM",
                  f"{loaded['gc_segment_discards']} x 1MiB; "
-                 f"{loaded['gc_segment_discard_sectors']} sectors"),
+                 f"{loaded['gc_segment_discard_sectors']} sectors; "
+                 f"{loaded['segment_discards_skipped_already_trimmed']} duplicate skips"),
+                ("placement holes",
+                 f"FG {loaded['alignment_hole_blocks_foreground']} / "
+                 f"GC {loaded['alignment_hole_blocks_gc']} blocks; "
+                 f"{loaded['run_splits_by_hole']} run splits"),
+                ("allocator probes",
+                 f"{loaded['alloc_probe_segments']} segments / "
+                 f"{loaded['alloc_probe_full_scans']} full scans; "
+                 f"{loaded['alloc_probe_wall_ns'] / 1e6:.2f} ms"),
+                ("logical segment opens",
+                 f"{loaded['segment_program_min']}/"
+                 f"{loaded['segment_program_sum'] / loaded['segment_program_segments']:.2f}/"
+                 f"{loaded['segment_program_max']} min/mean/max"),
             ("GC pressure",
                  f"wall {loaded['gc_fraction_ppm'] / 10000:.2f}% useful-W; "
                  f"p99 {loaded['gc_baseline_p99_ns'] / 1e6:.2f}->"

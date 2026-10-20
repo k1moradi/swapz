@@ -65,6 +65,9 @@ struct swapz_authority {
 	 * supplies this bounded sidecar so dead-segment validation is O(256)
 	 * instead of rescanning every logical page. */
 	swapz_u32 *segment_mapped_pages;
+	/* Optional logical segment-open counts. These are allocator write-cycle
+	 * telemetry, not physical NAND wear measurements. */
+	swapz_u32 *segment_program_counts;
 	/* Optional per-segment GC scores maintained with map publication. */
 	swapz_u32 *segment_gc_live_bytes;
 	swapz_u32 *segment_gc_io_cost;
@@ -74,6 +77,12 @@ struct swapz_authority {
 	swapz_u32 next_block;
 	swapz_u32 open_segment;		/* UINT32_MAX before the first allocation */
 	swapz_u32 next_segment_probe;
+	/* Placement/allocation evidence only; never participates in policy. */
+	unsigned long long alignment_hole_blocks_foreground;
+	unsigned long long alignment_hole_blocks_gc;
+	unsigned long long alloc_probe_segments;
+	unsigned long long alloc_probe_full_scans;
+	unsigned long long alloc_probe_wall_ns;
 	swapz_u32 recycled_dead_segments;
 	/*
 	 * Optional caller hook invoked only after a previously written 1MiB
@@ -149,6 +158,9 @@ int swapz_enable_segment_rotation(struct swapz_authority *authority,
  * authority. Native/research callers may omit it and retain full-map checks. */
 int swapz_enable_segment_mapping_counts(struct swapz_authority *authority,
 				      swapz_u32 *segment_mapped_pages,
+				      swapz_u32 segment_count);
+int swapz_enable_segment_program_counts(struct swapz_authority *authority,
+				      swapz_u32 *segment_program_counts,
 				      swapz_u32 segment_count);
 int swapz_enable_segment_gc_accounting(struct swapz_authority *authority,
 				     swapz_u32 *live_bytes,

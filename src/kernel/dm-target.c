@@ -282,6 +282,8 @@ struct swapz_dm {
 	swapz_u16 *gc_min_live_blocks; /* proven per-survivor block bound */
 	swapz_u32 *gc_segment_evictions; /* successful committed victim rotations */
 	swapz_u32 *segment_mapped_pages; /* exact current logical maps per segment */
+	swapz_u32 *segment_program_counts; /* logical allocator opens, not NAND wear */
+	swapz_u8 *segment_trimmed; /* successful whole-segment DISCARD since write */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	swapz_u32 segment_count;
 	swapz_u8 gc_cost_policy; /* 0=record count; 1=payload bytes; 2=I/O */
@@ -313,6 +315,7 @@ struct swapz_dm {
 	u64 segment_discards_failed;
 	u64 segment_discard_sectors;
 	u64 segment_discard_wall_ns;
+	u64 segment_discards_skipped_already_trimmed;
 	swapz_u8 batch_count;
 	swapz_u8 max_window;
 	/* K=1 asynchronous lower slot. bulk_scratch/bulk_txs are immutable
@@ -658,6 +661,19 @@ static void swapz_async_lower_write_done(unsigned long error, void *context)
 	mod_delayed_work(ctx->workqueue, &ctx->worker, 0);
 }
 
+static void swapz_mark_segments_dirty(struct swapz_dm *ctx,
+				      swapz_u32 block, swapz_u16 blocks)
+{
+	swapz_u32 segment, last_segment;
+
+	if (!ctx->segment_trimmed || !blocks)
+		return;
+	segment = block / SWAPZ_SEGMENT_BLOCKS;
+	last_segment = (block + blocks - 1U) / SWAPZ_SEGMENT_BLOCKS;
+	for (; segment <= last_segment; ++segment)
+		WRITE_ONCE(ctx->segment_trimmed[segment], 0);
+}
+
 static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 {
 	struct swapz_inflight_write *inflight = &ctx->inflight_write;
@@ -689,6 +705,8 @@ static int swapz_submit_inflight_write(struct swapz_dm *ctx)
 		ctx->write_fault_injected++;
 		return -EIO;
 	}
+	swapz_mark_segments_dirty(ctx, inflight->run.start_block,
+				 inflight->run.blocks);
 	swapz_invalidate_read_caches(ctx);
 	ctx->lower_write_submitted_bytes +=
 		(u64)inflight->run.blocks * SWAPZ_BLOCK_BYTES;
@@ -861,6 +879,9 @@ static int swapz_lower(struct swapz_dm *ctx, enum req_op op, swapz_u32 block,
 		ctx->write_fault_injected++;
 		return -EIO;
 	}
+	/* A submitted write may dirty media even if completion later fails. */
+	if (op == REQ_OP_WRITE)
+		swapz_mark_segments_dirty(ctx, block, blocks);
 	/* Cover direct RAW writes and GC relocation as well as engine writes.
 	 * The synchronous lower worker exclusively owns read_scratch. */
 	if (op == REQ_OP_WRITE)
@@ -1043,6 +1064,10 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 			return -EUCLEAN;
 
 	ctx->segment_discards_eligible++;
+	if (ctx->segment_trimmed && READ_ONCE(ctx->segment_trimmed[segment])) {
+		ctx->segment_discards_skipped_already_trimmed++;
+		return 0;
+	}
 	sectors = (sector_t)SWAPZ_SEGMENT_BLOCKS * SWAPZ_SECTORS;
 	if (!bdev_max_discard_sectors(ctx->backing->bdev)) {
 		ctx->segment_discards_unsupported++;
@@ -1065,6 +1090,8 @@ static int swapz_discard_dead_segment(void *opaque, swapz_u32 segment)
 	}
 	ctx->segment_discards_completed++;
 	ctx->segment_discard_sectors += sectors;
+	if (ctx->segment_trimmed)
+		WRITE_ONCE(ctx->segment_trimmed[segment], 1);
 	return 0;
 }
 
@@ -4273,6 +4300,8 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->gc_min_live_blocks);
 	kvfree(ctx->gc_segment_evictions);
 	kvfree(ctx->segment_mapped_pages);
+	kvfree(ctx->segment_program_counts);
+	kvfree(ctx->segment_trimmed);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
 	vfree(ctx->read_page);
@@ -4438,6 +4467,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->segment_mapped_pages = kvcalloc(ctx->segment_count,
 					    sizeof(*ctx->segment_mapped_pages),
 					    GFP_KERNEL);
+	ctx->segment_program_counts = kvcalloc(ctx->segment_count,
+					      sizeof(*ctx->segment_program_counts),
+					      GFP_KERNEL);
+	ctx->segment_trimmed = kvcalloc(ctx->segment_count,
+					sizeof(*ctx->segment_trimmed), GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
 				     sizeof(*ctx->segment_roles), GFP_KERNEL);
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
@@ -4447,6 +4481,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_min_live_blocks ||
 	    !ctx->gc_segment_evictions || !ctx->segment_mapped_pages ||
+	    !ctx->segment_program_counts || !ctx->segment_trimmed ||
 	    !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
@@ -4472,6 +4507,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 						ctx->segment_count);
 	if (error) {
 		ti->error = "Cannot initialize exact segment mapping counts";
+		goto fail;
+	}
+	error = swapz_enable_segment_program_counts(&ctx->authority,
+						 ctx->segment_program_counts,
+						 ctx->segment_count);
+	if (error) {
+		ti->error = "Cannot initialize logical segment-open accounting";
 		goto fail;
 	}
 	error = swapz_enable_segment_gc_accounting(&ctx->authority,
@@ -4642,12 +4684,34 @@ static void swapz_gc_victim_distribution(const struct swapz_dm *ctx,
 	*maximum = max_count;
 }
 
+static void swapz_segment_program_distribution(const struct swapz_dm *ctx,
+					      swapz_u32 *minimum,
+					      u64 *sum,
+					      swapz_u32 *maximum)
+{
+	swapz_u32 segment, min_count = U32_MAX, max_count = 0;
+	u64 total = 0;
+
+	for (segment = 0; segment < ctx->segment_count; ++segment) {
+		swapz_u32 count = ctx->segment_program_counts[segment];
+
+		min_count = min(min_count, count);
+		max_count = max(max_count, count);
+		total += count;
+	}
+	*minimum = min_count == U32_MAX ? 0 : min_count;
+	*sum = total;
+	*maximum = max_count;
+}
+
 static void swapz_status(struct dm_target *ti, status_type_t type,
 		       unsigned int flags, char *result, unsigned int maxlen)
 {
 	struct swapz_dm *ctx = ti->private;
 	swapz_u32 gc_distinct_victims, gc_victim_min_evictions;
 	swapz_u32 gc_victim_max_evictions;
+	swapz_u32 segment_program_min, segment_program_max;
+	u64 segment_program_sum;
 	u64 engine_publish_auth_wall_ns;
 	unsigned int sz = 0;
 
@@ -4655,6 +4719,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 	swapz_gc_victim_distribution(ctx, &gc_distinct_victims,
 				     &gc_victim_min_evictions,
 				     &gc_victim_max_evictions);
+	swapz_segment_program_distribution(ctx, &segment_program_min,
+					   &segment_program_sum,
+					   &segment_program_max);
 	engine_publish_auth_wall_ns =
 		ctx->engine_publish_wall_ns >= ctx->engine_publish_crc_wall_ns ?
 		ctx->engine_publish_wall_ns - ctx->engine_publish_crc_wall_ns : 0;
@@ -4685,6 +4752,13 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "segment_discards_completed=%llu segment_discards_unsupported=%llu "
 		       "segment_discards_failed=%llu segment_discard_sectors=%llu "
 		       "segment_discard_wall_ns=%llu "
+		       "segment_discards_skipped_already_trimmed=%llu "
+		       "alignment_hole_blocks_foreground=%llu "
+		       "alignment_hole_blocks_gc=%llu run_splits_by_hole=%u "
+		       "alloc_probe_segments=%llu alloc_probe_full_scans=%llu "
+		       "alloc_probe_wall_ns=%llu "
+		       "segment_program_min=%u segment_program_sum=%llu "
+		       "segment_program_max=%u segment_program_segments=%u "
 		       "write_verify_blocks=%u verify=%u "
 		       "write_submitted=%llu write_submitted_reqs=%llu "
 		       "read_submitted=%llu read_submitted_reqs=%llu "
@@ -4863,6 +4937,15 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->segment_discards_failed,
 		       ctx->segment_discard_sectors,
 		       ctx->segment_discard_wall_ns,
+		       ctx->segment_discards_skipped_already_trimmed,
+		       ctx->authority.alignment_hole_blocks_foreground,
+		       ctx->authority.alignment_hole_blocks_gc,
+		       ctx->engine.run_splits_by_hole,
+		       ctx->authority.alloc_probe_segments,
+		       ctx->authority.alloc_probe_full_scans,
+		       ctx->authority.alloc_probe_wall_ns,
+		       segment_program_min, segment_program_sum,
+		       segment_program_max, ctx->segment_count,
 		       ctx->engine.write_verify_read_blocks,
 		       ctx->engine.verify_after_write,
 		       ctx->lower_write_submitted_bytes,

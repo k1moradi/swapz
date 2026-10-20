@@ -109,6 +109,8 @@ def gc_scan_scale_evidence():
                 "legacy_score_scan_ns": 2000000,
                 "incremental_select_ns": 20000,
                 "relocation_scan_ns": 800000,
+                "legacy_dead_probe_ns": 700000,
+                "mapped_dead_probe_ns": 12000,
                 "victim_records": 256,
             },
             {
@@ -116,6 +118,8 @@ def gc_scan_scale_evidence():
                 "legacy_score_scan_ns": 8000000,
                 "incremental_select_ns": 80000,
                 "relocation_scan_ns": 3200000,
+                "legacy_dead_probe_ns": 2800000,
+                "mapped_dead_probe_ns": 15000,
                 "victim_records": 256,
             },
         ],
@@ -449,7 +453,7 @@ def synthetic_log():
            "SOURCE_HEAD=a" + "a" * 39,
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
            "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
-           "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:49152 no_headroom_skips:3",
+           "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:49152 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
@@ -632,6 +636,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["gc_choose_map_entries"], 0)
         self.assertEqual(loaded["gc_relocation_map_entries"], 49152)
         self.assertEqual(loaded["gc_no_headroom_skips"], 3)
+        self.assertEqual(loaded["alignment_hole_blocks_foreground"], 24)
+        self.assertEqual(loaded["run_splits_by_hole"], 8)
+        self.assertEqual(loaded["segment_discards_skipped_already_trimmed"], 6)
+        self.assertEqual(loaded["segment_program_max"], 4)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
         self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
@@ -652,7 +660,12 @@ class ReportContract(unittest.TestCase):
             "gc_wall_ns:200000000 gc_fraction_ppm:200000 "
             "choose_wall_ns:20000000 choose_calls:12 "
             "choose_map_entries:0 choose_segment_entries:768 "
-            "relocation_map_entries:49152 no_headroom_skips:3\n", "")
+            "relocation_map_entries:49152 no_headroom_skips:3 "
+            "alignment_hole_fg:24 alignment_hole_gc:2 run_splits_by_hole:8 "
+            "alloc_probe_segments:1024 alloc_probe_full_scans:16 "
+            "alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 "
+            "segment_program_sum:80 segment_program_max:4 "
+            "segment_program_segments:32\n", "")
         self.assertEqual(
             runner.parse_loaded_correctness(missing_pressure)["overall"],
             "INCOMPLETE")

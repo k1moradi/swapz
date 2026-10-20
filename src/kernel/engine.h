@@ -84,6 +84,8 @@ struct swapz_engine {
 	swapz_u32 bulk_writes;
 	swapz_u32 bulk_extents;
 	swapz_u32 bulk_padding_blocks;
+	/* Adjacent-only runs closed because extent alignment inserted a gap. */
+	swapz_u32 run_splits_by_hole;
 	/* Successful fully published runs by media composition, not a claim
 	 * about block-layer merged/split requests. */
 	swapz_u32 bulk_mixed_runs;

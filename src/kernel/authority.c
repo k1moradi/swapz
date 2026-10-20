@@ -20,6 +20,16 @@ static unsigned long long swapz_authority_now_ns(void)
 #endif
 }
 
+static int swapz_finish_alloc_probe(struct swapz_authority *a,
+				    unsigned long long start, int result)
+{
+	unsigned long long end = swapz_authority_now_ns();
+
+	if (end >= start)
+		a->alloc_probe_wall_ns += end - start;
+	return result;
+}
+
 static swapz_u32 swapz_publish_crc32c(struct swapz_authority *a,
 				      const void *bytes, swapz_u32 length)
 {
@@ -293,50 +303,46 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 			 a->physical_blocks :
 			 a->physical_blocks - a->reserve_blocks) /
 			SWAPZ_SEGMENT_BLOCKS;
+	unsigned long long probe_start = swapz_authority_now_ns();
 	swapz_u32 scan;
 
 	if (!count)
-		return -ENOSPC;
+		return swapz_finish_alloc_probe(a, probe_start, -ENOSPC);
 	for (scan = 0; scan < count; ++scan) {
 		swapz_u32 segment = (a->next_segment_probe + scan) % count;
 		swapz_u32 start = segment * SWAPZ_SEGMENT_BLOCKS;
 		swapz_u32 off, logical, live_total = 0;
 		int used = 0, blocked = 0;
 
-		/*
-		 * GC temporarily borrows the segment ring. Never let it
-		 * allocate into the paused foreground OPEN segment even if
-		 * all current mappings there are dead: the foreground cursor
-		 * will be restored after GC. Nor may it allocate into the
-		 * victim until the entire move is verified complete.
-		 */
+		a->alloc_probe_segments++;
 		if (a->gc_allocation &&
 		    (segment == a->gc_forbidden_open ||
 		     segment == a->gc_forbidden_victim))
 			continue;
-		/*
-		 * In rotating mode a GC destination must be one of the
-		 * reserved, entirely dead segments. Foreground allocation
-		 * must never consume reserved space. Once GC has begun it
-		 * may NOT spill into another reserve segment: a complete
-		 * handoff needs exactly one destination and one victim.
-		 */
 		if (a->segment_foreground &&
 		    (a->gc_allocation ?
 		     (a->segment_foreground[segment] ||
 		      a->gc_destination != ~(swapz_u32)0) :
 		     !a->segment_foreground[segment]))
 			continue;
+		/*
+		 * Exact mapped-page counts can safely reject a live segment before
+		 * touching its 256 physical entries. A false positive only leaks
+		 * capacity; the dangerous zero case still gets the full scan.
+		 */
+		if (a->segment_mapped_pages &&
+		    a->segment_mapped_pages[segment])
+			continue;
+		a->alloc_probe_full_scans++;
 		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
 			live_total += a->live_records[start + off];
 			if (a->extent_classes[start + off])
 				used = 1;
 		}
 		if (a->segment_mapped_pages) {
-			if (live_total != a->segment_mapped_pages[segment])
-				return -EUCLEAN;
 			if (live_total)
-				continue;
+				return swapz_finish_alloc_probe(a, probe_start,
+							 -EUCLEAN);
 		} else {
 			if (live_total)
 				continue;
@@ -346,7 +352,8 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 				if (!map->valid)
 					continue;
 				if (map->start_block >= a->physical_blocks)
-					return -EUCLEAN;
+					return swapz_finish_alloc_probe(
+						a, probe_start, -EUCLEAN);
 				if (map->start_block / SWAPZ_SEGMENT_BLOCKS == segment) {
 					blocked = 1;
 					break;
@@ -355,32 +362,29 @@ static int swapz_pick_dead_segment(struct swapz_authority *a)
 			if (blocked)
 				continue;
 		}
-		/*
-		 * Segment has no authoritative records and no pending writes.
-		 * The previous contents are disposable swap bytes, not durable
-		 * data. Give the production target one serialized advisory-reclaim
-		 * hook before reuse, but only when this segment was written before.
-		 */
 		if (used && a->dead_segment_recycle) {
 			int error = a->dead_segment_recycle(
 				a->dead_segment_recycle_opaque, segment);
 
 			if (error)
-				return error;
+				return swapz_finish_alloc_probe(a, probe_start,
+							 error);
 		}
-		/* Reuse the WHOLE segment; stage never crosses its edge. */
 		memset(a->live_records + start, 0,
 		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->live_records));
 		memset(a->extent_classes + start, 0,
 		       SWAPZ_SEGMENT_BLOCKS * sizeof(*a->extent_classes));
 		if (used)
 			a->recycled_dead_segments++;
+		if (a->segment_program_counts &&
+		    a->segment_program_counts[segment] != ~(swapz_u32)0)
+			a->segment_program_counts[segment]++;
 		a->next_block = start;
 		a->open_segment = segment;
 		a->next_segment_probe = (segment + 1U) % count;
-		return 0;
+		return swapz_finish_alloc_probe(a, probe_start, 0);
 	}
-	return -ENOSPC;
+	return swapz_finish_alloc_probe(a, probe_start, -ENOSPC);
 }
 
 /*
@@ -421,6 +425,20 @@ int swapz_enable_segment_mapping_counts(struct swapz_authority *a,
 		return -EINVAL;
 	memset(counts, 0, (size_t)count * sizeof(*counts));
 	a->segment_mapped_pages = counts;
+	return 0;
+}
+
+int swapz_enable_segment_program_counts(struct swapz_authority *a,
+				      swapz_u32 *counts, swapz_u32 count)
+{
+	if (!a || !counts || a->segment_program_counts ||
+	    !a->segment_foreground || !a->segment_mapped_pages ||
+	    a->in_flight || a->batch_pending || a->gc_allocation ||
+	    a->next_block || a->open_segment != ~(swapz_u32)0 ||
+	    count != a->segment_count)
+		return -EINVAL;
+	memset(counts, 0, (size_t)count * sizeof(*counts));
+	a->segment_program_counts = counts;
 	return 0;
 }
 
@@ -632,6 +650,14 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -EUCLEAN;
 
+	}
+	if (start > a->next_block) {
+		unsigned long long holes = start - a->next_block;
+
+		if (a->gc_allocation)
+			a->alignment_hole_blocks_gc += holes;
+		else
+			a->alignment_hole_blocks_foreground += holes;
 	}
 	memset(out, 0, sizeof(*out));
 	out->start_block = start;

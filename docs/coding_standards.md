@@ -974,3 +974,30 @@ mutation. `swapz_gc_choose_victim()` may scan segments but must not rescan
 `logical_pages`; relocation ownership discovery remains a separate measured
 problem and must not gain a per-page reverse index without independent
 evidence.
+
+
+### Physical placement and reclaim evidence
+
+The current 4/8/16KiB allocator may align an extent start to its own size.
+Until a matched placement experiment proves otherwise, preserve the current
+on-disk SWZ3 extent classes but measure unwritten alignment holes separately
+for foreground and GC staging, plus adjacent lower-run splits caused by those
+holes. Placement telemetry is diagnostic only and must not change planner
+policy.
+
+When exact per-segment mapped-page counts are available, dead-segment probing
+must reject a nonzero mapped segment before scanning its 256 physical block
+entries. A zero-mapped reuse candidate still requires the complete
+live-record/extent consistency scan before overwrite; optimization may leak
+capacity on inconsistent positive counts but must never turn a false zero into
+silent reuse.
+
+Successful whole-segment DISCARD is remembered per segment so the same dead
+bytes are not synchronously discarded twice before reuse. Any later lower
+WRITE clears that successful-discard state before submission. This is only
+duplicate suppression: asynchronous early DISCARD remains a separate
+concurrency experiment and may not race allocation or an upper BIO.
+
+Per-segment program/open counters describe logical allocator write cycles only.
+They are not NAND wear measurements and must not authorize wear-leveling or
+cold-data relocation without separately approved physical-media evidence.

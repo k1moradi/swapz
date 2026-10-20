@@ -1041,7 +1041,7 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 		const swapz_u8 raw = group >= extent_count;
 		swapz_u8 blocks = raw ? 1 : e->plan_classes[group];
 		swapz_u8 take = raw ? 1 : e->plan_takes[group], j;
-		swapz_u32 aligned;
+		swapz_u32 aligned, run_end;
 
 		/*
 		 * A prepared run is immutable once returned. Stop before the next
@@ -1051,13 +1051,19 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 		if (staged) {
 			aligned = (e->authority->next_block + blocks - 1U) &
 				  ~(swapz_u32)(blocks - 1U);
+			run_end = run_start + run_blocks;
 			if (aligned / SWAPZ_SEGMENT_BLOCKS !=
 					run_start / SWAPZ_SEGMENT_BLOCKS ||
 			    aligned < run_start ||
-			    (e->bulk_enabled == 1 &&
-			     aligned != run_start + run_blocks) ||
-			    aligned - run_start + blocks > SWAPZ_BULK_BLOCKS)
+			    (e->bulk_enabled == 1 && aligned != run_end) ||
+			    aligned - run_start + blocks > SWAPZ_BULK_BLOCKS) {
+				if (e->bulk_enabled == 1 && aligned > run_end &&
+				    aligned / SWAPZ_SEGMENT_BLOCKS ==
+					run_start / SWAPZ_SEGMENT_BLOCKS &&
+				    aligned - run_start + blocks <= SWAPZ_BULK_BLOCKS)
+					e->run_splits_by_hole++;
 				break;
+			}
 		}
 
 		tx = &run->txs[staged];

@@ -950,3 +950,22 @@ current per-segment victim-selection scan, and the still-current full-map
 relocation ownership scan. The sanitized report must retain the two geometry
 rows. Timing is directional CPU evidence, not a physical-media latency claim;
 no reverse index is justified solely because the loop is O(logical_pages).
+
+
+### Placement/reclaim qualification
+
+The next owner qualification records foreground and GC alignment-hole blocks,
+lower-run splits attributable to holes, dead-segment probe segments/full scans
+and probe wall time, duplicate successful-DISCARD skips, and logical segment
+open-count min/mean/max. These counters are evidence only. A nonzero hole count
+can authorize a separate hole-free placement A/B; it does not itself change
+SWZ3.
+
+Native GC scale evidence compares the previous per-probed-segment 256-entry
+dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
+logical pages. Loaded qualification still requires the full zero-mapped
+candidate liveness scan, repeated live-GC correctness, exact readback, and
+nonfatal DISCARD semantics.
+
+Logical segment-open spread is allocator telemetry, not flash-wear evidence.
+No threshold from RAM-backed null_blk may promote wear-aware relocation.

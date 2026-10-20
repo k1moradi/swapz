@@ -18,6 +18,8 @@ struct scale_row {
 	uint64_t legacy_score_scan_ns;
 	uint64_t incremental_select_ns;
 	uint64_t relocation_scan_ns;
+	uint64_t legacy_dead_probe_ns;
+	uint64_t mapped_dead_probe_ns;
 	swapz_u32 victim_records;
 };
 
@@ -125,14 +127,74 @@ static uint64_t relocation_scan(const struct swapz_map *maps,
 	return now_ns() - start;
 }
 
+static uint64_t legacy_dead_probe(const swapz_u16 *live_records,
+				 const swapz_u8 *extent_classes,
+				 const swapz_u32 *mapped_pages,
+				 swapz_u32 segments, swapz_u32 *selected_out)
+{
+	swapz_u32 segment;
+	uint64_t start = now_ns();
+
+	*selected_out = ~(swapz_u32)0;
+	for (segment = 0; segment < segments; ++segment) {
+		swapz_u32 block = segment * SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 off, live_total = 0, used = 0;
+
+		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
+			live_total += live_records[block + off];
+			used += extent_classes[block + off] != 0;
+		}
+		if (live_total != mapped_pages[segment])
+			return 0;
+		if (live_total)
+			continue;
+		*selected_out = segment;
+		evidence_sink += used;
+		break;
+	}
+	evidence_sink += *selected_out;
+	return now_ns() - start;
+}
+
+static uint64_t mapped_dead_probe(const swapz_u16 *live_records,
+				 const swapz_u8 *extent_classes,
+				 const swapz_u32 *mapped_pages,
+				 swapz_u32 segments, swapz_u32 *selected_out)
+{
+	swapz_u32 segment;
+	uint64_t start = now_ns();
+
+	*selected_out = ~(swapz_u32)0;
+	for (segment = 0; segment < segments; ++segment) {
+		swapz_u32 block, off, live_total = 0, used = 0;
+
+		if (mapped_pages[segment])
+			continue;
+		block = segment * SWAPZ_SEGMENT_BLOCKS;
+		for (off = 0; off < SWAPZ_SEGMENT_BLOCKS; ++off) {
+			live_total += live_records[block + off];
+			used += extent_classes[block + off] != 0;
+		}
+		if (live_total)
+			return 0;
+		*selected_out = segment;
+		evidence_sink += used;
+		break;
+	}
+	evidence_sink += *selected_out;
+	return now_ns() - start;
+}
+
 static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 {
 	swapz_u32 segments = logical_pages / SWAPZ_SEGMENT_BLOCKS;
 	struct swapz_map *maps = NULL;
-	swapz_u32 *bytes = NULL, *io = NULL;
-	swapz_u16 *counts = NULL, *min_blocks = NULL;
+	swapz_u32 *bytes = NULL, *io = NULL, *mapped_pages = NULL;
+	swapz_u16 *counts = NULL, *min_blocks = NULL, *live_records = NULL;
+	swapz_u8 *extent_classes = NULL;
 	uint64_t legacy[REPEATS], select[REPEATS], relocation[REPEATS];
-	swapz_u32 logical, repeat, records = 0;
+	uint64_t legacy_probe[REPEATS], mapped_probe[REPEATS];
+	swapz_u32 logical, repeat, records = 0, selected = 0;
 	int rc = 1;
 
 	if (!segments || logical_pages % SWAPZ_SEGMENT_BLOCKS)
@@ -142,7 +204,11 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 	io = calloc(segments, sizeof(*io));
 	counts = calloc(segments, sizeof(*counts));
 	min_blocks = calloc(segments, sizeof(*min_blocks));
-	if (!maps || !bytes || !io || !counts || !min_blocks)
+	mapped_pages = calloc(segments, sizeof(*mapped_pages));
+	live_records = calloc(logical_pages, sizeof(*live_records));
+	extent_classes = calloc(logical_pages, sizeof(*extent_classes));
+	if (!maps || !bytes || !io || !counts || !min_blocks ||
+	    !mapped_pages || !live_records || !extent_classes)
 		goto out;
 
 	for (logical = 0; logical < logical_pages; ++logical) {
@@ -152,6 +218,19 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 			.extent_blocks = 1,
 			.valid = 1,
 		};
+	}
+	/*
+	 * Near-full allocator geometry: every segment except the final one has
+	 * one authoritative start block. The old probe touches all 256 block
+	 * entries before consulting mapped_pages; current policy rejects live
+	 * segments from the O(1) sidecar and scans only the zero-mapped candidate.
+	 */
+	for (logical = 0; logical + 1U < segments; ++logical) {
+		swapz_u32 block = logical * SWAPZ_SEGMENT_BLOCKS;
+
+		mapped_pages[logical] = 1;
+		live_records[block] = 1;
+		extent_classes[block] = 1;
 	}
 	/* Populate the exact incremental state before timing current selection. */
 	(void)legacy_score_scan(maps, logical_pages, segments, bytes, io,
@@ -164,6 +243,16 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 			segments, bytes, io, counts, min_blocks);
 		relocation[repeat] = relocation_scan(
 			maps, logical_pages, segments / 2U, &records);
+		legacy_probe[repeat] = legacy_dead_probe(
+			live_records, extent_classes, mapped_pages,
+			segments, &selected);
+		if (selected != segments - 1U)
+			goto out;
+		mapped_probe[repeat] = mapped_dead_probe(
+			live_records, extent_classes, mapped_pages,
+			segments, &selected);
+		if (selected != segments - 1U)
+			goto out;
 	}
 	if (records != SWAPZ_SEGMENT_BLOCKS)
 		goto out;
@@ -173,10 +262,15 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 		.legacy_score_scan_ns = median_ns(legacy),
 		.incremental_select_ns = median_ns(select),
 		.relocation_scan_ns = median_ns(relocation),
+		.legacy_dead_probe_ns = median_ns(legacy_probe),
+		.mapped_dead_probe_ns = median_ns(mapped_probe),
 		.victim_records = records,
 	};
 	rc = 0;
 out:
+	free(extent_classes);
+	free(live_records);
+	free(mapped_pages);
 	free(min_blocks);
 	free(counts);
 	free(io);
@@ -206,10 +300,13 @@ int main(void)
 		       "\"legacy_score_scan_ns\":%" PRIu64 ","
 		       "\"incremental_select_ns\":%" PRIu64 ","
 		       "\"relocation_scan_ns\":%" PRIu64 ","
+		       "\"legacy_dead_probe_ns\":%" PRIu64 ","
+		       "\"mapped_dead_probe_ns\":%" PRIu64 ","
 		       "\"victim_records\":%u}",
 		       index ? "," : "", row->logical_pages, row->segments,
 		       row->legacy_score_scan_ns, row->incremental_select_ns,
-		       row->relocation_scan_ns, row->victim_records);
+		       row->relocation_scan_ns, row->legacy_dead_probe_ns,
+		       row->mapped_dead_probe_ns, row->victim_records);
 	}
 	puts("]}");
 	puts("PASS: GC victim selection is segment-scaled; relocation scan evidence collected");
