@@ -125,9 +125,12 @@ promotion. Fast write-only QD8 remains confirmed at +8.1%, paired 95% CI
   pointer/page-table/integer/float/struct pages are positive controls. Compare
   CL-Delta32x2, cacheline byte-delta, delta32, delta64 and xor64; verify exact
   inverse reconstruction; report classifier thresholds 64/96/128/192 and
-  production-planner physical block/extent savings. Source contracts must prove
-  no production DM/codec/authority/engine translation unit includes the
-  predictor and no filter metadata/policy-length surface exists in ID67a.
+  production-planner physical block/extent savings. The unprivileged
+  Make-interface fixture must emit the same valid predictor evidence as one
+  complete stdout line so stage parsing is exercised without privilege. Source
+  contracts must prove no production DM/codec/authority/engine translation unit
+  includes the predictor and no filter metadata/policy-length surface exists in
+  ID67a.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
   background worker.
