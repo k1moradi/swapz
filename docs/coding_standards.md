@@ -594,6 +594,10 @@ call. SIMD entry/exit uses kernel_fpu_begin()/kernel_fpu_end() from the non-SIMD
 dispatch translation unit and is process-context-only; a non-task call falls
 back to scalar. Native qualification may use ISA state directly. Classifier
 timing remains batched across repeated eligible-page sweeps.
+Kernel predictor implementation locals must not use identifiers that collide
+with Linux context macros such as `current`; use explicit value/previous names.
+The retained 64-byte cacheline constant is corpus geometry only, not a retired
+predictor model.
 Thresholds are evidence, never kernel policy before measurement.
 
 Delta64 must round-trip exactly, and every selected hardware backend must match

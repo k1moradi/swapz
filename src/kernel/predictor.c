@@ -19,15 +19,15 @@ static swapz_u32 swapz_predict_delta64_pair_score_scalar(
 						const swapz_u8 *input)
 {
 	unsigned long long previous = swapz_predictor_load64(input);
-	unsigned long long current =
+	unsigned long long value =
 		swapz_predictor_load64(input + SWAPZ_PREDICTOR_U64_BYTES);
 
-	if (swapz_predictor_small_nonzero_delta64(current, previous))
+	if (swapz_predictor_small_nonzero_delta64(value, previous))
 		return 2U;
 	return swapz_predictor_small_nonzero_delta32(
-			(swapz_u32)current, (swapz_u32)previous) +
+			(swapz_u32)value, (swapz_u32)previous) +
 		swapz_predictor_small_nonzero_delta32(
-			(swapz_u32)(current >> 32),
+			(swapz_u32)(value >> 32),
 			(swapz_u32)(previous >> 32));
 }
 
@@ -62,11 +62,11 @@ swapz_u32 swapz_predict_delta64_scalar(const swapz_u8 *input,
 	swapz_predictor_store64(output, previous);
 	for (offset = sizeof(previous); offset < SWAPZ_BLOCK_BYTES;
 	     offset += sizeof(previous)) {
-		unsigned long long current =
+		unsigned long long value =
 			swapz_predictor_load64(input + offset);
 
-		swapz_predictor_store64(output + offset, current - previous);
-		previous = current;
+		swapz_predictor_store64(output + offset, value - previous);
+		previous = value;
 	}
 	return 0;
 }

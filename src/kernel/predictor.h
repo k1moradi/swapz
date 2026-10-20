@@ -4,6 +4,7 @@
 
 #include "codec.h"
 
+#define SWAPZ_PREDICTOR_CACHELINE_BYTES 64U /* structured corpus geometry */
 #define SWAPZ_PREDICTOR_U64_BYTES 8U
 #define SWAPZ_PREDICTOR_SUBPAGE_BYTES 512U
 #define SWAPZ_PREDICTOR_STAGE1_PAIRS 8U
