@@ -2959,7 +2959,7 @@ def print_bench(result):
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
             ("read isolation", "ID63 slow+fast 5 matched pairs; standalone grouping retired"),
             ("ID64", "fast mixed: one directional guard-off/on control"),
-            ("write-only", "fast QD8: 5 matched pairs + paired CI; QD1/QD4/QD32 directional"),
+            ("write-only", "fast QD8/QD32: 5 matched pairs + paired CI; QD1/QD4 directional"),
             ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),
             ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),

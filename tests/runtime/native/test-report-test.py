@@ -1034,6 +1034,8 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("Fast QD4 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD32 A/S paired 95% CI", rendered)
+        self.assertIn("fast QD8/QD32: 5 matched pairs + paired CI; QD1/QD4 directional", rendered)
+        self.assertNotIn("QD1/QD4/QD32 directional", rendered)
         self.assertIn("QD1/QD4 remain directional controls.", rendered)
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
