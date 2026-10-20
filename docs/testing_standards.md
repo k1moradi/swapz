@@ -110,6 +110,9 @@ coalesce only exact post-cache missing ranges under the rules below.
   serialized path.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** measure useful-I/O foreground-GC stall/headroom before background GC.
+  READ-coalescing status fields are independent diagnostics and must not be
+  mistaken for or prohibited by GC cost-accounting contracts; GC still has no
+  synthetic coalesced-byte estimator.
 - **ID62:** current host-safety rules still prohibit physical-device collection.
 
 ## Open qualification gaps

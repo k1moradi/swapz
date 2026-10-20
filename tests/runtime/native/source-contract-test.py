@@ -740,7 +740,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("peeked->payload_length != current_map->payload_length", authority)
         self.assertIn("ctx->gc_cost_policy", body("swapz_gc_choose_victim"))
         self.assertIn("gc_selected_live_bytes", body("swapz_gc_choose_victim"))
-        self.assertNotIn("coalesce", body("swapz_status"))
+        # READ coalescing telemetry may appear in global status; GC cost must
+        # still expose no synthetic/coalesced GC-byte estimator.
+        self.assertNotIn("gc_coalesc", body("swapz_status"))
 
     def test_worker_close_reasons_cover_dependencies_and_control(self):
         flush = body("swapz_flush_window")
