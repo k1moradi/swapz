@@ -2387,22 +2387,26 @@ def print_bench(result):
         classifier = predictor["classifier"]
         print("  Sampled delta64 classifier — "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
-              f"{classifier['early_abort_pages']}/{classifier['eligible_pages']} "
-              "stage-1 aborts; "
-              f"{classifier['ns_per_page']} ns/eligible page "
-              f"({classifier['benchmark_repeats']} batched repeats)")
+              f"{classifier['ns_per_page']} ns/eligible page")
+        print("  Stage-1 aborts: "
+              f"{classifier['early_abort_pages']}/{classifier['eligible_pages']}; "
+              f"timing: {classifier['benchmark_repeats']} batched repeats")
         print_table(
             ("score", "neg call/eligible", "neg useful", "struct call/eligible",
-             "struct useful", "routed blocks", "routed extents"),
+             "struct useful"),
             [(
                 row["threshold"],
                 f"{row['negative_calls']}/{row['negative_eligible']}",
                 row["negative_useful"],
                 f"{row['structured_calls']}/{row['structured_eligible']}",
                 row["structured_useful"],
-                f"{row['routed_blocks_saved']:+d}",
-                f"{row['routed_extents_saved']:+d}",
             ) for row in predictor["thresholds"]])
+        print("  Routed delta64 planner savings")
+        print_table(
+            ("score", "blocks", "extents"),
+            [(row["threshold"], f"{row['routed_blocks_saved']:+d}",
+              f"{row['routed_extents_saved']:+d}")
+             for row in predictor["thresholds"]])
         print("  Negative classifier profile breakdown")
         print_table(
             ("score", "profile", "call/eligible", "useful"),
