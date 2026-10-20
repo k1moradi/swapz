@@ -390,7 +390,7 @@ def synthetic_log():
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
-    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
+    for index, enabled in enumerate(runner.DIRECTIONAL_SEQUENCE):
         out.append(f"START_BURST_GUARD_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
@@ -633,17 +633,17 @@ class ReportContract(unittest.TestCase):
 
         guard = runner.parse_burst_guard_ab(synthetic_log())
         self.assertEqual([row["guard"] for row in guard],
-                         list(runner.CONFIRMATION_SEQUENCE))
+                         list(runner.DIRECTIONAL_SEQUENCE))
         guard_diag = runner.burst_guard_ab_verdict(guard)
         self.assertEqual(guard_diag["overall"],
-                         "PASS_BURST_GUARD_AB_CONFIRMATION")
-        self.assertEqual(guard_diag["matched_pairs"], 5)
+                         "PASS_BURST_GUARD_DIRECTIONAL_CONTROL")
+        self.assertEqual(guard_diag["observations_per_mode"], 1)
         self.assertGreater(
             guard_diag["modes"]["1"]["burst_shrink_inflight_zero_skips"], 0)
         self.assertEqual(
             guard_diag["modes"]["1"]["burst_shrink_after_inflight_zero"], 0)
-        self.assertEqual(
-            guard_diag["paired"]["throughput_change_fraction"]["n"], 5)
+        self.assertGreater(
+            guard_diag["directional"]["guard_skip_delta"], 0)
 
         sd_coalesce = runner.parse_sd_read_coalesce_ab(synthetic_log())
         self.assertEqual([row["read_coalesce"] for row in sd_coalesce],
@@ -948,7 +948,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)
         self.assertIn("ID39 SAME-CACHE PARALLEL READ — directional control", rendered)
-        self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD", rendered)
+        self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — directional control", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)

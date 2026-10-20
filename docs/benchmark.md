@@ -33,8 +33,9 @@ Report replay-process CPU separately from kernel callback wall residency.
 Callback wall is not CPU time: ordered callback wall includes synchronous
 lower-I/O sleep and callback wall may include scheduler delay. ID24 additionally
 reports scheduler-accounted sampled worker CPU from
-`current->se.sum_exec_runtime` for ordered, preparation and read-helper work.
-Direct boundary samples can materially miss short callbacks that return before
+`current->se.sum_exec_runtime` for ordered and preparation work.
+`read_worker_cpu_ns` is retained as a zero-valued compatibility token after
+ID39 helper removal. Direct boundary samples can materially miss short callbacks that return before
 the scheduler updates the current entity, so treat them only as a lower-bound
 diagnostic. The report also carries separate ordered/preparation LZ4 and copy
 timers and derives measured non-sleeping phase floors from LZ4/CRC/copy plus
@@ -59,59 +60,55 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner-qualified source `64852c6e1b229a8940eea434d20c440fe434406c`
-(report-only `617ab932331d9b44e66f8f839fd1f7975bc545af`) passed all five
+Owner-qualified source `479a21a034b66ed6d8e9d05d151a771b2774a167`
+(report-only `9f1be6177a3eaa6d80b6a0649a539907bfbc487f`) passed all five
 stages on owned RAM.
 
-Fast write-only QD8 remains a confirmed K=1 async win: 23.00/20.99 MB/s,
-+9.7% paired, 95% CI [+1.4%,+18.0%], target 8 with 512/0/0
-PACK_READY/deadline/idle closes.
+ID64 is confirmed as a mechanism and retained by default. In five matched
+SSD_EMULATED QD32 mixed rounds, guard-on changed mean shrink 11.2 -> 1.8,
+after-I0 8.4 -> 0, guarded skips 0 -> 8.4, burst closes 134.2 -> 40.0,
+overshoots 99.8 -> 27.4 and lower WRITE requests 993.4 -> 958.6. Useful write
+throughput changed +0.7%; write/read p99 changed +0.4%/+1.7%. The five-pair
+performance question is closed.
 
-Fast mixed async/sync remains below the 5% promotion threshold:
-+2.2%, CI [-1.5%,+5.8%]. Burst fragmentation is nevertheless confirmed:
-+62.2 admission burst closes, CI [+50.0,+74.4], and +48.2 overshoots,
-CI [+38.7,+57.7]. Passive attribution finds 7.6/8.2 async learned-target
-shrinks immediately after an in-flight zero-tail sample, versus zero such
-shrinks in sync.
+Fast write-only QD8 remains a confirmed K=1 async win from the retained
+five-pair evidence: 23.00/20.99 MB/s, +9.7% paired, 95% CI
+[+1.4%,+18.0%].
 
-ID60 is refuted as a standalone optimization on hwq=1: seq requests
-398.0 -> 397.0, -0.2% CI [-1.7%,+1.3%], and seq p99 +5.7%
-[-1.5%,+13.0%].
+ID63 remains qualified on both synthetic models and retains five-pair
+confirmation. The latest fast A/B reduces sequential lower READ requests by
+about 16%, while the serial model reduces them by about 40%, with zero padding.
+The current source removes the refuted ID39 helper so the next owner run can
+measure ID63 without workqueue dispatch contaminating non-coalesced pairs.
 
-ID63 is qualified on both models. Fast seq requests are 404.6 -> 343.6,
--15.0% CI [-19.3%,-10.8%]; serial seq requests are 398.4 -> 248.2,
--37.7% CI [-46.1%,-29.2%]. Extra blocks remain zero. Fast non-merges are
-98.4 cache-satisfied, 0 noncontiguous, 1.6 gap; the exact no-padding design is
-already near its useful ceiling.
-
-ID39 remains performance-negative/inconclusive and is no longer worth repeated
-five-pair qualification. Keep only a directional regression control until its
-helper workqueue is removed in a later cleanup.
+ID39 helper concurrency is retired in current source. The read-only
+`parallel_reads` switch remains a grouping-control compatibility surface;
+`parallel_reads_enabled` and `read_worker_cpu_ns` remain zero.
 
 ## Confirmation gate
 
-ID64 is the sole active scheduling experiment. Its five matched fast-model
-rounds keep `async_prepare=1` in both arms and vary only the read-only
-`guard_inflight_zero_shrink=0/1` control. The guard-off arm must execute zero
-guarded skips. The guard-on arm must execute at least one guarded skip and must
-execute zero actual `burst_shrink_after_inflight_zero` events.
-
-The guard is one-shot. A real would-be shrink after an in-flight zero-tail
-sample is skipped once and consumes the flag. If no such candidate occurs, the
-first nonempty hard boundary that does not continue the retained chain clears
-the flag. PACK_READY closure, tail sampling, upper BIO completion and K=1
-lower-run ownership remain unchanged.
-
-The report retains paired 95% CIs for guard-on/off write throughput, absolute
-lower WRITE request delta, mixed read/write p99, burst-target closes, overshoot,
-actual shrink count, after-I0 shrink count and guarded-skip count. Performance
-may confirm or refute ID64; structural qualification must not force a positive
-result.
-
 Fast and serial ID63 remain five-pair confirmations because they are promoted
-request-efficiency mechanisms. Owner-refuted ID39 and ID60 are reduced to
-single off/on directional controls to keep official `make test` runtime
-bounded without discarding their historical five-pair evidence.
+request-efficiency mechanisms. The owner run must continue to report paired
+95% CIs for useful read throughput, p99, lower bytes and lower requests, with
+zero `parallel_read_coalesce_extra_blocks`.
+
+ID64 is now a single directional fast mixed regression control. Both arms keep
+`async_prepare=1` and vary only `guard_inflight_zero_shrink=0/1`.
+Guard-off must execute zero guarded skips; guard-on must execute at least one
+guarded skip and zero actual `burst_shrink_after_inflight_zero` events.
+The report records the direct off/on deltas but no longer manufactures a
+confidence interval from one pair; the historical five-pair result above is
+the promotion evidence.
+
+ID65 removes independent helper READ dispatch. Qualification must observe
+`parallel_reads_enabled=0` and `read_worker_cpu_ns=0` at every queue depth.
+Same-extent sibling grouping and an exact ID63 coalesced pair may still consume
+multiple BIOs synchronously; any other distinct-extent pair must fall back to
+ordinary FIFO `swapz_read()` without workqueue/completion/flush overhead.
+
+ID66 changes only discard prevalidation storage. Multi-page DISCARD must retain
+all-or-nothing generation/mapping/shared-extent-liveness validation before the
+commit loop, while allocating no per-physical-block discard epoch/count arrays.
 
 ## Deferred idea evidence
 
@@ -129,9 +126,9 @@ READ with no padding, seed only private slot scratch, then run the unchanged
 per-record metadata/generation/CRC/decompression path. Shared cache publication
 still waits for every grouped read and upper copy to succeed.
 
-Depth-one media may use same-extent grouping and one-request ID63 coalescing;
-only two-request concurrent Kread dispatch remains gated on lower queue depth
-greater than one.
+All queue depths may use same-extent grouping and one-request ID63 coalescing
+on the ordered worker. The rejected two-request concurrent helper dispatch is
+removed; lower queue depth no longer selects a separate READ execution path.
 
 **IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
 128-payload synthetic duplication. Keep representative-corpus evidence only.

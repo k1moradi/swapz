@@ -496,7 +496,7 @@ class PublicMakeContract(unittest.TestCase):
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (80, 150000, 2, 2, 1, 64)
-            for index, enabled in enumerate(confirmation):
+            for index, enabled in enumerate(directional):
                 records.extend((
                     f"START_BURST_GUARD_AB={enabled}",
                     "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
@@ -694,7 +694,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("directional_modes=(0 1)", loaded)
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)
         self.assertIn('for parallel_reads in "${directional_modes[@]}"', loaded)
-        self.assertIn('for guard in "${confirmation_modes[@]}"', loaded)
+        self.assertIn('for guard in "${directional_modes[@]}"', loaded)
         self.assertIn("START_BURST_GUARD_AB=", loaded)
         self.assertIn("PASS_BURST_GUARD_AB=", loaded)
         self.assertIn("--guard-inflight-zero-shrink", loaded)

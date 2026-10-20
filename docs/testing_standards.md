@@ -76,67 +76,54 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `64852c6e1b229a8940eea434d20c440fe434406c` passed all five
+Source `479a21a034b66ed6d8e9d05d151a771b2774a167` passed all five
 stages and published report-only commit
-`617ab932331d9b44e66f8f839fd1f7975bc545af`.
+`9f1be6177a3eaa6d80b6a0649a539907bfbc487f`.
 
-Fast write-only QD8 remains qualified at +9.7% async/sync,
-CI [+1.4%,+18.0%], with target 8 and 512/0/0
-PACK_READY/deadline/idle closes. ID38 remains passive at only
-29.6 ready windows / 87.1 records / 3.58 ms wait.
+ID64 is owner-qualified. Five matched fast mixed rounds eliminated observed
+after-I0 shrinks under guard-on and reduced mean shrink, burst-close, overshoot
+and lower-WRITE-request counts without a measured latency penalty. The guard
+stays enabled; current qualification keeps only one directional regression pair.
 
-ID60 is owner-refuted as a standalone performance optimization:
-seq requests -0.2% CI [-1.7%,+1.3%], seq p99 +5.7% [-1.5%,+13.0%].
-Its five-pair evidence is historical; current qualification keeps only a
-directional off/on regression control.
+Fast write-only QD8 retains its five-pair +9.7% async/sync evidence. ID38 stays
+passive; no second WRITE slot is justified.
 
-ID63 is owner-qualified on both synthetic models: fast sequential requests
--15.0% CI [-19.3%,-10.8%] and serial sequential requests -37.7%
-[-46.1%,-29.2%], with zero extra blocks. Non-merge attribution shows
-noncontiguous masks at zero and exact-range gaps near zero; cache satisfaction
-accounts for almost all remaining adjacent pairs.
+ID63 remains owner-qualified on both synthetic models and retains five-pair
+fast and serial confirmations. The next run specifically measures those same
+request/latency gates after removal of the refuted ID39 helper.
 
-ID64 passive evidence is strong enough for one bounded active experiment:
-7.6/8.2 fast async learned-target shrinks follow an in-flight zero-tail sample,
-all of those observed shrinks target <=8, while sync records zero after-I0
-shrinks. No performance claim is allowed until the active matched A/B completes.
+Current source retires the ID39 read workqueue and removes per-physical-block
+discard epoch/count scratch. These source changes require fresh owner-loaded
+qualification before their runtime effects become the new baseline.
 
 ## Deferred optimization evidence gates
 
 - **ID38 K>1:** keep passive counters. No second write slot is justified.
-- **ID39 helper concurrency:** five-pair performance evidence is already
-  inconclusive/negative. Keep one fast off/on directional control with ID63
-  disabled until helper removal is separately reviewed.
-  Its compact stdout no longer repeats the historical passive-ID63 adjacency
-  table; ID63's dedicated active exact-range and non-merge tables are the
-  canonical current read-coalescing evidence.
-- **ID60 same-extent grouping:** five-pair hwq=1 evidence refutes standalone
-  benefit. Keep one off/on directional regression control with
-  `read_coalesce=0` and require zero read-worker CPU.
+- **ID39 helper concurrency:** refuted and removed from current source. Do not
+  restore a helper workqueue merely to satisfy historical telemetry.
+- **ID60 same-extent grouping:** standalone benefit remains refuted; one
+  directional grouping control may remain as regression evidence.
 - **ID63 adjacent READ coalescing:** retain five matched fast rounds and five
   matched serial-depth rounds. Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
   stays zero and defensive skip-other stays zero.
-- **ID64 one-shot in-flight-zero shrink guard:** run exactly five matched
-  SSD_EMULATED mixed rounds with `async_prepare=1` in both arms and vary only
-  `guard_inflight_zero_shrink=0/1`. Guard-off must have zero guarded skips.
-  Guard-on must have positive guarded skips and zero actual
-  `burst_shrink_after_inflight_zero`. Report paired CIs for write throughput,
-  absolute lower WRITE requests, mixed read/write p99, burst closes, overshoot,
-  actual shrinks, after-I0 shrinks and guarded skips. The experiment may pass
-  structurally while performance refutes the candidate.
-- **ID64 one-shot lifecycle:** native/source contracts require the guard
-  predicate, immediate flag consumption on a guarded real shrink candidate,
-  and clearing of any unconsumed flag at the first nonempty non-chaining hard
-  boundary. Do not reintroduce PACK_READY suppression or tail deferral.
-  Status-schema source contracts assert the async-preparation and guard controls
-  independently; adding the read-only guard field must not make unrelated
-  overlap-counter checks depend on adjacency of status text.
+- **ID64 one-shot in-flight-zero shrink guard:** promotion is complete. Run one
+  directional SSD_EMULATED mixed guard-off/on control with
+  `async_prepare=1` in both arms. Guard-off must have zero guarded skips;
+  guard-on must have positive guarded skips and zero actual
+  `burst_shrink_after_inflight_zero`. Do not report a 95% CI from one pair.
+- **ID65 synchronous read cleanup:** `parallel_reads_enabled=0` and
+  `read_worker_cpu_ns=0` are mandatory. Non-coalescible distinct extents
+  remain FIFO-owned and use ordinary `swapz_read()`; fast/serial ID63 still
+  carry the five-pair request/latency acceptance burden.
+- **ID66 discard scratch cleanup:** source/native contracts must prove the
+  temporary live-reference decrement is exactly restored before return/commit,
+  including an error after a previously validated shared-extent page.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
   background worker.
 - **ID62:** current host-safety rules still prohibit physical-device
-  collection; this experiment does not authorize real storage.
+  collection; this cleanup does not authorize real storage.
 
 ## Open qualification gaps
 
@@ -806,77 +793,37 @@ target.
 
 ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain
-`ordered_worker_cpu_ns`, `prep_worker_cpu_ns` and `read_worker_cpu_ns` as
-scheduler-accounted lower bounds. They must also expose separate
-`ordered_lz4_wall_ns`, `prep_lz4_wall_ns`,
-`ordered_write_copy_wall_ns` and `prep_write_copy_wall_ns`. The report shows
+`ordered_worker_cpu_ns` and `prep_worker_cpu_ns` as scheduler-accounted
+lower bounds. The retired ID39 compatibility field `read_worker_cpu_ns` must
+remain zero. Reports must also expose separate `ordered_lz4_wall_ns`,
+`prep_lz4_wall_ns`, `ordered_write_copy_wall_ns` and
+`prep_write_copy_wall_ns`. The report shows
 callback wall, scheduler lower bound and measured non-sleeping phase floors
 separately. No worker-count/affinity conclusion may rely on the boundary
 `sum_exec_runtime` value alone.
 
-### Same-cache Kread A/B confirmation
+### Synchronous grouped-READ qualification
 
-The loaded test runs exactly ten SSD_EMULATED sessions in fixed order
-`parallel_reads=0,1,1,0,0,1,1,0,0,1`, with `async_prepare=0`, identical
-source/fixture/trace and alternating raw/swapz replay order. Adjacent sessions
-form five counterbalanced Kread-off/on matched rounds. The Kread-off arm must
-report zero `parallel_read_pairs`; every Kread-on packed pass must report
-positive pair activity before latency comparisons are accepted. Each packed
-pass remains 4 MiB/1024 verified pages.
+The fast directional `parallel_reads=0/1` control remains a single off/on
+observation with `read_coalesce=0`. It now measures grouping-regression
+behavior only; it is not a Kread concurrency experiment. Both arms must report
+`parallel_reads_enabled=0` and `read_worker_cpu_ns=0`. The off arm must
+report zero grouped pairs; the on arm must exercise same-extent grouping before
+the control is accepted.
 
-For sequential and seeded-random reads, report paired on/off change fractions
-and two-sided Student-t 95% confidence intervals for p99, useful throughput,
-lower bytes and lower requests. Promotion requires a repeatable latency benefit
-without material traffic inflation; a confidence interval is evidence, not a
-license to ignore the physical-I/O gate. If lifecycle qualification passes but
-this A/B contract fails, the loaded stage must fail with the A/B evidence reason
-rather than attempting to read a lifecycle failure reason from a passing
-lifecycle result. Failure-path report fixtures must identify the Kread
-confirmation reason explicitly rather than the retired diagnostic label.
+ID63 is the promoted request-efficiency mechanism. The loaded test therefore
+keeps exactly ten SSD_EMULATED and ten SD_EMULATED ID63 sessions in the fixed
+counterbalanced confirmation sequence while varying only `read_coalesce=0/1`.
+Every pass remains 4 MiB/1024 byte-exact verified pages. Report paired p99,
+useful-throughput, lower-byte and lower-request changes with two-sided
+Student-t 95% confidence intervals.
 
-The standard mixed report must also expose existing sync/async window bins
-(win1, win2, win3_4, win5_8, win9_16, win17_64) plus PACK_READY/DEADLINE/IDLE
-close totals. Do not add multi-tail kernel instrumentation unless these existing
-bins leave the residual fragmentation question unresolved.
-
-### Bounded Kread=2 qualification
-
-The owner-qualified `bd3f5886b61a...` implementation is a rejected
-implementation of the latency-first READ idea: it raised fast lower READ peak
-to 2 and improved fast random p99, but fragmented metadata/extent residency and
-increased lower READ bytes/requests by roughly 35-159%, including a severe
-serial-depth regression. A faster latency result that spends substantially more
-physical I/O fails the endurance-first acceptance gate.
-
-The revised experiment must prove exactly two bounded slots, queue-depth gating
-through the backing request queue, no slot allocation/workqueue at depth one,
-private helper engine state, and ordered-owner-only shared cache mutation. The
-read-only `parallel_reads` module parameter defaults true and may disable Kread
-for same-cache A/B evidence; depth-one remains serialized even when enabled. Direct
-production-C coverage must prove a 16-entry extent cache retains eight
-interleaved four-block extents without duplicate block reads, and that
-`swapz_engine_prime_read_slot()` / `swapz_engine_absorb_read_slot()` preserve
-extent residency plus metadata-LRU reuse across helper execution.
-
-Loaded acceptance is stricter than the report's latency-only `FASTER` label.
-The depth-one model must return to the serialized baseline with no material
-lower-byte/request or p99 regression. On the depth-64 model, Kread=2 must again
-raise lower READ depth above one and improve useful packed-read latency, while
-sequential and random lower bytes/requests stay at or below the qualified
-`89fe711...` cache baseline within ordinary run noise. Any candidate that buys
-latency with material read amplification is rejected.
-
-The ready-prefix scan stops at the first non-independent BIO. Pulling a later
-sibling is allowed only across skipped BIOs that are themselves independent
-READs; no write/barrier/dependency may be crossed. A single eligible READ never
-waits for a partner. Two synchronous slot callbacks can overlap, so summed lower
-READ busy-wall counters are not elapsed pair wall; use sampled lower in-flight
-depth and end-to-end latency/throughput together with lower bytes/requests.
-
-Source-contract assertions follow ownership helpers rather than retired syntax.
-A grouped dispatch may consume more than two BIOs, so worker-quantum coverage
-must require `remaining -= processed_bios` and an exact processed count returned
-by the grouped-read helper rather than a hard-coded paired value.
+No `swapz-read` workqueue, per-slot work/completion object, helper
+`queue_work`, `wait_for_completion` or `flush_work` is permitted. A
+non-coalescible distinct-extent pair must return from grouped-batch selection
+without taking BIO ownership. Same-extent siblings and exact ID63 pairs run
+synchronously on the ordered worker; shared cache mutation and BIO completion
+remain single-owner.
 
 The existing one-block selective-read budget remains an exact compatibility
 contract. `read_cached_full` denotes reusable multi-block extent residency; it
@@ -898,13 +845,13 @@ ID52 status labels may abbreviate `companion` as `comp` for operator output,
 but source contracts must bind each label to the exact backing struct member so
 schema spelling and production accounting cannot silently diverge.
 
-Rootless console-report coverage must pass the parsed ID39 diagnostic object to
-the printer; a display assertion is not valid against a report that omits the
-A/B evidence object entirely.
+Rootless console-report coverage must pass the parsed directional grouping
+object to the printer; a display assertion is not valid against a report that
+omits the evidence object entirely.
 
 The unprivileged Make-interface fixture must mirror the current telemetry
-schema and emit the ID64 five-pair marker set, fast/slow ID63 confirmations,
-and the directional ID39/ID60 controls. A fake loaded stage is not allowed to
+schema and emit the ID64 directional marker pair, fast/slow ID63 confirmations,
+and the directional grouping/ID60 controls. A fake loaded stage is not allowed to
 bypass new fail-closed fields merely to exercise incremental Make behavior;
 fixture records use the same parser and conservation contracts as owner-loaded
 output.

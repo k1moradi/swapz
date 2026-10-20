@@ -99,8 +99,6 @@ struct swapz_inflight_write {
 struct swapz_dm;
 
 struct swapz_read_slot {
-	struct work_struct work;
-	struct completion done;
 	struct swapz_dm *ctx;
 	struct swapz_engine engine;
 	struct bio *bios[SWAPZ_MAX_RECORDS];
@@ -178,15 +176,13 @@ struct swapz_dm {
 	struct dm_io_client *io_client;
 	struct workqueue_struct *workqueue;
 	struct delayed_work worker;
-	/* Bounded Kread=2 experiment. The ordered worker remains the sole
-	 * authority/BIO-completion owner; one helper performs only read-only work. */
-	struct workqueue_struct *read_workqueue;
+	/* Bounded read grouping/coalescing scratch. The ordered worker remains
+	 * the sole read execution, authority and BIO-completion owner. */
 	struct swapz_read_slot *read_slots;
 	u8 *read_coalesce_scratch; /* 2 * SWAPZ_MAX_EXTENT_BYTES */
-	/* Group/cache/coalesce can run on depth-one media. Only true lower
-	 * concurrency is gated by queue depth >1. */
 	bool read_grouping_enabled;
 	bool read_coalescing_enabled;
+	/* Status-ABI token for the retired ID39 helper; always false. */
 	bool parallel_reads_enabled;
 	u64 parallel_read_pairs;
 	u64 parallel_read_same_extent_pairs;
@@ -260,11 +256,6 @@ struct swapz_dm {
 	struct swapz_map *maps;
 	swapz_u16 *live_records;
 	swapz_u8 *extent_classes;
-	/* Per-discard epoch/delta scratch validates shared-extent liveness
-	 * before any mapping or generation is mutated. */
-	swapz_u32 *discard_epoch;
-	swapz_u16 *discard_count;
-	swapz_u32 discard_serial;
 	swapz_u32 physical_blocks;
 	swapz_u32 logical_pages;
 
@@ -561,6 +552,7 @@ struct swapz_dm {
 	u64 preparation_worker_wall_ns;
 	u64 ordered_worker_cpu_ns;
 	u64 preparation_worker_cpu_ns;
+	/* Retained status-ABI field for the retired ID39 helper; remains zero. */
 	u64 read_worker_cpu_ns;
 	u64 preparation_crc_wall_ns;
 	u64 ordered_crc_wall_ns;
@@ -3022,7 +3014,6 @@ static void swapz_read_slot_prepare(struct swapz_read_slot *slot,
 	slot->lower_read_wall_ns = 0;
 	slot->read_engine_nonio_wall_ns = 0;
 	slot->decode_wall_ns = 0;
-	reinit_completion(&slot->done);
 }
 
 static int swapz_read_slot_run(struct swapz_read_slot *slot)
@@ -3071,20 +3062,6 @@ static int swapz_read_slot_run(struct swapz_read_slot *slot)
 	return 0;
 }
 
-static void swapz_read_slot_worker(struct work_struct *work)
-{
-	struct swapz_read_slot *slot =
-		container_of(work, struct swapz_read_slot, work);
-	u64 cpu_start_ns = swapz_worker_cpu_sample();
-	u64 cpu_end_ns;
-
-	slot->error = swapz_read_slot_run(slot);
-	cpu_end_ns = swapz_worker_cpu_sample();
-	slot->ctx->read_worker_cpu_ns +=
-		swapz_elapsed_ns(cpu_start_ns, cpu_end_ns);
-	complete(&slot->done);
-}
-
 static void swapz_merge_read_slot(struct swapz_dm *ctx,
 				  struct swapz_read_slot *slot,
 				  bool absorb_cache)
@@ -3123,25 +3100,29 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 	/*
 	 * The discard must be all-or-nothing on any detectable mapping,
 	 * generation or liveness corruption. Validate every affected logical
-	 * page before changing even the first generation or refcount.
+	 * page and restore temporary liveness accounting before committing the
+	 * first generation or persistent refcount change.
 	 */
 	{
 		sector_t check_sector = sector;
 		sector_t check_remaining = remaining;
-		swapz_u32 epoch = ++ctx->discard_serial;
+		sector_t restore_sector;
+		int check_error = 0;
 
-		if (!epoch) {
-			memset(ctx->discard_epoch, 0,
-			       (size_t)ctx->physical_blocks *
-			       sizeof(*ctx->discard_epoch));
-			epoch = ++ctx->discard_serial;
-		}
+		/*
+		 * Account shared extents by temporarily consuming one live-record
+		 * reference per validated logical page. The ordered worker is the sole
+		 * authority mutator and this pass performs no I/O, so the exact prefix
+		 * is restored before either returning or committing the discard.
+		 */
 		while (check_remaining) {
 			swapz_u32 logical = (swapz_u32)(check_sector / SWAPZ_SECTORS);
 			const struct swapz_map *m = &ctx->maps[logical];
 
-			if (m->generation == ~(swapz_u32)0)
-				return -EOVERFLOW;
+			if (m->generation == ~(swapz_u32)0) {
+				check_error = -EOVERFLOW;
+				break;
+			}
 			if (m->valid) {
 				swapz_u32 start = m->start_block;
 
@@ -3150,24 +3131,26 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 				     m->extent_blocks != 2 &&
 				     m->extent_blocks != 4) ||
 				    ctx->extent_classes[start] != m->extent_blocks ||
-				    !ctx->live_records[start])
-					return -EUCLEAN;
-				if (ctx->discard_epoch[start] != epoch) {
-					ctx->discard_epoch[start] = epoch;
-					ctx->discard_count[start] = 0;
+				    !ctx->live_records[start]) {
+					check_error = -EUCLEAN;
+					break;
 				}
-				/*
-				 * Every logical page in this DISCARD sharing the
-				 * same physical extent consumes a separate live
-				 * record. Check the aggregated count first.
-				 */
-				if (++ctx->discard_count[start] >
-				    ctx->live_records[start])
-					return -EUCLEAN;
+				ctx->live_records[start]--;
 			}
 			check_sector += SWAPZ_SECTORS;
 			check_remaining -= SWAPZ_SECTORS;
 		}
+		for (restore_sector = sector; restore_sector < check_sector;
+		     restore_sector += SWAPZ_SECTORS) {
+			swapz_u32 logical =
+				(swapz_u32)(restore_sector / SWAPZ_SECTORS);
+			const struct swapz_map *m = &ctx->maps[logical];
+
+			if (m->valid)
+				ctx->live_records[m->start_block]++;
+		}
+		if (check_error)
+			return check_error;
 	}
 	while (remaining) {
 		error = swapz_discard_page(&ctx->authority,
@@ -3403,10 +3386,10 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 				ctx->parallel_read_coalesce_skip_other++;
 		}
 
-		/* On a depth-one lower queue, only same-extent grouping or a proven
-		 * one-request ID63 merge may consume multiple BIOs. Otherwise process
-		 * a same-extent sibling group if present, or leave FIFO untouched. */
-		if (!coalesce && !ctx->parallel_reads_enabled) {
+		/* Only same-extent grouping or a proven one-request ID63 merge may
+		 * consume multiple BIOs. Otherwise leave FIFO untouched so the ordered
+		 * worker takes the ordinary zero-dispatch-overhead read path. */
+		if (!coalesce) {
 			if (slot0->bio_count < 2U)
 				return false;
 			have1 = false;
@@ -3464,17 +3447,6 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 			error0 = slot0->error;
 			error1 = slot1->error;
 		}
-	} else if (have1) {
-		if (!ctx->read_workqueue ||
-		    !queue_work(ctx->read_workqueue, &slot0->work)) {
-			slot0->error = -EUCLEAN;
-			complete(&slot0->done);
-		}
-		slot1->error = swapz_read_slot_run(slot1);
-		wait_for_completion(&slot0->done);
-		flush_work(&slot0->work);
-		error0 = slot0->error;
-		error1 = slot1->error;
 	} else {
 		slot0->error = swapz_read_slot_run(slot0);
 		error0 = slot0->error;
@@ -4246,8 +4218,6 @@ static void swapz_drain(struct dm_target *ti)
 		flush_delayed_work(&ctx->worker);
 	}
 	drain_workqueue(ctx->workqueue);
-	if (ctx->read_workqueue)
-		drain_workqueue(ctx->read_workqueue);
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!list_empty(&ctx->incoming) ||
 	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||
@@ -4299,13 +4269,6 @@ static void swapz_free(struct swapz_dm *ctx)
 		drain_workqueue(ctx->preparation_workqueue);
 		destroy_workqueue(ctx->preparation_workqueue);
 	}
-	if (ctx->read_workqueue) {
-		if (ctx->read_slots)
-			for (slot = 0; slot < SWAPZ_PARALLEL_READ_SLOTS; ++slot)
-				cancel_work_sync(&ctx->read_slots[slot].work);
-		drain_workqueue(ctx->read_workqueue);
-		destroy_workqueue(ctx->read_workqueue);
-	}
 	if (ctx->preparation_pool)
 		mempool_destroy(ctx->preparation_pool);
 	kfree(ctx->preparation_lz4_workmem);
@@ -4317,8 +4280,6 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->maps);
 	kvfree(ctx->live_records);
 	kvfree(ctx->extent_classes);
-	kvfree(ctx->discard_epoch);
-	kvfree(ctx->discard_count);
 	vfree(ctx->batch_bytes);
 	vfree(ctx->gc_bytes_store);
 	kvfree(ctx->gc_scores);
@@ -4461,14 +4422,13 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		error = -EINVAL;
 		goto fail;
 	}
-	/* blk-mq initializes nr_requests from the tag-set queue depth. This is
-	 * only a bounded queue-capacity gate: depth-one media stays on the exact
-	 * serialized read path; deeper queues may qualify for Kread=2. */
+	/* Keep the read-only parallel_reads parameter as the grouping ABI control.
+	 * ID39 helper concurrency is retired: all grouping/coalescing executes on
+	 * the ordered worker and the legacy status token remains false. */
 	ctx->read_grouping_enabled = swapz_parallel_reads;
 	ctx->read_coalescing_enabled =
 		ctx->read_grouping_enabled && swapz_read_coalesce;
-	ctx->parallel_reads_enabled = ctx->read_grouping_enabled &&
-		bdev_get_queue(ctx->backing->bdev)->nr_requests > 1U;
+	ctx->parallel_reads_enabled = false;
 	logical = div_u64(ti->len, SWAPZ_SECTORS);
 	physical = div_u64(bdev_nr_sectors(ctx->backing->bdev), SWAPZ_SECTORS);
 	physical = div_u64(physical, SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
@@ -4501,10 +4461,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->maps = kvcalloc(logical, sizeof(*ctx->maps), GFP_KERNEL);
 	ctx->live_records = kvcalloc(physical, sizeof(*ctx->live_records), GFP_KERNEL);
 	ctx->extent_classes = kvcalloc(physical, sizeof(*ctx->extent_classes), GFP_KERNEL);
-	ctx->discard_epoch = kvcalloc(physical, sizeof(*ctx->discard_epoch), GFP_KERNEL);
-	ctx->discard_count = kvcalloc(physical, sizeof(*ctx->discard_count), GFP_KERNEL);
 	if (!ctx->maps || !ctx->live_records || !ctx->extent_classes ||
-	    !ctx->discard_epoch || !ctx->discard_count ||
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_live_counts || !ctx->gc_min_live_blocks ||
 	    !ctx->gc_segment_evictions || !ctx->segment_mapped_pages ||
@@ -4593,8 +4550,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 			error = -ENOMEM;
 			goto fail;
 		}
-		INIT_WORK(&slot->work, swapz_read_slot_worker);
-		init_completion(&slot->done);
 	}
 	ctx->inflight_write.run.bytes = ctx->engine.bulk_scratch;
 	ctx->inflight_write.run.txs = ctx->engine.bulk_txs;
@@ -4610,14 +4565,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (!ctx->workqueue) {
 		error = -ENOMEM;
 		goto fail;
-	}
-	if (ctx->parallel_reads_enabled) {
-		ctx->read_workqueue = alloc_workqueue(
-					"swapz-read", WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
-		if (!ctx->read_workqueue) {
-			error = -ENOMEM;
-			goto fail;
-		}
 	}
 	if (ctx->async_prepare) {
 		/* 64 preallocated producer pages, a semaphore enforcing the

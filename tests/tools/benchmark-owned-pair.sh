@@ -430,7 +430,7 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])guard_inflight_zero_shrink=$
     fail 'loaded swapz in-flight-zero shrink guard does not match selected benchmark arm'
 expected_grouping=$PARALLEL_READS
 expected_coalescing=$(( PARALLEL_READS && READ_COALESCE ? 1 : 0 ))
-expected_parallel=$(( PARALLEL_READS && HW_QUEUE_DEPTH > 1 ? 1 : 0 ))
+expected_parallel=0
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_grouping_enabled=$expected_grouping([[:space:]]|$)" ||
     fail 'loaded swapz read-grouping gate does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])read_coalescing_enabled=$expected_coalescing([[:space:]]|$)" ||

@@ -678,7 +678,7 @@ def run_stage(title, command, result, *, parse_bench=False):
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
                        burst_guard_diagnostic.get("overall") !=
-                       "PASS_BURST_GUARD_AB_CONFIRMATION"))
+                       "PASS_BURST_GUARD_DIRECTIONAL_CONTROL"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -1585,7 +1585,7 @@ def sd_read_coalesce_ab_verdict(sessions):
 
 
 def parse_burst_guard_ab(output):
-    """Parse five matched fast mixed rounds varying only the ID64 guard."""
+    """Parse one directional fast mixed off/on ID64 guard control."""
     sessions, current = [], None
     for line in output.splitlines():
         line = line.strip()
@@ -1649,43 +1649,43 @@ def parse_burst_guard_ab(output):
 
 
 def burst_guard_ab_verdict(sessions):
-    """Validate the sole active ID64 scheduling experiment."""
-    try:
-        pairs = matched_binary_pairs(sessions, "guard")
-    except ValueError as exc:
-        return {"overall": "INCOMPLETE", "reason": str(exc)}
+    """Validate one directional ID64 control after owner qualification."""
+    if len(sessions) != len(DIRECTIONAL_SEQUENCE) or \
+            [row.get("guard") for row in sessions] != list(DIRECTIONAL_SEQUENCE):
+        return {"overall": "INCOMPLETE",
+                "reason": "ID64 directional guard-off/on observations required"}
     expected = MODEL_SPECS["ssd_emulated"]
     for index, row in enumerate(sessions):
         if row.get("status") != "PASS" or row.get("order") != (
                 "swapz-first" if index % 2 else "off-first"):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 confirmation order/status mismatch"}
+                    "reason": "ID64 directional order/status mismatch"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(model.get(key) != expected[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 confirmation device model mismatch"}
+                    "reason": "ID64 directional device model mismatch"}
         arm = row.get("swapz")
         if not isinstance(arm, dict) or not re.fullmatch(
                 r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 confirmation source missing"}
+                    "reason": "ID64 directional source missing"}
         if any(not isinstance(arm.get(key), (int, float)) or arm[key] <= 0
                for key in ("logical_write_mbps", "logical_write_bytes",
                            "lower_write_bytes", "lower_write_requests",
                            "read_p99_ms", "write_p99_ms")):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 confirmation mixed metrics missing"}
+                    "reason": "ID64 directional mixed metrics missing"}
         kernel = arm.get("kernel_write_path")
         if not isinstance(kernel, dict) or any(
                 type(kernel.get(name)) is not int or kernel[name] < 0
                 for name in KERNEL_WRITE_FIELDS) or timed_window_error(kernel):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 confirmation C telemetry missing"}
+                    "reason": "ID64 directional C telemetry missing"}
         if not kernel["pipeline_async_runs"]:
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 confirmation did not keep async preparation active"}
+                    "reason": "ID64 directional control did not keep async preparation active"}
         if not row["guard"] and kernel["burst_shrink_inflight_zero_skips"]:
             return {"overall": "INCOMPLETE",
                     "reason": "ID64-off arm executed guarded skips"}
@@ -1696,10 +1696,9 @@ def burst_guard_ab_verdict(sessions):
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
-                "reason": "ID64 confirmation provenance mismatch"}
-    if not sum(row["swapz"]["kernel_write_path"][
-            "burst_shrink_inflight_zero_skips"]
-            for row in sessions if row["guard"]):
+                "reason": "ID64 directional provenance mismatch"}
+    if not sessions[1]["swapz"]["kernel_write_path"][
+            "burst_shrink_inflight_zero_skips"]:
         return {"overall": "INCOMPLETE",
                 "reason": "ID64-on arm exercised no one-shot guarded shrink"}
 
@@ -1709,58 +1708,52 @@ def burst_guard_ab_verdict(sessions):
         "burst_shrink_inflight_zero_skips",
         "burst_shrink_after_inflight_zero")
     modes = {}
-    for enabled in (0, 1):
-        rows = [row["swapz"] for row in sessions if row["guard"] == enabled]
-        modes[str(enabled)] = {
-            "logical_write_mbps": statistics.mean(
-                row["logical_write_mbps"] for row in rows),
-            "lower_write_requests": statistics.mean(
-                row["lower_write_requests"] for row in rows),
-            "read_p99_ms": statistics.mean(row["read_p99_ms"] for row in rows),
-            "write_p99_ms": statistics.mean(row["write_p99_ms"] for row in rows),
-            **{field: statistics.mean(
-                row["kernel_write_path"][field] for row in rows)
-               for field in fields},
+    for row in sessions:
+        arm = row["swapz"]
+        modes[str(row["guard"])] = {
+            "logical_write_mbps": arm["logical_write_mbps"],
+            "lower_write_requests": arm["lower_write_requests"],
+            "read_p99_ms": arm["read_p99_ms"],
+            "write_p99_ms": arm["write_p99_ms"],
+            **{field: arm["kernel_write_path"][field] for field in fields},
         }
 
-    paired = {name: [] for name in (
-        "throughput_change_fraction", "lower_request_delta",
-        "read_p99_change_fraction", "write_p99_change_fraction",
-        "burst_close_delta", "overshoot_delta", "shrink_delta",
-        "after_i0_delta", "guard_skip_delta")}
-    for pair in pairs:
-        off, on = pair[0]["swapz"], pair[1]["swapz"]
-        paired["throughput_change_fraction"].append(
-            on["logical_write_mbps"] / off["logical_write_mbps"] - 1.0)
-        paired["lower_request_delta"].append(
-            on["lower_write_requests"] - off["lower_write_requests"])
-        paired["read_p99_change_fraction"].append(
-            on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
-        paired["write_p99_change_fraction"].append(
-            on["write_p99_ms"] / off["write_p99_ms"] - 1.0)
-        ok, ik = on["kernel_write_path"], off["kernel_write_path"]
-        paired["burst_close_delta"].append(
-            ok["pack_close_burst_target"] - ik["pack_close_burst_target"])
-        paired["overshoot_delta"].append(
-            ok["pack_close_burst_overshoot"] - ik["pack_close_burst_overshoot"])
-        paired["shrink_delta"].append(
-            ok["burst_target_shrinks"] - ik["burst_target_shrinks"])
-        paired["after_i0_delta"].append(
-            ok["burst_shrink_after_inflight_zero"] -
-            ik["burst_shrink_after_inflight_zero"])
-        paired["guard_skip_delta"].append(
-            ok["burst_shrink_inflight_zero_skips"] -
-            ik["burst_shrink_inflight_zero_skips"])
+    off, on = sessions[0]["swapz"], sessions[1]["swapz"]
+    off_kernel, on_kernel = off["kernel_write_path"], on["kernel_write_path"]
+    directional = {
+        "throughput_change_fraction":
+            on["logical_write_mbps"] / off["logical_write_mbps"] - 1.0,
+        "lower_request_delta":
+            on["lower_write_requests"] - off["lower_write_requests"],
+        "read_p99_change_fraction":
+            on["read_p99_ms"] / off["read_p99_ms"] - 1.0,
+        "write_p99_change_fraction":
+            on["write_p99_ms"] / off["write_p99_ms"] - 1.0,
+        "burst_close_delta":
+            on_kernel["pack_close_burst_target"] -
+            off_kernel["pack_close_burst_target"],
+        "overshoot_delta":
+            on_kernel["pack_close_burst_overshoot"] -
+            off_kernel["pack_close_burst_overshoot"],
+        "shrink_delta":
+            on_kernel["burst_target_shrinks"] -
+            off_kernel["burst_target_shrinks"],
+        "after_i0_delta":
+            on_kernel["burst_shrink_after_inflight_zero"] -
+            off_kernel["burst_shrink_after_inflight_zero"],
+        "guard_skip_delta":
+            on_kernel["burst_shrink_inflight_zero_skips"] -
+            off_kernel["burst_shrink_inflight_zero_skips"],
+    }
     return {
-        "overall": "PASS_BURST_GUARD_AB_CONFIRMATION",
-        "matched_pairs": 5,
-        "confidence": "PAIRED_95PCT_CI_REPORTED",
+        "overall": "PASS_BURST_GUARD_DIRECTIONAL_CONTROL",
+        "observations_per_mode": 1,
+        "confidence": "DIRECTIONAL_ONLY_OWNER_QUALIFIED_ID64_HISTORY_RETAINED",
         "device_model": expected,
         "modes": modes,
-        "paired": {name: paired_ci95(values)
-                   for name, values in paired.items()},
+        "directional": directional,
         "interpretation":
-            "ASYNC_FIXED_ON_ONLY_ONE_SHOT_INFLIGHT_ZERO_SHRINK_GUARD_TOGGLE",
+            "ASYNC_FIXED_ON_ONE_SHOT_GUARD_DIRECTIONAL_REGRESSION_CONTROL",
     }
 
 
@@ -2936,8 +2929,8 @@ def print_bench(result):
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
 
     guard_ab = result["benchmarks"].get("burst_guard_ab", {})
-    if guard_ab.get("overall") == "PASS_BURST_GUARD_AB_CONFIRMATION":
-        print("\n  ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — five matched rounds")
+    if guard_ab.get("overall") == "PASS_BURST_GUARD_DIRECTIONAL_CONTROL":
+        print("\n  ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — directional control")
         rows = []
         for enabled in ("0", "1"):
             mode = guard_ab["modes"][enabled]
@@ -2952,7 +2945,7 @@ def print_bench(result):
             ))
         print_table(("guard", "W", "W req", "burst", "over", "shrink", "skip-I0"),
                     rows)
-        ci_rows = []
+        delta_rows = []
         for label, field, scale in (
                 ("W %", "throughput_change_fraction", 100.0),
                 ("W req", "lower_request_delta", 1.0),
@@ -2963,13 +2956,11 @@ def print_bench(result):
                 ("shrink", "shrink_delta", 1.0),
                 ("after-I0", "after_i0_delta", 1.0),
                 ("skip-I0", "guard_skip_delta", 1.0)):
-            ci = guard_ab["paired"][field]
-            ci_rows.append((label, f"{ci['mean'] * scale:+.1f}",
-                            f"{ci['low'] * scale:+.1f}",
-                            f"{ci['high'] * scale:+.1f}"))
-        print_table(("metric", "mean", "low", "high"), ci_rows)
+            value = guard_ab["directional"][field] * scale
+            delta_rows.append((label, f"{value:+.1f}"))
+        print_table(("metric", "guard1-guard0"), delta_rows)
     else:
-        print("\n  ID64 burst-shrink guard A/B: NOT QUALIFIED "
+        print("\n  ID64 burst-shrink guard directional control: NOT QUALIFIED "
               f"({guard_ab.get('reason', guard_ab.get('overall', 'NOT_RUN'))})")
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
@@ -3007,7 +2998,7 @@ def print_bench(result):
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
             ("read isolation", "ID39/slow ID60 directional; ID63 slow+fast 5 pairs"),
-            ("ID64", "fast mixed: 5 matched guard-off/on pairs + paired CI"),
+            ("ID64", "fast mixed: one directional guard-off/on control"),
             ("write-only", "fast QD8: 5 matched pairs + paired CI; QD1/QD4/QD32 directional"),
             ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),

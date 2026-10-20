@@ -512,9 +512,11 @@ that legacy pair counter after the candidate was already observed.
 ### Worker scheduler-accounted CPU attribution
 
 Keep callback wall residency and worker CPU attribution separate. At
-ordered/preparation/read-helper worker boundaries, sample
+ordered/preparation worker boundaries, sample
 `READ_ONCE(current->se.sum_exec_runtime)` and accumulate nonnegative deltas in
-dedicated counters. These samples exclude lower-I/O sleep and runqueue wall delay, but a direct
+dedicated counters. The retired ID39 helper has no worker boundary;
+`read_worker_cpu_ns` is retained only as a zero-valued status compatibility
+field. These samples exclude lower-I/O sleep and runqueue wall delay, but a direct
 entry/exit sample can materially miss a short non-sleeping callback when the
 scheduler has not updated the current entity between samples. Therefore the
 counters are lower-bound diagnostics, not total or cycle-exact CPU time. Expose
@@ -523,22 +525,30 @@ LZ4+CRC+copy for the producer and LZ4+CRC+copy+commit-non-I/O for the ordered
 path as measured non-sleeping phase floors. Floors are not total CPU either.
 Do not call an unexported scheduler helper merely to sharpen this measurement.
 
-### Parallel-read diagnostic control
+### Synchronous READ grouping and ID63 control
 
-The read-only `parallel_reads` and `read_coalesce` module parameters are
-evidence controls, not runtime auto-tuning policy. Loaded qualification may set
-them to 0 or 1 only through the private owned-RAM helper. Fast/slow ID63 keep
-`parallel_reads=1` and vary only `read_coalesce` for five matched rounds.
-Owner-refuted ID39 and ID60 retain only one off/on directional regression
-control with coalescing disabled.
+The read-only `parallel_reads` and `read_coalesce` module parameters remain
+evidence controls, not runtime auto-tuning policy. `parallel_reads=1` enables
+the bounded grouping machinery; `read_coalesce=1` additionally permits exact
+ID63 adjacent missing-range coalescing. They do not enable helper concurrency.
 
-When grouping is off, allocate no read slots, coalescing scratch or read
-workqueue. When grouping is on, same-extent grouping and single-request ID63
-coalescing may run even on a depth-one queue because they do not add lower
-concurrency. Only dispatch of two independent lower READ requests uses the
-helper workqueue and remains gated on `nr_requests > 1`. A depth-one
-qualification must observe zero read-worker CPU delta. Do not conflate
-grouping/coalescing capability with parallel lower service.
+The rejected ID39 `swapz-read` workqueue, per-slot work/completion objects,
+queue/wait/flush dispatch and helper CPU accounting are not part of current
+production code. `parallel_reads_enabled` remains in status for schema
+compatibility and must be zero; `read_worker_cpu_ns` must likewise remain
+zero.
+
+`swapz_try_parallel_read_batch()` may consume multiple BIOs only when the
+first extent has at least two sibling BIOs, or when two distinct extents satisfy
+the exact ID63 zero-padding coalescing rule. A non-coalescible distinct-extent
+pair must leave FIFO ownership untouched and fall back to ordinary
+`swapz_read()`. Shared cache priming/absorption, authority access and all BIO
+completion remain on the ordered worker.
+
+Fast and serial ID63 qualification keeps `parallel_reads=1` and varies only
+`read_coalesce` for five matched rounds. The legacy fast off/on
+`parallel_reads` directional control is regression evidence for grouping only;
+it must not be interpreted as renewed evidence for parallel lower READ service.
 
 ### One-shot in-flight-zero burst-target shrink guard
 
@@ -548,7 +558,9 @@ still active, clear retained-chain evidence, and leave the following residual
 deadline window looking like a new smaller burst.
 
 The read-only `guard_inflight_zero_shrink` module parameter is an owned-RAM
-A/B control and defaults enabled for the active ID64 candidate. It may affect
+regression control and remains enabled by default after owner qualification.
+The historical five-pair A/B is promotion evidence; current qualification keeps
+only one directional off/on observation. It may affect
 only the deadline learned-target shrink site. It must not suppress PACK_READY,
 defer/re-sample tails, delay upper BIO completion, alter timer expiry, create
 new waits, or change lower-run ownership/publication.
@@ -570,6 +582,20 @@ Actual shrinks continue to conserve across after-inflight-zero,
 after-read-bypass/other and <=8/9..32/>32 target bins. Guarded skips are
 separate from `burst_target_shrinks`; they are suppressed candidates, not
 actual target updates.
+
+### Zero-allocation DISCARD range prevalidation
+
+Multi-page DISCARD must validate the complete logical range before committing
+any mapping/generation invalidation. Shared physical extents require aggregate
+liveness accounting: the serialized ordered worker may temporarily decrement
+one `live_records[start]` reference per validated page, but it must restore the
+exact validated prefix on both success and failure before entering the commit
+loop.
+
+Do not allocate per-physical-block epoch/count scratch for this check. The
+temporary accounting pass performs no lower I/O and no mapping/generation
+mutation; malformed start/class/liveness or generation overflow fails closed.
+The subsequent `swapz_discard_page()` loop remains the sole commit path.
 
 ### Opposite-end asynchronous preparation
 
@@ -818,30 +844,27 @@ page. This optimization may remove duplicate reads of sibling records but must
 not turn cached bytes into mapping authority or weaken the existing mutation
 fence.
 
-### Bounded parallel READ ownership
+### Synchronous grouped READ ownership
 
-Parallel READ service is capped at `SWAPZ_PARALLEL_READ_SLOTS == 2` and is
-eligible only when the backing blk-mq queue exposes request depth greater than
-one. A read-only module parameter `parallel_reads`, default true, may disable
-the service for same-source A/B evidence; it never overrides the queue-depth
-safety gate. This is a bounded queue-capacity gate, not a generic device-speed
-classifier. A depth-one backing path must use the original serialized reader
-with no read-slot workqueue or slot allocation.
+Grouped READ handling is bounded to `SWAPZ_PARALLEL_READ_SLOTS == 2`, but the
+slots are scratch/telemetry containers executed synchronously by the ordered
+worker. The read-only `parallel_reads` parameter, default true, controls
+grouping eligibility only; it no longer enables independent lower-READ
+concurrency or depends on backing queue depth.
 
 The ordered worker remains the sole mapping, cache-publication, retained-window,
 global-accounting and upper-BIO completion owner. The master engine owns the
-512-entry metadata LRU and a 16-entry immutable extent-residency cache. Read
-helpers have private engine state/scratch only. Before dispatch the ordered
-worker may prime a helper from master residency; after join it may absorb only
-successfully validated helper residency and telemetry. Helpers never mutate
-shared cache state, authority or upper BIO completion.
+512-entry metadata LRU and a 16-entry immutable extent-residency cache. Private
+slot engine state is primed from master residency before a grouped operation and
+absorbed only after successful validation/copy; it never mutates shared cache
+state or authority independently.
 
-Within one already-admitted contiguous independent-READ prefix, the ordered
-worker may select at most two physical extents and collect all siblings for
-those extents. It may reorder only across earlier BIOs that are themselves
-independent READs; the first write, barrier or dependent READ ends the scan.
-There is no grace interval, fill timer, spin, sleep or wait for future arrivals.
-A lone eligible READ keeps the existing immediate serialized path.
+Within one already-admitted contiguous independent-READ prefix, same-extent
+siblings may be grouped. Two distinct extents may be consumed together only
+when the exact ID63 coalescing predicate proves one zero-padding lower request.
+Otherwise the helper returns without taking BIO ownership and the ordinary FIFO
+`swapz_read()` path runs. No grace interval, fill timer, spin, sleep, helper
+workqueue, completion wait or `flush_work()` is permitted.
 
 The shared extent cache is fixed at 16 * 16KiB = 256KiB per target. Each slot
 stores only blocks proven fetched for one immutable extent, with an exact block
@@ -850,7 +873,7 @@ write/GC/discard/barrier mutation fence invalidates the master one-extent cache,
 metadata LRU, shared extent cache and private-slot residency before authority
 changes. Cache reuse never skips generation/descriptor/payload CRC validation.
 
-A concurrent read failure fails closed through the ordered owner. Teardown
-closes admission and drains read work before freeing scratch. Parallel-slot
-lower READ wall is a sum of overlapping busy intervals and is not elapsed pair
-wall; lower in-flight depth plus end-to-end latency/traffic remain the evidence.
+A grouped read failure fails closed through the ordered owner. Teardown drains
+the ordered worker before freeing read scratch; there is no read-helper work to
+cancel or drain. End-to-end latency plus independently measured lower
+bytes/requests remain the acceptance evidence.
