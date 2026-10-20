@@ -132,8 +132,14 @@ promotion. Fast write-only QD8 remains confirmed at +8.1%, paired 95% CI
   includes the predictor and no filter metadata/policy-length surface exists in
   ID67a.
 - **ID58/59:** representative-content evidence only.
-- **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
-  background worker.
+- **ID61:** the owned-RAM lifecycle phase now collects foreground-GC pressure
+  evidence before any background worker. Exactly five pressure rounds must emit
+  useful-WRITE wall/p99; loaded status must show positive total GC wall and
+  victim-choice wall plus exact map/segment/relocation scan counts. The report
+  records round-0 baseline p99, maximum later-round p99, GC wall as a
+  fraction of useful-WRITE wall, and the existing no-headroom skip count. This
+  is observational only: no GC worker,
+  victim-policy change or reverse index is permitted in the evidence commit.
 - **ID62:** current host-safety rules still prohibit physical-device
   collection; this cleanup does not authorize real storage.
 
@@ -619,6 +625,26 @@ path therefore maps vec.bv_page and uses its page-local vec.bv_offset. A
 page-aligned 4KiB folio slice can already reach the direct single-segment path;
 multi-segment slices retain the copy fallback.
 
+
+### Foreground GC pressure evidence
+
+The existing `--gc-stress 5` owned-null_blk phase is the ID61 pressure oracle.
+It must retain byte-exact verification of all 4096 logical pages and the existing
+victim/rotation/TRIM requirements. Each round emits exactly one
+`GC_PRESSURE_ROUND` record containing successful WRITE count, summed WRITE
+wall, WRITE p99 and final fsync wall. Loaded qualification emits one
+`PASS_LOADED_GC_PRESSURE` record with five rounds, positive useful-WRITE wall,
+baseline/pressure p99, total GC wall, GC-wall fraction, victim-choice wall/calls,
+the existing no-headroom skip count, and exact choose-map, choose-segment and
+relocation-map scan counts.
+
+For the current 4096-page oracle, choose/relocation map-entry deltas must be at
+least `gc_victims * 4096`; this proves the full-map scaling cost is actually
+being exercised. The parser recomputes the integer GC-wall fraction and rejects
+missing/inconsistent evidence. Native report and Make-interface fixtures mirror
+the complete marker. No acceptance threshold for “background GC is useful” is
+hardcoded: the owner evidence first determines whether GC wall/tail impact is
+large enough to justify another architecture experiment.
 
 ### Native Make-interface benchmark fixture fidelity
 

@@ -623,6 +623,29 @@ temporary accounting pass performs no lower I/O and no mapping/generation
 mutation; malformed start/class/liveness or generation overflow fails closed.
 The subsequent `swapz_discard_page()` loop remains the sole commit path.
 
+### Foreground GC pressure and scaling telemetry
+
+ID61 evidence must observe the existing serialized collector without changing
+victim policy, allocation authority, publication order or introducing a GC
+worker. Time the complete `swapz_gc_compact_one()` attempt exactly once,
+including RAW callers and failed/no-headroom attempts, and time victim choice
+inside that total. Do not double-account GC wall at individual call sites.
+
+For scaling evidence, count exact loop work rather than infer it from device
+size: logical-map entries scanned while building victim scores, segment entries
+examined during victim selection, and logical-map entries scanned during victim
+relocation. Preserve the existing no-headroom skip counter alongside them so
+reserve pressure is visible. These counters are diagnostics only and must never
+influence selection. Existing `segment_mapped_pages` remains the authoritative O(1)
+post-evacuation deadness check.
+
+The private owned-RAM GC oracle may measure each successful foreground WRITE
+with `CLOCK_MONOTONIC`, report one p99 per pressure round and retain exact final
+image verification. Kernel GC wall and userspace WRITE wall are separate
+clocks/contexts; their ratio is attribution evidence, not a CPU utilization
+metric. A future background worker or reverse index requires a separate change
+after this evidence demonstrates a material latency/scaling problem.
+
 ### Opposite-end asynchronous preparation
 
 The ordered worker owns FIFO execution and may atomically reserve an unclaimed

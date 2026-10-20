@@ -137,8 +137,18 @@ prepare/prime/absorb work and leave FIFO ownership untouched.
 **IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
 128-payload synthetic duplication. Keep representative-corpus evidence only.
 
-**ID61 background GC.** Timed mixed I/O sees zero victims; measure foreground GC
-stall/headroom before adding a worker.
+**ID61 foreground GC pressure.** Timed mixed I/O still sees zero victims, so
+the existing owned-RAM lifecycle phase is the evidence surface. Its five
+capacity-pressure rounds report total successful useful-WRITE wall and one
+per-round WRITE p99, while kernel status brackets the same phase for total
+foreground-GC wall, victim-choice wall/calls, the existing
+no-headroom skip count, logical-map entries scanned, segment-score entries
+scanned and relocation-map entries scanned. Round 0 is
+the pre-pressure latency baseline; the maximum p99 from later rounds is the
+pressure observation. Report GC wall as parts-per-million of useful WRITE wall.
+This is synthetic owned-RAM evidence and must not be relabeled physical-device
+latency. Do not add a background worker until the measured GC fraction/tail
+impact is material with reserve headroom.
 
 **ID62 physical media.** No current benchmark may collect physical evidence.
 ID29/ID63 RAM qualification does not authorize physical storage or active swap.
@@ -166,6 +176,16 @@ The output is explicitly labeled
 `OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY` and is sanitized into the official
 report. A later ID67b is permitted only after this evidence is reviewed; the
 native evaluator itself must not be cited as loaded-kernel performance.
+
+The first native run is mechanism evidence, not prevalence evidence. On the
+structured controls, delta64 saved 60 of 238 planned blocks, CL-Delta32x2 saved
+53, xor64 43, delta32 14 and cacheline byte-delta zero. CL-Delta32x2 rescued 128
+RAW pages and crossed the <=2024-byte cliff on 96 controls; delta64 rescued the
+same 128 and crossed 128. However, the current CL small-residual signpost called
+second LZ4 on 76-77 of 141 eligible SHAKE-derived negative controls at thresholds
+64/96/128/192 and none produced a useful candidate. Therefore neither the CL
+classifier nor a production transform is promoted; representative content and a
+lower-false-positive routing signal are still required.
 
 ## Physical media
 

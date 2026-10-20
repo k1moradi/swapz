@@ -139,13 +139,13 @@ changes.
 | 58 | Nonzero same-filled-page special representation | **4 low-priority representative-corpus evidence** | Current synthetic trace has 0/12,301 nonzero same-filled writes and 0 final live same-filled pages, so there is no benchmark opportunity. Keep the offline detector; do not add a production representation until representative swap content shows prevalence. |
 | 59 | Exact-content page deduplication / shared payload ownership | **4 representative-corpus + architecture evidence** | Synthetic trace reports 12,301 resident duplicate opportunities from only 128 payloads and 1,024 final duplicate pages. This proves the analyzer, not production prevalence. Measure representative lifetime overlap before implementing collision-free verification, bounded refcounts, generation-safe COW and GC/DISCARD ownership. |
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
-| 61 | Background/asynchronous GC instead of foreground collection stalls | **4 dependent evidence** | Lifecycle GC is correct (20 victims/rotations), but timed mixed reports no foreground GC victims. First measure foreground GC stall/headroom during useful pressure; a worker is unjustified until GC materially contributes to latency with reserve headroom. |
+| 61 | Background/asynchronous GC instead of foreground collection stalls | **4 foreground-pressure evidence implemented; owner run pending** | Existing 4096-page/5-round owned-RAM live-GC stress now records per-round useful WRITE wall/p99 plus kernel total-GC wall, victim-choice wall/calls and exact map/segment/relocation scan counts. This measures the current serialized collector only; no background worker or scoring policy is added. Use the owner run to decide whether GC latency is material and whether full-map scans justify a reverse index/O(1) scoring follow-up. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
 | 63 | Physically adjacent distinct-extent READ coalescing | **1 qualified fast + serial request/latency result** | Post-ID65 owner evidence: fast seq req -24.1% CI [-27.7%,-20.5%] with p99 -3.6% CI [-9.5%,+2.4%]; serial seq req -40.3% and p99 -38.1% with decisive CIs. Zero extra blocks. Keep exact zero-padding coalescing only. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **1 owner-qualified / keep** | Five matched fast mixed rounds eliminated after-I0 shrinks and reduced burst closes, overshoot and lower WRITE requests without a measured latency penalty. Keep enabled; retain only one directional regression control. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | Owner run proves ID63 request savings persist without the helper and the old fast p99 regression disappears. Legacy helper status/CPU tokens remain zero. Follow-up cleanup rejects all non-ID63 pairs before slot preparation/priming. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Cacheline-reset predictive rescue before LZ4 | **4 ID67a native evidence implemented; production decision pending** | Portable CL-Delta32x2 plus byte-delta/delta32/delta64/xor64 controls now run only in native qualification. SHAKE entropy/mixed/medium pages are negative controls; nine deterministic structured binary/numeric archetypes are positive controls. Every transform must round-trip exactly and resulting lengths are scored through the real bounded planner. No codec/authority/DM/SWZ3 path uses the predictor. |
+| 67 | Cacheline-reset predictive rescue before LZ4 | **4 ID67a evidence collected; classifier/corpus refinement required** | Native structured controls show material planner opportunity, but do not justify production yet: delta64 saved 60/238 planned blocks, CL-Delta32x2 53/238, xor64 43/238 and delta32 14/238; byte-delta saved none. The current CL small-residual signpost still selected 76-77 of 141 eligible SHAKE-derived negative-control pages at thresholds 64-192 and none benefited, so the classifier is not ready for ID67b. No codec/authority/DM/SWZ3 path uses the predictor. |
 
 
 ## What the pinned queue experiment establishes
@@ -209,17 +209,17 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 1. Land the post-ID65 cleanup: restore executable test-script modes, promote
    ID65/66 documentation, reject non-ID63 READ pairs before slot
    preparation/priming, and retire standalone ID39/ID60 loaded controls.
-2. Qualify the implemented ID67a native/offline evaluator. It generates
-   SHAKE entropy/mixed/medium negative controls plus deterministic pointer,
-   page-table, integer, floating-point and struct-array positive controls;
-   compares five reversible transforms and classifier thresholds 64/96/128/192;
-   and reports real `swapz_engine_plan_bounded()` block/extent outcomes.
-   Do not add SWZ3 filter metadata or a hot-path predictor until this evidence
-   shows material physical savings and acceptable transform/LZ4 cost.
-3. Add ID61 foreground-GC pressure evidence on owned RAM. Measure GC wall as a
-   fraction of useful-I/O wall, read/write p99 impact, reserve headroom and
-   lower GC traffic; separately characterize the current full-map
-   victim/relocation scans versus logical-page count.
+2. Keep ID67 in native/offline evidence. The first structured controls prove
+   physical-block opportunity but favor delta64 over CL-Delta32x2, while the
+   current CL signpost has a high false-positive second-LZ4 rate on eligible
+   SHAKE-derived controls. Refine classifier/corpus evidence before any ID67b
+   SWZ3 metadata or hot-path predictor.
+3. Owner-qualify the implemented ID61 foreground-GC pressure instrumentation on
+   owned RAM. The 5-round lifecycle phase now reports useful WRITE wall/p99,
+   total foreground-GC wall/fraction, victim-choice wall/calls and exact
+   choose/relocation scan counts. Decide from that evidence whether a background
+   worker is justified and whether full-map scanning warrants incremental
+   per-segment reverse-index/scoring state.
 4. Continue ID43 compound/folio coverage and ID36 low-RAM/heavy-CPU
    qualification.
 5. Keep ID62 blocked until the RAM-backed kernel/format evidence work above is

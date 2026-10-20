@@ -556,7 +556,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_raw_write(ctx, bio, logical)", accept)
 
     def test_gc_refuses_any_unpublished_lower_group(self):
-        compact = body("swapz_gc_compact_one")
+        compact = body("swapz_gc_compact_one_inner")
         self.assertIn("a->batch_pending", compact)
         self.assertIn("a->batch_replaying", compact)
         self.assertLess(compact.index("a->batch_pending"),
@@ -573,7 +573,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         dead = source_body("swapz_pick_dead_segment", authority)
         rotate = source_body("swapz_gc_commit_rotation", authority)
         ctor = body("swapz_ctr")
-        compact = body("swapz_gc_compact_one")
+        compact = body("swapz_gc_compact_one_inner")
         self.assertIn("segment_mapped_pages", (ROOT / "src/kernel/authority.h").read_text())
         self.assertIn("segment_mapped_pages[new_segment]++", finish)
         self.assertIn("segment_mapped_pages[old_segments[index]]--", finish)
@@ -972,7 +972,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("e->plan_wall_ns +=", engine_prepare)
         self.assertIn("e->pack_wall_ns +=", engine_prepare)
         self.assertIn("e->publish_wall_ns +=", engine_complete)
-        self.assertIn("ctx->gc_wall_ns +=", flush)
+        compact = body("swapz_gc_compact_one")
+        self.assertIn("ctx->gc_wall_ns +=", compact)
+        self.assertIn("swapz_gc_compact_one_inner(ctx)", compact)
+        self.assertNotIn("ctx->gc_wall_ns +=", flush)
         self.assertIn("#include <linux/sched.h>", DM)
         self.assertNotIn("#include <linux/sched/cputime.h>", DM)
         self.assertNotIn("task_cputime_adjusted(current", DM)
@@ -996,7 +999,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                     "engine_publish_crc_wall_ns",
                     "lower_read_wall_ns", "lower_write_wall_ns",
                     "ordered_worker_wall_ns", "ordered_worker_cpu_ns",
-                    "read_worker_cpu_ns", "gc_wall_ns", "ordered_crc_wall_ns",
+                    "read_worker_cpu_ns", "gc_wall_ns",
+                    "gc_choose_wall_ns", "gc_choose_calls",
+                    "gc_choose_map_entries", "gc_choose_segment_entries",
+                    "gc_relocation_map_entries", "ordered_crc_wall_ns",
                     "prep_lower_write_samples",
                     "prep_lower_write_start_queued",
                     "prep_lower_write_start_nonempty",
@@ -1756,6 +1762,46 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(flush.index("accounted:"), flush.index("ctx->batch_count = 0"))
         self.assertIn("retained_read_bypasses=%llu", body("swapz_status"))
 
+    def test_id61_foreground_gc_pressure_evidence_is_observational(self):
+        choose = body("swapz_gc_choose_victim")
+        compact_inner = body("swapz_gc_compact_one_inner")
+        compact = body("swapz_gc_compact_one")
+        status = body("swapz_status")
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        oracle = (ROOT / "tests/tools/device-roundtrip.c").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+
+        self.assertIn("ctx->gc_choose_calls++", choose)
+        self.assertIn("ctx->gc_choose_map_entries++", choose)
+        self.assertIn("ctx->gc_choose_segment_entries++", choose)
+        self.assertIn("ctx->gc_relocation_map_entries++", compact_inner)
+        self.assertIn("ctx->gc_choose_wall_ns +=", compact_inner)
+        self.assertIn("ctx->gc_wall_ns +=", compact)
+        self.assertIn("swapz_gc_compact_one_inner(ctx)", compact)
+        for name in (
+                "gc_choose_wall_ns", "gc_choose_calls",
+                "gc_choose_map_entries", "gc_choose_segment_entries",
+                "gc_relocation_map_entries"):
+            self.assertIn(name + "=%llu", status)
+            self.assertIn("ctx->" + name, status)
+
+        self.assertIn("GC_PRESSURE_ROUND=", oracle)
+        self.assertIn("CLOCK_MONOTONIC", oracle)
+        self.assertIn("write_p99_ns", oracle)
+        self.assertIn("PASS_LOADED_GC_PRESSURE=", deploy)
+        self.assertIn("gc_fraction_ppm", deploy)
+        self.assertIn("gc_choose_map_entries >= gc_victims * 4096", deploy)
+        self.assertIn("gc_relocation_map_entries >= gc_victims * 4096", deploy)
+        self.assertIn('"gc_pressure": re.compile(', runner)
+        self.assertIn('"gc_fraction_ppm": gc_fraction_ppm', runner)
+        self.assertIn('"gc_no_headroom_skips": gc_no_headroom_skips', runner)
+
+        # This phase measures the current foreground collector only. It does
+        # not add a background worker or alter victim scoring/allocation.
+        self.assertNotIn("gc_workqueue", DM)
+        self.assertNotIn("queue_work(ctx->gc", DM)
+        self.assertNotIn("kthread", compact_inner)
+
     def test_gc_status_is_truthful(self):
         self.assertIn("mode=alpha-live-gc", body("swapz_status"))
         self.assertNotIn("mode=alpha-no-gc", body("swapz_status"))
@@ -2008,6 +2054,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("gc_rotations == gc_victims", deploy)
         self.assertIn("gc_victim != gc_destination", deploy)
         self.assertIn("PASS_LOADED_LIVE_GC=", deploy)
+        self.assertIn("PASS_LOADED_GC_PRESSURE=", deploy)
+        self.assertIn("GC_PRESSURE_ROUND=", (ROOT / "tests/tools/device-roundtrip.c").read_text())
         self.assertIn("START_LOADED_SUSPEND_DRAIN", deploy)
         self.assertIn('--table "0 32768 swapz $LOWER 0 64 1 2 0 1 0 4"', deploy)
         self.assertIn("timer_arms > lifecycle_windows", deploy)

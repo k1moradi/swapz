@@ -394,9 +394,36 @@ OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "live-GC DM UUID mismatch"
 gc_before="$(dmsetup status "$DMNAME")"
-timeout --signal=TERM --kill-after=5s 90s "$ORACLE" \
-    "/dev/mapper/$DMNAME" --gc-stress 5 ||
+if ! gc_oracle_output="$(timeout --signal=TERM --kill-after=5s 90s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --gc-stress 5 2>&1)"; then
+    printf '%s\n' "$gc_oracle_output"
     fail "loaded live-GC stress or byte-exact verification failed"
+fi
+printf '%s\n' "$gc_oracle_output"
+gc_round_count="$(printf '%s\n' "$gc_oracle_output" |
+    awk '/^GC_PRESSURE_ROUND=/ { count++ } END { print count + 0 }')"
+gc_write_wall_ns="$(printf '%s\n' "$gc_oracle_output" |
+    awk '/^GC_PRESSURE_ROUND=/ {
+        for (i = 1; i <= NF; ++i)
+            if ($i ~ /^write_wall_ns:/) {
+                split($i, value, ":"); total += value[2]
+            }
+    } END { printf "%.0f\n", total + 0 }')"
+gc_baseline_p99_ns="$(printf '%s\n' "$gc_oracle_output" |
+    awk '/^GC_PRESSURE_ROUND=0 / {
+        for (i = 1; i <= NF; ++i)
+            if ($i ~ /^write_p99_ns:/) {
+                split($i, value, ":"); print value[2]; found = 1
+            }
+    } END { if (!found) print 0 }')"
+gc_pressure_p99_ns="$(printf '%s\n' "$gc_oracle_output" |
+    awk '/^GC_PRESSURE_ROUND=[1-9][0-9]* / {
+        for (i = 1; i <= NF; ++i)
+            if ($i ~ /^write_p99_ns:/) {
+                split($i, value, ":")
+                if (value[2] + 0 > maximum + 0) maximum = value[2]
+            }
+    } END { printf "%.0f\n", maximum + 0 }')"
 gc_after="$(dmsetup status "$DMNAME")"
 gc_victims="$(status_u64 "$gc_after" gc_victims)" ||
     fail "live-GC status lacks victim count"
@@ -426,6 +453,41 @@ gc_dead_reuses="$(status_u64 "$gc_after" dead_segment_reuses)" ||
     fail "live-GC status lacks dead-segment reuse count"
 gc_no_headroom="$(status_u64 "$gc_after" gc_no_headroom_skips)" ||
     fail "live-GC status lacks no-headroom skip count"
+gc_wall_before="$(status_u64 "$gc_before" gc_wall_ns)" ||
+    fail "live-GC baseline lacks GC wall"
+gc_wall_after="$(status_u64 "$gc_after" gc_wall_ns)" ||
+    fail "live-GC status lacks GC wall"
+gc_choose_wall_before="$(status_u64 "$gc_before" gc_choose_wall_ns)" ||
+    fail "live-GC baseline lacks choose wall"
+gc_choose_wall_after="$(status_u64 "$gc_after" gc_choose_wall_ns)" ||
+    fail "live-GC status lacks choose wall"
+gc_choose_calls_before="$(status_u64 "$gc_before" gc_choose_calls)" ||
+    fail "live-GC baseline lacks choose calls"
+gc_choose_calls_after="$(status_u64 "$gc_after" gc_choose_calls)" ||
+    fail "live-GC status lacks choose calls"
+gc_choose_map_before="$(status_u64 "$gc_before" gc_choose_map_entries)" ||
+    fail "live-GC baseline lacks choose map entries"
+gc_choose_map_after="$(status_u64 "$gc_after" gc_choose_map_entries)" ||
+    fail "live-GC status lacks choose map entries"
+gc_choose_segment_before="$(status_u64 "$gc_before" gc_choose_segment_entries)" ||
+    fail "live-GC baseline lacks choose segment entries"
+gc_choose_segment_after="$(status_u64 "$gc_after" gc_choose_segment_entries)" ||
+    fail "live-GC status lacks choose segment entries"
+gc_relocation_map_before="$(status_u64 "$gc_before" gc_relocation_map_entries)" ||
+    fail "live-GC baseline lacks relocation map entries"
+gc_relocation_map_after="$(status_u64 "$gc_after" gc_relocation_map_entries)" ||
+    fail "live-GC status lacks relocation map entries"
+gc_wall_ns=$((gc_wall_after - gc_wall_before))
+gc_choose_wall_ns=$((gc_choose_wall_after - gc_choose_wall_before))
+gc_choose_calls=$((gc_choose_calls_after - gc_choose_calls_before))
+gc_choose_map_entries=$((gc_choose_map_after - gc_choose_map_before))
+gc_choose_segment_entries=$((gc_choose_segment_after - gc_choose_segment_before))
+gc_relocation_map_entries=$((gc_relocation_map_after - gc_relocation_map_before))
+if (( gc_write_wall_ns > 0 )); then
+    gc_fraction_ppm=$((gc_wall_ns * 1000000 / gc_write_wall_ns))
+else
+    gc_fraction_ppm=0
+fi
 gc_discards_eligible="$(status_u64 "$gc_after" segment_discards_eligible)" ||
     fail "live-GC status lacks discard eligibility count"
 gc_discards_issued="$(status_u64 "$gc_after" segment_discards_issued)" ||
@@ -439,6 +501,7 @@ gc_discards_failed="$(status_u64 "$gc_after" segment_discards_failed)" ||
 gc_discard_sectors="$(status_u64 "$gc_after" segment_discard_sectors)" ||
     fail "live-GC status lacks discard sector count"
 note "LIVE_GC_EVIDENCE=victims:$gc_victims rotations:$gc_rotations distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max pages:$gc_pages read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs dead_reuses:$gc_dead_reuses no_headroom:$gc_no_headroom last:$gc_victim->$gc_destination"
+note "LIVE_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns baseline_p99_ns:$gc_baseline_p99_ns pressure_p99_ns:$gc_pressure_p99_ns gc_wall_ns:$gc_wall_ns gc_fraction_ppm:$gc_fraction_ppm choose_wall_ns:$gc_choose_wall_ns choose_calls:$gc_choose_calls choose_map_entries:$gc_choose_map_entries choose_segment_entries:$gc_choose_segment_entries relocation_map_entries:$gc_relocation_map_entries no_headroom_skips:$gc_no_headroom"
 (( $(status_u64 "$gc_after" failed) == 0 &&
    gc_victims >= 2 && gc_rotations == gc_victims &&
    gc_distinct >= 3 && gc_victim_min > 0 &&
@@ -450,9 +513,17 @@ note "LIVE_GC_EVIDENCE=victims:$gc_victims rotations:$gc_rotations distinct:$gc_
    gc_discards_issued == gc_discards_completed &&
    gc_discards_completed >= gc_victims &&
    gc_discards_unsupported == 0 && gc_discards_failed == 0 &&
-   gc_discard_sectors == gc_discards_completed * 2048 )) ||
+   gc_discard_sectors == gc_discards_completed * 2048 &&
+   gc_round_count == 5 && gc_write_wall_ns > 0 &&
+   gc_baseline_p99_ns > 0 && gc_pressure_p99_ns > 0 &&
+   gc_wall_ns > 0 && gc_choose_wall_ns > 0 &&
+   gc_choose_calls >= gc_victims &&
+   gc_choose_map_entries >= gc_victims * 4096 &&
+   gc_choose_segment_entries > 0 &&
+   gc_relocation_map_entries >= gc_victims * 4096 )) ||
     fail "loaded live-GC did not prove repeated distributed live evacuation and rotation"
 note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max last:$gc_victim->$gc_destination discards:$gc_discards_completed discard_sectors:$gc_discard_sectors discard_unsupported:$gc_discards_unsupported discard_failed:$gc_discards_failed verified_pages:4096"
+note "PASS_LOADED_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns baseline_p99_ns:$gc_baseline_p99_ns pressure_p99_ns:$gc_pressure_p99_ns gc_wall_ns:$gc_wall_ns gc_fraction_ppm:$gc_fraction_ppm choose_wall_ns:$gc_choose_wall_ns choose_calls:$gc_choose_calls choose_map_entries:$gc_choose_map_entries choose_segment_entries:$gc_choose_segment_entries relocation_map_entries:$gc_relocation_map_entries no_headroom_skips:$gc_no_headroom"
 dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
 OWN_DM=0
 

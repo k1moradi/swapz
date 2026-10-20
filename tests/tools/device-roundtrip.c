@@ -14,9 +14,44 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 enum { PAGE = 4096, NPAGES = 128, GC_PAGES = 4096 };
+
+static uint64_t monotonic_ns(void)
+{
+	struct timespec now;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &now))
+		return 0;
+	return (uint64_t)now.tv_sec * UINT64_C(1000000000) +
+		(uint64_t)now.tv_nsec;
+}
+
+static uint64_t elapsed_ns(uint64_t start, uint64_t end)
+{
+	return end >= start ? end - start : 0;
+}
+
+static int compare_u64(const void *left, const void *right)
+{
+	uint64_t a = *(const uint64_t *)left;
+	uint64_t b = *(const uint64_t *)right;
+
+	return (a > b) - (a < b);
+}
+
+static uint64_t p99_ns(uint64_t *samples, unsigned int count)
+{
+	unsigned int index;
+
+	if (!count)
+		return 0;
+	qsort(samples, count, sizeof(*samples), compare_u64);
+	index = (99U * count + 99U) / 100U - 1U;
+	return samples[index];
+}
 
 static void pattern(unsigned char *p, unsigned int page, unsigned int round)
 {
@@ -143,12 +178,23 @@ static unsigned int gc_expected_round(unsigned int page,
 static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 		    unsigned int rounds)
 {
+	uint64_t *latencies = NULL;
 	unsigned int round, page;
+	int result = -1;
 
 	if (rounds < 4)
 		return -1;
+	latencies = calloc(GC_PAGES, sizeof(*latencies));
+	if (!latencies)
+		return -1;
 	for (round = 0; round < rounds; ++round) {
+		uint64_t write_wall_ns = 0;
+		uint64_t flush_start, flush_wall_ns;
+		unsigned int writes = 0;
+
 		for (page = 0; page < GC_PAGES; ++page) {
+			uint64_t start, end;
+
 			/*
 			 * Preserve a distinct page from every prior generation in
 			 * each 1MiB logical stripe: round 1 keeps offset 0, round 2
@@ -159,11 +205,22 @@ static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 			if (round && (page % 256U) < round)
 				continue;
 			raw_pattern(expected, page, round);
+			start = monotonic_ns();
 			if (transfer(fd, expected, page, 1))
-				return -1;
+				goto out;
+			end = monotonic_ns();
+			latencies[writes] = elapsed_ns(start, end);
+			write_wall_ns += latencies[writes++];
 		}
+		flush_start = monotonic_ns();
 		if (fsync(fd))
-			return -1;
+			goto out;
+		flush_wall_ns = elapsed_ns(flush_start, monotonic_ns());
+		printf("GC_PRESSURE_ROUND=%u writes:%u write_wall_ns:%" PRIu64
+		       " write_p99_ns:%" PRIu64 " fsync_ns:%" PRIu64 "\n",
+		       round, writes, write_wall_ns, p99_ns(latencies, writes),
+		       flush_wall_ns);
+		fflush(stdout);
 	}
 	for (page = 0; page < GC_PAGES; ++page) {
 		unsigned int expected_round = gc_expected_round(page, rounds);
@@ -174,10 +231,13 @@ static int gc_stress(int fd, unsigned char *buf, unsigned char *expected,
 			fprintf(stderr,
 				"FAIL GC byte-exact page=%u expected_round=%u\n",
 				page, expected_round);
-			return -1;
+			goto out;
 		}
 	}
-	return 0;
+	result = 0;
+out:
+	free(latencies);
+	return result;
 }
 
 int main(int argc, char **argv)

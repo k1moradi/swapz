@@ -285,6 +285,13 @@ struct swapz_dm {
 	u64 gc_no_headroom_skips;
 	u64 gc_selected_live_bytes;
 	u64 gc_selected_live_records;
+	/* ID61 foreground-GC scaling/latency evidence. These counters observe
+	 * existing serialized GC only; they never participate in victim choice. */
+	u64 gc_choose_wall_ns;
+	u64 gc_choose_calls;
+	u64 gc_choose_map_entries;
+	u64 gc_choose_segment_entries;
+	u64 gc_relocation_map_entries;
 	u64 gc_victims;
 	u64 gc_role_rotations;
 	swapz_u32 last_gc_victim;
@@ -1609,6 +1616,7 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 	swapz_u32 best = ~(swapz_u32)0;
 	swapz_u16 best_count = ~(swapz_u16)0;
 
+	ctx->gc_choose_calls++;
 	memset(ctx->gc_scores, 0,
 	       (size_t)ctx->segment_count * sizeof(*ctx->gc_scores));
 	memset(ctx->gc_live_counts, 0,
@@ -1621,6 +1629,8 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
 		const struct swapz_map *m = &ctx->maps[logical];
 		swapz_u32 cost, io_cost;
+
+		ctx->gc_choose_map_entries++;
 
 		if (!m->valid)
 			continue;
@@ -1643,6 +1653,8 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 	}
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
 		swapz_u16 count = ctx->gc_live_counts[segment];
+
+		ctx->gc_choose_segment_entries++;
 		swapz_u32 score;
 
 		/* GC must create *foreground usable* space. Evacuating a
@@ -1685,12 +1697,13 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 	return 0;
 }
 
-static int swapz_gc_compact_one(struct swapz_dm *ctx)
+static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 {
 	struct swapz_authority *a = &ctx->authority;
 	swapz_u32 old_next, old_open, old_probe, victim, logical, block;
 	u64 before_read, before_write;
 	u64 before_read_reqs, before_write_reqs;
+	u64 choose_start;
 	bool rotation_committed = false;
 	int error;
 
@@ -1704,7 +1717,10 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 	if (a->in_flight || a->batch_pending || a->batch_replaying ||
 	    a->gc_allocation)
 		return -EBUSY;
+	choose_start = ktime_get_ns();
 	error = swapz_gc_choose_victim(ctx, &victim);
+	ctx->gc_choose_wall_ns +=
+		swapz_elapsed_ns(choose_start, ktime_get_ns());
 	if (error)
 		return error;
 	old_next = a->next_block;
@@ -1729,6 +1745,8 @@ static int swapz_gc_compact_one(struct swapz_dm *ctx)
 	for (logical = 0; logical < ctx->logical_pages; ++logical) {
 		struct swapz_map snapshot = ctx->maps[logical];
 		swapz_u16 length;
+
+		ctx->gc_relocation_map_entries++;
 
 		/* GC can scan a large volatile map while the worker owns it.
 		 * Yield CPU periodically without permitting another mapping
@@ -1852,6 +1870,18 @@ out:
 		a->open_segment = old_open;
 		a->next_segment_probe = old_probe;
 	}
+	return error;
+}
+
+/* Measure every foreground compaction attempt in one place, including RAW
+ * callers and failed/no-headroom attempts. The metric is wall residency of the
+ * existing serialized GC path, not scheduler CPU time. */
+static int swapz_gc_compact_one(struct swapz_dm *ctx)
+{
+	u64 start_ns = ktime_get_ns();
+	int error = swapz_gc_compact_one_inner(ctx);
+
+	ctx->gc_wall_ns += swapz_elapsed_ns(start_ns, ktime_get_ns());
 	return error;
 }
 
@@ -2269,10 +2299,7 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 			 * relocating one fully verified low-live segment.
 			 * Retry ONLY the remaining logical records afterwards.
 			 */
-			section_start = ktime_get_ns();
 			error = swapz_gc_compact_one(ctx);
-			ctx->gc_wall_ns +=
-				swapz_elapsed_ns(section_start, ktime_get_ns());
 			if (!error)
 				continue;
 		}
@@ -4685,6 +4712,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "gc_pages=%llu gc_read=%llu gc_write=%llu "
 		       "gc_policy=%u gc_selected_bytes=%llu gc_selected_pages=%llu "
 		       "gc_selected_io_estimate=%llu gc_no_headroom_skips=%llu "
+		       "gc_choose_wall_ns=%llu gc_choose_calls=%llu "
+		       "gc_choose_map_entries=%llu gc_choose_segment_entries=%llu "
+		       "gc_relocation_map_entries=%llu "
 		       "gc_read_reqs=%llu gc_write_reqs=%llu "
 		       "dead_segment_reuses=%u "
 		       "segment_discards_eligible=%llu segment_discards_issued=%llu "
@@ -4857,6 +4887,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->gc_cost_policy, ctx->gc_selected_live_bytes,
 		       ctx->gc_selected_live_records, ctx->gc_selected_io_cost,
 		       ctx->gc_no_headroom_skips,
+		       ctx->gc_choose_wall_ns, ctx->gc_choose_calls,
+		       ctx->gc_choose_map_entries, ctx->gc_choose_segment_entries,
+		       ctx->gc_relocation_map_entries,
 		       ctx->gc_read_reqs, ctx->gc_write_reqs,
 		       ctx->authority.recycled_dead_segments,
 		       ctx->segment_discards_eligible,

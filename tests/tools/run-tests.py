@@ -499,6 +499,13 @@ def parse_loaded_correctness(output):
             r"discards:(\d+) discard_sectors:(\d+) "
             r"discard_unsupported:(\d+) discard_failed:(\d+) "
             r"verified_pages:(\d+)$"),
+        "gc_pressure": re.compile(
+            r"PASS_LOADED_GC_PRESSURE=rounds:(\d+) write_wall_ns:(\d+) "
+            r"baseline_p99_ns:(\d+) pressure_p99_ns:(\d+) "
+            r"gc_wall_ns:(\d+) gc_fraction_ppm:(\d+) "
+            r"choose_wall_ns:(\d+) choose_calls:(\d+) "
+            r"choose_map_entries:(\d+) choose_segment_entries:(\d+) "
+            r"relocation_map_entries:(\d+) no_headroom_skips:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
             r"observed_open:(\d+) verified_pages:(\d+)$"),
@@ -528,6 +535,11 @@ def parse_loaded_correctness(output):
      gc_last_victim, gc_last_destination, gc_segment_discards,
      gc_segment_discard_sectors, gc_discard_unsupported,
      gc_discard_failed, gc_verified_pages) = found["gc"]
+    (gc_pressure_rounds, gc_useful_write_wall_ns, gc_baseline_p99_ns,
+     gc_pressure_p99_ns, gc_wall_ns, gc_fraction_ppm,
+     gc_choose_wall_ns, gc_choose_calls, gc_choose_map_entries,
+     gc_choose_segment_entries, gc_relocation_map_entries,
+     gc_no_headroom_skips) = found["gc_pressure"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
@@ -547,6 +559,17 @@ def parse_loaded_correctness(output):
             gc_verified_pages != 4096):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded live-GC evidence is incomplete"}
+    if (gc_pressure_rounds != 5 or gc_useful_write_wall_ns <= 0 or
+            gc_baseline_p99_ns <= 0 or gc_pressure_p99_ns <= 0 or
+            gc_wall_ns <= 0 or gc_choose_wall_ns <= 0 or
+            gc_choose_calls < gc_victims or
+            gc_choose_map_entries < gc_victims * 4096 or
+            gc_choose_segment_entries <= 0 or
+            gc_relocation_map_entries < gc_victims * 4096 or
+            gc_fraction_ppm !=
+            gc_wall_ns * 1000000 // gc_useful_write_wall_ns):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded foreground-GC pressure evidence is incomplete"}
     if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
@@ -574,6 +597,18 @@ def parse_loaded_correctness(output):
         "gc_segment_discards": gc_segment_discards,
         "gc_segment_discard_sectors": gc_segment_discard_sectors,
         "gc_verified_pages": gc_verified_pages,
+        "gc_pressure_rounds": gc_pressure_rounds,
+        "gc_useful_write_wall_ns": gc_useful_write_wall_ns,
+        "gc_baseline_p99_ns": gc_baseline_p99_ns,
+        "gc_pressure_p99_ns": gc_pressure_p99_ns,
+        "gc_wall_ns": gc_wall_ns,
+        "gc_fraction_ppm": gc_fraction_ppm,
+        "gc_choose_wall_ns": gc_choose_wall_ns,
+        "gc_choose_calls": gc_choose_calls,
+        "gc_choose_map_entries": gc_choose_map_entries,
+        "gc_choose_segment_entries": gc_choose_segment_entries,
+        "gc_relocation_map_entries": gc_relocation_map_entries,
+        "gc_no_headroom_skips": gc_no_headroom_skips,
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
         "suspend_verified_pages": verified_pages,
@@ -2760,6 +2795,15 @@ def print_bench(result):
                 ("segment TRIM",
                  f"{loaded['gc_segment_discards']} x 1MiB; "
                  f"{loaded['gc_segment_discard_sectors']} sectors"),
+            ("GC pressure",
+                 f"wall {loaded['gc_fraction_ppm'] / 10000:.2f}% useful-W; "
+                 f"p99 {loaded['gc_baseline_p99_ns'] / 1e6:.2f}->"
+                 f"{loaded['gc_pressure_p99_ns'] / 1e6:.2f} ms"),
+            ("GC map scans",
+                 f"choose {loaded['gc_choose_map_entries']} / "
+                 f"relocate {loaded['gc_relocation_map_entries']} entries; "
+                 f"choose {loaded['gc_choose_wall_ns'] / 1e6:.2f} ms; "
+                 f"no-headroom {loaded['gc_no_headroom_skips']}"),
                 ("suspend/resume",
                  f"retain {loaded['suspend_retain_ms']} ms; "
                  f"{loaded['suspend_verified_pages']} pages verified"),
