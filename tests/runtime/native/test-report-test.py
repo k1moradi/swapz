@@ -1473,6 +1473,43 @@ class ReportContract(unittest.TestCase):
                 runner.ROOT, runner.REPORT = old_root, old_report
 
 
+    def test_git_sha_walks_report_only_chains_beyond_32_commits(self):
+        """Repeated qualifications never turn a report commit into source."""
+        import subprocess
+
+        def git(*args, cwd, check=True):
+            return subprocess.run(["git", *args], cwd=cwd, check=check,
+                                  capture_output=True, text=True, timeout=12)
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-chain-", dir=ROOT / "build/tests") as name:
+            checkout = Path(name)
+            git("init", cwd=checkout)
+            git("checkout", "-b", "main", cwd=checkout)
+            git("config", "user.name", "test-report CI", cwd=checkout)
+            git("config", "user.email", "test@example.invalid", cwd=checkout)
+            (checkout / "source.c").write_text("source\n")
+            (checkout / runner.GIT_RESULT).write_bytes(
+                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
+            git("commit", "-m", "Tested source", cwd=checkout)
+            source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+
+            for index in range(40):
+                (checkout / runner.GIT_RESULT).write_bytes(lzma.compress(
+                    json.dumps({"run": index}).encode("utf-8")))
+                git("add", runner.GIT_RESULT, cwd=checkout)
+                git("commit", "-m",
+                    f"test: latest run for {source_sha[:12]} [skip ci]",
+                    cwd=checkout)
+
+            old_root = runner.ROOT
+            runner.ROOT = checkout
+            try:
+                self.assertEqual(runner.git_sha(), source_sha)
+            finally:
+                runner.ROOT = old_root
+
     def test_git_sync_retries_after_concurrent_main_advance(self):
         """A completed failure report survives a normal source commit race."""
         import subprocess

@@ -526,20 +526,21 @@ def git_sha():
     current = git_text("rev-parse", "HEAD")
     if not current or not re.fullmatch(r"[0-9a-f]{40}", current):
         return "unknown"
-    for _ in range(32):
+    while True:
         subject = git_text("show", "-s", "--format=%s", current)
         changed = git_text("diff-tree", "--no-commit-id", "--name-only",
                            "-r", current)
-        parent = git_text("rev-parse", f"{current}^")
-        if subject is None or changed is None or parent is None:
+        if subject is None or changed is None:
             break
         names = [line for line in changed.splitlines() if line]
-        if (re.fullmatch(r"test: latest run for [0-9a-f]{12} \[skip ci\]",
-                         subject) and names == [GIT_RESULT] and
-                re.fullmatch(r"[0-9a-f]{40}", parent)):
-            current = parent
-            continue
-        break
+        if not (re.fullmatch(
+                r"test: latest run for [0-9a-f]{12} \[skip ci\]",
+                subject) and names == [GIT_RESULT]):
+            break
+        parent = git_text("rev-parse", f"{current}^")
+        if not parent or not re.fullmatch(r"[0-9a-f]{40}", parent):
+            break
+        current = parent
     return current
 
 

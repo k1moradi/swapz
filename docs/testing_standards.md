@@ -197,12 +197,14 @@ failure-phase/diagnostic, lifecycle and benchmark result for the exact
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest
 non-report code revision; generated report-only ancestors modify only
-`test_results.json.xz` and do not become new code revisions. The report is
-built on the actual current main head so report-on-report updates remain normal
-fast-forwards. Transient push/fetch failures receive a bounded exponential
-backoff retry. A moved main head is accepted only when the exact tested source
-remains its ancestor. Divergence, force-push, report branches/PRs, and replacing
-newer source bytes remain forbidden.
+`test_results.json.xz` and do not become new code revisions. Source revision
+normalization has no fixed report-chain depth, so repeated qualifications of
+unchanged code cannot eventually turn a report-only commit into tested source.
+The report is built on the actual current main head so report-on-report updates
+remain normal fast-forwards. Transient push/fetch failures receive a bounded
+exponential backoff retry. A moved main head is accepted only when the exact
+tested source remains its ancestor. Divergence, force-push, report branches/PRs,
+and replacing newer source bytes remain forbidden.
 
 
 Rootless incremental-build fixtures mirror the current `src/` and `tests/` layout; they must not recreate removed top-level `tools/` or `userspace/` directories.
