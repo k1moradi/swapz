@@ -80,6 +80,11 @@ module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
 		 "Enable zero-extra adjacent distinct-extent READ coalescing");
 
+static bool swapz_packed_placement;
+module_param_named(packed_placement, swapz_packed_placement, bool, 0444);
+MODULE_PARM_DESC(packed_placement,
+		 "A/B existing 1/2/4-block extents at back-to-back 4KiB starts");
+
 struct swapz_prepared_page {
 	int length;
 	bool zero;
@@ -3184,10 +3189,32 @@ static int swapz_discard(struct swapz_dm *ctx, struct bio *bio)
 			return check_error;
 	}
 	while (remaining) {
-		error = swapz_discard_page(&ctx->authority,
-				       (swapz_u32)(sector / SWAPZ_SECTORS));
+		swapz_u32 logical =
+			(swapz_u32)(sector / SWAPZ_SECTORS);
+		const struct swapz_map *old = &ctx->maps[logical];
+		swapz_u32 old_segment = ~(swapz_u32)0;
+		bool became_dead = false;
+
+		if (old->valid && ctx->segment_mapped_pages) {
+			old_segment = old->start_block / SWAPZ_SEGMENT_BLOCKS;
+			became_dead =
+				ctx->segment_mapped_pages[old_segment] == 1U;
+		}
+		error = swapz_discard_page(&ctx->authority, logical);
 		if (error)
 			return error;
+		/*
+		 * Upper DISCARD already owns the ordered worker and has removed the
+		 * final authoritative mapping. Reclaim a newly-dead CLOSED segment
+		 * now; ID70a makes a later allocator recycle a zero-I/O duplicate
+		 * skip. Device DISCARD failures remain advisory in the helper.
+		 */
+		if (became_dead &&
+		    old_segment != ctx->authority.open_segment) {
+			error = swapz_discard_dead_segment(ctx, old_segment);
+			if (error)
+				return error;
+		}
 		ctx->discard_pages++;
 		sector += SWAPZ_SECTORS;
 		remaining -= SWAPZ_SECTORS;
@@ -4496,6 +4523,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Production allocator exchanges ownership of one GC reserve segment
 	 * and one fully evacuated foreground victim every completed cycle. */
 	ctx->authority.reuse_dead_segments = 1;
+	ctx->authority.packed_placement = swapz_packed_placement;
 	error = swapz_enable_segment_rotation(&ctx->authority,
 					  ctx->segment_roles, ctx->segment_count);
 	if (error) {
@@ -4765,6 +4793,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "write_fault_nth=%u write_fault_calls=%llu write_fault_injected=%llu "
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
+		       "packed_placement=%u "
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
 		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
@@ -4957,6 +4986,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
+		       ctx->authority.packed_placement,
 		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,

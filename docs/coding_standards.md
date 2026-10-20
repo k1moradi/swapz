@@ -979,11 +979,13 @@ evidence.
 ### Physical placement and reclaim evidence
 
 The current 4/8/16KiB allocator may align an extent start to its own size.
-Until a matched placement experiment proves otherwise, preserve the current
-on-disk SWZ3 extent classes but measure unwritten alignment holes separately
-for foreground and GC staging, plus adjacent lower-run splits caused by those
-holes. Placement telemetry is diagnostic only and must not change planner
-policy.
+Placement telemetry must count both intra-segment alignment gaps and blocks
+abandoned at a segment tail before allocation advances to a new segment.
+Preserve the current on-disk SWZ3 extent classes. The ID69 packed-placement
+arm may place those existing 1/2/4-block extents back-to-back at 4KiB
+granularity, but it remains read-only-module-param evidence with default off
+until owner qualification proves a Pareto-neutral-or-better result. No packed
+placement experiment may introduce a new serialized extent class.
 
 When exact per-segment mapped-page counts are available, dead-segment probing
 must reject a nonzero mapped segment before scanning its 256 physical block
@@ -994,9 +996,12 @@ silent reuse.
 
 Successful whole-segment DISCARD is remembered per segment so the same dead
 bytes are not synchronously discarded twice before reuse. Any later lower
-WRITE clears that successful-discard state before submission. This is only
-duplicate suppression: asynchronous early DISCARD remains a separate
-concurrency experiment and may not race allocation or an upper BIO.
+WRITE clears that successful-discard state before submission. When an upper
+REQ_OP_DISCARD synchronously removes the final mapping from a closed segment,
+the ordered worker may issue the whole-segment DISCARD immediately; later
+allocator reuse must then hit the existing duplicate-suppression state.
+Asynchronous early DISCARD remains a separate concurrency experiment and may
+not race allocation or an upper BIO.
 
 Per-segment program/open counters describe logical allocator write cycles only.
 They are not NAND wear measurements and must not authorize wear-leveling or

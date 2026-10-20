@@ -148,12 +148,16 @@ static int validate_owned_device(int fd)
 }
 
 static int series(int fd, unsigned char *buf, unsigned char *expected,
-		  unsigned int count, unsigned int round, int write_data)
+		  unsigned int count, unsigned int round, int write_data,
+		  int raw_data)
 {
 	unsigned int i;
 
 	for (i = 0; i < count; ++i) {
-		pattern(expected, i, round);
+		if (raw_data)
+			raw_pattern(expected, i, round);
+		else
+			pattern(expected, i, round);
 		if (write_data) {
 			if (transfer(fd, expected, i, 1))
 				return -1;
@@ -245,7 +249,7 @@ int main(int argc, char **argv)
 	const char *prefix = "/dev/mapper/swapz-demo-";
 	unsigned char *buf = NULL, *expected = NULL;
 	int fd = -1, rc = 1, private_mode = 0, write_series = 0;
-	int gc_mode = 0;
+	int raw_series = 0, discard_pages = 0, gc_mode = 0;
 	unsigned int i, phase, count = 0, round = 0, gc_rounds = 0;
 	int open_flags = O_RDWR | O_CLOEXEC | O_DIRECT | O_SYNC | O_NOFOLLOW;
 
@@ -272,12 +276,26 @@ int main(int argc, char **argv)
 	if (argc == 5) {
 		if (!strcmp(argv[2], "--write-series"))
 			write_series = 1;
-		else if (strcmp(argv[2], "--verify-series")) {
+		else if (!strcmp(argv[2], "--raw-write-series")) {
+			write_series = 1;
+			raw_series = 1;
+		} else if (!strcmp(argv[2], "--raw-verify-series")) {
+			raw_series = 1;
+		} else if (!strcmp(argv[2], "--discard-pages")) {
+			discard_pages = 1;
+		} else if (strcmp(argv[2], "--verify-series")) {
 			fprintf(stderr, "FAIL unknown private oracle mode\n");
 			return 2;
 		}
-		if (parse_uint(argv[3], NPAGES, &count) || !count ||
-		    parse_uint(argv[4], 255U, &round)) {
+		if (discard_pages) {
+			if (parse_uint(argv[3], GC_PAGES - 1U, &round) ||
+			    parse_uint(argv[4], GC_PAGES, &count) || !count ||
+			    count > GC_PAGES - round) {
+				fprintf(stderr, "FAIL invalid private discard range\n");
+				return 2;
+			}
+		} else if (parse_uint(argv[3], GC_PAGES, &count) || !count ||
+			   parse_uint(argv[4], 255U, &round)) {
 			fprintf(stderr, "FAIL invalid private count/round\n");
 			return 2;
 		}
@@ -308,10 +326,26 @@ int main(int argc, char **argv)
 		goto out;
 	}
 	if (private_mode) {
-		if (series(fd, buf, expected, count, round, write_series))
-			goto out;
-		printf("PASS: owned swapz direct %s series count=%u round=%u\n",
-		       write_series ? "write" : "verify", count, round);
+		if (discard_pages) {
+			uint64_t range[2] = {
+				(uint64_t)round * PAGE,
+				(uint64_t)count * PAGE,
+			};
+
+			if (ioctl(fd, BLKDISCARD, &range)) {
+				perror("FAIL owned swapz BLKDISCARD");
+				goto out;
+			}
+			printf("PASS: owned swapz discard start=%u count=%u\n",
+			       round, count);
+		} else {
+			if (series(fd, buf, expected, count, round,
+				   write_series, raw_series))
+				goto out;
+			printf("PASS: owned swapz direct %s%s series count=%u round=%u\n",
+			       raw_series ? "raw-" : "",
+			       write_series ? "write" : "verify", count, round);
+		}
 		rc = 0;
 		goto out;
 	}

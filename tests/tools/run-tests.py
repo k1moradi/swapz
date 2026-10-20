@@ -436,6 +436,56 @@ def parse_gc_scan_scale_evidence(output):
     return {"scope": record["scope"], "rows": clean}
 
 
+def parse_extent_geometry_evidence(output):
+    """Sanitize deterministic ID73 offline extent-geometry evidence."""
+    prefix = "SWAPZ_EXTENT_GEOMETRY_EVIDENCE="
+    record = None
+    for line in output.splitlines():
+        if not line.startswith(prefix):
+            continue
+        try:
+            candidate = json.loads(line[len(prefix):])
+        except (TypeError, ValueError):
+            return None
+        if record is not None:
+            return None
+        record = candidate
+    if not isinstance(record, dict) or record.get("scope") != (
+            "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY"):
+        return None
+    if record.get("logical_pages") != 1024 or record.get("normal_windows") != 64:
+        return None
+    expected = (
+        "aligned_1_2_4",
+        "packed_1_2_4",
+        "packed_1_2_3_4",
+        "packed_1_2_4_8",
+        "packed_1_2_4_8_16",
+    )
+    rows = record.get("rows")
+    if not isinstance(rows, list) or len(rows) != len(expected):
+        return None
+    clean = []
+    for row, name in zip(rows, expected):
+        if not isinstance(row, dict) or row.get("name") != name:
+            return None
+        for field in ("physical_blocks", "write_runs",
+                      "cold_read_blocks_x1000", "seq_4m_requests"):
+            if type(row.get(field)) is not int or row[field] <= 0:
+                return None
+        if type(row.get("waste_blocks")) is not int or row["waste_blocks"] < 0:
+            return None
+        clean.append({key: row[key] for key in (
+            "name", "physical_blocks", "waste_blocks", "write_runs",
+            "cold_read_blocks_x1000", "seq_4m_requests")})
+    return {
+        "scope": record["scope"],
+        "logical_pages": record["logical_pages"],
+        "normal_windows": record["normal_windows"],
+        "rows": clean,
+    }
+
+
 def workload_opportunity_record(obj):
     record = obj.get("workload_opportunity")
     if not isinstance(record, dict) or record.get("scope") != (
@@ -668,6 +718,12 @@ def parse_loaded_correctness(output):
             r"trim_skipped:(\d+) segment_program_min:(\d+) "
             r"segment_program_sum:(\d+) segment_program_max:(\d+) "
             r"segment_program_segments:(\d+)$"),
+        "discard_trim": re.compile(
+            r"PASS_LOADED_DISCARD_TRIM=pages:(\d+) immediate_discards:(\d+) "
+            r"immediate_sectors:(\d+) reuse_skips:(\d+) verified_pages:(\d+)$"),
+        "packed_placement": re.compile(
+            r"PASS_LOADED_PACKED_PLACEMENT=enabled:(\d+) verified_pages:(\d+) "
+            r"holes:(\d+) run_splits:(\d+) failed:(\d+)$"),
         "suspend": re.compile(
             r"PASS_LOADED_SUSPEND_DRAIN=retain_ms:(\d+) "
             r"observed_open:(\d+) verified_pages:(\d+)$"),
@@ -706,6 +762,10 @@ def parse_loaded_correctness(output):
      alloc_probe_wall_ns, trim_skipped, segment_program_min,
      segment_program_sum, segment_program_max,
      segment_program_segments) = found["gc_pressure"]
+    (discard_trim_pages, discard_trim_immediate, discard_trim_sectors,
+     discard_trim_reuse_skips, discard_trim_verified) = found["discard_trim"]
+    (packed_enabled, packed_verified_pages, packed_holes,
+     packed_run_splits, packed_failed) = found["packed_placement"]
     suspend_retain, observed_open, verified_pages = found["suspend"]
     write_retain, write_injected, write_lower_delta = found["write_fault"]
     flush_retain, flush_injected, flush_data_lower = found["flush_fault"]
@@ -741,6 +801,14 @@ def parse_loaded_correctness(output):
             gc_wall_ns * 1000000 // gc_useful_write_wall_ns):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded foreground-GC pressure evidence is incomplete"}
+    if (discard_trim_pages != 256 or discard_trim_immediate != 1 or
+            discard_trim_sectors != 2048 or discard_trim_reuse_skips < 1 or
+            discard_trim_verified != 4096):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded discard-time TRIM evidence is incomplete"}
+    if (packed_enabled != 1 or packed_verified_pages != 128 or packed_failed != 0):
+        return {"overall": "INCOMPLETE",
+                "reason": "loaded packed-placement smoke evidence is incomplete"}
     if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
@@ -791,6 +859,15 @@ def parse_loaded_correctness(output):
         "segment_program_sum": segment_program_sum,
         "segment_program_max": segment_program_max,
         "segment_program_segments": segment_program_segments,
+        "discard_trim_pages": discard_trim_pages,
+        "discard_trim_immediate": discard_trim_immediate,
+        "discard_trim_sectors": discard_trim_sectors,
+        "discard_trim_reuse_skips": discard_trim_reuse_skips,
+        "discard_trim_verified_pages": discard_trim_verified,
+        "packed_placement_enabled": packed_enabled,
+        "packed_placement_verified_pages": packed_verified_pages,
+        "packed_placement_holes": packed_holes,
+        "packed_placement_run_splits": packed_run_splits,
         "suspend_retain_ms": suspend_retain,
         "suspend_observed_open": observed_open,
         "suspend_verified_pages": verified_pages,
@@ -954,12 +1031,15 @@ def run_stage(title, command, result, *, parse_bench=False):
         output, rc = type(exc).__name__, 127
     predictor_evidence = parse_predictor_evidence(output)
     gc_scale_evidence = parse_gc_scan_scale_evidence(output)
+    extent_geometry_evidence = parse_extent_geometry_evidence(output)
     native_evidence_required = title == "Native and rootless contracts"
     predictor_failure = (native_evidence_required and rc == 0 and
                          predictor_evidence is None)
     gc_scale_failure = (native_evidence_required and rc == 0 and
                         gc_scale_evidence is None)
-    if predictor_failure or gc_scale_failure:
+    extent_geometry_failure = (native_evidence_required and rc == 0 and
+                               extent_geometry_evidence is None)
+    if predictor_failure or gc_scale_failure or extent_geometry_failure:
         rc = 1
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
     read_coalesce_sessions = parse_read_coalesce_ab(output) if parse_bench else []
@@ -997,6 +1077,10 @@ def run_stage(title, command, result, *, parse_bench=False):
             record["failed_phase"] = "ID61 GC scan scaling evidence"
             record["diagnostic"] = (
                 "Native GC scan scaling marker missing, malformed or incomplete")
+        elif extent_geometry_failure:
+            record["failed_phase"] = "ID73 offline extent geometry evidence"
+            record["diagnostic"] = (
+                "Native extent geometry marker missing, malformed or incomplete")
         elif marker_failure:
             if loaded_correctness.get("overall") != "PASS":
                 record["failed_phase"] = "owned RAM lifecycle evidence"
@@ -1025,6 +1109,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         result.setdefault("evidence", {})["predictor"] = predictor_evidence
     if gc_scale_evidence is not None:
         result.setdefault("evidence", {})["gc_scan_scale"] = gc_scale_evidence
+    if extent_geometry_evidence is not None:
+        result.setdefault("evidence", {})["extent_geometry"] = extent_geometry_evidence
     if parse_bench:
         result["benchmarks"]["loaded_correctness"] = loaded_correctness
         result["benchmarks"]["sessions"] = parse_sessions(output)
@@ -2351,6 +2437,18 @@ def print_bench(result):
                 f"{row['mapped_dead_probe_ns'] / 1e6:.3f}",
             ) for row in gc_scale["rows"]])
 
+    geometry = result.get("evidence", {}).get("extent_geometry")
+    if isinstance(geometry, dict):
+        print("\n  ID73 OFFLINE EXTENT GEOMETRY — simulation only; no format policy")
+        print_table(
+            ("geometry", "blocks", "waste", "W runs", "cold R blk", "seq req"),
+            [(
+                row["name"], row["physical_blocks"], row["waste_blocks"],
+                row["write_runs"],
+                f"{row['cold_read_blocks_x1000'] / 1000:.2f}",
+                row["seq_4m_requests"],
+            ) for row in geometry["rows"]])
+
     verdict = result["benchmarks"]["verdicts"]
     if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":
         print("  Benchmark matrix: NOT QUALIFIED "
@@ -2868,6 +2966,13 @@ def print_bench(result):
                  f"{loaded['segment_program_min']}/"
                  f"{loaded['segment_program_sum'] / loaded['segment_program_segments']:.2f}/"
                  f"{loaded['segment_program_max']} min/mean/max"),
+                ("upper DISCARD TRIM",
+                 f"{loaded['discard_trim_immediate']} immediate; "
+                 f"{loaded['discard_trim_reuse_skips']} reuse skips"),
+                ("packed smoke",
+                 f"{loaded['packed_placement_verified_pages']} pages; "
+                 f"holes {loaded['packed_placement_holes']}; "
+                 f"splits {loaded['packed_placement_run_splits']}"),
             ("GC pressure",
                  f"wall {loaded['gc_fraction_ppm'] / 10000:.2f}% useful-W; "
                  f"p99 {loaded['gc_baseline_p99_ns'] / 1e6:.2f}->"

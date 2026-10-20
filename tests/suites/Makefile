@@ -14,9 +14,11 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor clean
-PROGRAMS := codec-roundtrip zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
+PROGRAMS := codec-roundtrip extent-geometry zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
 
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
+extent-geometry_SRC := $(NATIVE)/codec/extent-geometry.c
+extent-geometry_HDR := $(KERNEL)/codec.h $(KERNEL)/authority.h
 PREDICTOR_CORE_OBJ := $(OUT)/predictor-core.o
 PREDICTOR_ARCH_OBJS :=
 UNAME_M := $(shell uname -m)
@@ -73,8 +75,8 @@ $(OUT)/predictor-qualification: $(NATIVE)/codec/predictor-qualification.c \
 		$(ENGINE) $(AUTH) $(CODEC) $(PREDICTOR_CORE_OBJ) $(PREDICTOR_ARCH_OBJS) \
 		-o "$@" -llz4
 
-test-codec: $(OUT)/codec-roundtrip
-	@set -e; "$(OUT)/codec-roundtrip"
+test-codec: $(OUT)/codec-roundtrip $(OUT)/extent-geometry
+	@set -e; "$(OUT)/codec-roundtrip"; "$(OUT)/extent-geometry"
 
 test-predictor: $(OUT)/predictor-qualification
 	@set -e; \

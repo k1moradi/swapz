@@ -126,6 +126,31 @@ def gc_scan_scale_evidence():
     }
 
 
+def extent_geometry_evidence():
+    return {
+        "scope": "OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY",
+        "logical_pages": 1024,
+        "normal_windows": 64,
+        "rows": [
+            {"name": "aligned_1_2_4", "physical_blocks": 320,
+             "waste_blocks": 24, "write_runs": 80,
+             "cold_read_blocks_x1000": 1800, "seq_4m_requests": 1500},
+            {"name": "packed_1_2_4", "physical_blocks": 320,
+             "waste_blocks": 4, "write_runs": 60,
+             "cold_read_blocks_x1000": 1800, "seq_4m_requests": 1500},
+            {"name": "packed_1_2_3_4", "physical_blocks": 300,
+             "waste_blocks": 3, "write_runs": 55,
+             "cold_read_blocks_x1000": 1750, "seq_4m_requests": 1450},
+            {"name": "packed_1_2_4_8", "physical_blocks": 292,
+             "waste_blocks": 2, "write_runs": 48,
+             "cold_read_blocks_x1000": 1900, "seq_4m_requests": 1300},
+            {"name": "packed_1_2_4_8_16", "physical_blocks": 288,
+             "waste_blocks": 1, "write_runs": 44,
+             "cold_read_blocks_x1000": 2150, "seq_4m_requests": 1200},
+        ],
+    }
+
+
 def lower_inflight(*, has_reads):
     read_peak = 1 if has_reads else 0
     read_mean = 0.25 if has_reads else 0.0
@@ -454,6 +479,8 @@ def synthetic_log():
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
            "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
            "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:49152 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
+           "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:2 verified_pages:4096",
+           "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:0 run_splits:0 failed:0",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
            "PASS_RETAINED_SYNTHETIC_WRITE_FAULT=retain_ms:2 injected:1 lower_write_delta:0",
            "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1",
@@ -617,6 +644,17 @@ class ReportContract(unittest.TestCase):
         self.assertIsNone(runner.parse_gc_scan_scale_evidence(
             "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" + json.dumps(broken) + "\n"))
 
+    def test_extent_geometry_evidence_is_sanitized(self):
+        raw = extent_geometry_evidence()
+        parsed = runner.parse_extent_geometry_evidence(
+            "SWAPZ_EXTENT_GEOMETRY_EVIDENCE=" + json.dumps(raw) + "\n")
+        self.assertEqual(parsed["rows"][1]["name"], "packed_1_2_4")
+        self.assertEqual(parsed["rows"][4]["seq_4m_requests"], 1200)
+        broken = json.loads(json.dumps(raw))
+        broken["rows"][2]["name"] = "packed_1_4"
+        self.assertIsNone(runner.parse_extent_geometry_evidence(
+            "SWAPZ_EXTENT_GEOMETRY_EVIDENCE=" + json.dumps(broken) + "\n"))
+
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
         self.assertEqual(loaded["overall"], "PASS")
@@ -640,6 +678,10 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["run_splits_by_hole"], 8)
         self.assertEqual(loaded["segment_discards_skipped_already_trimmed"], 6)
         self.assertEqual(loaded["segment_program_max"], 4)
+        self.assertEqual(loaded["discard_trim_immediate"], 1)
+        self.assertEqual(loaded["discard_trim_reuse_skips"], 2)
+        self.assertEqual(loaded["packed_placement_enabled"], 1)
+        self.assertEqual(loaded["packed_placement_holes"], 0)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
         self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
@@ -668,6 +710,13 @@ class ReportContract(unittest.TestCase):
             "segment_program_segments:32\n", "")
         self.assertEqual(
             runner.parse_loaded_correctness(missing_pressure)["overall"],
+            "INCOMPLETE")
+
+        missing_trim = synthetic_log().replace(
+            "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 "
+            "immediate_sectors:2048 reuse_skips:2 verified_pages:4096\n", "")
+        self.assertEqual(
+            runner.parse_loaded_correctness(missing_trim)["overall"],
             "INCOMPLETE")
 
         missing = synthetic_log().replace(
@@ -946,7 +995,8 @@ class ReportContract(unittest.TestCase):
         saturation = runner.write_saturation_verdict(
             runner.parse_write_saturation(synthetic_log()))
         report = {"evidence": {"predictor": predictor_evidence(),
-                                "gc_scan_scale": gc_scan_scale_evidence()},
+                                "gc_scan_scale": gc_scan_scale_evidence(),
+                                "extent_geometry": extent_geometry_evidence()},
                   "benchmarks": {
             "verdicts": verdicts,
             "read_coalesce_ab": runner.read_coalesce_ab_verdict(
@@ -961,6 +1011,10 @@ class ReportContract(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
         self.assertIn("ID61 GC MAP-SCAN SCALE", rendered)
+        self.assertIn("ID73 OFFLINE EXTENT GEOMETRY", rendered)
+        self.assertIn("packed_1_2_4_8_16", rendered)
+        self.assertIn("upper DISCARD TRIM", rendered)
+        self.assertIn("packed smoke", rendered)
         self.assertIn("1048576", rendered)
         self.assertIn("Sampled delta64 classifier", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)

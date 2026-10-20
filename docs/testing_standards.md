@@ -954,12 +954,14 @@ no reverse index is justified solely because the loop is O(logical_pages).
 
 ### Placement/reclaim qualification
 
-The next owner qualification records foreground and GC alignment-hole blocks,
-lower-run splits attributable to holes, dead-segment probe segments/full scans
-and probe wall time, duplicate successful-DISCARD skips, and logical segment
-open-count min/mean/max. These counters are evidence only. A nonzero hole count
-can authorize a separate hole-free placement A/B; it does not itself change
-SWZ3.
+Owner qualification records foreground and GC placement-waste blocks,
+including segment-tail waste, lower-run splits attributable to intra-segment
+holes, dead-segment probe segments/full scans and probe wall time, duplicate
+successful-DISCARD skips, and logical segment-open min/mean/max. Native ID69
+A/B must prove identical lower bytes with fewer requests and zero internal
+holes on mixed 1/2/4-block sequences. Loaded packed placement is a bounded
+byte-exact null_blk smoke only; default aligned placement remains the full
+benchmark control until explicitly promoted. None of this changes SWZ3.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
@@ -969,3 +971,17 @@ nonfatal DISCARD semantics.
 
 Logical segment-open spread is allocator telemetry, not flash-wear evidence.
 No threshold from RAM-backed null_blk may promote wear-aware relocation.
+
+
+ID70c loaded qualification uses only the owned RAM null_blk mapping. It must
+prove that an upper DISCARD which removes the final mapping from a closed
+1MiB segment immediately completes exactly one 1MiB lower DISCARD, and that
+later allocator reuse increments the already-trimmed skip counter while
+byte-exact verification still passes. This is synchronous ordered-worker
+reclaim, not background TRIM and not physical-media endurance evidence.
+
+ID73 is native simulation evidence only. The deterministic study must compare
+aligned 1/2/4, packed 1/2/4, packed exact 1/2/3/4, packed up-to-32KiB and
+packed up-to-64KiB geometries and report blocks, placement waste, write runs,
+cold-read blocks and sequential 4MiB request estimates. Candidate 3/8/16-block
+classes in this table do not exist in kernel policy or SWZ3.

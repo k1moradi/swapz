@@ -147,12 +147,12 @@ changes.
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
 | 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
-| 68 | Placement/reclaim telemetry | **4 implemented / owner qualification pending** | Report foreground/GC alignment-hole blocks, adjacent-run splits caused by holes, allocator probe segments/full scans/wall time, duplicate successful-DISCARD skips and logical segment-open distribution. Evidence only; no SWZ3 or planner-policy change. |
-| 69 | Hole-free 4KiB-aligned extent placement | **4 evidence-gated A/B** | Keep current 1/2/4-block SWZ3 extent classes. Implement only as a temporary matched A/B if ID68 proves material holes; accept only with zero holes, no request/GC regression and neutral-or-better throughput. |
-| 70 | Segment DISCARD lifecycle | **3 duplicate suppression implemented / early async TRIM deferred** | Remember successful whole-segment DISCARD and skip the same dead bytes on reuse; any later synchronous or K=1 async WRITE clears that state before submission. Early background TRIM needs a separate ownership/race design and evidence. |
-| 71 | Dead-segment allocation probe scaling | **3 mapped-count fast reject implemented / owner qualification pending** | Reject nonzero `segment_mapped_pages` before the 256-block scan; retain the complete physical liveness scan for the zero-mapped reuse candidate. Native evidence compares old/new near-full allocation at 1GiB/4GiB-equivalent scales. |
+| 68 | Placement/reclaim telemetry | **3 qualified / tail-accounting fix pending owner run** | Owner report 712b98e0 qualified the probe/TRIM/program telemetry. Tail blocks abandoned before segment rotation are now included in placement-waste accounting; owner requalification is pending. |
+| 69 | Hole-free 4KiB-aligned extent placement | **4 opt-in A/B implemented / default off** | Existing 1/2/4-block SWZ3 extents may be staged back-to-back at 4KiB granularity under read-only `packed_placement=1`. Native mixed-class A/B and bounded loaded correctness are qualification gates; the qualified aligned policy remains default. |
+| 70 | Segment DISCARD lifecycle | **3 ID70a qualified; ID70c implemented / owner pending** | ID70a eliminated 16 duplicate 1MiB DISCARDs in the qualified lifecycle. ID70c synchronously reclaims a closed segment when upper DISCARD removes its final mapping and relies on ID70a to skip later reuse. Early/background async TRIM remains deferred. |
+| 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
 | 72 | Wear-aware free-segment choice / cold relocation | **6 physical-media evidence gate** | Logical segment-open counts are allocator distribution telemetry, not NAND wear. Do not add wear leveling or cold relocation from RAM-backed evidence alone. |
-| 73 | Flexible/larger extent study | **4 offline evidence next** | Compare current aligned 1/2/4, hole-free 1/2/4, exact block-count classes and larger 32/64/128KiB candidates separately from shared multi-page compression. No SWZ3 change without a Pareto win. |
+| 73 | Flexible/larger extent study | **4 offline simulator implemented / evidence pending** | Deterministically compare aligned 1/2/4, packed 1/2/4, exact 1/2/3/4, up-to-32KiB and up-to-64KiB candidates. Larger classes remain simulation-only; no SWZ3/mask/cache change without a Pareto win. |
 
 
 ## What the pinned queue experiment establishes
@@ -213,21 +213,20 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 
 ## Immediate work queue
 
-1. Owner-qualify ID68, ID70 duplicate-DISCARD suppression and ID71 with the
-   existing full `make test` matrix. Use the new placement/probe/TRIM/program
-   telemetry to decide the next allocator experiment; do not change SWZ3.
-2. If ID68 reports material alignment holes, run ID69 as a matched temporary
-   A/B using the existing 1/2/4-block extent classes and 4KiB physical
-   alignment. Keep only a Pareto-neutral-or-better result.
-3. Build ID73 as an offline extent-geometry/compression-granularity study
-   before widening SWZ3 classes, masks, caches or scratch buffers.
-4. Keep the qualified shallow K=1 detach baseline unchanged. Keep K>1 writes,
-   background GC, a reverse index and early asynchronous TRIM deferred until
-   fresh evidence demonstrates a material blocked-work or lifecycle benefit.
-5. Continue representative ID67 content/CPU evidence and the bounded ID63
-   fast-latency A/B independently of allocator work.
-6. Keep ID62 blocked until RAM-backed kernel/format evidence is settled and
-   physical-device testing is separately authorized.
+1. Owner-qualify the ID68 tail-waste fix, ID70c synchronous discard-time
+   reclaim, ID69 opt-in packed placement and ID73 offline geometry evidence
+   with the existing full `make test` matrix.
+2. Keep `packed_placement=0` as the qualified default unless mixed-class
+   native evidence and loaded correctness are Pareto-positive; do not change
+   SWZ3 merely because the offline simulator favors another class set.
+3. Use ID73 to decide whether any 3/8/16-block candidate deserves a separate
+   format/mask/cache design. Do not add those classes in this experiment.
+4. Keep the qualified shallow K=1 detach baseline and ID63 completion semantics
+   unchanged. Keep K>1 writes, background GC, reverse indexing and asynchronous
+   early TRIM deferred without a measured bottleneck.
+5. Continue representative ID67 content/CPU evidence independently.
+6. Keep ID62 blocked; physical-device testing remains separately unauthorized
+   until explicitly approved after the RAM-backed evidence is settled.
 
 ## NUMA / deployment topology
 

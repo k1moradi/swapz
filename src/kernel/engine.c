@@ -122,7 +122,7 @@ static int swapz_engine_plan_bounded_policy(
 			    swapz_u8 count, swapz_u8 max_read_blocks,
 			    swapz_u8 *classes, swapz_u8 *records_per_extent,
 			    swapz_u8 *extent_count, int prefer_large_ties,
-			    swapz_u32 alignment_cursor)
+			    swapz_u32 alignment_cursor, int packed_placement)
 {
 	swapz_u32 costs[SWAPZ_MAX_RECORDS + 1U];
 	swapz_u32 reads[SWAPZ_MAX_RECORDS + 1U];
@@ -220,7 +220,7 @@ static int swapz_engine_plan_bounded_policy(
 							   &local_read_blocks);
 				swapz_u32 candidate_bytes, candidate_reads;
 				swapz_u8 candidate_batches;
-				swapz_u32 aligned, hole;
+				swapz_u32 hole;
 
 				if (!take)
 					continue;
@@ -234,9 +234,19 @@ static int swapz_engine_plan_bounded_policy(
 				    candidate_reads != reads[position] ||
 				    candidate_batches != batches[position])
 					continue;
-				aligned = (alignment_cursor + blocks - 1U) &
-					  ~(swapz_u32)(blocks - 1U);
-				hole = aligned - alignment_cursor;
+				if (packed_placement) {
+					swapz_u32 offset =
+						alignment_cursor % SWAPZ_SEGMENT_BLOCKS;
+
+					hole = offset + blocks > SWAPZ_SEGMENT_BLOCKS ?
+						SWAPZ_SEGMENT_BLOCKS - offset : 0;
+				} else {
+					swapz_u32 aligned =
+						(alignment_cursor + blocks - 1U) &
+						~(swapz_u32)(blocks - 1U);
+
+					hole = aligned - alignment_cursor;
+				}
 				if (hole < best_hole ||
 				    (hole == best_hole && blocks > chosen_class)) {
 					best_hole = hole;
@@ -249,9 +259,18 @@ static int swapz_engine_plan_bounded_policy(
 		}
 		classes[out] = chosen_class;
 		records_per_extent[out] = chosen_count;
-		alignment_cursor =
-			((alignment_cursor + chosen_class - 1U) &
-			 ~(swapz_u32)(chosen_class - 1U)) + chosen_class;
+		if (packed_placement) {
+			swapz_u32 offset =
+				alignment_cursor % SWAPZ_SEGMENT_BLOCKS;
+
+			if (offset + chosen_class > SWAPZ_SEGMENT_BLOCKS)
+				alignment_cursor += SWAPZ_SEGMENT_BLOCKS - offset;
+			alignment_cursor += chosen_class;
+		} else {
+			alignment_cursor =
+				((alignment_cursor + chosen_class - 1U) &
+				 ~(swapz_u32)(chosen_class - 1U)) + chosen_class;
+		}
 		position += chosen_count;
 		out++;
 	}
@@ -266,7 +285,7 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 {
 	return swapz_engine_plan_bounded_policy(pages, count, max_read_blocks,
 					      classes, records_per_extent,
-					      extent_count, 0, 0);
+					      extent_count, 0, 0, 0);
 }
 
 static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
@@ -1028,7 +1047,8 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 						plan_read_blocks,
 						e->plan_classes, e->plan_takes,
 						&extent_count, 1,
-						e->authority->next_block);
+						e->authority->next_block,
+						e->authority->packed_placement);
 		e->plan_wall_ns += swapz_engine_elapsed_ns(
 			phase_start, swapz_engine_now_ns());
 		if (error)
@@ -1049,11 +1069,15 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 		 * this prefix and prepare the remainder only after completion.
 		 */
 		if (staged) {
-			aligned = (e->authority->next_block + blocks - 1U) &
-				  ~(swapz_u32)(blocks - 1U);
+			aligned = e->authority->packed_placement ?
+				e->authority->next_block :
+				(e->authority->next_block + blocks - 1U) &
+					~(swapz_u32)(blocks - 1U);
 			run_end = run_start + run_blocks;
 			if (aligned / SWAPZ_SEGMENT_BLOCKS !=
 					run_start / SWAPZ_SEGMENT_BLOCKS ||
+			    aligned % SWAPZ_SEGMENT_BLOCKS + blocks >
+					SWAPZ_SEGMENT_BLOCKS ||
 			    aligned < run_start ||
 			    (e->bulk_enabled == 1 && aligned != run_end) ||
 			    aligned - run_start + blocks > SWAPZ_BULK_BLOCKS) {

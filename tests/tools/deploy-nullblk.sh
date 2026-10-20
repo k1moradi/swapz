@@ -561,6 +561,66 @@ note "PASS_LOADED_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wal
 dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
 OWN_DM=0
 
+# ID70c: upper DISCARD is already serialized by the ordered worker. Prove that
+# invalidating the final mapping in a CLOSED 1MiB segment immediately issues
+# one lower whole-segment TRIM, then prove later allocator reuse observes
+# ID70a's successful-TRIM state and skips a duplicate pre-write DISCARD.
+note "START_LOADED_DISCARD_TRIM"
+UUID="SWAPZ-TEST-$TOKEN-discardtrim"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0" ||
+    fail "cannot create discard-time TRIM mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "discard-time TRIM DM UUID mismatch"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --raw-write-series 257 0 ||
+    fail "discard-time TRIM setup write failed"
+trim_before="$(dmsetup status "$DMNAME")"
+trim_completed_before="$(status_u64 "$trim_before" segment_discards_completed)" ||
+    fail "discard-time TRIM status lacks completion count"
+trim_sectors_before="$(status_u64 "$trim_before" segment_discard_sectors)" ||
+    fail "discard-time TRIM status lacks sector count"
+trim_skips_before="$(status_u64 "$trim_before" segment_discards_skipped_already_trimmed)" ||
+    fail "discard-time TRIM status lacks duplicate-skip count"
+discard_pages_before="$(status_u64 "$trim_before" discarded)" ||
+    fail "discard-time TRIM status lacks upper discard count"
+timeout --signal=TERM --kill-after=5s 20s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --discard-pages 0 256 ||
+    fail "owned upper DISCARD failed"
+trim_after_discard="$(dmsetup status "$DMNAME")"
+trim_completed_after="$(status_u64 "$trim_after_discard" segment_discards_completed)" ||
+    fail "discard-time TRIM post-discard completion count missing"
+trim_sectors_after="$(status_u64 "$trim_after_discard" segment_discard_sectors)" ||
+    fail "discard-time TRIM post-discard sector count missing"
+trim_skips_after="$(status_u64 "$trim_after_discard" segment_discards_skipped_already_trimmed)" ||
+    fail "discard-time TRIM post-discard skip count missing"
+discard_pages_after="$(status_u64 "$trim_after_discard" discarded)" ||
+    fail "discard-time TRIM post-discard upper count missing"
+(( trim_completed_after - trim_completed_before == 1 &&
+   trim_sectors_after - trim_sectors_before == 2048 &&
+   trim_skips_after == trim_skips_before &&
+   discard_pages_after - discard_pages_before == 256 &&
+   $(status_u64 "$trim_after_discard" failed) == 0 )) ||
+    fail "upper DISCARD did not immediately reclaim exactly one closed segment"
+for trim_round in 1 2 3 4; do
+    timeout --signal=TERM --kill-after=5s 60s "$ORACLE" \
+        "/dev/mapper/$DMNAME" --raw-write-series 4096 "$trim_round" ||
+        fail "discard-time TRIM reuse round failed"
+done
+timeout --signal=TERM --kill-after=5s 60s "$ORACLE" \
+    "/dev/mapper/$DMNAME" --raw-verify-series 4096 4 ||
+    fail "discard-time TRIM reuse verification failed"
+trim_after_reuse="$(dmsetup status "$DMNAME")"
+trim_skips_reuse="$(status_u64 "$trim_after_reuse" segment_discards_skipped_already_trimmed)" ||
+    fail "discard-time TRIM reuse skip count missing"
+trim_reuse_delta=$((trim_skips_reuse - trim_skips_after))
+(( trim_reuse_delta >= 1 && $(status_u64 "$trim_after_reuse" failed) == 0 )) ||
+    fail "later allocator reuse did not suppress prior discard-time TRIM"
+note "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:$trim_reuse_delta verified_pages:4096"
+dmsetup remove "$DMNAME" || fail "cannot remove discard-time TRIM mapping"
+OWN_DM=0
+
 # Retained lifecycle qualification. Use the maximum already-supported
 # retention interval only to make the drain-path race observable; the real
 # performance policy remains owner-qualified retain_ms=2. The private writer
@@ -705,4 +765,40 @@ read -r -a flush_fault_lower_after < "/sys/block/$DISK/stat"
 note "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reached_lower:1"
 
 dmsetup remove "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
+OWN_DM=0
+
+# ID69 remains an opt-in evidence arm. Reload only the already-owned module
+# with packed placement enabled, then run the byte-exact mixed smoke on the
+# same owned RAM lower. The full benchmark matrix continues to use default=0.
+rmmod dm_swapz || fail "cannot reload swapz for packed-placement smoke"
+OWN_MODULE=0
+insmod "$MODULE" packed_placement=1 ||
+    fail "swapz packed-placement module arm rejected"
+OWN_MODULE=1
+note "START_LOADED_PACKED_PLACEMENT"
+UUID="SWAPZ-TEST-$TOKEN-packed"
+dmsetup create "$DMNAME" --uuid "$UUID" \
+    --table "0 32768 swapz $LOWER 0 64 1 2 0 1 0" ||
+    fail "cannot create packed-placement mapping"
+OWN_DM=1
+[[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
+    fail "packed-placement DM UUID mismatch"
+packed_before="$(dmsetup status "$DMNAME")"
+(( $(status_u64 "$packed_before" packed_placement) == 1 &&
+   $(status_u64 "$packed_before" failed) == 0 )) ||
+    fail "packed-placement module policy mismatch"
+timeout --signal=TERM --kill-after=5s 30s "$ORACLE" "/dev/mapper/$DMNAME" ||
+    fail "packed-placement byte-exact smoke failed"
+packed_after="$(dmsetup status "$DMNAME")"
+packed_holes="$(status_u64 "$packed_after" alignment_hole_blocks_foreground)" ||
+    fail "packed-placement status lacks hole count"
+packed_splits="$(status_u64 "$packed_after" run_splits_by_hole)" ||
+    fail "packed-placement status lacks hole-split count"
+packed_failed="$(status_u64 "$packed_after" failed)" ||
+    fail "packed-placement status lacks failure state"
+(( $(status_u64 "$packed_after" packed_placement) == 1 &&
+   packed_failed == 0 )) ||
+    fail "packed-placement smoke did not remain healthy"
+note "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:$packed_holes run_splits:$packed_splits failed:$packed_failed"
+dmsetup remove "$DMNAME" || fail "cannot remove packed-placement mapping"
 OWN_DM=0

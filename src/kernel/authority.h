@@ -96,6 +96,12 @@ struct swapz_authority {
 	 * default; the separately reviewed Device Mapper target enables this.
 	 */
 	swapz_u8 reuse_dead_segments;
+	/*
+	 * Experimental placement A/B. Zero preserves the qualified power-of-two
+	 * physical-start alignment; one packs existing 1/2/4-block extents
+	 * back-to-back at 4KiB granularity. This never changes SWZ3 bytes.
+	 */
+	swapz_u8 packed_placement;
 	/* Only the serialized GC worker may set this, never foreground. */
 	swapz_u8 gc_allocation;
 	/* GC may NOT allocate into the paused foreground OPEN segment or
@@ -179,7 +185,7 @@ int swapz_authority_init(struct swapz_authority *authority,
 		       struct swapz_map *maps, swapz_u16 *live_records,
 		       swapz_u8 *extent_classes, swapz_u32 logical_pages,
 		       swapz_u32 physical_blocks);
-/* Reserves aligned physical blocks; single worker, one pending transaction. */
+/* Reserves physical blocks; single worker, one pending transaction. */
 int swapz_stage(struct swapz_authority *authority, const swapz_u32 *logical_pages,
 	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out);
 /*

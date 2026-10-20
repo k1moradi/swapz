@@ -64,6 +64,14 @@ static int swapz_legal_class(swapz_u8 blocks)
 	return blocks == 1U || blocks == 2U || blocks == 4U;
 }
 
+static swapz_u32 swapz_placement_start(const struct swapz_authority *a,
+				      swapz_u32 cursor, swapz_u8 blocks)
+{
+	if (a->packed_placement)
+		return cursor;
+	return (cursor + blocks - 1U) & ~(swapz_u32)(blocks - 1U);
+}
+
 static int swapz_gc_accounting_enabled(const struct swapz_authority *a)
 {
 	return a->segment_gc_live_bytes || a->segment_gc_io_cost ||
@@ -565,7 +573,7 @@ int swapz_gc_commit_rotation(struct swapz_authority *a, swapz_u32 victim)
 int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	      swapz_u8 count, swapz_u8 blocks, struct swapz_tx *out)
 {
-	swapz_u32 limit, start;
+	swapz_u32 limit, start, tail_waste = 0;
 	swapz_u8 index;
 
 	if (!a || !a->maps || !pages || !out ||
@@ -582,14 +590,15 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	 * the combined IO; the engine flushes the group on -EAGAIN and retries.
 	 */
 	if (a->batch_pending) {
-		swapz_u32 aligned = (a->next_block + blocks - 1U) &
-				  ~(swapz_u32)(blocks - 1U);
+		swapz_u32 placed =
+			swapz_placement_start(a, a->next_block, blocks);
+
 		if (!a->reuse_dead_segments ||
 		    a->open_segment != a->batch_segment ||
-		    aligned >= a->physical_blocks ||
-		    blocks > a->physical_blocks - aligned ||
-		    aligned / SWAPZ_SEGMENT_BLOCKS != a->batch_segment ||
-		    aligned % SWAPZ_SEGMENT_BLOCKS + blocks >
+		    placed >= a->physical_blocks ||
+		    blocks > a->physical_blocks - placed ||
+		    placed / SWAPZ_SEGMENT_BLOCKS != a->batch_segment ||
+		    placed % SWAPZ_SEGMENT_BLOCKS + blocks >
 					SWAPZ_SEGMENT_BLOCKS)
 			return -EAGAIN;
 	}
@@ -612,8 +621,7 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 		if (a->next_block > limit ||
 		    blocks - 1U > limit - a->next_block)
 			return -ENOSPC;
-		start = (a->next_block + blocks - 1U) &
-			~(swapz_u32)(blocks - 1U);
+		start = swapz_placement_start(a, a->next_block, blocks);
 		if (start > limit || blocks > limit - start ||
 		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -ENOSPC;
@@ -624,27 +632,54 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 			  a->physical_blocks - a->reserve_blocks) /
 			 SWAPZ_SEGMENT_BLOCKS) * SWAPZ_SEGMENT_BLOCKS;
 		/*
-		 * Reuse the OPEN segment only while the entire aligned extent fits.
+		 * Reuse the OPEN segment only while the entire placed extent fits.
 		 * A crossed segment edge MUST run the mapped-record liveness scan;
 		 * merely advancing to the numerically next segment can destroy data
 		 * after physical cursor wrap.
 		 */
 		start = a->next_block;
-		if (a->open_segment == ~(swapz_u32)0 ||
-		    start >= limit || blocks - 1U > limit - start ||
-		    ((start + blocks - 1U) & ~(swapz_u32)(blocks - 1U)) >
-				limit - blocks ||
-		    (((start + blocks - 1U) & ~(swapz_u32)(blocks - 1U)) /
-		     SWAPZ_SEGMENT_BLOCKS) != a->open_segment ||
-		    ((start + blocks - 1U) & ~(swapz_u32)(blocks - 1U)) %
-				SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS) {
-			int error = swapz_pick_dead_segment(a);
+		{
+			swapz_u32 placed =
+				swapz_placement_start(a, start, blocks);
 
-			if (error)
-				return error;
-			start = a->next_block;
+			if (a->open_segment == ~(swapz_u32)0 ||
+			    start >= limit || blocks - 1U > limit - start ||
+			    placed > limit - blocks ||
+			    placed / SWAPZ_SEGMENT_BLOCKS != a->open_segment ||
+			    placed % SWAPZ_SEGMENT_BLOCKS + blocks >
+					SWAPZ_SEGMENT_BLOCKS) {
+				int error;
+
+				/*
+				 * Account the blocks abandoned at a real segment edge before
+				 * swapz_pick_dead_segment() resets next_block to the new
+				 * segment. This is physical placement waste, not media I/O.
+				 */
+				if (a->open_segment != ~(swapz_u32)0 &&
+				    a->next_block / SWAPZ_SEGMENT_BLOCKS ==
+						a->open_segment &&
+				    a->next_block % SWAPZ_SEGMENT_BLOCKS &&
+				    (placed / SWAPZ_SEGMENT_BLOCKS !=
+						a->open_segment ||
+				     placed % SWAPZ_SEGMENT_BLOCKS + blocks >
+						SWAPZ_SEGMENT_BLOCKS))
+					tail_waste = SWAPZ_SEGMENT_BLOCKS -
+						(a->next_block % SWAPZ_SEGMENT_BLOCKS);
+				error = swapz_pick_dead_segment(a);
+				if (error)
+					return error;
+				if (tail_waste) {
+					if (a->gc_allocation)
+						a->alignment_hole_blocks_gc +=
+							tail_waste;
+					else
+						a->alignment_hole_blocks_foreground +=
+							tail_waste;
+				}
+				start = a->next_block;
+			}
 		}
-		start = (start + blocks - 1U) & ~(swapz_u32)(blocks - 1U);
+		start = swapz_placement_start(a, start, blocks);
 		if (start >= limit || blocks > limit - start ||
 		    start / SWAPZ_SEGMENT_BLOCKS != a->open_segment ||
 		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
@@ -782,7 +817,8 @@ int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 	    (tx->extent_blocks != 1 && tx->extent_blocks != 2 &&
 	     tx->extent_blocks != 4) ||
 	    !tx->count || tx->count > SWAPZ_MAX_RECORDS ||
-	    tx->start_block % tx->extent_blocks ||
+	    (!a->packed_placement &&
+	     tx->start_block % tx->extent_blocks) ||
 	    tx->start_block >= a->physical_blocks ||
 	    tx->extent_blocks > a->physical_blocks - tx->start_block ||
 	    tx->start_block + tx->extent_blocks > a->next_block ||
