@@ -911,3 +911,14 @@ and the directional grouping/ID60 controls. A fake loaded stage is not allowed t
 bypass new fail-closed fields merely to exercise incremental Make behavior;
 fixture records use the same parser and conservation contracts as owner-loaded
 output.
+
+
+### Native GC map-scan scaling evidence
+
+The rootless stage must run a bounded native GC scaling microbenchmark at
+262,144 and 1,048,576 logical pages (1GiB and 4GiB at 4KiB/page). It reports
+three CPU-only timings: the retired full-map score rebuild for comparison, the
+current per-segment victim-selection scan, and the still-current full-map
+relocation ownership scan. The sanitized report must retain the two geometry
+rows. Timing is directional CPU evidence, not a physical-media latency claim;
+no reverse index is justified solely because the loop is O(logical_pages).

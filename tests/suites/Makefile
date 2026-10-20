@@ -14,7 +14,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor clean
-PROGRAMS := codec-roundtrip predictor-qualification zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
+PROGRAMS := codec-roundtrip predictor-qualification zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
 
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
 predictor-qualification_SRC := $(NATIVE)/codec/predictor-qualification.c $(ENGINE) $(AUTH) $(CODEC)
@@ -30,6 +30,8 @@ online-packing_SRC := $(NATIVE)/mapping/online-packing.c $(ENGINE) $(AUTH) $(COD
 randomized-authority_SRC := $(NATIVE)/mapping/randomized-authority.c $(ENGINE) $(AUTH) $(CODEC)
 gc-forbidden-victim_SRC := $(NATIVE)/gc/forbidden-victim.c $(AUTH) $(CODEC)
 gc-cost-accounting_SRC := $(NATIVE)/gc/cost-accounting.c $(AUTH) $(CODEC)
+gc-scan-scaling_SRC := $(NATIVE)/gc/scan-scaling.c
+gc-scan-scaling_HDR := $(KERNEL)/gc-cost.h $(KERNEL)/authority.h $(KERNEL)/codec.h
 gc-rotation_SRC := $(NATIVE)/gc/rotation.c $(AUTH) $(CODEC)
 gc-engine-rotation_SRC := $(NATIVE)/gc/engine-rotation.c $(ENGINE) $(AUTH) $(CODEC)
 flush-ordering_SRC := $(NATIVE)/io/flush-ordering.c
@@ -66,8 +68,8 @@ test-predictor: $(OUT)/predictor-qualification
 test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/transaction-publication $(OUT)/write-verification $(OUT)/dead-segment-reclamation $(OUT)/raw-discard $(OUT)/online-packing $(OUT)/randomized-authority
 	@set -e; "$(OUT)/zero-write-elision"; "$(OUT)/mapping-authority"; "$(OUT)/transaction-publication"; "$(OUT)/write-verification"; "$(OUT)/dead-segment-reclamation"; "$(OUT)/raw-discard"; "$(OUT)/online-packing"; "$(OUT)/randomized-authority"
 
-test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-rotation $(OUT)/gc-engine-rotation
-	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"
+test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-scan-scaling $(OUT)/gc-rotation $(OUT)/gc-engine-rotation
+	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"
 
 test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy
 	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"

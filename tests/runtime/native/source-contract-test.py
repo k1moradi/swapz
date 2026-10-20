@@ -1065,6 +1065,23 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("swapz_note_dry_pack_close", DM)
         self.assertNotIn("swapz_note_dry_pack_followup_locked", DM)
 
+    def test_id61_native_gc_scan_scaling_is_bounded_and_reported(self):
+        scale = (ROOT / "tests/runtime/native/gc/scan-scaling.c").read_text()
+        suites = (ROOT / "tests/suites/Makefile").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
+        authority = (ROOT / "src/kernel/authority.h").read_text()
+
+        self.assertIn("262144U, 1048576U", scale)
+        self.assertIn("legacy_score_scan", scale)
+        self.assertIn("incremental_select", scale)
+        self.assertIn("relocation_scan", scale)
+        self.assertIn("SWAPZ_GC_SCAN_SCALE_EVIDENCE=", scale)
+        self.assertIn("gc-scan-scaling", suites)
+        self.assertIn("def parse_gc_scan_scale_evidence", runner)
+        self.assertIn("OFFLINE_NATIVE_GC_SCALE_ONLY", runner)
+        self.assertNotIn("reverse_index", authority)
+        self.assertNotIn("logical_backref", authority)
+
     def test_id63_read_coalescing_is_cache_coherent(self):
         header = (ROOT / "src/kernel/engine.h").read_text()
         engine = (ROOT / "src/kernel/engine.c").read_text()

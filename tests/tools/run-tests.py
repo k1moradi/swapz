@@ -332,6 +332,45 @@ def parse_predictor_evidence(output):
     }
 
 
+def parse_gc_scan_scale_evidence(output):
+    """Sanitize native million-page GC scan scaling evidence."""
+    prefix = "SWAPZ_GC_SCAN_SCALE_EVIDENCE="
+    record = None
+    for line in output.splitlines():
+        if not line.startswith(prefix):
+            continue
+        try:
+            candidate = json.loads(line[len(prefix):])
+        except (TypeError, ValueError):
+            return None
+        if record is not None:
+            return None
+        record = candidate
+    if not isinstance(record, dict) or record.get("scope") != (
+            "OFFLINE_NATIVE_GC_SCALE_ONLY"):
+        return None
+    rows = record.get("rows")
+    expected = ((262144, 1024), (1048576, 4096))
+    if not isinstance(rows, list) or len(rows) != len(expected):
+        return None
+    clean = []
+    for row, (pages, segments) in zip(rows, expected):
+        if not isinstance(row, dict) or \
+                row.get("logical_pages") != pages or \
+                row.get("segments") != segments or \
+                row.get("victim_records") != 256:
+            return None
+        for field in ("legacy_score_scan_ns", "incremental_select_ns",
+                      "relocation_scan_ns"):
+            if type(row.get(field)) is not int or row[field] <= 0:
+                return None
+        clean.append({key: row[key] for key in (
+            "logical_pages", "segments", "legacy_score_scan_ns",
+            "incremental_select_ns", "relocation_scan_ns",
+            "victim_records")})
+    return {"scope": record["scope"], "rows": clean}
+
+
 def workload_opportunity_record(obj):
     record = obj.get("workload_opportunity")
     if not isinstance(record, dict) or record.get("scope") != (
@@ -822,9 +861,13 @@ def run_stage(title, command, result, *, parse_bench=False):
     except OSError as exc:
         output, rc = type(exc).__name__, 127
     predictor_evidence = parse_predictor_evidence(output)
-    predictor_required = title == "Native and rootless contracts"
-    predictor_failure = predictor_required and rc == 0 and predictor_evidence is None
-    if predictor_failure:
+    gc_scale_evidence = parse_gc_scan_scale_evidence(output)
+    native_evidence_required = title == "Native and rootless contracts"
+    predictor_failure = (native_evidence_required and rc == 0 and
+                         predictor_evidence is None)
+    gc_scale_failure = (native_evidence_required and rc == 0 and
+                        gc_scale_evidence is None)
+    if predictor_failure or gc_scale_failure:
         rc = 1
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
     read_coalesce_sessions = parse_read_coalesce_ab(output) if parse_bench else []
@@ -864,6 +907,10 @@ def run_stage(title, command, result, *, parse_bench=False):
             record["failed_phase"] = "ID67 offline predictor evidence"
             record["diagnostic"] = (
                 "Native predictor evidence marker missing, malformed or incomplete")
+        elif gc_scale_failure:
+            record["failed_phase"] = "ID61 GC scan scaling evidence"
+            record["diagnostic"] = (
+                "Native GC scan scaling marker missing, malformed or incomplete")
         elif marker_failure:
             if loaded_correctness.get("overall") != "PASS":
                 record["failed_phase"] = "owned RAM lifecycle evidence"
@@ -890,6 +937,8 @@ def run_stage(title, command, result, *, parse_bench=False):
     result["stages"].append(record)
     if predictor_evidence is not None:
         result.setdefault("evidence", {})["predictor"] = predictor_evidence
+    if gc_scale_evidence is not None:
+        result.setdefault("evidence", {})["gc_scan_scale"] = gc_scale_evidence
     if parse_bench:
         result["benchmarks"]["loaded_correctness"] = loaded_correctness
         result["benchmarks"]["sessions"] = parse_sessions(output)
@@ -2334,6 +2383,19 @@ def print_bench(result):
               profile["useful"])
              for row in predictor["thresholds"]
              for profile in row["negative_profiles"]])
+
+    gc_scale = result.get("evidence", {}).get("gc_scan_scale")
+    if isinstance(gc_scale, dict):
+        print("\n  ID61 GC MAP-SCAN SCALE — native CPU evidence; no lower I/O")
+        print_table(
+            ("logical pages", "segments", "old score ms",
+             "segment select ms", "relocate scan ms"),
+            [(
+                row["logical_pages"], row["segments"],
+                f"{row['legacy_score_scan_ns'] / 1e6:.3f}",
+                f"{row['incremental_select_ns'] / 1e6:.3f}",
+                f"{row['relocation_scan_ns'] / 1e6:.3f}",
+            ) for row in gc_scale["rows"]])
 
     verdict = result["benchmarks"]["verdicts"]
     if verdict.get("overall") != "PASS_BOUNDED_RAM_MATRIX":

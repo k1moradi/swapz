@@ -71,6 +71,28 @@ def predictor_evidence():
     }
 
 
+def gc_scan_scale_evidence():
+    return {
+        "scope": "OFFLINE_NATIVE_GC_SCALE_ONLY",
+        "rows": [
+            {
+                "logical_pages": 262144, "segments": 1024,
+                "legacy_score_scan_ns": 2000000,
+                "incremental_select_ns": 20000,
+                "relocation_scan_ns": 800000,
+                "victim_records": 256,
+            },
+            {
+                "logical_pages": 1048576, "segments": 4096,
+                "legacy_score_scan_ns": 8000000,
+                "incremental_select_ns": 80000,
+                "relocation_scan_ns": 3200000,
+                "victim_records": 256,
+            },
+        ],
+    }
+
+
 def lower_inflight(*, has_reads):
     read_peak = 1 if has_reads else 0
     read_mean = 0.25 if has_reads else 0.0
@@ -589,6 +611,16 @@ class ReportContract(unittest.TestCase):
             "SWAPZ_PREDICTOR_EVIDENCE=" + json.dumps(raw) + "\n")
         self.assertIsNone(runner.parse_predictor_evidence(duplicate))
 
+    def test_gc_scan_scale_evidence_is_sanitized(self):
+        raw = gc_scan_scale_evidence()
+        parsed = runner.parse_gc_scan_scale_evidence(
+            "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" + json.dumps(raw) + "\n")
+        self.assertEqual(parsed["rows"][1]["logical_pages"], 1048576)
+        broken = json.loads(json.dumps(raw))
+        broken["rows"][1]["victim_records"] = 255
+        self.assertIsNone(runner.parse_gc_scan_scale_evidence(
+            "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" + json.dumps(broken) + "\n"))
+
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
         self.assertEqual(loaded["overall"], "PASS")
@@ -916,7 +948,8 @@ class ReportContract(unittest.TestCase):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
             runner.parse_write_saturation(synthetic_log()))
-        report = {"evidence": {"predictor": predictor_evidence()},
+        report = {"evidence": {"predictor": predictor_evidence(),
+                                "gc_scan_scale": gc_scan_scale_evidence()},
                   "benchmarks": {
             "verdicts": verdicts,
             "read_coalesce_ab": runner.read_coalesce_ab_verdict(
@@ -932,6 +965,8 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
+        self.assertIn("ID61 GC MAP-SCAN SCALE", rendered)
+        self.assertIn("1048576", rendered)
         self.assertIn("Sampled delta64 classifier", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)
         self.assertIn("cl_delta32x2", rendered)

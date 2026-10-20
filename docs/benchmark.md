@@ -711,3 +711,14 @@ queue and hardware queue depth 1. The fast profile uses blk-mq, one submission
 queue and hardware queue depth 64. These are deliberately contrasting
 serial-depth and queued-depth experiments; they are not literal protocol models
 for every SD/HDD/SSD/NVMe device.
+
+
+### ID61 native map-scan scaling control
+
+The rootless native suite allocates deterministic 1GiB-equivalent (262,144
+maps) and 4GiB-equivalent (1,048,576 maps) metadata tables without allocating
+backing payloads. It times the retired full logical-map victim-score rebuild,
+the current O(segment_count) selection over incrementally maintained scores,
+and the unchanged relocation ownership scan over logical maps. Seven repeats
+are reduced to the median. These timings quantify metadata CPU scaling only;
+they do not model lower-device I/O or authorize a reverse index.
