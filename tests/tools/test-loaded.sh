@@ -139,25 +139,9 @@ for guard in "${directional_modes[@]}"; do
     (( index += 1 ))
 done
 
-# ID39 is owner-refuted as a performance optimization. Keep one fast off/on
-# directional regression control; do not spend five matched rounds on it.
-index=0
-for parallel_reads in "${directional_modes[@]}"; do
-    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
-               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --read-coalesce 0 --parallel-reads "$parallel_reads"
-               --shared-plan "$shared_plan")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_PARALLEL_READ_AB=%s\n' "$parallel_reads"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-    printf 'PASS_PARALLEL_READ_AB=%s\n' "$parallel_reads"
-    (( index += 1 ))
-done
-
-# ID63 isolated same-cache confirmation: keep Kread=2 enabled and vary only
-# zero-extra adjacent distinct-extent coalescing for five matched fast rounds.
+# ID63 adjacent distinct-extent confirmation: vary only exact zero-extra
+# coalescing for five matched fast rounds. Standalone same-extent grouping is
+# retired; the off arm therefore remains on the ordinary swapz_read() path.
 index=0
 for read_coalesce in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
@@ -173,25 +157,8 @@ for read_coalesce in "${confirmation_modes[@]}"; do
     (( index += 1 ))
 done
 
-# ID60 is owner-refuted as a standalone optimization. Keep one hwq=1 off/on
-# directional regression control with ID63 disabled and no helper concurrency.
-index=0
-for parallel_reads in "${directional_modes[@]}"; do
-    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
-               --lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000
-               --read-coalesce 0 --parallel-reads "$parallel_reads"
-               --shared-plan "$shared_plan")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_SD_READ_GROUPING_AB=%s\n' "$parallel_reads"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-    printf 'PASS_SD_READ_GROUPING_AB=%s\n' "$parallel_reads"
-    (( index += 1 ))
-done
-
-# ID63 depth-one adjacent coalescing confirmation: keep grouping enabled and
-# vary only exact zero-extra adjacent-range coalescing on the serial model.
+# ID63 depth-one adjacent coalescing confirmation: vary only exact zero-extra
+# adjacent-range coalescing on the serial model; the off arm is ordinary FIFO.
 index=0
 for read_coalesce in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced

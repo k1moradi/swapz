@@ -648,16 +648,9 @@ def run_stage(title, command, result, *, parse_bench=False):
     except OSError as exc:
         output, rc = type(exc).__name__, 127
     loaded_correctness = parse_loaded_correctness(output) if parse_bench else None
-    parallel_read_sessions = parse_parallel_read_ab(output) if parse_bench else []
-    parallel_read_diagnostic = (parallel_read_ab_verdict(parallel_read_sessions)
-                                if parse_bench else None)
     read_coalesce_sessions = parse_read_coalesce_ab(output) if parse_bench else []
     read_coalesce_diagnostic = (
         read_coalesce_ab_verdict(read_coalesce_sessions)
-        if parse_bench else None)
-    sd_grouping_sessions = parse_sd_read_grouping_ab(output) if parse_bench else []
-    sd_grouping_diagnostic = (
-        sd_read_grouping_ab_verdict(sd_grouping_sessions)
         if parse_bench else None)
     sd_coalesce_sessions = parse_sd_read_coalesce_ab(output) if parse_bench else []
     sd_coalesce_diagnostic = (
@@ -669,12 +662,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
-                       parallel_read_diagnostic.get("overall") !=
-                       "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL" or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
-                       sd_grouping_diagnostic.get("overall") !=
-                       "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL" or
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
                        burst_guard_diagnostic.get("overall") !=
@@ -697,21 +686,11 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "owned RAM lifecycle evidence"
                 record["diagnostic"] = loaded_correctness.get(
                     "reason", "Loaded correctness evidence is incomplete")
-            elif parallel_read_diagnostic.get("overall") != (
-                    "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL"):
-                record["failed_phase"] = "parallel READ A/B evidence"
-                record["diagnostic"] = parallel_read_diagnostic.get(
-                    "reason", "Kread diagnostic evidence is incomplete")
             elif read_coalesce_diagnostic.get("overall") != (
                     "PASS_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = read_coalesce_diagnostic.get(
                     "reason", "ID63 diagnostic evidence is incomplete")
-            elif sd_grouping_diagnostic.get("overall") != (
-                    "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL"):
-                record["failed_phase"] = "SD same-extent grouping A/B evidence"
-                record["diagnostic"] = sd_grouping_diagnostic.get(
-                    "reason", "SD ID60 diagnostic evidence is incomplete")
             elif sd_coalesce_diagnostic.get("overall") != (
                     "PASS_SD_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
@@ -736,12 +715,8 @@ def run_stage(title, command, result, *, parse_bench=False):
                 "PASS_BOUNDED_RAM_MATRIX"):
             result["benchmarks"]["verdicts"]["gc"] = (
                 "LIVE_VICTIMS_EXERCISED_OWNED_RAM")
-        result["benchmarks"]["parallel_read_ab_sessions"] = parallel_read_sessions
-        result["benchmarks"]["parallel_read_ab"] = parallel_read_diagnostic
         result["benchmarks"]["read_coalesce_ab_sessions"] = read_coalesce_sessions
         result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
-        result["benchmarks"]["sd_read_grouping_ab_sessions"] = sd_grouping_sessions
-        result["benchmarks"]["sd_read_grouping_ab"] = sd_grouping_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
         result["benchmarks"]["sd_read_coalesce_ab"] = sd_coalesce_diagnostic
         result["benchmarks"]["burst_guard_ab_sessions"] = burst_guard_sessions
@@ -763,9 +738,7 @@ def parse_sessions(output):
         line = line.strip()
         if line.startswith("START_OWNED_RAM_REGIME="):
             regime = line.partition("=")[2]
-        elif line.startswith(("START_PARALLEL_READ_AB=",
-                              "START_READ_COALESCE_AB=",
-                              "START_SD_READ_GROUPING_AB=",
+        elif line.startswith(("START_READ_COALESCE_AB=",
                               "START_SD_READ_COALESCE_AB=",
                               "START_BURST_GUARD_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
@@ -877,162 +850,6 @@ def parse_sessions(output):
 
 
 
-def parse_parallel_read_ab(output):
-    """Parse the four fast-model same-cache Kread diagnostic sessions."""
-    sessions, current = [], None
-    for line in output.splitlines():
-        line = line.strip()
-        match = re.fullmatch(r"START_PARALLEL_READ_AB=([01])", line)
-        if match:
-            current = {"parallel_reads": int(match.group(1)), "status": "INCOMPLETE",
-                       "order": "unknown", "device_model": None, "swapz": None}
-            sessions.append(current)
-            continue
-        if current is None:
-            continue
-        if line.startswith("REPLAY_ORDER="):
-            current["order"] = line.partition("=")[2].strip()
-        elif line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
-            model = re.fullmatch(
-                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
-                line)
-            if model:
-                current["device_model"] = {
-                    "cap_mib_s": int(model.group(1)),
-                    "completion_nsec": int(model.group(2)),
-                    "irqmode": int(model.group(3)),
-                    "queue_mode": int(model.group(4)),
-                    "submit_queues": int(model.group(5)),
-                    "hw_queue_depth": int(model.group(6)),
-                }
-        elif line.startswith("{"):
-            try:
-                obj = json.loads(line)
-            except (ValueError, TypeError):
-                continue
-            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
-                continue
-            packed = obj.get("packed_read") or {}
-            passes = {}
-            for mode in ("sequential", "seeded_random"):
-                phase = (packed.get("passes") or {}).get(mode) or {}
-                lower = phase.get("lower_io") or {}
-                passes[mode] = {
-                    "logical_bytes": phase.get("logical_bytes"),
-                    "verified_pages": phase.get("verified_pages"),
-                    "verified_image_sha256": phase.get("verified_image_sha256"),
-                    "useful_read_mbps": phase.get("useful_read_mbps"),
-                    "read_p99_ms": phase.get("read_p99_ms"),
-                    "lower_read_bytes": lower.get("lower_read_bytes"),
-                    "lower_read_requests": lower.get("lower_read_requests"),
-                    "kernel_read_path": phase.get("kernel_read_path"),
-                }
-            current["swapz"] = {
-                "source_sha": obj.get("source_sha"),
-                "fixture_sha256": obj.get("fixture_sha256"),
-                "trace_sha256": obj.get("trace_sha256"),
-                "logical_image_sha256": packed.get("logical_image_sha256"),
-                "packed_close_delta": packed.get("packed_close_delta"),
-                "passes": passes,
-            }
-        else:
-            done = re.fullmatch(r"PASS_PARALLEL_READ_AB=([01])", line)
-            if done and int(done.group(1)) == current["parallel_reads"]:
-                current["status"] = "PASS"
-                current = None
-    return sessions
-
-
-def parallel_read_ab_verdict(sessions):
-    """Validate one directional fast Kread control after ID39 was refuted."""
-    if len(sessions) != len(DIRECTIONAL_SEQUENCE) or \
-            [row.get("parallel_reads") for row in sessions] != list(
-                DIRECTIONAL_SEQUENCE):
-        return {"overall": "INCOMPLETE",
-                "reason": "Kread directional off/on observations required"}
-    expected = MODEL_SPECS["ssd_emulated"]
-    for index, row in enumerate(sessions):
-        if row.get("status") != "PASS" or row.get("order") != (
-                "swapz-first" if index % 2 else "off-first"):
-            return {"overall": "INCOMPLETE",
-                    "reason": "Kread directional order/status mismatch"}
-        model = row.get("device_model")
-        if not isinstance(model, dict) or any(model.get(key) != expected[key]
-                for key in ("cap_mib_s", "completion_nsec", "irqmode",
-                            "queue_mode", "submit_queues", "hw_queue_depth")):
-            return {"overall": "INCOMPLETE",
-                    "reason": "Kread directional device model mismatch"}
-        arm = row.get("swapz")
-        if not isinstance(arm, dict) or not re.fullmatch(
-                r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
-            return {"overall": "INCOMPLETE",
-                    "reason": "Kread directional source missing"}
-        if not isinstance(arm.get("packed_close_delta"), int) or \
-                arm["packed_close_delta"] <= 0:
-            return {"overall": "INCOMPLETE",
-                    "reason": "Kread directional packed population missing"}
-        for mode in ("sequential", "seeded_random"):
-            phase = arm["passes"].get(mode)
-            if not isinstance(phase, dict) or \
-                    phase.get("logical_bytes") != 4194304 or \
-                    phase.get("verified_pages") != 1024:
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread directional packed read incomplete"}
-            kernel = phase.get("kernel_read_path")
-            if not isinstance(kernel, dict) or any(
-                    type(kernel.get(name)) is not int or kernel[name] < 0
-                    for name in KERNEL_READ_FIELDS):
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread directional C telemetry missing"}
-            if not row["parallel_reads"] and kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread-off arm executed parallel pairs"}
-            if row["parallel_reads"] and not kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread-on arm executed no parallel pairs"}
-            if any(kernel[field] for field in (
-                    "parallel_read_coalesced_pairs",
-                    "parallel_read_coalesced_reqs_saved",
-                    "parallel_read_coalesced_blocks",
-                    "parallel_read_coalesce_extra_blocks",
-                    "parallel_read_coalesce_skip_cached",
-                    "parallel_read_coalesce_skip_noncontig_slot",
-                    "parallel_read_coalesce_skip_gap",
-                    "parallel_read_coalesce_skip_other")):
-                return {"overall": "INCOMPLETE",
-                        "reason": "Kread directional control was contaminated by ID63"}
-    if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
-            len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
-            len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
-            len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
-        return {"overall": "INCONCLUSIVE",
-                "reason": "Kread directional provenance mismatch"}
-
-    modes = {}
-    for row in sessions:
-        enabled = row["parallel_reads"]
-        passes = {}
-        for mode in ("sequential", "seeded_random"):
-            phase = row["swapz"]["passes"][mode]
-            passes[mode] = {
-                "useful_read_mbps": phase["useful_read_mbps"],
-                "read_p99_ms": phase["read_p99_ms"],
-                "lower_read_bytes": phase["lower_read_bytes"],
-                "lower_read_requests": phase["lower_read_requests"],
-            }
-            for name in KERNEL_READ_FIELDS:
-                passes[mode][name] = phase["kernel_read_path"][name]
-        modes[str(enabled)] = passes
-    return {
-        "overall": "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL",
-        "observations_per_mode": 1,
-        "confidence": "DIRECTIONAL_ONLY_OWNER_QUALIFIED_ID39_HISTORY_RETAINED",
-        "device_model": expected,
-        "modes": modes,
-        "interpretation":
-            "SAME_SOURCE_SHARED_CACHE_KREAD_DIRECTIONAL_SYNTHETIC_RAM_ONLY",
-    }
-
 def parse_read_coalesce_ab(output):
     """Parse five matched fast-model rounds varying only ID63 coalescing."""
     sessions, current = [], None
@@ -1101,7 +918,7 @@ def parse_read_coalesce_ab(output):
 
 
 def read_coalesce_ab_verdict(sessions):
-    """Validate five same-cache rounds holding Kread on and varying only ID63."""
+    """Validate five same-cache rounds varying only ID63 with the off arm on ordinary FIFO."""
     try:
         pairs = matched_binary_pairs(sessions, "read_coalesce")
     except ValueError as exc:
@@ -1146,9 +963,9 @@ def read_coalesce_ab_verdict(sessions):
                     for name in KERNEL_READ_FIELDS):
                 return {"overall": "INCOMPLETE",
                         "reason": "ID63 confirmation C telemetry missing"}
-            if not kernel["parallel_read_pairs"]:
+            if not row["read_coalesce"] and kernel["parallel_read_pairs"]:
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63 confirmation did not keep Kread active"}
+                        "reason": "ID63-off arm executed retired grouped READ path"}
             if not row["read_coalesce"] and any(kernel[field] for field in (
                     "parallel_read_coalesced_pairs",
                     "parallel_read_coalesced_reqs_saved",
@@ -1243,7 +1060,7 @@ def read_coalesce_ab_verdict(sessions):
         "modes": modes,
         "paired": paired,
         "interpretation":
-            "SAME_SOURCE_KREAD_ON_ONLY_ID63_COALESCE_TOGGLE_SYNTHETIC_RAM_ONLY",
+            "SAME_SOURCE_ID63_TOGGLE_ORDINARY_OFF_PATH_SYNTHETIC_RAM_ONLY",
     }
 
 
@@ -1316,12 +1133,6 @@ def _parse_sd_read_toggle_ab(output, start_marker, pass_marker, field):
     return sessions
 
 
-def parse_sd_read_grouping_ab(output):
-    return _parse_sd_read_toggle_ab(
-        output, "START_SD_READ_GROUPING_AB", "PASS_SD_READ_GROUPING_AB",
-        "parallel_reads")
-
-
 def parse_sd_read_coalesce_ab(output):
     return _parse_sd_read_toggle_ab(
         output, "START_SD_READ_COALESCE_AB", "PASS_SD_READ_COALESCE_AB",
@@ -1381,47 +1192,24 @@ def _sd_read_ab_verdict(sessions, field, kind):
                 return {"overall": "INCOMPLETE",
                         "reason": f"SD {kind} hit unexpected coalesce skip reason"}
         seq_kernel = arm["passes"]["sequential"]["kernel_read_path"]
-        if kind == "grouping":
-            if any(arm["passes"][mode]["kernel_read_path"][name]
-                   for mode in ("sequential", "seeded_random")
-                   for name in (
-                       "parallel_read_coalesced_pairs",
-                       "parallel_read_coalesced_reqs_saved",
-                       "parallel_read_coalesced_blocks",
-                       "parallel_read_coalesce_extra_blocks",
-                       "parallel_read_coalesce_skip_cached",
-                       "parallel_read_coalesce_skip_noncontig_slot",
-                       "parallel_read_coalesce_skip_gap",
-                       "parallel_read_coalesce_skip_other")):
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping A/B was contaminated by ID63"}
-            if not row[field] and seq_kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping-off arm grouped READs"}
-            if row[field] and not seq_kernel["parallel_read_same_extent_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping-on arm found no same-extent groups"}
-        else:
-            if not seq_kernel["parallel_read_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD ID63 A/B did not keep grouping active"}
-            if not row[field] and any(
-                    arm["passes"][mode]["kernel_read_path"][name]
-                    for mode in ("sequential", "seeded_random")
-                    for name in (
-                        "parallel_read_coalesced_pairs",
-                        "parallel_read_coalesced_reqs_saved",
-                        "parallel_read_coalesced_blocks",
-                        "parallel_read_coalesce_extra_blocks",
-                        "parallel_read_coalesce_skip_cached",
-                        "parallel_read_coalesce_skip_noncontig_slot",
-                        "parallel_read_coalesce_skip_gap",
-                        "parallel_read_coalesce_skip_other")):
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD ID63-off arm executed coalescing telemetry"}
-            if row[field] and not seq_kernel["parallel_read_coalesced_pairs"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD ID63-on arm executed no sequential coalescing"}
+        if not row[field] and any(
+                arm["passes"][mode]["kernel_read_path"][name]
+                for mode in ("sequential", "seeded_random")
+                for name in (
+                    "parallel_read_pairs",
+                    "parallel_read_coalesced_pairs",
+                    "parallel_read_coalesced_reqs_saved",
+                    "parallel_read_coalesced_blocks",
+                    "parallel_read_coalesce_extra_blocks",
+                    "parallel_read_coalesce_skip_cached",
+                    "parallel_read_coalesce_skip_noncontig_slot",
+                    "parallel_read_coalesce_skip_gap",
+                    "parallel_read_coalesce_skip_other")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD ID63-off arm executed retired grouped/coalesced READ path"}
+        if row[field] and not seq_kernel["parallel_read_coalesced_pairs"]:
+            return {"overall": "INCOMPLETE",
+                    "reason": "SD ID63-on arm executed no sequential coalescing"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
@@ -1474,108 +1262,14 @@ def _sd_read_ab_verdict(sessions, field, kind):
             "lower_bytes_change_fraction": paired_ci95(lower_bytes),
         }
     return {
-        "overall": ("PASS_SD_READ_GROUPING_AB_CONFIRMATION"
-                    if kind == "grouping" else
-                    "PASS_SD_READ_COALESCE_AB_CONFIRMATION"),
+        "overall": "PASS_SD_READ_COALESCE_AB_CONFIRMATION",
         "matched_pairs": 5,
         "confidence": "PAIRED_95PCT_CI_REPORTED",
         "device_model": expected,
         "modes": modes,
         "paired": paired,
-        "interpretation": (
-            "SAME_SOURCE_HWQ1_GROUPING_ONLY_NO_READ_WORKQUEUE_SYNTHETIC_RAM"
-            if kind == "grouping" else
-            "SAME_SOURCE_HWQ1_GROUPING_ON_ONLY_ID63_TOGGLE_SYNTHETIC_RAM"),
-    }
-
-
-def sd_read_grouping_ab_verdict(sessions):
-    """Directional hwq=1 ID60 regression control after five-pair refutation."""
-    if len(sessions) != len(DIRECTIONAL_SEQUENCE) or \
-            [row.get("parallel_reads") for row in sessions] != list(
-                DIRECTIONAL_SEQUENCE):
-        return {"overall": "INCOMPLETE",
-                "reason": "SD grouping directional off/on observations required"}
-    expected = MODEL_SPECS["sd_emulated"]
-    for index, row in enumerate(sessions):
-        if row.get("status") != "PASS" or row.get("order") != (
-                "swapz-first" if index % 2 else "off-first"):
-            return {"overall": "INCOMPLETE",
-                    "reason": "SD grouping directional order/status mismatch"}
-        model = row.get("device_model")
-        if not isinstance(model, dict) or any(model.get(key) != expected[key]
-                for key in ("cap_mib_s", "completion_nsec", "irqmode",
-                            "queue_mode", "submit_queues", "hw_queue_depth")):
-            return {"overall": "INCOMPLETE",
-                    "reason": "SD grouping directional device model mismatch"}
-        arm = row.get("swapz")
-        if not isinstance(arm, dict):
-            return {"overall": "INCOMPLETE",
-                    "reason": "SD grouping directional swapz arm missing"}
-        for mode in ("sequential", "seeded_random"):
-            phase = arm["passes"].get(mode)
-            if not isinstance(phase, dict) or \
-                    phase.get("logical_bytes") != 4194304 or \
-                    phase.get("verified_pages") != 1024:
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping directional packed read incomplete"}
-            kernel = phase.get("kernel_read_path")
-            if not isinstance(kernel, dict) or any(
-                    type(kernel.get(name)) is not int or kernel[name] < 0
-                    for name in KERNEL_READ_FIELDS):
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping directional C telemetry missing"}
-            if kernel["read_worker_cpu_ns"]:
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping directional used read workqueue"}
-            if any(kernel[name] for name in (
-                    "parallel_read_coalesced_pairs",
-                    "parallel_read_coalesced_reqs_saved",
-                    "parallel_read_coalesced_blocks",
-                    "parallel_read_coalesce_extra_blocks",
-                    "parallel_read_coalesce_skip_cached",
-                    "parallel_read_coalesce_skip_noncontig_slot",
-                    "parallel_read_coalesce_skip_gap",
-                    "parallel_read_coalesce_skip_other")):
-                return {"overall": "INCOMPLETE",
-                        "reason": "SD grouping directional contaminated by ID63"}
-        seq_kernel = arm["passes"]["sequential"]["kernel_read_path"]
-        if not row["parallel_reads"] and seq_kernel["parallel_read_pairs"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "SD grouping-off arm grouped READs"}
-        if row["parallel_reads"] and not seq_kernel[
-                "parallel_read_same_extent_pairs"]:
-            return {"overall": "INCOMPLETE",
-                    "reason": "SD grouping-on arm found no same-extent groups"}
-    if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
-            len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
-            len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
-            len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
-        return {"overall": "INCONCLUSIVE",
-                "reason": "SD grouping directional provenance mismatch"}
-    modes = {}
-    for row in sessions:
-        enabled = row["parallel_reads"]
-        passes = {}
-        for mode in ("sequential", "seeded_random"):
-            phase = row["swapz"]["passes"][mode]
-            passes[mode] = {
-                "useful_read_mbps": phase["useful_read_mbps"],
-                "read_p99_ms": phase["read_p99_ms"],
-                "lower_read_bytes": phase["lower_read_bytes"],
-                "lower_read_requests": phase["lower_read_requests"],
-            }
-            for name in KERNEL_READ_FIELDS:
-                passes[mode][name] = phase["kernel_read_path"][name]
-        modes[str(enabled)] = passes
-    return {
-        "overall": "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL",
-        "observations_per_mode": 1,
-        "confidence": "DIRECTIONAL_ONLY_OWNER_QUALIFIED_ID60_HISTORY_RETAINED",
-        "device_model": expected,
-        "modes": modes,
         "interpretation":
-            "HWQ1_GROUPING_ONLY_NO_READ_WORKQUEUE_DIRECTIONAL_SYNTHETIC_RAM",
+            "SAME_SOURCE_HWQ1_ID63_TOGGLE_ORDINARY_OFF_PATH_SYNTHETIC_RAM",
     }
 
 
@@ -2772,27 +2466,6 @@ def print_bench(result):
                 ("packed read", async_criteria["packed_4mib_sequential"]),
             ])
 
-    parallel_ab = result["benchmarks"].get("parallel_read_ab", {})
-    if parallel_ab.get("overall") == "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL":
-        print("\n  ID39 SAME-CACHE PARALLEL READ — directional control")
-        rows = []
-        for enabled in ("0", "1"):
-            seq = parallel_ab["modes"][enabled]["sequential"]
-            rnd = parallel_ab["modes"][enabled]["seeded_random"]
-            rows.append((
-                enabled,
-                f"{seq['lower_read_requests']:.1f}",
-                f"{seq['read_p99_ms']:.2f}",
-                f"{rnd['lower_read_requests']:.1f}",
-                f"{rnd['read_p99_ms']:.2f}",
-                f"{seq['parallel_read_same_extent_pairs']:.1f}",
-            ))
-        print_table(("parallel", "seq req", "seq p99", "rnd req", "rnd p99",
-                     "same-ext"), rows)
-    else:
-        print("\n  ID39 parallel READ directional control: NOT QUALIFIED "
-              f"({parallel_ab.get('reason', parallel_ab.get('overall', 'NOT_RUN'))})")
-
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
     if coalesce_ab.get("overall") == "PASS_READ_COALESCE_AB_CONFIRMATION":
         print("\n  ID63 ADJACENT READ COALESCE A/B — five matched rounds")
@@ -2854,27 +2527,6 @@ def print_bench(result):
     else:
         print("\n  ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
               f"({coalesce_ab.get('reason', coalesce_ab.get('overall', 'NOT_RUN'))})")
-
-    sd_grouping_ab = result["benchmarks"].get("sd_read_grouping_ab", {})
-    if sd_grouping_ab.get("overall") == "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL":
-        print("\n  SD ID60 SAME-EXTENT GROUPING — directional control")
-        rows = []
-        for enabled in ("0", "1"):
-            seq = sd_grouping_ab["modes"][enabled]["sequential"]
-            rnd = sd_grouping_ab["modes"][enabled]["seeded_random"]
-            rows.append((
-                enabled,
-                f"{seq['lower_read_requests']:.1f}",
-                f"{seq['read_p99_ms']:.2f}",
-                f"{rnd['lower_read_requests']:.1f}",
-                f"{rnd['read_p99_ms']:.2f}",
-                f"{seq['parallel_read_same_extent_pairs']:.1f}",
-            ))
-        print_table(("group", "seq req", "seq p99", "rnd req", "rnd p99",
-                     "same-ext"), rows)
-    else:
-        print("\n  SD ID60 grouping directional control: NOT QUALIFIED "
-              f"({sd_grouping_ab.get('reason', sd_grouping_ab.get('overall', 'NOT_RUN'))})")
 
     sd_coalesce_ab = result["benchmarks"].get("sd_read_coalesce_ab", {})
     if sd_coalesce_ab.get("overall") == "PASS_SD_READ_COALESCE_AB_CONFIRMATION":
@@ -2997,7 +2649,7 @@ def print_bench(result):
         [
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
-            ("read isolation", "ID39/slow ID60 directional; ID63 slow+fast 5 pairs"),
+            ("read isolation", "ID63 slow+fast 5 matched pairs; standalone grouping retired"),
             ("ID64", "fast mixed: one directional guard-off/on control"),
             ("write-only", "fast QD8: 5 matched pairs + paired CI; QD1/QD4/QD32 directional"),
             ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),

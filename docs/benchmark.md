@@ -100,15 +100,17 @@ The report records the direct off/on deltas but no longer manufactures a
 confidence interval from one pair; the historical five-pair result above is
 the promotion evidence.
 
-ID65 removes independent helper READ dispatch. Qualification must observe
-`parallel_reads_enabled=0` and `read_worker_cpu_ns=0` at every queue depth.
-Same-extent sibling grouping and an exact ID63 coalesced pair may still consume
-multiple BIOs synchronously; any other distinct-extent pair must fall back to
-ordinary FIFO `swapz_read()` without workqueue/completion/flush overhead.
+ID65 and ID66 are owner-qualified at source
+`2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
+and compatibility telemetry stays zero. ID63 now carries the entire grouped-slot
+execution path: a non-ID63 candidate must return before slot preparation,
+cache-LRU scans or cached-block copies. Standalone same-extent grouping is
+retired.
 
-ID66 changes only discard prevalidation storage. Multi-page DISCARD must retain
-all-or-nothing generation/mapping/shared-extent-liveness validation before the
-commit loop, while allocating no per-physical-block discard epoch/count arrays.
+Multi-page DISCARD retains all-or-nothing
+generation/mapping/shared-extent-liveness validation with no per-physical-block
+discard epoch/count arrays. The temporary live-ref accounting must be fully
+restored before either error return or commit.
 
 ## Deferred idea evidence
 
@@ -126,9 +128,11 @@ READ with no padding, seed only private slot scratch, then run the unchanged
 per-record metadata/generation/CRC/decompression path. Shared cache publication
 still waits for every grouped read and upper copy to succeed.
 
-All queue depths may use same-extent grouping and one-request ID63 coalescing
-on the ordered worker. The rejected two-request concurrent helper dispatch is
-removed; lower queue depth no longer selects a separate READ execution path.
+All queue depths may use one-request ID63 coalescing on the ordered worker.
+Standalone same-extent slot grouping and the rejected helper dispatch are
+removed. When coalescing is disabled or the first two immutable extents are not
+physically adjacent in one segment, selection must return before slot
+prepare/prime/absorb work and leave FIFO ownership untouched.
 
 **IDs58/59.** Current fixture has zero nonzero same-filled writes and extreme
 128-payload synthetic duplication. Keep representative-corpus evidence only.
@@ -138,6 +142,23 @@ stall/headroom before adding a worker.
 
 **ID62 physical media.** No current benchmark may collect physical evidence.
 ID29/ID63 RAM qualification does not authorize physical storage or active swap.
+
+## ID67 offline predictor evidence
+
+ID67 starts with no production-format or hot-path change. The current
+`anon-page-fixture.py` SHAKE-generated hard regions are a negative control:
+a useful classifier should reject them without a second LZ4 call. Positive
+evidence comes from deterministic native structured pages representing pointer/
+page-table arrays, u32/u64 counters and timestamps, float/double arrays and
+fixed-layout structs with mixed high-entropy fields.
+
+Compare CL-Delta32x2, cacheline byte-delta, whole-page delta32/delta64 and xor64.
+For each page report baseline LZ4 length, transformed length, classifier score,
+transform/inverse time and second-LZ4 time. Evaluate classifier thresholds
+64/96/128/192. Feed baseline and candidate length sequences through the real
+`swapz_engine_plan_bounded()`; the primary result is planned physical 4KiB
+blocks/extents saved, including RAW->compressed and >2024-><=2024 crossings.
+Compression ratio alone is not promotion evidence.
 
 ## Physical media
 

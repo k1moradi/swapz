@@ -538,17 +538,39 @@ production code. `parallel_reads_enabled` remains in status for schema
 compatibility and must be zero; `read_worker_cpu_ns` must likewise remain
 zero.
 
-`swapz_try_parallel_read_batch()` may consume multiple BIOs only when the
-first extent has at least two sibling BIOs, or when two distinct extents satisfy
-the exact ID63 zero-padding coalescing rule. A non-coalescible distinct-extent
-pair must leave FIFO ownership untouched and fall back to ordinary
-`swapz_read()`. Shared cache priming/absorption, authority access and all BIO
-completion remain on the ordered worker.
+`swapz_try_parallel_read_batch()` is ID63-only. After the first immutable-read
+prefix scan, it must reject before slot preparation, a second FIFO walk,
+cache-LRU scans or cached-block memcpy unless read coalescing is enabled and the
+first two distinct extents are physically adjacent in the same segment. After
+priming, any cached/noncontiguous/gapped missing range must still return before
+BIO ownership transfers. Standalone same-extent slot grouping is retired;
+ordinary `swapz_read()` already reuses the shared extent/metadata caches.
 
 Fast and serial ID63 qualification keeps `parallel_reads=1` and varies only
-`read_coalesce` for five matched rounds. The legacy fast off/on
-`parallel_reads` directional control is regression evidence for grouping only;
-it must not be interpreted as renewed evidence for parallel lower READ service.
+`read_coalesce` for five matched rounds. The off arm is the ordinary FIFO read
+path and must execute zero grouped/coalesced slot pairs. Dedicated ID39/ID60
+loaded controls are removed after owner qualification/refutation; do not retain
+dead benchmark sessions merely for historical telemetry.
+
+### Offline predictor qualification before any format change
+
+A reversible pre-LZ4 predictor is not production code until native/offline
+evidence shows material physical benefit. The initial candidate is a
+cacheline-reset two-lane 32-bit delta transform, compared against cacheline
+byte-delta, whole-page delta32/delta64 and xor64 controls. Loads/stores must be
+`memcpy`-safe and arithmetic explicitly unsigned.
+
+The current SHAKE-generated benchmark hard regions are negative controls, not a
+positive predictor corpus. Native evidence must also construct deterministic
+pointer/page-table, integer counter/timestamp, float/double and fixed-layout
+struct archetypes. The transform may compute a small-residual classifier during
+the same pass; thresholds are evidence, never hardcoded before measurement.
+
+Every candidate must round-trip exactly. Measure transform, inverse and optional
+second-LZ4 cost. Feed actual compressed-length sequences into the production
+`swapz_engine_plan_bounded()` and report planned 4KiB blocks/extents, RAW
+rescues and packing-cliff crossings. Do not modify SWZ3 metadata, authority,
+Device Mapper hot paths or retained-window policy as part of this offline phase.
 
 ### One-shot in-flight-zero burst-target shrink guard
 

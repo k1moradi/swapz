@@ -76,33 +76,33 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `479a21a034b66ed6d8e9d05d151a771b2774a167` passed all five
+Source `2fabd0dc4b3fe09b8e52e9a624e9452647229e09` passed all five
 stages and published report-only commit
-`9f1be6177a3eaa6d80b6a0649a539907bfbc487f`.
+`92d6aa08b44ab7dd827636680584f8c9a313a89b`.
 
-ID64 is owner-qualified. Five matched fast mixed rounds eliminated observed
-after-I0 shrinks under guard-on and reduced mean shrink, burst-close, overshoot
-and lower-WRITE-request counts without a measured latency penalty. The guard
-stays enabled; current qualification keeps only one directional regression pair.
+ID65 is owner-qualified. Fast ID63 sequential lower requests changed
+399.0 -> 302.8 (-24.1%, paired 95% CI [-27.7%,-20.5%]) with p99
+5.52 -> 5.33 ms (-3.6%, CI [-9.5%,+2.4%]). Serial ID63 changed
+396.0 -> 236.2 requests (-40.3%) and 13.43 -> 8.28 ms p99 (-38.1%) with
+decisive intervals. `parallel_reads_enabled` and `read_worker_cpu_ns` remain
+zero.
 
-Fast write-only QD8 retains its five-pair +9.7% async/sync evidence. ID38 stays
-passive; no second WRITE slot is justified.
+ID66 is owner-qualified by the same run. Loaded lifecycle evidence retained
+20 live GC victims/rotations, 4096 verified pages, 36 exact 1MiB DISCARDs,
+suspend/resume verification and fail-closed injected WRITE/FLUSH behavior.
 
-ID63 remains owner-qualified on both synthetic models and retains five-pair
-fast and serial confirmations. The next run specifically measures those same
-request/latency gates after removal of the refuted ID39 helper.
-
-Current source retires the ID39 read workqueue and removes per-physical-block
-discard epoch/count scratch. These source changes require fresh owner-loaded
-qualification before their runtime effects become the new baseline.
+ID64 remains a directional regression control after its historical five-pair
+promotion. Fast write-only QD8 remains confirmed at +8.1%, paired 95% CI
+[+2.3%,+13.9%]. ID38 remains on hold.
 
 ## Deferred optimization evidence gates
 
 - **ID38 K>1:** keep passive counters. No second write slot is justified.
 - **ID39 helper concurrency:** refuted and removed from current source. Do not
   restore a helper workqueue merely to satisfy historical telemetry.
-- **ID60 same-extent grouping:** standalone benefit remains refuted; one
-  directional grouping control may remain as regression evidence.
+- **ID60 same-extent grouping:** refuted and retired. Do not keep a dedicated
+  loaded A/B after the code path is removed; ordinary reads already use the
+  shared extent/metadata caches.
 - **ID63 adjacent READ coalescing:** retain five matched fast rounds and five
   matched serial-depth rounds. Every merge remains exact, same-segment,
   <=8 blocks total and zero-padding; `parallel_read_coalesce_extra_blocks`
@@ -112,13 +112,18 @@ qualification before their runtime effects become the new baseline.
   `async_prepare=1` in both arms. Guard-off must have zero guarded skips;
   guard-on must have positive guarded skips and zero actual
   `burst_shrink_after_inflight_zero`. Do not report a 95% CI from one pair.
-- **ID65 synchronous read cleanup:** `parallel_reads_enabled=0` and
-  `read_worker_cpu_ns=0` are mandatory. Non-coalescible distinct extents
-  remain FIFO-owned and use ordinary `swapz_read()`; fast/serial ID63 still
-  carry the five-pair request/latency acceptance burden.
-- **ID66 discard scratch cleanup:** source/native contracts must prove the
-  temporary live-reference decrement is exactly restored before return/commit,
-  including an error after a previously validated shared-extent page.
+- **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
+  must now return before slot preparation/priming; no standalone same-extent
+  slot execution remains. Fast/serial ID63 retain five-pair confirmation.
+- **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
+  continue proving the temporary live-reference decrement is exactly restored
+  before return/commit, including an error after a validated shared-extent page.
+- **ID67 predictive rescue:** evidence-only first. Native tests must include
+  SHAKE/random negative controls plus structured numeric/binary positive
+  archetypes, compare reversible transforms/classifier thresholds, verify exact
+  inverse reconstruction, and evaluate physical block/extent savings through
+  the production bounded planner. No codec/authority/DM format change belongs
+  in ID67a.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** collect useful-I/O foreground-GC stall/headroom before adding a
   background worker.

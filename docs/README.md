@@ -42,28 +42,27 @@ requiring the owner to copy private root-owned logs.
 
 ## Current evidence
 
-Owner-loaded qualification of source `479a21a034b66ed6d8e9d05d151a771b2774a167`
-(report-only `9f1be6177a3eaa6d80b6a0649a539907bfbc487f`) passed all five
+Owner-loaded qualification of source `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`
+(report-only `92d6aa08b44ab7dd827636680584f8c9a313a89b`) passed all five
 stages on positively owned RAM-backed `null_blk`.
 
-ID64 is qualified as a one-shot scheduling guard: in five matched
-SSD_EMULATED QD32 mixed rounds it eliminated observed
-`burst_shrink_after_inflight_zero` events, substantially reduced burst-target
-closes/overshoot, and reduced mean lower WRITE requests without a measured
-latency penalty. The guard remains enabled by default; the official harness now
-keeps only one directional off/on regression control because the five-pair
-performance question is closed.
+ID65 is qualified: removing the refuted `swapz-read` helper preserved and
+strengthened ID63. On SSD_EMULATED, adjacent exact-range coalescing reduced
+sequential lower READ requests 24.1% with paired 95% CI [-27.7%,-20.5%] while
+sequential p99 changed -3.6% with CI [-9.5%,+2.4%]. On SD_EMULATED it reduced
+sequential requests 40.3% and p99 38.1%, both with decisive paired intervals.
+The legacy helper CPU/status compatibility tokens remain zero.
 
-ID63 remains the promoted exact zero-padding adjacent READ coalescer on both
-synthetic queue models. Current source retires the refuted ID39 `swapz-read`
-helper so same-extent grouping and ID63 coalescing execute synchronously on the
-ordered worker, and removes the per-physical-block discard epoch/count scratch
-while preserving all-or-nothing shared-extent liveness prevalidation. These two
-source cleanups require a fresh owner-loaded `make test` before their loaded
-performance/correctness effects are promoted.
+ID66 is also qualified. Multi-page DISCARD now performs zero-allocation
+shared-extent liveness prevalidation by temporarily consuming and restoring the
+exact validated `live_records` prefix before any mapping/generation commit.
+Loaded GC/TRIM, suspend/resume and injected lower-WRITE/FLUSH failure evidence
+remained byte-exact and fail-closed.
 
-Physical media and active system swap remain outside the authorized safety
-scope.
+ID64 remains qualified with only a directional regression control. Fast
+write-only QD8 retains a confirmed K=1 async benefit of +8.1%, paired 95% CI
+[+2.3%,+13.9%]. Physical media and active system swap remain outside the
+authorized safety scope.
 
 ## Documentation
 

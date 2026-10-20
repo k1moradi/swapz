@@ -279,7 +279,7 @@ def parallel_arm(enabled, regime="ssd_emulated"):
 
 
 def coalesce_arm(enabled, regime="ssd_emulated"):
-    record = parallel_arm(1, regime=regime)
+    record = parallel_arm(enabled, regime=regime)
     for mode, phase in record["packed_read"]["passes"].items():
         kernel = phase["kernel_read_path"]
         if enabled:
@@ -404,20 +404,6 @@ def synthetic_log():
         for record in ((swapz, raw) if index % 2 else (raw, swapz)):
             out.append(json.dumps(record))
         out.append(f"PASS_BURST_GUARD_AB={enabled}")
-    for index, enabled in enumerate(runner.DIRECTIONAL_SEQUENCE):
-        out.append(f"START_PARALLEL_READ_AB={enabled}")
-        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
-                   "REPLAY_ORDER=off-first")
-        out.append(
-            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
-            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
-            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
-            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-        raw = arm("off", mode=0, regime="ssd_emulated")
-        swapz = parallel_arm(enabled)
-        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
-            out.append(json.dumps(record))
-        out.append(f"PASS_PARALLEL_READ_AB={enabled}")
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_READ_COALESCE_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
@@ -433,20 +419,6 @@ def synthetic_log():
             out.append(json.dumps(record))
         out.append(f"PASS_READ_COALESCE_AB={enabled}")
     spec = runner.MODEL_SPECS["sd_emulated"]
-    for index, enabled in enumerate(runner.DIRECTIONAL_SEQUENCE):
-        out.append(f"START_SD_READ_GROUPING_AB={enabled}")
-        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
-                   "REPLAY_ORDER=off-first")
-        out.append(
-            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
-            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
-            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
-            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-        raw = arm("off", mode=0, regime="sd_emulated")
-        swapz = parallel_arm(enabled, regime="sd_emulated")
-        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
-            out.append(json.dumps(record))
-        out.append(f"PASS_SD_READ_GROUPING_AB={enabled}")
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_SD_READ_COALESCE_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
@@ -538,7 +510,8 @@ class ReportContract(unittest.TestCase):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)
-        self.assertIn("START_PARALLEL_READ_AB=", loaded)
+        self.assertNotIn("START_PARALLEL_READ_AB=", loaded)
+        self.assertNotIn("START_SD_READ_GROUPING_AB=", loaded)
         self.assertIn("--parallel-reads", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertNotIn("swapon ", loaded)
@@ -588,15 +561,6 @@ class ReportContract(unittest.TestCase):
     def test_immutable_inputs_and_alternating_arm_order(self):
         sessions = runner.parse_sessions(synthetic_log())
         self.assertEqual(len(sessions), 14)
-        parallel = runner.parse_parallel_read_ab(synthetic_log())
-        self.assertEqual([row["parallel_reads"] for row in parallel],
-                         list(runner.DIRECTIONAL_SEQUENCE))
-        diagnostic = runner.parallel_read_ab_verdict(parallel)
-        self.assertEqual(diagnostic["overall"],
-                         "PASS_PARALLEL_READ_DIRECTIONAL_CONTROL")
-        self.assertEqual(diagnostic["observations_per_mode"], 1)
-        self.assertEqual(diagnostic["modes"]["0"]["sequential"]["parallel_read_pairs"], 0)
-        self.assertGreater(diagnostic["modes"]["1"]["sequential"]["parallel_read_pairs"], 0)
         coalesce = runner.parse_read_coalesce_ab(synthetic_log())
         self.assertEqual([row["read_coalesce"] for row in coalesce],
                          list(runner.CONFIRMATION_SEQUENCE))
@@ -613,23 +577,6 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(
             coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
-
-        sd_grouping = runner.parse_sd_read_grouping_ab(synthetic_log())
-        self.assertEqual([row["parallel_reads"] for row in sd_grouping],
-                         list(runner.DIRECTIONAL_SEQUENCE))
-        sd_grouping_diag = runner.sd_read_grouping_ab_verdict(sd_grouping)
-        self.assertEqual(sd_grouping_diag["overall"],
-                         "PASS_SD_READ_GROUPING_DIRECTIONAL_CONTROL")
-        self.assertEqual(sd_grouping_diag["observations_per_mode"], 1)
-        self.assertEqual(
-            sd_grouping_diag["modes"]["0"]["sequential"][
-                "parallel_read_pairs"], 0)
-        self.assertGreater(
-            sd_grouping_diag["modes"]["1"]["sequential"][
-                "parallel_read_same_extent_pairs"], 0)
-        self.assertEqual(
-            sd_grouping_diag["modes"]["1"]["sequential"][
-                "read_worker_cpu_ns"], 0)
 
         guard = runner.parse_burst_guard_ab(synthetic_log())
         self.assertEqual([row["guard"] for row in guard],
@@ -662,12 +609,6 @@ class ReportContract(unittest.TestCase):
             sd_coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
 
-        inactive = runner.parse_parallel_read_ab(synthetic_log())
-        next(row for row in inactive if row["parallel_reads"] == 1)["swapz"]["passes"][
-            "sequential"]["kernel_read_path"]["parallel_read_pairs"] = 0
-        rejected = runner.parallel_read_ab_verdict(inactive)
-        self.assertEqual(rejected["overall"], "INCOMPLETE")
-        self.assertIn("executed no parallel pairs", rejected["reason"])
         self.assertEqual(
             [s["async_prepare"] for s in sessions],
             [0, 1, 1, 0] + list(runner.CONFIRMATION_SEQUENCE))
@@ -878,12 +819,8 @@ class ReportContract(unittest.TestCase):
             runner.parse_write_saturation(synthetic_log()))
         report = {"benchmarks": {
             "verdicts": verdicts,
-            "parallel_read_ab": runner.parallel_read_ab_verdict(
-                runner.parse_parallel_read_ab(synthetic_log())),
             "read_coalesce_ab": runner.read_coalesce_ab_verdict(
                 runner.parse_read_coalesce_ab(synthetic_log())),
-            "sd_read_grouping_ab": runner.sd_read_grouping_ab_verdict(
-                runner.parse_sd_read_grouping_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
             "burst_guard_ab": runner.burst_guard_ab_verdict(
@@ -928,10 +865,11 @@ class ReportContract(unittest.TestCase):
         self.assertIn("after-I0", rendered)
         self.assertIn("segment TRIM", rendered)
         self.assertIn("ID63 ADJACENT READ COALESCE A/B", rendered)
+        self.assertNotIn("ID39 SAME-CACHE PARALLEL READ", rendered)
+        self.assertNotIn("SD ID60 SAME-EXTENT GROUPING", rendered)
         self.assertIn("ID63 active exact-range accounting", rendered)
         self.assertIn("ID63 active non-merge attribution", rendered)
         self.assertIn("noncontig", rendered)
-        self.assertIn("SD ID60 SAME-EXTENT GROUPING — directional control", rendered)
         self.assertIn("SD ID63 ADJACENT READ COALESCE A/B", rendered)
         self.assertIn("SD ID63 exact-range attribution", rendered)
         self.assertIn("saved", rendered)
@@ -947,7 +885,6 @@ class ReportContract(unittest.TestCase):
         self.assertIn("deferred C age <=250/500/1000/>", rendered)
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)
-        self.assertIn("ID39 SAME-CACHE PARALLEL READ — directional control", rendered)
         self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — directional control", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
@@ -1172,29 +1109,6 @@ class ReportContract(unittest.TestCase):
                               stage["failed_phase"])
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
-
-    def test_parallel_read_diagnostic_failure_reports_its_own_reason(self):
-        broken = synthetic_log().replace("PASS_PARALLEL_READ_AB=1\n", "", 1)
-        fake_process = type("FakeProcess", (), {
-            "stdout": broken,
-            "returncode": 0,
-        })()
-        original_run = runner.subprocess.run
-        report = {"schema": "swapz-test-results-v1", "stages": [],
-                  "benchmarks": {"sessions": [], "verdicts": {}}}
-        try:
-            runner.subprocess.run = lambda *args, **kwargs: fake_process
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(
-                    runner.run_stage("Owned RAM smoke and 8 pairs",
-                                     ["unused"], report, parse_bench=True), 1)
-        finally:
-            runner.subprocess.run = original_run
-
-        stage = report["stages"][-1]
-        self.assertEqual(stage["status"], "FAIL")
-        self.assertEqual(stage["failed_phase"], "parallel READ A/B evidence")
-        self.assertIn("Kread directional", stage["diagnostic"])
 
     def test_read_coalesce_diagnostic_failure_reports_its_own_reason(self):
         broken = synthetic_log().replace("PASS_READ_COALESCE_AB=1\n", "", 1)

@@ -388,7 +388,7 @@ class PublicMakeContract(unittest.TestCase):
                 return json.dumps(record, sort_keys=True)
 
             def mock_coalesce_arm(enabled, sd=False):
-                record = json.loads(mock_parallel_arm(1, sd=sd))
+                record = json.loads(mock_parallel_arm(enabled, sd=sd))
                 for key, phase in record["packed_read"]["passes"].items():
                     kernel = phase["kernel_read_path"]
                     if enabled:
@@ -505,15 +505,6 @@ class PublicMakeContract(unittest.TestCase):
                     mock_arm("off", 1) if index % 2 else mock_guard_arm(enabled),
                     f"PASS_BURST_GUARD_AB={enabled}",
                 ))
-            for index, enabled in enumerate(directional):
-                records.extend((
-                    f"START_PARALLEL_READ_AB={enabled}",
-                    "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
-                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
-                    mock_parallel_arm(enabled) if index % 2 else mock_arm("off", 0),
-                    mock_arm("off", 0) if index % 2 else mock_parallel_arm(enabled),
-                    f"PASS_PARALLEL_READ_AB={enabled}",
-                ))
             for index, enabled in enumerate(confirmation):
                 records.extend((
                     f"START_READ_COALESCE_AB={enabled}",
@@ -524,15 +515,6 @@ class PublicMakeContract(unittest.TestCase):
                     f"PASS_READ_COALESCE_AB={enabled}",
                 ))
             cap, ns, irq, queue_mode, submit_queues, hw_depth = (10, 1000000, 2, 2, 1, 1)
-            for index, enabled in enumerate(directional):
-                records.extend((
-                    f"START_SD_READ_GROUPING_AB={enabled}",
-                    "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
-                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
-                    mock_parallel_arm(enabled, sd=True) if index % 2 else mock_arm("off", 0),
-                    mock_arm("off", 0) if index % 2 else mock_parallel_arm(enabled, sd=True),
-                    f"PASS_SD_READ_GROUPING_AB={enabled}",
-                ))
             for index, enabled in enumerate(confirmation):
                 records.extend((
                     f"START_SD_READ_COALESCE_AB={enabled}",
@@ -693,19 +675,21 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
         self.assertIn("directional_modes=(0 1)", loaded)
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)
-        self.assertIn('for parallel_reads in "${directional_modes[@]}"', loaded)
+        self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
         self.assertIn('for guard in "${directional_modes[@]}"', loaded)
         self.assertIn("START_BURST_GUARD_AB=", loaded)
         self.assertIn("PASS_BURST_GUARD_AB=", loaded)
         self.assertIn("--guard-inflight-zero-shrink", loaded)
-        self.assertIn("START_SD_READ_GROUPING_AB=", loaded)
-        self.assertIn("PASS_SD_READ_GROUPING_AB=", loaded)
+        self.assertNotIn("START_PARALLEL_READ_AB=", loaded)
+        self.assertNotIn("PASS_PARALLEL_READ_AB=", loaded)
+        self.assertNotIn("START_SD_READ_GROUPING_AB=", loaded)
+        self.assertNotIn("PASS_SD_READ_GROUPING_AB=", loaded)
         self.assertIn("START_SD_READ_COALESCE_AB=", loaded)
         self.assertIn("PASS_SD_READ_COALESCE_AB=", loaded)
         self.assertGreaterEqual(
             loaded.count(
                 "--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000"),
-            3)
+            2)
         self.assertIn("for qd in 1 4 8 32", loaded)
         self.assertIn("$qd == 8", loaded)
         self.assertNotIn("$qd == 4 || $qd == 8", loaded)

@@ -3253,11 +3253,12 @@ static bool swapz_parallel_read_extent(struct swapz_dm *ctx,
 	return true;
 }
 
-/* Scan only the already-admitted independent READ prefix. At most two distinct
- * immutable extents are selected, but every sibling for those extents in the
- * prefix is consumed. No future-arrival wait and no reordering across a write,
- * barrier or dependent READ is introduced. Shared cache state remains owned by
- * this ordered worker: slots are primed before dispatch and absorbed after join. */
+/* Scan only the already-admitted independent READ prefix. ID63 may consume two
+ * physically adjacent immutable extents only when their exact missing ranges
+ * form one zero-padding lower read. Standalone same-extent grouping is retired:
+ * ordinary swapz_read() already reuses the shared extent/metadata caches without
+ * slot prime/absorb copies. No future-arrival wait or ownership change occurs
+ * before the exact ID63 candidate is proven. */
 static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 					  struct list_head *local,
 					  unsigned int remaining,
@@ -3306,14 +3307,27 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		if (start == start1 && blocks == blocks1)
 			selected1++;
 	}
-	if (!have1 && selected0 < 2U)
+	/*
+	 * With ID39/ID60 retired, slot execution exists only for an ID63 pair.
+	 * Reject before slot preparation, a second FIFO walk, cache-LRU scans or
+	 * cached-block memcpy when coalescing is disabled or the extents cannot
+	 * possibly produce one exact contiguous missing range.
+	 */
+	if (!have1 || !ctx->read_coalescing_enabled)
+		return false;
+	passive_adjacent =
+		start0 / SWAPZ_SEGMENT_BLOCKS ==
+			start1 / SWAPZ_SEGMENT_BLOCKS &&
+		(swapz_u16)blocks0 + blocks1 <= 2U * SWAPZ_MAX_BLOCKS &&
+		(start0 + blocks0 == start1 ||
+		 start1 + blocks1 == start0);
+	if (!passive_adjacent)
 		return false;
 
 	slot0 = &ctx->read_slots[0];
 	slot1 = &ctx->read_slots[1];
 	swapz_read_slot_prepare(slot0, start0, blocks0);
-	if (have1)
-		swapz_read_slot_prepare(slot1, start1, blocks1);
+	swapz_read_slot_prepare(slot1, start1, blocks1);
 
 	/* First collect descriptors without removing them from FIFO. This lets
 	 * depth-one media decline a non-coalescible two-extent pair with zero
@@ -3350,13 +3364,6 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		swapz_engine_prime_read_slot(&ctx->engine, &slot1->engine,
 				     start1, blocks1);
 	if (have1) {
-		passive_adjacent =
-			start0 / SWAPZ_SEGMENT_BLOCKS ==
-				start1 / SWAPZ_SEGMENT_BLOCKS &&
-			(swapz_u16)blocks0 + blocks1 <=
-				2U * SWAPZ_MAX_BLOCKS &&
-			(start0 + blocks0 == start1 ||
-			 start1 + blocks1 == start0);
 		range0 = swapz_engine_required_read_range(
 			&slot0->engine, slot0->logical_pages, slot0->bio_count,
 			start0, blocks0, &req_first0, &req_blocks0);
@@ -3386,14 +3393,10 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 				ctx->parallel_read_coalesce_skip_other++;
 		}
 
-		/* Only same-extent grouping or a proven one-request ID63 merge may
-		 * consume multiple BIOs. Otherwise leave FIFO untouched so the ordered
-		 * worker takes the ordinary zero-dispatch-overhead read path. */
-		if (!coalesce) {
-			if (slot0->bio_count < 2U)
-				return false;
-			have1 = false;
-		}
+		/* Slot execution is ID63-only. A cache hit, noncontiguous missing
+		 * range or exact-range gap leaves FIFO ownership untouched. */
+		if (!coalesce)
+			return false;
 	}
 
 	/* Ownership transfers only after the exact execution mode is known. */
@@ -3429,7 +3432,7 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 
 	retained_bypass = ctx->batch_count && ctx->retain_ms;
 	read_start_ns = ktime_get_ns();
-	if (have1 && coalesce) {
+	if (coalesce) {
 		error0 = swapz_engine_coalesce_read_pair(
 			&slot0->engine, &slot1->engine,
 			start0, blocks0, req_first0, req_blocks0,
@@ -3447,9 +3450,6 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 			error0 = slot0->error;
 			error1 = slot1->error;
 		}
-	} else {
-		slot0->error = swapz_read_slot_run(slot0);
-		error0 = slot0->error;
 	}
 	read_end_ns = ktime_get_ns();
 	batch_error = error0 ? error0 : error1;
