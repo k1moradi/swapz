@@ -49,12 +49,13 @@ Owner-loaded qualification of source `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`
 (report-only `92d6aa08b44ab7dd827636680584f8c9a313a89b`) passed all five
 stages on positively owned RAM-backed `null_blk`.
 
-ID65 is qualified: removing the refuted `swapz-read` helper preserved and
-strengthened ID63. On SSD_EMULATED, adjacent exact-range coalescing reduced
-sequential lower READ requests 24.1% with paired 95% CI [-27.7%,-20.5%] while
-sequential p99 changed -3.6% with CI [-9.5%,+2.4%]. On SD_EMULATED it reduced
-sequential requests 40.3% and p99 38.1%, both with decisive paired intervals.
-The legacy helper CPU/status compatibility tokens remain zero.
+The latest owner run keeps ID63's request-efficiency result but reopens its
+fast-latency question. On SSD_EMULATED, adjacent exact-range coalescing reduced
+sequential lower READ requests 20.0% with paired 95% CI [-24.4%,-15.5%] while
+p99 increased 9.5% [1.7%,17.4%]. On SD_EMULATED it reduced sequential requests
+41.1% and p99 37.8%, both decisively. Current source therefore removes rejected
+pair cache-copy work and moves shared-cache absorption after upper completion;
+ID63 remains enabled pending owner confirmation.
 
 ID66 is also qualified. Multi-page DISCARD now performs zero-allocation
 shared-extent liveness prevalidation by temporarily consuming and restoring the

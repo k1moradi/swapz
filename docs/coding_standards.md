@@ -828,6 +828,16 @@ published or aborted.
 
 ### K=1 ping-pong write pipeline
 
+Idle asynchronous preparation must be self-gating. With no lower WRITE active,
+a tail-credit workqueue wake requires at least four unclaimed preparation
+descriptors. The initial accepted-wave starter observes the ordered head as
+well, so it requires five descriptors total; after the head is stolen inline,
+QD4 has only three tails and must remain entirely inline. The producer itself
+must not consume an idle tail credit with fewer than two queued descriptors.
+When a lower WRITE is actually active, any nonempty preparation queue remains
+eligible for immediate head-first overlap. These gates add no timer, wait,
+status token or mapping/publication owner.
+
 The first asynchronous Device Mapper experiment is enabled only on the existing
 `async_prepare` candidate. A complete multi-record non-FUA window may be
 packed into the immutable `bulk_scratch`/`bulk_txs` run and submitted with

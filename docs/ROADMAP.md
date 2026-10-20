@@ -14,13 +14,14 @@ published report-only commit
 `92d6aa08b44ab7dd827636680584f8c9a313a89b`. Evidence remains newly-created,
 positively owned RAM-backed `null_blk` only.
 
-ID65 is qualified. After removal of the ID39 helper workqueue, fast ID63
-sequential lower READ requests improved 399.0 -> 302.8 (-24.1%, paired 95% CI
-[-27.7%,-20.5%]) while p99 changed 5.52 -> 5.33 ms (-3.6%, CI
-[-9.5%,+2.4%]). Serial ID63 improved 396.0 -> 236.2 requests (-40.3%, CI
-[-42.3%,-38.4%]) and 13.43 -> 8.28 ms p99 (-38.1%, CI [-45.6%,-30.6%]).
-The old fast latency regression was helper-path contamination, not an ID63
-property.
+The latest owner run preserves ID63's request benefit but shows its fast-latency
+question is not closed. SSD_EMULATED sequential requests improved 403.0 ->
+322.6 (-20.0%, paired 95% CI [-24.4%,-15.5%]) while p99 regressed 5.13 ->
+5.60 ms (+9.5%, CI [+1.7%,+17.4%]). Serial ID63 improved 399.4 -> 235.2
+requests (-41.1%) and 14.32 -> 8.89 ms p99 (-37.8%) with decisive intervals.
+The next source removes cache-copy work from rejected pairs and puts shared-LRU
+absorption after successful BIO completion; it does not disable ID63 by queue
+depth.
 
 ID66 is qualified. The discard epoch/count sidecars are gone; the serialized
 precheck temporarily decrements and exactly restores live refs before commit.
@@ -95,7 +96,7 @@ changes.
 | 11 | Split final-image publish CRC from authority/liveness | **1 completed measurement** | Reconfirmed: final CRC is 12.0/22.1 ms slow and 8.8/17.2 ms fast. It is a major publish subphase, not the global bottleneck. |
 | 12 | Split stage/pause hash/hole-clear/control residual | **1 completed snapshot measurement** | Reconfirmed at ~1.7/1.1 ms pause with ~8.6/6.2 ms residual after subtraction. Full-transaction hashing stays; the snapshot-scope optimization question is closed. Further residual splitting is optional attribution only. |
 | 13 | Dry PACK_READY close -> next accepted WRITE timing | **1 completed measurement** | Question answered and telemetry deleted. |
-| 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. |
+| 14 | Extra preparation credits in current synchronous geometry | **5** | Serial lower-WRITE preparation backlog is still 0.00/0.00; fast is only 0.18/0.06. Generic extra credits cannot manufacture enough eligible work. The current candidate instead suppresses idle preparation wakes below four true tails while preserving any-depth lower-WRITE overlap. |
 | 15 | >=5 counterbalanced pairs for promoted performance questions | **1 evidence gate implemented** | Retain five matched fast mixed, corrected persistent-worker fast QD8/QD32 and promoted ID63 confirmations where inference still matters; legacy wave-driver write evidence is historical burst evidence only. |
 | 16 | N=2/4 preparation workers in old single-credit design | **5** | Refuted as formulated. |
 | 17 | Pointer handoff solely to remove current copies | **5** | Reconfirmed: explicit copies are only ~5.1 ms slow / 3.5 ms fast. |

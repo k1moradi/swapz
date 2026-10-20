@@ -46,6 +46,17 @@
 #define SWAPZ_WORK_QUANTUM_BIOS 64U
 #define SWAPZ_MAX_RETAIN_MS 4U
 #define SWAPZ_SINGLETON_DEADLINE_STREAK 2U
+/*
+ * Idle producer wakes need enough unclaimed distance to amortize a workqueue
+ * handoff. The wave-starter sees the ordered FIFO head too, so it requires one
+ * extra descriptor; after the ordered head is stolen inline, four true tails
+ * remain the wake threshold. An already-active lower WRITE is a separate real
+ * overlap signal and may wake preparation for any queued page.
+ */
+#define SWAPZ_PREPARATION_TAIL_WAKE_MIN 4U
+#define SWAPZ_PREPARATION_STARTER_WAKE_MIN \
+	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
+#define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
 
 /*
  * Experimental opt-in: a separate bounded LZ4 producer may prepare future
@@ -1285,7 +1296,9 @@ static void swapz_preparation_worker(struct work_struct *work)
 			 * both the head and its earned credit intact until a true tail
 			 * exists behind it.
 			 */
-			if (list_is_singular(&ctx->preparation_incoming) ||
+			if (ctx->preparation_queued <
+				SWAPZ_PREPARATION_TAIL_CLAIM_MIN ||
+			    list_is_singular(&ctx->preparation_incoming) ||
 			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
 				up(&ctx->preparation_slots);
@@ -3425,7 +3438,9 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		atomic_set(&ctx->preparation_tail_credit, 1);
-		if (!list_empty(&ctx->preparation_incoming))
+		if (!list_empty(&ctx->preparation_incoming) &&
+		    (atomic_read(&ctx->lower_write_active) ||
+		     ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_WAKE_MIN))
 			queue_work(ctx->preparation_workqueue,
 				   &ctx->preparation_worker);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -3763,16 +3778,15 @@ static void swapz_worker(struct work_struct *work)
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		list_splice_init(&ctx->incoming, &local);
 		/*
-		 * A finite accepted wave with at least two unclaimed WRITE
-		 * preparations is direct FIFO-distance evidence: the ordered worker
-		 * owns the head while a distinct tail exists for the producer.
-		 * Start one tail credit before processing the head so QD4/QD8 can
-		 * overlap LZ4 immediately. The producer still preserves one FIFO head
-		 * via its singular-list guard, and no future-arrival wait is added.
+		 * An idle producer starts only when the accepted wave contains the
+		 * ordered head plus at least four unclaimed tails. This keeps QD4
+		 * entirely inline while preserving an immediate producer start for
+		 * QD8/QD32. A real active lower WRITE remains the independent
+		 * head-first overlap signal and is not subject to this idle threshold.
 		 */
 		if (ctx->async_prepare &&
-		    !list_empty(&ctx->preparation_incoming) &&
-		    !list_is_singular(&ctx->preparation_incoming)) {
+		    ctx->preparation_queued >=
+			    SWAPZ_PREPARATION_STARTER_WAKE_MIN) {
 			atomic_set(&ctx->preparation_tail_credit, 1);
 			ctx->preparation_wave_kicks++;
 			queue_work(ctx->preparation_workqueue,
@@ -3817,7 +3831,10 @@ static void swapz_worker(struct work_struct *work)
 					wait_for_preparation = false;
 					ctx->preparation_ordered_inline++;
 					atomic_set(&ctx->preparation_tail_credit, 1);
-					if (!list_empty(&ctx->preparation_incoming))
+					if (!list_empty(&ctx->preparation_incoming) &&
+					    (atomic_read(&ctx->lower_write_active) ||
+					     ctx->preparation_queued >=
+						SWAPZ_PREPARATION_TAIL_WAKE_MIN))
 						queue_work(ctx->preparation_workqueue,
 							   &ctx->preparation_worker);
 				} else {
@@ -3848,7 +3865,10 @@ static void swapz_worker(struct work_struct *work)
 				 */
 				spin_lock_irqsave(&ctx->queue_lock, flags);
 				atomic_set(&ctx->preparation_tail_credit, 1);
-				if (!list_empty(&ctx->preparation_incoming))
+				if (!list_empty(&ctx->preparation_incoming) &&
+				    (atomic_read(&ctx->lower_write_active) ||
+				     ctx->preparation_queued >=
+					SWAPZ_PREPARATION_TAIL_WAKE_MIN))
 					queue_work(ctx->preparation_workqueue,
 						   &ctx->preparation_worker);
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -4171,7 +4191,8 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 			      &ctx->preparation_incoming);
 		ctx->preparation_queued++;
 		if (atomic_read(&ctx->lower_write_active) ||
-		    atomic_read(&ctx->preparation_tail_credit))
+		    (atomic_read(&ctx->preparation_tail_credit) &&
+		     ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_WAKE_MIN))
 			queue_work(ctx->preparation_workqueue,
 				   &ctx->preparation_worker);
 	}

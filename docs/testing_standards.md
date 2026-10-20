@@ -492,6 +492,15 @@ FIFO/semaphore deadlock.
 
 ### Lower-WRITE queue starvation and GC distribution attribution
 
+Low-depth asynchronous-preparation qualification must prove the idle producer
+gate in source: four unclaimed tails are required for an idle tail-credit wake,
+the pre-head wave starter requires five total queued preparations, and an idle
+producer tail claim requires two queued descriptors. Active lower WRITE overlap
+is exempt and may wake on one queued descriptor. No new status fields are
+required. Owner evidence must re-run the existing persistent-worker QD1/4/8/32
+matrix; the candidate is rejected if QD8/QD32 loses its confirmed advantage or
+if QD1/QD4 still pay material producer-wakeup cost.
+
 The retired dry-close timer answered its bounded scheduling question and is no
 longer production telemetry. The active starvation probe is observational:
 `preparation_queued` counts unclaimed preparation descriptors exactly under
