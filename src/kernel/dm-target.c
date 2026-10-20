@@ -36,6 +36,7 @@
 #include "gc-cost.h"
 #include "flush-qual.h"
 #include "window-policy.h"
+#include "predictor.h"
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
 #error "swapz requires 4KiB PAGE_SIZE"
@@ -5150,6 +5151,11 @@ static struct target_type swapz_target = {
 
 static int __init swapz_dm_init(void)
 {
+	int error;
+
+	error = swapz_predictor_init();
+	if (error)
+		return error;
 	return dm_register_target(&swapz_target);
 }
 

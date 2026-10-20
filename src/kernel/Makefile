@@ -1,7 +1,23 @@
 # SPDX-License-Identifier: GPL-2.0-only
 ifneq ($(KERNELRELEASE),)
 obj-m += dm-swapz.o
-dm-swapz-y := dm-target.o codec.o authority.o engine.o
+dm-swapz-y := dm-target.o codec.o authority.o engine.o predictor.o
+
+ifeq ($(CONFIG_X86_64),y)
+dm-swapz-y += predictor-sse2.o predictor-avx2.o
+CFLAGS_predictor-sse2.o += $(CC_FLAGS_FPU)
+CFLAGS_REMOVE_predictor-sse2.o += -mno-sse -mno-sse2
+CFLAGS_predictor-avx2.o += $(CC_FLAGS_FPU) -mavx2
+CFLAGS_REMOVE_predictor-avx2.o += -mno-sse -mno-sse2 -mno-avx
+endif
+
+ifeq ($(CONFIG_ARM64),y)
+ifeq ($(CONFIG_KERNEL_MODE_NEON),y)
+dm-swapz-y += predictor-neon.o
+CFLAGS_predictor-neon.o += $(CC_FLAGS_FPU)
+CFLAGS_REMOVE_predictor-neon.o += $(CC_FLAGS_NO_FPU)
+endif
+endif
 else
 KDIR ?= /lib/modules/$(shell uname -r)/build
 SWAPZ_ROOT := $(abspath $(CURDIR)/../..)

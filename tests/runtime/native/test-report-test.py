@@ -68,6 +68,7 @@ def predictor_evidence():
         "structured_pages": 320,
         "classifier": {
             "candidate": "delta64",
+            "backend": "avx2",
             "sample_pairs": 32,
             "stage1_pairs": 8,
             "stage1_min_score": 2,
@@ -984,7 +985,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("1048576", rendered)
         self.assertIn("Sampled delta64 classifier", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)
-        self.assertIn("cl_delta32x2", rendered)
+        self.assertIn("delta64", rendered)
+        self.assertIn("avx2 backend", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
         self.assertIn("Lower queue", rendered)

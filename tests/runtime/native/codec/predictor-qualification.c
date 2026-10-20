@@ -11,6 +11,7 @@
 
 #include "engine.h"
 #include "predictor.h"
+#include "predictor-internal.h"
 
 #define PREDICTOR_CAP ((int)SWAPZ_MAX_COMPRESSED)
 #define MAX_EVIDENCE_PAGES 1024U
@@ -18,8 +19,8 @@
 #define STRUCTURED_PAGES_PER_KIND 32U
 #define GENERATED_NEGATIVE_PAGES 32U
 #define NEGATIVE_PROFILE_COUNT 5U
-#define TRANSFORM_COUNT 6U
-#define TRANSFORM_DELTA64 3U
+#define TRANSFORM_COUNT 1U
+#define TRANSFORM_DELTA64 0U
 #define THRESHOLD_COUNT 5U
 #define CLASSIFIER_BENCH_REPEATS 256U
 
@@ -89,20 +90,13 @@ static struct page_evidence evidence[MAX_EVIDENCE_PAGES];
 static swapz_u8 evidence_pages[MAX_EVIDENCE_PAGES][SWAPZ_BLOCK_BYTES];
 static volatile uint64_t classifier_benchmark_sink;
 static swapz_u8 transform_page[SWAPZ_BLOCK_BYTES];
+static swapz_u8 scalar_transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 recovered_page[SWAPZ_BLOCK_BYTES];
 static char compressed_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 planner_dummy[SWAPZ_BLOCK_BYTES];
 
 static const struct transform transforms[TRANSFORM_COUNT] = {
-	{ "cl_delta32x2", swapz_predict_cl_delta32x2,
-	  swapz_unpredict_cl_delta32x2 },
-	{ "cl_bytedelta8", swapz_predict_cl_bytedelta8,
-	  swapz_unpredict_cl_bytedelta8 },
-	{ "delta32", swapz_predict_delta32, swapz_unpredict_delta32 },
 	{ "delta64", swapz_predict_delta64, swapz_unpredict_delta64 },
-	{ "delta64_512", swapz_predict_delta64_512,
-	  swapz_unpredict_delta64_512 },
-	{ "xor64", swapz_predict_xor64, swapz_unpredict_xor64 },
 };
 
 static const char *negative_profile_names[NEGATIVE_PROFILE_COUNT] = {
@@ -307,7 +301,12 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 	out->structured = structured;
 	out->negative_profile = negative_profile;
 	if (!baseline || baseline > 2024) {
+		swapz_u32 scalar_score =
+			swapz_predict_delta64_sample_score_scalar(page);
+
 		out->classifier_score = swapz_predict_delta64_sample_score(page);
+		if (out->classifier_score != scalar_score)
+			return -EUCLEAN;
 		classifier->pages++;
 		classifier->early_abort_pages += out->classifier_score == 0;
 		out->classifier_ran = 1;
@@ -320,6 +319,10 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 		start = now_ns();
 		transform->predict(page, transform_page);
 		summary[transform_index].transform_ns += now_ns() - start;
+		swapz_predict_delta64_scalar(page, scalar_transform_page);
+		if (memcmp(transform_page, scalar_transform_page,
+			   SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
 
 		start = now_ns();
 		transform->unpredict(transform_page, recovered_page);
@@ -605,6 +608,12 @@ int main(int argc, char **argv)
 	unsigned int kind, page_index, transform_index, threshold_index;
 	int argument, error;
 
+	error = swapz_predictor_init();
+	if (error) {
+		fprintf(stderr, "predictor backend initialization failed: %d\n",
+			error);
+		return 1;
+	}
 	if (argc != 4) {
 		fprintf(stderr, "predictor qualification requires entropy/mixed/medium fixtures\n");
 		return 2;
@@ -704,12 +713,14 @@ int main(int argc, char **argv)
 	       "\"OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY\","
 	       "\"negative_pages\":%u,\"structured_pages\":%u,"
 	       "\"classifier\":{\"candidate\":\"delta64\","
+	       "\"backend\":\"%s\","
 	       "\"sample_pairs\":%u,\"stage1_pairs\":%u,"
 	       "\"stage1_min_score\":%u,\"eligible_pages\":%u,"
 	       "\"early_abort_pages\":%u,\"benchmark_repeats\":%u,"
 	       "\"benchmark_calls\":%" PRIu64 ","
 	       "\"ns_per_page\":%" PRIu64 "},\"thresholds\":[",
 	       negative_count, count - structured_start,
+	       swapz_predictor_backend_name(),
 	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, SWAPZ_PREDICTOR_STAGE1_PAIRS,
 	       SWAPZ_PREDICTOR_STAGE1_MIN_SCORE, classifier_summary.pages,
 	       classifier_summary.early_abort_pages, CLASSIFIER_BENCH_REPEATS,

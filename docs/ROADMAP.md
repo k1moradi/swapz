@@ -58,7 +58,7 @@ The highest-value new compression question is ID67, but it starts as offline
 native-C evidence only. The existing synthetic fixture intentionally contains
 cryptographic-noise regions and only 128 repeated payloads, so it is a useful
 negative/control corpus rather than representative evidence for predictive
-compression. ID67 must compare reversible predictors on deterministic
+compression. ID67 now maintains only delta64 across scalar/SIMD backends on deterministic
 structured binary/numeric archetypes and pass resulting lengths through the
 real bounded planner before any SWZ3 format or hot-path change.
 
@@ -149,7 +149,7 @@ changes.
 | 64 | One-shot in-flight-zero burst-target shrink guard | **1 owner-qualified / keep** | Five matched fast mixed rounds eliminated after-I0 shrinks and reduced burst closes, overshoot and lower WRITE requests without a measured latency penalty. Keep enabled; retain only one directional regression control. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Predictive rescue before LZ4 | **4 ID67a.3 evidence collection implemented** | Owner ID67a.2 evidence made delta64 the leading candidate (+65 planner blocks) and threshold 32 had 0/141 negative calls with 256/320 useful structured calls, but the per-page timer reported 385 ns. ID67a.3 keeps production untouched, changes the router to an 8-pair early-reject then 32-pair strided sample, batch-times repeated sweeps, and reports planner blocks/extents saved after each routing threshold. ID67b remains gated on this evidence. |
+| 67 | Predictive rescue before LZ4 | **4 ID67a.4 delta64-only SIMD dispatch implemented** | Delta64 is the only maintained predictor. Portable C remains the oracle/fallback; x86_64 selects AVX2 only with CPU+YMM-state support and otherwise SSE2, while arm64 selects kernel-mode NEON when available. Kernel call sites use init-time static-call patching with isolated FPU translation units. Native qualification proves selected-backend/scalar equivalence and reports backend timing/routed planner savings. SWZ3 and the production data path remain unchanged until ID67b is separately justified. |
 
 
 ## What the pinned queue experiment establishes
@@ -213,10 +213,9 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 1. Land the post-ID65 cleanup: restore executable test-script modes, promote
    ID65/66 documentation, reject non-ID63 READ pairs before slot
    preparation/priming, and retire standalone ID39/ID60 loaded controls.
-2. Keep ID67 in native/offline evidence. ID67a.3 now tests the leading delta64
-   candidate with an 8->32-pair early-reject router, batched timing and
-   classifier-routed production-planner savings. Review that evidence before any
-   ID67b SWZ3 metadata or hot-path predictor.
+2. Keep ID67 format integration gated while owner-qualifying the delta64-only
+   SIMD implementation. Confirm selected backend, scalar equivalence, routed
+   planner savings and CPU cost before any ID67b SWZ3 metadata or write-path use.
 3. Owner-qualify the implemented ID61 foreground-GC pressure instrumentation on
    owned RAM. The 5-round lifecycle phase now reports useful WRITE wall/p99,
    total foreground-GC wall/fraction, victim-choice wall/calls and exact

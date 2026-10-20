@@ -1245,79 +1245,93 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("parallel_read_coalesced_reqs_saved", runner)
         self.assertIn("parallel_read_coalesce_extra_blocks", runner)
 
-    def test_id67_predictor_is_offline_only_and_planner_qualified(self):
+    def test_id67_delta64_is_single_candidate_with_arch_dispatch(self):
         predictor = (ROOT / "src/kernel/predictor.h").read_text()
+        internal = (ROOT / "src/kernel/predictor-internal.h").read_text()
+        dispatch = (ROOT / "src/kernel/predictor.c").read_text()
+        sse2 = (ROOT / "src/kernel/predictor-sse2.c").read_text()
+        avx2 = (ROOT / "src/kernel/predictor-avx2.c").read_text()
+        neon = (ROOT / "src/kernel/predictor-neon.c").read_text()
         qualification = (
             ROOT / "tests/runtime/native/codec/predictor-qualification.c").read_text()
         suites = (ROOT / "tests/suites/Makefile").read_text()
+        kbuild = (ROOT / "src/kernel/Makefile").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
         workflow = (ROOT / ".github/workflows/product-codec.yml").read_text()
         authority = (ROOT / "src/kernel/authority.c").read_text()
         codec = (ROOT / "src/kernel/codec.c").read_text()
         engine = (ROOT / "src/kernel/engine.c").read_text()
 
-        self.assertIn("swapz_predict_cl_delta32x2", predictor)
-        self.assertIn("swapz_unpredict_cl_delta32x2", predictor)
-        self.assertIn("swapz_predict_cl_bytedelta8", predictor)
-        self.assertIn("swapz_predict_delta32", predictor)
-        self.assertIn("swapz_predict_delta64", predictor)
-        self.assertIn("swapz_predict_xor64", predictor)
-        self.assertIn("swapz_predictor_small_nonzero_delta32", predictor)
-        self.assertIn("return delta &&", predictor)
+        for retired in ("swapz_predict_cl_delta32x2",
+                        "swapz_predict_cl_bytedelta8",
+                        "swapz_predict_delta32",
+                        "swapz_predict_delta64_512",
+                        "swapz_predict_xor64"):
+            self.assertNotIn(retired, predictor)
+            self.assertNotIn(retired, internal)
+            self.assertNotIn(retired, qualification)
+
         self.assertIn("swapz_predict_delta64_sample_score", predictor)
-        self.assertIn("swapz_predict_should_try_delta64", predictor)
+        self.assertIn("swapz_predict_delta64", predictor)
+        self.assertIn("swapz_unpredict_delta64", predictor)
+        self.assertIn("swapz_predict_delta64_scalar", internal)
+        self.assertIn("swapz_predict_delta64_sample_score_scalar", internal)
         self.assertIn("SWAPZ_PREDICTOR_STAGE1_PAIRS 8U", predictor)
-        self.assertIn("SWAPZ_PREDICTOR_STAGE1_MIN_SCORE 2U", predictor)
         self.assertIn("SWAPZ_PREDICTOR_SAMPLE_PAIRS 32U", predictor)
-        pair_start = predictor.index(
-            "static inline swapz_u32 swapz_predict_delta64_pair_score")
-        sample_start = predictor.index(
-            "static inline swapz_u32 swapz_predict_delta64_sample_score",
-            pair_start)
-        sample_end = predictor.index(
-            "static inline int swapz_predict_should_try_delta64", sample_start)
-        pair_body = predictor[pair_start:sample_start]
-        sample_body = predictor[sample_start:sample_end]
-        self.assertNotIn("swapz_predictor_load32(", pair_body)
-        self.assertIn("(swapz_u32)previous", pair_body)
-        self.assertIn("(swapz_u32)current", pair_body)
-        self.assertIn("(swapz_u32)(previous >> 32)", pair_body)
-        self.assertIn("(swapz_u32)(current >> 32)", pair_body)
-        self.assertIn("score < SWAPZ_PREDICTOR_STAGE1_MIN_SCORE", sample_body)
-        self.assertIn("SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES", sample_body)
-        self.assertIn("swapz_predict_delta64_512", predictor)
-        self.assertIn("swapz_unpredict_delta64_512", predictor)
-        self.assertIn("swapz_engine_plan_bounded(", qualification)
-        self.assertIn("LZ4_compress_fast", qualification)
-        self.assertIn("planner_blocks_saved", qualification)
+
+        self.assertIn("DEFINE_STATIC_CALL", dispatch)
+        self.assertIn("static_call_update", dispatch)
+        self.assertIn("kernel_fpu_begin()", dispatch)
+        self.assertIn("kernel_fpu_end()", dispatch)
+        self.assertIn("X86_FEATURE_AVX2", dispatch)
+        self.assertIn("XFEATURE_MASK_YMM", dispatch)
+        self.assertIn("X86_FEATURE_XMM2", dispatch)
+        self.assertIn("kernel_fpu_available()", dispatch)
+        self.assertIn('"avx2"', dispatch)
+        self.assertIn('"sse2"', dispatch)
+        self.assertIn('"neon"', dispatch)
+        self.assertIn("__builtin_cpu_supports(\"avx2\")", dispatch)
+
+        self.assertIn("#include <emmintrin.h>", sse2)
+        self.assertIn("_mm_sub_epi64", sse2)
+        self.assertIn("#include <immintrin.h>", avx2)
+        self.assertIn("_mm256_sub_epi64", avx2)
+        self.assertIn("_mm256_zeroupper", avx2)
+        self.assertIn("#include <arm_neon.h>", neon)
+        self.assertIn("vsubq_u64", neon)
+
+        self.assertIn("predictor.o", kbuild)
+        self.assertIn("predictor-sse2.o predictor-avx2.o", kbuild)
+        self.assertIn("CFLAGS_predictor-avx2.o += $(CC_FLAGS_FPU) -mavx2",
+                      kbuild)
+        self.assertIn("CFLAGS_REMOVE_predictor-avx2.o", kbuild)
+        self.assertIn("predictor-neon.o", kbuild)
+        self.assertIn("CFLAGS_REMOVE_predictor-neon.o += $(CC_FLAGS_NO_FPU)",
+                      kbuild)
+
+        self.assertIn("PREDICTOR_TRANSFORM_NAMES = (\"delta64\",)", runner)
+        self.assertIn("PREDICTOR_BACKENDS", runner)
+        self.assertIn("swapz_predictor_init()", qualification)
+        self.assertIn("swapz_predictor_backend_name()", qualification)
+        self.assertIn("swapz_predict_delta64_scalar(page, scalar_transform_page)",
+                      qualification)
+        self.assertIn("swapz_predict_delta64_sample_score_scalar(page)",
+                      qualification)
         self.assertIn("routed_blocks_saved", qualification)
-        self.assertIn("routed_extents_saved", qualification)
-        self.assertIn("CLASSIFIER_BENCH_REPEATS 256U", qualification)
         self.assertIn("benchmark_classifier", qualification)
-        self.assertNotIn("classifier->wall_ns += now_ns() - start", qualification)
-        self.assertIn("raw_rescued", qualification)
-        self.assertIn("cliff_2024", qualification)
-        self.assertIn("SWAPZ_PREDICTOR_EVIDENCE=", qualification)
-        self.assertIn("STRUCTURED_KINDS 10U", qualification)
-        self.assertIn('"zero", "repeat", "entropy", "mixed", "medium"', qualification)
-        self.assertIn("--weights entropy=100", suites)
-        self.assertIn("--weights mixed=100", suites)
-        self.assertIn("--weights medium=100", suites)
-        self.assertIn("predictor-qualification_LDLIBS := -llz4", suites)
-        self.assertIn("def parse_predictor_evidence", runner)
-        self.assertIn("OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY", runner)
+        self.assertIn("-msse2 -c $(KERNEL)/predictor-sse2.c", suites)
+        self.assertIn("-mavx2 -c $(KERNEL)/predictor-avx2.c", suites)
         self.assertIn("liblz4-dev", workflow)
 
-        # ID67a may compile portable candidate code but may not alter or enter
-        # the production DM/codec/authority/engine paths or SWZ3 interpretation.
-        self.assertNotIn('#include "predictor.h"', DM)
+        self.assertIn('#include "predictor.h"', DM)
+        init = body("swapz_dm_init")
+        self.assertIn("swapz_predictor_init()", init)
+        self.assertNotIn("swapz_predict_delta64(", DM)
         self.assertNotIn('#include "predictor.h"', authority)
         self.assertNotIn('#include "predictor.h"', codec)
         self.assertNotIn('#include "predictor.h"', engine)
-        self.assertNotIn("SWAPZ_FILTER_CL_DELTA32X2", DM)
-        self.assertNotIn("SWAPZ_FILTER_CL_DELTA32X2", codec)
-        self.assertNotIn("policy_length", DM)
         self.assertNotIn("payload_filter", codec)
+        self.assertNotIn("policy_length", DM)
 
     def test_id64_guard_is_read_only_one_shot_and_owner_benchmarked(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()

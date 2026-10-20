@@ -568,12 +568,11 @@ dead benchmark sessions merely for historical telemetry.
 
 ### Offline predictor qualification before any format change
 
-A reversible pre-LZ4 predictor is not production code until native/offline
-evidence shows material physical benefit. Current evidence promotes whole-page
-delta64 as the routing candidate; CL-Delta32x2 and 512-byte-reset delta64 remain
-comparators, while cacheline byte-delta and whole-page delta32 are baseline
-controls rather than active promotion candidates. Loads/stores must be
-`memcpy`-safe and arithmetic explicitly unsigned.
+A reversible pre-LZ4 predictor is not production format policy until native/
+loaded evidence shows material physical benefit. Whole-page delta64 is now the
+only maintained candidate; the refuted CL-delta, byte-delta, delta32,
+reset-delta64 and xor64 experiments live only in Git history. Portable unsigned,
+memcpy-safe C delta64 is the mandatory correctness oracle and fallback.
 
 The current SHAKE-generated benchmark hard regions are negative controls, not a
 positive predictor corpus. Native evidence must also construct deterministic
@@ -581,19 +580,25 @@ pointer/page-table, integer counter/timestamp, float/double, fixed-layout
 struct and independently based subpage archetypes. Routing evidence must be
 separate from the full transform: sample the raw page first, never count a zero
 delta as positive evidence, and report false calls by negative profile.
-The sampled hot loop must cache each loaded 64-bit word and derive any 32-bit
-lane evidence from those cached values rather than rereading the same bytes.
-ID67a.3 uses an 8-pair page-wide first stage; fewer than two points is an
-immediate reject. Passing pages extend to 32 evenly strided pairs. The fixed
-three second-stage positions in each 512-byte region should be expressed
-directly rather than paying a nested offset-loop branch in this intentionally
-tiny classifier. Classifier timing must be batched across repeated eligible-page
-sweeps so two timer calls cover many classifier invocations rather than
-contaminating every page.
+ID67 keeps the 8-pair page-wide first stage; fewer than two points is an
+immediate reject, and passing pages extend to 32 fixed strided pairs. Scalar,
+SSE2, AVX2 and NEON must produce byte-identical transforms, inverse pages and
+classifier scores. SIMD code lives in isolated translation units compiled with
+the kernel FPU flags; ordinary DM/authority/engine/codec objects must never be
+compiled with SIMD enabled. x86_64 uses SSE2 as the compatibility SIMD baseline
+and selects AVX2 only with the CPU feature plus enabled YMM xstate. arm64 selects
+NEON only when kernel-mode FPSIMD is available. Otherwise scalar C remains
+active. Kernel dispatch is selected once at module initialization with
+static_call patching, with no per-page CPU-feature branch or permanent indirect
+call. SIMD entry/exit uses kernel_fpu_begin()/kernel_fpu_end() from the non-SIMD
+dispatch translation unit and is process-context-only; a non-task call falls
+back to scalar. Native qualification may use ISA state directly. Classifier
+timing remains batched across repeated eligible-page sweeps.
 Thresholds are evidence, never kernel policy before measurement.
 
-Every candidate must round-trip exactly. Measure transform, inverse and optional
-second-LZ4 cost. Feed actual compressed-length sequences into the production
+Delta64 must round-trip exactly, and every selected hardware backend must match
+the scalar oracle on every classified/transformed page. Measure transform,
+inverse and optional second-LZ4 cost. Feed actual compressed-length sequences into the production
 `swapz_engine_plan_bounded()` and report planned 4KiB blocks/extents, RAW
 rescues and packing-cliff crossings. For every router threshold, also feed the
 classifier-routed delta64 lengths through the same planner and report routed

@@ -219,9 +219,8 @@ WORKLOAD_OPPORTUNITY_FIELDS = (
     "final_live_duplicate_pages", "final_live_nonzero_same_filled_pages")
 
 
-PREDICTOR_TRANSFORM_NAMES = (
-    "cl_delta32x2", "cl_bytedelta8", "delta32", "delta64",
-    "delta64_512", "xor64")
+PREDICTOR_TRANSFORM_NAMES = ("delta64",)
+PREDICTOR_BACKENDS = ("scalar", "sse2", "avx2", "neon")
 PREDICTOR_THRESHOLDS = (4, 8, 16, 24, 32)
 PREDICTOR_NEGATIVE_PROFILES = ("zero", "repeat", "entropy", "mixed", "medium")
 PREDICTOR_TRANSFORM_FIELDS = (
@@ -256,6 +255,7 @@ def parse_predictor_evidence(output):
     classifier = record.get("classifier")
     if not isinstance(classifier, dict) or \
             classifier.get("candidate") != "delta64" or \
+            classifier.get("backend") not in PREDICTOR_BACKENDS or \
             classifier.get("sample_pairs") != 32 or \
             classifier.get("stage1_pairs") != 8 or \
             classifier.get("stage1_min_score") != 2 or \
@@ -2386,6 +2386,7 @@ def print_bench(result):
             ) for row in predictor["transforms"]])
         classifier = predictor["classifier"]
         print("  Sampled delta64 classifier — "
+              f"{classifier['backend']} backend; "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
               f"{classifier['ns_per_page']} ns/eligible page")
         print("  Stage-1 aborts: "

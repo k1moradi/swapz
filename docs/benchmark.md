@@ -182,9 +182,10 @@ generated independently in C and cover pointer arrays, page-table-like entries,
 u32/u64 counters/timestamps, slowly varying floats/doubles, two-field structs and
 cacheline-local mixed structured/high-entropy records.
 
-The evaluator compares CL-Delta32x2, cacheline byte-delta, whole-page delta32,
-whole-page delta64, 512-byte-reset delta64 and xor64. Every transform is
-inverted and byte-compared before its measurement is accepted. It records
+The evaluator now keeps only whole-page delta64. Retired comparator
+implementations are removed from current source; historical evidence remains in
+Git. The selected scalar/SSE2/AVX2/NEON path must match the portable scalar
+classifier and transformed bytes before its measurement is accepted. It records
 transform/inverse/second-LZ4 time, adopted representations, RAW rescues and
 >2024 -> <=2024 crossings. The ID67a.3 delta64 signpost samples 8 page-wide
 pairs first and returns immediately below score 2; passing pages extend to 32
@@ -201,13 +202,9 @@ The output is explicitly labeled
 report. A later ID67b is permitted only after this evidence is reviewed; the
 native evaluator itself must not be cited as loaded-kernel performance.
 
-The first native run is mechanism evidence, not prevalence evidence. On the
-structured controls, delta64 saved 60 of 238 planned blocks, CL-Delta32x2 saved
-53, xor64 43, delta32 14 and cacheline byte-delta zero. CL-Delta32x2 rescued 128
-RAW pages and crossed the <=2024-byte cliff on 96 controls; delta64 rescued the
-same 128 and crossed 128. The first CL signpost was invalid for routing because it counted delta-zero
-raw repetition as positive evidence, producing 76-77 unnecessary calls among
-141 eligible negative controls. ID67a.2 fixed that mathematical bug: the owner run's threshold 32 produced
+Historical multi-model runs are retained only as decision evidence: delta64 was
+the winner and the alternatives are no longer maintained. ID67a.2 fixed the
+delta-zero classifier bug; the owner run's threshold 32 produced
 0/141 negative calls and 256/320 useful structured calls, while ungated delta64
 saved 65 planner blocks. Its 385 ns/page single-page timer result is not a
 promotion-quality cost measurement. Initial ID67a.3 rootless native CI measures
@@ -215,9 +212,15 @@ promotion-quality cost measurement. Initial ID67a.3 rootless native CI measures
 tested zero-false-call point and retains 52 of 65 ungated planner blocks saved
 plus 49 extents; thresholds 24/32 produce the same routed geometry. This is
 promising offline evidence, not owner-loaded or production evidence, and it
-still misses the provisional <60 ns/page target by 1 ns. The fixed 24-pair
-second stage is therefore unrolled without changing sample positions before
-owner review. No SWZ3 flag is promoted by this change.
+still misses the provisional <60 ns/page target by 1 ns. The fixed 24-pair second stage is unrolled without changing sample positions.
+ID67a.4 adds explicit SIMD before the next owner run: SSE2 for old x86_64,
+AVX2 only when CPU capability and YMM xstate permit it, NEON for arm64
+kernel-mode FPSIMD, and portable C otherwise. Kernel call sites are static-call
+patched once at module init and SIMD code is isolated under kernel FPU build/
+state rules. Native timing identifies the selected backend, but native timing
+does not include kernel_fpu_begin/end overhead; that transition cost must be
+measured if ID67b enters the process-context write path. No SWZ3 flag is
+promoted by this change.
 
 ## Physical media
 

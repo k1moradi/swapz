@@ -122,28 +122,26 @@ remains on hold.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** evidence-only first. The official rootless stage
-  must build/run the native evaluator, emit exactly one sanitized
+- **ID67 predictive rescue:** evidence-only format policy first. The official
+  rootless stage must build/run the native evaluator, emit exactly one sanitized
   `SWAPZ_PREDICTOR_EVIDENCE` record, and fail if it is missing or malformed.
   SHAKE entropy/mixed/medium plus generated zero/repeat pages are negative
-  controls; deterministic native pointer/page-table/integer/float/struct and
-  independently based 512-byte regions are positive controls. Compare
-  CL-Delta32x2, cacheline byte-delta, delta32, whole-page delta64,
-  512-byte-reset delta64 and xor64; verify exact inverse reconstruction. The
-  rescue signpost is sampled before transformation, ignores zero residuals,
-  aborts after an 8-pair page-wide first stage when its score is below two, and
-  extends passing pages to 32 strided pairs. Classifier ns/page must come from
-  repeated batched sweeps rather than a timer pair around each page. Every
-  threshold reports per-negative-profile false calls plus classifier-routed
-  production-planner block/extent savings. Console rendering must keep the
-  classifier-call table and routed-planner table separate so every benchmark
-  line remains below the compact-report width contract. Thresholds are evidence,
-  not kernel policy. The unprivileged
-  Make-interface fixture must emit the same valid predictor evidence as one
-  complete stdout line so stage parsing is exercised without privilege. Source
-  contracts must prove no production DM/codec/authority/engine translation unit
-  includes the predictor and no filter metadata/policy-length surface exists in
-  ID67a.
+  controls; deterministic pointer/page-table/integer/float/struct and
+  independently based 512-byte regions are positive controls. Delta64 is the
+  sole maintained predictor. Qualification initializes the selected
+  scalar/SSE2/AVX2/NEON backend, compares every classifier score and transformed
+  page byte-for-byte with scalar C, and verifies exact inverse reconstruction.
+  The rescue signpost ignores zero residuals, aborts after the 8-pair first
+  stage below score two, and extends passing pages to 32 strided pairs.
+  Classifier ns/page uses repeated batched sweeps. Every threshold reports
+  per-negative-profile false calls plus classifier-routed production-planner
+  block/extent savings. Source contracts prove static-call kernel dispatch,
+  x86 AVX2 CPU+YMM-state gating, SSE2 compatibility fallback, arm64 kernel-mode
+  NEON gating and isolated FPU compiler flags. The unprivileged Make-interface
+  fixture must emit the same valid evidence schema. Production module init may
+  select the backend, but DM data-path/codec/authority/engine code still has no
+  predictor transform call and no filter metadata/policy-length surface exists
+  before ID67b.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** the owned-RAM lifecycle phase now collects foreground-GC pressure
   evidence before any background worker. Exactly five pressure rounds must emit

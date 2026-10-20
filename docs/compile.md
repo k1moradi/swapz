@@ -6,7 +6,12 @@
 
 ## Build
 
-The production kernel source is `src/kernel/`. There is one module: `dm-swapz.ko`. Kbuild links `dm-target.o codec.o authority.o engine.o`; there is no alternate research module. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
+The production kernel source is `src/kernel/`. There is one module:
+`dm-swapz.ko`. Kbuild links the DM/codec/authority/engine core plus the
+delta64 predictor core. x86_64 also links isolated SSE2 and AVX2 predictor
+objects; arm64 with kernel-mode NEON links the isolated NEON object. These are
+backends inside the same module, not alternate research modules. The Device
+Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
 Normal artifacts live only under `build/`:
 
@@ -37,6 +42,12 @@ No extra root aliases or public test targets are permitted.
 ## Incremental builds
 
 Kernel staging compares content before copying so unchanged source does not invalidate all object timestamps. W=1, W=2 and normal builds use separate output directories. Userspace/helper changes should not force unrelated kernel recompilation.
+
+SIMD predictor files are separate translation units so ordinary kernel objects
+retain architecture no-FPU flags. x86 SSE2/AVX2 objects opt into
+`CC_FLAGS_FPU` (AVX2 also `-mavx2`) and remove conflicting no-SIMD flags;
+arm64 NEON uses `CC_FLAGS_FPU` and removes `CC_FLAGS_NO_FPU`. Runtime
+selection never changes the single-module artifact.
 
 The official test runner may use Make jobserver parallelism for independent compilation, but loaded device phases and benchmark pairs remain sequential.
 
