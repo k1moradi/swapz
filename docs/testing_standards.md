@@ -107,6 +107,9 @@ shrinks. No performance claim is allowed until the active matched A/B completes.
 - **ID39 helper concurrency:** five-pair performance evidence is already
   inconclusive/negative. Keep one fast off/on directional control with ID63
   disabled until helper removal is separately reviewed.
+  Its compact stdout no longer repeats the historical passive-ID63 adjacency
+  table; ID63's dedicated active exact-range and non-merge tables are the
+  canonical current read-coalescing evidence.
 - **ID60 same-extent grouping:** five-pair hwq=1 evidence refutes standalone
   benefit. Keep one off/on directional regression control with
   `read_coalesce=0` and require zero read-worker CPU.

@@ -927,7 +927,6 @@ class ReportContract(unittest.TestCase):
         self.assertIn("skip-I0", rendered)
         self.assertIn("after-I0", rendered)
         self.assertIn("segment TRIM", rendered)
-        self.assertIn("ID63 passive adjacent distinct-extent opportunity", rendered)
         self.assertIn("ID63 ADJACENT READ COALESCE A/B", rendered)
         self.assertIn("ID63 active exact-range accounting", rendered)
         self.assertIn("ID63 active non-merge attribution", rendered)
