@@ -127,11 +127,10 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# ID64 is owner-qualified. Retain one fast off/on directional control with
-# async preparation enabled to catch a structural regression without repeating
-# the retired five-pair performance experiment.
+# ID64 final confirmation after completion-aware tail sampling: five matched
+# guard-off/on rounds with async preparation fixed on in both arms.
 index=0
-for guard in "${directional_modes[@]}"; do
+for guard in "${confirmation_modes[@]}"; do
     arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
                --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
                --async-prepare

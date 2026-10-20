@@ -23,6 +23,11 @@
 #define TRANSFORM_DELTA64 0U
 #define THRESHOLD_COUNT 5U
 #define CLASSIFIER_BENCH_REPEATS 256U
+#define TRANSFORM_BENCH_REPEATS 64U
+#define LZ4_BENCH_REPEATS 32U
+#define MAX_BACKEND_BENCHMARKS 3U
+#define SD_EMULATED_BLOCK_NS 390625ULL
+#define SSD_EMULATED_BLOCK_NS 48828ULL
 
 typedef swapz_u32 (*predict_fn)(const swapz_u8 *, swapz_u8 *);
 typedef void (*unpredict_fn)(const swapz_u8 *, swapz_u8 *);
@@ -31,6 +36,13 @@ struct transform {
 	const char *name;
 	predict_fn predict;
 	unpredict_fn unpredict;
+};
+struct backend_benchmark {
+	const char *name;
+	predict_fn predict;
+	unpredict_fn unpredict;
+	uint64_t transform_ns_per_page;
+	uint64_t inverse_ns_per_page;
 };
 
 struct page_evidence {
@@ -78,6 +90,9 @@ struct threshold_summary {
 	swapz_u32 routed_candidate_blocks;
 	swapz_u32 routed_baseline_extents;
 	swapz_u32 routed_candidate_extents;
+	uint64_t routed_cpu_ns_total;
+	uint64_t routed_cpu_ns_per_page;
+	uint64_t ns_per_saved_block;
 	struct profile_threshold_summary profiles[NEGATIVE_PROFILE_COUNT];
 };
 
@@ -91,7 +106,9 @@ struct classifier_summary {
 
 static struct page_evidence evidence[MAX_EVIDENCE_PAGES];
 static swapz_u8 evidence_pages[MAX_EVIDENCE_PAGES][SWAPZ_BLOCK_BYTES];
+static swapz_u8 delta64_pages[MAX_EVIDENCE_PAGES][SWAPZ_BLOCK_BYTES];
 static volatile uint64_t classifier_benchmark_sink;
+static volatile uint64_t transform_benchmark_sink;
 static swapz_u8 transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 scalar_transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 recovered_page[SWAPZ_BLOCK_BYTES];
@@ -288,66 +305,37 @@ static void generate_structured_page(unsigned int kind, unsigned int page_index,
 }
 
 static int evaluate_page(const swapz_u8 *page, int structured,
-			 swapz_u8 negative_profile,
-			 struct page_evidence *out,
+			 swapz_u8 negative_profile, struct page_evidence *out,
 			 struct transform_summary *summary,
 			 struct classifier_summary *classifier)
 {
 	unsigned int transform_index;
-	uint64_t start;
 	int baseline;
-
+	(void)summary;
 	baseline = compress_page_lz4(page);
-	if (baseline < 0 || baseline > PREDICTOR_CAP)
-		return -EINVAL;
+	if (baseline < 0 || baseline > PREDICTOR_CAP) return -EINVAL;
 	memset(out, 0, sizeof(*out));
-	out->baseline_length = baseline;
-	out->structured = structured;
+	out->baseline_length = baseline; out->structured = structured;
 	out->negative_profile = negative_profile;
 	if (!baseline || baseline > 2024) {
-		swapz_u32 scalar_score =
-			swapz_predict_delta64_sample_score_scalar(page);
-
+		swapz_u32 scalar_score = swapz_predict_delta64_sample_score_scalar(page);
 		out->classifier_score = swapz_predict_delta64_sample_score(page);
-		if (out->classifier_score != scalar_score)
-			return -EUCLEAN;
-		classifier->pages++;
-		classifier->early_abort_pages += out->classifier_score == 0;
+		if (out->classifier_score != scalar_score) return -EUCLEAN;
+		classifier->pages++; classifier->early_abort_pages += out->classifier_score == 0;
 		out->classifier_ran = 1;
 	}
-	for (transform_index = 0; transform_index < TRANSFORM_COUNT;
-	     ++transform_index) {
+	for (transform_index = 0; transform_index < TRANSFORM_COUNT; ++transform_index) {
 		const struct transform *transform = &transforms[transform_index];
 		int candidate;
-
-		start = now_ns();
-		transform->predict(page, transform_page);
-		summary[transform_index].transform_ns += now_ns() - start;
-		start = now_ns();
-		swapz_predict_delta64_scalar(page, scalar_transform_page);
-		summary[transform_index].scalar_transform_ns += now_ns() - start;
-		if (memcmp(transform_page, scalar_transform_page,
-			   SWAPZ_BLOCK_BYTES))
-			return -EUCLEAN;
-
-		start = now_ns();
+		if (transform->predict(page, transform_page) ||
+		    swapz_predict_delta64_scalar(page, scalar_transform_page)) return -EUCLEAN;
+		if (memcmp(transform_page, scalar_transform_page, SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
 		transform->unpredict(transform_page, recovered_page);
-		summary[transform_index].inverse_ns += now_ns() - start;
-		if (memcmp(page, recovered_page, SWAPZ_BLOCK_BYTES))
-			return -EUCLEAN;
-
-		start = now_ns();
-		swapz_unpredict_delta64_scalar(scalar_transform_page,
-					      scalar_recovered_page);
-		summary[transform_index].scalar_inverse_ns += now_ns() - start;
-		if (memcmp(page, scalar_recovered_page, SWAPZ_BLOCK_BYTES))
-			return -EUCLEAN;
-
-		start = now_ns();
+		if (memcmp(page, recovered_page, SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
+		swapz_unpredict_delta64_scalar(scalar_transform_page, scalar_recovered_page);
+		if (memcmp(page, scalar_recovered_page, SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
 		candidate = compress_page_lz4(transform_page);
-		summary[transform_index].second_lz4_ns += now_ns() - start;
-		if (candidate < 0 || candidate > PREDICTOR_CAP)
-			return -EINVAL;
+		if (candidate < 0 || candidate > PREDICTOR_CAP) return -EINVAL;
 		out->candidate_length[transform_index] = candidate;
 	}
 	return 0;
@@ -517,44 +505,117 @@ static void summarize_transform(const struct page_evidence *rows,
 	}
 }
 
-static int benchmark_classifier(const struct page_evidence *rows,
-				swapz_u32 count,
+static int benchmark_classifier(const struct page_evidence *rows, swapz_u32 count,
 				struct classifier_summary *summary)
 {
-	uint64_t calls = 0, selected_sink = 0, scalar_sink = 0;
-	uint64_t start, end;
-	unsigned int repeat;
-	swapz_u32 index;
-
-	if (!rows || !summary || !summary->pages)
-		return -EINVAL;
+	uint64_t calls = 0, sink = 0, start, end; unsigned int repeat; swapz_u32 index;
+	if (!rows || !summary || !summary->pages) return -EINVAL;
 	start = now_ns();
 	for (repeat = 0; repeat < CLASSIFIER_BENCH_REPEATS; ++repeat)
 		for (index = 0; index < count; ++index)
 			if (rows[index].classifier_ran) {
-				selected_sink += swapz_predict_delta64_sample_score(
-					evidence_pages[index]);
-				calls++;
+				sink += swapz_predict_delta64_sample_score(evidence_pages[index]); calls++;
 			}
-	end = now_ns();
-	if (!start || !end ||
-	    calls != (uint64_t)summary->pages * CLASSIFIER_BENCH_REPEATS)
+	end = now_ns(); classifier_benchmark_sink = sink;
+	if (!start || !end || calls != (uint64_t)summary->pages * CLASSIFIER_BENCH_REPEATS)
 		return -EUCLEAN;
-	summary->wall_ns = end - start;
-
+	summary->wall_ns = end - start; summary->scalar_wall_ns = summary->wall_ns;
+	summary->benchmark_calls = calls; return 0;
+}
+static int build_delta64_pages(swapz_u32 count)
+{
+	swapz_u32 index;
+	for (index = 0; index < count; ++index)
+		if (swapz_predict_delta64_scalar(evidence_pages[index], delta64_pages[index]))
+			return -EUCLEAN;
+	return 0;
+}
+static int benchmark_backend(struct backend_benchmark *backend, swapz_u32 count)
+{
+	uint64_t start, end, sink = 0, calls = (uint64_t)count * TRANSFORM_BENCH_REPEATS;
+	unsigned int repeat; swapz_u32 index;
+	if (!backend || !backend->predict || !backend->unpredict || !count) return -EINVAL;
+	for (index = 0; index < count; ++index) {
+		if (backend->predict(evidence_pages[index], transform_page)) return -EUCLEAN;
+		if (memcmp(transform_page, delta64_pages[index], SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
+		backend->unpredict(delta64_pages[index], recovered_page);
+		if (memcmp(recovered_page, evidence_pages[index], SWAPZ_BLOCK_BYTES)) return -EUCLEAN;
+	}
 	start = now_ns();
-	for (repeat = 0; repeat < CLASSIFIER_BENCH_REPEATS; ++repeat)
-		for (index = 0; index < count; ++index)
-			if (rows[index].classifier_ran)
-				scalar_sink +=
-					swapz_predict_delta64_sample_score_scalar(
-						evidence_pages[index]);
-	end = now_ns();
-	classifier_benchmark_sink = selected_sink + scalar_sink;
-	if (!start || !end || selected_sink != scalar_sink)
-		return -EUCLEAN;
-	summary->scalar_wall_ns = end - start;
-	summary->benchmark_calls = calls;
+	for (repeat = 0; repeat < TRANSFORM_BENCH_REPEATS; ++repeat)
+		for (index = 0; index < count; ++index) {
+			backend->predict(evidence_pages[index], transform_page);
+			sink += transform_page[(index + repeat) & (SWAPZ_BLOCK_BYTES - 1U)];
+		}
+	end = now_ns(); if (!start || !end || !calls) return -EUCLEAN;
+	backend->transform_ns_per_page = (end - start) / calls;
+	start = now_ns();
+	for (repeat = 0; repeat < TRANSFORM_BENCH_REPEATS; ++repeat)
+		for (index = 0; index < count; ++index) {
+			backend->unpredict(delta64_pages[index], recovered_page);
+			sink += recovered_page[(index + repeat) & (SWAPZ_BLOCK_BYTES - 1U)];
+		}
+	end = now_ns(); transform_benchmark_sink += sink;
+	if (!start || !end) return -EUCLEAN;
+	backend->inverse_ns_per_page = (end - start) / calls; return 0;
+}
+static int collect_backend_benchmarks(struct backend_benchmark *backends,
+				      unsigned int *count_out, swapz_u32 page_count)
+{
+	unsigned int count = 0, index;
+	backends[count++] = (struct backend_benchmark){ "scalar", swapz_predict_delta64_scalar, swapz_unpredict_delta64_scalar, 0, 0 };
+#if defined(__x86_64__)
+	backends[count++] = (struct backend_benchmark){ "sse2", swapz_predict_delta64_sse2, swapz_unpredict_delta64_sse2, 0, 0 };
+	__builtin_cpu_init();
+	if (__builtin_cpu_supports("avx2"))
+		backends[count++] = (struct backend_benchmark){ "avx2", swapz_predict_delta64_avx2, swapz_unpredict_delta64_avx2, 0, 0 };
+#elif defined(__aarch64__)
+	backends[count++] = (struct backend_benchmark){ "neon", swapz_predict_delta64_neon, swapz_unpredict_delta64_neon, 0, 0 };
+#endif
+	if (count > MAX_BACKEND_BENCHMARKS) return -E2BIG;
+	for (index = 0; index < count; ++index) { int error = benchmark_backend(&backends[index], page_count); if (error) return error; }
+	*count_out = count; return 0;
+}
+static const struct backend_benchmark *find_backend(const struct backend_benchmark *backends,
+						     unsigned int count, const char *name)
+{
+	unsigned int index; for (index = 0; index < count; ++index) if (!strcmp(backends[index].name, name)) return &backends[index];
+	return NULL;
+}
+static int benchmark_second_lz4(swapz_u32 count, uint64_t *ns_per_page)
+{
+	uint64_t start, end, sink = 0, calls = (uint64_t)count * LZ4_BENCH_REPEATS;
+	unsigned int repeat; swapz_u32 index;
+	if (!count || !ns_per_page) return -EINVAL;
+	start = now_ns();
+	for (repeat = 0; repeat < LZ4_BENCH_REPEATS; ++repeat)
+		for (index = 0; index < count; ++index) {
+			int length = compress_page_lz4(delta64_pages[index]);
+			if (length < 0 || length > PREDICTOR_CAP) return -EUCLEAN;
+			sink += (uint64_t)length;
+		}
+	end = now_ns(); transform_benchmark_sink += sink;
+	if (!start || !end || !calls) return -EUCLEAN;
+	*ns_per_page = (end - start) / calls; return 0;
+}
+static int account_routed_cpu(struct threshold_summary *rows,
+			      const struct classifier_summary *classifier,
+			      const struct transform_summary *transform,
+			      swapz_u32 total_count)
+{
+	uint64_t classifier_ns, transform_ns, second_lz4_ns; unsigned int index;
+	if (!rows || !classifier || !transform || !total_count || !classifier->benchmark_calls) return -EINVAL;
+	classifier_ns = classifier->wall_ns / classifier->benchmark_calls;
+	transform_ns = transform->transform_ns / total_count;
+	second_lz4_ns = transform->second_lz4_ns / total_count;
+	for (index = 0; index < THRESHOLD_COUNT; ++index) {
+		uint64_t eligible = (uint64_t)rows[index].negative_eligible + rows[index].structured_eligible;
+		uint64_t calls = (uint64_t)rows[index].negative_calls + rows[index].structured_calls;
+		long saved = (long)rows[index].routed_baseline_blocks - (long)rows[index].routed_candidate_blocks;
+		rows[index].routed_cpu_ns_total = eligible * classifier_ns + calls * (transform_ns + second_lz4_ns);
+		rows[index].routed_cpu_ns_per_page = rows[index].routed_cpu_ns_total / total_count;
+		rows[index].ns_per_saved_block = saved > 0 ? rows[index].routed_cpu_ns_total / (uint64_t)saved : 0;
+	}
 	return 0;
 }
 
@@ -628,6 +689,10 @@ int main(int argc, char **argv)
 	struct transform_summary structured_summary[TRANSFORM_COUNT] = { 0 };
 	struct threshold_summary threshold_summary[THRESHOLD_COUNT] = { 0 };
 	struct classifier_summary classifier_summary = { 0 };
+	struct backend_benchmark backend_benchmarks[MAX_BACKEND_BENCHMARKS] = { 0 };
+	const struct backend_benchmark *selected_transform, *selected_inverse, *scalar_backend;
+	uint64_t second_lz4_ns_per_page = 0;
+	unsigned int backend_count = 0;
 	swapz_u32 count = 0, negative_count, structured_start;
 	swapz_u8 page[SWAPZ_BLOCK_BYTES];
 	unsigned int kind, page_index, transform_index, threshold_index;
@@ -686,10 +751,22 @@ int main(int argc, char **argv)
 
 	error = benchmark_classifier(evidence, count, &classifier_summary);
 	if (error) {
-		fprintf(stderr, "predictor classifier batch benchmark failed: %d\n",
-			error);
+		fprintf(stderr, "predictor classifier batch benchmark failed: %d\n", error);
 		return 1;
 	}
+	error = build_delta64_pages(count);
+	if (!error) error = collect_backend_benchmarks(backend_benchmarks, &backend_count, count);
+	if (!error) error = benchmark_second_lz4(count, &second_lz4_ns_per_page);
+	if (error) { fprintf(stderr, "predictor backend batch benchmark failed: %d\n", error); return 1; }
+	selected_transform = find_backend(backend_benchmarks, backend_count, swapz_predictor_transform_backend_name());
+	selected_inverse = find_backend(backend_benchmarks, backend_count, swapz_predictor_inverse_backend_name());
+	scalar_backend = find_backend(backend_benchmarks, backend_count, "scalar");
+	if (!selected_transform || !selected_inverse || !scalar_backend) return 1;
+	total_summary[0].transform_ns = selected_transform->transform_ns_per_page * count;
+	total_summary[0].inverse_ns = selected_inverse->inverse_ns_per_page * count;
+	total_summary[0].scalar_transform_ns = scalar_backend->transform_ns_per_page * count;
+	total_summary[0].scalar_inverse_ns = scalar_backend->inverse_ns_per_page * count;
+	total_summary[0].second_lz4_ns = second_lz4_ns_per_page * count;
 
 	for (transform_index = 0; transform_index < TRANSFORM_COUNT;
 	     ++transform_index) {
@@ -722,8 +799,8 @@ int main(int argc, char **argv)
 			return 1;
 		}
 	}
-	error = summarize_thresholds(evidence, negative_count, structured_start,
-				     count, threshold_summary);
+	error = summarize_thresholds(evidence, negative_count, structured_start, count, threshold_summary);
+	if (!error) error = account_routed_cpu(threshold_summary, &classifier_summary, &total_summary[0], count);
 	if (error) {
 		fprintf(stderr, "routed production planner rejected evidence: %d\n",
 			error);
@@ -742,7 +819,7 @@ int main(int argc, char **argv)
 	       "\"OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY\","
 	       "\"negative_pages\":%u,\"structured_pages\":%u,"
 	       "\"classifier\":{\"candidate\":\"delta64\","
-	       "\"backend\":\"%s\","
+	       "\"backend\":\"scalar\","
 	       "\"sample_pairs\":%u,\"stage1_pairs\":%u,"
 	       "\"stage1_min_score\":%u,\"eligible_pages\":%u,"
 	       "\"early_abort_pages\":%u,\"benchmark_repeats\":%u,"
@@ -750,7 +827,6 @@ int main(int argc, char **argv)
 	       "\"ns_per_page\":%" PRIu64 ","
 	       "\"scalar_ns_per_page\":%" PRIu64 "},\"thresholds\":[",
 	       negative_count, count - structured_start,
-	       swapz_predictor_backend_name(),
 	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, SWAPZ_PREDICTOR_STAGE1_PAIRS,
 	       SWAPZ_PREDICTOR_STAGE1_MIN_SCORE, classifier_summary.pages,
 	       classifier_summary.early_abort_pages, CLASSIFIER_BENCH_REPEATS,
@@ -758,8 +834,15 @@ int main(int argc, char **argv)
 	       classifier_summary.benchmark_calls ?
 	       classifier_summary.wall_ns / classifier_summary.benchmark_calls : 0,
 	       classifier_summary.benchmark_calls ?
-	       classifier_summary.scalar_wall_ns /
-		       classifier_summary.benchmark_calls : 0);
+	       classifier_summary.scalar_wall_ns / classifier_summary.benchmark_calls : 0);
+	printf(",\"backend_benchmarks\":[");
+	for (transform_index = 0; transform_index < backend_count; ++transform_index) {
+		const struct backend_benchmark *backend = &backend_benchmarks[transform_index];
+		printf("%s{\"name\":\"%s\",\"transform_ns_per_page\":%" PRIu64 ",\"inverse_ns_per_page\":%" PRIu64 "}",
+		       transform_index ? "," : "", backend->name, backend->transform_ns_per_page, backend->inverse_ns_per_page);
+	}
+	printf("],\"io_model_block_ns\":{\"sd_emulated\":%" PRIu64 ",\"ssd_emulated\":%" PRIu64 "},\"thresholds\":[",
+	       (uint64_t)SD_EMULATED_BLOCK_NS, (uint64_t)SSD_EMULATED_BLOCK_NS);
 	for (threshold_index = 0; threshold_index < THRESHOLD_COUNT;
 	     ++threshold_index) {
 		const struct threshold_summary *item =
@@ -776,7 +859,7 @@ int main(int argc, char **argv)
 		       "\"routed_blocks_saved\":%ld,"
 		       "\"routed_baseline_extents\":%u,"
 		       "\"routed_candidate_extents\":%u,"
-		       "\"routed_extents_saved\":%ld,"
+		       "\"routed_extents_saved\":%ld,\"routed_cpu_ns_total\":%" PRIu64 ",\"routed_cpu_ns_per_page\":%" PRIu64 ",\"ns_per_saved_block\":%" PRIu64 ","
 		       "\"negative_profiles\":[",
 		       threshold_index ? "," : "", item->threshold,
 		       item->negative_eligible, item->negative_calls,
@@ -786,8 +869,8 @@ int main(int argc, char **argv)
 		       (long)item->routed_baseline_blocks -
 			       (long)item->routed_candidate_blocks,
 		       item->routed_baseline_extents, item->routed_candidate_extents,
-		       (long)item->routed_baseline_extents -
-			       (long)item->routed_candidate_extents);
+		       (long)item->routed_baseline_extents - (long)item->routed_candidate_extents,
+		       item->routed_cpu_ns_total, item->routed_cpu_ns_per_page, item->ns_per_saved_block);
 		for (profile_index = 0; profile_index < NEGATIVE_PROFILE_COUNT;
 		     ++profile_index) {
 			const struct profile_threshold_summary *profile =
@@ -819,7 +902,7 @@ int main(int argc, char **argv)
 		       "\"baseline_blocks\":%u,\"candidate_blocks\":%u,"
 		       "\"planner_blocks_saved\":%ld,"
 		       "\"baseline_extents\":%u,\"candidate_extents\":%u,"
-		       "\"planner_extents_saved\":%ld,"
+		       "\"planner_extents_saved\":%ld,\"transform_backend\":\"%s\",\"inverse_backend\":\"%s\","
 		       "\"transform_ns_per_page\":%" PRIu64 ","
 		       "\"inverse_ns_per_page\":%" PRIu64 ","
 		       "\"scalar_transform_ns_per_page\":%" PRIu64 ","
@@ -830,6 +913,7 @@ int main(int argc, char **argv)
 		       item->saved_payload_bytes, item->baseline_blocks,
 		       item->candidate_blocks, block_saved,
 		       item->baseline_extents, item->candidate_extents, extent_saved,
+		       swapz_predictor_transform_backend_name(), swapz_predictor_inverse_backend_name(),
 		       total_summary[transform_index].transform_ns / pages,
 		       total_summary[transform_index].inverse_ns / pages,
 		       total_summary[transform_index].scalar_transform_ns / pages,

@@ -149,7 +149,7 @@ changes.
 | 64 | One-shot in-flight-zero burst-target shrink guard | **1 owner-qualified / keep** | Five matched fast mixed rounds eliminated after-I0 shrinks and reduced burst closes, overshoot and lower WRITE requests without a measured latency penalty. Keep enabled; retain only one directional regression control. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Predictive rescue before LZ4 | **4 ID67a.4 delta64-only SIMD dispatch implemented** | Delta64 is the only maintained predictor. Portable C remains the oracle/fallback; x86_64 selects AVX2 only with CPU+YMM-state support and otherwise SSE2, while arm64 selects kernel-mode NEON when available. Kernel call sites use init-time static-call patching with isolated FPU translation units. Native qualification proves selected-backend/scalar equivalence and reports backend timing/routed planner savings. SWZ3 and the production data path remain unchanged until ID67b is separately justified. |
+| 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
 
 
 ## What the pinned queue experiment establishes
@@ -213,9 +213,10 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 1. Land the post-ID65 cleanup: restore executable test-script modes, promote
    ID65/66 documentation, reject non-ID63 READ pairs before slot
    preparation/priming, and retire standalone ID39/ID60 loaded controls.
-2. Keep ID67 format integration gated while owner-qualifying the delta64-only
-   SIMD implementation. Confirm selected backend, scalar equivalence, routed
-   planner savings and CPU cost before any ID67b SWZ3 metadata or write-path use.
+2. Owner-qualify ID67a.5 operation-specific SIMD and routed CPU economics
+   before any ID67b SWZ3 metadata or write-path use.
+3. Re-run ID64 as five matched fast-mixed pairs after completion-aware tail
+   sampling; retire the guard if the repaired path makes it dormant.
 3. Owner-qualify the implemented ID61 foreground-GC pressure instrumentation on
    owned RAM. The 5-round lifecycle phase now reports useful WRITE wall/p99,
    total foreground-GC wall/fraction, victim-choice wall/calls and exact

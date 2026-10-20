@@ -1214,7 +1214,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("expected_parallel=0", pair)
         self.assertIn("parallel_reads_enabled=$expected_parallel", pair)
         self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
-        self.assertIn('for guard in "${directional_modes[@]}"', loaded)
+        self.assertIn('for guard in "${confirmation_modes[@]}"', loaded)
         self.assertIn("START_BURST_GUARD_AB=", loaded)
         self.assertIn("PASS_BURST_GUARD_AB=", loaded)
         self.assertIn("--guard-inflight-zero-shrink", pair)
@@ -1230,7 +1230,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("def parse_parallel_read_ab", runner)
         self.assertNotIn("PASS_PARALLEL_READ_DIRECTIONAL_CONTROL", runner)
         self.assertIn("def parse_burst_guard_ab", runner)
-        self.assertIn("PASS_BURST_GUARD_DIRECTIONAL_CONTROL", runner)
+        self.assertIn("PASS_BURST_GUARD_AB_CONFIRMATION", runner)
         self.assertIn("def parse_read_coalesce_ab", runner)
         self.assertIn("PASS_READ_COALESCE_AB_CONFIRMATION", runner)
         self.assertNotIn("def parse_sd_read_grouping_ab", runner)
@@ -1282,6 +1282,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("DEFINE_STATIC_CALL", dispatch)
         self.assertIn("static_call_update", dispatch)
         self.assertIn("kernel_fpu_begin()", dispatch)
+        self.assertNotIn("swapz_predictor_score_call", dispatch)
+        self.assertIn("return swapz_predict_delta64_sample_score_scalar(input);",
+                      dispatch)
         self.assertIn("kernel_fpu_end()", dispatch)
         self.assertIn("X86_FEATURE_AVX2", dispatch)
         self.assertIn("XFEATURE_MASK_YMM", dispatch)
@@ -1293,11 +1296,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("__builtin_cpu_supports(\"avx2\")", dispatch)
 
         self.assertIn("__attribute__((vector_size(16)))", sse2)
-        self.assertIn("delta64.u64 = value.u64 - previous.u64", sse2)
         self.assertIn("__attribute__((vector_size(32)))", avx2)
-        self.assertIn("delta64.u64 = value.u64 - previous.u64", avx2)
+        self.assertIn("vpslldq", avx2)
+        self.assertIn("vpermq", avx2)
         self.assertIn("Advanced SIMD/NEON", neon)
         self.assertIn("__attribute__((vector_size(16)))", neon)
+        for retired_score in (
+                "swapz_predict_delta64_sample_score_sse2",
+                "swapz_predict_delta64_sample_score_avx2",
+                "swapz_predict_delta64_sample_score_neon"):
+            self.assertNotIn(retired_score, internal)
+            self.assertNotIn(retired_score, sse2 + avx2 + neon)
 
         self.assertIn("predictor.o", kbuild)
         self.assertIn("predictor-sse2.o predictor-avx2.o", kbuild)
@@ -1311,7 +1320,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PREDICTOR_TRANSFORM_NAMES = (\"delta64\",)", runner)
         self.assertIn("PREDICTOR_BACKENDS", runner)
         self.assertIn("swapz_predictor_init()", qualification)
-        self.assertIn("swapz_predictor_backend_name()", qualification)
+        self.assertIn("swapz_predictor_transform_backend_name()", qualification)
+        self.assertIn("swapz_predictor_inverse_backend_name()", qualification)
         self.assertIn("swapz_predict_delta64_scalar(page, scalar_transform_page)",
                       qualification)
         self.assertIn("swapz_predict_delta64_sample_score_scalar(page)",
@@ -1321,6 +1331,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("scalar_ns_per_page", qualification)
         self.assertIn("scalar_transform_ns_per_page", qualification)
         self.assertIn("scalar_inverse_ns_per_page", qualification)
+        self.assertIn("backend_benchmarks", qualification)
+        self.assertIn("routed_cpu_ns_per_page", qualification)
+        self.assertIn("ns_per_saved_block", qualification)
+        self.assertIn("TRANSFORM_BENCH_REPEATS 64U", qualification)
         self.assertIn("-msse2 -c $(KERNEL)/predictor-sse2.c", suites)
         self.assertIn("-mavx2 -c $(KERNEL)/predictor-avx2.c", suites)
         rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
@@ -1553,6 +1567,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->pack_close_burst_overshoot++", flush)
         sample = body("swapz_sample_pack_tail_locked")
         self.assertIn("READ_ONCE(ctx->inflight_write.active)", sample)
+        self.assertIn("!completion_done(&ctx->inflight_write.lower_done)", sample)
+        self.assertLess(sample.index("if (!tail && inflight)"),
+                        sample.index("ctx->pack_tail_samples++"))
         self.assertIn("ctx->pack_tail_samples++", sample)
         for field in ("pack_tail_zero_inflight", "pack_tail_zero_idle",
                       "pack_tail_one_inflight", "pack_tail_one_idle",
@@ -2005,6 +2022,13 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("ordered_worker_busy", DM)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 1)", ordered)
         self.assertIn("atomic_set(&ctx->preparation_tail_credit, 0)", ordered)
+        parallel_read = body("swapz_try_parallel_read_batch")
+        self.assertNotIn("atomic_set(&ctx->preparation_tail_credit, 1)",
+                         parallel_read)
+        nonwrite_start = ordered.index("} else if (ctx->async_prepare)")
+        nonwrite_end = ordered.index("} else {", nonwrite_start)
+        self.assertNotIn("queue_work(ctx->preparation_workqueue",
+                         ordered[nonwrite_start:nonwrite_end])
         self.assertIn("bool inline_preparation = false", ordered)
         self.assertIn("inline_preparation = true", ordered)
         self.assertIn("!ctx->batch_count", ordered)
@@ -2055,6 +2079,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("prep_lower_write_overlap_ns=%llu prep_wave_kicks=%llu",
                       status)
         self.assertIn("ctx->preparation_lz4_lower_write_overlap_ns +=", producer)
+        flush = body("swapz_flush_window")
+        self.assertIn("!ctx->retained_window_read_bypasses", flush)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))

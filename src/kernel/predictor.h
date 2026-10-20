@@ -16,17 +16,12 @@
 #error "swapz delta64 predictor requires an exact 64-bit unsigned long long"
 #endif
 
-/*
- * Select the best compiled backend once. In-kernel calls use static_call()
- * patching; native qualification uses the same API with one initialized
- * function table. The scalar implementation is always available as fallback.
- */
 int swapz_predictor_init(void);
-const char *swapz_predictor_backend_name(void);
+const char *swapz_predictor_transform_backend_name(void);
+const char *swapz_predictor_inverse_backend_name(void);
 
 swapz_u32 swapz_predict_delta64_sample_score(const swapz_u8 *input);
-int swapz_predict_should_try_delta64(const swapz_u8 *input,
-				     swapz_u32 threshold);
+int swapz_predict_should_try_delta64(const swapz_u8 *input, swapz_u32 threshold);
 swapz_u32 swapz_predict_delta64(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64(const swapz_u8 *input, swapz_u8 *output);
 

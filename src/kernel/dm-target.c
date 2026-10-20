@@ -2170,7 +2170,8 @@ static int swapz_flush_window(struct swapz_dm *ctx)
 	 * the remainder; never split a good window merely to manufacture overlap.
 	 */
 	if (ctx->async_prepare && READ_ONCE(ctx->accepting) && count > 1U &&
-	    !needs_fua && ctx->engine.bulk_enabled &&
+	    !needs_fua && !ctx->retained_window_read_bypasses &&
+	    ctx->engine.bulk_enabled &&
 	    !ctx->engine.verify_after_write &&
 	    (close_reason == SWAPZ_CLOSE_FULL ||
 	     close_reason == SWAPZ_CLOSE_DUPLICATE ||
@@ -2583,7 +2584,14 @@ static void swapz_sample_pack_tail_locked(struct swapz_dm *ctx,
 	 * actually declaring an empty post-PACK_READY tail before its detached
 	 * lower write and upper completions have finished.
 	 */
-	inflight = READ_ONCE(ctx->inflight_write.active);
+	inflight = READ_ONCE(ctx->inflight_write.active) &&
+		!completion_done(&ctx->inflight_write.lower_done);
+	/*
+	 * A zero tail while detached K=1 is still running is premature. Keep the
+	 * PACK_READY sample pending; completion requeues the ordered worker.
+	 */
+	if (!tail && inflight)
+		return;
 	ctx->pack_tail_samples++;
 	if (!tail) {
 		if (inflight) {
@@ -3434,18 +3442,8 @@ static bool swapz_try_parallel_read_batch(struct swapz_dm *ctx,
 		}
 	}
 	ctx->worker_has_immediate_followup = !list_empty(local);
-	if (ctx->async_prepare) {
-		unsigned long flags;
-
-		spin_lock_irqsave(&ctx->queue_lock, flags);
-		atomic_set(&ctx->preparation_tail_credit, 1);
-		if (!list_empty(&ctx->preparation_incoming) &&
-		    (atomic_read(&ctx->lower_write_active) ||
-		     ctx->preparation_queued >= SWAPZ_PREPARATION_TAIL_WAKE_MIN))
-			queue_work(ctx->preparation_workqueue,
-				   &ctx->preparation_worker);
-		spin_unlock_irqrestore(&ctx->queue_lock, flags);
-	}
+	if (ctx->async_prepare)
+		atomic_set(&ctx->preparation_tail_credit, 0);
 
 	retained_bypass = ctx->batch_count && ctx->retain_ms;
 	read_start_ns = ktime_get_ns();
@@ -3859,20 +3857,8 @@ static void swapz_worker(struct work_struct *work)
 								       ktime_get_ns());
 				}
 			} else if (ctx->async_prepare) {
-				/*
-				 * A READ/barrier can also provide real ordered service time.
-				 * Permit one future WRITE preparation during that BIO, but never
-				 * let the producer chain through the rest of the FIFO.
-				 */
-				spin_lock_irqsave(&ctx->queue_lock, flags);
-				atomic_set(&ctx->preparation_tail_credit, 1);
-				if (!list_empty(&ctx->preparation_incoming) &&
-				    (atomic_read(&ctx->lower_write_active) ||
-				     ctx->preparation_queued >=
-					SWAPZ_PREPARATION_TAIL_WAKE_MIN))
-					queue_work(ctx->preparation_workqueue,
-						   &ctx->preparation_worker);
-				spin_unlock_irqrestore(&ctx->queue_lock, flags);
+				/* READs/barriers revoke idle WRITE-wave credit. */
+				atomic_set(&ctx->preparation_tail_credit, 0);
 			} else {
 				atomic_set(&ctx->preparation_tail_credit, 0);
 			}

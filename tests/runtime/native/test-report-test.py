@@ -42,6 +42,9 @@ def predictor_evidence():
             "routed_baseline_extents": 100,
             "routed_candidate_extents": 85,
             "routed_extents_saved": 15,
+            "routed_cpu_ns_total": 2500000,
+            "routed_cpu_ns_per_page": 4340,
+            "ns_per_saved_block": 71428,
             "negative_profiles": profiles,
         })
     transforms = []
@@ -58,6 +61,8 @@ def predictor_evidence():
             "baseline_extents": 100,
             "candidate_extents": 80 + index,
             "planner_extents_saved": 20 - index,
+            "transform_backend": "avx2",
+            "inverse_backend": "sse2",
             "transform_ns_per_page": 1000 + index * 100,
             "inverse_ns_per_page": 900 + index * 100,
             "scalar_transform_ns_per_page": 1400 + index * 100,
@@ -70,7 +75,7 @@ def predictor_evidence():
         "structured_pages": 320,
         "classifier": {
             "candidate": "delta64",
-            "backend": "avx2",
+            "backend": "scalar",
             "sample_pairs": 32,
             "stage1_pairs": 8,
             "stage1_min_score": 2,
@@ -81,6 +86,15 @@ def predictor_evidence():
             "ns_per_page": 55,
             "scalar_ns_per_page": 70,
         },
+        "backend_benchmarks": [
+            {"name": "scalar", "transform_ns_per_page": 700,
+             "inverse_ns_per_page": 650},
+            {"name": "sse2", "transform_ns_per_page": 430,
+             "inverse_ns_per_page": 550},
+            {"name": "avx2", "transform_ns_per_page": 300,
+             "inverse_ns_per_page": 600},
+        ],
+        "io_model_block_ns": {"sd_emulated": 390625, "ssd_emulated": 48828},
         "thresholds": thresholds,
         "transforms": transforms,
     }
@@ -484,7 +498,7 @@ def synthetic_log():
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
     spec = runner.MODEL_SPECS["ssd_emulated"]
-    for index, enabled in enumerate(runner.DIRECTIONAL_SEQUENCE):
+    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_BURST_GUARD_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
@@ -720,17 +734,17 @@ class ReportContract(unittest.TestCase):
 
         guard = runner.parse_burst_guard_ab(synthetic_log())
         self.assertEqual([row["guard"] for row in guard],
-                         list(runner.DIRECTIONAL_SEQUENCE))
+                         list(runner.CONFIRMATION_SEQUENCE))
         guard_diag = runner.burst_guard_ab_verdict(guard)
         self.assertEqual(guard_diag["overall"],
-                         "PASS_BURST_GUARD_DIRECTIONAL_CONTROL")
-        self.assertEqual(guard_diag["observations_per_mode"], 1)
+                         "PASS_BURST_GUARD_AB_CONFIRMATION")
+        self.assertEqual(guard_diag["matched_pairs"], 5)
         self.assertGreater(
             guard_diag["modes"]["1"]["burst_shrink_inflight_zero_skips"], 0)
         self.assertEqual(
             guard_diag["modes"]["1"]["burst_shrink_after_inflight_zero"], 0)
         self.assertGreater(
-            guard_diag["directional"]["guard_skip_delta"], 0)
+            guard_diag["paired"]["guard_skip_delta"]["mean"], 0)
 
         sd_coalesce = runner.parse_sd_read_coalesce_ab(synthetic_log())
         self.assertEqual([row["read_coalesce"] for row in sd_coalesce],
@@ -989,8 +1003,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Sampled delta64 classifier", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)
         self.assertIn("delta64", rendered)
-        self.assertIn("avx2/scalar", rendered)
-        self.assertIn("Delta64 backend/scalar timing", rendered)
+        self.assertIn("classifier=scalar", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
         self.assertIn("Lower queue", rendered)
@@ -1045,7 +1058,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("deferred C age <=250/500/1000/>", rendered)
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)
-        self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — directional control", rendered)
+        self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — five matched rounds", rendered)
+        self.assertIn("Routed delta64 CPU economics", rendered)
+        self.assertIn("Delta64 selected backends", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)
         self.assertIn("Lifecycle", rendered)

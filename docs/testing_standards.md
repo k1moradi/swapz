@@ -111,11 +111,13 @@ remains on hold.
   stays zero and defensive skip-other stays zero. Eligibility must use shared
   cache metadata without private-slot memcpy, and source contracts must prove
   successful upper BIO completion precedes shared LRU absorption.
-- **ID64 one-shot in-flight-zero shrink guard:** promotion is complete. Run one
-  directional SSD_EMULATED mixed guard-off/on control with
-  `async_prepare=1` in both arms. Guard-off must have zero guarded skips;
-  guard-on must have positive guarded skips and zero actual
-  `burst_shrink_after_inflight_zero`. Do not report a 95% CI from one pair.
+- **ID64 one-shot in-flight-zero shrink guard:** after completion-aware
+  post-PACK tail sampling, run five counterbalanced SSD_EMULATED mixed
+  guard-off/on pairs with `async_prepare=1` in both arms. Report paired 95%
+  CIs for useful WRITE throughput, lower WRITE requests, read/write p99, burst
+  closes, overshoot and shrink counters. Guard-off must never execute a guarded
+  skip; guard-on must never perform an in-flight-zero shrink. Zero guard-on
+  skips are valid evidence that the repaired sampling path made ID64 dormant.
 - **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
   must now return before slot preparation/priming; no standalone same-extent
   slot execution remains. Fast/serial ID63 retain five-pair confirmation.
@@ -128,14 +130,19 @@ remains on hold.
   SHAKE entropy/mixed/medium plus generated zero/repeat pages are negative
   controls; deterministic pointer/page-table/integer/float/struct and
   independently based 512-byte regions are positive controls. Delta64 is the
-  sole maintained predictor. Qualification initializes the selected
-  scalar/SSE2/AVX2/NEON backend, compares every classifier score and transformed
-  page byte-for-byte with scalar C, and verifies exact inverse reconstruction.
+  sole maintained predictor. The classifier is always scalar C. Qualification
+  compares scalar/SSE2/AVX2 (or scalar/NEON) full-page transform and inverse
+  implementations byte-for-byte, batch-times them independently on the same
+  host, and verifies exact inverse reconstruction.
   The rescue signpost ignores zero residuals, aborts after the 8-pair first
   stage below score two, and extends passing pages to 32 strided pairs.
   Classifier ns/page uses repeated batched sweeps. Every threshold reports
-  per-negative-profile false calls plus classifier-routed production-planner
-  block/extent savings. Source contracts prove static-call kernel dispatch,
+  per-negative-profile false calls, classifier-routed planner block/extent
+  savings, routed extra CPU ns/corpus-page and ns/saved-block. CPU accounting
+  charges every eligible page one classifier cost and every routed call one
+  selected-transform plus second-LZ4 cost; compare against 390625 ns per 4KiB
+  for SD_EMULATED and 48828 ns for SSD_EMULATED. Source contracts prove
+  static-call kernel dispatch,
   x86 AVX2 CPU+YMM-state gating, SSE2 compatibility fallback, arm64 kernel-mode
   NEON gating and isolated FPU compiler flags. On x86_64 the rootless build must
   also disassemble the isolated native objects and prove SSE2 `psubq/paddq` and

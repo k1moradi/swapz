@@ -598,6 +598,12 @@ Kernel predictor implementation locals must not use identifiers that collide
 with Linux context macros such as `current`; use explicit value/previous names.
 The retained 64-byte cacheline constant is corpus geometry only, not a retired
 predictor model.
+
+The sparse 8->32 classifier is scalar-only and must never enter kernel FPU/SIMD
+state. Full-page transform and inverse dispatch are separate. On AVX2 x86_64
+the forward transform may use AVX2 while inverse remains SSE2 until same-host
+batched evidence proves the wider inverse faster. Qualification batch-times
+scalar/SSE2/AVX2 (or scalar/NEON) independently.
 Thresholds are evidence, never kernel policy before measurement.
 
 Delta64 must round-trip exactly, and every selected hardware backend must match
@@ -847,6 +853,11 @@ published or aborted.
 
 
 ### K=1 ping-pong write pipeline
+
+READs and barriers never grant idle preparation tail credit. A detached K=1
+PACK_READY close must not consume an empty tail sample while its lower WRITE is
+still incomplete; keep that sample pending until ordered finalization. A window
+that recorded a read bypass is not eligible for asynchronous K=1 detach.
 
 Idle asynchronous preparation must be self-gating. With no lower WRITE active,
 a tail-credit workqueue wake requires at least four unclaimed preparation

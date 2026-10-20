@@ -106,13 +106,10 @@ request-efficiency mechanisms. The owner run must continue to report paired
 95% CIs for useful read throughput, p99, lower bytes and lower requests, with
 zero `parallel_read_coalesce_extra_blocks`.
 
-ID64 is now a single directional fast mixed regression control. Both arms keep
-`async_prepare=1` and vary only `guard_inflight_zero_shrink=0/1`.
-Guard-off must execute zero guarded skips; guard-on must execute at least one
-guarded skip and zero actual `burst_shrink_after_inflight_zero` events.
-The report records the direct off/on deltas but no longer manufactures a
-confidence interval from one pair; the historical five-pair result above is
-the promotion evidence.
+ID64 returns to five matched fast-mixed guard-off/on rounds after the
+completion-aware tail-sample repair. This is a final keep/retire test: if the
+repaired path removes in-flight-zero shrink observations, zero guard-on skips
+are valid evidence that the guard is now redundant. Report paired 95% CIs.
 
 ID65 and ID66 are owner-qualified at source
 `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
@@ -217,13 +214,13 @@ ID67a.4 adds explicit SIMD before the next owner run: SSE2 for old x86_64,
 AVX2 only when CPU capability and YMM xstate permit it, NEON for arm64
 kernel-mode FPSIMD, and portable C otherwise. Kernel call sites are static-call
 patched once at module init and SIMD code is isolated under kernel FPU build/
-state rules. Native timing identifies the selected backend and now records a same-host
-portable-scalar baseline for classifier, forward transform and inverse. Dispatch
-must not be changed from cross-machine timing comparisons: the owner machine's
-SSE2 result is compared directly with scalar on that same CPU. Native timing
-does not include kernel_fpu_begin/end overhead; that transition cost must be
-measured if ID67b enters the process-context write path. No SWZ3 flag is
-promoted by this change.
+state rules. The owner SSE2 machine proved the sparse classifier regresses under vector
+packing (231 ns versus 211 ns scalar), while full-page forward/inverse improve
+(429/550 ns versus 774/767 ns scalar). The classifier is therefore scalar-only.
+Transform and inverse dispatch independently. Qualification batch-times all
+available same-host backends and reports routed CPU ns/page and ns/saved-block.
+Native timing still excludes kernel_fpu_begin/end overhead, so ID67b remains
+gated. No SWZ3 flag is promoted.
 
 ## Physical media
 
@@ -750,3 +747,12 @@ the current O(segment_count) selection over incrementally maintained scores,
 and the unchanged relocation ownership scan over logical maps. Seven repeats
 are reduced to the median. These timings quantify metadata CPU scaling only;
 they do not model lower-device I/O or authorize a reverse index.
+
+### Completion-aware mixed async candidate
+
+Owner source f476ec7d4ff2 showed fast mixed async issuing +81.6 lower WRITE
+requests with no confirmed throughput gain while sampling 605.2 empty
+post-PACK tails during detached K=1 service. The candidate removes READ/barrier
+tail credits, defers an empty PACK tail sample until lower completion, and
+keeps read-interrupted windows synchronous. Pure write QD8/QD32 remains
+eligible for K=1 detach. No new status fields are added.

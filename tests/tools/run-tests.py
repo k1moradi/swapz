@@ -230,6 +230,9 @@ PREDICTOR_TRANSFORM_FIELDS = (
     "transform_ns_per_page", "inverse_ns_per_page",
     "scalar_transform_ns_per_page", "scalar_inverse_ns_per_page",
     "second_lz4_ns_per_page")
+PREDICTOR_BACKEND_TIMING_FIELDS = ("transform_ns_per_page", "inverse_ns_per_page")
+PREDICTOR_ROUTE_CPU_FIELDS = (
+    "routed_cpu_ns_total", "routed_cpu_ns_per_page", "ns_per_saved_block")
 
 
 def parse_predictor_evidence(output):
@@ -257,7 +260,7 @@ def parse_predictor_evidence(output):
     classifier = record.get("classifier")
     if not isinstance(classifier, dict) or \
             classifier.get("candidate") != "delta64" or \
-            classifier.get("backend") not in PREDICTOR_BACKENDS or \
+            classifier.get("backend") != "scalar" or \
             classifier.get("sample_pairs") != 32 or \
             classifier.get("stage1_pairs") != 8 or \
             classifier.get("stage1_min_score") != 2 or \
@@ -275,6 +278,22 @@ def parse_predictor_evidence(output):
             classifier["scalar_ns_per_page"] < 0:
         return None
 
+    backend_rows = record.get("backend_benchmarks")
+    if not isinstance(backend_rows, list) or not backend_rows or \
+            backend_rows[0].get("name") != "scalar" or \
+            any(not isinstance(row, dict) or
+                row.get("name") not in PREDICTOR_BACKENDS or
+                any(type(row.get(field)) is not int or row[field] < 0
+                    for field in PREDICTOR_BACKEND_TIMING_FIELDS)
+                for row in backend_rows) or \
+            len({row["name"] for row in backend_rows}) != len(backend_rows):
+        return None
+    io_model_block_ns = record.get("io_model_block_ns")
+    if not isinstance(io_model_block_ns, dict) or \
+            io_model_block_ns.get("sd_emulated") != 390625 or \
+            io_model_block_ns.get("ssd_emulated") != 48828:
+        return None
+
     threshold_rows = record.get("thresholds")
     if not isinstance(threshold_rows, list) or \
             [row.get("threshold") if isinstance(row, dict) else None
@@ -287,7 +306,9 @@ def parse_predictor_evidence(output):
         "routed_baseline_extents", "routed_candidate_extents")
     for row in threshold_rows:
         if any(type(row.get(field)) is not int or row[field] < 0
-               for field in threshold_fields):
+               for field in threshold_fields) or \
+                any(type(row.get(field)) is not int or row[field] < 0
+                    for field in PREDICTOR_ROUTE_CPU_FIELDS):
             return None
         if row["negative_calls"] > row["negative_eligible"] or \
                 row["negative_useful"] > row["negative_calls"] or \
@@ -341,7 +362,9 @@ def parse_predictor_evidence(output):
                     value < 0:
                 return None
         if row["baseline_blocks"] <= 0 or row["candidate_blocks"] <= 0 or \
-                row["baseline_extents"] <= 0 or row["candidate_extents"] <= 0:
+                row["baseline_extents"] <= 0 or row["candidate_extents"] <= 0 or \
+                row.get("transform_backend") not in PREDICTOR_BACKENDS or \
+                row.get("inverse_backend") not in PREDICTOR_BACKENDS:
             return None
         if row["planner_blocks_saved"] != (
                 row["baseline_blocks"] - row["candidate_blocks"]) or \
@@ -353,6 +376,8 @@ def parse_predictor_evidence(output):
         "negative_pages": record["negative_pages"],
         "structured_pages": record["structured_pages"],
         "classifier": classifier,
+        "backend_benchmarks": backend_rows,
+        "io_model_block_ns": io_model_block_ns,
         "thresholds": threshold_rows,
         "transforms": transform_rows,
     }
@@ -916,7 +941,7 @@ def run_stage(title, command, result, *, parse_bench=False):
                        sd_coalesce_diagnostic.get("overall") !=
                        "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
                        burst_guard_diagnostic.get("overall") !=
-                       "PASS_BURST_GUARD_DIRECTIONAL_CONTROL"))
+                       "PASS_BURST_GUARD_AB_CONFIRMATION"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -1604,43 +1629,44 @@ def parse_burst_guard_ab(output):
 
 
 def burst_guard_ab_verdict(sessions):
-    """Validate one directional ID64 control after owner qualification."""
-    if len(sessions) != len(DIRECTIONAL_SEQUENCE) or \
-            [row.get("guard") for row in sessions] != list(DIRECTIONAL_SEQUENCE):
+    """Validate five counterbalanced ID64 rounds after tail-sample repair."""
+    try:
+        pairs = matched_binary_pairs(sessions, "guard")
+    except ValueError:
         return {"overall": "INCOMPLETE",
-                "reason": "ID64 directional guard-off/on observations required"}
+                "reason": "ID64 five matched guard-off/on rounds required"}
     expected = MODEL_SPECS["ssd_emulated"]
     for index, row in enumerate(sessions):
         if row.get("status") != "PASS" or row.get("order") != (
                 "swapz-first" if index % 2 else "off-first"):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 directional order/status mismatch"}
+                    "reason": "ID64 matched order/status mismatch"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(model.get(key) != expected[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 directional device model mismatch"}
+                    "reason": "ID64 matched device model mismatch"}
         arm = row.get("swapz")
         if not isinstance(arm, dict) or not re.fullmatch(
                 r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 directional source missing"}
+                    "reason": "ID64 matched source missing"}
         if any(not isinstance(arm.get(key), (int, float)) or arm[key] <= 0
                for key in ("logical_write_mbps", "logical_write_bytes",
                            "lower_write_bytes", "lower_write_requests",
                            "read_p99_ms", "write_p99_ms")):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 directional mixed metrics missing"}
+                    "reason": "ID64 matched mixed metrics missing"}
         kernel = arm.get("kernel_write_path")
         if not isinstance(kernel, dict) or any(
                 type(kernel.get(name)) is not int or kernel[name] < 0
                 for name in KERNEL_WRITE_FIELDS) or timed_window_error(kernel):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 directional C telemetry missing"}
+                    "reason": "ID64 matched C telemetry missing"}
         if not kernel["pipeline_async_runs"]:
             return {"overall": "INCOMPLETE",
-                    "reason": "ID64 directional control did not keep async preparation active"}
+                    "reason": "ID64 matched control did not keep async preparation active"}
         if not row["guard"] and kernel["burst_shrink_inflight_zero_skips"]:
             return {"overall": "INCOMPLETE",
                     "reason": "ID64-off arm executed guarded skips"}
@@ -1651,11 +1677,7 @@ def burst_guard_ab_verdict(sessions):
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
-                "reason": "ID64 directional provenance mismatch"}
-    if not sessions[1]["swapz"]["kernel_write_path"][
-            "burst_shrink_inflight_zero_skips"]:
-        return {"overall": "INCOMPLETE",
-                "reason": "ID64-on arm exercised no one-shot guarded shrink"}
+                "reason": "ID64 matched provenance mismatch"}
 
     fields = (
         "pack_close_burst_target", "pack_close_burst_admission",
@@ -1663,53 +1685,74 @@ def burst_guard_ab_verdict(sessions):
         "burst_shrink_inflight_zero_skips",
         "burst_shrink_after_inflight_zero")
     modes = {}
-    for row in sessions:
-        arm = row["swapz"]
-        modes[str(row["guard"])] = {
-            "logical_write_mbps": arm["logical_write_mbps"],
-            "lower_write_requests": arm["lower_write_requests"],
-            "read_p99_ms": arm["read_p99_ms"],
-            "write_p99_ms": arm["write_p99_ms"],
-            **{field: arm["kernel_write_path"][field] for field in fields},
+    for enabled in (0, 1):
+        arms = [row["swapz"] for row in sessions if row["guard"] == enabled]
+        modes[str(enabled)] = {
+            "logical_write_mbps":
+                statistics.mean(arm["logical_write_mbps"] for arm in arms),
+            "lower_write_requests":
+                statistics.mean(arm["lower_write_requests"] for arm in arms),
+            "read_p99_ms":
+                statistics.mean(arm["read_p99_ms"] for arm in arms),
+            "write_p99_ms":
+                statistics.mean(arm["write_p99_ms"] for arm in arms),
+            **{
+                field: statistics.mean(
+                    arm["kernel_write_path"][field] for arm in arms)
+                for field in fields
+            },
         }
 
-    off, on = sessions[0]["swapz"], sessions[1]["swapz"]
-    off_kernel, on_kernel = off["kernel_write_path"], on["kernel_write_path"]
-    directional = {
-        "throughput_change_fraction":
-            on["logical_write_mbps"] / off["logical_write_mbps"] - 1.0,
-        "lower_request_delta":
-            on["lower_write_requests"] - off["lower_write_requests"],
-        "read_p99_change_fraction":
-            on["read_p99_ms"] / off["read_p99_ms"] - 1.0,
-        "write_p99_change_fraction":
-            on["write_p99_ms"] / off["write_p99_ms"] - 1.0,
-        "burst_close_delta":
+    samples = {name: [] for name in (
+        "throughput_change_fraction", "lower_request_delta",
+        "read_p99_change_fraction", "write_p99_change_fraction",
+        "burst_close_delta", "overshoot_delta", "shrink_delta",
+        "after_i0_delta", "guard_skip_delta")}
+    for pair in pairs:
+        off, on = pair[0]["swapz"], pair[1]["swapz"]
+        off_kernel, on_kernel = off["kernel_write_path"], on["kernel_write_path"]
+        samples["throughput_change_fraction"].append(
+            on["logical_write_mbps"] / off["logical_write_mbps"] - 1.0)
+        samples["lower_request_delta"].append(
+            on["lower_write_requests"] - off["lower_write_requests"])
+        samples["read_p99_change_fraction"].append(
+            on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
+        samples["write_p99_change_fraction"].append(
+            on["write_p99_ms"] / off["write_p99_ms"] - 1.0)
+        samples["burst_close_delta"].append(
             on_kernel["pack_close_burst_target"] -
-            off_kernel["pack_close_burst_target"],
-        "overshoot_delta":
+            off_kernel["pack_close_burst_target"])
+        samples["overshoot_delta"].append(
             on_kernel["pack_close_burst_overshoot"] -
-            off_kernel["pack_close_burst_overshoot"],
-        "shrink_delta":
+            off_kernel["pack_close_burst_overshoot"])
+        samples["shrink_delta"].append(
             on_kernel["burst_target_shrinks"] -
-            off_kernel["burst_target_shrinks"],
-        "after_i0_delta":
+            off_kernel["burst_target_shrinks"])
+        samples["after_i0_delta"].append(
             on_kernel["burst_shrink_after_inflight_zero"] -
-            off_kernel["burst_shrink_after_inflight_zero"],
-        "guard_skip_delta":
+            off_kernel["burst_shrink_after_inflight_zero"])
+        samples["guard_skip_delta"].append(
             on_kernel["burst_shrink_inflight_zero_skips"] -
-            off_kernel["burst_shrink_inflight_zero_skips"],
-    }
+            off_kernel["burst_shrink_inflight_zero_skips"])
+
     return {
-        "overall": "PASS_BURST_GUARD_DIRECTIONAL_CONTROL",
-        "observations_per_mode": 1,
-        "confidence": "DIRECTIONAL_ONLY_OWNER_QUALIFIED_ID64_HISTORY_RETAINED",
+        "overall": "PASS_BURST_GUARD_AB_CONFIRMATION",
+        "matched_pairs": 5,
+        "confidence": "PAIRED_95PCT_CI_REPORTED",
         "device_model": expected,
         "modes": modes,
-        "directional": directional,
+        "paired": {field: paired_ci95(values)
+                   for field, values in samples.items()},
+        "mechanism_exercised": any(
+            row["guard"] and
+            row["swapz"]["kernel_write_path"]["burst_shrink_inflight_zero_skips"]
+            for row in sessions),
         "interpretation":
-            "ASYNC_FIXED_ON_ONE_SHOT_GUARD_DIRECTIONAL_REGRESSION_CONTROL",
+            "POST_TAIL_REPAIR_ID64_FINAL_KEEP_OR_RETIRE_CONFIRMATION",
     }
+
+
+def parse_write_saturation(output):
 
 
 def parse_write_saturation(output):
@@ -2390,16 +2433,17 @@ def print_bench(result):
             ) for row in predictor["transforms"]])
         transform = predictor["transforms"][0]
         classifier = predictor["classifier"]
-        print("  Delta64 backend/scalar timing — "
-              f"transform {transform['transform_ns_per_page']}/"
-              f"{transform['scalar_transform_ns_per_page']} ns; "
-              f"inverse {transform['inverse_ns_per_page']}/"
-              f"{transform['scalar_inverse_ns_per_page']} ns")
-        print("  Sampled delta64 classifier — "
-              f"{classifier['backend']}/scalar; "
+        print("  Delta64 selected backends — "
+              f"transform={transform['transform_backend']} "
+              f"inverse={transform['inverse_backend']}; classifier=scalar")
+        print_table(
+            ("backend", "xform ns", "inv ns"),
+            [(row["name"], row["transform_ns_per_page"],
+              row["inverse_ns_per_page"])
+             for row in predictor["backend_benchmarks"]])
+        print("  Sampled delta64 classifier — scalar; "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
-              f"{classifier['ns_per_page']}/{classifier['scalar_ns_per_page']} "
-              "ns/eligible page")
+              f"{classifier['ns_per_page']} ns/eligible page")
         print("  Stage-1 aborts: "
               f"{classifier['early_abort_pages']}/{classifier['eligible_pages']}; "
               f"timing: {classifier['benchmark_repeats']} batched repeats")
@@ -2418,6 +2462,17 @@ def print_bench(result):
             ("score", "blocks", "extents"),
             [(row["threshold"], f"{row['routed_blocks_saved']:+d}",
               f"{row['routed_extents_saved']:+d}")
+             for row in predictor["thresholds"]])
+        io_ns = predictor["io_model_block_ns"]
+        print("  Routed delta64 CPU economics")
+        print_table(
+            ("score", "cpu/page ns", "ns/saved block", "SD x", "SSD x"),
+            [(row["threshold"], row["routed_cpu_ns_per_page"],
+              row["ns_per_saved_block"],
+              f"{io_ns['sd_emulated'] / row['ns_per_saved_block']:.1f}"
+              if row["ns_per_saved_block"] else "-",
+              f"{io_ns['ssd_emulated'] / row['ns_per_saved_block']:.2f}"
+              if row["ns_per_saved_block"] else "-")
              for row in predictor["thresholds"]])
         print("  Negative classifier profile breakdown")
         print_table(
@@ -2924,8 +2979,8 @@ def print_bench(result):
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
 
     guard_ab = result["benchmarks"].get("burst_guard_ab", {})
-    if guard_ab.get("overall") == "PASS_BURST_GUARD_DIRECTIONAL_CONTROL":
-        print("\n  ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — directional control")
+    if guard_ab.get("overall") == "PASS_BURST_GUARD_AB_CONFIRMATION":
+        print("\n  ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — five matched rounds")
         rows = []
         for enabled in ("0", "1"):
             mode = guard_ab["modes"][enabled]
@@ -2940,7 +2995,7 @@ def print_bench(result):
             ))
         print_table(("guard", "W", "W req", "burst", "over", "shrink", "skip-I0"),
                     rows)
-        delta_rows = []
+        ci_rows = []
         for label, field, scale in (
                 ("W %", "throughput_change_fraction", 100.0),
                 ("W req", "lower_request_delta", 1.0),
@@ -2951,11 +3006,18 @@ def print_bench(result):
                 ("shrink", "shrink_delta", 1.0),
                 ("after-I0", "after_i0_delta", 1.0),
                 ("skip-I0", "guard_skip_delta", 1.0)):
-            value = guard_ab["directional"][field] * scale
-            delta_rows.append((label, f"{value:+.1f}"))
-        print_table(("metric", "guard1-guard0"), delta_rows)
+            interval = guard_ab["paired"][field]
+            ci_rows.append((
+                label,
+                f"{interval['mean'] * scale:+.1f}",
+                f"{interval['low'] * scale:+.1f}",
+                f"{interval['high'] * scale:+.1f}",
+            ))
+        print_table(("metric", "mean", "low", "high"), ci_rows)
+        print("  ID64 mechanism exercised: "
+              f"{'yes' if guard_ab['mechanism_exercised'] else 'no'}")
     else:
-        print("\n  ID64 burst-shrink guard directional control: NOT QUALIFIED "
+        print("\n  ID64 burst-shrink guard five-pair confirmation: NOT QUALIFIED "
               f"({guard_ab.get('reason', guard_ab.get('overall', 'NOT_RUN'))})")
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
