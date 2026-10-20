@@ -481,7 +481,7 @@ def synthetic_log():
         index = 0
         for qd in (1, 4, 8, 32):
             modes = (runner.CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd == 8
+                     if regime == "ssd_emulated" and qd in (8, 32)
                      else (0, 1))
             for mode in modes:
                 out.append(
@@ -706,14 +706,17 @@ class ReportContract(unittest.TestCase):
         self.assertNotIn("PRIVATE_DEVICE_MUST_NOT_ESCAPE", json.dumps(sessions))
         self.assertTrue(all("kernel_status" not in session for session in sessions))
 
-    def test_write_saturation_evidence_repeats_only_fast_qd8(self):
+    def test_write_saturation_evidence_repeats_fast_qd8_and_qd32(self):
         sessions = runner.parse_write_saturation(synthetic_log())
-        self.assertEqual(len(sessions), 24)
+        self.assertEqual(len(sessions), 32)
         verdict = runner.write_saturation_verdict(sessions)
         self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_EVIDENCE")
         self.assertEqual(verdict["fast_qd8_matched_pairs"], 5)
+        self.assertEqual(verdict["fast_qd32_matched_pairs"], 5)
         self.assertEqual(
             verdict["fast_qd8_paired"]["throughput_change_fraction"]["n"], 5)
+        self.assertEqual(
+            verdict["fast_qd32_paired"]["throughput_change_fraction"]["n"], 5)
         self.assertIn("PAIRED_95PCT_CI", verdict["confidence"])
         self.assertEqual(
             verdict["regimes"]["sd_emulated"][2]["retained_burst_target"], 4)
@@ -738,8 +741,11 @@ class ReportContract(unittest.TestCase):
                     if p["qd"] == 4]
         fast_qd8 = [p for p in verdict["regimes"]["ssd_emulated"]
                     if p["qd"] == 8]
+        fast_qd32 = [p for p in verdict["regimes"]["ssd_emulated"]
+                     if p["qd"] == 32]
         self.assertEqual([p["observations"] for p in fast_qd4], [1, 1])
         self.assertEqual([p["observations"] for p in fast_qd8], [5, 5])
+        self.assertEqual([p["observations"] for p in fast_qd32], [5, 5])
         broken = runner.parse_write_saturation(synthetic_log())
         broken[0]["arms"]["off"]["logical_read_bytes"] = 4096
         self.assertEqual(runner.write_saturation_verdict(broken)["overall"],
@@ -976,7 +982,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Persistent lane workers", rendered)
         self.assertNotIn("Fast QD4 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
-        self.assertIn("QD1/QD4/QD32 remain directional controls.", rendered)
+        self.assertIn("Fast QD32 A/S paired 95% CI", rendered)
+        self.assertIn("QD1/QD4 remain directional controls.", rendered)
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)

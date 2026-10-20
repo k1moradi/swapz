@@ -1692,7 +1692,7 @@ def parse_write_saturation(output):
 
 
 def write_saturation_verdict(sessions):
-    """Validate bounded QD controls plus five matched fast-QD8 rounds."""
+    """Validate bounded QD controls plus matched fast-QD8/QD32 rounds."""
     regimes = {}
     expected_total = 0
     for regime in MODEL_ORDER:
@@ -1700,7 +1700,8 @@ def write_saturation_verdict(sessions):
         expected_shape = []
         for qd in (1, 4, 8, 32):
             modes = (CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd == 8 else (0, 1))
+                     if regime == "ssd_emulated" and qd in (8, 32)
+                     else (0, 1))
             expected_shape.extend((qd, mode) for mode in modes)
         expected_total += len(expected_shape)
         shape = [(row.get("qd"), row.get("async_prepare")) for row in rows]
@@ -1785,7 +1786,7 @@ def write_saturation_verdict(sessions):
         regimes[regime] = rows
     if len(sessions) != expected_total:
         return {"overall": "INCOMPLETE",
-                "reason": "exactly 24 write-only evidence sessions required"}
+                "reason": "exactly 32 write-only evidence sessions required"}
     if len({row["source_sha"] for row in sessions}) != 1 or \
             len({row.get("fixture_sha256") for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
@@ -1861,41 +1862,46 @@ def write_saturation_verdict(sessions):
                 })
         summaries[regime] = points
 
-    fast_qd8 = [row for row in regimes["ssd_emulated"]
-                if row["qd"] == 8]
-    try:
-        qd8_pairs = matched_binary_pairs(fast_qd8, "async_prepare")
-    except ValueError as exc:
-        return {"overall": "INCOMPLETE",
-                "reason": "fast QD8: " + str(exc)}
-    throughput, requests, lower_bytes = [], [], []
-    for pair in qd8_pairs:
-        sync = pair[0]["arms"]["swapz"]
-        asynchronous = pair[1]["arms"]["swapz"]
-        throughput.append(
-            asynchronous["input_write_mbps"] /
-            sync["input_write_mbps"] - 1.0)
-        requests.append(
-            asynchronous["lower_write_requests"] /
-            sync["lower_write_requests"] - 1.0)
-        lower_bytes.append(
-            asynchronous["lower_write_bytes"] /
-            sync["lower_write_bytes"] - 1.0)
+    paired_results = {}
+    for qd in (8, 32):
+        fast_rows = [row for row in regimes["ssd_emulated"]
+                     if row["qd"] == qd]
+        try:
+            pairs = matched_binary_pairs(fast_rows, "async_prepare")
+        except ValueError as exc:
+            return {"overall": "INCOMPLETE",
+                    "reason": f"fast QD{qd}: {exc}"}
+        throughput, requests, lower_bytes = [], [], []
+        for pair in pairs:
+            sync = pair[0]["arms"]["swapz"]
+            asynchronous = pair[1]["arms"]["swapz"]
+            throughput.append(
+                asynchronous["input_write_mbps"] /
+                sync["input_write_mbps"] - 1.0)
+            requests.append(
+                asynchronous["lower_write_requests"] /
+                sync["lower_write_requests"] - 1.0)
+            lower_bytes.append(
+                asynchronous["lower_write_bytes"] /
+                sync["lower_write_bytes"] - 1.0)
+        paired_results[qd] = {
+            "throughput_change_fraction": paired_ci95(throughput),
+            "lower_requests_change_fraction": paired_ci95(requests),
+            "lower_bytes_change_fraction": paired_ci95(lower_bytes),
+        }
 
     return {
         "overall": "PASS_WRITE_SATURATION_EVIDENCE",
         "fast_qd8_matched_pairs": 5,
+        "fast_qd32_matched_pairs": 5,
         "replay_mode": "persistent-write",
         "confidence":
-            "FAST_QD8_PAIRED_95PCT_CI_OTHER_QDS_DIRECTIONAL",
-        "fast_qd8_paired": {
-            "throughput_change_fraction": paired_ci95(throughput),
-            "lower_requests_change_fraction": paired_ci95(requests),
-            "lower_bytes_change_fraction": paired_ci95(lower_bytes),
-        },
+            "FAST_QD8_QD32_PAIRED_95PCT_CI_QD1_QD4_DIRECTIONAL",
+        "fast_qd8_paired": paired_results[8],
+        "fast_qd32_paired": paired_results[32],
         "regimes": summaries,
         "interpretation":
-            "SYNTHETIC_RAM_SUSTAINED_QD8_CONFIRMATION_OTHER_QDS_DIRECTIONAL",
+            "SYNTHETIC_RAM_SUSTAINED_QD8_QD32_CONFIRMATION_QD1_QD4_DIRECTIONAL",
     }
 
 
@@ -2916,11 +2922,13 @@ def print_bench(result):
             print("  Async windows; close=P/D/I")
             print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
-        qd8_ci = saturation["fast_qd8_paired"]["throughput_change_fraction"]
-        print("  Fast QD8 A/S paired 95% CI: "
-              f"{qd8_ci['mean'] * 100:+.1f}% "
-              f"[{qd8_ci['low'] * 100:+.1f},{qd8_ci['high'] * 100:+.1f}]%")
-        print("  QD1/QD4/QD32 remain directional controls.")
+        for qd in (8, 32):
+            ci = saturation[f"fast_qd{qd}_paired"][
+                "throughput_change_fraction"]
+            print(f"  Fast QD{qd} A/S paired 95% CI: "
+                  f"{ci['mean'] * 100:+.1f}% "
+                  f"[{ci['low'] * 100:+.1f},{ci['high'] * 100:+.1f}]%")
+        print("  QD1/QD4 remain directional controls.")
     else:
         print("\n  Write-only saturation evidence: NOT QUALIFIED "
               f"({saturation.get('reason', saturation.get('overall', 'NOT_RUN'))})")

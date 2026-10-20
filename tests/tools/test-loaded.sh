@@ -182,13 +182,13 @@ for read_coalesce in "${confirmation_modes[@]}"; do
 done
 
 # Write-only sustained-QD controls stay one sync/async observation per point
-# except fast QD8, which keeps five adjacent counterbalanced rounds. Historical
-# wave-driver QD8 evidence is not reused as sustained-QD qualification.
+# except fast QD8 and QD32, which keep five adjacent counterbalanced rounds.
+# Historical wave-driver evidence is not reused as sustained-QD qualification.
 for regime in sd_emulated ssd_emulated; do
     printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
     index=0
     for qd in 1 4 8 32; do
-        if [[ $regime == ssd_emulated && $qd == 8 ]]; then
+        if [[ $regime == ssd_emulated && ( $qd == 8 || $qd == 32 ) ]]; then
             modes=("${confirmation_modes[@]}")
         else
             modes=(0 1)
@@ -221,5 +221,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 Kread sessions, and 24 write-only sessions completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, Kread, and fast QD8 carry five matched rounds with paired 95% CIs; QD4 is directional.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 Kread sessions, and 32 write-only sessions completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, Kread, and fast QD8/QD32 carry five matched rounds with paired 95% CIs; QD1/QD4 are directional.'

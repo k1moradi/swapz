@@ -23,7 +23,7 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The write-only sweep uses QD1/4/8/32, 0% reads and exact final verification with pre-created persistent lane workers. Warmup completes before a common measured start gate; during measurement each lane issues its next write directly after its prior completion, with no per-I/O Future/main-thread hop and no full-QD wave barrier. Lanes own disjoint logical-page stripes, so cross-lane completion order cannot change the final image. Fast QD8 receives ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4/QD32 remain directional controls.
+The write-only sweep uses QD1/4/8/32, 0% reads and exact final verification with pre-created persistent lane workers. Warmup completes before a common measured start gate; during measurement each lane issues its next write directly after its prior completion, with no per-I/O Future/main-thread hop and no full-QD wave barrier. Lanes own disjoint logical-page stripes, so cross-lane completion order cannot change the final image. Fast QD8 and QD32 each receive ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4 remain directional controls.
 
 ## Timed boundaries
 

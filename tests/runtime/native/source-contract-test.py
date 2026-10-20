@@ -142,10 +142,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn('"replay_mode": obj.get("replay_mode")', reporter)
         self.assertIn('arm.get("replay_mode") != "persistent-write"', reporter)
         self.assertIn("PASS_WRITE_SATURATION_EVIDENCE", reporter)
-        self.assertIn("FAST_QD8_PAIRED_95PCT_CI", reporter)
+        self.assertIn("FAST_QD8_QD32_PAIRED_95PCT_CI", reporter)
         self.assertNotIn("fast_qd4_paired", reporter)
         self.assertIn("fast_qd8_paired", reporter)
-        self.assertIn("$qd == 8", loaded)
+        self.assertIn("fast_qd32_paired", reporter)
+        self.assertIn("$qd == 8 || $qd == 32", loaded)
         self.assertNotIn("$qd == 4 || $qd == 8", loaded)
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
 

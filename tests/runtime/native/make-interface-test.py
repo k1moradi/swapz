@@ -532,7 +532,7 @@ class PublicMakeContract(unittest.TestCase):
                 index = 0
                 for qd in (1, 4, 8, 32):
                     modes = (confirmation
-                             if regime == "ssd_emulated" and qd == 8
+                             if regime == "ssd_emulated" and qd in (8, 32)
                              else (0, 1))
                     for mode in modes:
                         records.extend((
