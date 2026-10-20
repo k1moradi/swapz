@@ -60,6 +60,8 @@ def predictor_evidence():
             "planner_extents_saved": 20 - index,
             "transform_ns_per_page": 1000 + index * 100,
             "inverse_ns_per_page": 900 + index * 100,
+            "scalar_transform_ns_per_page": 1400 + index * 100,
+            "scalar_inverse_ns_per_page": 1300 + index * 100,
             "second_lz4_ns_per_page": 5000 + index * 100,
         })
     return {
@@ -77,6 +79,7 @@ def predictor_evidence():
             "benchmark_repeats": 256,
             "benchmark_calls": 81920,
             "ns_per_page": 55,
+            "scalar_ns_per_page": 70,
         },
         "thresholds": thresholds,
         "transforms": transforms,
@@ -986,7 +989,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Sampled delta64 classifier", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)
         self.assertIn("delta64", rendered)
-        self.assertIn("avx2 backend", rendered)
+        self.assertIn("avx2/scalar", rendered)
+        self.assertIn("Delta64 backend/scalar timing", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)
         self.assertIn("Lower queue", rendered)

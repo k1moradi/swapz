@@ -1318,8 +1318,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       qualification)
         self.assertIn("routed_blocks_saved", qualification)
         self.assertIn("benchmark_classifier", qualification)
+        self.assertIn("scalar_ns_per_page", qualification)
+        self.assertIn("scalar_transform_ns_per_page", qualification)
+        self.assertIn("scalar_inverse_ns_per_page", qualification)
         self.assertIn("-msse2 -c $(KERNEL)/predictor-sse2.c", suites)
         self.assertIn("-mavx2 -c $(KERNEL)/predictor-avx2.c", suites)
+        rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
+        self.assertIn("predictor-sse2.disasm", rootless)
+        self.assertIn("predictor-avx2.disasm", rootless)
+        self.assertNotIn("objdump -d build/tests/native/predictor-sse2.o |",
+                         rootless)
         self.assertIn("liblz4-dev", workflow)
 
         self.assertIn('#include "predictor.h"', DM)

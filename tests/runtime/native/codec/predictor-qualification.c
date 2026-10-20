@@ -45,6 +45,8 @@ struct page_evidence {
 struct transform_summary {
 	uint64_t transform_ns;
 	uint64_t inverse_ns;
+	uint64_t scalar_transform_ns;
+	uint64_t scalar_inverse_ns;
 	uint64_t second_lz4_ns;
 	uint64_t saved_payload_bytes;
 	uint64_t pages;
@@ -81,6 +83,7 @@ struct threshold_summary {
 
 struct classifier_summary {
 	uint64_t wall_ns;
+	uint64_t scalar_wall_ns;
 	uint64_t benchmark_calls;
 	swapz_u32 pages;
 	swapz_u32 early_abort_pages;
@@ -92,6 +95,7 @@ static volatile uint64_t classifier_benchmark_sink;
 static swapz_u8 transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 scalar_transform_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 recovered_page[SWAPZ_BLOCK_BYTES];
+static swapz_u8 scalar_recovered_page[SWAPZ_BLOCK_BYTES];
 static char compressed_page[SWAPZ_BLOCK_BYTES];
 static swapz_u8 planner_dummy[SWAPZ_BLOCK_BYTES];
 
@@ -319,7 +323,9 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 		start = now_ns();
 		transform->predict(page, transform_page);
 		summary[transform_index].transform_ns += now_ns() - start;
+		start = now_ns();
 		swapz_predict_delta64_scalar(page, scalar_transform_page);
+		summary[transform_index].scalar_transform_ns += now_ns() - start;
 		if (memcmp(transform_page, scalar_transform_page,
 			   SWAPZ_BLOCK_BYTES))
 			return -EUCLEAN;
@@ -328,6 +334,13 @@ static int evaluate_page(const swapz_u8 *page, int structured,
 		transform->unpredict(transform_page, recovered_page);
 		summary[transform_index].inverse_ns += now_ns() - start;
 		if (memcmp(page, recovered_page, SWAPZ_BLOCK_BYTES))
+			return -EUCLEAN;
+
+		start = now_ns();
+		swapz_unpredict_delta64_scalar(scalar_transform_page,
+					      scalar_recovered_page);
+		summary[transform_index].scalar_inverse_ns += now_ns() - start;
+		if (memcmp(page, scalar_recovered_page, SWAPZ_BLOCK_BYTES))
 			return -EUCLEAN;
 
 		start = now_ns();
@@ -508,7 +521,7 @@ static int benchmark_classifier(const struct page_evidence *rows,
 				swapz_u32 count,
 				struct classifier_summary *summary)
 {
-	uint64_t calls = 0, sink = 0;
+	uint64_t calls = 0, selected_sink = 0, scalar_sink = 0;
 	uint64_t start, end;
 	unsigned int repeat;
 	swapz_u32 index;
@@ -519,16 +532,28 @@ static int benchmark_classifier(const struct page_evidence *rows,
 	for (repeat = 0; repeat < CLASSIFIER_BENCH_REPEATS; ++repeat)
 		for (index = 0; index < count; ++index)
 			if (rows[index].classifier_ran) {
-				sink += swapz_predict_delta64_sample_score(
+				selected_sink += swapz_predict_delta64_sample_score(
 					evidence_pages[index]);
 				calls++;
 			}
 	end = now_ns();
-	classifier_benchmark_sink = sink;
 	if (!start || !end ||
 	    calls != (uint64_t)summary->pages * CLASSIFIER_BENCH_REPEATS)
 		return -EUCLEAN;
 	summary->wall_ns = end - start;
+
+	start = now_ns();
+	for (repeat = 0; repeat < CLASSIFIER_BENCH_REPEATS; ++repeat)
+		for (index = 0; index < count; ++index)
+			if (rows[index].classifier_ran)
+				scalar_sink +=
+					swapz_predict_delta64_sample_score_scalar(
+						evidence_pages[index]);
+	end = now_ns();
+	classifier_benchmark_sink = selected_sink + scalar_sink;
+	if (!start || !end || selected_sink != scalar_sink)
+		return -EUCLEAN;
+	summary->scalar_wall_ns = end - start;
 	summary->benchmark_calls = calls;
 	return 0;
 }
@@ -674,6 +699,10 @@ int main(int argc, char **argv)
 			total_summary[transform_index].transform_ns;
 		structured_summary[transform_index].inverse_ns =
 			total_summary[transform_index].inverse_ns;
+		structured_summary[transform_index].scalar_transform_ns =
+			total_summary[transform_index].scalar_transform_ns;
+		structured_summary[transform_index].scalar_inverse_ns =
+			total_summary[transform_index].scalar_inverse_ns;
 		structured_summary[transform_index].second_lz4_ns =
 			total_summary[transform_index].second_lz4_ns;
 		summarize_transform(evidence + structured_start,
@@ -718,7 +747,8 @@ int main(int argc, char **argv)
 	       "\"stage1_min_score\":%u,\"eligible_pages\":%u,"
 	       "\"early_abort_pages\":%u,\"benchmark_repeats\":%u,"
 	       "\"benchmark_calls\":%" PRIu64 ","
-	       "\"ns_per_page\":%" PRIu64 "},\"thresholds\":[",
+	       "\"ns_per_page\":%" PRIu64 ","
+	       "\"scalar_ns_per_page\":%" PRIu64 "},\"thresholds\":[",
 	       negative_count, count - structured_start,
 	       swapz_predictor_backend_name(),
 	       SWAPZ_PREDICTOR_SAMPLE_PAIRS, SWAPZ_PREDICTOR_STAGE1_PAIRS,
@@ -726,7 +756,10 @@ int main(int argc, char **argv)
 	       classifier_summary.early_abort_pages, CLASSIFIER_BENCH_REPEATS,
 	       classifier_summary.benchmark_calls,
 	       classifier_summary.benchmark_calls ?
-	       classifier_summary.wall_ns / classifier_summary.benchmark_calls : 0);
+	       classifier_summary.wall_ns / classifier_summary.benchmark_calls : 0,
+	       classifier_summary.benchmark_calls ?
+	       classifier_summary.scalar_wall_ns /
+		       classifier_summary.benchmark_calls : 0);
 	for (threshold_index = 0; threshold_index < THRESHOLD_COUNT;
 	     ++threshold_index) {
 		const struct threshold_summary *item =
@@ -789,6 +822,8 @@ int main(int argc, char **argv)
 		       "\"planner_extents_saved\":%ld,"
 		       "\"transform_ns_per_page\":%" PRIu64 ","
 		       "\"inverse_ns_per_page\":%" PRIu64 ","
+		       "\"scalar_transform_ns_per_page\":%" PRIu64 ","
+		       "\"scalar_inverse_ns_per_page\":%" PRIu64 ","
 		       "\"second_lz4_ns_per_page\":%" PRIu64 "}",
 		       transform_index ? "," : "", transforms[transform_index].name,
 		       item->adopted, item->raw_rescued, item->cliff_2024,
@@ -797,6 +832,8 @@ int main(int argc, char **argv)
 		       item->baseline_extents, item->candidate_extents, extent_saved,
 		       total_summary[transform_index].transform_ns / pages,
 		       total_summary[transform_index].inverse_ns / pages,
+		       total_summary[transform_index].scalar_transform_ns / pages,
+		       total_summary[transform_index].scalar_inverse_ns / pages,
 		       total_summary[transform_index].second_lz4_ns / pages);
 	}
 	printf("]}\n");

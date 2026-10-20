@@ -217,7 +217,10 @@ ID67a.4 adds explicit SIMD before the next owner run: SSE2 for old x86_64,
 AVX2 only when CPU capability and YMM xstate permit it, NEON for arm64
 kernel-mode FPSIMD, and portable C otherwise. Kernel call sites are static-call
 patched once at module init and SIMD code is isolated under kernel FPU build/
-state rules. Native timing identifies the selected backend, but native timing
+state rules. Native timing identifies the selected backend and now records a same-host
+portable-scalar baseline for classifier, forward transform and inverse. Dispatch
+must not be changed from cross-machine timing comparisons: the owner machine's
+SSE2 result is compared directly with scalar on that same CPU. Native timing
 does not include kernel_fpu_begin/end overhead; that transition cost must be
 measured if ID67b enters the process-context write path. No SWZ3 flag is
 promoted by this change.

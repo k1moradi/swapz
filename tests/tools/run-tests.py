@@ -227,7 +227,9 @@ PREDICTOR_TRANSFORM_FIELDS = (
     "adopted", "raw_rescued", "cliff_2024", "saved_payload_bytes",
     "baseline_blocks", "candidate_blocks", "planner_blocks_saved",
     "baseline_extents", "candidate_extents", "planner_extents_saved",
-    "transform_ns_per_page", "inverse_ns_per_page", "second_lz4_ns_per_page")
+    "transform_ns_per_page", "inverse_ns_per_page",
+    "scalar_transform_ns_per_page", "scalar_inverse_ns_per_page",
+    "second_lz4_ns_per_page")
 
 
 def parse_predictor_evidence(output):
@@ -268,7 +270,9 @@ def parse_predictor_evidence(output):
             classifier["benchmark_calls"] != \
             classifier["eligible_pages"] * classifier["benchmark_repeats"] or \
             type(classifier.get("ns_per_page")) is not int or \
-            classifier["ns_per_page"] < 0:
+            classifier["ns_per_page"] < 0 or \
+            type(classifier.get("scalar_ns_per_page")) is not int or \
+            classifier["scalar_ns_per_page"] < 0:
         return None
 
     threshold_rows = record.get("thresholds")
@@ -2384,11 +2388,18 @@ def print_bench(result):
                 row["inverse_ns_per_page"],
                 row["second_lz4_ns_per_page"],
             ) for row in predictor["transforms"]])
+        transform = predictor["transforms"][0]
         classifier = predictor["classifier"]
+        print("  Delta64 backend/scalar timing — "
+              f"transform {transform['transform_ns_per_page']}/"
+              f"{transform['scalar_transform_ns_per_page']} ns; "
+              f"inverse {transform['inverse_ns_per_page']}/"
+              f"{transform['scalar_inverse_ns_per_page']} ns")
         print("  Sampled delta64 classifier — "
-              f"{classifier['backend']} backend; "
+              f"{classifier['backend']}/scalar; "
               f"{classifier['stage1_pairs']} -> {classifier['sample_pairs']} pairs; "
-              f"{classifier['ns_per_page']} ns/eligible page")
+              f"{classifier['ns_per_page']}/{classifier['scalar_ns_per_page']} "
+              "ns/eligible page")
         print("  Stage-1 aborts: "
               f"{classifier['early_abort_pages']}/{classifier['eligible_pages']}; "
               f"timing: {classifier['benchmark_repeats']} batched repeats")
