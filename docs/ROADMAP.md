@@ -28,10 +28,7 @@ precheck temporarily decrements and exactly restores live refs before commit.
 The full owner run preserved loaded GC/TRIM, suspend/resume and fail-closed
 fault-injection evidence.
 
-ID64 remains qualified. Its current directional control again converted
-in-flight-zero shrink candidates into one-shot skips and reduced requests,
-burst closes and overshoot, but the historical five-pair result remains the
-statistical promotion evidence.
+ID64 is retired. Completion-aware zero-tail sampling removed the triggering condition; the latest five matched owner rounds observed zero after-I0 shrinks and zero guard skips.
 
 The prior fast write-only QD8 +8.1% paired result used the retired per-QD wave
 dispatcher. Keep it only as historical burst evidence; it no longer qualifies
@@ -119,7 +116,7 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **2 needs sustained-QD requalification** | The historical +9.7% fast QD8 result used the retired wave dispatcher. Keep the ownership machinery, but do not cite that throughput as sustained evidence. Re-run the corrected persistent-worker QD8 confirmation and collect five matched QD32 pairs before broader scheduling promotion; mixed remains separate. |
+| 37 | K=1 ping-pong WRITE pipeline | **4 shallow-detach candidate implemented / owner requalification pending** | Owner evidence proves deep sustained gains (+16.3% QD8, +34.6% QD32) but fast QD4 regresses -6.9% and fast mixed adds requests without throughput gain. Detach only when count>4 or confirmed preparation backlog exists; fast QD4/QD8/QD32 now use five matched pairs. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 current opportunity too small** | Fast mixed measures 29.6 ready windows / 87.1 records / 3.58 ms total K=1 completion wait. Keep passive counters; do not add K=2 authority state. |
 | 39 | Latency-first bounded parallel READ service | **5 refuted; helper removed from current source** | Owner evidence showed no standalone benefit. ID65 removes the `swapz-read` helper; the legacy `parallel_reads_enabled`/read-worker CPU status tokens remain zero for schema compatibility. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
@@ -146,7 +143,7 @@ changes.
 | 61 | Background/asynchronous GC instead of foreground collection stalls | **1 incremental victim accounting owner-qualified; background worker refuted** | The latest owner run reports choose-map=0 and 0.02 ms total victim-choice wall across 20 rotations, with total foreground-GC wall only 0.65% of useful-WRITE wall. Native 4GiB-equivalent selection is 0.014 ms versus 17.475 ms for the old map score scan; relocation remains a separate 4.607 ms full-map scan. Keep foreground GC and no per-page reverse index until loaded scaling proves relocation material. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
 | 63 | Physically adjacent distinct-extent READ coalescing | **4 fast-latency repair implemented / owner requalification pending** | Latest owner evidence keeps the request win but exposes fast p99: SSD_EMULATED seq req -20.0% CI [-24.4%,-15.5%] with p99 +9.5% CI [+1.7%,+17.4%]; serial seq req -41.1% and p99 -37.8%. Current source rejects from shared-cache metadata before private cache copies and absorbs shared LRU state after upper BIO completion. |
-| 64 | One-shot in-flight-zero burst-target shrink guard | **1 owner-qualified / keep** | Five matched fast mixed rounds eliminated after-I0 shrinks and reduced burst closes, overshoot and lower WRITE requests without a measured latency penalty. Keep enabled; retain only one directional regression control. |
+| 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
 | 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
@@ -215,8 +212,8 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
    preparation/priming, and retire standalone ID39/ID60 loaded controls.
 2. Owner-qualify ID67a.5 operation-specific SIMD and routed CPU economics
    before any ID67b SWZ3 metadata or write-path use.
-3. Re-run ID64 as five matched fast-mixed pairs after completion-aware tail
-   sampling; retire the guard if the repaired path makes it dormant.
+3. Owner-qualify the shallow K=1 detach gate with fast QD4/QD8/QD32 five-pair CIs and the existing fast mixed five-pair matrix. Confirm QD4 no longer regresses while QD8/QD32 preserve their established gains and mixed request inflation falls.
+4. Keep the report's analytical device-model limits explicit: configured MiB/s cap versus unmerged 4KiB latency ceiling and measured raw QD32.
 3. Owner-qualify the implemented ID61 foreground-GC pressure instrumentation on
    owned RAM. The 5-round lifecycle phase now reports useful WRITE wall/p99,
    total foreground-GC wall/fraction, victim-choice wall/calls and exact

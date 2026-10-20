@@ -207,25 +207,6 @@ static int test_retained_burst_target_adapts_from_finite_evidence(void)
 	CHECK(swapz_window_shrink_burst_target(4, 1) == 4);
 	return 0;
 }
-static int test_inflight_zero_shrink_guard_is_one_shot(void)
-{
-	/* Normal learning remains unchanged without the observation. */
-	CHECK(!swapz_window_guard_burst_target_shrink(1, 0));
-	CHECK(swapz_window_shrink_burst_target(32, 8) == 8);
-	/* The enabled guard suppresses exactly the candidate immediately
-	 * associated with the remembered in-flight zero-tail observation. */
-	CHECK(swapz_window_guard_burst_target_shrink(1, 1));
-	CHECK(swapz_window_shrink_burst_target(32, 8) == 8);
-	/* The diagnostic control can disable ID64 without changing shrink math. */
-	CHECK(!swapz_window_guard_burst_target_shrink(0, 1));
-	CHECK(swapz_window_shrink_burst_target(32, 8) == 8);
-	/* Production consumes the remembered flag after one guarded candidate;
-	 * a following deadline therefore adapts normally. */
-	CHECK(!swapz_window_guard_burst_target_shrink(1, 0));
-	CHECK(swapz_window_shrink_burst_target(32, 8) == 8);
-	return 0;
-}
-
 static int test_retained_burst_close_requires_geometry_or_sampled_tail(void)
 {
 	CHECK(!swapz_window_burst_close_ready(0, 0, 3, 4, 0));
@@ -411,7 +392,6 @@ int main(void)
 	CHECK(test_pack_ready_small_and_medium_exact_geometry() == 0); passed++;
 	CHECK(test_pack_ready_rejects_raw_and_unfittable() == 0); passed++;
 	CHECK(test_retained_burst_target_adapts_from_finite_evidence() == 0); passed++;
-	CHECK(test_inflight_zero_shrink_guard_is_one_shot() == 0); passed++;
 	CHECK(test_retained_burst_close_requires_geometry_or_sampled_tail() == 0); passed++;
 	CHECK(test_timer_cancel_only_for_enabled_retention() == 0); passed++;
 	CHECK(test_timer_arm_requires_retention_and_unqueued_timer() == 0); passed++;

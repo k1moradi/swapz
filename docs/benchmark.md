@@ -19,7 +19,7 @@ Mandatory loaded benchmarking uses newly owned RAM-backed `null_blk` only:
 - faster model: 80 MiB/s lower cap, 0.15 ms completion delay, blk-mq with one
   submit queue and `hw_queue_depth=64`.
 
-These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results. Every timed arm samples the positively identified lower device's block-layer READ/WRITE in-flight counters and reports sampled boundary depth, peak and time-weighted mean. swapz mixed arms also report K=1 immutable-run slot occupancy from async submission through ordered publication.
+These model latency/bandwidth behavior; they are not measurements of real SD cards or SSDs. Do not label them as physical-media results. The configured mbps value is a lower-device MiB/s cap, not a promise that unmerged 4KiB raw I/O reaches that rate. Reports therefore show the cap converted to decimal MB/s, the analytical 4KiB latency ceiling (4096 * hw_queue_depth / completion_nsec), their minimum, and measured raw sustained-QD32 throughput. On the slow profile the 1ms/depth-1 ceiling is 4.096 MB/s even though the bulk cap is 10 MiB/s. This table is analytical model attribution, not a bulk calibration measurement. Every timed arm samples the positively identified lower device's block-layer READ/WRITE in-flight counters and reports sampled boundary depth, peak and time-weighted mean. swapz mixed arms also report K=1 immutable-run slot occupancy from async submission through ordered publication.
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
@@ -32,7 +32,7 @@ threshold because that observation still includes the ordered head. Lower-WRITE
 overlap remains eligible at any nonzero preparation depth. This is a bounded
 policy experiment, not promotion until the same matrix is owner-qualified.
 
-The write-only sweep uses QD1/4/8/32, 0% reads and exact final verification with pre-created persistent lane workers. Warmup completes before a common measured start gate; during measurement each lane issues its next write directly after its prior completion, with no per-I/O Future/main-thread hop and no full-QD wave barrier. Lanes own disjoint logical-page stripes, so cross-lane completion order cannot change the final image. Fast QD8 and QD32 each receive ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1/QD4 remain directional controls.
+The write-only sweep uses QD1/4/8/32, 0% reads and exact final verification with pre-created persistent lane workers. Warmup completes before a common measured start gate; during measurement each lane issues its next write directly after its prior completion, with no per-I/O Future/main-thread hop and no full-QD wave barrier. Lanes own disjoint logical-page stripes, so cross-lane completion order cannot change the final image. Fast QD4, QD8 and QD32 each receive ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1 remain directional controls.
 
 ## Timed boundaries
 
@@ -73,14 +73,9 @@ Owner-qualified source `479a21a034b66ed6d8e9d05d151a771b2774a167`
 (report-only `9f1be6177a3eaa6d80b6a0649a539907bfbc487f`) passed all five
 stages on owned RAM.
 
-ID64 is confirmed as a mechanism and retained by default. In five matched
-SSD_EMULATED QD32 mixed rounds, guard-on changed mean shrink 11.2 -> 1.8,
-after-I0 8.4 -> 0, guarded skips 0 -> 8.4, burst closes 134.2 -> 40.0,
-overshoots 99.8 -> 27.4 and lower WRITE requests 993.4 -> 958.6. Useful write
-throughput changed +0.7%; write/read p99 changed +0.4%/+1.7%. The five-pair
-performance question is closed.
+ID64 is retired after completion-aware sampling eliminated the triggering condition. In the latest five matched owner rounds both after-I0 shrinks and guarded skips were zero, so keeping the branch would only preserve dead policy state. Compatibility status fields remain fixed at zero.
 
-The historical fast write-only QD8 five-pair result (23.00/20.99 MB/s,
+The historical fast write-only QD8 five-pair resultThe historical fast write-only QD8 five-pair result (23.00/20.99 MB/s,
 +9.7%, 95% CI [+1.4%,+18.0%]) used the retired per-QD wave dispatcher. It is
 retained only as burst evidence and does not qualify sustained-QD throughput.
 The next owner run must establish the corrected persistent-worker baseline.
@@ -106,12 +101,9 @@ request-efficiency mechanisms. The owner run must continue to report paired
 95% CIs for useful read throughput, p99, lower bytes and lower requests, with
 zero `parallel_read_coalesce_extra_blocks`.
 
-ID64 returns to five matched fast-mixed guard-off/on rounds after the
-completion-aware tail-sample repair. This is a final keep/retire test: if the
-repaired path removes in-flight-zero shrink observations, zero guard-on skips
-are valid evidence that the guard is now redundant. Report paired 95% CIs.
+ID64 no longer has a confirmation gate. Its loaded A/B is removed. The active scheduling question is shallow K=1 detachment: fast QD4/QD8/QD32 use five matched sync/async rounds while fast mixed retains five matched pairs.
 
-ID65 and ID66 are owner-qualified at source
+ID65 and ID66 are owner-qualifiedID65 and ID66 are owner-qualified at source
 `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`. The READ helper remains absent
 and compatibility telemetry stays zero. ID63 now carries the entire grouped-slot
 execution path: a non-ID63 candidate must return before slot preparation,

@@ -409,32 +409,6 @@ def coalesce_arm(enabled, regime="ssd_emulated"):
     return record
 
 
-def guard_arm(enabled):
-    record = arm("swapz", mode=1, regime="ssd_emulated")
-    kernel = record["kernel_write_path"]
-    if enabled:
-        kernel["burst_shrink_inflight_zero_skips"] = 2
-        kernel["burst_target_shrinks"] = 0
-        kernel["burst_shrink_after_inflight_zero"] = 0
-        kernel["burst_shrink_after_read_bypass"] = 0
-        kernel["burst_shrink_other"] = 0
-        kernel["burst_shrink_target_le8"] = 0
-        kernel["burst_shrink_target_9_32"] = 0
-        kernel["burst_shrink_target_gt32"] = 0
-        record["lower_io"]["lower_write_requests"] = 4
-        record["throughput_mbps"]["logical_write_mbps"] *= 1.05
-    else:
-        kernel["burst_shrink_inflight_zero_skips"] = 0
-        kernel["burst_target_shrinks"] = 2
-        kernel["burst_shrink_after_inflight_zero"] = 2
-        kernel["burst_shrink_after_read_bypass"] = 0
-        kernel["burst_shrink_other"] = 0
-        kernel["burst_shrink_target_le8"] = 1
-        kernel["burst_shrink_target_9_32"] = 1
-        kernel["burst_shrink_target_gt32"] = 0
-    return record
-
-
 def write_arm(candidate, *, qd, regime, mode):
     swapz = candidate == "swapz"
     raw = 8.0 if regime == "sd_emulated" else 20.0
@@ -497,21 +471,6 @@ def synthetic_log():
                 out.append("PASS_ASYNC_LOWER_IO_OVERLAP_STARTS=42")
             out.append(f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}")
         out.append(f"PASS_OWNED_RAM_REGIME={regime}")
-    spec = runner.MODEL_SPECS["ssd_emulated"]
-    for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
-        out.append(f"START_BURST_GUARD_AB={enabled}")
-        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
-                   "REPLAY_ORDER=off-first")
-        out.append(
-            "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
-            "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
-            "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
-            "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-        raw = arm("off", mode=1, regime="ssd_emulated")
-        swapz = guard_arm(enabled)
-        for record in ((swapz, raw) if index % 2 else (raw, swapz)):
-            out.append(json.dumps(record))
-        out.append(f"PASS_BURST_GUARD_AB={enabled}")
     for index, enabled in enumerate(runner.CONFIRMATION_SEQUENCE):
         out.append(f"START_READ_COALESCE_AB={enabled}")
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
@@ -547,7 +506,7 @@ def synthetic_log():
         index = 0
         for qd in (1, 4, 8, 32):
             modes = (runner.CONFIRMATION_SEQUENCE
-                     if regime == "ssd_emulated" and qd in (8, 32)
+                     if regime == "ssd_emulated" and qd in (4, 8, 32)
                      else (0, 1))
             for mode in modes:
                 out.append(
@@ -732,20 +691,6 @@ class ReportContract(unittest.TestCase):
             coalesce_diag["modes"]["1"]["sequential"][
                 "parallel_read_coalesce_skip_other"], 0)
 
-        guard = runner.parse_burst_guard_ab(synthetic_log())
-        self.assertEqual([row["guard"] for row in guard],
-                         list(runner.CONFIRMATION_SEQUENCE))
-        guard_diag = runner.burst_guard_ab_verdict(guard)
-        self.assertEqual(guard_diag["overall"],
-                         "PASS_BURST_GUARD_AB_CONFIRMATION")
-        self.assertEqual(guard_diag["matched_pairs"], 5)
-        self.assertGreater(
-            guard_diag["modes"]["1"]["burst_shrink_inflight_zero_skips"], 0)
-        self.assertEqual(
-            guard_diag["modes"]["1"]["burst_shrink_after_inflight_zero"], 0)
-        self.assertGreater(
-            guard_diag["paired"]["guard_skip_delta"]["mean"], 0)
-
         sd_coalesce = runner.parse_sd_read_coalesce_ab(synthetic_log())
         self.assertEqual([row["read_coalesce"] for row in sd_coalesce],
                          list(runner.CONFIRMATION_SEQUENCE))
@@ -791,6 +736,12 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(len(sessions), 32)
         verdict = runner.write_saturation_verdict(sessions)
         self.assertEqual(verdict["overall"], "PASS_WRITE_SATURATION_EVIDENCE")
+        self.assertAlmostEqual(
+            verdict["model_limits"]["sd_emulated"]["effective_4k_model_ceiling_mbps"],
+            4.096, places=3)
+        self.assertAlmostEqual(
+            verdict["model_limits"]["ssd_emulated"]["cap_decimal_mbps"],
+            80 * (1 << 20) / 1_000_000.0, places=3)
         self.assertEqual(verdict["fast_qd8_matched_pairs"], 5)
         self.assertEqual(verdict["fast_qd32_matched_pairs"], 5)
         self.assertEqual(
@@ -823,7 +774,7 @@ class ReportContract(unittest.TestCase):
                     if p["qd"] == 8]
         fast_qd32 = [p for p in verdict["regimes"]["ssd_emulated"]
                      if p["qd"] == 32]
-        self.assertEqual([p["observations"] for p in fast_qd4], [1, 1])
+        self.assertEqual([p["observations"] for p in fast_qd4], [5, 5])
         self.assertEqual([p["observations"] for p in fast_qd8], [5, 5])
         self.assertEqual([p["observations"] for p in fast_qd32], [5, 5])
         broken = runner.parse_write_saturation(synthetic_log())
@@ -989,8 +940,6 @@ class ReportContract(unittest.TestCase):
                 runner.parse_read_coalesce_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
-            "burst_guard_ab": runner.burst_guard_ab_verdict(
-                runner.parse_burst_guard_ab(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -1058,7 +1007,6 @@ class ReportContract(unittest.TestCase):
         self.assertIn("deferred C age <=250/500/1000/>", rendered)
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)
-        self.assertIn("ID64 ONE-SHOT IN-FLIGHT-ZERO SHRINK GUARD — five matched rounds", rendered)
         self.assertIn("Routed delta64 CPU economics", rendered)
         self.assertIn("Delta64 selected backends", rendered)
         self.assertNotIn("dry-close followups", rendered)
@@ -1067,12 +1015,13 @@ class ReportContract(unittest.TestCase):
         self.assertIn("retained WRITE/FLUSH failed closed", rendered)
         self.assertIn("WRITE-ONLY SUSTAINED-QD EVIDENCE", rendered)
         self.assertIn("Persistent lane workers", rendered)
-        self.assertNotIn("Fast QD4 A/S paired 95% CI", rendered)
+        self.assertIn("Fast QD4 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD8 A/S paired 95% CI", rendered)
         self.assertIn("Fast QD32 A/S paired 95% CI", rendered)
-        self.assertIn("fast QD8/QD32: 5 matched pairs + paired CI; QD1/QD4 directional", rendered)
-        self.assertNotIn("QD1/QD4/QD32 directional", rendered)
-        self.assertIn("QD1/QD4 remain directional controls.", rendered)
+        self.assertIn("fast QD4/QD8/QD32: 5 matched pairs + paired CI; QD1 directional", rendered)
+        self.assertIn("QD1 remains a directional control.", rendered)
+        self.assertIn("DEVICE MODEL LIMITS", rendered)
+        self.assertIn("4K latency MB/s", rendered)
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)

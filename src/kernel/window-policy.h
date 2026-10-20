@@ -161,11 +161,6 @@ static inline swapz_u8 swapz_window_shrink_burst_target(
 		return observed;
 	return current_target;
 }
-static inline int swapz_window_guard_burst_target_shrink(
-		int guard_enabled, int last_pack_tail_zero_inflight)
-{
-	return guard_enabled && last_pack_tail_zero_inflight;
-}
 static inline swapz_u8 swapz_window_effective_burst_target(
 		swapz_u8 learned, swapz_u8 admitted_tail)
 {

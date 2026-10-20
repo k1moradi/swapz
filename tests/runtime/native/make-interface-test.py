@@ -413,31 +413,6 @@ class PublicMakeContract(unittest.TestCase):
                         phase["read_p99_ms"] *= .95
                 return json.dumps(record, sort_keys=True)
 
-            def mock_guard_arm(enabled):
-                record = json.loads(mock_arm("swapz", 1))
-                kernel = record["kernel_write_path"]
-                if enabled:
-                    kernel["burst_shrink_inflight_zero_skips"] = 2
-                    kernel["burst_target_shrinks"] = 0
-                    kernel["burst_shrink_after_inflight_zero"] = 0
-                    kernel["burst_shrink_after_read_bypass"] = 0
-                    kernel["burst_shrink_other"] = 0
-                    kernel["burst_shrink_target_le8"] = 0
-                    kernel["burst_shrink_target_9_32"] = 0
-                    kernel["burst_shrink_target_gt32"] = 0
-                    record["lower_io"]["lower_write_requests"] = 4
-                    record["throughput_mbps"]["logical_write_mbps"] = 21
-                else:
-                    kernel["burst_shrink_inflight_zero_skips"] = 0
-                    kernel["burst_target_shrinks"] = 2
-                    kernel["burst_shrink_after_inflight_zero"] = 2
-                    kernel["burst_shrink_after_read_bypass"] = 0
-                    kernel["burst_shrink_other"] = 0
-                    kernel["burst_shrink_target_le8"] = 1
-                    kernel["burst_shrink_target_9_32"] = 1
-                    kernel["burst_shrink_target_gt32"] = 0
-                return json.dumps(record, sort_keys=True)
-
             def mock_write_arm(candidate, qd, mode):
                 is_swapz = candidate == "swapz"
                 logical = 4096 * 4096
@@ -483,7 +458,6 @@ class PublicMakeContract(unittest.TestCase):
             specs = (("sd_emulated", 10, 1000000, 2, 2, 1, 1),
                      ("ssd_emulated", 80, 150000, 2, 2, 1, 64))
             confirmation = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)
-            directional = (0, 1)
             for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
                 records.append(f"START_OWNED_RAM_REGIME={regime}")
                 modes = confirmation if regime == "ssd_emulated" else (0, 1, 1, 0)
@@ -499,16 +473,6 @@ class PublicMakeContract(unittest.TestCase):
                         f"PASS_OWNED_RAM_PAIR_ASYNC_PREPARE={mode}",
                     ))
                 records.append(f"PASS_OWNED_RAM_REGIME={regime}")
-            cap, ns, irq, queue_mode, submit_queues, hw_depth = (80, 150000, 2, 2, 1, 64)
-            for index, enabled in enumerate(confirmation):
-                records.extend((
-                    f"START_BURST_GUARD_AB={enabled}",
-                    "REPLAY_ORDER=swapz-first" if index % 2 else "REPLAY_ORDER=off-first",
-                    f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} IRQMODE={irq} QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
-                    mock_guard_arm(enabled) if index % 2 else mock_arm("off", 1),
-                    mock_arm("off", 1) if index % 2 else mock_guard_arm(enabled),
-                    f"PASS_BURST_GUARD_AB={enabled}",
-                ))
             for index, enabled in enumerate(confirmation):
                 records.extend((
                     f"START_READ_COALESCE_AB={enabled}",
@@ -533,7 +497,7 @@ class PublicMakeContract(unittest.TestCase):
                 index = 0
                 for qd in (1, 4, 8, 32):
                     modes = (confirmation
-                             if regime == "ssd_emulated" and qd in (8, 32)
+                             if regime == "ssd_emulated" and qd in (4, 8, 32)
                              else (0, 1))
                     for mode in modes:
                         records.extend((
@@ -677,13 +641,10 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)
         self.assertIn("--async-prepare", loaded)
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
-        self.assertIn("directional_modes=(0 1)", loaded)
         self.assertIn('for async_prepare in "${modes[@]}"', loaded)
         self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
-        self.assertIn('for guard in "${confirmation_modes[@]}"', loaded)
-        self.assertIn("START_BURST_GUARD_AB=", loaded)
-        self.assertIn("PASS_BURST_GUARD_AB=", loaded)
-        self.assertIn("--guard-inflight-zero-shrink", loaded)
+        self.assertNotIn("START_BURST_GUARD_AB=", loaded)
+        self.assertNotIn("--guard-inflight-zero-shrink", loaded)
         self.assertNotIn("START_PARALLEL_READ_AB=", loaded)
         self.assertNotIn("PASS_PARALLEL_READ_AB=", loaded)
         self.assertNotIn("START_SD_READ_GROUPING_AB=", loaded)
@@ -695,8 +656,7 @@ class PublicMakeContract(unittest.TestCase):
                 "--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000"),
             2)
         self.assertIn("for qd in 1 4 8 32", loaded)
-        self.assertIn("$qd == 8", loaded)
-        self.assertNotIn("$qd == 4 || $qd == 8", loaded)
+        self.assertIn("$qd == 4 || $qd == 8 || $qd == 32", loaded)
         self.assertIn("--write-only-qd", loaded)
         self.assertIn("--sustained-write", loaded)
         self.assertIn("START_WRITE_SATURATION_PAIR_QD=", loaded)

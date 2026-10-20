@@ -48,7 +48,7 @@ The mandatory mixed matrix uses two RAM-only latency models: 10 MiB/s with 1 ms 
 
 Both arms of every session carry the same exact source SHA, fixture SHA-256 and trace SHA-256. Missing or divergent provenance is INCONCLUSIVE. Every logical workload must finish its byte-exact oracle before a performance verdict is considered. The five fast matched deltas use a two-sided Student-t 95% confidence interval with four degrees of freedom. Report both the paired mean and interval; do not replace paired analysis with an interval over unpaired arm means.
 
-The write-only QD1/4/8/32 sweep is sustained offered-load evidence: workers are pre-created, warmup finishes before a common measured start gate, and each worker owns a disjoint ordered logical-page lane. No per-I/O Future submission or full-QD wave barrier is permitted in the timed path. Slow QDs and fast QD1/QD4 stay directional; fast QD8 and QD32 each use the ten-session confirmation sequence and paired 95% confidence intervals for logical write throughput, lower requests and lower bytes. Historical wave-driver intervals are burst evidence only and cannot promote sustained-QD performance. A new promotion claim for QD1/QD4 requires its own >=5 matched rounds. Rootless Make-interface/source fixtures must assert the shared sequence, persistent replay mode and fast-QD8/QD32 mode selection.
+The write-only QD1/4/8/32 sweep is sustained offered-load evidence: workers are pre-created, warmup finishes before a common measured start gate, and each worker owns a disjoint ordered logical-page lane. No per-I/O Future submission or full-QD wave barrier is permitted in the timed path. Slow QDs and fast QD1 stay directional; fast QD4, QD8 and QD32 each use the ten-session confirmation sequence and paired 95% confidence intervals for logical write throughput, lower requests and lower bytes. Historical wave-driver intervals are burst evidence only and cannot promote sustained-QD performance. Rootless Make-interface/source fixtures must assert the shared sequence, persistent replay mode and fast-QD4/QD8/QD32 mode selection.
 
 ## Report contract
 
@@ -91,12 +91,9 @@ ID66 is owner-qualified by the same run. Loaded lifecycle evidence retained
 20 live GC victims/rotations, 4096 verified pages, 36 exact 1MiB DISCARDs,
 suspend/resume verification and fail-closed injected WRITE/FLUSH behavior.
 
-ID64 remains a directional regression control after its historical five-pair
-promotion. The prior fast write-only QD8 +8.1% interval came from the retired
-wave driver and is retained only as historical burst evidence; sustained-QD
-write performance requires a new owner run with persistent lane workers. ID38
-remains on hold.
+ID64 is retired. Completion-aware zero-tail sampling made the mechanism unobservable in five matched owner rounds; old status token names remain fixed-zero compatibility fields only. The current persistent-worker QD4/QD8/QD32 matrix is the scheduling gate. ID38 remains on hold.
 
+## Deferred optimization evidence gates
 ## Deferred optimization evidence gates
 
 - **ID38 K>1:** keep passive counters. No second write slot is justified.
@@ -111,16 +108,10 @@ remains on hold.
   stays zero and defensive skip-other stays zero. Eligibility must use shared
   cache metadata without private-slot memcpy, and source contracts must prove
   successful upper BIO completion precedes shared LRU absorption.
-- **ID64 one-shot in-flight-zero shrink guard:** after completion-aware
-  post-PACK tail sampling, run five counterbalanced SSD_EMULATED mixed
-  guard-off/on pairs with `async_prepare=1` in both arms. Report paired 95%
-  CIs for useful WRITE throughput, lower WRITE requests, read/write p99, burst
-  closes, overshoot and shrink counters. Guard-off must never execute a guarded
-  skip; guard-on must never perform an in-flight-zero shrink. Zero guard-on
-  skips are valid evidence that the repaired sampling path made ID64 dormant.
-  Rootless Make-interface/source contracts must assert the same ten-arm
-  confirmation sequence so a directional harness cannot silently return.
-- **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
+- **ID64 one-shot in-flight-zero shrink guard:** retired. Do not restore the module parameter, shrink helper or loaded A/B. Compatibility status fields stay zero so existing report parsers remain stable.
+- **K=1 shallow detach gate:** fast QD4/QD8/QD32 require five matched sync/async pairs. Acceptance requires the prior QD4 regression to disappear, QD8/QD32 to keep statistically positive async gains, and fast mixed lower request inflation to improve without useful-throughput or read-tail loss.
+- **Device-model limits:** every report must distinguish the configured null_blk MiB/s cap from the analytical unmerged-4KiB latency ceiling (4096 * hw_queue_depth / completion_nsec). The console must show both in decimal MB/s and must not call the calculation a measured bulk calibration.
+- **ID65 synchronous read cleanup:**- **ID65 synchronous read cleanup:** owner-qualified. Any non-ID63 candidate
   must now return before slot preparation/priming; no standalone same-extent
   slot execution remains. Fast/serial ID63 retain five-pair confirmation.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts

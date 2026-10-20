@@ -142,12 +142,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn('"replay_mode": obj.get("replay_mode")', reporter)
         self.assertIn('arm.get("replay_mode") != "persistent-write"', reporter)
         self.assertIn("PASS_WRITE_SATURATION_EVIDENCE", reporter)
-        self.assertIn("FAST_QD8_QD32_PAIRED_95PCT_CI", reporter)
-        self.assertNotIn("fast_qd4_paired", reporter)
+        self.assertIn("FAST_QD4_QD8_QD32_PAIRED_95PCT_CI", reporter)
+        self.assertIn("fast_qd4_paired", reporter)
         self.assertIn("fast_qd8_paired", reporter)
         self.assertIn("fast_qd32_paired", reporter)
-        self.assertIn("$qd == 8 || $qd == 32", loaded)
-        self.assertNotIn("$qd == 4 || $qd == 8", loaded)
+        self.assertIn("$qd == 4 || $qd == 8 || $qd == 32", loaded)
         self.assertIn("confirmation_modes=(0 1 1 0 0 1 1 0 0 1)", loaded)
 
 
@@ -1214,12 +1213,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("expected_parallel=0", pair)
         self.assertIn("parallel_reads_enabled=$expected_parallel", pair)
         self.assertNotIn('for parallel_reads in "${directional_modes[@]}"', loaded)
-        self.assertIn('for guard in "${confirmation_modes[@]}"', loaded)
-        self.assertIn("START_BURST_GUARD_AB=", loaded)
-        self.assertIn("PASS_BURST_GUARD_AB=", loaded)
-        self.assertIn("--guard-inflight-zero-shrink", pair)
-        self.assertIn('"guard_inflight_zero_shrink=$GUARD_INFLIGHT_ZERO_SHRINK"', pair)
-        self.assertIn("guard_inflight_zero_shrink=$GUARD_INFLIGHT_ZERO_SHRINK", pair)
+        self.assertNotIn("START_BURST_GUARD_AB=", loaded)
+        self.assertNotIn("PASS_BURST_GUARD_AB=", loaded)
+        self.assertNotIn("--guard-inflight-zero-shrink", pair)
+        self.assertIn("guard_inflight_zero_shrink=0", pair)
         self.assertNotIn("START_PARALLEL_READ_AB=", loaded)
         self.assertNotIn("START_SD_READ_GROUPING_AB=", loaded)
         self.assertIn("START_READ_COALESCE_AB=", loaded)
@@ -1229,8 +1226,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       loaded)
         self.assertNotIn("def parse_parallel_read_ab", runner)
         self.assertNotIn("PASS_PARALLEL_READ_DIRECTIONAL_CONTROL", runner)
-        self.assertIn("def parse_burst_guard_ab", runner)
-        self.assertIn("PASS_BURST_GUARD_AB_CONFIRMATION", runner)
+        self.assertNotIn("def parse_burst_guard_ab", runner)
+        self.assertNotIn("PASS_BURST_GUARD_AB_CONFIRMATION", runner)
         self.assertIn("def parse_read_coalesce_ab", runner)
         self.assertIn("PASS_READ_COALESCE_AB_CONFIRMATION", runner)
         self.assertNotIn("def parse_sd_read_grouping_ab", runner)
@@ -1356,32 +1353,26 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("payload_filter", codec)
         self.assertNotIn("policy_length", DM)
 
-    def test_id64_guard_is_read_only_one_shot_and_owner_benchmarked(self):
+    def test_id64_is_retired_after_completion_aware_zero_tail_sampling(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
         pair = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         worker = body("swapz_worker")
         flush = body("swapz_flush_window")
-        ctr = body("swapz_ctr")
         status = body("swapz_status")
-        self.assertIn("module_param_named(guard_inflight_zero_shrink", DM)
-        self.assertIn("0444", DM[DM.index(
-            "module_param_named(guard_inflight_zero_shrink"):DM.index(
-            "module_param_named(guard_inflight_zero_shrink") + 180])
-        self.assertIn(
-            "ctx->guard_inflight_zero_shrink = swapz_guard_inflight_zero_shrink",
-            ctr)
-        self.assertIn("swapz_window_guard_burst_target_shrink", policy)
-        self.assertIn("candidate_target", worker)
-        self.assertIn("ctx->burst_shrink_inflight_zero_skips++", worker)
-        self.assertIn("ctx->last_pack_tail_zero_inflight = false", worker)
-        self.assertIn("hard_boundary && !chain_continues", flush)
+        self.assertNotIn("module_param_named(guard_inflight_zero_shrink", DM)
+        self.assertNotIn("swapz_window_guard_burst_target_shrink", policy)
+        self.assertNotIn("ctx->burst_shrink_inflight_zero_skips++", worker)
+        self.assertNotIn("ctx->last_pack_tail_zero_inflight", DM)
+        self.assertNotIn("ctx->burst_shrink_after_inflight_zero++", worker)
+        self.assertIn("if (!tail && inflight)", body("swapz_sample_pack_tail_locked"))
         self.assertIn("guard_inflight_zero_shrink=%u", status)
         self.assertIn("burst_shrink_inflight_zero_skips=%llu", status)
-        self.assertIn("--guard-inflight-zero-shrink 0|1", pair)
-        self.assertIn("START_BURST_GUARD_AB=", loaded)
-        self.assertIn("PASS_BURST_GUARD_AB=", loaded)
-        self.assertNotIn("pack_ready_busy_deferrals", DM)
+        self.assertIn("burst_shrink_after_inflight_zero=%llu", status)
+        self.assertNotIn("--guard-inflight-zero-shrink", pair)
+        self.assertNotIn("START_BURST_GUARD_AB=", loaded)
+        self.assertIn("(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U)",
+                      flush)
 
     def test_alpha17_uniform_compressed_windows_skip_greedy_reordering(self):
         policy = (ROOT / "src/kernel/window-policy.h").read_text()
@@ -1538,8 +1529,6 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "pack_tail_one_idle", "pack_tail_many_inflight",
                       "pack_tail_many_idle", "burst_target_grows",
                       "burst_target_shrinks",
-                      "burst_shrink_inflight_zero_skips",
-                      "burst_shrink_after_inflight_zero",
                       "burst_shrink_after_read_bypass",
                       "burst_shrink_other",
                       "burst_shrink_target_le8",
@@ -1552,6 +1541,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       "k1_ready_wait_other"):
             self.assertIn(field + "=%llu", status)
             self.assertIn("ctx->" + field, status)
+        for retired in ("burst_shrink_inflight_zero_skips",
+                        "burst_shrink_after_inflight_zero"):
+            self.assertIn(retired + "=%llu", status)
+            self.assertNotIn("ctx->" + retired, DM)
         self.assertIn("SWAPZ_PACK_CLOSE_TAIL_TARGET", writer)
         self.assertIn("SWAPZ_PACK_CLOSE_BURST_TARGET", writer)
         self.assertIn("SWAPZ_PACK_CLOSE_SERVICE_DRY", worker)
@@ -1571,19 +1564,15 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(sample.index("if (!tail && inflight)"),
                         sample.index("ctx->pack_tail_samples++"))
         self.assertIn("ctx->pack_tail_samples++", sample)
-        for field in ("pack_tail_zero_inflight", "pack_tail_zero_idle",
-                      "pack_tail_one_inflight", "pack_tail_one_idle",
-                      "pack_tail_many_inflight", "pack_tail_many_idle",
-                      "burst_target_grows"):
+        for field in ("pack_tail_zero_idle", "pack_tail_one_inflight",
+                      "pack_tail_one_idle", "pack_tail_many_inflight",
+                      "pack_tail_many_idle", "burst_target_grows"):
             self.assertIn("ctx->" + field + "++", sample)
-        self.assertIn("ctx->last_pack_tail_zero_inflight = true", sample)
-        self.assertIn("ctx->last_pack_tail_zero_inflight = false", sample)
-        self.assertIn("swapz_window_guard_burst_target_shrink(", worker)
-        self.assertIn("ctx->burst_shrink_inflight_zero_skips++", worker)
-        self.assertIn("ctx->last_pack_tail_zero_inflight = false", worker)
-        self.assertIn("hard_boundary && !chain_continues", flush)
-        self.assertIn("ctx->last_pack_tail_zero_inflight = false", flush)
-        self.assertIn("ctx->burst_shrink_after_inflight_zero++", worker)
+        self.assertNotIn("ctx->pack_tail_zero_inflight++", sample)
+        self.assertNotIn("swapz_window_guard_burst_target_shrink(", worker)
+        self.assertNotIn("ctx->burst_shrink_inflight_zero_skips++", worker)
+        self.assertNotIn("ctx->last_pack_tail_zero_inflight", DM)
+        self.assertNotIn("ctx->burst_shrink_after_inflight_zero++", worker)
         self.assertIn("ctx->burst_shrink_after_read_bypass++", worker)
         self.assertIn("ctx->burst_shrink_other++", worker)
         self.assertIn("ctx->burst_shrink_target_le8++", worker)
@@ -2081,6 +2070,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->preparation_lz4_lower_write_overlap_ns +=", producer)
         flush = body("swapz_flush_window")
         self.assertIn("!ctx->retained_window_read_bypasses", flush)
+        self.assertIn("(count > 4U || READ_ONCE(ctx->preparation_queued) > 0U)",
+                      flush)
         self.assertIn("drain_workqueue(ctx->preparation_workqueue)", drain)
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))
@@ -2124,6 +2115,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn('echo "$HW_QUEUE_DEPTH" > "$config/hw_queue_depth"', benchmark)
         self.assertIn("PASS_RAM_MODEL_LOWER_MBPS=", benchmark)
         self.assertIn("LOWER_MBPS=$LOWER_MBPS", benchmark)
+        self.assertIn("def device_model_limits", runner)
+        self.assertIn("unmerged_4k_latency_ceiling_mbps", runner)
+        self.assertIn("DEVICE MODEL LIMITS", runner)
         replay = (ROOT / "tests/runtime/benchmark/io-replay.py").read_text()
         self.assertIn('prep.add_argument("--sustained-write"', replay)
         self.assertIn('replay_mode = "persistent-write"', replay)

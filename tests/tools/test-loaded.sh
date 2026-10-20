@@ -127,24 +127,6 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_OWNED_RAM_REGIME=%s\n' "$regime"
 done
 
-# ID64 final confirmation after completion-aware tail sampling: five matched
-# guard-off/on rounds with async preparation fixed on in both arms.
-index=0
-for guard in "${confirmation_modes[@]}"; do
-    arguments=(--run-owned-ram-pair --profile medium --retain-ms 2 --unpaced
-               --lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000
-               --async-prepare
-               --guard-inflight-zero-shrink "$guard"
-               --shared-plan "$shared_plan")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_BURST_GUARD_AB=%s\n' "$guard"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-    printf 'PASS_BURST_GUARD_AB=%s\n' "$guard"
-    (( index += 1 ))
-done
-
 # ID63 adjacent distinct-extent confirmation: vary only exact zero-extra
 # coalescing for five matched fast rounds. Standalone same-extent grouping is
 # retired; the off arm therefore remains on the ordinary swapz_read() path.
@@ -187,7 +169,7 @@ for regime in sd_emulated ssd_emulated; do
     printf 'START_WRITE_SATURATION_REGIME=%s\n' "$regime"
     index=0
     for qd in 1 4 8 32; do
-        if [[ $regime == ssd_emulated && ( $qd == 8 || $qd == 32 ) ]]; then
+        if [[ $regime == ssd_emulated && ( $qd == 4 || $qd == 8 || $qd == 32 ) ]]; then
             modes=("${confirmation_modes[@]}")
         else
             modes=(0 1)
@@ -220,5 +202,5 @@ for regime in sd_emulated ssd_emulated; do
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 10 Kread sessions, and 32 write-only sessions completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, Kread, and fast QD8/QD32 carry five matched rounds with paired 95% CIs; QD1/QD4 are directional.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry five matched rounds with paired 95% CIs; QD1 is directional.'

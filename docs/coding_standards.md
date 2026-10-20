@@ -622,38 +622,11 @@ translation unit may include that header yet. Do not modify SWZ3 metadata,
 authority, Device Mapper hot paths or retained-window policy as part of this
 offline phase.
 
-### One-shot in-flight-zero burst-target shrink guard
+### Retired in-flight-zero shrink guard
 
-The passive ID56/ID64 attribution established a narrow timing defect: a
-post-PACK sample may observe `tail == 0` while the detached K=1 lower write is
-still active, clear retained-chain evidence, and leave the following residual
-deadline window looking like a new smaller burst.
+Completion-aware tail sampling now returns before consuming tail == 0 while a detached K=1 lower WRITE is incomplete. Owner evidence at source 086ce15f3476 then exercised zero after-I0 shrinks and zero ID64 skips across five matched rounds, so the one-shot guard is retired. Do not restore its module parameter, policy helper, remembered flag, or loaded A/B.
 
-The read-only `guard_inflight_zero_shrink` module parameter is an owned-RAM
-regression control and remains enabled by default after owner qualification.
-The historical five-pair A/B is promotion evidence; current qualification keeps
-only one directional off/on observation. It may affect
-only the deadline learned-target shrink site. It must not suppress PACK_READY,
-defer/re-sample tails, delay upper BIO completion, alter timer expiry, create
-new waits, or change lower-run ownership/publication.
-
-When the ordinary shrink helper produces a different candidate target and both
-the guard and `last_pack_tail_zero_inflight` are true, keep the current target,
-increment `burst_shrink_inflight_zero_skips`, and clear the flag immediately.
-This consumes exactly one exemption. Otherwise apply the unchanged shrink
-helper and retain the existing mutually-exclusive actual-shrink attribution.
-
-A remembered in-flight-zero observation must never leak across unrelated
-windows. Any later nonzero tail sample clears it. A nonempty hard boundary that
-does not continue the retained chain also clears any unconsumed observation.
-Therefore a first residual deadline window may be exempted, but a second
-consecutive deadline window can down-adapt normally if no new in-flight-zero
-sample occurred.
-
-Actual shrinks continue to conserve across after-inflight-zero,
-after-read-bypass/other and <=8/9..32/>32 target bins. Guarded skips are
-separate from `burst_target_shrinks`; they are suppressed candidates, not
-actual target updates.
+For report compatibility only, guard_inflight_zero_shrink, burst_shrink_inflight_zero_skips, and burst_shrink_after_inflight_zero remain status tokens fixed at zero. They are not active state and must not influence scheduling.
 
 ### Zero-allocation DISCARD range prevalidation
 
@@ -860,6 +833,8 @@ READs and barriers never grant idle preparation tail credit. A detached K=1
 PACK_READY close must not consume an empty tail sample while its lower WRITE is
 still incomplete; keep that sample pending until ordered finalization. A window
 that recorded a read bypass is not eligible for asynchronous K=1 detach.
+
+K=1 lower-WRITE detachment is a depth/backlog policy, not merely a multi-record test. A prepared window may detach asynchronously only when it contains more than four records or when a separate unclaimed preparation descriptor is already queued. Shallow <=4-record windows with no confirmed WRITE successor stay synchronous. This removes callback/workqueue cost where no overlap can exist while preserving QD8/QD32 overlap.
 
 Idle asynchronous preparation must be self-gating. With no lower WRITE active,
 a tail-credit workqueue wake requires at least four unclaimed preparation
