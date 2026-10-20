@@ -1236,7 +1236,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("PASS_SD_READ_COALESCE_AB_CONFIRMATION", runner)
         self.assertIn("CONFIRMATION_SEQUENCE = (0, 1, 1, 0, 0, 1, 1, 0, 0, 1)",
                       runner)
-        self.assertIn("DIRECTIONAL_SEQUENCE = (0, 1)", runner)
+        self.assertNotIn("DIRECTIONAL_SEQUENCE =", runner)
         self.assertIn("def paired_ci95", runner)
         self.assertIn('kernel["parallel_read_pairs"]', runner)
         self.assertIn("parallel_read_coalesced_reqs_saved", runner)
@@ -1946,6 +1946,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         freeing = body("swapz_free")
         status = body("swapz_status")
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        runner = (ROOT / "tests/tools/run-tests.py").read_text()
 
         self.assertIn("module_param_named(async_prepare", DM)
         self.assertIn("ctx->async_prepare = swapz_async_prepare", ctor)

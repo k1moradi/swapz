@@ -2927,7 +2927,7 @@ def print_bench(result):
             print("  Async windows; close=P/D/I")
             print_table(("QD", "target", "1", "3-4", "5-8", "17-64", "P/D/I"),
                         window_rows)
-        for qd in (8, 32):
+        for qd in (4, 8, 32):
             ci = saturation[f"fast_qd{qd}_paired"][
                 "throughput_change_fraction"]
             print(f"  Fast QD{qd} A/S paired 95% CI: "
