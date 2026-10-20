@@ -795,7 +795,8 @@ ID24 boundary CPU attribution is measurement only and is not a trustworthy
 total for short callbacks. Status/timed deltas retain
 `ordered_worker_cpu_ns` and `prep_worker_cpu_ns` as scheduler-accounted
 lower bounds. The retired ID39 compatibility field `read_worker_cpu_ns` must
-remain zero. Reports must also expose separate `ordered_lz4_wall_ns`,
+remain zero; source contracts assert that no read-helper callback or CPU
+accumulator survives. Reports must also expose separate `ordered_lz4_wall_ns`,
 `prep_lz4_wall_ns`, `ordered_write_copy_wall_ns` and
 `prep_write_copy_wall_ns`. The report shows
 callback wall, scheduler lower bound and measured non-sleeping phase floors

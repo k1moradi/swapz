@@ -980,11 +980,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("READ_ONCE(current->se.sum_exec_runtime)", cpu_sample)
         self.assertIn("cpu_start_ns = swapz_worker_cpu_sample()", producer)
         self.assertIn("cpu_start_ns = swapz_worker_cpu_sample()", worker)
-        slot_worker = body("swapz_read_slot_worker")
-        self.assertIn("cpu_start_ns = swapz_worker_cpu_sample()", slot_worker)
+        self.assertNotIn("swapz_read_slot_worker", DM)
+        self.assertNotIn("read_worker_cpu_ns +=", DM)
         self.assertIn("ctx->preparation_worker_cpu_ns", producer)
         self.assertIn("ctx->ordered_worker_cpu_ns", worker)
-        self.assertIn("slot->ctx->read_worker_cpu_ns", slot_worker)
         self.assertEqual(producer.count("return;"),
                          producer.count("swapz_account_worker_runtime("))
         self.assertEqual(worker.count("return;"),
