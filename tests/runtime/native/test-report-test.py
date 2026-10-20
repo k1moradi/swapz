@@ -1411,6 +1411,92 @@ class ReportContract(unittest.TestCase):
             finally:
                 runner.ROOT, runner.REPORT = old_root, old_report
 
+
+    def test_git_sync_retries_after_concurrent_main_advance(self):
+        """A completed failure report survives a normal source commit race."""
+        import subprocess
+        from unittest import mock
+
+        def git(*args, cwd, check=True):
+            return subprocess.run(["git", *args], cwd=cwd, check=check,
+                                  capture_output=True, text=True, timeout=12)
+
+        with tempfile.TemporaryDirectory(
+                prefix="report-race-", dir=ROOT / "build/tests") as name:
+            sandbox = Path(name)
+            checkout, origin, peer = (
+                sandbox / "checkout", sandbox / "origin.git", sandbox / "peer")
+            checkout.mkdir()
+            git("init", "--bare", str(origin), cwd=sandbox)
+            git("init", cwd=checkout)
+            git("checkout", "-b", "main", cwd=checkout)
+            git("config", "user.name", "test-report CI", cwd=checkout)
+            git("config", "user.email", "test@example.invalid", cwd=checkout)
+            (checkout / "source.c").write_text("old source\n")
+            (checkout / runner.GIT_RESULT).write_bytes(
+                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
+            git("commit", "-m", "Tested source", cwd=checkout)
+            source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
+            git("remote", "add", "origin", str(origin), cwd=checkout)
+            git("push", "origin", "main", cwd=checkout)
+
+            git("clone", "-b", "main", str(origin), str(peer), cwd=sandbox)
+            git("config", "user.name", "concurrent writer", cwd=peer)
+            git("config", "user.email", "writer@example.invalid", cwd=peer)
+            (peer / "source.c").write_text("newer source\n")
+            git("add", "source.c", cwd=peer)
+            git("commit", "-m", "Concurrent source", cwd=peer)
+            concurrent_sha = git("rev-parse", "HEAD", cwd=peer).stdout.strip()
+            git("push", "origin", "main", cwd=peer)
+
+            old_root, old_report, old_git_result = (
+                runner.ROOT, runner.REPORT, runner.git_result)
+            runner.ROOT = checkout
+            runner.REPORT = checkout / runner.GIT_RESULT
+
+            def intercept(command, *, data=None, timeout=15, env=None):
+                if command == ["remote", "get-url", "--push", "origin"]:
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=b"git@github.com:k1moradi/swapz.git",
+                        stderr=b"")
+                return old_git_result(command, data=data, timeout=timeout,
+                                      env=env)
+
+            try:
+                with mock.patch.object(runner, "git_result",
+                                       side_effect=intercept):
+                    failed = {
+                        "schema": "swapz-test-results-v1",
+                        "source_sha": source_sha,
+                        "tested_commit_sha": source_sha,
+                        "overall": "FAIL",
+                    }
+                    runner.write_report(failed)
+                    notice = runner.publish(source_sha)
+                    self.assertIn("SYNCED_GIT_AFTER_ADVANCE", notice)
+
+                    final_head = git("rev-parse", "HEAD",
+                                     cwd=checkout).stdout.strip()
+                    remote_head = git("--git-dir", str(origin), "rev-parse",
+                                      "refs/heads/main",
+                                      cwd=sandbox).stdout.strip()
+                    self.assertEqual(final_head, remote_head)
+                    self.assertEqual(
+                        git("rev-parse", "HEAD^",
+                            cwd=checkout).stdout.strip(), concurrent_sha)
+                    self.assertEqual((checkout / "source.c").read_text(),
+                                     "newer source\n")
+                    self.assertEqual(
+                        json.loads(lzma.decompress(
+                            (checkout / runner.GIT_RESULT).read_bytes())),
+                        failed)
+                    self.assertEqual(git("status", "--porcelain",
+                                         cwd=checkout).stdout, "")
+            finally:
+                runner.ROOT, runner.REPORT = old_root, old_report
+
     def test_publisher_preserves_configured_git_credentials(self):
         source = (ROOT / "tests/tools/run-tests.py").read_text()
         self.assertIn('env["GIT_TERMINAL_PROMPT"] = "0"', source)

@@ -36,9 +36,14 @@ The root Make interface is exactly `make`, `make install`, `make uninstall`, and
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json.xz`, with the latest sanitized PASS/FAIL/BLOCKED test
 and benchmark result and automatically publishes that file directly to
-`main` when the tested checkout still matches origin/main. No report branch or
-PR is created, and normal diagnosis should use that published file rather than
-requiring the owner to copy private root-owned logs.
+`main`. The normal report commit is a direct child of the tested source. If
+`main` advances during a long qualification run, publication may retry only
+when the new remote head is a descendant of that exact tested source; the
+report-only commit is then built on the newer main tree so no newer source is
+reverted. Publication is always nonforce and bounded, and divergence still
+fails closed. No report branch or PR is created, and normal diagnosis should
+use the published file rather than requiring the owner to copy private
+root-owned logs.
 
 ## Current evidence
 

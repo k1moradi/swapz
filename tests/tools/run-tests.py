@@ -2908,11 +2908,12 @@ def git_result(command, *, data=None, timeout=15, env=None):
 def publish(source_sha):
     """Publish the one canonical report as a lease-checked main commit.
 
-    Qualification runs against an unchanged checkout. Only after every stage
-    has finished do we replace test_results.json.xz, construct a report-only
-    commit whose parent is the exact tested checkout, push it nonforce, then
-    advance the local main ref/index to that same commit. No branch or PR is
-    created and no source file is staged or committed.
+    Qualification runs against an unchanged checkout. After every stage finishes
+    we replace test_results.json.xz and first try the historical direct-child
+    report commit. If main advanced concurrently, retry only when the remote head
+    is a descendant of the exact tested source: rebuild the report-only commit on
+    top of that newer main tree, preserving all newer source bytes, and push
+    normally. No force push, report branch, PR, or source commit is created.
     """
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         return "SKIPPED_GIT_SYNC: tested source commit unavailable"
@@ -2968,51 +2969,117 @@ def publish(source_sha):
         return "SKIPPED_GIT_SYNC: tracked source/index is not clean"
 
     blob = run("hash-object", "-w", "--no-filters", str(REPORT))
-    root_tree = run("ls-tree", "-z", source_sha)
-    if any(item is None or item.returncode for item in (blob, root_tree)):
+    if blob is None or blob.returncode:
         return "GIT_SYNC_FAILED: could not prepare report Git objects"
     blob_id = blob.stdout.decode("ascii", "replace").strip()
     if not re.fullmatch(r"[0-9a-f]{40}", blob_id):
         return "GIT_SYNC_FAILED: invalid report blob"
 
-    entries = []
-    for item in root_tree.stdout.split(b"\0"):
-        if not item:
-            continue
-        try:
-            _, name = item.split(b"\t", 1)
-        except ValueError:
-            return "GIT_SYNC_FAILED: malformed root Git tree"
-        if name != GIT_RESULT.encode("ascii"):
-            entries.append(item)
-    entries.append(f"100644 blob {blob_id}\t{GIT_RESULT}".encode())
-    entries.sort(key=lambda item: item.split(b"\t", 1)[1])
-    tree = run("mktree", "-z", data=b"\0".join(entries) + b"\0")
-    if tree is None or tree.returncode:
-        return "GIT_SYNC_FAILED: could not assemble report-only tree"
-    tree_id = tree.stdout.decode("ascii", "replace").strip()
-
     message = (f"test: latest run for {source_sha[:12]} "
                "[skip ci]").encode("utf-8")
-    commit = run("commit-tree", tree_id, "-p", source_sha, data=message)
-    if commit is None or commit.returncode:
-        return ("SKIPPED_GIT_SYNC: Git commit identity unavailable "
-                "(configure user.name/user.email)")
-    report_sha = commit.stdout.decode("ascii", "replace").strip()
-    if not re.fullmatch(r"[0-9a-f]{40}", report_sha):
-        return "GIT_SYNC_FAILED: invalid report commit"
 
-    # report_sha is a direct child of source_sha. A normal nonforce push is
-    # therefore safe: any concurrent main advance makes this non-fast-forward
-    # and Git rejects it without overwriting the other work.
+    def build_report_commit(parent_sha):
+        root_tree = run("ls-tree", "-z", parent_sha)
+        if root_tree is None or root_tree.returncode:
+            return None, "GIT_SYNC_FAILED: could not prepare report Git objects"
+        entries = []
+        for item in root_tree.stdout.split(b"\0"):
+            if not item:
+                continue
+            try:
+                _, name = item.split(b"\t", 1)
+            except ValueError:
+                return None, "GIT_SYNC_FAILED: malformed root Git tree"
+            if name != GIT_RESULT.encode("ascii"):
+                entries.append(item)
+        entries.append(f"100644 blob {blob_id}\t{GIT_RESULT}".encode())
+        entries.sort(key=lambda item: item.split(b"\t", 1)[1])
+        tree = run("mktree", "-z", data=b"\0".join(entries) + b"\0")
+        if tree is None or tree.returncode:
+            return None, "GIT_SYNC_FAILED: could not assemble report-only tree"
+        tree_id = tree.stdout.decode("ascii", "replace").strip()
+        commit = run("commit-tree", tree_id, "-p", parent_sha, data=message)
+        if commit is None or commit.returncode:
+            return None, ("SKIPPED_GIT_SYNC: Git commit identity unavailable "
+                          "(configure user.name/user.email)")
+        report_sha = commit.stdout.decode("ascii", "replace").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", report_sha):
+            return None, "GIT_SYNC_FAILED: invalid report commit"
+        return report_sha, None
+
+    report_sha, error = build_report_commit(source_sha)
+    if error:
+        return error
     push = run("push", "origin", f"{report_sha}:refs/heads/main", timeout=60)
-    if push is None or push.returncode:
-        return ("GIT_SYNC_FAILED: nonforce report push rejected or "
-                "authentication unavailable; local source was not committed")
+    concurrent_parent = None
 
-    # The remote commit now exists. Advance only the local main ref with a
-    # compare-and-swap, then refresh the index. The working report already has
-    # the exact blob just pushed, so no source/worktree rewrite is needed.
+    if push is None or push.returncode:
+        # A long loaded run can race a normal source commit. Do not lose a
+        # completed FAIL/BLOCKED report merely because main advanced. Refetch
+        # and retry only along the tested source's descendant chain; a rewrite
+        # or divergence is never crossed, and every retry remains nonforce.
+        report_sha = None
+        for _ in range(3):
+            fetch = run("fetch", "--no-tags", "origin", "main", timeout=60)
+            if fetch is None or fetch.returncode:
+                return ("GIT_SYNC_FAILED: report push rejected and current "
+                        "origin/main could not be fetched noninteractively")
+            remote_head = run("rev-parse", "FETCH_HEAD")
+            if remote_head is None or remote_head.returncode:
+                return "GIT_SYNC_FAILED: fetched origin/main is unavailable"
+            remote_sha = remote_head.stdout.decode("ascii", "replace").strip()
+            if not re.fullmatch(r"[0-9a-f]{40}", remote_sha):
+                return "GIT_SYNC_FAILED: fetched origin/main is malformed"
+            if remote_sha == source_sha:
+                return ("GIT_SYNC_FAILED: nonforce report push rejected or "
+                        "authentication unavailable; local source was not committed")
+            ancestor = run("merge-base", "--is-ancestor", source_sha, remote_sha)
+            if ancestor is None:
+                return "GIT_SYNC_FAILED: could not verify concurrent main ancestry"
+            if ancestor.returncode:
+                return ("GIT_SYNC_FAILED: origin/main no longer descends from "
+                        "the tested source; report remains local")
+            retry_sha, error = build_report_commit(remote_sha)
+            if error:
+                return error
+            retry = run("push", "origin",
+                        f"{retry_sha}:refs/heads/main", timeout=60)
+            if retry is not None and not retry.returncode:
+                report_sha = retry_sha
+                concurrent_parent = remote_sha
+                break
+        if report_sha is None:
+            return ("GIT_SYNC_FAILED: origin/main advanced repeatedly or "
+                    "authentication failed during bounded report retry")
+
+    if concurrent_parent is not None:
+        # Remote publication succeeded without replacing newer source. Refresh
+        # the local checkout only if it is still the exact clean tested source;
+        # otherwise leave owner changes untouched and report remote success.
+        head_now = run("rev-parse", "HEAD")
+        tracked_now = run("diff", "--quiet", "--", ".",
+                          f":(exclude){GIT_RESULT}")
+        cached_now = run("diff", "--cached", "--quiet")
+        clean_for_refresh = (
+            head_now is not None and not head_now.returncode and
+            head_now.stdout.decode("ascii", "replace").strip() == source_sha and
+            tracked_now is not None and not tracked_now.returncode and
+            cached_now is not None and not cached_now.returncode)
+        if clean_for_refresh:
+            refresh = run("reset", "--hard", report_sha, timeout=30)
+            if refresh is not None and not refresh.returncode:
+                return (f"SYNCED_GIT_AFTER_ADVANCE: "
+                        f"https://github.com/{REPO}/blob/main/{GIT_RESULT} "
+                        f"(report {report_sha[:12]}; tested {source_sha[:12]}; "
+                        f"preserved main {concurrent_parent[:12]})")
+        return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
+                f"{GIT_RESULT} (report {report_sha[:12]}; tested "
+                f"{source_sha[:12]}; local refresh skipped after concurrent "
+                "main advance)")
+
+    # The remote direct-child commit now exists. Advance only the local main ref
+    # with a compare-and-swap, then refresh the index. The working report already
+    # has the exact blob just pushed, so no source/worktree rewrite is needed.
     local_ref = run("update-ref", "refs/heads/main", report_sha, source_sha)
     if local_ref is None or local_ref.returncode:
         return (f"SYNCED_GIT_REMOTE: https://github.com/{REPO}/blob/main/"
@@ -3024,7 +3091,6 @@ def publish(source_sha):
 
     return (f"SYNCED_GIT: https://github.com/{REPO}/blob/main/{GIT_RESULT} "
             f"(report {report_sha[:12]}; tested {source_sha[:12]})")
-
 
 def qualification_overall(exit_code, stages):
     if not exit_code:
