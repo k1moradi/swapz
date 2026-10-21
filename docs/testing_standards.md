@@ -1103,3 +1103,13 @@ baselines, and rejects a delta64 candidate that is not smaller. The read path
 must LZ4-decompress a delta64 record into separate scratch and apply the selected
 inverse before upper copy. Full owner qualification is required because this
 changes default production representation and CPU work.
+
+
+### Unversioned SWZ format identity
+
+Until an incompatible deployed format boundary is justified, maintained source,
+tests, workflows and documentation call the on-disk format `SWZ` only. Rootless
+source qualification rejects the retired generation-suffixed format name. The
+codec keeps the unversioned `SWZ\\0` magic and requires reserved header flags
+to remain zero; a future incompatible format change must introduce its identity
+deliberately rather than pre-versioning an undeployed format.
