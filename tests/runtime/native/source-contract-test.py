@@ -89,12 +89,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("a->alloc_probe_segments++", pick)
         self.assertIn("a->alloc_probe_full_scans++", pick)
         self.assertIn("a->segment_program_counts[segment]++", pick)
-        stage = source_body("swapz_stage", AUTHORITY)
+        stage = source_body("swapz_stage", AUTH)
         self.assertIn("tail_waste = SWAPZ_SEGMENT_BLOCKS -", stage)
         self.assertLess(stage.index("tail_waste = SWAPZ_SEGMENT_BLOCKS -"),
                         stage.index("error = swapz_pick_dead_segment(a)"))
         self.assertIn("swapz_placement_start(a, start, blocks)", stage)
-        resume = source_body("swapz_batch_resume", AUTHORITY)
+        resume = source_body("swapz_batch_resume", AUTH)
         self.assertIn("!a->packed_placement", resume)
 
         discard = body("swapz_discard_dead_segment")
