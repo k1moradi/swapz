@@ -16,8 +16,15 @@
 
 static struct swapz_authority a;
 static struct swapz_map maps[32];
-static swapz_u16 live[768];
-static swapz_u8 classes[768];
+static swapz_u16 live[1280];
+static swapz_u8 classes[1280];
+static swapz_u8 roles[5];
+static swapz_u32 mapped_pages[5];
+static swapz_u32 program_counts[5];
+static swapz_u32 first_page[5];
+static swapz_u32 last_page[5];
+static swapz_u32 prev_page[32];
+static swapz_u32 next_page[32];
 static swapz_u8 bytes[SWAPZ_BLOCK_BYTES];
 static swapz_u8 data[100];
 static int recycle_hook_calls;
@@ -50,6 +57,38 @@ static int setup(void)
 	a.dead_segment_recycle = recycle_hook;
 	a.dead_segment_recycle_opaque = &a;
 	return rc;
+}
+
+static int setup_indexed(swapz_u32 physical_blocks, int balance)
+{
+	swapz_u32 segments = physical_blocks / SWAPZ_SEGMENT_BLOCKS;
+	int rc;
+
+	rc = swapz_authority_init(&a, maps, live, classes, 32, physical_blocks);
+	if (rc)
+		return rc;
+	rc = swapz_enable_segment_rotation(&a, roles, segments);
+	if (rc)
+		return rc;
+	rc = swapz_enable_segment_mapping_counts(&a, mapped_pages, segments);
+	if (rc)
+		return rc;
+	rc = swapz_enable_segment_program_counts(&a, program_counts, segments);
+	if (rc)
+		return rc;
+	rc = swapz_enable_segment_page_lists(&a, first_page, last_page,
+					      prev_page, next_page,
+					      segments, 32);
+	if (rc)
+		return rc;
+	recycle_hook_calls = 0;
+	recycle_hook_last_segment = ~(swapz_u32)0;
+	recycle_hook_error = 0;
+	a.reuse_dead_segments = 1;
+	a.balance_segment_opens = balance;
+	a.dead_segment_recycle = recycle_hook;
+	a.dead_segment_recycle_opaque = &a;
+	return 0;
 }
 
 static int write_page(swapz_u32 logical)
@@ -174,6 +213,88 @@ static int test_two_block_class_respects_segment_edges(void)
 	return 0;
 }
 
+static int test_segment_page_lists_track_authority(void)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+
+	CHECK(setup_indexed(768, 0) == 0);
+	CHECK(first_page[0] == none && last_page[0] == none);
+	CHECK(write_page(0) == 0);
+	CHECK(write_page(1) == 0);
+	CHECK(mapped_pages[0] == 2);
+	CHECK(first_page[0] == 0 && last_page[0] == 1);
+	CHECK(prev_page[0] == none && next_page[0] == 1);
+	CHECK(prev_page[1] == 0 && next_page[1] == none);
+
+	/* Same-segment rewrite moves the logical page to the list tail. */
+	CHECK(write_page(0) == 0);
+	CHECK(mapped_pages[0] == 2);
+	CHECK(first_page[0] == 1 && last_page[0] == 0);
+	CHECK(prev_page[1] == none && next_page[1] == 0);
+	CHECK(prev_page[0] == 1 && next_page[0] == none);
+
+	CHECK(swapz_discard_page(&a, 1) == 0);
+	CHECK(mapped_pages[0] == 1);
+	CHECK(first_page[0] == 0 && last_page[0] == 0);
+	CHECK(prev_page[0] == none && next_page[0] == none);
+
+	/* Corrupt a valid local link: discard must fail before mutation. */
+	next_page[0] = 7;
+	CHECK(swapz_discard_page(&a, 0) == -EUCLEAN);
+	CHECK(maps[0].valid && mapped_pages[0] == 1);
+	next_page[0] = none;
+	CHECK(swapz_discard_page(&a, 0) == 0);
+	CHECK(!maps[0].valid && mapped_pages[0] == 0);
+	CHECK(first_page[0] == none && last_page[0] == none);
+
+	/* Invalid maps must also carry no stale membership links. */
+	prev_page[0] = 1;
+	CHECK(write_page(0) == -EUCLEAN);
+	CHECK(!maps[0].valid && mapped_pages[0] == 0);
+	return 0;
+}
+
+static int test_logical_open_balance_prefers_least_opened_dead_segment(void)
+{
+	struct swapz_tx tx;
+	swapz_u32 logical = 0;
+
+	CHECK(setup_indexed(1280, 1) == 0);
+	/* 32 logical pages => two reserve segments, three foreground segments. */
+	CHECK(roles[0] == 1 && roles[1] == 1 && roles[2] == 1);
+	program_counts[0] = 5;
+	program_counts[1] = 2;
+	program_counts[2] = 0;
+	a.next_segment_probe = 0;
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == 2U * SWAPZ_SEGMENT_BLOCKS);
+	CHECK(a.open_segment == 2 && program_counts[2] == 1);
+	CHECK(swapz_abort(&a, &tx) == 0);
+
+	CHECK(setup_indexed(1280, 1) == 0);
+	program_counts[0] = 5;
+	program_counts[1] = 2;
+	program_counts[2] = 3;
+	a.next_segment_probe = 0;
+	CHECK(swapz_stage(&a, &logical, 1, 1, &tx) == 0);
+	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS);
+	CHECK(a.open_segment == 1 && program_counts[1] == 3);
+	CHECK(swapz_abort(&a, &tx) == 0);
+	return 0;
+}
+
+static int test_logical_open_balance_applies_to_gc_destination(void)
+{
+	CHECK(setup_indexed(1280, 1) == 0);
+	program_counts[3] = 4;
+	program_counts[4] = 0;
+	a.next_segment_probe = 3;
+	CHECK(swapz_gc_begin_rotation(&a, 0) == 0);
+	CHECK(a.gc_destination == 4);
+	CHECK(a.open_segment == 4 && program_counts[4] == 1);
+	return 0;
+}
+
 int main(void)
 {
 	int passed = 0;
@@ -183,6 +304,9 @@ int main(void)
 	CHECK(test_live_segment_is_never_overwritten() == 0); passed++;
 	CHECK(test_corrupted_liveness_never_reclaims_live_map() == 0); passed++;
 	CHECK(test_two_block_class_respects_segment_edges() == 0); passed++;
+	CHECK(test_segment_page_lists_track_authority() == 0); passed++;
+	CHECK(test_logical_open_balance_prefers_least_opened_dead_segment() == 0); passed++;
+	CHECK(test_logical_open_balance_applies_to_gc_destination() == 0); passed++;
 	printf("SWAPZ_DEAD_SEGMENT_REUSE_TESTS_PASS=%d\n", passed);
 	return 0;
 }

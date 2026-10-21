@@ -511,6 +511,10 @@ alignment_hole_fg="$(status_u64 "$gc_after" alignment_hole_blocks_foreground)" |
     fail "live-GC status lacks foreground alignment-hole count"
 alignment_hole_gc="$(status_u64 "$gc_after" alignment_hole_blocks_gc)" ||
     fail "live-GC status lacks GC alignment-hole count"
+tail_waste_fg="$(status_u64 "$gc_after" segment_tail_waste_blocks_foreground)" ||
+    fail "live-GC status lacks foreground segment-tail waste"
+tail_waste_gc="$(status_u64 "$gc_after" segment_tail_waste_blocks_gc)" ||
+    fail "live-GC status lacks GC segment-tail waste"
 run_splits_by_hole="$(status_u64 "$gc_after" run_splits_by_hole)" ||
     fail "live-GC status lacks hole-split count"
 alloc_probe_segments="$(status_u64 "$gc_after" alloc_probe_segments)" ||
@@ -547,7 +551,9 @@ note "LIVE_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns ba
    gc_choose_calls >= gc_victims &&
    gc_choose_map_entries == 0 &&
    gc_choose_segment_entries > 0 &&
-   gc_relocation_map_entries >= gc_victims * 4096 &&
+   gc_relocation_map_entries == gc_pages &&
+   tail_waste_fg <= alignment_hole_fg &&
+   tail_waste_gc <= alignment_hole_gc &&
    alloc_probe_segments > 0 &&
    alloc_probe_full_scans > 0 &&
    alloc_probe_full_scans <= alloc_probe_segments &&
@@ -557,7 +563,7 @@ note "LIVE_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns ba
    gc_discard_skipped <= gc_discards_eligible )) ||
     fail "loaded live-GC did not prove repeated distributed live evacuation and rotation"
 note "PASS_LOADED_LIVE_GC=victims:$gc_victims rotations:$gc_rotations pages:$gc_pages read_bytes:$gc_read write_bytes:$gc_write read_reqs:$gc_read_reqs write_reqs:$gc_write_reqs distinct:$gc_distinct victim_min:$gc_victim_min victim_max:$gc_victim_max last:$gc_victim->$gc_destination discards:$gc_discards_completed discard_sectors:$gc_discard_sectors discard_unsupported:$gc_discards_unsupported discard_failed:$gc_discards_failed verified_pages:4096"
-note "PASS_LOADED_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns baseline_p99_ns:$gc_baseline_p99_ns pressure_p99_ns:$gc_pressure_p99_ns gc_wall_ns:$gc_wall_ns gc_fraction_ppm:$gc_fraction_ppm choose_wall_ns:$gc_choose_wall_ns choose_calls:$gc_choose_calls choose_map_entries:$gc_choose_map_entries choose_segment_entries:$gc_choose_segment_entries relocation_map_entries:$gc_relocation_map_entries no_headroom_skips:$gc_no_headroom alignment_hole_fg:$alignment_hole_fg alignment_hole_gc:$alignment_hole_gc run_splits_by_hole:$run_splits_by_hole alloc_probe_segments:$alloc_probe_segments alloc_probe_full_scans:$alloc_probe_full_scans alloc_probe_wall_ns:$alloc_probe_wall_ns trim_skipped:$gc_discard_skipped segment_program_min:$segment_program_min segment_program_sum:$segment_program_sum segment_program_max:$segment_program_max segment_program_segments:$segment_program_segments"
+note "PASS_LOADED_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns baseline_p99_ns:$gc_baseline_p99_ns pressure_p99_ns:$gc_pressure_p99_ns gc_wall_ns:$gc_wall_ns gc_fraction_ppm:$gc_fraction_ppm choose_wall_ns:$gc_choose_wall_ns choose_calls:$gc_choose_calls choose_map_entries:$gc_choose_map_entries choose_segment_entries:$gc_choose_segment_entries relocation_map_entries:$gc_relocation_map_entries no_headroom_skips:$gc_no_headroom alignment_hole_fg:$alignment_hole_fg alignment_hole_gc:$alignment_hole_gc tail_waste_fg:$tail_waste_fg tail_waste_gc:$tail_waste_gc run_splits_by_hole:$run_splits_by_hole alloc_probe_segments:$alloc_probe_segments alloc_probe_full_scans:$alloc_probe_full_scans alloc_probe_wall_ns:$alloc_probe_wall_ns trim_skipped:$gc_discard_skipped segment_program_min:$segment_program_min segment_program_sum:$segment_program_sum segment_program_max:$segment_program_max segment_program_segments:$segment_program_segments"
 dmsetup remove "$DMNAME" || fail "cannot remove live-GC qualification mapping"
 OWN_DM=0
 

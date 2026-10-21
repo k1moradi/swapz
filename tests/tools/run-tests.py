@@ -424,15 +424,15 @@ def parse_gc_scan_scale_evidence(output):
                 row.get("victim_records") != 256:
             return None
         for field in ("legacy_score_scan_ns", "incremental_select_ns",
-                      "relocation_scan_ns", "legacy_dead_probe_ns",
-                      "mapped_dead_probe_ns"):
+                      "relocation_scan_ns", "relocation_list_ns",
+                      "legacy_dead_probe_ns", "mapped_dead_probe_ns"):
             if type(row.get(field)) is not int or row[field] <= 0:
                 return None
         clean.append({key: row[key] for key in (
             "logical_pages", "segments", "legacy_score_scan_ns",
             "incremental_select_ns", "relocation_scan_ns",
-            "legacy_dead_probe_ns", "mapped_dead_probe_ns",
-            "victim_records")})
+            "relocation_list_ns", "legacy_dead_probe_ns",
+            "mapped_dead_probe_ns", "victim_records")})
     return {"scope": record["scope"], "rows": clean}
 
 
@@ -713,6 +713,7 @@ def parse_loaded_correctness(output):
             r"choose_map_entries:(\d+) choose_segment_entries:(\d+) "
             r"relocation_map_entries:(\d+) no_headroom_skips:(\d+) "
             r"alignment_hole_fg:(\d+) alignment_hole_gc:(\d+) "
+            r"tail_waste_fg:(\d+) tail_waste_gc:(\d+) "
             r"run_splits_by_hole:(\d+) alloc_probe_segments:(\d+) "
             r"alloc_probe_full_scans:(\d+) alloc_probe_wall_ns:(\d+) "
             r"trim_skipped:(\d+) segment_program_min:(\d+) "
@@ -791,9 +792,11 @@ def parse_loaded_correctness(output):
             gc_choose_calls < gc_victims or
             gc_choose_map_entries != 0 or
             gc_choose_segment_entries <= 0 or
-            gc_relocation_map_entries < gc_victims * 4096 or
+            gc_relocation_map_entries != gc_pages or
             alloc_probe_segments <= 0 or alloc_probe_full_scans <= 0 or
             alloc_probe_full_scans > alloc_probe_segments or
+            tail_waste_fg > alignment_hole_fg or
+            tail_waste_gc > alignment_hole_gc or
             segment_program_segments <= 0 or
             segment_program_min > segment_program_max or
             segment_program_sum < segment_program_max or
@@ -850,6 +853,8 @@ def parse_loaded_correctness(output):
         "gc_no_headroom_skips": gc_no_headroom_skips,
         "alignment_hole_blocks_foreground": alignment_hole_fg,
         "alignment_hole_blocks_gc": alignment_hole_gc,
+        "segment_tail_waste_blocks_foreground": tail_waste_fg,
+        "segment_tail_waste_blocks_gc": tail_waste_gc,
         "run_splits_by_hole": run_splits_by_hole,
         "alloc_probe_segments": alloc_probe_segments,
         "alloc_probe_full_scans": alloc_probe_full_scans,
@@ -1050,12 +1055,19 @@ def run_stage(title, command, result, *, parse_bench=False):
     sd_coalesce_diagnostic = (
         sd_read_coalesce_ab_verdict(sd_coalesce_sessions)
         if parse_bench else None)
+    packed_placement_sessions = (
+        parse_packed_placement_ab(output) if parse_bench else [])
+    packed_placement_diagnostic = (
+        packed_placement_ab_verdict(packed_placement_sessions)
+        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
-                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION"))
+                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
+                       packed_placement_diagnostic.get("overall") !=
+                       "PASS_PACKED_PLACEMENT_AB"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -1096,10 +1108,15 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "SD ID63 diagnostic evidence is incomplete")
+            elif packed_placement_diagnostic.get("overall") != (
+                    "PASS_PACKED_PLACEMENT_AB"):
+                record["failed_phase"] = "ID69 packed placement A/B evidence"
+                record["diagnostic"] = packed_placement_diagnostic.get(
+                    "reason", "ID69 placement evidence is incomplete")
             else:
-                record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
-                record["diagnostic"] = sd_coalesce_diagnostic.get(
-                    "reason", "SD ID63 diagnostic evidence is incomplete")
+                record["failed_phase"] = "ID69 packed placement A/B evidence"
+                record["diagnostic"] = packed_placement_diagnostic.get(
+                    "reason", "ID69 placement evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1125,6 +1142,8 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
         result["benchmarks"]["sd_read_coalesce_ab"] = sd_coalesce_diagnostic
+        result["benchmarks"]["packed_placement_ab_sessions"] = packed_placement_sessions
+        result["benchmarks"]["packed_placement_ab"] = packed_placement_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -1136,6 +1155,191 @@ def run_stage(title, command, result, *, parse_bench=False):
     return rc
 
 
+def _status_u64(status, key):
+    match = re.search(r"(?:^|\\s)" + re.escape(key) + r"=(\\d+)(?:\\s|$)",
+                      status)
+    return int(match.group(1)) if match else None
+
+
+def parse_packed_placement_ab(output):
+    sessions, current = [], None
+    for raw in output.splitlines():
+        line = raw.strip()
+        if line.startswith("START_PACKED_PLACEMENT_AB="):
+            try:
+                mode = int(line.rsplit("=", 1)[-1])
+            except ValueError:
+                return []
+            if mode not in (0, 1):
+                return []
+            current = {"packed_placement": mode, "status": "INCOMPLETE",
+                       "order": "unknown", "swapz": None,
+                       "status_after": None}
+            sessions.append(current)
+        elif current is not None and line.startswith("REPLAY_ORDER="):
+            current["order"] = line.partition("=")[2].strip()
+        elif current is not None and line.startswith("SWAPZ_STATUS_AFTER="):
+            current["status_after"] = line.partition("=")[2].strip()
+        elif current is not None and line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
+                continue
+            rates = obj.get("throughput_mbps") or {}
+            lower = obj.get("lower_io") or {}
+            kernel = obj.get("kernel_write_path") or {}
+            current["swapz"] = {
+                "source_sha": obj.get("source_sha"),
+                "fixture_sha256": obj.get("fixture_sha256"),
+                "trace_sha256": obj.get("trace_sha256"),
+                "replay_mode": obj.get("replay_mode"),
+                "qd": obj.get("qd"), "write_ops": obj.get("write_ops"),
+                "read_ops": obj.get("read_ops"),
+                "verified_pages": obj.get("verified_pages"),
+                "logical_write_mbps": rates.get("logical_write_mbps"),
+                "write_p99_ns": obj.get("write_p99_ns"),
+                "lower_write_bytes": lower.get("lower_write_bytes"),
+                "lower_write_requests": lower.get("lower_write_requests"),
+                "physical_write_reqs": kernel.get("physical_write_reqs"),
+            }
+        elif current is not None and line.startswith("PASS_PACKED_PLACEMENT_AB="):
+            try:
+                mode = int(line.rsplit("=", 1)[-1])
+            except ValueError:
+                return []
+            if mode != current["packed_placement"]:
+                return []
+            current["status"] = "PASS"
+            current = None
+    return sessions
+
+
+def packed_placement_ab_verdict(sessions):
+    expected_modes = (0, 1, 1, 0)
+    if len(sessions) != len(expected_modes) or tuple(
+            row.get("packed_placement") for row in sessions) != expected_modes:
+        return {"overall": "INCOMPLETE",
+                "reason": "ID69 placement A/B session sequence is incomplete"}
+    clean = []
+    for row in sessions:
+        arm = row.get("swapz")
+        status = row.get("status_after")
+        if row.get("status") != "PASS" or not isinstance(arm, dict) or \
+                not isinstance(status, str):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B arm did not complete"}
+        integer_fields = (
+            "qd", "write_ops", "read_ops", "verified_pages", "write_p99_ns",
+            "lower_write_bytes", "lower_write_requests", "physical_write_reqs")
+        if any(type(arm.get(field)) is not int or arm[field] < 0
+               for field in integer_fields):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B I/O evidence is malformed"}
+        if (arm["qd"] != 32 or arm["write_ops"] != 2048 or arm["read_ops"] != 0 or
+                arm["verified_pages"] != 1024 or
+                arm["replay_mode"] != "persistent-write" or
+                not isinstance(arm.get("source_sha"), str) or
+                not re.fullmatch(r"[0-9a-f]{40}", arm["source_sha"]) or
+                not isinstance(arm.get("fixture_sha256"), str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm["fixture_sha256"]) or
+                not isinstance(arm.get("trace_sha256"), str) or
+                not re.fullmatch(r"[0-9a-f]{64}", arm["trace_sha256"]) or
+                not isinstance(arm.get("logical_write_mbps"), (int, float)) or
+                not math.isfinite(arm["logical_write_mbps"]) or
+                arm["logical_write_mbps"] <= 0):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B workload identity is invalid"}
+        mode = row["packed_placement"]
+        status_values = {
+            key: _status_u64(status, key) for key in (
+                "packed_placement", "logical_open_balance",
+                "alignment_hole_blocks_foreground",
+                "segment_tail_waste_blocks_foreground",
+                "run_splits_by_hole", "segment_program_sum")
+        }
+        if any(value is None for value in status_values.values()) or \
+                status_values["packed_placement"] != mode or \
+                status_values["logical_open_balance"] != 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B status policy mismatch"}
+        if (arm["physical_write_reqs"] <= 0 or
+                arm["lower_write_bytes"] <= 0 or arm["write_p99_ns"] <= 0 or
+                status_values["segment_program_sum"] <= 0):
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B measured write evidence is empty"}
+        aggregate_holes = status_values["alignment_hole_blocks_foreground"]
+        tail_waste = status_values["segment_tail_waste_blocks_foreground"]
+        if tail_waste > aggregate_holes:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement telemetry has tail waste above aggregate holes"}
+        clean.append({
+            **row,
+            "holes": aggregate_holes,
+            "tail_waste": tail_waste,
+            "internal_holes": aggregate_holes - tail_waste,
+            "run_splits": status_values["run_splits_by_hole"],
+            "segment_program_sum": status_values["segment_program_sum"],
+        })
+    if len({row["swapz"]["source_sha"] for row in clean}) != 1 or \
+            len({row["swapz"]["fixture_sha256"] for row in clean}) != 1 or \
+            len({row["swapz"]["trace_sha256"] for row in clean}) != 1:
+        return {"overall": "INCOMPLETE",
+                "reason": "ID69 placement A/B did not reuse one immutable workload"}
+    pairs = ((clean[0], clean[1]), (clean[3], clean[2]))
+    paired = []
+    for aligned, packed in pairs:
+        if aligned["packed_placement"] != 0 or packed["packed_placement"] != 1:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B pairing is invalid"}
+        if aligned["internal_holes"] <= 0 and aligned["run_splits"] <= 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 control workload did not exercise alignment waste"}
+        if packed["internal_holes"] != 0 or packed["run_splits"] != 0:
+            return {"overall": "REGRESSION",
+                    "reason": "ID69 packed placement retained internal holes"}
+        a, p = aligned["swapz"], packed["swapz"]
+        if p["physical_write_reqs"] >= a["physical_write_reqs"]:
+            return {"overall": "NO_GAIN",
+                    "reason": "ID69 packed placement did not reduce physical WRITE requests"}
+        if p["lower_write_bytes"] > a["lower_write_bytes"]:
+            return {"overall": "REGRESSION",
+                    "reason": "ID69 packed placement increased lower WRITE bytes"}
+        if packed["segment_program_sum"] >= aligned["segment_program_sum"]:
+            return {"overall": "NO_GAIN",
+                    "reason": "ID69 packed placement did not reduce logical segment opens"}
+        paired.append({
+            "request_change_pct":
+                (p["physical_write_reqs"] - a["physical_write_reqs"]) * 100.0 /
+                a["physical_write_reqs"],
+            "byte_change_pct":
+                (p["lower_write_bytes"] - a["lower_write_bytes"]) * 100.0 /
+                a["lower_write_bytes"] if a["lower_write_bytes"] else 0.0,
+            "throughput_change_pct":
+                (p["logical_write_mbps"] - a["logical_write_mbps"]) * 100.0 /
+                a["logical_write_mbps"],
+            "p99_change_pct":
+                (p["write_p99_ns"] - a["write_p99_ns"]) * 100.0 /
+                a["write_p99_ns"] if a["write_p99_ns"] else 0.0,
+            "program_change":
+                packed["segment_program_sum"] - aligned["segment_program_sum"],
+        })
+    return {
+        "overall": "PASS_PACKED_PLACEMENT_AB",
+        "scope": "OWNED_RAM_MIXED_CLASS_PLACEMENT_ONLY",
+        "sessions": clean, "paired": paired,
+        "mean_request_change_pct":
+            statistics.mean(row["request_change_pct"] for row in paired),
+        "mean_byte_change_pct":
+            statistics.mean(row["byte_change_pct"] for row in paired),
+        "mean_throughput_change_pct":
+            statistics.mean(row["throughput_change_pct"] for row in paired),
+        "mean_p99_change_pct":
+            statistics.mean(row["p99_change_pct"] for row in paired),
+    }
+
+
 def parse_sessions(output):
     sessions, current, regime = [], None, None
     for line in output.splitlines():
@@ -1144,6 +1348,7 @@ def parse_sessions(output):
             regime = line.partition("=")[2]
         elif line.startswith(("START_READ_COALESCE_AB=",
                               "START_SD_READ_COALESCE_AB=",
+                              "START_PACKED_PLACEMENT_AB=",
                               "START_BURST_GUARD_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
             current = None
@@ -2420,13 +2625,13 @@ def print_bench(result):
     if isinstance(gc_scale, dict):
         print("\n  ID61 GC MAP-SCAN SCALE — native CPU evidence; no lower I/O")
         print_table(
-            ("logical pages", "segments", "old score ms",
-             "segment select ms", "relocate scan ms"),
+            ("pages", "segs", "old ms", "select ms", "map ms", "list ms"),
             [(
                 row["logical_pages"], row["segments"],
                 f"{row['legacy_score_scan_ns'] / 1e6:.3f}",
                 f"{row['incremental_select_ns'] / 1e6:.3f}",
                 f"{row['relocation_scan_ns'] / 1e6:.3f}",
+                f"{row['relocation_list_ns'] / 1e6:.3f}",
             ) for row in gc_scale["rows"]])
         print("  ID71 DEAD-SEGMENT PROBE SCALE — native CPU evidence; no lower I/O")
         print_table(
@@ -2931,6 +3136,26 @@ def print_bench(result):
         print("\n  SD ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
 
+    packed_ab = result["benchmarks"].get("packed_placement_ab")
+    if isinstance(packed_ab, dict):
+        print("\n  ID69 PACKED PLACEMENT A/B — mixed-class owned RAM")
+        if packed_ab.get("overall") == "PASS_PACKED_PLACEMENT_AB":
+            print_table(
+                ("metric", "paired mean"),
+                [
+                    ("physical WRITE req",
+                     f"{packed_ab['mean_request_change_pct']:+.1f}%"),
+                    ("lower WRITE bytes",
+                     f"{packed_ab['mean_byte_change_pct']:+.1f}%"),
+                    ("logical W throughput",
+                     f"{packed_ab['mean_throughput_change_pct']:+.1f}%"),
+                    ("write p99",
+                     f"{packed_ab['mean_p99_change_pct']:+.1f}%"),
+                ])
+        else:
+            print(f"  verdict: {packed_ab.get('overall')} — "
+                  f"{packed_ab.get('reason', 'incomplete')}")
+
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":
         print("\n  Lifecycle")
@@ -2954,10 +3179,12 @@ def print_bench(result):
                  f"{loaded['gc_segment_discards']} x 1MiB; "
                  f"{loaded['gc_segment_discard_sectors']} sectors; "
                  f"{loaded['segment_discards_skipped_already_trimmed']} duplicate skips"),
-                ("placement holes",
-                 f"FG {loaded['alignment_hole_blocks_foreground']} / "
-                 f"GC {loaded['alignment_hole_blocks_gc']} blocks; "
-                 f"{loaded['run_splits_by_hole']} run splits"),
+                ("placement waste",
+                 f"FG {loaded['alignment_hole_blocks_foreground']} "
+                 f"(tail {loaded['segment_tail_waste_blocks_foreground']}) / "
+                 f"GC {loaded['alignment_hole_blocks_gc']} "
+                 f"(tail {loaded['segment_tail_waste_blocks_gc']}); "
+                 f"{loaded['run_splits_by_hole']} splits"),
                 ("allocator probes",
                  f"{loaded['alloc_probe_segments']} segments / "
                  f"{loaded['alloc_probe_full_scans']} full scans; "
@@ -2977,9 +3204,9 @@ def print_bench(result):
                  f"wall {loaded['gc_fraction_ppm'] / 10000:.2f}% useful-W; "
                  f"p99 {loaded['gc_baseline_p99_ns'] / 1e6:.2f}->"
                  f"{loaded['gc_pressure_p99_ns'] / 1e6:.2f} ms"),
-            ("GC map scans",
+            ("GC map/list",
                  f"choose-map {loaded['gc_choose_map_entries']} / "
-                 f"relocate {loaded['gc_relocation_map_entries']} entries; "
+                 f"relocate {loaded['gc_relocation_map_entries']} survivors; "
                  f"choose {loaded['gc_choose_wall_ns'] / 1e6:.2f} ms; "
                  f"no-headroom {loaded['gc_no_headroom_skips']}"),
                 ("suspend/resume",

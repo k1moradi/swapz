@@ -109,6 +109,7 @@ def gc_scan_scale_evidence():
                 "legacy_score_scan_ns": 2000000,
                 "incremental_select_ns": 20000,
                 "relocation_scan_ns": 800000,
+                "relocation_list_ns": 4000,
                 "legacy_dead_probe_ns": 700000,
                 "mapped_dead_probe_ns": 12000,
                 "victim_records": 256,
@@ -118,6 +119,7 @@ def gc_scan_scale_evidence():
                 "legacy_score_scan_ns": 8000000,
                 "incremental_select_ns": 80000,
                 "relocation_scan_ns": 3200000,
+                "relocation_list_ns": 4500,
                 "legacy_dead_probe_ns": 2800000,
                 "mapped_dead_probe_ns": 15000,
                 "victim_records": 256,
@@ -473,12 +475,29 @@ def write_arm(candidate, *, qd, regime, mode):
             mode=mode, target=max(4, qd)) if swapz else None),
     }
 
+def placement_arm(packed):
+    record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=0)
+    record["fixture_sha256"] = "c" * 64
+    record["trace_sha256"] = "d" * 64
+    record["measure_ops"] = 2048
+    record["write_ops"] = 2048
+    record["read_ops"] = 0
+    record["verified_pages"] = 1024
+    record["throughput_mbps"]["logical_write_bytes"] = 2048 * 4096
+    record["throughput_mbps"]["logical_write_mbps"] = 61.0 if packed else 60.0
+    record["lower_io"]["lower_write_bytes"] = 6000000
+    record["lower_io"]["lower_write_requests"] = 80 if packed else 130
+    record["write_p99_ns"] = 2400000 if packed else 2500000
+    record["kernel_write_path"]["physical_write_reqs"] = 80 if packed else 130
+    return record
+
+
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
            "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
-           "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:49152 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
+           "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:12 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
            "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:2 verified_pages:4096",
            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:0 run_splits:0 failed:0",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
@@ -566,6 +585,19 @@ def synthetic_log():
                     f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
                 index += 1
         out.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
+    for index, packed in enumerate((0, 1, 1, 0)):
+        out.append(f"START_PACKED_PLACEMENT_AB={packed}")
+        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                   "REPLAY_ORDER=off-first")
+        out.append(
+            "SWAPZ_STATUS_AFTER=packed_placement={} logical_open_balance=0 "
+            "alignment_hole_blocks_foreground={} "
+            "segment_tail_waste_blocks_foreground={} "
+            "run_splits_by_hole={} segment_program_sum={}".format(
+                packed, 0 if packed else 24, 0,
+                0 if packed else 8, 70 if packed else 80))
+        out.append(json.dumps(placement_arm(packed)))
+        out.append(f"PASS_PACKED_PLACEMENT_AB={packed}")
     return "\n".join(out) + "\n"
 
 
@@ -639,6 +671,7 @@ class ReportContract(unittest.TestCase):
         parsed = runner.parse_gc_scan_scale_evidence(
             "SWAPZ_GC_SCAN_SCALE_EVIDENCE=" + json.dumps(raw) + "\n")
         self.assertEqual(parsed["rows"][1]["logical_pages"], 1048576)
+        self.assertEqual(parsed["rows"][1]["relocation_list_ns"], 4500)
         broken = json.loads(json.dumps(raw))
         broken["rows"][1]["victim_records"] = 255
         self.assertIsNone(runner.parse_gc_scan_scale_evidence(
@@ -654,6 +687,24 @@ class ReportContract(unittest.TestCase):
         broken["rows"][2]["name"] = "packed_1_4"
         self.assertIsNone(runner.parse_extent_geometry_evidence(
             "SWAPZ_EXTENT_GEOMETRY_EVIDENCE=" + json.dumps(broken) + "\n"))
+
+    def test_packed_placement_ab_is_strict_and_sanitized(self):
+        rows = runner.parse_packed_placement_ab(synthetic_log())
+        self.assertEqual([row["packed_placement"] for row in rows],
+                         [0, 1, 1, 0])
+        verdict = runner.packed_placement_ab_verdict(rows)
+        self.assertEqual(verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
+        self.assertLess(verdict["mean_request_change_pct"], 0)
+        self.assertEqual(verdict["mean_byte_change_pct"], 0)
+        broken = synthetic_log().replace(
+            "packed_placement=1 logical_open_balance=0 "
+            "alignment_hole_blocks_foreground=0",
+            "packed_placement=1 logical_open_balance=0 "
+            "alignment_hole_blocks_foreground=1", 1)
+        self.assertEqual(
+            runner.packed_placement_ab_verdict(
+                runner.parse_packed_placement_ab(broken))["overall"],
+            "REGRESSION")
 
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
@@ -672,9 +723,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["gc_baseline_p99_ns"], 1000000)
         self.assertEqual(loaded["gc_pressure_p99_ns"], 5000000)
         self.assertEqual(loaded["gc_choose_map_entries"], 0)
-        self.assertEqual(loaded["gc_relocation_map_entries"], 49152)
+        self.assertEqual(loaded["gc_relocation_map_entries"], 12)
         self.assertEqual(loaded["gc_no_headroom_skips"], 3)
         self.assertEqual(loaded["alignment_hole_blocks_foreground"], 24)
+        self.assertEqual(loaded["segment_tail_waste_blocks_foreground"], 4)
+        self.assertEqual(loaded["segment_tail_waste_blocks_gc"], 1)
         self.assertEqual(loaded["run_splits_by_hole"], 8)
         self.assertEqual(loaded["segment_discards_skipped_already_trimmed"], 6)
         self.assertEqual(loaded["segment_program_max"], 4)
@@ -702,8 +755,8 @@ class ReportContract(unittest.TestCase):
             "gc_wall_ns:200000000 gc_fraction_ppm:200000 "
             "choose_wall_ns:20000000 choose_calls:12 "
             "choose_map_entries:0 choose_segment_entries:768 "
-            "relocation_map_entries:49152 no_headroom_skips:3 "
-            "alignment_hole_fg:24 alignment_hole_gc:2 run_splits_by_hole:8 "
+            "relocation_map_entries:12 no_headroom_skips:3 "
+            "alignment_hole_fg:24 alignment_hole_gc:2 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:8 "
             "alloc_probe_segments:1024 alloc_probe_full_scans:16 "
             "alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 "
             "segment_program_sum:80 segment_program_max:4 "
@@ -1003,6 +1056,8 @@ class ReportContract(unittest.TestCase):
                 runner.parse_read_coalesce_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
+            "packed_placement_ab": runner.packed_placement_ab_verdict(
+                runner.parse_packed_placement_ab(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -1012,6 +1067,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
         self.assertIn("ID61 GC MAP-SCAN SCALE", rendered)
         self.assertIn("ID73 OFFLINE EXTENT GEOMETRY", rendered)
+        self.assertIn("ID69 PACKED PLACEMENT A/B", rendered)
+        self.assertIn("physical WRITE req", rendered)
         self.assertIn("packed_1_2_4_8_16", rendered)
         self.assertIn("upper DISCARD TRIM", rendered)
         self.assertIn("packed smoke", rendered)

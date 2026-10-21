@@ -18,6 +18,7 @@ struct scale_row {
 	uint64_t legacy_score_scan_ns;
 	uint64_t incremental_select_ns;
 	uint64_t relocation_scan_ns;
+	uint64_t relocation_list_ns;
 	uint64_t legacy_dead_probe_ns;
 	uint64_t mapped_dead_probe_ns;
 	swapz_u32 victim_records;
@@ -127,6 +128,38 @@ static uint64_t relocation_scan(const struct swapz_map *maps,
 	return now_ns() - start;
 }
 
+static uint64_t relocation_list_scan(const struct swapz_map *maps,
+				     const swapz_u32 *first_page,
+				     const swapz_u32 *next_page,
+				     swapz_u32 logical_pages,
+				     swapz_u32 victim,
+				     swapz_u32 *records_out)
+{
+	const swapz_u32 none = ~(swapz_u32)0;
+	swapz_u32 logical = first_page[victim], records = 0;
+	uint64_t start = now_ns();
+
+	while (logical != none) {
+		const struct swapz_map *m;
+
+		if (logical >= logical_pages || records >= logical_pages) {
+			*records_out = ~(swapz_u32)0;
+			return 0;
+		}
+		m = &maps[logical];
+		if (!m->valid ||
+		    m->start_block / SWAPZ_SEGMENT_BLOCKS != victim) {
+			*records_out = ~(swapz_u32)0;
+			return 0;
+		}
+		records++;
+		logical = next_page[logical];
+	}
+	evidence_sink += records;
+	*records_out = records;
+	return now_ns() - start;
+}
+
 static uint64_t legacy_dead_probe(const swapz_u16 *live_records,
 				 const swapz_u8 *extent_classes,
 				 const swapz_u32 *mapped_pages,
@@ -190,11 +223,14 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 	swapz_u32 segments = logical_pages / SWAPZ_SEGMENT_BLOCKS;
 	struct swapz_map *maps = NULL;
 	swapz_u32 *bytes = NULL, *io = NULL, *mapped_pages = NULL;
+	swapz_u32 *first_page = NULL, *last_page = NULL;
+	swapz_u32 *prev_page = NULL, *next_page = NULL;
 	swapz_u16 *counts = NULL, *min_blocks = NULL, *live_records = NULL;
 	swapz_u8 *extent_classes = NULL;
 	uint64_t legacy[REPEATS], select[REPEATS], relocation[REPEATS];
+	uint64_t relocation_list[REPEATS];
 	uint64_t legacy_probe[REPEATS], mapped_probe[REPEATS];
-	swapz_u32 logical, repeat, records = 0, selected = 0;
+	swapz_u32 logical, repeat, records = 0, list_records = 0, selected = 0;
 	int rc = 1;
 
 	if (!segments || logical_pages % SWAPZ_SEGMENT_BLOCKS)
@@ -205,19 +241,37 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 	counts = calloc(segments, sizeof(*counts));
 	min_blocks = calloc(segments, sizeof(*min_blocks));
 	mapped_pages = calloc(segments, sizeof(*mapped_pages));
+	first_page = malloc((size_t)segments * sizeof(*first_page));
+	last_page = malloc((size_t)segments * sizeof(*last_page));
+	prev_page = malloc((size_t)logical_pages * sizeof(*prev_page));
+	next_page = malloc((size_t)logical_pages * sizeof(*next_page));
 	live_records = calloc(logical_pages, sizeof(*live_records));
 	extent_classes = calloc(logical_pages, sizeof(*extent_classes));
 	if (!maps || !bytes || !io || !counts || !min_blocks ||
-	    !mapped_pages || !live_records || !extent_classes)
+	    !mapped_pages || !first_page || !last_page || !prev_page ||
+	    !next_page || !live_records || !extent_classes)
 		goto out;
+	memset(first_page, 0xff, (size_t)segments * sizeof(*first_page));
+	memset(last_page, 0xff, (size_t)segments * sizeof(*last_page));
+	memset(prev_page, 0xff, (size_t)logical_pages * sizeof(*prev_page));
+	memset(next_page, 0xff, (size_t)logical_pages * sizeof(*next_page));
 
 	for (logical = 0; logical < logical_pages; ++logical) {
+		swapz_u32 segment = logical / SWAPZ_SEGMENT_BLOCKS;
+		swapz_u32 last = last_page[segment];
+
 		maps[logical] = (struct swapz_map){
 			.start_block = logical,
 			.payload_length = (swapz_u16)(1800U + logical % 401U),
 			.extent_blocks = 1,
 			.valid = 1,
 		};
+		prev_page[logical] = last;
+		if (last == ~(swapz_u32)0)
+			first_page[segment] = logical;
+		else
+			next_page[last] = logical;
+		last_page[segment] = logical;
 	}
 	/*
 	 * Near-full allocator geometry: every segment except the final one has
@@ -243,6 +297,11 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 			segments, bytes, io, counts, min_blocks);
 		relocation[repeat] = relocation_scan(
 			maps, logical_pages, segments / 2U, &records);
+		relocation_list[repeat] = relocation_list_scan(
+			maps, first_page, next_page, logical_pages,
+			segments / 2U, &list_records);
+		if (list_records != records)
+			goto out;
 		legacy_probe[repeat] = legacy_dead_probe(
 			live_records, extent_classes, mapped_pages,
 			segments, &selected);
@@ -262,6 +321,7 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 		.legacy_score_scan_ns = median_ns(legacy),
 		.incremental_select_ns = median_ns(select),
 		.relocation_scan_ns = median_ns(relocation),
+		.relocation_list_ns = median_ns(relocation_list),
 		.legacy_dead_probe_ns = median_ns(legacy_probe),
 		.mapped_dead_probe_ns = median_ns(mapped_probe),
 		.victim_records = records,
@@ -270,6 +330,10 @@ static int run_geometry(swapz_u32 logical_pages, struct scale_row *row)
 out:
 	free(extent_classes);
 	free(live_records);
+	free(next_page);
+	free(prev_page);
+	free(last_page);
+	free(first_page);
 	free(mapped_pages);
 	free(min_blocks);
 	free(counts);
@@ -300,15 +364,17 @@ int main(void)
 		       "\"legacy_score_scan_ns\":%" PRIu64 ","
 		       "\"incremental_select_ns\":%" PRIu64 ","
 		       "\"relocation_scan_ns\":%" PRIu64 ","
+		       "\"relocation_list_ns\":%" PRIu64 ","
 		       "\"legacy_dead_probe_ns\":%" PRIu64 ","
 		       "\"mapped_dead_probe_ns\":%" PRIu64 ","
 		       "\"victim_records\":%u}",
 		       index ? "," : "", row->logical_pages, row->segments,
 		       row->legacy_score_scan_ns, row->incremental_select_ns,
-		       row->relocation_scan_ns, row->legacy_dead_probe_ns,
-		       row->mapped_dead_probe_ns, row->victim_records);
+		       row->relocation_scan_ns, row->relocation_list_ns,
+		       row->legacy_dead_probe_ns, row->mapped_dead_probe_ns,
+		       row->victim_records);
 	}
 	puts("]}");
-	puts("PASS: GC victim selection is segment-scaled; relocation scan evidence collected");
+	puts("PASS: GC selection/dead probes are segment-scaled; relocation list is survivor-scaled");
 	return evidence_sink == UINT64_MAX ? 1 : 0;
 }

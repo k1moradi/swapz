@@ -5,7 +5,7 @@ set -Eeuo pipefail
 umask 077
 if [[ $# == 1 && $1 == --help ]]; then
     echo 'INTERNAL HELPER ONLY: the only official test/benchmark command is make test.'
-    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] [--read-coalesce 0|1] (private Make test orchestration)'
+    echo 'Internal flags: --run-owned-ram-pair --profile medium --retain-ms 2 --unpaced [--lower-mbps 10|80] [--completion-nsec 150000|1000000] [--async-prepare] [--parallel-reads 0|1] [--read-coalesce 0|1] [--packed-placement 0|1] (private Make test orchestration)'
     exit 0
 fi
 PROFILE=default
@@ -21,6 +21,8 @@ READ_COALESCE=1
 WRITE_ONLY_QD=0
 READ_PCT=25
 PACKED_READ=1
+PACKED_PLACEMENT=0
+PLACEMENT_AB=0
 LOWER_MBPS=0
 COMPLETION_NSEC=0
 IRQMODE=1
@@ -37,6 +39,13 @@ SHARED_PLAN=""
 # Only make test supplies its freshly made immutable workload directory.
 if [[ $# -ge 3 && ${@: -2:1} == --shared-plan ]]; then
     SHARED_PLAN="${!#}"
+    set -- "${@:1:$(( $# - 2 ))}"
+fi
+# ID69 same-source placement A/B. Parsed after the immutable-plan suffix so
+# make test can pass --packed-placement immediately before --shared-plan.
+if [[ $# -ge 3 && ${@: -2:1} == --packed-placement &&
+      ( ${!#} == 0 || ${!#} == 1 ) ]]; then
+    PACKED_PLACEMENT="${!#}"
     set -- "${@:1:$(( $# - 2 ))}"
 fi
 # Explicit same-source Kread A/B control. The module parameter defaults on;
@@ -98,6 +107,20 @@ elif [[ $# == 5 && $1 == --run-owned-ram-pair &&
     PROFILE=medium
     RETAIN_MS=2
 elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
+        $2 == --profile && $3 == placement &&
+        $4 == --retain-ms && $5 == 2 &&
+        $6 == --unpaced ]]; then
+    PROFILE=placement
+    PLACEMENT_AB=1
+    RETAIN_MS=2
+    RATE_MODE=unpaced
+    QD=32
+    WARMUP_OPS=256
+    MEASURE_OPS=2048
+    IOPS=0
+    READ_PCT=0
+    PACKED_READ=0
+elif [[ $# == 6 && $1 == --run-owned-ram-pair &&
         $2 == --profile && $3 == medium &&
         $4 == --retain-ms && ( $5 == 1 || $5 == 2 ) &&
         $6 == --unpaced ]]; then
@@ -124,13 +147,19 @@ if (( WRITE_ONLY_QD )); then
     PACKED_READ=0
 fi
 if (( REPLAY_SWAPZ_FIRST )) &&
-   [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
-    echo 'BLOCKED: swapz-first requires owned medium QD32' >&2
+   [[ $RATE_MODE != unpaced ||
+      ( $PROFILE != medium && $PROFILE != placement ) ]]; then
+    echo 'BLOCKED: swapz-first requires an owned unpaced QD32 profile' >&2
     exit 2
 fi
 if (( ASYNC_PREPARE || LOWER_MBPS || COMPLETION_NSEC )) &&
-   [[ $RATE_MODE != unpaced || $PROFILE != medium ]]; then
-    echo 'BLOCKED: async/rate-cap trials require owned medium unpaced QD32' >&2
+   [[ $RATE_MODE != unpaced ||
+      ( $PROFILE != medium && $PROFILE != placement ) ]]; then
+    echo 'BLOCKED: async/rate-cap trials require an owned unpaced QD32 profile' >&2
+    exit 2
+fi
+if (( PLACEMENT_AB )) && [[ -z $SHARED_PLAN ]]; then
+    echo 'BLOCKED: placement A/B requires make-test immutable shared plan' >&2
     exit 2
 fi
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -201,7 +230,7 @@ git merge-base --is-ancestor "$SOURCE" HEAD >/dev/null 2>&1 &&
     git diff --quiet "$SOURCE..HEAD" -- . ':(exclude)test_results.json.xz' ||
     fail "tested source does not match checkout code"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
-note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"
+note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE PACKED_PLACEMENT=$PACKED_PLACEMENT LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 || PLACEMENT_AB != 0 ))"
 note "RUNNING_KERNEL=$(uname -r)"
 note "HOST_SWAPS_BEFORE:"
 note "$SWAPS"
@@ -390,7 +419,7 @@ create_owned_ram  # swapz backing, separate device
 [[ ${DEVS[0]} != "${DEVS[1]}" ]] || fail 'pair backed by same RAM device'
 note "PASS_RAM_MODEL_LOWER_MBPS=$LOWER_MBPS COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QUEUE_MODE=$QUEUE_MODE SUBMIT_QUEUES=$SUBMIT_QUEUES HW_QUEUE_DEPTH=$HW_QUEUE_DEPTH"
 modprobe dm_mod
-insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" ||
+insmod "$MODULE" "async_prepare=$ASYNC_PREPARE" "parallel_reads=$PARALLEL_READS" "read_coalesce=$READ_COALESCE" "packed_placement=$PACKED_PLACEMENT" ||
     fail 'swapz module insertion rejected'
 OWN_MODULE=1
 dmsetup targets | grep -Eq '^swapz[[:space:]]' ||
@@ -424,6 +453,10 @@ dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])async_prepare=$ASYNC_PREPARE
     fail 'loaded swapz async preparation does not match selected benchmark arm'
 dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])guard_inflight_zero_shrink=0([[:space:]]|$)" ||
     fail 'retired ID64 compatibility token must remain zero'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])packed_placement=$PACKED_PLACEMENT([[:space:]]|$)" ||
+    fail 'loaded swapz packed-placement gate does not match selected arm'
+dmsetup status "$DMNAME" | grep -Eq "(^|[[:space:]])logical_open_balance=0([[:space:]]|$)" ||
+    fail 'logical-open balance must remain off in placement A/B'
 expected_grouping=$PARALLEL_READS
 expected_coalescing=$(( PARALLEL_READS && READ_COALESCE ? 1 : 0 ))
 expected_parallel=0
@@ -486,7 +519,8 @@ else
         --output-prefix "$SESSION/fixture" --pages 128 --seed 0x51a0a9
 fi
 prepare_replay_args=()
-(( WRITE_ONLY_QD )) && prepare_replay_args+=(--sustained-write)
+(( WRITE_ONLY_QD || PLACEMENT_AB )) &&
+    prepare_replay_args+=(--sustained-write)
 python3 -B tests/runtime/benchmark/io-replay.py prepare \
     --fixture "$SESSION/fixture.bin" --output-dir "$SESSION/plan" \
     --logical-pages 1024 --writer-pages 256 --reader-start 512 \

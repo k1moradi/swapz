@@ -139,7 +139,7 @@ class PublicMakeContract(unittest.TestCase):
                 "test -x build/tests/device-roundtrip\n"
                 "test -x build/userspace/swapzctl\n"
                 "printf '%s\\n' 'SWAPZ_PREDICTOR_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY\",\"negative_pages\":256,\"structured_pages\":320,\"classifier\":{\"candidate\":\"delta64\",\"backend\":\"scalar\",\"sample_pairs\":32,\"stage1_pairs\":8,\"stage1_min_score\":2,\"eligible_pages\":320,\"early_abort_pages\":120,\"benchmark_repeats\":256,\"benchmark_calls\":81920,\"ns_per_page\":55,\"scalar_ns_per_page\":55},\"backend_benchmarks\":[{\"name\":\"scalar\",\"transform_ns_per_page\":700,\"inverse_ns_per_page\":650},{\"name\":\"sse2\",\"transform_ns_per_page\":430,\"inverse_ns_per_page\":550}],\"io_model_block_ns\":{\"sd_emulated\":390625,\"ssd_emulated\":48828},\"thresholds\":[{\"threshold\":4,\"negative_eligible\":141,\"negative_calls\":0,\"negative_useful\":0,\"structured_eligible\":320,\"structured_calls\":256,\"structured_useful\":256,\"routed_baseline_blocks\":200,\"routed_candidate_blocks\":165,\"routed_blocks_saved\":35,\"routed_baseline_extents\":100,\"routed_candidate_extents\":85,\"routed_extents_saved\":15,\"routed_cpu_ns_total\":2500000,\"routed_cpu_ns_per_page\":4340,\"ns_per_saved_block\":71428,\"negative_profiles\":[{\"name\":\"zero\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"repeat\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"entropy\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0},{\"name\":\"mixed\",\"pages\":64,\"eligible\":13,\"calls\":0,\"useful\":0},{\"name\":\"medium\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0}]},{\"threshold\":8,\"negative_eligible\":141,\"negative_calls\":0,\"negative_useful\":0,\"structured_eligible\":320,\"structured_calls\":256,\"structured_useful\":256,\"routed_baseline_blocks\":200,\"routed_candidate_blocks\":165,\"routed_blocks_saved\":35,\"routed_baseline_extents\":100,\"routed_candidate_extents\":85,\"routed_extents_saved\":15,\"routed_cpu_ns_total\":2500000,\"routed_cpu_ns_per_page\":4340,\"ns_per_saved_block\":71428,\"negative_profiles\":[{\"name\":\"zero\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"repeat\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"entropy\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0},{\"name\":\"mixed\",\"pages\":64,\"eligible\":13,\"calls\":0,\"useful\":0},{\"name\":\"medium\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0}]},{\"threshold\":16,\"negative_eligible\":141,\"negative_calls\":0,\"negative_useful\":0,\"structured_eligible\":320,\"structured_calls\":256,\"structured_useful\":256,\"routed_baseline_blocks\":200,\"routed_candidate_blocks\":165,\"routed_blocks_saved\":35,\"routed_baseline_extents\":100,\"routed_candidate_extents\":85,\"routed_extents_saved\":15,\"routed_cpu_ns_total\":2500000,\"routed_cpu_ns_per_page\":4340,\"ns_per_saved_block\":71428,\"negative_profiles\":[{\"name\":\"zero\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"repeat\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"entropy\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0},{\"name\":\"mixed\",\"pages\":64,\"eligible\":13,\"calls\":0,\"useful\":0},{\"name\":\"medium\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0}]},{\"threshold\":24,\"negative_eligible\":141,\"negative_calls\":0,\"negative_useful\":0,\"structured_eligible\":320,\"structured_calls\":256,\"structured_useful\":256,\"routed_baseline_blocks\":200,\"routed_candidate_blocks\":165,\"routed_blocks_saved\":35,\"routed_baseline_extents\":100,\"routed_candidate_extents\":85,\"routed_extents_saved\":15,\"routed_cpu_ns_total\":2500000,\"routed_cpu_ns_per_page\":4340,\"ns_per_saved_block\":71428,\"negative_profiles\":[{\"name\":\"zero\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"repeat\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"entropy\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0},{\"name\":\"mixed\",\"pages\":64,\"eligible\":13,\"calls\":0,\"useful\":0},{\"name\":\"medium\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0}]},{\"threshold\":32,\"negative_eligible\":141,\"negative_calls\":0,\"negative_useful\":0,\"structured_eligible\":320,\"structured_calls\":256,\"structured_useful\":256,\"routed_baseline_blocks\":200,\"routed_candidate_blocks\":165,\"routed_blocks_saved\":35,\"routed_baseline_extents\":100,\"routed_candidate_extents\":85,\"routed_extents_saved\":15,\"routed_cpu_ns_total\":2500000,\"routed_cpu_ns_per_page\":4340,\"ns_per_saved_block\":71428,\"negative_profiles\":[{\"name\":\"zero\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"repeat\",\"pages\":32,\"eligible\":0,\"calls\":0,\"useful\":0},{\"name\":\"entropy\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0},{\"name\":\"mixed\",\"pages\":64,\"eligible\":13,\"calls\":0,\"useful\":0},{\"name\":\"medium\",\"pages\":64,\"eligible\":64,\"calls\":0,\"useful\":0}]}],\"transforms\":[{\"name\":\"delta64\",\"adopted\":77,\"raw_rescued\":17,\"cliff_2024\":27,\"saved_payload_bytes\":97000,\"baseline_blocks\":200,\"candidate_blocks\":163,\"planner_blocks_saved\":37,\"baseline_extents\":100,\"candidate_extents\":83,\"planner_extents_saved\":17,\"transform_backend\":\"sse2\",\"inverse_backend\":\"sse2\",\"transform_ns_per_page\":1300,\"inverse_ns_per_page\":1200,\"scalar_transform_ns_per_page\":1500,\"scalar_inverse_ns_per_page\":1400,\"second_lz4_ns_per_page\":5300}]}'\n"
-                "printf '%s\\n' 'SWAPZ_GC_SCAN_SCALE_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GC_SCALE_ONLY\",\"rows\":[{\"logical_pages\":262144,\"segments\":1024,\"legacy_score_scan_ns\":2000000,\"incremental_select_ns\":20000,\"relocation_scan_ns\":800000,\"legacy_dead_probe_ns\":700000,\"mapped_dead_probe_ns\":12000,\"victim_records\":256},{\"logical_pages\":1048576,\"segments\":4096,\"legacy_score_scan_ns\":8000000,\"incremental_select_ns\":80000,\"relocation_scan_ns\":3200000,\"legacy_dead_probe_ns\":2800000,\"mapped_dead_probe_ns\":15000,\"victim_records\":256}]}'\n"
+                "printf '%s\\n' 'SWAPZ_GC_SCAN_SCALE_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GC_SCALE_ONLY\",\"rows\":[{\"logical_pages\":262144,\"segments\":1024,\"legacy_score_scan_ns\":2000000,\"incremental_select_ns\":20000,\"relocation_scan_ns\":800000,\"relocation_list_ns\":4000,\"legacy_dead_probe_ns\":700000,\"mapped_dead_probe_ns\":12000,\"victim_records\":256},{\"logical_pages\":1048576,\"segments\":4096,\"legacy_score_scan_ns\":8000000,\"incremental_select_ns\":80000,\"relocation_scan_ns\":3200000,\"relocation_list_ns\":4500,\"legacy_dead_probe_ns\":2800000,\"mapped_dead_probe_ns\":15000,\"victim_records\":256}]}'\n"
                 "printf '%s\\n' 'SWAPZ_EXTENT_GEOMETRY_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY\",\"logical_pages\":1024,\"normal_windows\":64,\"rows\":[{\"name\":\"aligned_1_2_4\",\"physical_blocks\":320,\"waste_blocks\":24,\"write_runs\":80,\"cold_read_blocks_x1000\":1800,\"seq_4m_requests\":1500},{\"name\":\"packed_1_2_4\",\"physical_blocks\":320,\"waste_blocks\":4,\"write_runs\":60,\"cold_read_blocks_x1000\":1800,\"seq_4m_requests\":1500},{\"name\":\"packed_1_2_3_4\",\"physical_blocks\":300,\"waste_blocks\":3,\"write_runs\":55,\"cold_read_blocks_x1000\":1750,\"seq_4m_requests\":1450},{\"name\":\"packed_1_2_4_8\",\"physical_blocks\":292,\"waste_blocks\":2,\"write_runs\":48,\"cold_read_blocks_x1000\":1900,\"seq_4m_requests\":1300},{\"name\":\"packed_1_2_4_8_16\",\"physical_blocks\":288,\"waste_blocks\":1,\"write_runs\":44,\"cold_read_blocks_x1000\":2150,\"seq_4m_requests\":1200}]}'\n"
                 "printf 'rootless\\n' >> build/order.log\n")
             # Synthetic records model eight latency-modeled RAM-only sessions;
@@ -448,10 +448,29 @@ class PublicMakeContract(unittest.TestCase):
                     },
                 }, sort_keys=True)
 
+            def mock_placement_arm(packed):
+                record = json.loads(mock_write_arm("swapz", 32, 0))
+                record.update({
+                    "fixture_sha256": "c" * 64,
+                    "trace_sha256": "d" * 64,
+                    "qd": 32, "measure_ops": 2048, "write_ops": 2048,
+                    "read_ops": 0, "verified_pages": 1024,
+                    "replay_mode": "persistent-write",
+                    "write_p99_ns": 2400000 if packed else 2500000,
+                })
+                record["throughput_mbps"]["logical_write_mbps"] = (
+                    61.0 if packed else 60.0)
+                record["throughput_mbps"]["logical_write_bytes"] = 2048 * 4096
+                record["lower_io"]["lower_write_bytes"] = 6000000
+                record["lower_io"]["lower_write_requests"] = 80 if packed else 130
+                record["kernel_write_path"]["physical_write_reqs"] = (
+                    80 if packed else 130)
+                return json.dumps(record, sort_keys=True)
+
             records = [
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
-                "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:49152 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
+                "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:12 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
                 "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:1 verified_pages:4096",
                 "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:0 run_splits:0 failed:0",
                 "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
@@ -532,6 +551,21 @@ class PublicMakeContract(unittest.TestCase):
                         ))
                         index += 1
                 records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
+            for index, packed in enumerate((0, 1, 1, 0)):
+                records.extend((
+                    f"START_PACKED_PLACEMENT_AB={packed}",
+                    "REPLAY_ORDER=swapz-first" if index % 2 else
+                    "REPLAY_ORDER=off-first",
+                    "SWAPZ_STATUS_AFTER=packed_placement={} "
+                    "logical_open_balance=0 "
+                    "alignment_hole_blocks_foreground={} "
+                    "segment_tail_waste_blocks_foreground={} "
+                    "run_splits_by_hole={} segment_program_sum={}".format(
+                        packed, 0 if packed else 24, 0,
+                        0 if packed else 8, 70 if packed else 80),
+                    mock_placement_arm(packed),
+                    f"PASS_PACKED_PLACEMENT_AB={packed}",
+                ))
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"

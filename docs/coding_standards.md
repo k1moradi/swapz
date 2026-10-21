@@ -971,16 +971,20 @@ Victim-selection cost metadata is per physical 1MiB segment, never per logical
 conservative I/O cost and proven minimum-live-block cost in the same fail-closed
 publication/discard transition. Score arithmetic is prevalidated before mapping
 mutation. `swapz_gc_choose_victim()` may scan segments but must not rescan
-`logical_pages`; relocation ownership discovery remains a separate measured
-problem and must not gain a per-page reverse index without independent
-evidence.
+`logical_pages`. ID61b supplies a caller-owned volatile per-segment intrusive
+logical-page list for relocation ownership: list unlink/append is O(1) in the
+same serialized publication/discard transition, list traversal is bounded by
+the exact mapped-page count, and any local link/map disagreement fails closed.
+The list is never serialized into SWZ3 and research callers may omit it and use
+the legacy full-map fallback.
 
 
 ### Physical placement and reclaim evidence
 
 The current 4/8/16KiB allocator may align an extent start to its own size.
-Placement telemetry must count both intra-segment alignment gaps and blocks
-abandoned at a segment tail before allocation advances to a new segment.
+Placement telemetry keeps aggregate waste for continuity but must also count
+segment-tail waste separately so experiments can derive avoidable internal
+alignment gaps without misclassifying a segment-edge remainder.
 Preserve the current on-disk SWZ3 extent classes. The ID69 packed-placement
 arm may place those existing 1/2/4-block extents back-to-back at 4KiB
 granularity, but it remains read-only-module-param evidence with default off
@@ -1004,5 +1008,8 @@ Asynchronous early DISCARD remains a separate concurrency experiment and may
 not race allocation or an upper BIO.
 
 Per-segment program/open counters describe logical allocator write cycles only.
-They are not NAND wear measurements and must not authorize wear-leveling or
-cold-data relocation without separately approved physical-media evidence.
+A default-off allocator experiment may use them to compare logical-open spread
+or choose the least-opened eligible destination without additional I/O. They
+are not NAND wear measurements; neither that experiment nor a GC score tie
+break may be described as wear leveling or authorize cold-data relocation
+without separately approved physical-media evidence.

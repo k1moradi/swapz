@@ -469,6 +469,7 @@ static int test_segment_tail_waste_is_accounted_before_rotation(void)
 	CHECK(swapz_stage(&a, &logical, 1, 4, &tx) == 0);
 	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS);
 	CHECK(a.alignment_hole_blocks_foreground == 3);
+	CHECK(a.segment_tail_waste_blocks_foreground == 3);
 	CHECK(swapz_abort(&a, &tx) == 0);
 
 	CHECK(setup() == 0);
@@ -482,6 +483,7 @@ static int test_segment_tail_waste_is_accounted_before_rotation(void)
 	CHECK(swapz_stage(&a, &logical, 1, 4, &tx) == 0);
 	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS);
 	CHECK(a.alignment_hole_blocks_foreground == 3);
+	CHECK(a.segment_tail_waste_blocks_foreground == 3);
 	CHECK(swapz_abort(&a, &tx) == 0);
 	return 0;
 }

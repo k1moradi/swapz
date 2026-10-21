@@ -945,23 +945,31 @@ output.
 
 The rootless stage must run a bounded native GC scaling microbenchmark at
 262,144 and 1,048,576 logical pages (1GiB and 4GiB at 4KiB/page). It reports
-three CPU-only timings: the retired full-map score rebuild for comparison, the
-current per-segment victim-selection scan, and the still-current full-map
-relocation ownership scan. The sanitized report must retain the two geometry
-rows. Timing is directional CPU evidence, not a physical-media latency claim;
-no reverse index is justified solely because the loop is O(logical_pages).
+four CPU-only timings: the retired full-map score rebuild, current per-segment
+victim selection, legacy full-map relocation ownership discovery, and ID61b
+per-segment-list relocation of the same 256 survivors. The sanitized report
+must retain both geometry rows. Timing is directional CPU evidence, not a
+physical-media latency claim. Loaded qualification must additionally prove that
+successful GC visits exactly `gc_pages` relocation-list entries, rather than
+merely timing a native surrogate.
 
 
 ### Placement/reclaim qualification
 
 Owner qualification records foreground and GC placement-waste blocks,
-including segment-tail waste, lower-run splits attributable to intra-segment
-holes, dead-segment probe segments/full scans and probe wall time, duplicate
+including aggregate holes and separately reported segment-tail waste,
+lower-run splits attributable to intra-segment holes, dead-segment probe
+segments/full scans and probe wall time, duplicate
 successful-DISCARD skips, and logical segment-open min/mean/max. Native ID69
 A/B must prove identical lower bytes with fewer requests and zero internal
-holes on mixed 1/2/4-block sequences. Loaded packed placement is a bounded
-byte-exact null_blk smoke only; default aligned placement remains the full
-benchmark control until explicitly promoted. None of this changes SWZ3.
+holes on mixed 1/2/4-block sequences. Loaded qualification adds four fresh
+fast-null_blk QD32 persistent-write sessions over one immutable mixed+entropy
+fixture in counterbalanced modes 0/1/1/0. Both packed arms must have zero
+internal gaps/splits, fewer timed physical WRITE requests and fewer logical
+segment opens than their aligned partner, with no increase in lower WRITE
+bytes. Throughput and p99 are reported directionally. The source default stays
+aligned until a separate post-evidence promotion commit. None of this changes
+SWZ3.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
@@ -970,7 +978,9 @@ candidate liveness scan, repeated live-GC correctness, exact readback, and
 nonfatal DISCARD semantics.
 
 Logical segment-open spread is allocator telemetry, not flash-wear evidence.
-No threshold from RAM-backed null_blk may promote wear-aware relocation.
+A default-off least-opened-segment experiment may be qualified as logical
+allocator fairness only. No threshold from RAM-backed null_blk may turn that
+counter into a NAND-wear claim or promote cold-data relocation.
 
 
 ID70c loaded qualification uses only the owned RAM null_blk mapping. It must

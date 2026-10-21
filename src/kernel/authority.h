@@ -68,6 +68,13 @@ struct swapz_authority {
 	/* Optional logical segment-open counts. These are allocator write-cycle
 	 * telemetry, not physical NAND wear measurements. */
 	swapz_u32 *segment_program_counts;
+	/* Optional exact logical-page membership lists per physical segment. */
+	swapz_u32 *segment_first_page;
+	swapz_u32 *segment_last_page;
+	swapz_u32 *page_prev_in_segment;
+	swapz_u32 *page_next_in_segment;
+	/* Optional allocator-fairness A/B; logical opens are NOT NAND wear. */
+	swapz_u8 balance_segment_opens;
 	/* Optional per-segment GC scores maintained with map publication. */
 	swapz_u32 *segment_gc_live_bytes;
 	swapz_u32 *segment_gc_io_cost;
@@ -80,6 +87,8 @@ struct swapz_authority {
 	/* Placement/allocation evidence only; never participates in policy. */
 	unsigned long long alignment_hole_blocks_foreground;
 	unsigned long long alignment_hole_blocks_gc;
+	unsigned long long segment_tail_waste_blocks_foreground;
+	unsigned long long segment_tail_waste_blocks_gc;
 	unsigned long long alloc_probe_segments;
 	unsigned long long alloc_probe_full_scans;
 	unsigned long long alloc_probe_wall_ns;
@@ -168,6 +177,13 @@ int swapz_enable_segment_mapping_counts(struct swapz_authority *authority,
 int swapz_enable_segment_program_counts(struct swapz_authority *authority,
 				      swapz_u32 *segment_program_counts,
 				      swapz_u32 segment_count);
+int swapz_enable_segment_page_lists(struct swapz_authority *authority,
+				  swapz_u32 *segment_first_page,
+				  swapz_u32 *segment_last_page,
+				  swapz_u32 *page_prev_in_segment,
+				  swapz_u32 *page_next_in_segment,
+				  swapz_u32 segment_count,
+				  swapz_u32 logical_pages);
 int swapz_enable_segment_gc_accounting(struct swapz_authority *authority,
 				     swapz_u32 *live_bytes,
 				     swapz_u32 *io_cost,

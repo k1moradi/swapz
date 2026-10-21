@@ -85,6 +85,11 @@ module_param_named(packed_placement, swapz_packed_placement, bool, 0444);
 MODULE_PARM_DESC(packed_placement,
 		 "A/B existing 1/2/4-block extents at back-to-back 4KiB starts");
 
+static bool swapz_logical_open_balance;
+module_param_named(logical_open_balance, swapz_logical_open_balance, bool, 0444);
+MODULE_PARM_DESC(logical_open_balance,
+		 "A/B least-opened logical segment selection; not NAND-wear policy");
+
 struct swapz_prepared_page {
 	int length;
 	bool zero;
@@ -288,6 +293,10 @@ struct swapz_dm {
 	swapz_u32 *gc_segment_evictions; /* successful committed victim rotations */
 	swapz_u32 *segment_mapped_pages; /* exact current logical maps per segment */
 	swapz_u32 *segment_program_counts; /* logical allocator opens, not NAND wear */
+	swapz_u32 *segment_first_page; /* exact current logical membership */
+	swapz_u32 *segment_last_page;
+	swapz_u32 *page_prev_in_segment;
+	swapz_u32 *page_next_in_segment;
 	swapz_u8 *segment_trimmed; /* successful whole-segment DISCARD since write */
 	swapz_u8 *segment_roles; /* 1=foreground, 0=free GC reserve */
 	swapz_u32 segment_count;
@@ -1648,7 +1657,7 @@ static int swapz_gc_move_raw(struct swapz_dm *ctx, swapz_u32 logical,
 static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 {
 	swapz_u32 segment, selected = ~(swapz_u32)0;
-	swapz_u32 best = ~(swapz_u32)0;
+	swapz_u32 best = ~(swapz_u32)0, best_programs = ~(swapz_u32)0;
 	swapz_u16 best_count = ~(swapz_u16)0;
 
 	ctx->gc_choose_calls++;
@@ -1661,7 +1670,7 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 	for (segment = 0; segment < ctx->segment_count; ++segment) {
 		swapz_u32 mapped = ctx->segment_mapped_pages[segment];
 		swapz_u16 count;
-		swapz_u32 score;
+		swapz_u32 score, programs;
 
 		ctx->gc_choose_segment_entries++;
 		if (mapped > (swapz_u32)(swapz_u16)~0U)
@@ -1696,9 +1705,15 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 			score = ctx->gc_io_scores[segment];
 			break;
 		}
-		if (swapz_gc_prefer(score, count, best, best_count)) {
+		programs = ctx->segment_program_counts ?
+			ctx->segment_program_counts[segment] : 0;
+		if (swapz_gc_prefer(score, count, best, best_count) ||
+		    (ctx->authority.balance_segment_opens &&
+		     score == best && count == best_count &&
+		     programs < best_programs)) {
 			best = score;
 			best_count = count;
+			best_programs = programs;
 			selected = segment;
 		}
 	}
@@ -1711,10 +1726,54 @@ static int swapz_gc_choose_victim(struct swapz_dm *ctx, swapz_u32 *victim)
 	return 0;
 }
 
+static int swapz_gc_relocate_one(struct swapz_dm *ctx, swapz_u32 victim,
+				 swapz_u32 logical)
+{
+	struct swapz_map snapshot;
+	swapz_u16 length;
+	int error;
+
+	if (logical >= ctx->logical_pages)
+		return -EUCLEAN;
+	snapshot = ctx->maps[logical];
+	if (!snapshot.valid || snapshot.start_block >= ctx->physical_blocks ||
+	    snapshot.start_block / SWAPZ_SEGMENT_BLOCKS != victim)
+		return -EUCLEAN;
+	if (snapshot.raw) {
+		error = swapz_gc_flush(ctx);
+		if (error)
+			return error;
+		return swapz_gc_move_raw(ctx, logical, &snapshot);
+	}
+	error = swapz_engine_read_page(&ctx->engine, logical,
+				      ctx->read_compressed,
+				      SWAPZ_BLOCK_BYTES, &length);
+	if (error)
+		return error;
+	if (!length || length > SWAPZ_MAX_COMPRESSED)
+		return -EUCLEAN;
+	memcpy(ctx->gc_bytes_store +
+	       (size_t)ctx->gc_count * SWAPZ_BLOCK_BYTES,
+	       ctx->read_compressed, length);
+	ctx->gc_pending[ctx->gc_count++] =
+		(struct swapz_pending_bio) {
+			.bio = NULL,
+			.logical = logical,
+			.payload_crc32c =
+				swapz_crc32c_bytes(ctx->read_compressed, length),
+			.length = length,
+			.payload_crc32c_valid = 1,
+		};
+	if (ctx->gc_count == SWAPZ_MAX_RECORDS)
+		return swapz_gc_flush(ctx);
+	return 0;
+}
+
 static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 {
 	struct swapz_authority *a = &ctx->authority;
 	swapz_u32 old_next, old_open, old_probe, victim, logical, block;
+	swapz_u32 expected_victim_pages = 0, visited_victim_pages = 0;
 	u64 before_read, before_write;
 	u64 before_read_reqs, before_write_reqs;
 	u64 choose_start;
@@ -1740,6 +1799,8 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 	old_next = a->next_block;
 	old_open = a->open_segment;
 	old_probe = a->next_segment_probe;
+	if (a->segment_mapped_pages)
+		expected_victim_pages = a->segment_mapped_pages[victim];
 	before_read = ctx->physical_read_bytes;
 	before_write = ctx->physical_write_bytes;
 	before_read_reqs = ctx->physical_read_reqs;
@@ -1756,55 +1817,44 @@ static int swapz_gc_compact_one_inner(struct swapz_dm *ctx)
 		goto out;
 	ctx->gc_count = 0;
 
-	for (logical = 0; logical < ctx->logical_pages; ++logical) {
-		struct swapz_map snapshot = ctx->maps[logical];
-		swapz_u16 length;
+	if (a->segment_first_page && a->page_next_in_segment) {
+		const swapz_u32 none = ~(swapz_u32)0;
 
-		ctx->gc_relocation_map_entries++;
+		logical = a->segment_first_page[victim];
+		while (logical != none) {
+			swapz_u32 next;
 
-		/* GC can scan a large volatile map while the worker owns it.
-		 * Yield CPU periodically without permitting another mapping
-		 * writer: the same worker remains the only authority owner. */
-		if (!(logical & 63U))
-			cond_resched();
-		if (!snapshot.valid ||
-		    snapshot.start_block / SWAPZ_SEGMENT_BLOCKS != victim)
-			continue;
-		if (snapshot.raw) {
-			error = swapz_gc_flush(ctx);
+			if (logical >= ctx->logical_pages ||
+			    visited_victim_pages >= expected_victim_pages ||
+			    visited_victim_pages >= ctx->logical_pages) {
+				error = -EUCLEAN;
+				goto out;
+			}
+			next = a->page_next_in_segment[logical];
+			ctx->gc_relocation_map_entries++;
+			visited_victim_pages++;
+			if (!(visited_victim_pages & 63U))
+				cond_resched();
+			error = swapz_gc_relocate_one(ctx, victim, logical);
 			if (error)
 				goto out;
-			error = swapz_gc_move_raw(ctx, logical, &snapshot);
-			if (error)
-				goto out;
-			continue;
+			logical = next;
 		}
-		/* Existing media bytes remain authoritative until this page's
-		 * full replacement is successfully committed by the swapz engine. */
-		error = swapz_engine_read_page(&ctx->engine, logical,
-						ctx->read_compressed,
-						SWAPZ_BLOCK_BYTES, &length);
-		if (error)
-			goto out;
-		if (!length || length > SWAPZ_MAX_COMPRESSED) {
+		if (visited_victim_pages != expected_victim_pages) {
 			error = -EUCLEAN;
 			goto out;
 		}
-		memcpy(ctx->gc_bytes_store +
-		       (size_t)ctx->gc_count * SWAPZ_BLOCK_BYTES,
-		       ctx->read_compressed, length);
-		ctx->gc_pending[ctx->gc_count++] =
-			(struct swapz_pending_bio) {
-				.bio = NULL,
-				.logical = logical,
-				.payload_crc32c =
-					swapz_crc32c_bytes(ctx->read_compressed,
-							   length),
-				.length = length,
-				.payload_crc32c_valid = 1,
-			};
-		if (ctx->gc_count == SWAPZ_MAX_RECORDS) {
-			error = swapz_gc_flush(ctx);
+	} else {
+		for (logical = 0; logical < ctx->logical_pages; ++logical) {
+			const struct swapz_map *snapshot = &ctx->maps[logical];
+
+			ctx->gc_relocation_map_entries++;
+			if (!(logical & 63U))
+				cond_resched();
+			if (!snapshot->valid ||
+			    snapshot->start_block / SWAPZ_SEGMENT_BLOCKS != victim)
+				continue;
+			error = swapz_gc_relocate_one(ctx, victim, logical);
 			if (error)
 				goto out;
 		}
@@ -4328,6 +4378,10 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->gc_segment_evictions);
 	kvfree(ctx->segment_mapped_pages);
 	kvfree(ctx->segment_program_counts);
+	kvfree(ctx->segment_first_page);
+	kvfree(ctx->segment_last_page);
+	kvfree(ctx->page_prev_in_segment);
+	kvfree(ctx->page_next_in_segment);
 	kvfree(ctx->segment_trimmed);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
@@ -4497,6 +4551,18 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->segment_program_counts = kvcalloc(ctx->segment_count,
 					      sizeof(*ctx->segment_program_counts),
 					      GFP_KERNEL);
+	ctx->segment_first_page = kvcalloc(ctx->segment_count,
+					   sizeof(*ctx->segment_first_page),
+					   GFP_KERNEL);
+	ctx->segment_last_page = kvcalloc(ctx->segment_count,
+					  sizeof(*ctx->segment_last_page),
+					  GFP_KERNEL);
+	ctx->page_prev_in_segment = kvcalloc(logical,
+					     sizeof(*ctx->page_prev_in_segment),
+					     GFP_KERNEL);
+	ctx->page_next_in_segment = kvcalloc(logical,
+					     sizeof(*ctx->page_next_in_segment),
+					     GFP_KERNEL);
 	ctx->segment_trimmed = kvcalloc(ctx->segment_count,
 					sizeof(*ctx->segment_trimmed), GFP_KERNEL);
 	ctx->segment_roles = kvcalloc(ctx->segment_count,
@@ -4508,7 +4574,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	    !ctx->gc_scores || !ctx->gc_io_scores ||
 	    !ctx->gc_min_live_blocks ||
 	    !ctx->gc_segment_evictions || !ctx->segment_mapped_pages ||
-	    !ctx->segment_program_counts || !ctx->segment_trimmed ||
+	    !ctx->segment_program_counts || !ctx->segment_first_page ||
+	    !ctx->segment_last_page || !ctx->page_prev_in_segment ||
+	    !ctx->page_next_in_segment || !ctx->segment_trimmed ||
 	    !ctx->segment_roles) {
 		error = -ENOMEM;
 		goto fail;
@@ -4544,6 +4612,18 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot initialize logical segment-open accounting";
 		goto fail;
 	}
+	error = swapz_enable_segment_page_lists(&ctx->authority,
+					      ctx->segment_first_page,
+					      ctx->segment_last_page,
+					      ctx->page_prev_in_segment,
+					      ctx->page_next_in_segment,
+					      ctx->segment_count,
+					      ctx->logical_pages);
+	if (error) {
+		ti->error = "Cannot initialize exact segment page lists";
+		goto fail;
+	}
+	ctx->authority.balance_segment_opens = swapz_logical_open_balance;
 	error = swapz_enable_segment_gc_accounting(&ctx->authority,
 					      ctx->gc_scores,
 					      ctx->gc_io_scores,
@@ -4782,7 +4862,9 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "segment_discard_wall_ns=%llu "
 		       "segment_discards_skipped_already_trimmed=%llu "
 		       "alignment_hole_blocks_foreground=%llu "
-		       "alignment_hole_blocks_gc=%llu run_splits_by_hole=%u "
+		       "alignment_hole_blocks_gc=%llu "
+		       "segment_tail_waste_blocks_foreground=%llu "
+		       "segment_tail_waste_blocks_gc=%llu run_splits_by_hole=%u "
 		       "alloc_probe_segments=%llu alloc_probe_full_scans=%llu "
 		       "alloc_probe_wall_ns=%llu "
 		       "segment_program_min=%u segment_program_sum=%llu "
@@ -4793,7 +4875,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "write_fault_nth=%u write_fault_calls=%llu write_fault_injected=%llu "
 		       "flush_calls=%llu flush_ok=%llu flush_err=%llu "
 		       "flush_injected=%llu flush_fault_nth=%u "
-		       "packed_placement=%u "
+		       "packed_placement=%u logical_open_balance=%u "
 		       "bulk_mode=%u bulk_io=%u bulk_extents=%u bulk_padding=%u "
 		       "bulk_mixed_io=%u bulk_raw_only_io=%u bulk_raw_entries=%u "
 		       "worker_requeues=%llu one_page_windows=%llu "
@@ -4969,6 +5051,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->segment_discards_skipped_already_trimmed,
 		       ctx->authority.alignment_hole_blocks_foreground,
 		       ctx->authority.alignment_hole_blocks_gc,
+		       ctx->authority.segment_tail_waste_blocks_foreground,
+		       ctx->authority.segment_tail_waste_blocks_gc,
 		       ctx->engine.run_splits_by_hole,
 		       ctx->authority.alloc_probe_segments,
 		       ctx->authority.alloc_probe_full_scans,
@@ -4987,6 +5071,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
 		       ctx->authority.packed_placement,
+		       ctx->authority.balance_segment_opens,
 		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
 		       ctx->engine.bulk_padding_blocks,

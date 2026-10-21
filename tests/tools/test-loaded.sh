@@ -43,12 +43,16 @@ umask 077
 # there, and let each privileged child COPY it to its own private session.
 mkdir -p "$ROOT/build/tests"
 shared_plan="$(mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX")"
+placement_plan="$shared_plan/placement"
 cleanup_shared_plan() {
     # Remove only exactly named files from this freshly allocated directory.
     [[ $shared_plan == "$ROOT/build/tests/benchmark-plan."* &&
        -d $shared_plan && ! -L $shared_plan ]] || return
     rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
-        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json"
+        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json" \
+        "$placement_plan/fixture.bin" "$placement_plan/fixture.json" \
+        "$placement_plan/plan/trace.jsonl" "$placement_plan/plan/manifest.json"
+    rmdir -- "$placement_plan/plan" "$placement_plan" 2>/dev/null || true
     for qd in 1 4 8 32; do
         rm -f -- "$shared_plan/plan-write-qd$qd/trace.jsonl" \
             "$shared_plan/plan-write-qd$qd/manifest.json"
@@ -89,6 +93,32 @@ assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
 assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
+
+# ID69 placement fixture: deterministic compressed-size diversity plus RAW
+# fallback, separate from the medium fixture used by the qualified baseline.
+mkdir -p "$placement_plan"
+python3 -B tests/runtime/benchmark/anon-page-fixture.py \
+    --output-prefix "$placement_plan/fixture" --pages 128 \
+    --seed 0x69a11c --weights mixed=80,entropy=20
+python3 -B - "$placement_plan/fixture.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as inp:
+    fixture = json.load(inp)
+assert fixture["pages"] == 128
+assert fixture["profile_pages"] == {"entropy": 26, "mixed": 102}
+assert fixture["raw_pages"] >= 26
+accepted = {k: v for k, v in fixture["lz4_size_buckets"].items()
+            if k != "raw" and v}
+assert len(accepted) >= 3
+assert sum(accepted.values()) + fixture["raw_pages"] == 128
+PY
+python3 -B tests/runtime/benchmark/io-replay.py prepare \
+    --fixture "$placement_plan/fixture.bin" \
+    --output-dir "$placement_plan/plan" \
+    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
+    --reader-pages 256 --qd 32 --read-pct 0 \
+    --warmup-ops 256 --measure-ops 2048 --iops 0 --sustained-write
 
 # Two representative delay-modeled RAM-backed environments provide paired
 # write/read evidence. Slow remains a bounded directional control. Fast runs
@@ -201,6 +231,27 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
+# ID69 loaded performance A/B. Four fresh fast-RAM sessions use the same
+# immutable mixed-class QD32 write plan and counterbalance placement mode plus
+# OFF/swapz replay order. Source default remains packed_placement=0.
+placement_modes=(0 1 1 0)
+index=0
+for packed_placement in "${placement_modes[@]}"; do
+    arguments=(--run-owned-ram-pair --profile placement
+               --retain-ms 2 --unpaced
+               --lower-mbps 80 --hw-queue-depth 64
+               --completion-nsec 150000
+               --packed-placement "$packed_placement"
+               --shared-plan "$placement_plan")
+    if (( index % 2 )); then
+        arguments+=(--swapz-first)
+    fi
+    printf 'START_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
+    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+    printf 'PASS_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
+    (( index += 1 ))
+done
+
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry five matched rounds with paired 95% CIs; QD1 is directional.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, 40 write-only sessions, and 4 ID69 placement sessions completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, fast QD4/QD8/QD32, and ID69 carry bounded matched evidence; QD1 is directional.'

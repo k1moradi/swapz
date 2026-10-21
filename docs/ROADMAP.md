@@ -140,19 +140,19 @@ changes.
 | 58 | Nonzero same-filled-page special representation | **4 low-priority representative-corpus evidence** | Current synthetic trace has 0/12,301 nonzero same-filled writes and 0 final live same-filled pages, so there is no benchmark opportunity. Keep the offline detector; do not add a production representation until representative swap content shows prevalence. |
 | 59 | Exact-content page deduplication / shared payload ownership | **4 representative-corpus + architecture evidence** | Synthetic trace reports 12,301 resident duplicate opportunities from only 128 payloads and 1,024 final duplicate pages. This proves the analyzer, not production prevalence. Measure representative lifetime overlap before implementing collision-free verification, bounded refcounts, generation-safe COW and GC/DISCARD ownership. |
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
-| 61 | Background/asynchronous GC instead of foreground collection stalls | **1 incremental victim accounting owner-qualified; background worker refuted** | The latest owner run reports choose-map=0 and 0.02 ms total victim-choice wall across 20 rotations, with total foreground-GC wall only 0.65% of useful-WRITE wall. Native 4GiB-equivalent selection is 0.014 ms versus 17.475 ms for the old map score scan; relocation remains a separate 4.607 ms full-map scan. Keep foreground GC and no per-page reverse index until loaded scaling proves relocation material. |
+| 61 | Foreground GC scaling / background-GC question | **4 ID61b exact segment-membership sidecar implemented / owner evidence pending** | Report 711ceaad keeps victim selection at 0.013ms at 4GiB-equivalent scale but shows a 4.560ms full logical-map relocation scan and 81,920 map visits for 20 relocated pages. Production DM now provisions volatile per-segment intrusive logical-page lists so relocation is survivor-scaled; the full-map path remains a compatibility fallback. This does not add a background worker. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
 | 63 | Physically adjacent distinct-extent READ coalescing | **4 fast-latency repair implemented / owner requalification pending** | Latest owner evidence keeps the request win but exposes fast p99: SSD_EMULATED seq req -20.0% CI [-24.4%,-15.5%] with p99 +9.5% CI [+1.7%,+17.4%]; serial seq req -41.1% and p99 -37.8%. Current source rejects from shared-cache metadata before private cache copies and absorbs shared LRU state after upper BIO completion. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
 | 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
-| 68 | Placement/reclaim telemetry | **3 qualified / tail-accounting fix pending owner run** | Owner report 712b98e0 qualified the probe/TRIM/program telemetry. Tail blocks abandoned before segment rotation are now included in placement-waste accounting; owner requalification is pending. |
-| 69 | Hole-free 4KiB-aligned extent placement | **4 opt-in A/B implemented / default off** | Existing 1/2/4-block SWZ3 extents may be staged back-to-back at 4KiB granularity under read-only `packed_placement=1`. Native mixed-class A/B and bounded loaded correctness are qualification gates; the qualified aligned policy remains default. |
-| 70 | Segment DISCARD lifecycle | **3 ID70a qualified; ID70c implemented / owner pending** | ID70a eliminated 16 duplicate 1MiB DISCARDs in the qualified lifecycle. ID70c synchronously reclaims a closed segment when upper DISCARD removes its final mapping and relies on ID70a to skip later reuse. Early/background async TRIM remains deferred. |
+| 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
+| 69 | Hole-free 4KiB-aligned extent placement | **4 loaded performance A/B implemented / default off** | Offline geometry shows packed 1/2/4 keeps 2,089 payload blocks while removing 236 waste blocks and modeling 209->80 write runs with unchanged read cost. A new same-plan mixed-class owned-RAM A/B must prove fewer physical WRITE requests and logical segment opens with no lower-byte increase before any default promotion. |
+| 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
-| 72 | Wear-aware free-segment choice / cold relocation | **6 physical-media evidence gate** | Logical segment-open counts are allocator distribution telemetry, not NAND wear. Do not add wear leveling or cold relocation from RAM-backed evidence alone. |
-| 73 | Flexible/larger extent study | **4 offline simulator implemented / evidence pending** | Deterministically compare aligned 1/2/4, packed 1/2/4, exact 1/2/3/4, up-to-32KiB and up-to-64KiB candidates. Larger classes remain simulation-only; no SWZ3/mask/cache change without a Pareto win. |
+| 72 | Physical wear / logical allocator fairness | **4 logical-open balancing A/B implemented / physical wear still gated** | Optional `logical_open_balance=1` prefers the least-opened eligible dead destination and uses logical-open count only as an exact-score/count GC victim tie-break. It is default-off and is allocator-fairness evidence only; logical LBA opens do not measure NAND P/E cycles and cannot authorize cold relocation or physical wear claims. |
+| 73 | Flexible/larger extent study | **5 larger/irregular classes deprioritized** | Report 711ceaad shows packed 1/2/4 captures the dominant geometry gain. A 3-block class saves only 2/2,089 blocks; 32/64KiB maxima save 14/22 more blocks while cold-read cost rises 1.47->1.53/1.55. Keep SWZ3 1/2/4 classes unchanged unless a broader representative corpus materially overturns this result. |
 
 
 ## What the pinned queue experiment establishes
@@ -213,20 +213,20 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 
 ## Immediate work queue
 
-1. Owner-qualify the ID68 tail-waste fix, ID70c synchronous discard-time
-   reclaim, ID69 opt-in packed placement and ID73 offline geometry evidence
-   with the existing full `make test` matrix.
-2. Keep `packed_placement=0` as the qualified default unless mixed-class
-   native evidence and loaded correctness are Pareto-positive; do not change
-   SWZ3 merely because the offline simulator favors another class set.
-3. Use ID73 to decide whether any 3/8/16-block candidate deserves a separate
-   format/mask/cache design. Do not add those classes in this experiment.
-4. Keep the qualified shallow K=1 detach baseline and ID63 completion semantics
-   unchanged. Keep K>1 writes, background GC, reverse indexing and asynchronous
-   early TRIM deferred without a measured bottleneck.
+1. Owner-qualify ID61b survivor-list relocation, the ID69 mixed-class loaded
+   performance A/B, the ID68 tail-waste split and the default-off logical-open
+   allocator-fairness A/B with the existing full `make test` matrix.
+2. Keep `packed_placement=0` in this evidence commit. If both matched ID69
+   pairs pass the structural request/open/byte gates, make the default flip a
+   small follow-up commit and rerun the entire qualification matrix.
+3. Keep `logical_open_balance=0`. Promote it only if fresh RAM evidence shows
+   useful allocator-spread behavior without probe/GC regressions; even then it
+   remains logical fairness, not NAND wear leveling.
+4. Keep SWZ3 1/2/4 classes, K=1 scheduling and ID63 completion semantics
+   unchanged. Do not implement the currently weak 3/8/16-block class ideas.
 5. Continue representative ID67 content/CPU evidence independently.
-6. Keep ID62 blocked; physical-device testing remains separately unauthorized
-   until explicitly approved after the RAM-backed evidence is settled.
+6. Keep ID62 blocked. Physical-device testing remains separately unauthorized
+   and requires its own owner approval and safety review.
 
 ## NUMA / deployment topology
 
