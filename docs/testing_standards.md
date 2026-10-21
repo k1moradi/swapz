@@ -701,7 +701,9 @@ schema change must update this fixture in the same change so rootless
 qualification cannot pass evidence that a real loaded run would reject.
 ID69 fixture rows must likewise carry every status field consumed by the
 placement verdict, including physical-write bytes, allocator cursor, GC-victim
-count, placement waste/splits and logical segment-open telemetry.
+count, placement waste/splits and logical segment-open telemetry. Post-promotion
+fixtures also carry the exact owned-RAM device-model identity and the complete
+five-pair counterbalanced sequence for both maintained synthetic models.
 
 
 The write-only saturation parser consumes the same exact owned-RAM device-model
@@ -965,13 +967,16 @@ lower-run splits attributable to intra-segment holes, dead-segment probe
 segments/full scans and probe wall time, duplicate
 successful-DISCARD skips, and logical segment-open min/mean/max. Native ID69
 A/B must prove identical lower bytes with fewer requests and zero internal
-holes on mixed 1/2/4-block sequences. Loaded qualification adds four fresh
-fast-null_blk QD32 persistent-write sessions over one immutable mixed+entropy
-fixture in counterbalanced modes 0/1/1/0. Each aligned arm must exercise nonzero internal gaps and hole-induced splits.
-Both packed arms must have zero internal gaps/splits, strictly fewer timed
-physical WRITE requests, and strictly fewer consumed foreground physical blocks
-(`physical_write / 4096 + alignment_hole_blocks_foreground`) than their aligned
-partner. Every placement arm must remain GC-free, and its allocator cursor must
+holes on mixed 1/2/4-block sequences. Post-promotion loaded qualification adds ten fresh QD32 persistent-write
+sessions on each maintained owned-RAM model (20 sessions total) over one
+immutable mixed+entropy fixture. Each model uses five adjacent matched rounds
+in `CONFIRMATION_SEQUENCE`, counterbalancing placement mode and OFF/swapz
+replay order. Every aligned arm must exercise nonzero internal gaps and
+hole-induced splits. Every packed arm must have zero internal gaps/splits,
+strictly fewer timed physical WRITE requests, and strictly fewer consumed
+foreground physical blocks
+(`physical_write / 4096 + alignment_hole_blocks_foreground`) than its matched
+aligned partner. Every placement arm must remain GC-free, and its allocator cursor must
 equal that consumed-block total so the structural comparison cannot be polluted
 by reclaim or accounting drift. Logical segment opens must not increase.
 Whole-session physical WRITE bytes and timed lower-device WRITE bytes remain
@@ -983,8 +988,12 @@ requests likewise remain observational because block-layer merging may vary.
 The ID69 console summary must keep the timed-I/O and placement-geometry rows in
 separate compact Markdown tables so the official reporter preserves its
 less-than-96-column output contract without dropping qualification evidence.
-Throughput and p99 are reported directionally. The source default stays aligned
-until a separate post-evidence promotion commit. None of this changes SWZ3.
+Throughput and p99 are reported with five-pair per-model confidence intervals.
+Owner report a88b328 qualified the default-off evidence gate, so the separate
+promotion commit defaults packed placement on while retaining the read-only
+module parameter for exactly one full post-promotion qualification cycle. A
+successful cycle permits retiring aligned mode in a follow-up change. None of
+this changes SWZ3.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576

@@ -231,27 +231,48 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-# ID69 loaded performance A/B. Four fresh fast-RAM sessions use the same
-# immutable mixed-class QD32 write plan and counterbalance placement mode plus
-# OFF/swapz replay order. Source default remains packed_placement=0.
-placement_modes=(0 1 1 0)
-index=0
-for packed_placement in "${placement_modes[@]}"; do
-    arguments=(--run-owned-ram-pair --profile placement
-               --retain-ms 2 --unpaced
-               --lower-mbps 80 --hw-queue-depth 64
-               --completion-nsec 150000
-               --packed-placement "$packed_placement"
-               --shared-plan "$placement_plan")
-    if (( index % 2 )); then
-        arguments+=(--swapz-first)
-    fi
-    printf 'START_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
-    "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-    printf 'PASS_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
-    (( index += 1 ))
+# ID69 post-promotion A/B. Ten fresh sessions per synthetic model use the
+# same immutable mixed-class QD32 write plan. Five adjacent matched rounds
+# counterbalance packed/aligned mode and OFF/swapz replay order.
+placement_modes=(0 1 1 0 0 1 1 0 0 1)
+for regime in sd_emulated ssd_emulated; do
+    case "$regime" in
+        sd_emulated)
+            lower_mbps=10
+            hw_queue_depth=1
+            completion_nsec=1000000
+            ;;
+        ssd_emulated)
+            lower_mbps=80
+            hw_queue_depth=64
+            completion_nsec=150000
+            ;;
+        *)
+            printf 'BLOCKED: unsupported ID69 model %s\n' "$regime" >&2
+            exit 1
+            ;;
+    esac
+    printf 'START_PACKED_PLACEMENT_REGIME=%s\n' "$regime"
+    index=0
+    for packed_placement in "${placement_modes[@]}"; do
+        arguments=(--run-owned-ram-pair --profile placement
+                   --retain-ms 2 --unpaced
+                   --lower-mbps "$lower_mbps"
+                   --hw-queue-depth "$hw_queue_depth"
+                   --completion-nsec "$completion_nsec"
+                   --packed-placement "$packed_placement"
+                   --shared-plan "$placement_plan")
+        if (( index % 2 )); then
+            arguments+=(--swapz-first)
+        fi
+        printf 'START_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
+        "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
+        printf 'PASS_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
+        (( index += 1 ))
+    done
+    printf 'PASS_PACKED_PLACEMENT_REGIME=%s\n' "$regime"
 done
 
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, 40 write-only sessions, and 4 ID69 placement sessions completed.' \
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, 40 write-only sessions, and 20 ID69 placement sessions completed.' \
     'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, fast QD4/QD8/QD32, and ID69 carry bounded matched evidence; QD1 is directional.'

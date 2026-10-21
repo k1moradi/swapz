@@ -986,10 +986,12 @@ Placement telemetry keeps aggregate waste for continuity but must also count
 segment-tail waste separately so experiments can derive avoidable internal
 alignment gaps without misclassifying a segment-edge remainder.
 Preserve the current on-disk SWZ3 extent classes. The ID69 packed-placement
-arm may place those existing 1/2/4-block extents back-to-back at 4KiB
-granularity, but it remains read-only-module-param evidence with default off
-until owner qualification proves a Pareto-neutral-or-better result. No packed
-placement experiment may introduce a new serialized extent class.
+policy may place those existing 1/2/4-block extents back-to-back at 4KiB
+granularity. Owner report a88b328 qualified the promotion gate, so packed
+placement is now the source default; the read-only module parameter retains
+aligned mode only for one post-promotion full qualification cycle. After that
+cycle passes, retire the aligned policy rather than carrying a permanent dual
+mode. No packed placement change may introduce a new serialized extent class.
 
 When exact per-segment mapped-page counts are available, dead-segment probing
 must reject a nonzero mapped segment before scanning its 256 physical block

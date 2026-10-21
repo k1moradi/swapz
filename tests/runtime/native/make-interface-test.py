@@ -142,7 +142,7 @@ class PublicMakeContract(unittest.TestCase):
                 "printf '%s\\n' 'SWAPZ_GC_SCAN_SCALE_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GC_SCALE_ONLY\",\"rows\":[{\"logical_pages\":262144,\"segments\":1024,\"legacy_score_scan_ns\":2000000,\"incremental_select_ns\":20000,\"relocation_scan_ns\":800000,\"relocation_list_ns\":4000,\"legacy_dead_probe_ns\":700000,\"mapped_dead_probe_ns\":12000,\"victim_records\":256},{\"logical_pages\":1048576,\"segments\":4096,\"legacy_score_scan_ns\":8000000,\"incremental_select_ns\":80000,\"relocation_scan_ns\":3200000,\"relocation_list_ns\":4500,\"legacy_dead_probe_ns\":2800000,\"mapped_dead_probe_ns\":15000,\"victim_records\":256}]}'\n"
                 "printf '%s\\n' 'SWAPZ_EXTENT_GEOMETRY_EVIDENCE={\"scope\":\"OFFLINE_NATIVE_GEOMETRY_ONLY_NOT_FORMAT_POLICY\",\"logical_pages\":1024,\"normal_windows\":64,\"rows\":[{\"name\":\"aligned_1_2_4\",\"physical_blocks\":320,\"waste_blocks\":24,\"write_runs\":80,\"cold_read_blocks_x1000\":1800,\"seq_4m_requests\":1500},{\"name\":\"packed_1_2_4\",\"physical_blocks\":320,\"waste_blocks\":4,\"write_runs\":60,\"cold_read_blocks_x1000\":1800,\"seq_4m_requests\":1500},{\"name\":\"packed_1_2_3_4\",\"physical_blocks\":300,\"waste_blocks\":3,\"write_runs\":55,\"cold_read_blocks_x1000\":1750,\"seq_4m_requests\":1450},{\"name\":\"packed_1_2_4_8\",\"physical_blocks\":292,\"waste_blocks\":2,\"write_runs\":48,\"cold_read_blocks_x1000\":1900,\"seq_4m_requests\":1300},{\"name\":\"packed_1_2_4_8_16\",\"physical_blocks\":288,\"waste_blocks\":1,\"write_runs\":44,\"cold_read_blocks_x1000\":2150,\"seq_4m_requests\":1200}]}'\n"
                 "printf 'rootless\\n' >> build/order.log\n")
-            # Synthetic records model eight latency-modeled RAM-only sessions;
+            # Synthetic records mirror the modeled RAM-only session schemas;
             # mock Kbuild / loaded phase never touch actual host devices.
             import json
             # This is STILL an unprivileged mock; use a real Git checkout
@@ -551,22 +551,28 @@ class PublicMakeContract(unittest.TestCase):
                         ))
                         index += 1
                 records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
-            for index, packed in enumerate((0, 1, 1, 0)):
-                records.extend((
-                    f"START_PACKED_PLACEMENT_AB={packed}",
-                    "REPLAY_ORDER=swapz-first" if index % 2 else
-                    "REPLAY_ORDER=off-first",
-                    "SWAPZ_STATUS_AFTER=physical_write=4096000 "
-                    "cursor={} gc_victims=0 packed_placement={} "
-                    "logical_open_balance=0 "
-                    "alignment_hole_blocks_foreground={} "
-                    "segment_tail_waste_blocks_foreground={} "
-                    "run_splits_by_hole={} segment_program_sum=80".format(
-                        1000 if packed else 1024, packed,
-                        0 if packed else 24, 0, 0 if packed else 8),
-                    mock_placement_arm(packed),
-                    f"PASS_PACKED_PLACEMENT_AB={packed}",
-                ))
+            for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
+                records.append(f"START_PACKED_PLACEMENT_REGIME={regime}")
+                for index, packed in enumerate(confirmation):
+                    records.extend((
+                        f"START_PACKED_PLACEMENT_AB={packed}",
+                        "REPLAY_ORDER=swapz-first" if index % 2 else
+                        "REPLAY_ORDER=off-first",
+                        f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} "
+                        f"IRQMODE={irq} QUEUE_MODE={queue_mode} "
+                        f"SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
+                        "SWAPZ_STATUS_AFTER=physical_write=4096000 "
+                        "cursor={} gc_victims=0 packed_placement={} "
+                        "logical_open_balance=0 "
+                        "alignment_hole_blocks_foreground={} "
+                        "segment_tail_waste_blocks_foreground={} "
+                        "run_splits_by_hole={} segment_program_sum=80".format(
+                            1000 if packed else 1024, packed,
+                            0 if packed else 24, 0, 0 if packed else 8),
+                        mock_placement_arm(packed),
+                        f"PASS_PACKED_PLACEMENT_AB={packed}",
+                    ))
+                records.append(f"PASS_PACKED_PLACEMENT_REGIME={regime}")
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"

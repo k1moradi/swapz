@@ -475,8 +475,8 @@ def write_arm(candidate, *, qd, regime, mode):
             mode=mode, target=max(4, qd)) if swapz else None),
     }
 
-def placement_arm(packed):
-    record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=0)
+def placement_arm(packed, regime):
+    record = write_arm("swapz", qd=32, regime=regime, mode=0)
     record["fixture_sha256"] = "c" * 64
     record["trace_sha256"] = "d" * 64
     record["qd"] = 32
@@ -485,7 +485,9 @@ def placement_arm(packed):
     record["read_ops"] = 0
     record["verified_pages"] = 1024
     record["throughput_mbps"]["logical_write_bytes"] = 2048 * 4096
-    record["throughput_mbps"]["logical_write_mbps"] = 61.0 if packed else 60.0
+    base_rate = 12.0 if regime == "sd_emulated" else 60.0
+    record["throughput_mbps"]["logical_write_mbps"] = (
+        base_rate + 1.0 if packed else base_rate)
     record["lower_io"]["lower_write_bytes"] = 6000000
     record["lower_io"]["lower_write_requests"] = 80 if packed else 130
     record["write_p99_ns"] = 2400000 if packed else 2500000
@@ -586,20 +588,29 @@ def synthetic_log():
                     f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
                 index += 1
         out.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
-    for index, packed in enumerate((0, 1, 1, 0)):
-        out.append(f"START_PACKED_PLACEMENT_AB={packed}")
-        out.append("REPLAY_ORDER=swapz-first" if index % 2 else
-                   "REPLAY_ORDER=off-first")
-        out.append(
-            "SWAPZ_STATUS_AFTER=physical_write=4096000 cursor={} gc_victims=0 "
-            "packed_placement={} logical_open_balance=0 "
-            "alignment_hole_blocks_foreground={} "
-            "segment_tail_waste_blocks_foreground={} "
-            "run_splits_by_hole={} segment_program_sum=80".format(
-                1000 if packed else 1024, packed, 0 if packed else 24, 0,
-                0 if packed else 8))
-        out.append(json.dumps(placement_arm(packed)))
-        out.append(f"PASS_PACKED_PLACEMENT_AB={packed}")
+    for regime in runner.MODEL_ORDER:
+        spec = runner.MODEL_SPECS[regime]
+        out.append(f"START_PACKED_PLACEMENT_REGIME={regime}")
+        for index, packed in enumerate(runner.CONFIRMATION_SEQUENCE):
+            out.append(f"START_PACKED_PLACEMENT_AB={packed}")
+            out.append("REPLAY_ORDER=swapz-first" if index % 2 else
+                       "REPLAY_ORDER=off-first")
+            out.append(
+                "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
+                "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
+                "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
+                "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
+            out.append(
+                "SWAPZ_STATUS_AFTER=physical_write=4096000 cursor={} gc_victims=0 "
+                "packed_placement={} logical_open_balance=0 "
+                "alignment_hole_blocks_foreground={} "
+                "segment_tail_waste_blocks_foreground={} "
+                "run_splits_by_hole={} segment_program_sum=80".format(
+                    1000 if packed else 1024, packed,
+                    0 if packed else 24, 0, 0 if packed else 8))
+            out.append(json.dumps(placement_arm(packed, regime)))
+            out.append(f"PASS_PACKED_PLACEMENT_AB={packed}")
+        out.append(f"PASS_PACKED_PLACEMENT_REGIME={regime}")
     return "\n".join(out) + "\n"
 
 
@@ -692,13 +703,23 @@ class ReportContract(unittest.TestCase):
 
     def test_packed_placement_ab_is_strict_and_sanitized(self):
         rows = runner.parse_packed_placement_ab(synthetic_log())
-        self.assertEqual([row["packed_placement"] for row in rows],
-                         [0, 1, 1, 0])
+        self.assertEqual(len(rows),
+                         len(runner.MODEL_ORDER) *
+                         len(runner.CONFIRMATION_SEQUENCE))
+        for regime in runner.MODEL_ORDER:
+            regime_rows = [row for row in rows if row["regime"] == regime]
+            self.assertEqual(
+                [row["packed_placement"] for row in regime_rows],
+                list(runner.CONFIRMATION_SEQUENCE))
         verdict = runner.packed_placement_ab_verdict(rows)
         self.assertEqual(verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
         self.assertLess(verdict["mean_request_change_pct"], 0)
         self.assertEqual(verdict["mean_byte_change_pct"], 0)
         self.assertEqual(verdict["mean_physical_byte_change_pct"], 0)
+        for regime in runner.MODEL_ORDER:
+            self.assertEqual(len(verdict["regimes"][regime]["paired"]), 5)
+            self.assertEqual(
+                verdict["regimes"][regime]["ci95"]["request_change_pct"]["n"], 5)
         broken = runner.parse_packed_placement_ab(synthetic_log())
         broken[1]["status_after"] = (
             broken[1]["status_after"]
@@ -722,10 +743,15 @@ class ReportContract(unittest.TestCase):
                 runner.parse_packed_placement_ab(more_opens))["overall"],
             "REGRESSION")
         equal_lower_requests = runner.parse_packed_placement_ab(synthetic_log())
-        equal_lower_requests[1]["swapz"]["lower_write_requests"] = \
-            equal_lower_requests[0]["swapz"]["lower_write_requests"]
-        equal_lower_requests[2]["swapz"]["lower_write_requests"] = \
-            equal_lower_requests[3]["swapz"]["lower_write_requests"]
+        for regime in runner.MODEL_ORDER:
+            regime_rows = [
+                row for row in equal_lower_requests
+                if row["regime"] == regime
+            ]
+            for pair in runner.matched_binary_pairs(
+                    regime_rows, "packed_placement"):
+                pair[1]["swapz"]["lower_write_requests"] = \
+                    pair[0]["swapz"]["lower_write_requests"]
         equal_lower_request_verdict = runner.packed_placement_ab_verdict(
             equal_lower_requests)
         self.assertEqual(

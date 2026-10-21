@@ -1186,10 +1186,17 @@ def _status_u64(status, key):
 
 
 def parse_packed_placement_ab(output):
-    sessions, current = [], None
+    sessions, current, regime = [], None, None
     for raw in output.splitlines():
         line = raw.strip()
-        if line.startswith("START_PACKED_PLACEMENT_AB="):
+        if line.startswith("START_PACKED_PLACEMENT_REGIME="):
+            label = line.partition("=")[2].strip()
+            if label not in MODEL_ORDER or current is not None:
+                return []
+            regime = label
+        elif line.startswith("START_PACKED_PLACEMENT_AB="):
+            if regime not in MODEL_ORDER or current is not None:
+                return []
             try:
                 mode = int(line.rsplit("=", 1)[-1])
             except ValueError:
@@ -1197,11 +1204,25 @@ def parse_packed_placement_ab(output):
             if mode not in (0, 1):
                 return []
             current = {"packed_placement": mode, "status": "INCOMPLETE",
-                       "order": "unknown", "swapz": None,
+                       "regime": regime, "order": "unknown",
+                       "device_model": None, "swapz": None,
                        "status_after": None}
             sessions.append(current)
         elif current is not None and line.startswith("REPLAY_ORDER="):
             current["order"] = line.partition("=")[2].strip()
+        elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
+            model = re.fullmatch(
+                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
+                line)
+            if model:
+                current["device_model"] = {
+                    "cap_mib_s": int(model.group(1)),
+                    "completion_nsec": int(model.group(2)),
+                    "irqmode": int(model.group(3)),
+                    "queue_mode": int(model.group(4)),
+                    "submit_queues": int(model.group(5)),
+                    "hw_queue_depth": int(model.group(6)),
+                }
         elif current is not None and line.startswith("SWAPZ_STATUS_AFTER="):
             current["status_after"] = line.partition("=")[2].strip()
         elif current is not None and line.startswith("{"):
@@ -1237,21 +1258,28 @@ def parse_packed_placement_ab(output):
                 return []
             current["status"] = "PASS"
             current = None
+        elif line.startswith("PASS_PACKED_PLACEMENT_REGIME="):
+            label = line.partition("=")[2].strip()
+            if current is not None or label != regime:
+                return []
+            regime = None
+    if current is not None or regime is not None:
+        return []
     return sessions
 
 
 def packed_placement_ab_verdict(sessions):
-    expected_modes = (0, 1, 1, 0)
-    if len(sessions) != len(expected_modes) or tuple(
-            row.get("packed_placement") for row in sessions) != expected_modes:
+    expected_total = len(MODEL_ORDER) * len(CONFIRMATION_SEQUENCE)
+    if len(sessions) != expected_total:
         return {"overall": "INCOMPLETE",
-                "reason": "ID69 placement A/B session sequence is incomplete"}
+                "reason": "ID69 placement A/B session count is incomplete"}
     clean = []
     for row in sessions:
         arm = row.get("swapz")
         status = row.get("status_after")
-        if row.get("status") != "PASS" or not isinstance(arm, dict) or \
-                not isinstance(status, str):
+        regime = row.get("regime")
+        if regime not in MODEL_ORDER or row.get("status") != "PASS" or \
+                not isinstance(arm, dict) or not isinstance(status, str):
             return {"overall": "INCOMPLETE",
                     "reason": "ID69 placement A/B arm did not complete"}
         integer_fields = (
@@ -1275,6 +1303,14 @@ def packed_placement_ab_verdict(sessions):
                 arm["logical_write_mbps"] <= 0):
             return {"overall": "INCOMPLETE",
                     "reason": "ID69 placement A/B workload identity is invalid"}
+        expected_model = MODEL_SPECS[regime]
+        model = row.get("device_model")
+        if not isinstance(model, dict) or any(
+                model.get(key) != expected_model[key]
+                for key in ("cap_mib_s", "completion_nsec", "irqmode",
+                            "queue_mode", "submit_queues", "hw_queue_depth")):
+            return {"overall": "INCOMPLETE",
+                    "reason": f"{regime}: ID69 device model mismatch"}
         mode = row["packed_placement"]
         status_values = {
             key: _status_u64(status, key) for key in (
@@ -1325,6 +1361,7 @@ def packed_placement_ab_verdict(sessions):
             "gc_victims": status_values["gc_victims"],
             "segment_program_sum": status_values["segment_program_sum"],
         })
+
     def completed(overall, reason, paired=None):
         return {
             "overall": overall,
@@ -1340,81 +1377,144 @@ def packed_placement_ab_verdict(sessions):
         return completed(
             "INCOMPLETE",
             "ID69 placement A/B did not reuse one immutable workload")
-    pairs = ((clean[0], clean[1]), (clean[3], clean[2]))
-    paired = []
-    for aligned, packed in pairs:
-        if aligned["packed_placement"] != 0 or packed["packed_placement"] != 1:
-            return completed("INCOMPLETE",
-                             "ID69 placement A/B pairing is invalid", paired)
-        if aligned["internal_holes"] <= 0 or aligned["run_splits"] <= 0:
+
+    all_paired = []
+    regime_results = {}
+    for regime in MODEL_ORDER:
+        rows = [row for row in clean if row["regime"] == regime]
+        if len(rows) != len(CONFIRMATION_SEQUENCE) or \
+                [row["packed_placement"] for row in rows] != \
+                list(CONFIRMATION_SEQUENCE):
             return completed(
                 "INCOMPLETE",
-                "ID69 control workload did not exercise internal holes and splits",
-                paired)
-        if packed["internal_holes"] != 0 or packed["run_splits"] != 0:
-            return completed("REGRESSION",
-                             "ID69 packed placement retained internal holes",
-                             paired)
-        a, p = aligned["swapz"], packed["swapz"]
-        if p["physical_write_reqs"] >= a["physical_write_reqs"]:
+                f"{regime}: ID69 counterbalanced placement sequence is incomplete",
+                all_paired)
+        if any(row.get("order") !=
+               ("swapz-first" if index % 2 else "off-first")
+               for index, row in enumerate(rows)):
             return completed(
-                "NO_GAIN",
-                "ID69 packed placement did not reduce physical WRITE requests",
-                paired)
-        if packed["consumed_blocks"] >= aligned["consumed_blocks"]:
+                "INCOMPLETE",
+                f"{regime}: ID69 replay order mismatch",
+                all_paired)
+        try:
+            pairs = matched_binary_pairs(rows, "packed_placement")
+        except ValueError:
             return completed(
-                "NO_GAIN",
-                "ID69 packed placement did not reduce consumed physical blocks",
-                paired)
-        if packed["segment_program_sum"] > aligned["segment_program_sum"]:
-            return completed(
-                "REGRESSION",
-                "ID69 packed placement increased logical segment opens",
-                paired)
-        paired.append({
-            "request_change_pct":
-                (p["physical_write_reqs"] - a["physical_write_reqs"]) * 100.0 /
-                a["physical_write_reqs"],
-            "lower_request_change_pct":
-                (p["lower_write_requests"] - a["lower_write_requests"]) * 100.0 /
-                a["lower_write_requests"],
-            "byte_change_pct":
-                (p["lower_write_bytes"] - a["lower_write_bytes"]) * 100.0 /
-                a["lower_write_bytes"] if a["lower_write_bytes"] else 0.0,
-            "physical_byte_change_pct":
-                (packed["physical_write_bytes"] -
-                 aligned["physical_write_bytes"]) * 100.0 /
-                aligned["physical_write_bytes"]
-                if aligned["physical_write_bytes"] else 0.0,
-            "consumed_block_change":
-                packed["consumed_blocks"] - aligned["consumed_blocks"],
-            "throughput_change_pct":
-                (p["logical_write_mbps"] - a["logical_write_mbps"]) * 100.0 /
-                a["logical_write_mbps"],
-            "p99_change_pct":
-                (p["write_p99_ns"] - a["write_p99_ns"]) * 100.0 /
-                a["write_p99_ns"] if a["write_p99_ns"] else 0.0,
-            "program_change":
-                packed["segment_program_sum"] - aligned["segment_program_sum"],
-        })
+                "INCOMPLETE",
+                f"{regime}: ID69 matched pairing is invalid",
+                all_paired)
+        regime_paired = []
+        for pair in pairs:
+            aligned, packed = pair[0], pair[1]
+            if aligned["internal_holes"] <= 0 or aligned["run_splits"] <= 0:
+                return completed(
+                    "INCOMPLETE",
+                    f"{regime}: ID69 control did not exercise holes and splits",
+                    all_paired + regime_paired)
+            if packed["internal_holes"] != 0 or packed["run_splits"] != 0:
+                return completed(
+                    "REGRESSION",
+                    f"{regime}: ID69 packed placement retained internal holes",
+                    all_paired + regime_paired)
+            a, p = aligned["swapz"], packed["swapz"]
+            if p["physical_write_reqs"] >= a["physical_write_reqs"]:
+                return completed(
+                    "NO_GAIN",
+                    f"{regime}: ID69 packed placement did not reduce physical WRITE requests",
+                    all_paired + regime_paired)
+            if packed["consumed_blocks"] >= aligned["consumed_blocks"]:
+                return completed(
+                    "NO_GAIN",
+                    f"{regime}: ID69 packed placement did not reduce consumed physical blocks",
+                    all_paired + regime_paired)
+            if packed["segment_program_sum"] > aligned["segment_program_sum"]:
+                return completed(
+                    "REGRESSION",
+                    f"{regime}: ID69 packed placement increased logical segment opens",
+                    all_paired + regime_paired)
+            regime_paired.append({
+                "request_change_pct":
+                    (p["physical_write_reqs"] - a["physical_write_reqs"]) *
+                    100.0 / a["physical_write_reqs"],
+                "lower_request_change_pct":
+                    (p["lower_write_requests"] - a["lower_write_requests"]) *
+                    100.0 / a["lower_write_requests"],
+                "byte_change_pct":
+                    (p["lower_write_bytes"] - a["lower_write_bytes"]) * 100.0 /
+                    a["lower_write_bytes"] if a["lower_write_bytes"] else 0.0,
+                "physical_byte_change_pct":
+                    (packed["physical_write_bytes"] -
+                     aligned["physical_write_bytes"]) * 100.0 /
+                    aligned["physical_write_bytes"]
+                    if aligned["physical_write_bytes"] else 0.0,
+                "consumed_block_change":
+                    packed["consumed_blocks"] - aligned["consumed_blocks"],
+                "throughput_change_pct":
+                    (p["logical_write_mbps"] - a["logical_write_mbps"]) *
+                    100.0 / a["logical_write_mbps"],
+                "p99_change_pct":
+                    (p["write_p99_ns"] - a["write_p99_ns"]) * 100.0 /
+                    a["write_p99_ns"] if a["write_p99_ns"] else 0.0,
+                "program_change":
+                    packed["segment_program_sum"] -
+                    aligned["segment_program_sum"],
+            })
+        def ci(field):
+            return paired_ci95([row[field] for row in regime_paired])
+        regime_results[regime] = {
+            "sessions": rows,
+            "paired": regime_paired,
+            "mean_request_change_pct":
+                statistics.mean(row["request_change_pct"]
+                                for row in regime_paired),
+            "mean_lower_request_change_pct":
+                statistics.mean(row["lower_request_change_pct"]
+                                for row in regime_paired),
+            "mean_byte_change_pct":
+                statistics.mean(row["byte_change_pct"]
+                                for row in regime_paired),
+            "mean_physical_byte_change_pct":
+                statistics.mean(row["physical_byte_change_pct"]
+                                for row in regime_paired),
+            "mean_consumed_block_change":
+                statistics.mean(row["consumed_block_change"]
+                                for row in regime_paired),
+            "mean_throughput_change_pct":
+                statistics.mean(row["throughput_change_pct"]
+                                for row in regime_paired),
+            "mean_p99_change_pct":
+                statistics.mean(row["p99_change_pct"]
+                                for row in regime_paired),
+            "ci95": {
+                "request_change_pct": ci("request_change_pct"),
+                "lower_request_change_pct": ci("lower_request_change_pct"),
+                "byte_change_pct": ci("byte_change_pct"),
+                "physical_byte_change_pct": ci("physical_byte_change_pct"),
+                "consumed_block_change": ci("consumed_block_change"),
+                "throughput_change_pct": ci("throughput_change_pct"),
+                "p99_change_pct": ci("p99_change_pct"),
+            },
+        }
+        all_paired.extend(regime_paired)
+
     return {
         "overall": "PASS_PACKED_PLACEMENT_AB",
         "scope": "OWNED_RAM_MIXED_CLASS_PLACEMENT_ONLY",
-        "sessions": clean, "paired": paired,
+        "sessions": clean, "paired": all_paired, "regimes": regime_results,
         "mean_request_change_pct":
-            statistics.mean(row["request_change_pct"] for row in paired),
+            statistics.mean(row["request_change_pct"] for row in all_paired),
         "mean_lower_request_change_pct":
-            statistics.mean(row["lower_request_change_pct"] for row in paired),
+            statistics.mean(row["lower_request_change_pct"] for row in all_paired),
         "mean_byte_change_pct":
-            statistics.mean(row["byte_change_pct"] for row in paired),
+            statistics.mean(row["byte_change_pct"] for row in all_paired),
         "mean_physical_byte_change_pct":
-            statistics.mean(row["physical_byte_change_pct"] for row in paired),
+            statistics.mean(row["physical_byte_change_pct"] for row in all_paired),
         "mean_consumed_block_change":
-            statistics.mean(row["consumed_block_change"] for row in paired),
+            statistics.mean(row["consumed_block_change"] for row in all_paired),
         "mean_throughput_change_pct":
-            statistics.mean(row["throughput_change_pct"] for row in paired),
+            statistics.mean(row["throughput_change_pct"] for row in all_paired),
         "mean_p99_change_pct":
-            statistics.mean(row["p99_change_pct"] for row in paired),
+            statistics.mean(row["p99_change_pct"] for row in all_paired),
     }
 
 def parse_sessions(output):
@@ -1425,6 +1525,7 @@ def parse_sessions(output):
             regime = line.partition("=")[2]
         elif line.startswith(("START_READ_COALESCE_AB=",
                               "START_SD_READ_COALESCE_AB=",
+                              "START_PACKED_PLACEMENT_REGIME=",
                               "START_PACKED_PLACEMENT_AB=",
                               "START_BURST_GUARD_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
@@ -3215,56 +3316,81 @@ def print_bench(result):
 
     packed_ab = result["benchmarks"].get("packed_placement_ab")
     if isinstance(packed_ab, dict):
-        print("\n  ID69 PACKED PLACEMENT A/B — mixed-class owned RAM")
-        placement_rows = []
-        for row in packed_ab.get("sessions", []):
-            arm = row.get("swapz") or {}
-            placement_rows.append((
-                row.get("packed_placement"),
-                row.get("order", "unknown"),
-                f"{arm.get('logical_write_mbps', 0):.2f}",
-                f"{arm.get('write_p99_ns', 0) / 1e6:.2f}",
-                f"{arm.get('lower_write_bytes', 0) / 1024:.0f}",
-                arm.get("physical_write_reqs", 0),
-                arm.get("lower_write_requests", 0),
-                row.get("internal_holes", 0),
-                row.get("tail_waste", 0),
-                row.get("run_splits", 0),
-                row.get("physical_write_blocks", 0),
-                row.get("consumed_blocks", 0),
-                row.get("cursor", 0),
-                row.get("gc_victims", 0),
-                row.get("segment_program_sum", 0),
-            ))
-        if placement_rows:
-            print_table(
-                ("pack", "order", "W MB/s", "W p99", "lower W KiB",
-                 "phys req", "lower req"),
-                [row[:7] for row in placement_rows])
-            print_table(
-                ("pack", "int holes", "tail", "splits", "phys blk",
-                 "consumed", "cursor", "GC", "seg opens"),
-                [(row[0], *row[7:]) for row in placement_rows])
+        regimes = packed_ab.get("regimes") or {}
         if packed_ab.get("overall") == "PASS_PACKED_PLACEMENT_AB":
-            print_table(
-                ("metric", "paired mean"),
-                [
-                    ("physical WRITE req",
-                     f"{packed_ab['mean_request_change_pct']:+.1f}%"),
-                    ("lower WRITE req",
-                     f"{packed_ab['mean_lower_request_change_pct']:+.1f}%"),
-                    ("lower WRITE bytes",
-                     f"{packed_ab['mean_byte_change_pct']:+.1f}%"),
-                    ("physical WRITE bytes",
-                     f"{packed_ab['mean_physical_byte_change_pct']:+.1f}%"),
-                    ("consumed blocks",
-                     f"{packed_ab['mean_consumed_block_change']:+.1f}"),
-                    ("logical W throughput",
-                     f"{packed_ab['mean_throughput_change_pct']:+.1f}%"),
-                    ("write p99",
-                     f"{packed_ab['mean_p99_change_pct']:+.1f}%"),
-                ])
+            for regime in MODEL_ORDER:
+                data = regimes.get(regime) or {}
+                print(f"\n  ID69 PACKED PLACEMENT A/B — {regime.upper()} mixed-class owned RAM")
+                placement_rows = []
+                for row in data.get("sessions", []):
+                    arm = row.get("swapz") or {}
+                    placement_rows.append((
+                        row.get("packed_placement"),
+                        row.get("order", "unknown"),
+                        f"{arm.get('logical_write_mbps', 0):.2f}",
+                        f"{arm.get('write_p99_ns', 0) / 1e6:.2f}",
+                        f"{arm.get('lower_write_bytes', 0) / 1024:.0f}",
+                        arm.get("physical_write_reqs", 0),
+                        arm.get("lower_write_requests", 0),
+                        row.get("internal_holes", 0),
+                        row.get("tail_waste", 0),
+                        row.get("run_splits", 0),
+                        row.get("physical_write_blocks", 0),
+                        row.get("consumed_blocks", 0),
+                        row.get("cursor", 0),
+                        row.get("gc_victims", 0),
+                        row.get("segment_program_sum", 0),
+                    ))
+                if placement_rows:
+                    print_table(
+                        ("pack", "order", "W MB/s", "W p99", "lower W KiB",
+                         "phys req", "lower req"),
+                        [row[:7] for row in placement_rows])
+                    print_table(
+                        ("pack", "int holes", "tail", "splits", "phys blk",
+                         "consumed", "cursor", "GC", "seg opens"),
+                        [(row[0], *row[7:]) for row in placement_rows])
+                ci = data.get("ci95") or {}
+                metric_rows = []
+                for label, key, suffix in (
+                        ("physical WRITE req", "request_change_pct", "%"),
+                        ("lower WRITE req", "lower_request_change_pct", "%"),
+                        ("lower WRITE bytes", "byte_change_pct", "%"),
+                        ("physical WRITE bytes", "physical_byte_change_pct", "%"),
+                        ("consumed blocks", "consumed_block_change", ""),
+                        ("logical W throughput", "throughput_change_pct", "%"),
+                        ("write p99", "p99_change_pct", "%")):
+                    stats = ci.get(key) or {}
+                    if suffix:
+                        metric_rows.append((
+                            label,
+                            f"{stats.get('mean', 0):+.1f}{suffix}",
+                            f"{stats.get('low', 0):+.1f}{suffix}",
+                            f"{stats.get('high', 0):+.1f}{suffix}"))
+                    else:
+                        metric_rows.append((
+                            label,
+                            f"{stats.get('mean', 0):+.1f}",
+                            f"{stats.get('low', 0):+.1f}",
+                            f"{stats.get('high', 0):+.1f}"))
+                print_table(("metric", "mean", "low", "high"), metric_rows)
         else:
+            print("\n  ID69 PACKED PLACEMENT A/B — mixed-class owned RAM")
+            placement_rows = []
+            for row in packed_ab.get("sessions", []):
+                arm = row.get("swapz") or {}
+                placement_rows.append((
+                    row.get("regime", "unknown"),
+                    row.get("packed_placement"),
+                    row.get("order", "unknown"),
+                    arm.get("physical_write_reqs", 0),
+                    row.get("internal_holes", 0),
+                    row.get("consumed_blocks", 0),
+                ))
+            if placement_rows:
+                print_table(
+                    ("model", "pack", "order", "phys req", "holes", "consumed"),
+                    placement_rows)
             print(f"  verdict: {packed_ab.get('overall')} — "
                   f"{packed_ab.get('reason', 'incomplete')}")
 

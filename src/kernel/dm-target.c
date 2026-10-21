@@ -80,10 +80,10 @@ module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
 		 "Enable zero-extra adjacent distinct-extent READ coalescing");
 
-static bool swapz_packed_placement;
+static bool swapz_packed_placement = true;
 module_param_named(packed_placement, swapz_packed_placement, bool, 0444);
 MODULE_PARM_DESC(packed_placement,
-		 "A/B existing 1/2/4-block extents at back-to-back 4KiB starts");
+		 "Qualification override for packed existing 1/2/4-block extents");
 
 static bool swapz_logical_open_balance;
 module_param_named(logical_open_balance, swapz_logical_open_balance, bool, 0444);
