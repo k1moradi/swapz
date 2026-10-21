@@ -2263,6 +2263,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("--weights mixed=80,entropy=20", loaded)
         self.assertIn("--measure-ops 2048", loaded)
         self.assertIn("--packed-placement", pair)
+        self.assertIn("PACKED_PLACEMENT=1", pair)
         self.assertIn('"packed_placement=$PACKED_PLACEMENT"', pair)
         self.assertIn("packed_placement_ab_verdict", runner)
         self.assertIn("GC_PRESSURE_ROUND=", (ROOT / "tests/tools/device-roundtrip.c").read_text())
