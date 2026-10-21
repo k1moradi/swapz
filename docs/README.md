@@ -45,33 +45,35 @@ normal nonforce fast-forwards and never revert newer source bytes.
 
 ## Current evidence
 
-The standard owner matrix tested source
-`faaf9f9371b85193ae61949ce25140c054539266` and passed all five stages. Its
-report-only commit is
-`0e0683e58f5f997f9f0ac66fd249300a28df8aec`. Loaded qualification is limited to
-positively owned RAM-backed `null_blk`. The packed-placement segment-edge fix
-passed byte-exact loaded verification with zero internal holes and zero
-hole-induced run splits.
+The latest standard owner matrix tested source
+`1888781027f38b8d22b4a0d9cb8b2829d9468f9e`, passed all five stages, and
+published report-only commit
+`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`. Loaded qualification is limited to
+positively owned RAM-backed `null_blk`; the run does not qualify physical
+media or endurance. The packed-placement segment-edge fix passed byte-exact
+loaded verification with zero internal holes and zero hole-induced run splits.
 
 The default-on bounded async-preparation path passed the standard lifecycle
-matrix with K=1 and existing activation gates. Five matched fast-model
-sustained-write pairs measured async versus sync at QD4 +0.52% (95% CI
-[-6.90%,+7.95%]), QD8 +30.21% ([+26.03%,+34.39%]), and QD32 +20.75%
-([+15.66%,+25.84%]). Fast mixed async-versus-sync useful WRITE throughput
-was +0.01% (CI [-2.40%,+2.43%]) and lower WRITE requests changed by +35.2
-(CI [-6.1,+76.5]), so that comparison is inconclusive. In the fast mixed raw
-comparison, async wrote 15.26 versus 24.28 MB/s to the lower device and issued
-804.6 versus 12301 lower WRITE requests, while useful WRITE throughput was
-22.20 versus 24.28 MB/s. This confirms lower traffic for this synthetic
-workload, alongside a useful-throughput loss; it does not show a universal
-throughput win over raw storage.
+matrix with K=1 and the existing activation gates. Five matched fast-model
+sustained-write pairs measured async versus sync at QD4 +0.31% (95% CI
+[-5.12%,+5.73%]), QD8 +23.88% ([+16.67%,+31.09%]), and QD32 +22.04%
+([+13.28%,+30.81%]). QD4's interval overlaps zero; QD8 and QD32 intervals
+exclude zero. In the fast mixed raw comparison, swapz delivered 22.48 versus
+24.90 MB/s useful WRITE throughput, while lower WRITE bytes fell from 50.38
+to 34.62 MB and lower WRITE requests fell from 12,301 to about 781. This is a
+large physical-I/O reduction with about 9.7% lower useful throughput on this
+synthetic fast model, not a universal throughput win over raw storage.
 
-Fast sequential adjacent-range READ coalescing reduced lower requests 28.5%
-(paired 95% CI [-34.3%,-22.7%]); p99 changed -1.3% (CI [-29.3%,+26.6%]),
-which does not establish a latency effect. The separate heavy-CPU/low-RAM
-qualification remains open before release qualification of the async default.
-Physical media, active system swap and endurance remain outside the authorized
-qualification scope.
+For the fast packed-read phase, swapz reported 7.46 versus 8.27 MB/s read
+throughput and 1.90 versus 2.84 ms p99 against raw. The slower RAM model
+reported 2.36 versus 0.89 MB/s and 11.95 versus 33.67 ms p99. These are
+synthetic RAM-backed results: they show model-dependent throughput and latency
+tradeoffs, not real-device swap-in time. Sequential adjacent-range READ
+coalescing reduced lower requests by 28.4% on the fast model (paired 95% CI
+[-32.97%,-23.83%]); its p99 interval overlaps zero. The separate
+heavy-CPU/low-RAM qualification remains open before release qualification of
+the async default. Physical media, active system swap and endurance remain
+outside the authorized qualification scope.
 
 ## Documentation
 

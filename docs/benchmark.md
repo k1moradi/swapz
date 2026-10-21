@@ -23,19 +23,24 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The standard owner matrix tested source
-`faaf9f9371b85193ae61949ce25140c054539266` (report-only commit
-`0e0683e58f5f997f9f0ac66fd249300a28df8aec`) and passed all five stages on
+The latest standard owner matrix tested source
+`1888781027f38b8d22b4a0d9cb8b2829d9468f9e` (report-only commit
+`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`) and passed all five stages on
 positively owned RAM-backed devices. Fast-model async/sync WRITE throughput
-was +0.52% at QD4 (paired 95% CI [-6.90%,+7.95%]), +30.21% at QD8
-([+26.03%,+34.39%]) and +20.75% at QD32 ([+15.66%,+25.84%]). The existing
-activation gates and K=1 ownership remain unchanged. Fast mixed async/sync
-throughput (+0.01%, CI [-2.40%,+2.43%]) and lower WRITE requests (+35.2 per
-run, CI [-6.1,+76.5]) remain inconclusive. In the fast mixed raw comparison,
-async lowered backing WRITE throughput from 24.28 to 15.26 MB/s and requests
-from 12301 to 804.6, while useful WRITE throughput fell from 24.28 to
-22.20 MB/s. Thus lower physical traffic is measured in this synthetic case,
-but a universal useful-throughput gain over raw is not established.
+was +0.31% at QD4 (paired 95% CI [-5.12%,+5.73%]), +23.88% at QD8
+([+16.67%,+31.09%]) and +22.04% at QD32 ([+13.28%,+30.81%]). The existing
+activation gates and K=1 ownership remain unchanged. QD4 is inconclusive;
+QD8 and QD32 intervals exclude zero.
+
+In the fast mixed raw comparison, useful WRITE throughput was 22.48 versus
+24.90 MB/s. Lower WRITE bytes fell from 50.38 to 34.62 MB, and lower WRITE
+requests fell from 12,301 to about 781. Therefore this synthetic workload
+shows a substantial physical-I/O reduction with about 9.7% lower useful
+throughput on the fast model; it does not establish a universal throughput
+gain over raw. Fast packed-read throughput was 7.46 versus 8.27 MB/s raw,
+with p99 of 1.90 versus 2.84 ms. The slower RAM model was 2.36 versus 0.89
+MB/s, with p99 of 11.95 versus 33.67 ms. These are model-specific RAM results,
+not physical-media measurements.
 
 The default-on path passed the standard loaded lifecycle matrix. ID36
 heavy-CPU/low-RAM qualification remains a separate release gate; the standard
@@ -79,24 +84,18 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-The standard owner matrix of source
-`faaf9f9371b85193ae61949ce25140c054539266` (report-only
-`0e0683e58f5f997f9f0ac66fd249300a28df8aec`) passed all five stages on owned
-RAM-backed `null_blk`. Its packed-placement segment-edge repair passed loaded
-byte-exact verification with zero internal holes and zero hole-induced run
-splits.
+The latest standard owner matrix tested source
+`1888781027f38b8d22b4a0d9cb8b2829d9468f9e` (report-only
+`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`) and passed all five stages on
+owned RAM-backed `null_blk`. Its packed-placement segment-edge repair passed
+loaded byte-exact verification with zero internal holes and zero hole-induced
+run splits.
 
-Five matched fast sustained-write pairs support async preparation at QD8 and
-QD32 while QD4 is neutral, but they compare async with sync rather than raw.
-The fast mixed raw comparison reduced backing WRITE MB/s and requests while
-useful WRITE throughput also fell. Async-versus-sync mixed changes remain
-inconclusive, so report their paired intervals in every owner run. ID36
-heavy-CPU/low-RAM qualification remains open before release qualification of
-the default-on policy.
-
-Fast sequential adjacent-range READ requests fell 28.5% (paired 95% CI
-[-34.3%,-22.7%]); p99 changed -1.3% (CI [-29.3%,+26.6%]), so no latency
-effect is established. Do not describe a latency improvement as qualified.
+Fast sequential adjacent-range READ requests fell 28.4% (paired 95% CI
+[-32.97%,-23.83%]); p99 changed +10.8% with an interval spanning zero
+([-9.50%,+31.10%]), so no latency effect is established. ID36 heavy-CPU/
+low-RAM qualification remains open before release qualification of the
+default-on policy. Do not describe a latency improvement as qualified.
 Helper concurrency is retired;
 `parallel_reads_enabled` and `read_worker_cpu_ns` remain zero compatibility
 fields. Physical media, active system swap and endurance remain unqualified.

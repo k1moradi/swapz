@@ -86,32 +86,33 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-The standard owner matrix tested source
-`faaf9f9371b85193ae61949ce25140c054539266`, passed all five stages, and
+The latest standard owner matrix tested source
+`1888781027f38b8d22b4a0d9cb8b2829d9468f9e`, passed all five stages, and
 published report-only commit
-`0e0683e58f5f997f9f0ac66fd249300a28df8aec`. This qualification used only
+`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`. This qualification used only
 positively owned RAM-backed `null_blk`; it does not establish physical-media
 behavior or endurance.
 
-Five matched fast sustained-write pairs showed async/sync QD4 +0.52% (95% CI
-[-6.90%,+7.95%]), QD8 +30.21% ([+26.03%,+34.39%]), and QD32 +20.75%
-([+15.66%,+25.84%]). Fast mixed async/sync useful WRITE throughput changed
-by +0.01% (CI [-2.40%,+2.43%]); lower WRITE requests changed by +35.2
-(CI [-6.1,+76.5]). The fast mixed async arm wrote 15.26 MB/s to the lower
-device versus 24.28 MB/s raw and issued 804.6 versus 12301 lower WRITE
-requests, while useful WRITE throughput was 22.20 versus 24.28 MB/s. The
-evidence supports lower physical traffic in that synthetic workload, not a
-universal useful-throughput win.
+Five matched fast sustained-write pairs showed async/sync QD4 +0.31% (95% CI
+[-5.12%,+5.73%]), QD8 +23.88% ([+16.67%,+31.09%]), and QD32 +22.04%
+([+13.28%,+30.81%]). The QD4 interval overlaps zero; QD8 and QD32 intervals
+exclude zero. In the fast mixed raw comparison, useful WRITE throughput was
+22.48 versus 24.90 MB/s, while lower WRITE bytes fell from 50.38 to 34.62 MB
+and requests fell from 12,301 to about 781. This shows much lower physical
+WRITE traffic with about 9.7% lower useful throughput on this synthetic fast
+model, so it is not a universal useful-throughput win.
 
-Fast sequential adjacent-range READ coalescing reduced lower requests by
-28.5% (paired 95% CI [-34.3%,-22.7%]); p99 changed by -1.3% (CI
-[-29.3%,+26.6%]), which does not establish a latency effect. The default-on
-path passed standard loaded lifecycle qualification. The separate low-RAM and
-heavy-CPU gate remains open before release qualification: async target setup
-allocates 64 prepared-page buffers of 4KiB each (256 KiB, plus scratch, LZ4
-workspace and queue metadata), and target creation can fail when these
-allocations cannot be satisfied. Do not describe the standard matrix as
-low-memory qualification.
+Fast packed-read throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
+versus 2.84 ms. The slow RAM model was 2.36 versus 0.89 MB/s, with p99 of
+11.95 versus 33.67 ms. Fast sequential adjacent-range READ coalescing reduced
+lower requests by 28.4% (paired 95% CI [-32.97%,-23.83%]); its p99 interval
+overlaps zero. The default-on path passed standard loaded lifecycle
+qualification. The separate low-RAM and heavy-CPU gate remains open before
+release qualification: async target setup allocates 64 prepared-page buffers
+of 4KiB each (256 KiB, plus scratch, LZ4 workspace and queue metadata), and
+target creation can fail when these allocations cannot be satisfied. Do not
+describe the standard matrix as low-memory qualification or real-device
+swap-in evidence.
 
 ## Deferred optimization evidence gates
 ## Deferred optimization evidence gates

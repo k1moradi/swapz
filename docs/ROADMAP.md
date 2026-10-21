@@ -8,33 +8,32 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-The standard owner matrix tested source
-`faaf9f9371b85193ae61949ce25140c054539266`, passed all five stages, and
+The latest standard owner matrix tested source
+`1888781027f38b8d22b4a0d9cb8b2829d9468f9e`, passed all five stages, and
 published report-only commit
-`0e0683e58f5f997f9f0ac66fd249300a28df8aec`. Loaded evidence remains limited to
+`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`. Loaded evidence remains limited to
 newly-created, positively owned RAM-backed `null_blk`. Packed-placement
 segment-edge repair passed byte-exact verification with zero internal holes
 and zero hole-induced run splits. The default-on asynchronous-preparation
-path passed this standard lifecycle matrix; the separate ID36 low-RAM and
+path passed the standard lifecycle matrix; the separate ID36 low-RAM and
 heavy-CPU release gate remains open.
 
-Across five fast-model sustained-write pairs, async versus sync was neutral at
-QD4 (+0.52%, 95% CI [-6.90%,+7.95%]) and improved throughput at QD8 (+30.21%,
-[+26.03%,+34.39%]) and QD32 (+20.75%, [+15.66%,+25.84%]). Fast mixed
-async-versus-sync remains inconclusive: useful WRITE throughput was +0.01%
-(CI [-2.40%,+2.43%]) and lower WRITE requests changed by +35.2 per run
-(CI [-6.1,+76.5]). In the fast mixed raw comparison, async wrote 15.26 versus
-24.28 MB/s to the lower device and issued 804.6 versus 12301 lower WRITE
-requests, while useful WRITE throughput was 22.20 versus 24.28 MB/s. This
-shows a physical-I/O reduction in this synthetic workload, alongside a
-useful-throughput loss; it does not establish a universal throughput win over
-raw storage.
+Across five fast-model sustained-write pairs, async versus sync was +0.31% at
+QD4 (95% CI [-5.12%,+5.73%], interval overlaps zero), +23.88% at QD8
+([+16.67%,+31.09%]), and +22.04% at QD32 ([+13.28%,+30.81%]). In the fast
+mixed raw comparison, useful WRITE throughput was 22.48 versus 24.90 MB/s,
+while lower WRITE bytes fell from 50.38 to 34.62 MB and requests fell from
+12,301 to about 781. This is substantially less backing I/O with about 9.7%
+lower useful throughput on this synthetic fast model; it does not establish a
+universal throughput win over raw storage.
 
-Fast sequential adjacent-range READ coalescing reduced lower requests by
-28.5% (paired 95% CI [-34.3%,-22.7%]); p99 changed by -1.3% with a wide
-interval ([-29.3%,+26.6%]), so no latency effect is established. ID66 and ID69
-remain owner-qualified. Physical endurance and real-device behavior remain
-unproven.
+Fast packed-read throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
+versus 2.84 ms. On the slower RAM model, it was 2.36 versus 0.89 MB/s with
+p99 of 11.95 versus 33.67 ms. These synthetic results show model-dependent
+swap-in throughput and latency tradeoffs. Fast sequential adjacent-range READ
+coalescing reduced lower requests by 28.4% (paired 95% CI
+[-32.97%,-23.83%]); its p99 interval overlaps zero. Physical endurance and
+real-device behavior remain unproven.
 
 ID60 standalone same-extent slot grouping is retired. Ordinary `swapz_read()`
 already receives the shared metadata/extent-cache benefit without private-slot
