@@ -3235,9 +3235,12 @@ def print_bench(result):
         if placement_rows:
             print_table(
                 ("pack", "order", "W MB/s", "W p99", "lower W KiB",
-                 "phys req", "lower req", "int holes", "tail", "splits",
-                 "phys blk", "consumed", "cursor", "GC", "seg opens"),
-                placement_rows)
+                 "phys req", "lower req"),
+                [row[:7] for row in placement_rows])
+            print_table(
+                ("pack", "int holes", "tail", "splits", "phys blk",
+                 "consumed", "cursor", "GC", "seg opens"),
+                [(row[0], *row[7:]) for row in placement_rows])
         if packed_ab.get("overall") == "PASS_PACKED_PLACEMENT_AB":
             print_table(
                 ("metric", "paired mean"),

@@ -974,6 +974,9 @@ physical WRITE requests, and strictly fewer consumed foreground physical blocks
 partner. Physical/lower WRITE bytes and logical segment opens must not increase.
 Independent lower-device WRITE requests remain reported as observational
 block-layer evidence rather than a strict gate because merging may vary.
+The ID69 console summary must keep the timed-I/O and placement-geometry rows in
+separate compact Markdown tables so the official reporter preserves its
+less-than-96-column output contract without dropping qualification evidence.
 Throughput and p99 are reported directionally. The source default stays aligned
 until a separate post-evidence promotion commit. None of this changes SWZ3.
 
