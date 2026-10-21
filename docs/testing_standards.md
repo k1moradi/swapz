@@ -1113,6 +1113,9 @@ lookups <= probes <= four * lookups. Compare the owner run against source
 The unprivileged Make-interface fixture must emit the same five locality fields
 with internally consistent bounds so rootless qualification cannot bypass the
 loaded telemetry schema.
+Native replay fixtures must initialize these counters by field name rather than
+positional tuple order; adding telemetry must not silently shift unrelated
+coalescing or worker counters.
 No lower-I/O, cache-capacity, generation, CRC, selective-read or coalescing rule
 changes in this round. Predictor qualification continues to require SSE2
 transformed bytes and inverse reconstruction to match scalar exactly.

@@ -633,7 +633,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("read_extent_cache", engine_h)
         self.assertIn("engine->read_cached_block_mask = 0", invalidate)
         self.assertIn("read_extent_lru_valid", invalidate)
-        self.assertIn("cached_mask = cached_metadata ?", read)
+        self.assertIn("cached_mask = cached_extent ?", read)
+        self.assertIn("cached_metadata = cached_extent && !!(cached_mask & 1U)", read)
         self.assertIn("cached_mask |= 1U", read)
         self.assertIn("(1U << initial_blocks) - 1U", read)
         self.assertIn("while (start <= last && (cached_mask & (1U << start)))",
@@ -649,7 +650,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
                       read[residency_gate:residency_gate + 300])
         self.assertLess(residency_gate,
                         read.index("cached_mask |=", residency_gate))
-        self.assertIn("engine->read_cached_block_mask = cached_mask", read)
+        self.assertIn("reusable_mask = cached_mask", read)
+        self.assertIn("reusable_mask &= (swapz_u8)~1U", read)
+        self.assertIn("engine->read_cached_block_mask = reusable_mask", read)
         self.assertIn("engine->read_cached_full = observed.extent_blocks > 1 &&",
                       read)
         self.assertIn("engine->max_read_blocks_per_record != 1",

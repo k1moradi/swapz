@@ -132,13 +132,62 @@ class PairReplayContract(unittest.TestCase):
             Path("/tmp/not-used"), {"dm_uuid": None}))
         self.assertIsNone(module.kernel_read_delta(None, None))
         fields = module.KERNEL_READ_FIELDS
-        before = dict(zip(fields, (10, 4, 5, 3000, 100, 50, 4096, 200,
-                                   2, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-                                   0, 0, 0, 0, 0, 0, 0, 0, 1000)))
-        after = dict(zip(fields, (1034, 516, 517, 90000000, 3000000,
-                                  100050, 4198400, 500200,
-                                  402, 102, 321, 201, 200, 8, 3, 5, 2, 12,
-                                  2, 2, 8, 0, 3, 4, 5, 0, 101000)))
+        before = {field: 0 for field in fields}
+        before.update({
+            "read_meta_reqs": 10,
+            "read_payload_reqs": 4,
+            "read_payload_blocks": 5,
+            "lower_read_wall_ns": 3000,
+            "decode_wall_ns": 100,
+            "read_copy_wall_ns": 50,
+            "read_copy_bytes": 4096,
+            "read_engine_nonio_wall_ns": 200,
+            "read_meta_cache_hits": 2,
+            "read_meta_lru_hits": 1,
+            "read_meta_set_lookups": 10,
+            "read_meta_set_hits": 2,
+            "read_meta_set_probes": 20,
+            "read_meta_set_replacements": 0,
+            "read_meta_copy_bytes": 0,
+            "read_full_extent_reqs": 1,
+            "read_full_cache_hits": 1,
+            "read_worker_cpu_ns": 1000,
+        })
+        after = dict(before)
+        after.update({
+            "read_meta_reqs": 1034,
+            "read_payload_reqs": 516,
+            "read_payload_blocks": 517,
+            "lower_read_wall_ns": 90000000,
+            "decode_wall_ns": 3000000,
+            "read_copy_wall_ns": 100050,
+            "read_copy_bytes": 4198400,
+            "read_engine_nonio_wall_ns": 500200,
+            "read_meta_cache_hits": 402,
+            "read_meta_lru_hits": 102,
+            "read_meta_set_lookups": 1034,
+            "read_meta_set_hits": 202,
+            "read_meta_set_probes": 2068,
+            "read_meta_set_replacements": 50,
+            "read_meta_copy_bytes": 207200,
+            "read_full_extent_reqs": 321,
+            "read_full_cache_hits": 201,
+            "read_two_block_skips": 200,
+            "parallel_read_pairs": 8,
+            "parallel_read_same_extent_pairs": 3,
+            "parallel_read_distinct_extent_pairs": 5,
+            "parallel_read_adjacent_extent_pairs": 2,
+            "parallel_read_adjacent_extent_blocks": 12,
+            "parallel_read_coalesced_pairs": 2,
+            "parallel_read_coalesced_reqs_saved": 2,
+            "parallel_read_coalesced_blocks": 8,
+            "parallel_read_coalesce_extra_blocks": 0,
+            "parallel_read_coalesce_skip_cached": 3,
+            "parallel_read_coalesce_skip_noncontig_slot": 4,
+            "parallel_read_coalesce_skip_gap": 5,
+            "parallel_read_coalesce_skip_other": 0,
+            "read_worker_cpu_ns": 101000,
+        })
         result = subprocess.CompletedProcess(
             ["dmsetup"], 0, stdout="0 8192 swapz " +
             " ".join(f"{key}={value}" for key, value in before.items()))
@@ -154,6 +203,11 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_engine_nonio_wall_ns"], 500000)
         self.assertEqual(measured["read_meta_cache_hits"], 400)
         self.assertEqual(measured["read_meta_lru_hits"], 101)
+        self.assertEqual(measured["read_meta_set_lookups"], 1024)
+        self.assertEqual(measured["read_meta_set_hits"], 200)
+        self.assertEqual(measured["read_meta_set_probes"], 2048)
+        self.assertEqual(measured["read_meta_set_replacements"], 50)
+        self.assertEqual(measured["read_meta_copy_bytes"], 207200)
         self.assertEqual(measured["read_full_extent_reqs"], 320)
         self.assertEqual(measured["read_full_cache_hits"], 200)
         self.assertEqual(measured["read_two_block_skips"], 200)
@@ -188,6 +242,12 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_read_delta(before, dict(after, read_full_cache_hits=500))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_two_block_skips=850))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_meta_set_hits=2000))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_meta_set_probes=9000))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_meta_set_hits=50))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(
                 before, dict(after, parallel_read_same_extent_pairs=9))
