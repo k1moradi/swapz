@@ -2447,8 +2447,8 @@ TABLE_HEADER_LEGEND = {
     "overlap/stall ms": "overlap or stall time in milliseconds",
     "async signal": "asynchronous-preparation counter",
     "mean": "paired effect estimate or average; units follow the metric",
-    "check": "qualification check",
-    "result": "measured verdict or status",
+    "check": "qualification criterion",
+    "result": "measured outcome for that criterion",
     "merge": "adjacent-range merge: 0=off, 1=on",
     "seq req": "sequential lower READ requests",
     "seq p99": "sequential READ p99 latency in milliseconds",
@@ -2578,13 +2578,19 @@ def _table_interpretation(headers, rows):
 
     if "check" in header_index and "result" in header_index and rows:
         outcomes = [str(row[header_index["result"]]).upper() for row in rows]
-        passed = sum(outcome == "PASS" or outcome.startswith("PASS_")
-                     for outcome in outcomes)
-        other = len(outcomes) - passed
-        if other:
-            return (f"{passed} of {len(outcomes)} checks pass; {other} show another "
-                    "reported status. Review those rows before treating the group as passed.")
-        return f"All {passed} listed checks pass in this reported run."
+        terminal_statuses = {"PASS", "FAIL", "BLOCKED", "INCOMPLETE", "NOT_RUN"}
+        if set(outcomes) <= terminal_statuses:
+            counts = {status: outcomes.count(status)
+                      for status in terminal_statuses if status in outcomes}
+            return (f"{len(outcomes)} checks have terminal results: " +
+                    ", ".join(f"{count} {status}" for status, count in counts.items()) +
+                    ".")
+        descriptions = list(dict.fromkeys(
+            outcome.replace("_", " ").lower() for outcome in outcomes))
+        shown = ", ".join(descriptions[:3])
+        suffix = "; additional outcomes are listed" if len(descriptions) > 3 else ""
+        return (f"{len(outcomes)} criteria are summarized by these outcomes: {shown}{suffix}. "
+                "Read each criterion separately; the rows do not form one overall verdict.")
 
     # For all other tables, report the observed range of the first numeric
     # measure. The text deliberately avoids assigning a good/bad direction.
@@ -3297,7 +3303,7 @@ def print_bench(result):
             ("CPU", "scheduler time is a lower bound; phase floors are separate"),
             ("4MiB READ", "RAM-backed; not a cold physical swap-in"),
             ("GC", "RAM exercise only; physical wear is unproven"),
-            ("full detail", "test_results.json.xz"),
+            ("Full telemetry", "test_results.json.xz"),
         ])
 
     saturation = result["benchmarks"].get("write_saturation", {})

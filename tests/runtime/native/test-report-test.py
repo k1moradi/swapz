@@ -1138,6 +1138,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("95% intervals", rendered)
         self.assertIn("overlap zero for", rendered)
         self.assertIn("Merge-on means versus merge-off", rendered)
+        self.assertIn("Read each criterion separately", rendered)
         self.assertNotRegex(rendered, r"(?m)^\s*(?:SD\s+)?ID\d+\b")
         self.assertNotIn("ID63 active", rendered)
         self.assertNotIn("All-window close reasons per-pair mean", rendered)
