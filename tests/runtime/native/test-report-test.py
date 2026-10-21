@@ -699,14 +699,14 @@ class ReportContract(unittest.TestCase):
         self.assertLess(verdict["mean_request_change_pct"], 0)
         self.assertEqual(verdict["mean_byte_change_pct"], 0)
         self.assertEqual(verdict["mean_physical_byte_change_pct"], 0)
-        broken = synthetic_log().replace(
-            "packed_placement=1 logical_open_balance=0 "
-            "alignment_hole_blocks_foreground=0",
-            "packed_placement=1 logical_open_balance=0 "
-            "alignment_hole_blocks_foreground=1", 1)
+        broken = runner.parse_packed_placement_ab(synthetic_log())
+        broken[1]["status_after"] = (
+            broken[1]["status_after"]
+            .replace("cursor=1000", "cursor=1001")
+            .replace("alignment_hole_blocks_foreground=0",
+                     "alignment_hole_blocks_foreground=1"))
         self.assertEqual(
-            runner.packed_placement_ab_verdict(
-                runner.parse_packed_placement_ab(broken))["overall"],
+            runner.packed_placement_ab_verdict(broken)["overall"],
             "REGRESSION")
         more_opens = synthetic_log().replace(
             "packed_placement=1 logical_open_balance=0 "
