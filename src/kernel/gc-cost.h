@@ -27,7 +27,7 @@ static inline swapz_u32 swapz_gc_live_byte_cost(const struct swapz_map *m)
 /*
  * Conservative host I/O-cost estimate for a single authoritative record.
  * A GC move MUST issue a selective lower read of the source before writing
- * the destination. A packed SWZ3 extent may take more than one block to
+ * the destination. A packed SWZ extent may take more than one block to
  * fetch the metadata and record payload. The actual read path and read
  * cache/budget decide the completed count, so this is a selection
  * heuristic, NOT a measured or guaranteed bound on physical IO.
@@ -53,7 +53,7 @@ static inline swapz_u32 swapz_gc_estimated_io_cost(const struct swapz_map *m)
  * A single 1MiB destination MUST retain some free space for the
  * blocked foreground write. A lower bound on the relocated object
  * footprint is the sum of raw page bytes or compressed payloads plus
- * SWZ3 descriptors. If even that optimistic lower bound fills the whole
+ * SWZ descriptors. If even that optimistic lower bound fills the whole
  * destination, no packing heuristic can produce useful reclaim.
  *
  * This is a necessary condition, NOT a promise that a candidate with
@@ -68,7 +68,7 @@ static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
 /*
  * PROVEN physical lower bound for large compressed GC survivors.
  *
- * At most FOUR >=3258-byte records can occupy one 16KiB SWZ3 extent:
+ * At most FOUR >=3258-byte records can occupy one 16KiB SWZ extent:
  * five of them + one header + five 16B descriptors exceed 16384B.
  * Similarly at most two can occupy an 8KiB extent, or one a 4KiB
  * extent. Consequently every such survivor requires at least ONE
@@ -80,9 +80,7 @@ static inline int swapz_gc_has_possible_headroom(swapz_u32 live_bytes)
  * solely to reject victims with a provably full GC destination before
  * performing potentially 2MiB of wasted relocation I/O.
  */
-#define SWAPZ_GC_UNSHAREABLE_MIN_LENGTH \
-	((SWAPZ_MAX_EXTENT_BYTES - sizeof(struct swapz_header) - \
-	  5U * sizeof(struct swapz_record)) / 5U + 1U)
+#define SWAPZ_GC_UNSHAREABLE_MIN_LENGTH 	((SWAPZ_MAX_EXTENT_BYTES - sizeof(struct swapz_header) - 	  5U * sizeof(struct swapz_record)) / 5U + 1U)
 
 static inline swapz_u8 swapz_gc_min_live_blocks(const struct swapz_map *m)
 {
