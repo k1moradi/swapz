@@ -52,7 +52,7 @@ grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/s
 [[ $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
 	fail "swapz vermagic does not match running kernel"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
-	    authority.h engine.h flush-qual.h gc-cost.h; do
+	    authority.h engine.h flush-qual.h gc-cost.h preparation-slots.h; do
 	cmp -s "src/kernel/$file" "build/kernel/experimental/$file" ||
 		fail "staged module source mismatch: $file"
 done
@@ -263,7 +263,10 @@ default_status="$(dmsetup status "$DMNAME")" ||
 	fail "cannot read default-policy target status"
 grep -Eq '(^|[[:space:]])async_prepare=1([[:space:]]|$)' <<< "$default_status" ||
 	fail "bare module load did not activate async_prepare=1"
+grep -Eq '(^|[[:space:]])delta64_rescue=0([[:space:]]|$)' <<< "$default_status" ||
+	fail "bare module load unexpectedly enabled delta64 rescue"
 note "PASS_DEFAULT_ASYNC_PREPARE=1"
+note "PASS_DEFAULT_DELTA64_RESCUE=0"
 dmsetup table "$DMNAME" | grep -Eq '^0 32768 swapz ' ||
 	fail "DM table unexpected"
 dmsetup deps -o devname "$DMNAME" | grep -Fq "$DISK" ||
@@ -318,6 +321,19 @@ status_delta() {
     (( after_value >= before_value )) || fail "target status $key regressed"
     printf '%s\n' "$((after_value - before_value))"
 }
+require_delta64_disabled() {
+    local line="$1" field value
+    for field in rescue eligible classifier_pass attempts adopted raw_rescues \
+                 lz4_rescues pack_eligible pack_attempts pack_cliff_crossings \
+                 pack_adopted score_0_7 score_8_15 score_16_23 score_ge24 \
+                 payload_bytes_saved raw_payload_bytes_saved \
+                 lz4_payload_bytes_saved wall_ns; do
+        value="$(status_u64 "$line" "delta64_$field")" ||
+            fail "default target status missing delta64_$field"
+        [[ $value == 0 ]] || fail "default target ran delta64_$field"
+    done
+}
+require_delta64_disabled "$status_after"
 logical_writes="$(status_delta logical_write)"
 zero_writes="$(status_delta zero_elided)"
 target_write_bytes="$(status_delta physical_write)"
@@ -797,12 +813,14 @@ OWN_DM=1
     fail "packed-placement DM UUID mismatch"
 packed_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$packed_before" async_prepare) == 1 &&
+   $(status_u64 "$packed_before" delta64_rescue) == 0 &&
    $(status_u64 "$packed_before" packed_placement) == 1 &&
    $(status_u64 "$packed_before" failed) == 0 )) ||
 	fail "packed-placement/default-async canonical status invariant mismatch"
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" "/dev/mapper/$DMNAME" ||
     fail "packed-placement byte-exact smoke failed"
 packed_after="$(dmsetup status "$DMNAME")"
+require_delta64_disabled "$packed_after"
 packed_holes="$(status_u64 "$packed_after" alignment_hole_blocks_foreground)" ||
     fail "packed-placement status lacks hole count"
 packed_splits="$(status_u64 "$packed_after" run_splits_by_hole)" ||

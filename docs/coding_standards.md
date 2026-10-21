@@ -318,7 +318,7 @@ inline by the ordered worker and is never waited on or producer-completed.
 Once stealing is possible, producer and ordered compression may overlap.
 Therefore they must have distinct input scratch and distinct LZ4 work memory.
 Producer and ordered timing accumulation must also remain single-writer and may
-be summed only for reporting. Prepared-page mempool/semaphore ownership applies
+be summed only for reporting. Prepared-array slot ownership applies
 only to producer-prepared entries; inline entries allocate no prepared page and
 must not release a slot they never acquired.
 
@@ -570,10 +570,21 @@ dead benchmark sessions merely for historical telemetry.
 
 Whole-page delta64 is the only maintained predictive transform; the refuted
 CL-delta, byte-delta, delta32, reset-delta64 and xor64 experiments live only in
-Git history. Production always tries raw LZ4 first. Only a baseline above 2024
-bytes or RAW fallback may reach the scalar sampled classifier, and threshold 24
-is the production routing point. The candidate must compress successfully and
-be strictly smaller than the baseline before it replaces the stored payload.
+Git history. The read-only module parameter `delta64_rescue` defaults to zero
+and is snapshotted into each target at construction. Both producer and ordered
+write paths must bypass the rescue call entirely when disabled; no classifier,
+rescue timer or rescue counter runs and no predictor scratch is allocated for
+either write or read slots. Ordinary LZ4 remains active. The codec and GC retain
+delta64 encoding support; reads of an encoded record require their scratch and
+fail closed if it is missing. Only an explicitly enabled target may write new
+delta64 records. A default-off result is not a measured classifier rejection.
+
+When explicitly enabled, production tries raw LZ4 first. RAW or >2024-byte
+baselines use classifier threshold 24. The inherited packing-aware path may
+classify a smaller LZ4 baseline at threshold 16 only when another record can
+fit at a lower uniform payload limit in a maintained extent class; adoption
+must cross that limit as well as produce a strictly smaller payload. Both
+paths remain behind the default-off gate and need exact-source owner evidence.
 Portable unsigned,
 memcpy-safe C delta64 is the mandatory correctness oracle and fallback.
 
@@ -756,8 +767,23 @@ Publish includes batch resume plus authoritative finish/revalidation after lower
 completion. These diagnostics must not be used to skip CRC, generation or
 transaction-snapshot validation without a separately qualified replacement.
 
-The producer reserves bounded prepared-page capacity nonblocking before taking
-`queue_lock` or claiming a BIO. Tail claiming never consumes
+The producer uses one constructor-allocated, zeroed 64-element prepared-page
+array and an `atomic64_t` free mask, initialized with all bits set. Claim a bit
+using the shared production helper before taking `queue_lock` or claiming a
+BIO. There is one serialized claimant; other owners only return slots, so at
+most 64 concurrent returns can invalidate a compare/exchange and 65 attempts
+bound the claim. An empty mask or exhausted retry budget leaves the descriptor
+available for ordered inline work. No per-page allocation, semaphore wait or
+second reserve is permitted.
+
+An empty preparation queue, rejected tail claim or copy error must return the
+reserved bit exactly once. A completed buffer belongs to the ordered consumer;
+clear its BIO pointer before releasing the slot, before `bio_endio()` can
+invalidate per-BIO data. Slot return uses a full barrier before relaxed
+`atomic64_or`; a successful fully ordered claim acquires that release before
+overwriting the array element. Returning the bit without this ordering is not
+sufficient. Suspend/drain must leave every bit free before destruction frees
+the array after both workqueues. Tail claiming never consumes
 completion/publication ownership: the FIFO worker can continue inline-stealing
 unclaimed heads and releases prepared slots as it reaches completed tail
 entries. Separate LZ4 scratch/work memory remains mandatory for concurrent

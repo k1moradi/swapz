@@ -14,7 +14,7 @@ Compression ratio, encoded-size diagrams, mock counters, green CI or a single sy
 
 There is one implementation and one public product identity. Production kernel code is C under `src/kernel/`; the administrative utility is under `src/userspace/`. SWZ is the current unversioned format name, not a product generation. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
-The format uses independently decodable 4KiB logical pages, LZ4 compression, optional page-local delta64 followed by LZ4 when that representation is smaller, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. Delta64 never carries state across logical pages or extents.
+The format uses independently decodable 4KiB logical pages, LZ4 compression, optional page-local delta64 followed by LZ4 when that representation is smaller, whole-page RAW fallback, 4/8/16KiB extents, CRC/generation authority, bounded write windows, and serialized publication only after required lower I/O succeeds. Delta64 rescue is experimental and off by default; it requires explicit `delta64_rescue=1` at module load. Delta64 never carries state across logical pages or extents.
 
 ## Non-negotiable correctness
 

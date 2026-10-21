@@ -87,44 +87,32 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
 The latest standard owner matrix tested source
-`4d73b13fa66f63b24b5edf099fcb2b7f3cab756f`, passed all five stages, and
+`5bdd040334ee0739e1663e98eef4c875a1c4629a`, passed all five stages, and
 published report-only commit
-`e80d8544a311130f5c81eff9b3b2fce98225cd77`. It covers owned RAM-backed
-`null_blk`, including the metadata front index and page-local delta64. The
-pending production-attribution increment has not been compiled or tested.
-The report demonstrates functional qualification, not a causal performance win
-for either the cache change or delta64. AVX-512 runtime remains unqualified on
-this SSE2-only host.
+`1df2e5a6d7c52682c2ac048310b0ed2f932a2791`. This qualifies the standard
+owned-RAM matrix for that source only. Later metadata-locality work and the
+reviewed preparation-array/default-off rescue changes remain owner-unqualified.
 
-Five matched fast-model write pairs measured async versus sync throughput:
-QD4 +0.64% (95% CI [-1.02%,+2.31%]), QD8 +23.63%
-([+17.84%,+29.43%]), QD32 +26.15% ([+19.24%,+33.06%]). QD8 lower WRITE
-requests fell 17.97% ([-20.13%,-15.81%]) while bytes rose 0.47%
-([+0.34%,+0.60%]). QD32 requests rose 25.04% ([+3.98%,+46.10%]) and
-bytes rose 0.68% ([+0.27%,+1.08%]). Keep the K=1 throughput benefit and its
-aggregation cost visible together; QD4 has no confirmed change.
+Five matched fast-model write pairs measured async/sync throughput changes:
+QD4 +0.88% (95% CI [-0.59%,+2.34%]), QD8 +19.62%
+([+15.02%,+24.22%]), QD32 +26.37% ([+21.31%,+31.43%]). QD8 lower WRITE
+requests fell 16.19% while bytes rose 0.39%; QD32 requests rose 25.44% and
+bytes rose 0.70%. Those four I/O intervals exclude zero. Fast mixed async/sync
+throughput +1.27% ([-1.06%,+3.61%]) remains inconclusive.
 
-Fast mixed async/sync throughput changed +1.36% (95% CI [-3.44%,+6.16%]);
-WRITE requests changed +4.43% ([-4.86%,+13.72%]). Neither interval establishes
-a change in that workload. Async versus raw means were 20.77 versus 19.89 MB/s
-useful WRITE input, 34.83 versus 50.38 MB lower WRITE data, and 930.2 versus
-12,301 lower WRITE requests. The means describe this synthetic run only.
+All 14 mixed and 40 sustained-write sessions recorded zero delta64 classifier
+passes, attempts and adoptions. Classification still consumed measured wall
+time; it is not isolated CPU consumption. The reviewed policy therefore makes
+`delta64_rescue=0` the default and allocates predictor scratch only when opted
+in. The codec/GC encoding and native structured-corpus controls remain intact.
 
-Fast mixed arms observed about 35.1-36.0% whole-host CPU activity and
-3.5-6.1% CPU PSI waiting. Background work includes Codex; these observations
-neither isolate its cost nor establish an idle host. Do not pool unlike host
-conditions or attribute cross-report differences to a single source change.
-Packed-read engine attribution is wall time excluding lower READ waits, not
-CPU consumption. Native threshold-24 delta64 routing saved 52 modeled blocks
-and 49 extents on the structured corpus; absent production counters, it cannot
-establish loaded adoption, lower-I/O savings or throughput benefit.
-
-Packed placement, byte-exact readback, GC and lifecycle qualification passed.
-Resource-pressure qualification, realistic churn/GC/TRIM cost, real kernel swap
-semantics and physical endurance remain open. The next report will capture
-production delta64 attempts, adoptions, split payload savings and rescue wall
-time without changing routing or K=1. See [benchmark.md](benchmark.md) for the
-measurement scope and [ROADMAP.md](ROADMAP.md) for release gates.
+Fast QD32 whole-host CPU activity averaged 38.8% sync versus 53.8% async;
+CPU PSI averaged 19.1% versus 25.9%. These include benchmark, kernel and
+background work such as Codex. No idle-host control or code-specific CPU
+attribution exists. Do not pool unlike host conditions or treat elapsed engine
+timings as CPU time. K=1, activation thresholds and packing geometry remain
+unchanged. Low-RAM/heavy-CPU, realistic churn, actual kernel swap and physical
+endurance remain open qualification gates.
 
 ## Timed boundaries
 
@@ -451,7 +439,9 @@ leaves a lone idle head for ordered inline steal, but while the ordered worker
 is active the producer prepares from the opposite queue end, switching to the
 head during synchronous lower WRITE wait. Prepared-page capacity is reserved
 nonblocking before BIO claim so queue depths above the 64-slot bound cannot
-form a semaphore/FIFO deadlock.
+form a capacity/FIFO deadlock. The reviewed allocator now reserves from one
+fixed preparation array through a bounded atomic free mask; inline work does
+not consume an array slot.
 
 Acceptance is simultaneous: QD8 should return toward ~520 lower requests,
 faster QD32 toward ~139, high-QD async throughput should recover materially,

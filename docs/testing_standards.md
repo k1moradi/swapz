@@ -107,44 +107,32 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest standard owner matrix tested source
-`4d73b13fa66f63b24b5edf099fcb2b7f3cab756f`, passed all five stages, and
+`5bdd040334ee0739e1663e98eef4c875a1c4629a`, passed all five stages, and
 published report-only commit
-`e80d8544a311130f5c81eff9b3b2fce98225cd77`. It covers owned RAM-backed
-`null_blk`, including the metadata front index and page-local delta64. The
-pending production-attribution increment has not been compiled or tested.
-The report demonstrates functional qualification, not a causal performance win
-for either the cache change or delta64. AVX-512 runtime remains unqualified on
-this SSE2-only host.
+`1df2e5a6d7c52682c2ac048310b0ed2f932a2791`. This qualifies the standard
+owned-RAM matrix for that source only. Later metadata-locality work and the
+reviewed preparation-array/default-off rescue changes remain owner-unqualified.
 
-Five matched fast-model write pairs measured async versus sync throughput:
-QD4 +0.64% (95% CI [-1.02%,+2.31%]), QD8 +23.63%
-([+17.84%,+29.43%]), QD32 +26.15% ([+19.24%,+33.06%]). QD8 lower WRITE
-requests fell 17.97% ([-20.13%,-15.81%]) while bytes rose 0.47%
-([+0.34%,+0.60%]). QD32 requests rose 25.04% ([+3.98%,+46.10%]) and
-bytes rose 0.68% ([+0.27%,+1.08%]). Keep the K=1 throughput benefit and its
-aggregation cost visible together; QD4 has no confirmed change.
+Five matched fast-model write pairs measured async/sync throughput changes:
+QD4 +0.88% (95% CI [-0.59%,+2.34%]), QD8 +19.62%
+([+15.02%,+24.22%]), QD32 +26.37% ([+21.31%,+31.43%]). QD8 lower WRITE
+requests fell 16.19% while bytes rose 0.39%; QD32 requests rose 25.44% and
+bytes rose 0.70%. Those four I/O intervals exclude zero. Fast mixed async/sync
+throughput +1.27% ([-1.06%,+3.61%]) remains inconclusive.
 
-Fast mixed async/sync throughput changed +1.36% (95% CI [-3.44%,+6.16%]);
-WRITE requests changed +4.43% ([-4.86%,+13.72%]). Neither interval establishes
-a change in that workload. Async versus raw means were 20.77 versus 19.89 MB/s
-useful WRITE input, 34.83 versus 50.38 MB lower WRITE data, and 930.2 versus
-12,301 lower WRITE requests. The means describe this synthetic run only.
+All 14 mixed and 40 sustained-write sessions recorded zero delta64 classifier
+passes, attempts and adoptions. Classification still consumed measured wall
+time; it is not isolated CPU consumption. The reviewed policy therefore makes
+`delta64_rescue=0` the default and allocates predictor scratch only when opted
+in. The codec/GC encoding and native structured-corpus controls remain intact.
 
-Fast mixed arms observed about 35.1-36.0% whole-host CPU activity and
-3.5-6.1% CPU PSI waiting. Background work includes Codex; these observations
-neither isolate its cost nor establish an idle host. Do not pool unlike host
-conditions or attribute cross-report differences to a single source change.
-Packed-read engine attribution is wall time excluding lower READ waits, not
-CPU consumption. Native threshold-24 delta64 routing saved 52 modeled blocks
-and 49 extents on the structured corpus; absent production counters, it cannot
-establish loaded adoption, lower-I/O savings or throughput benefit.
-
-Packed placement, byte-exact readback, GC and lifecycle qualification passed.
-Resource-pressure qualification, realistic churn/GC/TRIM cost, real kernel swap
-semantics and physical endurance remain open. The next report will capture
-production delta64 attempts, adoptions, split payload savings and rescue wall
-time without changing routing or K=1. See [benchmark.md](benchmark.md) for the
-measurement scope and [ROADMAP.md](ROADMAP.md) for release gates.
+Fast QD32 whole-host CPU activity averaged 38.8% sync versus 53.8% async;
+CPU PSI averaged 19.1% versus 25.9%. These include benchmark, kernel and
+background work such as Codex. No idle-host control or code-specific CPU
+attribution exists. Do not pool unlike host conditions or treat elapsed engine
+timings as CPU time. K=1, activation thresholds and packing geometry remain
+unchanged. Low-RAM/heavy-CPU, realistic churn, actual kernel swap and physical
+endurance remain open qualification gates.
 
 ## Deferred optimization evidence gates
 
@@ -553,14 +541,16 @@ within the same worker burst, but must keep
 from a non-PACK close.
 
 
-Nonblocking preparation-slot qualification requires the producer to call
-`down_trylock(&ctx->preparation_slots)` before acquiring `queue_lock` or
-removing a preparation entry. No blocking `down()` may remain in the
-producer. Every return after a successful slot reservation but before BIO
-claim must `up()` the slot. Existing producer error paths and ordered
-prepared-page release must continue to return exactly one slot. This prevents
-tail preparation at queue depths above the 64-record bound from creating a
-FIFO/semaphore deadlock.
+Nonblocking preparation-slot qualification executes the shared production
+mask helper with C11 atomic shims. Exercise all 64 slots, exhaustion without
+mask mutation, bit 63, release/reclaim, rejected-claim cleanup and concurrent
+producer/consumer payload reuse. Native stress does not prove the Linux memory
+model or loaded BIO lifecycle. Source contracts require a bounded claim before
+`queue_lock`/descriptor removal, no producer allocation or semaphore, return on
+all three early-release paths, pointer clearing before bit return, release
+barrier plus ordered compare/exchange, array destruction after worker drain,
+and an all-free mask in the suspend/drain invariant. The owner matrix must
+still cover byte-exact reads, deep-QD reuse, faults and suspend/teardown.
 
 
 ### Lower-WRITE queue starvation and GC distribution attribution
@@ -1136,18 +1126,21 @@ extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
 share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,
 reject reserved header flags, and preserve payload CRC validation.
 
-The production classifier now has two explicit paths. RAW or >2024-byte LZ4
-baselines keep threshold 24 and still require a strictly smaller delta64
-candidate. For an already-compressed baseline at or below 2024 bytes, the engine
-computes the next exact uniform-payload packing limit across 4/8/16KiB SWZ
-extents. Only pages with such a lower limit are packing-eligible; they may use
-threshold 16, and their candidate is adopted only when it is strictly smaller
-AND at or below that packing limit. The lower threshold therefore cannot adopt a
-candidate that merely saves bytes without crossing a records-per-extent
-geometry boundary. The read path must LZ4-decompress a delta64 record into
-separate scratch and apply the selected inverse before upper copy. Full owner
-qualification is required because this changes default production representation
-and CPU work.
+Both write owners must bypass rescue when the read-only, default-off
+`delta64_rescue` module parameter is disabled. Snapshot it at construction and
+allocate predictor scratch only when enabled. The bare-load smoke and reload
+must assert `delta64_rescue=0`; all rescue counters and wall time stay zero.
+This describes the bypass, not classifier selectivity. Encoded reads retain
+inverse support and fail closed if their scratch is missing.
+
+The inherited opt-in classifier has two paths. RAW or >2024-byte LZ4 baselines
+keep threshold 24 and require a strictly smaller delta64 candidate. For an
+already-compressed baseline at or below 2024 bytes, the engine computes the
+next exact uniform-payload packing limit across 4/8/16KiB SWZ extents. Pages
+with such a lower limit may use threshold 16, but adoption also requires
+crossing that packing limit. Neither path runs while rescue is disabled.
+These inherited packing-aware changes and the allocation/default-off increment
+remain owner-unqualified. Native structured pages are opportunity evidence.
 
 Capture every production `delta64_*` counter in drained, timed mixed and
 sustained-write snapshots. Missing fields are unavailable evidence, not zero
@@ -1158,6 +1151,18 @@ attempts; packing-adopted <= packing-attempts <= packing-eligible <= eligible;
 packing-adopted <= LZ4 rescues; adopted = RAW rescues + LZ4 rescues; and
 total/split payload-byte savings must match. Reject resets and impossible
 per-rescue savings.
+
+The replay records `delta64_rescue` as a required policy gauge, not a counter
+delta. Reject changed/nonboolean policy or any disabled-target rescue activity.
+Rootless fixtures distinguish enabled-positive, enabled-negative and
+disabled-zero cases. Print the policy with a legend and interpretation so a
+bypass cannot be presented as evidence of classifier selectivity. Payload-byte
+savings do not establish lower I/O savings or a speedup. A causal comparison
+requires identical source/workload, one controlled toggle, comparable host
+load, independent lower I/O, useful throughput, p99 and worker CPU. Keep K=1
+and per-record encoding unchanged and collect representative content plus a
+positive loaded control before reconsidering the default.
+
 
 The console prints mixed-arm general attempts, packing-path activity, score
 distribution and payload savings. Zero packing adoptions mean the new

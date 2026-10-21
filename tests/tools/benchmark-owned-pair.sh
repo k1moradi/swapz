@@ -181,7 +181,7 @@ grep -Fxq "#define SWAPZ_ALPHA_VERSION \"$version\"" build/kernel/experimental/s
 [[ -s $MODULE && $(modinfo -F vermagic "$MODULE" | awk '{print $1}') == "$(uname -r)" ]] ||
     fail "swapz module missing or running-kernel vermagic mismatch"
 for file in Makefile dm-target.c codec.c authority.c engine.c codec.h \
-            authority.h engine.h flush-qual.h gc-cost.h; do
+            authority.h engine.h flush-qual.h gc-cost.h preparation-slots.h; do
     cmp -s "src/kernel/$file" "build/kernel/experimental/$file" ||
         fail "staged kernel source mismatch: $file"
 done

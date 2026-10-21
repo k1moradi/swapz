@@ -436,13 +436,23 @@ class PairReplayContract(unittest.TestCase):
             "delta64_lz4_payload_bytes_saved": 200,
             "delta64_payload_bytes_saved": 1200, "delta64_wall_ns": 50000,
         })
+        before["delta64_rescue"] = after["delta64_rescue"] = 1
         delta = module.kernel_write_delta(before, after)
         self.assertEqual(delta["delta64_adopted"], 3)
         self.assertEqual(delta["delta64_pack_adopted"], 1)
         self.assertEqual(delta["delta64_pack_cliff_crossings"], 1)
         self.assertEqual(delta["delta64_score_16_23"], 2)
         self.assertEqual(delta["delta64_payload_bytes_saved"], 1200)
+        disabled_before = dict(before, delta64_rescue=0)
+        disabled_after = dict(after, delta64_rescue=0,
+                              **{field: 0 for field in module.DELTA64_FIELDS})
+        self.assertEqual(module.kernel_write_delta(
+            disabled_before, disabled_after)["delta64_rescue"], 0)
+        with self.assertRaisesRegex(ValueError, "disabled.*delta64"):
+            module.kernel_write_delta(disabled_before,
+                                      dict(disabled_after, delta64_wall_ns=1))
         for invalid in (
+                {"delta64_rescue": 0}, {"delta64_rescue": 2},
                 {"delta64_classifier_pass": 11},
                 {"delta64_attempts": 6},
                 {"delta64_adopted": 6},

@@ -1154,11 +1154,6 @@ int swapz_engine_prepare_batched_run(struct swapz_engine *e,
 			    placed < run_start ||
 			    (e->bulk_enabled == 1 && placed != run_end) ||
 			    placed - run_start + blocks > SWAPZ_BULK_BLOCKS) {
-				if (e->bulk_enabled == 1 && placed > run_end &&
-				    placed / SWAPZ_SEGMENT_BLOCKS ==
-					run_start / SWAPZ_SEGMENT_BLOCKS &&
-				    placed - run_start + blocks <= SWAPZ_BULK_BLOCKS)
-					e->run_splits_by_hole++;
 				break;
 			}
 		}

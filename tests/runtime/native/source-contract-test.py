@@ -280,6 +280,53 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertIn(f"READ_ONCE(ctx->ordered_delta64.{field})", status)
             self.assertIn(f"READ_ONCE(ctx->preparation_delta64.{field})", status)
 
+    def test_preparation_array_reservation_and_release_are_bounded(self):
+        slots = (ROOT / "src/kernel/preparation-slots.h").read_text()
+        claim = source_body("swapz_preparation_claim_slot", slots)
+        release_slot = source_body("swapz_preparation_release_slot", slots)
+        producer = body("swapz_preparation_worker")
+        drain = body("swapz_drain")
+        self.assertIn("SWAPZ_MAX_RECORDS != 64U", slots)
+        self.assertIn("attempt <= SWAPZ_MAX_RECORDS", claim)
+        self.assertIn("if (!mask)", claim)
+        self.assertIn("__ffs64(mask)", claim)
+        self.assertIn("atomic64_cmpxchg", claim)
+        self.assertLess(release_slot.index("smp_mb__before_atomic()"),
+                        release_slot.index("atomic64_or("))
+        self.assertIn("prepared = &ctx->preparation_pages[slot]", producer)
+        self.assertEqual(producer.count("swapz_preparation_release_slot("), 3)
+        self.assertNotIn("-ENOMEM", producer)
+        for allocation in ("kmalloc(", "kzalloc(", "vzalloc(", "mempool_alloc("):
+            self.assertNotIn(allocation, producer)
+        self.assertIn("atomic64_read(&ctx->preparation_free_mask)", drain)
+        self.assertIn("SWAPZ_PREPARATION_FREE_MASK", drain)
+
+    def test_delta64_rescue_is_opt_in_and_default_avoids_scratch(self):
+        ctor = body("swapz_ctr")
+        producer = body("swapz_preparation_worker")
+        ordered = body("swapz_accept_write")
+        read = body("swapz_read")
+        slot_read = body("swapz_read_slot_run")
+        self.assertRegex(DM, r"static\s+bool\s+swapz_delta64_rescue_enabled\s*;")
+        self.assertIn("module_param_named(delta64_rescue, "
+                      "swapz_delta64_rescue_enabled, bool, 0444)", DM)
+        self.assertIn("ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled",
+                      ctor)
+        for owner in (producer, ordered):
+            self.assertRegex(owner, r"if \(ctx->delta64_rescue_enabled\)\s+"
+                             r"(?:prepared->length|length) = swapz_delta64_rescue\(")
+        for allocation in ("ctx->predictor_page = kmalloc(",
+                           "slot->predictor_page = kmalloc(",
+                           "ctx->preparation_predictor_page ="):
+            self.assertRegex(ctor, r"if \(ctx->delta64_rescue_enabled\)\s+" +
+                             re.escape(allocation))
+        self.assertIn("if (!ctx->predictor_page)", read)
+        self.assertIn("if (!slot->predictor_page)", slot_read)
+        self.assertIn("delta64_rescue=%u", body("swapz_status"))
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
+        self.assertIn("delta64_rescue=0([[:space:]]|$)", deploy)
+        self.assertIn('status_u64 "$packed_before" delta64_rescue', deploy)
+
     def test_exact_zero_write_elides_lower_io_without_losing_ordering(self):
         accept = body("swapz_accept_write")
         read = body("swapz_read")
@@ -628,7 +675,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("placed = e->authority->next_block;", prepare)
         self.assertIn("(e->bulk_enabled == 1 && placed != run_end)", prepare)
         self.assertIn("tx->start_block != run_start + run_blocks", prepare)
-        self.assertIn("e->run_splits_by_hole++", prepare)
+        self.assertNotIn("e->run_splits_by_hole++", prepare)
         self.assertIn("swapz_stage_batch(e->authority", prepare)
         self.assertIn("batch_hashes", authority)
         self.assertIn("batch_stage_allowed", authority)
@@ -2150,15 +2197,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker)", ctor)
         self.assertIn('"swapz", WQ_MEM_RECLAIM | WQ_UNBOUND, 1', ctor)
         self.assertIn('"swapz-lz4", WQ_MEM_RECLAIM | WQ_UNBOUND,', ctor)
-        self.assertIn("mempool_create_kmalloc_pool(", ctor)
+        self.assertIn("ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *", ctor)
         self.assertIn("ctx->preparation_lz4_workmem", ctor)
-        self.assertIn("sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS)", ctor)
-        self.assertIn("down_trylock(&ctx->preparation_slots)", producer)
-        self.assertNotIn("down(&ctx->preparation_slots)", producer)
-        self.assertIn("mempool_alloc(ctx->preparation_pool, GFP_NOIO)", producer)
-        self.assertLess(producer.index("down_trylock(&ctx->preparation_slots)"),
+        self.assertIn("atomic64_set(&ctx->preparation_free_mask", ctor)
+        self.assertIn("swapz_preparation_claim_slot(&ctx->preparation_free_mask)",
+                      producer)
+        self.assertNotIn("mempool_", DM)
+        self.assertNotIn("preparation_slots", DM)
+        self.assertLess(producer.index("swapz_preparation_claim_slot("),
                         producer.index("spin_lock_irqsave(&ctx->queue_lock, flags)"))
-        self.assertLess(producer.index("down_trylock(&ctx->preparation_slots)"),
+        self.assertLess(producer.index("swapz_preparation_claim_slot("),
                         producer.index("list_del_init(&entry->preparation_list)"))
         self.assertIn("LZ4_compress_fast(", producer)
         self.assertIn("ctx->preparation_lz4_workmem", producer)
@@ -2250,8 +2298,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_release_prepared(bio)", finish)
         self.assertLess(finish.index("swapz_release_prepared(bio)"),
                         finish.index("bio_endio(bio)"))
-        self.assertIn("mempool_free(", release)
-        self.assertIn("up(entry->preparation_slots)", release)
+        self.assertIn("entry->prepared_page - ctx->preparation_pages", release)
+        self.assertIn("swapz_preparation_release_slot(", release)
+        self.assertLess(release.index("entry->prepared_page = NULL"),
+                        release.index("swapz_preparation_release_slot("))
         self.assertIn("atomic_set(&ctx->lower_write_active, 1)", lower)
         self.assertIn("atomic_set(&ctx->lower_write_active, 0)", lower)
         flush = body("swapz_flush_window")
@@ -2274,7 +2324,9 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertLess(drain.index("drain_workqueue(ctx->preparation_workqueue)"),
                         drain.index("drain_workqueue(ctx->workqueue)"))
         self.assertIn("destroy_workqueue(ctx->preparation_workqueue)", freeing)
-        self.assertIn("mempool_destroy(ctx->preparation_pool)", freeing)
+        self.assertIn("vfree(ctx->preparation_pages)", freeing)
+        self.assertLess(freeing.index("destroy_workqueue(ctx->preparation_workqueue)"),
+                        freeing.index("vfree(ctx->preparation_pages)"))
         self.assertIn("kfree(ctx->preparation_lz4_workmem)", freeing)
         self.assertIn("ctx->lz4_wall_ns + ctx->preparation_lz4_wall_ns", status)
         self.assertIn("write_copy_wall_ns=%llu write_copy_bytes=%llu", status)

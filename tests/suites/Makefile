@@ -14,7 +14,7 @@ endif
 CPPFLAGS += -I$(KERNEL)
 
 .PHONY: test-all test-codec test-mapping test-gc test-lower-io test-predictor clean
-PROGRAMS := codec-roundtrip extent-geometry zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy
+PROGRAMS := codec-roundtrip extent-geometry zero-write-elision mapping-authority transaction-publication write-verification dead-segment-reclamation raw-discard online-packing randomized-authority gc-forbidden-victim gc-cost-accounting gc-scan-scaling gc-rotation gc-engine-rotation flush-ordering lower-write-aggregation window-policy preparation-slots
 
 codec-roundtrip_SRC := $(NATIVE)/codec/roundtrip.c $(CODEC)
 extent-geometry_SRC := $(NATIVE)/codec/extent-geometry.c
@@ -47,6 +47,9 @@ flush-ordering_SRC := $(NATIVE)/io/flush-ordering.c
 lower-write-aggregation_SRC := $(NATIVE)/io/lower-write-aggregation.c $(ENGINE) $(AUTH) $(CODEC)
 window-policy_SRC := $(NATIVE)/io/window-policy.c
 window-policy_HDR := $(KERNEL)/window-policy.h $(KERNEL)/codec.h
+preparation-slots_SRC := $(NATIVE)/io/preparation-slots.c
+preparation-slots_HDR := $(KERNEL)/preparation-slots.h $(KERNEL)/codec.h
+preparation-slots_LDLIBS := -pthread
 
 $(OUT):
 	@mkdir -p "$@"
@@ -101,8 +104,8 @@ test-mapping: $(OUT)/zero-write-elision $(OUT)/mapping-authority $(OUT)/transact
 test-gc: $(OUT)/gc-forbidden-victim $(OUT)/gc-cost-accounting $(OUT)/gc-scan-scaling $(OUT)/gc-rotation $(OUT)/gc-engine-rotation
 	@set -e; "$(OUT)/gc-forbidden-victim"; "$(OUT)/gc-cost-accounting"; "$(OUT)/gc-scan-scaling"; "$(OUT)/gc-rotation"; "$(OUT)/gc-engine-rotation"
 
-test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy
-	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"
+test-lower-io: $(OUT)/flush-ordering $(OUT)/lower-write-aggregation $(OUT)/window-policy $(OUT)/preparation-slots
+	@set -e; "$(OUT)/flush-ordering"; "$(OUT)/lower-write-aggregation"; "$(OUT)/window-policy"; "$(OUT)/preparation-slots"
 
 test-all: test-codec test-predictor test-mapping test-gc test-lower-io
 

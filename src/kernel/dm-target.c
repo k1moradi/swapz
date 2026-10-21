@@ -21,8 +21,6 @@
 #include <linux/hrtimer.h>
 #include <linux/ioprio.h>
 #include <linux/completion.h>
-#include <linux/mempool.h>
-#include <linux/semaphore.h>
 #include <linux/ktime.h>
 #include <linux/lz4.h>
 #include <linux/module.h>
@@ -37,6 +35,7 @@
 #include "gc-cost.h"
 #include "flush-qual.h"
 #include "window-policy.h"
+#include "preparation-slots.h"
 #include "predictor.h"
 
 #if PAGE_SIZE != SWAPZ_BLOCK_BYTES
@@ -74,6 +73,11 @@ module_param_named(async_prepare, swapz_async_prepare, bool, 0444);
 MODULE_PARM_DESC(async_prepare,
 		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O; "
 		 "set async_prepare=0 for synchronous qualification");
+
+static bool swapz_delta64_rescue_enabled;
+module_param_named(delta64_rescue, swapz_delta64_rescue_enabled, bool, 0444);
+MODULE_PARM_DESC(delta64_rescue,
+		 "Opt in to page-local delta64 rescue after ordinary LZ4; default off");
 
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);
@@ -162,15 +166,14 @@ struct swapz_bio_ref {
 	struct bio *bio;
 	/* Both lists refer to this dm_per_bio_data object. The ordered worker
 	 * waits for preparation_finished before touching the payload or BIO.
-	 * Only the ordered worker returns a prepared buffer to its pool. */
+	 * Only the ordered worker returns a completed prepared buffer's slot. */
 	struct list_head preparation_list;
 	struct completion preparation_finished;
 	struct swapz_prepared_page *prepared_page;
 	/* Set only when the ordered worker atomically removes this BIO from
 	 * preparation_incoming before the producer claims it. */
 	bool preparation_inline;
-	mempool_t *preparation_pool;
-	struct semaphore *preparation_slots;
+	struct swapz_dm *preparation_ctx;
 	int preparation_error;
 };
 
@@ -245,13 +248,14 @@ struct swapz_dm {
 	/* One bounded LZ4 producer, separate from the ordered I/O worker.
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
+	bool delta64_rescue_enabled;
 	struct workqueue_struct *preparation_workqueue;
 	struct work_struct preparation_worker;
 	struct list_head preparation_incoming;
 	/* Exact unclaimed preparation descriptors, protected by queue_lock. */
 	swapz_u32 preparation_queued;
-	struct semaphore preparation_slots;
-	mempool_t *preparation_pool;
+	struct swapz_prepared_page *preparation_pages;
+	atomic64_t preparation_free_mask;
 	u8 *preparation_input_page;
 	u8 *preparation_predictor_page;
 	/* Producer and ordered worker may now compress concurrently. Never
@@ -646,12 +650,15 @@ static void swapz_account_worker_runtime(u64 *wall_counter, u64 wall_start_ns,
 static void swapz_release_prepared(struct bio *bio)
 {
 	struct swapz_bio_ref *entry = dm_per_bio_data(bio, sizeof(*entry));
+	struct swapz_dm *ctx = entry->preparation_ctx;
+	size_t slot;
 
 	if (!entry->prepared_page)
 		return;
-	mempool_free(entry->prepared_page, entry->preparation_pool);
+	slot = (size_t)(entry->prepared_page - ctx->preparation_pages);
 	entry->prepared_page = NULL;
-	up(entry->preparation_slots);
+	swapz_preparation_release_slot(&ctx->preparation_free_mask,
+				       (unsigned int)slot);
 }
 
 static void swapz_complete(struct bio *bio, int error)
@@ -1380,8 +1387,8 @@ out:
  * read its still-pinned upper BIO data. The ordered consumer waits on its
  * completion and is solely responsible for recycling prepared_page.
  *
- * preparation_slots caps resident prepared pages to SWAPZ_MAX_RECORDS even
- * under unlimited incoming BIOs. The producer never waits for a slot while
+ * The array/free mask caps prepared pages to SWAPZ_MAX_RECORDS even under
+ * unlimited incoming BIOs. The producer never waits for a slot while
  * holding queue_lock. Tail claims cannot deadlock the FIFO consumer because
  * the ordered worker can keep stealing unclaimed head entries inline without
  * consuming preparation slots, then releases prepared slots as it reaches
@@ -1405,6 +1412,7 @@ static void swapz_preparation_worker(struct work_struct *work)
 		bool lower_write_overlap;
 		u64 elapsed_ns;
 		int error;
+		int slot;
 
 		/*
 		 * Reserve bounded prepared-page capacity before claiming a BIO.
@@ -1413,17 +1421,19 @@ static void swapz_preparation_worker(struct work_struct *work)
 		 * behind prepared tail entries that own every slot. If capacity is
 		 * exhausted, leave all remaining entries claimable by inline steal.
 		 */
-		if (down_trylock(&ctx->preparation_slots)) {
+		slot = swapz_preparation_claim_slot(&ctx->preparation_free_mask);
+		if (slot < 0) {
 			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
 						 wall_start_ns,
 						 &ctx->preparation_worker_cpu_ns,
 						 cpu_start_ns);
 			return;
 		}
+		prepared = &ctx->preparation_pages[slot];
 		spin_lock_irqsave(&ctx->queue_lock, flags);
 		if (list_empty(&ctx->preparation_incoming)) {
 			spin_unlock_irqrestore(&ctx->queue_lock, flags);
-			up(&ctx->preparation_slots);
+			swapz_preparation_release_slot(&ctx->preparation_free_mask, slot);
 			swapz_account_worker_runtime(&ctx->preparation_worker_wall_ns,
 						 wall_start_ns,
 						 &ctx->preparation_worker_cpu_ns,
@@ -1461,7 +1471,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			    list_is_singular(&ctx->preparation_incoming) ||
 			    !atomic_xchg(&ctx->preparation_tail_credit, 0)) {
 				spin_unlock_irqrestore(&ctx->queue_lock, flags);
-				up(&ctx->preparation_slots);
+				swapz_preparation_release_slot(
+					&ctx->preparation_free_mask, slot);
 				swapz_account_worker_runtime(
 					&ctx->preparation_worker_wall_ns,
 					wall_start_ns,
@@ -1480,22 +1491,6 @@ static void swapz_preparation_worker(struct work_struct *work)
 		list_del_init(&entry->preparation_list);
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
 
-		prepared = mempool_alloc(ctx->preparation_pool, GFP_NOIO);
-		if (!prepared) {
-			entry->preparation_error = -ENOMEM;
-			up(&ctx->preparation_slots);
-			complete(&entry->preparation_finished);
-			if (tail_claim && !atomic_read(&ctx->lower_write_active) &&
-			    !atomic_read(&ctx->preparation_tail_credit)) {
-				swapz_account_worker_runtime(
-					&ctx->preparation_worker_wall_ns,
-					wall_start_ns,
-					&ctx->preparation_worker_cpu_ns,
-					cpu_start_ns);
-				return;
-			}
-			continue;
-		}
 		input = swapz_map_single_bio_input(entry->bio, &mapped_input);
 		if (input) {
 			ctx->preparation_direct_lz4_pages++;
@@ -1505,8 +1500,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 					    &ctx->preparation_copy_wall_ns,
 					    &ctx->preparation_copy_bytes);
 			if (error) {
-				mempool_free(prepared, ctx->preparation_pool);
-				up(&ctx->preparation_slots);
+				swapz_preparation_release_slot(
+					&ctx->preparation_free_mask, slot);
 				entry->preparation_error = error;
 				complete(&entry->preparation_finished);
 				if (tail_claim &&
@@ -1544,14 +1539,15 @@ static void swapz_preparation_worker(struct work_struct *work)
 		    atomic_read(&ctx->lower_write_active))
 			ctx->preparation_lz4_lower_write_overlap_ns += elapsed_ns;
 		prepared->encoding = SWAPZ_ENCODING_LZ4;
-		prepared->length = swapz_delta64_rescue(
-			input, prepared->length, prepared->bytes,
-			ctx->preparation_predictor_page,
-			prepared->length > 0 ? ctx->preparation_input_page :
-					      prepared->bytes,
-			ctx->preparation_lz4_workmem,
-			&ctx->preparation_lz4_wall_ns, &prepared->encoding,
-			&ctx->preparation_delta64);
+		if (ctx->delta64_rescue_enabled)
+			prepared->length = swapz_delta64_rescue(
+				input, prepared->length, prepared->bytes,
+				ctx->preparation_predictor_page,
+				prepared->length > 0 ? ctx->preparation_input_page :
+						      prepared->bytes,
+				ctx->preparation_lz4_workmem,
+				&ctx->preparation_lz4_wall_ns, &prepared->encoding,
+				&ctx->preparation_delta64);
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0) {
 			section_start = ktime_get_ns();
@@ -2976,16 +2972,17 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				ctx->lz4_workmem);
 		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start,
 						   ktime_get_ns());
-		length = swapz_delta64_rescue(
-			input, length,
-			ctx->batch_bytes +
-				(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-			ctx->predictor_page,
-			length > 0 ? ctx->input_page :
+		if (ctx->delta64_rescue_enabled)
+			length = swapz_delta64_rescue(
+				input, length,
 				ctx->batch_bytes +
-				(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-			ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
-			&ctx->ordered_delta64);
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				ctx->predictor_page,
+				length > 0 ? ctx->input_page :
+					ctx->batch_bytes +
+					(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+				ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
+				&ctx->ordered_delta64);
 		if (length > 0) {
 			section_start = ktime_get_ns();
 			payload_crc32c = swapz_crc32c_bytes(
@@ -3223,6 +3220,8 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 			return error;
 		section_start = ktime_get_ns();
 		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
+			if (!ctx->predictor_page)
+				return -EUCLEAN;
 			decompressed = LZ4_decompress_safe(ctx->read_compressed,
 						  ctx->predictor_page,
 						  payload_bytes,
@@ -3303,6 +3302,8 @@ static int swapz_read_slot_run(struct swapz_read_slot *slot)
 			return error;
 		section_start = ktime_get_ns();
 		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
+			if (!slot->predictor_page)
+				return -EUCLEAN;
 			decompressed = LZ4_decompress_safe(slot->read_compressed,
 						 slot->predictor_page,
 						 payload_bytes,
@@ -4397,8 +4398,7 @@ static int swapz_map(struct dm_target *ti, struct bio *bio)
 	INIT_LIST_HEAD(&entry->preparation_list);
 	entry->prepared_page = NULL;
 	entry->preparation_inline = false;
-	entry->preparation_pool = ctx->preparation_pool;
-	entry->preparation_slots = &ctx->preparation_slots;
+	entry->preparation_ctx = ctx;
 	entry->preparation_error = 0;
 	if (ctx->async_prepare && bio_op(bio) == REQ_OP_WRITE && count)
 		init_completion(&entry->preparation_finished);
@@ -4486,6 +4486,8 @@ static void swapz_drain(struct dm_target *ti)
 	spin_lock_irqsave(&ctx->queue_lock, flags);
 	if (!list_empty(&ctx->incoming) ||
 	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||
+	    (u64)atomic64_read(&ctx->preparation_free_mask) !=
+					SWAPZ_PREPARATION_FREE_MASK ||
 	    ctx->batch_count || READ_ONCE(ctx->inflight_write.active) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -4534,8 +4536,7 @@ static void swapz_free(struct swapz_dm *ctx)
 		drain_workqueue(ctx->preparation_workqueue);
 		destroy_workqueue(ctx->preparation_workqueue);
 	}
-	if (ctx->preparation_pool)
-		mempool_destroy(ctx->preparation_pool);
+	vfree(ctx->preparation_pages);
 	kfree(ctx->preparation_lz4_workmem);
 	kfree(ctx->preparation_predictor_page);
 	vfree(ctx->preparation_input_page);
@@ -4651,12 +4652,14 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->engine.verify_after_write = verify;
 	ctx->engine.bulk_enabled = lower_bulk;
 	ctx->async_prepare = swapz_async_prepare;
+	ctx->delta64_rescue_enabled = swapz_delta64_rescue_enabled;
 	spin_lock_init(&ctx->queue_lock);
 	INIT_LIST_HEAD(&ctx->incoming);
 	INIT_LIST_HEAD(&ctx->preparation_incoming);
 	INIT_DELAYED_WORK(&ctx->worker, swapz_worker);
 	INIT_WORK(&ctx->preparation_worker, swapz_preparation_worker);
-	sema_init(&ctx->preparation_slots, SWAPZ_MAX_RECORDS);
+	atomic64_set(&ctx->preparation_free_mask,
+		     (s64)SWAPZ_PREPARATION_FREE_MASK);
 	atomic_set(&ctx->lower_write_active, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
@@ -4815,7 +4818,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->batch_bytes = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->gc_bytes_store = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
-	ctx->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+	if (ctx->delta64_rescue_enabled)
+		ctx->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 	ctx->read_page = vzalloc(SWAPZ_BLOCK_BYTES);
 	ctx->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
 	ctx->engine.write_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
@@ -4837,7 +4841,8 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
-	    !ctx->predictor_page || !ctx->read_page || !ctx->read_compressed ||
+	    (ctx->delta64_rescue_enabled && !ctx->predictor_page) ||
+	    !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
 	    !ctx->engine.read_metadata_cache || !ctx->engine.read_extent_cache ||
 	    (ctx->read_grouping_enabled &&
@@ -4864,9 +4869,11 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		slot->engine.read_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
 		slot->read_pages = vzalloc((size_t)SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES);
 		slot->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
-		slot->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+		if (ctx->delta64_rescue_enabled)
+			slot->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 		if (!slot->engine.read_scratch || !slot->read_pages ||
-		    !slot->read_compressed || !slot->predictor_page) {
+		    !slot->read_compressed ||
+		    (ctx->delta64_rescue_enabled && !slot->predictor_page)) {
 			error = -ENOMEM;
 			goto fail;
 		}
@@ -4887,19 +4894,19 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto fail;
 	}
 	if (ctx->async_prepare) {
-		/* 64 preallocated producer pages, a semaphore enforcing the
-		 * same hard bound, and no dynamic allocations in ->map. */
+		/* One fixed array: no per-page allocation or slab-size rounding. */
+		ctx->preparation_pages = vzalloc(SWAPZ_MAX_RECORDS *
+					       sizeof(*ctx->preparation_pages));
 		ctx->preparation_input_page = vzalloc(SWAPZ_BLOCK_BYTES);
-		ctx->preparation_predictor_page =
-			kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
+		if (ctx->delta64_rescue_enabled)
+			ctx->preparation_predictor_page =
+				kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 		ctx->preparation_lz4_workmem =
 			kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
-		ctx->preparation_pool = mempool_create_kmalloc_pool(
-					SWAPZ_MAX_RECORDS,
-					sizeof(struct swapz_prepared_page));
-		if (!ctx->preparation_input_page ||
-		    !ctx->preparation_predictor_page ||
-		    !ctx->preparation_lz4_workmem || !ctx->preparation_pool) {
+		if (!ctx->preparation_pages || !ctx->preparation_input_page ||
+		    (ctx->delta64_rescue_enabled &&
+		     !ctx->preparation_predictor_page) ||
+		    !ctx->preparation_lz4_workmem) {
 			error = -ENOMEM;
 			goto fail;
 		}
@@ -5462,7 +5469,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->failed, ctx->last_error);
 		/* These independent single-writer values are diagnostic while busy;
 		 * qualification snapshots only at drained measurement boundaries. */
-		DMEMIT(" delta64_eligible=%llu delta64_classifier_pass=%llu "
+		DMEMIT(" delta64_rescue=%u delta64_eligible=%llu "
+		       "delta64_classifier_pass=%llu "
 		       "delta64_attempts=%llu delta64_adopted=%llu "
 		       "delta64_raw_rescues=%llu delta64_lz4_rescues=%llu "
 		       "delta64_pack_eligible=%llu delta64_pack_attempts=%llu "
@@ -5472,6 +5480,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "delta64_payload_bytes_saved=%llu "
 		       "delta64_raw_payload_bytes_saved=%llu "
 		       "delta64_lz4_payload_bytes_saved=%llu delta64_wall_ns=%llu",
+		       ctx->delta64_rescue_enabled,
 		       READ_ONCE(ctx->ordered_delta64.eligible) +
 			READ_ONCE(ctx->preparation_delta64.eligible),
 		       READ_ONCE(ctx->ordered_delta64.classifier_pass) +

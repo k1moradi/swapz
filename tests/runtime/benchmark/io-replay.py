@@ -976,7 +976,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms"
 ) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
-KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target",)
+KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target", "delta64_rescue")
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
@@ -1008,6 +1008,12 @@ def kernel_write_delta(before, after):
                 for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
+    if (before["delta64_rescue"] != after["delta64_rescue"] or
+            after["delta64_rescue"] not in (0, 1)):
+        raise ValueError("invalid or changed swapz delta64 policy")
+    if not after["delta64_rescue"] and any(
+            before[key] or after[key] for key in DELTA64_FIELDS):
+        raise ValueError("disabled swapz delta64 recorded rescue activity")
     if not (counters["delta64_adopted"] <= counters["delta64_attempts"] <=
             counters["delta64_classifier_pass"] <= counters["delta64_eligible"]):
         raise ValueError("inconsistent swapz delta64 attempt accounting")

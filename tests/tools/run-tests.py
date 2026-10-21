@@ -231,7 +231,7 @@ KERNEL_WRITE_FIELDS = (
     "prep_lower_write_end_nonempty", "pipeline_async_runs",
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
-    "write_wait_gt4ms", "retained_burst_target"
+    "write_wait_gt4ms", "retained_burst_target", "delta64_rescue"
 ) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
@@ -525,9 +525,13 @@ def lower_inflight_record(obj):
 def timed_window_error(record):
     if not isinstance(record, dict):
         return "missing timed swapz window telemetry"
+    if type(record.get("delta64_rescue")) is not int or record["delta64_rescue"] not in (0, 1):
+        return "missing or invalid timed delta64 policy"
     if any(type(record.get(field)) is not int or record[field] < 0
            for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS):
         return "invalid timed swapz window telemetry"
+    if not record["delta64_rescue"] and any(record[field] for field in DELTA64_FIELDS):
+        return "disabled delta64 recorded rescue activity"
     if not (record["delta64_adopted"] <= record["delta64_attempts"] <=
             record["delta64_classifier_pass"] <= record["delta64_eligible"]):
         return "inconsistent timed delta64 attempt accounting"
@@ -2577,6 +2581,7 @@ TABLE_HEADER_LEGEND = {
     "hand/wait": "preparation handoffs / blocking waits",
     "target": "retained burst target in records",
     "eligible": "foreground pages with ordinary LZ4 >2024 bytes or RAW fallback",
+    "rescue": "delta64 policy: off=default bypass, on=opted in, mixed=unmatched policy",
     "passed": "eligible pages passing the threshold-24 classifier",
     "attempts": "full-page delta64 transform attempts",
     "adopted": "attempts selecting a strictly smaller delta64 payload",
@@ -2612,6 +2617,10 @@ def _table_interpretation(headers, rows):
                 "inverse-read cost or loaded throughput; a ratio above one is "
                 "modeled opportunity, not a demonstrated speedup.")
     if "eligible" in header_index and "adopted" in header_index:
+        if "rescue" in header_index and all(
+                row[header_index["rescue"]] == "off" for row in rows):
+            return ("Delta64 rescue is disabled: no classifier, transform or rescue timer "
+                    "runs. Zero counters describe the bypass, not classifier selectivity.")
         adopted = [_table_number(row[header_index["adopted"]]) or 0 for row in rows]
         if not any(adopted):
             return ("No delta64 payload was adopted in these measured intervals. "
@@ -2952,8 +2961,9 @@ def print_bench(result):
 
         print("  Production delta64 during mixed I/O — mean foreground attempt counters")
         print_table(
-            ("mode", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+"),
-            [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
+            ("mode", "rescue", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+"),
+            [(mode, {0: "off", 1: "on"}.get(columns[mode]['mixed_delta64_rescue'], "mixed"),
+              *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
                 "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
                 "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues")))
              for mode in ("sync", "async")])

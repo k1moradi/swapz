@@ -176,6 +176,7 @@ def timed_kernel_write(*, mode, target=8):
     record = {field: 0 for field in runner.KERNEL_WRITE_FIELDS}
     record.update({
         "physical_write_reqs": 5,
+        "delta64_rescue": 1,
         "delta64_eligible": 10,
         "delta64_classifier_pass": 5,
         "delta64_attempts": 5,
@@ -1087,6 +1088,7 @@ class ReportContract(unittest.TestCase):
             {"delta64_score_0_7": 3},
             {"delta64_score_ge24": 6},
             {"delta64_wall_ns": -1}, {"delta64_eligible": True},
+            {"delta64_rescue": 0}, {"delta64_rescue": 2},
         ]
         for invalid in invalid_records:
             with self.subTest(invalid=invalid):
@@ -1095,11 +1097,19 @@ class ReportContract(unittest.TestCase):
             missing = dict(record)
             del missing[field]
             self.assertIsNotNone(runner.timed_window_error(missing))
+        zero["delta64_rescue"] = 0
+        self.assertIsNone(runner.timed_window_error(zero))
+        missing = dict(zero)
+        del missing["delta64_rescue"]
+        self.assertIsNotNone(runner.timed_window_error(missing))
         headers = ("mode", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+")
         interpretation = runner._table_interpretation(
             headers, [("async", "10", "0", "0", "0", "0", "0")])
         self.assertIn("No delta64 payload was adopted", interpretation)
         self.assertIn("no loaded delta64 savings evidence", interpretation)
+        disabled_headers = ("mode", "rescue", *headers[1:])
+        self.assertIn("disabled", runner._table_interpretation(
+            disabled_headers, [("async", "off", "0", "0", "0", "0", "0", "0")]))
         self.assertIn("not committed mappings", runner._table_interpretation(
             headers, [("async", "10", "5", "5", "3", "1", "2")]))
 
