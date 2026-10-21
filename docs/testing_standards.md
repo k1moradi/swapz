@@ -1110,6 +1110,9 @@ Loaded qualification must report metadata set lookups, hits, probes,
 replacements and cached-block payload-copy bytes. Require hits <= lookups and
 lookups <= probes <= four * lookups. Compare the owner run against source
 5bdd040334ee's baseline rather than inferring a win from source structure alone.
+The unprivileged Make-interface fixture must emit the same five locality fields
+with internally consistent bounds so rootless qualification cannot bypass the
+loaded telemetry schema.
 No lower-I/O, cache-capacity, generation, CRC, selective-read or coalescing rule
 changes in this round. Predictor qualification continues to require SSE2
 transformed bytes and inverse reconstruction to match scalar exactly.
