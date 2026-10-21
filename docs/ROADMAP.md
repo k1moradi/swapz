@@ -8,29 +8,33 @@ This file contains only active work. Completed experiments and detailed historic
 
 ## Current baseline
 
-Owner qualification of source
-`79c6bd9400ae7f95a2881634c0cb459167d486a3` passed all five stages and
+The standard owner matrix tested source
+`faaf9f9371b85193ae61949ce25140c054539266`, passed all five stages, and
 published report-only commit
-`013893fa3edb5267bc288439379aa3d2498761ff`. Evidence remains newly-created,
-positively owned RAM-backed `null_blk` only. Packed placement's segment-edge
-repair passed loaded byte-exact verification with zero internal holes and
-zero hole-induced run splits.
+`0e0683e58f5f997f9f0ac66fd249300a28df8aec`. Loaded evidence remains limited to
+newly-created, positively owned RAM-backed `null_blk`. Packed-placement
+segment-edge repair passed byte-exact verification with zero internal holes
+and zero hole-induced run splits. The default-on asynchronous-preparation
+path passed this standard lifecycle matrix; the separate ID36 low-RAM and
+heavy-CPU release gate remains open.
 
-The same report supports promoting the existing bounded async-preparation
-policy. Across five fast-model sustained-write pairs, async versus sync was
-neutral at QD4 (-0.07%, 95% CI [-0.44%,+0.30%]), and improved throughput at
-QD8 (+26.80%, [+22.01%,+31.59%]) and QD32 (+23.12%, [+16.92%,+29.32%]). Fast
-mixed async versus sync remains inconclusive: useful write throughput +0.51%
-(CI [-2.20%,+3.22%]) and lower WRITE requests +4.24% (CI [-2.17%,+10.66%]).
-The mixed fast-model async arm reduced lower WRITE bytes about 31.2% and
-requests about 93.5% versus raw, while useful mixed throughput was about 12.6%
-lower. These results support the narrow async default change; they do not
-establish a universal throughput win over raw storage.
+Across five fast-model sustained-write pairs, async versus sync was neutral at
+QD4 (+0.52%, 95% CI [-6.90%,+7.95%]) and improved throughput at QD8 (+30.21%,
+[+26.03%,+34.39%]) and QD32 (+20.75%, [+15.66%,+25.84%]). Fast mixed
+async-versus-sync remains inconclusive: useful WRITE throughput was +0.01%
+(CI [-2.40%,+2.43%]) and lower WRITE requests changed by +35.2 per run
+(CI [-6.1,+76.5]). In the fast mixed raw comparison, async wrote 15.26 versus
+24.28 MB/s to the lower device and issued 804.6 versus 12301 lower WRITE
+requests, while useful WRITE throughput was 22.20 versus 24.28 MB/s. This
+shows a physical-I/O reduction in this synthetic workload, alongside a
+useful-throughput loss; it does not establish a universal throughput win over
+raw storage.
 
-ID63 keeps its fast sequential request benefit but has an unresolved p99 cost:
-SSD_EMULATED requests fell 24.15% (paired 95% CI [-29.39%,-18.92%]) while p99
-rose 8.68% (CI [+0.008%,+17.34%]). ID66 and ID69 remain owner-qualified.
-Physical endurance and real-device behavior remain unproven.
+Fast sequential adjacent-range READ coalescing reduced lower requests by
+28.5% (paired 95% CI [-34.3%,-22.7%]); p99 changed by -1.3% with a wide
+interval ([-29.3%,+26.6%]), so no latency effect is established. ID66 and ID69
+remain owner-qualified. Physical endurance and real-device behavior remain
+unproven.
 
 ID60 standalone same-extent slot grouping is retired. Ordinary `swapz_read()`
 already receives the shared metadata/extent-cache benefit without private-slot
@@ -110,8 +114,8 @@ changes.
 | 33 | Linux kernel CRC32C primitive | **1** | Already implemented; keep architecture-selected kernel backend. |
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
-| 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **1 alpha.24 default-on change; owner qualification pending** | Five matched fast sustained-write pairs show async/sync QD4 -0.07% CI [-0.44%,+0.30%], QD8 +26.80% [+22.01%,+31.59%], and QD32 +23.12% [+16.92%,+29.32%]. Keep K=1 and the existing count/backlog gates; fast mixed remains inconclusive. |
+| 36 | Heavy-CPU plus low-RAM qualification | **6** | Open release gate for the async default and any increase beyond K=1. Measure target-creation behavior and resource use under memory pressure and CPU oversubscription before release qualification. |
+| 37 | K=1 ping-pong WRITE pipeline | **1 standard owned-RAM matrix passed; release gate open** | Five matched fast sustained-write pairs show async/sync QD4 +0.52% CI [-6.90%,+7.95%], QD8 +30.21% [+26.03%,+34.39%], and QD32 +20.75% [+15.66%,+25.84%]. Keep K=1 and existing activation gates; fast mixed remains inconclusive. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 current opportunity too small** | Fast mixed measures 29.6 ready windows / 87.1 records / 3.58 ms total K=1 completion wait. Keep passive counters; do not add K=2 authority state. |
 | 39 | Latency-first bounded parallel READ service | **5 refuted; helper removed from current source** | Owner evidence showed no standalone benefit. ID65 removes the `swapz-read` helper; the legacy `parallel_reads_enabled`/read-worker CPU status tokens remain zero for schema compatibility. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
@@ -209,14 +213,14 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 ## Immediate work queue
 
-1. Packed-placement retirement is owner-qualified on source
-   `79c6bd9400ae7f95a2881634c0cb459167d486a3`, report
-   `013893fa3edb5267bc288439379aa3d2498761ff`.
-2. The alpha.24 production-C change promotes `async_prepare=1` as the default.
-   Keep K=1 and its existing activation gates, retain `async_prepare=0` as the
-   sync qualification control, and continue reporting fast-mixed async-sync
-   lower-WRITE-request paired CI. Run full owner qualification before this
-   default is considered qualified.
+1. Packed-placement retirement is owner-qualified and remains covered by the
+   loaded zero-hole/zero-split invariant.
+2. The alpha.24 production-C change enables `async_prepare=1` by default.
+   Standard owned-RAM qualification passed on the source and report named
+   above. Keep K=1 and its existing activation gates, retain
+   `async_prepare=0` as the sync control, and preserve the fast-mixed paired
+   intervals. The ID36 low-RAM/heavy-CPU gate still blocks release
+   qualification of the default-on path.
 3. Keep `logical_open_balance=0`. Promote it only if fresh RAM evidence shows
    useful allocator-spread behavior without probe/GC regressions; even then it
    remains logical fairness, not NAND wear leveling.

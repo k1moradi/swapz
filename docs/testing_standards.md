@@ -65,8 +65,18 @@ root `test_results.json.xz` report.
 Every console table printed by the official `make test` reporter must be an
 unindented GitHub-Flavored Markdown pipe table. Header-separator cells contain
 at least three dashes, and the reporter emits a literal `---` horizontal rule
-immediately after every table. This keeps captured stdout directly
-copy/pasteable as Markdown while preserving the compact <96-column contract.
+immediately after every table. Each table is followed by a legend that defines
+every column and an automated interpretation derived from its rows. Paired
+confidence-interval interpretations must say whether intervals exclude or
+overlap zero; descriptive tables must not imply that the largest value is
+automatically best. Operator-facing headings and scope names use plain,
+human-readable descriptions rather than roadmap IDs. Keep every printed line
+under 96 columns so captured stdout stays copy/pasteable and readable.
+
+Loaded qualification of the default-on preparation path must read the target's
+status after every bare module load and fail unless `async_prepare=1`, including
+after a module reload. Paired synchronous controls must pass
+`async_prepare=0` explicitly and verify the reported mode.
 
 The retained production counters must describe active decisions only. Closed/rejected diagnostic counters are removed from production and report schemas.
 
@@ -76,22 +86,32 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 
 ## Current qualified baseline
 
-Source `2fabd0dc4b3fe09b8e52e9a624e9452647229e09` passed all five
-stages and published report-only commit
-`92d6aa08b44ab7dd827636680584f8c9a313a89b`.
+The standard owner matrix tested source
+`faaf9f9371b85193ae61949ce25140c054539266`, passed all five stages, and
+published report-only commit
+`0e0683e58f5f997f9f0ac66fd249300a28df8aec`. This qualification used only
+positively owned RAM-backed `null_blk`; it does not establish physical-media
+behavior or endurance.
 
-ID65 is owner-qualified. Fast ID63 sequential lower requests changed
-399.0 -> 302.8 (-24.1%, paired 95% CI [-27.7%,-20.5%]) with p99
-5.52 -> 5.33 ms (-3.6%, CI [-9.5%,+2.4%]). Serial ID63 changed
-396.0 -> 236.2 requests (-40.3%) and 13.43 -> 8.28 ms p99 (-38.1%) with
-decisive intervals. `parallel_reads_enabled` and `read_worker_cpu_ns` remain
-zero.
+Five matched fast sustained-write pairs showed async/sync QD4 +0.52% (95% CI
+[-6.90%,+7.95%]), QD8 +30.21% ([+26.03%,+34.39%]), and QD32 +20.75%
+([+15.66%,+25.84%]). Fast mixed async/sync useful WRITE throughput changed
+by +0.01% (CI [-2.40%,+2.43%]); lower WRITE requests changed by +35.2
+(CI [-6.1,+76.5]). The fast mixed async arm wrote 15.26 MB/s to the lower
+device versus 24.28 MB/s raw and issued 804.6 versus 12301 lower WRITE
+requests, while useful WRITE throughput was 22.20 versus 24.28 MB/s. The
+evidence supports lower physical traffic in that synthetic workload, not a
+universal useful-throughput win.
 
-ID66 is owner-qualified by the same run. Loaded lifecycle evidence retained
-20 live GC victims/rotations, 4096 verified pages, 36 exact 1MiB DISCARDs,
-suspend/resume verification and fail-closed injected WRITE/FLUSH behavior.
-
-ID64 is retired. Completion-aware zero-tail sampling made the mechanism unobservable in five matched owner rounds; old status token names remain fixed-zero compatibility fields only. The current persistent-worker QD4/QD8/QD32 matrix is the scheduling gate. ID38 remains on hold.
+Fast sequential adjacent-range READ coalescing reduced lower requests by
+28.5% (paired 95% CI [-34.3%,-22.7%]); p99 changed by -1.3% (CI
+[-29.3%,+26.6%]), which does not establish a latency effect. The default-on
+path passed standard loaded lifecycle qualification. The separate low-RAM and
+heavy-CPU gate remains open before release qualification: async target setup
+allocates 64 prepared-page buffers of 4KiB each (256 KiB, plus scratch, LZ4
+workspace and queue metadata), and target creation can fail when these
+allocations cannot be satisfied. Do not describe the standard matrix as
+low-memory qualification.
 
 ## Deferred optimization evidence gates
 ## Deferred optimization evidence gates

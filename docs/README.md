@@ -45,32 +45,33 @@ normal nonforce fast-forwards and never revert newer source bytes.
 
 ## Current evidence
 
-The latest full run tested source
-`79c6bd9400ae7f95a2881634c0cb459167d486a3` and passed all five stages. Its
+The standard owner matrix tested source
+`faaf9f9371b85193ae61949ce25140c054539266` and passed all five stages. Its
 report-only commit is
-`013893fa3edb5267bc288439379aa3d2498761ff`; qualification is limited to
+`0e0683e58f5f997f9f0ac66fd249300a28df8aec`. Loaded qualification is limited to
 positively owned RAM-backed `null_blk`. The packed-placement segment-edge fix
 passed byte-exact loaded verification with zero internal holes and zero
 hole-induced run splits.
 
-The report supports enabling bounded asynchronous LZ4 preparation by default
-while keeping K=1 and the current depth/backlog activation gate. In five
-matched fast-model sustained-write pairs, async versus sync was neutral at QD4
-(-0.07%, paired 95% CI [-0.44%,+0.30%]), and improved throughput at QD8
-(+26.80%, [+22.01%,+31.59%]) and QD32 (+23.12%, [+16.92%,+29.32%]). Fast
-mixed async versus sync was inconclusive: useful write throughput +0.51%
-(CI [-2.20%,+3.22%]) and lower WRITE requests +4.24% (CI [-2.17%,+10.66%]).
-On that fast mixed workload, async reduced lower WRITE bytes about 31.2% and
-requests about 93.5% versus raw, while useful throughput was about 12.6% lower.
-The result supports the narrow async/sync policy comparison; it does not show
-a universal throughput win over raw storage.
+The default-on bounded async-preparation path passed the standard lifecycle
+matrix with K=1 and existing activation gates. Five matched fast-model
+sustained-write pairs measured async versus sync at QD4 +0.52% (95% CI
+[-6.90%,+7.95%]), QD8 +30.21% ([+26.03%,+34.39%]), and QD32 +20.75%
+([+15.66%,+25.84%]). Fast mixed async-versus-sync useful WRITE throughput
+was +0.01% (CI [-2.40%,+2.43%]) and lower WRITE requests changed by +35.2
+(CI [-6.1,+76.5]), so that comparison is inconclusive. In the fast mixed raw
+comparison, async wrote 15.26 versus 24.28 MB/s to the lower device and issued
+804.6 versus 12301 lower WRITE requests, while useful WRITE throughput was
+22.20 versus 24.28 MB/s. This confirms lower traffic for this synthetic
+workload, alongside a useful-throughput loss; it does not show a universal
+throughput win over raw storage.
 
-ID63 retains its fast sequential request reduction (-24.15%, CI
-[-29.39%,-18.92%]) but has an unresolved p99 regression (+8.68%, CI
-[+0.008%,+17.34%]). Loaded GC/TRIM, suspend/resume and injected lower-WRITE/
-FLUSH failure evidence passed byte-exact and fail-closed. Physical media,
-active system swap and endurance remain outside the authorized qualification
-scope. The alpha.24 async-default change requires its own full owner run.
+Fast sequential adjacent-range READ coalescing reduced lower requests 28.5%
+(paired 95% CI [-34.3%,-22.7%]); p99 changed -1.3% (CI [-29.3%,+26.6%]),
+which does not establish a latency effect. The separate heavy-CPU/low-RAM
+qualification remains open before release qualification of the async default.
+Physical media, active system swap and endurance remain outside the authorized
+qualification scope.
 
 ## Documentation
 

@@ -259,6 +259,11 @@ dmsetup create "$DMNAME" --uuid "$UUID" \
 OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
 	fail "owned DM UUID mismatch"
+default_status="$(dmsetup status "$DMNAME")" ||
+	fail "cannot read default-policy target status"
+grep -Eq '(^|[[:space:]])async_prepare=1([[:space:]]|$)' <<< "$default_status" ||
+	fail "bare module load did not activate async_prepare=1"
+note "PASS_DEFAULT_ASYNC_PREPARE=1"
 dmsetup table "$DMNAME" | grep -Eq '^0 32768 swapz ' ||
 	fail "DM table unexpected"
 dmsetup deps -o devname "$DMNAME" | grep -Fq "$DISK" ||
@@ -791,9 +796,10 @@ OWN_DM=1
 [[ "$(dmsetup info -c --noheadings -o uuid "$DMNAME" | tr -d '[:space:]')" == "$UUID" ]] ||
     fail "packed-placement DM UUID mismatch"
 packed_before="$(dmsetup status "$DMNAME")"
-(( $(status_u64 "$packed_before" packed_placement) == 1 &&
+(( $(status_u64 "$packed_before" async_prepare) == 1 &&
+   $(status_u64 "$packed_before" packed_placement) == 1 &&
    $(status_u64 "$packed_before" failed) == 0 )) ||
-    fail "packed-placement canonical status invariant mismatch"
+	fail "packed-placement/default-async canonical status invariant mismatch"
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" "/dev/mapper/$DMNAME" ||
     fail "packed-placement byte-exact smoke failed"
 packed_after="$(dmsetup status "$DMNAME")"

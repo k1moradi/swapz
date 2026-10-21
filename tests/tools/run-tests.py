@@ -10,6 +10,7 @@ from pathlib import Path
 import statistics
 import subprocess
 import sys
+import textwrap
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1101,15 +1102,15 @@ def run_stage(title, command, result, *, parse_bench=False):
         # Do not publish an untrusted last log line: it can contain a host
         # path, swap inventory, block-device identity or local username.
         if predictor_failure:
-            record["failed_phase"] = "ID67 offline predictor evidence"
+            record["failed_phase"] = "predictive-compression screening"
             record["diagnostic"] = (
                 "Native predictor evidence marker missing, malformed or incomplete")
         elif gc_scale_failure:
-            record["failed_phase"] = "ID61 GC scan scaling evidence"
+            record["failed_phase"] = "garbage-collection map-scan scaling"
             record["diagnostic"] = (
                 "Native GC scan scaling marker missing, malformed or incomplete")
         elif extent_geometry_failure:
-            record["failed_phase"] = "ID73 offline extent geometry evidence"
+            record["failed_phase"] = "simulated extent geometry"
             record["diagnostic"] = (
                 "Native extent geometry marker missing, malformed or incomplete")
         elif marker_failure:
@@ -1121,12 +1122,12 @@ def run_stage(title, command, result, *, parse_bench=False):
                     "PASS_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = read_coalesce_diagnostic.get(
-                    "reason", "ID63 diagnostic evidence is incomplete")
+                    "reason", "adjacent-range READ coalescing evidence is incomplete")
             elif sd_coalesce_diagnostic.get("overall") != (
                     "PASS_SD_READ_COALESCE_AB_CONFIRMATION"):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
-                    "reason", "SD ID63 diagnostic evidence is incomplete")
+                    "reason", "serial-depth adjacent-range READ coalescing evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1359,44 +1360,44 @@ def read_coalesce_ab_verdict(sessions):
         if row.get("status") != "PASS" or row.get("order") != (
                 "swapz-first" if index % 2 else "off-first"):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID63 confirmation order/status mismatch"}
+                    "reason": "adjacent-range READ confirmation order/status mismatch"}
         model = row.get("device_model")
         if not isinstance(model, dict) or any(model.get(key) != expected[key]
                 for key in ("cap_mib_s", "completion_nsec", "irqmode",
                             "queue_mode", "submit_queues", "hw_queue_depth")):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID63 confirmation device model mismatch"}
+                    "reason": "adjacent-range READ confirmation device model mismatch"}
         arm = row.get("swapz")
         if not isinstance(arm, dict) or not re.fullmatch(
                 r"[0-9a-f]{40}", str(arm.get("source_sha", ""))):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID63 confirmation source missing"}
+                    "reason": "adjacent-range READ confirmation source missing"}
         if not isinstance(arm.get("packed_close_delta"), int) or \
                 arm["packed_close_delta"] <= 0:
             return {"overall": "INCOMPLETE",
-                    "reason": "ID63 confirmation packed population missing"}
+                    "reason": "adjacent-range READ packed population missing"}
         for mode in ("sequential", "seeded_random"):
             phase = arm["passes"].get(mode)
             if not isinstance(phase, dict) or \
                     phase.get("logical_bytes") != 4194304 or \
                     phase.get("verified_pages") != 1024:
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63 confirmation packed read incomplete"}
+                        "reason": "adjacent-range READ packed verification incomplete"}
             if any(not isinstance(phase.get(key), (int, float)) or
                    phase[key] < 0 for key in
                    ("useful_read_mbps", "read_p99_ms",
                     "lower_read_bytes", "lower_read_requests")):
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63 confirmation metrics missing"}
+                        "reason": "adjacent-range READ metrics missing"}
             kernel = phase.get("kernel_read_path")
             if not isinstance(kernel, dict) or any(
                     type(kernel.get(name)) is not int or kernel[name] < 0
                     for name in KERNEL_READ_FIELDS):
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63 confirmation C telemetry missing"}
+                        "reason": "adjacent-range READ kernel telemetry missing"}
             if not row["read_coalesce"] and kernel["parallel_read_pairs"]:
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63-off arm executed retired grouped READ path"}
+                        "reason": "merge-off arm executed a retired grouped READ path"}
             if not row["read_coalesce"] and any(kernel[field] for field in (
                     "parallel_read_coalesced_pairs",
                     "parallel_read_coalesced_reqs_saved",
@@ -1407,23 +1408,23 @@ def read_coalesce_ab_verdict(sessions):
                     "parallel_read_coalesce_skip_gap",
                     "parallel_read_coalesce_skip_other")):
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63-off arm executed coalescing"}
+                        "reason": "merge-off arm executed adjacent-range READ coalescing"}
         if row["read_coalesce"] and not arm["passes"]["sequential"][
                 "kernel_read_path"]["parallel_read_coalesced_pairs"]:
             return {"overall": "INCOMPLETE",
-                    "reason": "ID63-on arm executed no sequential coalescing"}
+                    "reason": "merge-on arm executed no sequential READ coalescing"}
         if row["read_coalesce"] and any(
                 arm["passes"][mode]["kernel_read_path"][
                     "parallel_read_coalesce_skip_other"]
                 for mode in ("sequential", "seeded_random")):
             return {"overall": "INCOMPLETE",
-                    "reason": "ID63-on arm hit unexpected coalesce skip reason"}
+                    "reason": "merge-on arm hit an unexpected READ merge skip reason"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["logical_image_sha256"] for row in sessions}) != 1:
         return {"overall": "INCONCLUSIVE",
-                "reason": "ID63 confirmation provenance mismatch"}
+                "reason": "adjacent-range READ confirmation provenance mismatch"}
 
     modes = {}
     for enabled in (0, 1):
@@ -1469,7 +1470,7 @@ def read_coalesce_ab_verdict(sessions):
             if not off["read_p99_ms"] or not off["useful_read_mbps"] or \
                     not off["lower_read_bytes"] or not off["lower_read_requests"]:
                 return {"overall": "INCOMPLETE",
-                        "reason": "ID63 confirmation zero denominator"}
+                        "reason": "adjacent-range READ confirmation has a zero denominator"}
             p99.append(on["read_p99_ms"] / off["read_p99_ms"] - 1.0)
             throughput.append(
                 on["useful_read_mbps"] / off["useful_read_mbps"] - 1.0)
@@ -1637,10 +1638,10 @@ def _sd_read_ab_verdict(sessions, field, kind):
                     "parallel_read_coalesce_skip_gap",
                     "parallel_read_coalesce_skip_other")):
             return {"overall": "INCOMPLETE",
-                    "reason": "SD ID63-off arm executed retired grouped/coalesced READ path"}
+                    "reason": "serial-depth merge-off arm executed a retired grouped READ path"}
         if row[field] and not seq_kernel["parallel_read_coalesced_pairs"]:
             return {"overall": "INCOMPLETE",
-                    "reason": "SD ID63-on arm executed no sequential coalescing"}
+                    "reason": "serial-depth merge-on arm executed no sequential READ coalescing"}
     if len({row["swapz"]["source_sha"] for row in sessions}) != 1 or \
             len({row["swapz"]["fixture_sha256"] for row in sessions}) != 1 or \
             len({row["swapz"]["trace_sha256"] for row in sessions}) != 1 or \
@@ -2353,8 +2354,269 @@ def benchmark_verdicts(sessions):
     }
 
 
+TABLE_HEADER_LEGEND = {
+    "scope": "evidence area",
+    "value": "scope limit or result detail",
+    "transform": "candidate page transform",
+    "adopt": "whether the candidate is selected",
+    "RAW+": "raw pages made compressible",
+    "<=2024": "payloads at or below 2024 bytes",
+    "blocks": "physical 4KiB blocks",
+    "extents": "physical extents",
+    "xform ns": "transform time per page in nanoseconds",
+    "inv ns": "inverse-transform time per page in nanoseconds",
+    "LZ4-2 ns": "second LZ4 pass time per page in nanoseconds",
+    "backend": "implementation backend",
+    "score": "candidate threshold or score",
+    "neg call/eligible": "negative calls / eligible pages",
+    "neg useful": "useful negative classifications",
+    "struct call/eligible": "structured calls / eligible pages",
+    "struct useful": "useful structured classifications",
+    "cpu/page ns": "CPU time per page in nanoseconds",
+    "ns/saved block": "CPU nanoseconds per physical block saved",
+    "SD x": "modeled SD I/O-time / CPU-cost ratio",
+    "SSD x": "modeled SSD I/O-time / CPU-cost ratio",
+    "profile": "input-content profile",
+    "call/eligible": "classifier calls / eligible pages",
+    "useful": "useful classifier outcomes",
+    "pages": "logical 4KiB pages",
+    "logical pages": "logical 4KiB pages",
+    "segs": "physical segments",
+    "segments": "physical segments",
+    "old ms": "legacy scan time in milliseconds",
+    "select ms": "candidate selection time in milliseconds",
+    "map ms": "mapping scan time in milliseconds",
+    "list ms": "survivor-list scan time in milliseconds",
+    "old probe ms": "legacy allocator-probe time in milliseconds",
+    "mapped probe ms": "mapped-count allocator-probe time in milliseconds",
+    "geometry": "simulated placement policy",
+    "waste": "unused physical blocks",
+    "W runs": "contiguous backing WRITE runs",
+    "cold R blk": "cold READ blocks per logical workload unit",
+    "seq req": "sequential lower READ requests",
+    "writes": "logical WRITE operations",
+    "same-filled": "writes matching a prior page value",
+    "same-page": "rewrites to the same logical page",
+    "resident-dup": "writes matching a currently resident value",
+    "uniq payloads": "distinct payload values",
+    "mode": "arm: off=raw, sync=ordered swapz, async=prepared swapz",
+    "W": "useful logical WRITE throughput in decimal MB/s",
+    "lower W": "backing-device WRITE throughput in decimal MB/s",
+    "W req": "backing-device WRITE request count",
+    "R": "useful logical READ throughput in decimal MB/s",
+    "R p99": "READ 99th-percentile latency in milliseconds",
+    "read": "READ workload or access pattern",
+    "lower KiB": "backing-device READ data in KiB",
+    "lower": "lower-device I/O wall time in milliseconds",
+    "req": "backing-device request count",
+    "p99": "99th-percentile latency in milliseconds",
+    "engine": "swapz read-engine time in milliseconds",
+    "LZ4": "decompression time in milliseconds",
+    "copy": "read-copy time in milliseconds",
+    "bdev R": "lower-device READ in-flight mean / peak",
+    "bdev W": "lower-device WRITE in-flight mean / peak",
+    "K=1 run slot": "active immutable lower-WRITE run mean / peak",
+    "1": "one-record windows or one-block extents, as titled",
+    "2": "two-record windows or two-block extents, as titled",
+    "3-4": "three-to-four-record windows or extents, as titled",
+    "5-8": "five-to-eight-record windows or extents, as titled",
+    "9-16": "nine-to-sixteen-record windows",
+    "17-64": "seventeen-to-sixty-four-record windows",
+    "P/D/I": "PACK_READY / deadline / idle window closes",
+    "tail<=4": "PACK_READY closes with at most four records remaining",
+    "tail": "PACK_READY closes with a larger remaining tail",
+    "burst": "burst-target PACK_READY closes",
+    "dry": "service-dry PACK_READY closes",
+    "adm/wrk": "burst closes attributed to admission / worker",
+    "t<=4/5-8/9-16/17+": "target-close counts by target-size range",
+    "c<=4/5-8/9-16/17+": "window record counts by size range",
+    "over": "burst-target overshoot count",
+    "0 I/N": "samples with zero in-flight / nonempty state",
+    "1 I/N": "samples with one in-flight / nonempty state",
+    "2+ I/N": "samples with multiple in-flight / nonempty state",
+    "grow/shrink": "burst-target growth / shrink events",
+    "skip-I0": "shrink skips at zero in-flight",
+    "after-I0": "shrinks after in-flight reaches zero",
+    "after-read": "shrinks after a READ bypass",
+    "other": "other recorded causes",
+    "<=8": "shrink targets up to eight records",
+    "9-32": "shrink targets of nine to thirty-two records",
+    ">32": "shrink targets above thirty-two records",
+    "stage": "measured pipeline stage",
+    "busy ms": "stage wall time in milliseconds",
+    "overlap/stall ms": "overlap or stall time in milliseconds",
+    "async signal": "asynchronous-preparation counter",
+    "mean": "paired effect estimate or average; units follow the metric",
+    "check": "qualification check",
+    "result": "measured verdict or status",
+    "merge": "adjacent-range merge: 0=off, 1=on",
+    "seq req": "sequential lower READ requests",
+    "seq p99": "sequential READ p99 latency in milliseconds",
+    "rnd req": "seeded-random lower READ requests",
+    "rnd p99": "seeded-random READ p99 latency in milliseconds",
+    "seq saved": "sequential READ requests saved by merging",
+    "rnd saved": "seeded-random READ requests saved by merging",
+    "dist": "distinct eligible extent pairs",
+    "adj": "physically adjacent extent pairs",
+    "merged": "pairs merged into one lower READ",
+    "extra": "extra blocks read outside requested extents",
+    "cached": "pairs skipped because data was cached",
+    "noncontig": "pairs skipped because extents were not contiguous",
+    "gap": "pairs skipped because a physical gap existed",
+    "metric": "measured effect",
+    "low": "paired 95% confidence-interval lower bound",
+    "high": "paired 95% confidence-interval upper bound",
+    "model": "synthetic lower-device model",
+    "cap MB/s": "configured lower-device cap in decimal MB/s",
+    "4K latency MB/s": "analytical unmerged 4KiB latency ceiling",
+    "effective MB/s": "minimum of configured cap and 4KiB ceiling",
+    "raw QD32 MB/s": "measured raw WRITE throughput at queue depth 32",
+    "QD": "upper workload queue depth",
+    "raw": "raw, uncompressed WRITE throughput in MB/s",
+    "sync": "synchronous swapz WRITE throughput in MB/s",
+    "async": "asynchronous-preparation swapz WRITE throughput in MB/s",
+    "A/S": "async throughput divided by sync throughput",
+    "A req": "lower-device WRITE requests in the async arm",
+    "wave": "preparation waves started",
+    "head/tail": "producer head / tail claims",
+    "inline": "ordered-worker inline preparations",
+    "hand/wait": "preparation handoffs / blocking waits",
+    "target": "retained burst target in records",
+}
+
+
+def _table_number(value):
+    """Read a scalar measurement; slash-separated tuples are not scalars."""
+    value = str(value).strip()
+    if "/" in value:
+        return None
+    match = re.match(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))", value)
+    return float(match.group(1)) if match else None
+
+
+def _print_table_note(label, message):
+    prefix = f"  {label}: "
+    print(textwrap.fill(message, width=94, initial_indent=prefix,
+                         subsequent_indent="    "))
+
+
+def _table_interpretation(headers, rows):
+    """Summarize table data without turning descriptive rows into a verdict."""
+    header_index = {str(header): index for index, header in enumerate(headers)}
+
+    # Paired confidence-interval tables can make a directional statement only
+    # when the full interval excludes zero.
+    if all(name in header_index for name in ("metric", "mean", "low", "high")):
+        supported = []
+        uncertain = []
+        for row in rows:
+            low = _table_number(row[header_index["low"]])
+            high = _table_number(row[header_index["high"]])
+            if low is None or high is None:
+                continue
+            name = str(row[header_index["metric"]])
+            if low > 0:
+                supported.append(f"{name} positive")
+            elif high < 0:
+                supported.append(f"{name} negative")
+            else:
+                uncertain.append(name)
+        if supported or uncertain:
+            parts = []
+            if supported:
+                parts.append("95% intervals exclude zero for " + ", ".join(supported))
+            if uncertain:
+                parts.append("overlap zero for " + ", ".join(uncertain))
+            return "; ".join(parts) + ". Direction alone does not mean benefit."
+
+    # The primary throughput table includes all three controls. Summarize
+    # useful throughput and physical WRITE changes, while explicitly noting
+    # that these are table means and not the paired inference.
+    if ("mode" in header_index and "W" in header_index and
+            "off" in {str(row[header_index["mode"]]) for row in rows} and
+            "async" in {str(row[header_index["mode"]]) for row in rows}):
+        by_mode = {str(row[header_index["mode"]]): row for row in rows}
+        raw = _table_number(by_mode["off"][header_index["W"]])
+        asynchronous = _table_number(by_mode["async"][header_index["W"]])
+        sync = (_table_number(by_mode["sync"][header_index["W"]])
+                if "sync" in by_mode else None)
+        if raw is not None and asynchronous is not None and raw:
+            raw_delta = (asynchronous / raw - 1.0) * 100.0
+            summary = (f"Async useful WRITE throughput is {asynchronous:.2f} MB/s, "
+                       f"{raw_delta:+.1f}% versus raw")
+            if sync is not None and sync:
+                summary += f" and {(asynchronous / sync - 1.0) * 100.0:+.1f}% versus sync"
+            details = []
+            for column, label in (("lower W", "lower-WRITE throughput"),
+                                  ("W req", "lower-WRITE requests")):
+                if column not in header_index:
+                    continue
+                raw_value = _table_number(by_mode["off"][header_index[column]])
+                async_value = _table_number(by_mode["async"][header_index[column]])
+                if raw_value:
+                    details.append(f"{label} {(async_value / raw_value - 1.0) * 100.0:+.1f}% vs raw")
+            if details:
+                summary += "; " + ", ".join(details)
+            return summary + ". Mean values only; use paired intervals for inference."
+
+    # Give the binary merge toggle a direct before/after reading. Confidence
+    # and qualification remain in the paired interval table that follows.
+    if "merge" in header_index:
+        by_merge = {str(row[header_index["merge"]]): row for row in rows}
+        if "0" in by_merge and "1" in by_merge:
+            changes = []
+            for column in ("seq req", "seq p99", "rnd req", "rnd p99"):
+                if column not in header_index:
+                    continue
+                before = _table_number(by_merge["0"][header_index[column]])
+                after = _table_number(by_merge["1"][header_index[column]])
+                if before:
+                    changes.append(f"{column} {(after / before - 1.0) * 100.0:+.1f}%")
+            if changes:
+                return ("Merge-on means versus merge-off: " + ", ".join(changes) +
+                        ". Use the paired interval below for evidence of a repeatable change.")
+
+    if "check" in header_index and "result" in header_index and rows:
+        outcomes = [str(row[header_index["result"]]).upper() for row in rows]
+        passed = sum(outcome == "PASS" or outcome.startswith("PASS_")
+                     for outcome in outcomes)
+        other = len(outcomes) - passed
+        if other:
+            return (f"{passed} of {len(outcomes)} checks pass; {other} show another "
+                    "reported status. Review those rows before treating the group as passed.")
+        return f"All {passed} listed checks pass in this reported run."
+
+    # For all other tables, report the observed range of the first numeric
+    # measure. The text deliberately avoids assigning a good/bad direction.
+    metric_index = None
+    values = []
+    for index in range(1, len(headers)):
+        parsed = [(_table_number(row[index]), str(row[0])) for row in rows]
+        parsed = [(value, label) for value, label in parsed if value is not None]
+        if parsed:
+            metric_index = index
+            values = parsed
+            break
+    if values:
+        low = min(values, key=lambda item: item[0])
+        high = max(values, key=lambda item: item[0])
+        metric = str(headers[metric_index])
+        if len(rows) == 1:
+            return (f"One row: {metric}={low[0]:g}. This is a descriptive measurement, "
+                    "not a comparison.")
+        if low[0] == high[0]:
+            return f"{metric} is {low[0]:g} across {len(rows)} rows; no difference is visible."
+        return (f"{metric} ranges {low[0]:g} to {high[0]:g} "
+                f"(lowest: {low[1]}; highest: {high[1]}). Direction is workload-specific.")
+
+    if not rows:
+        return "No rows were reported."
+    return (f"{len(rows)} named status or scope rows are listed; read each value as "
+            "a check result or evidence limit.")
+
+
 def print_table(headers, rows):
-    """Print one valid compact GFM pipe table followed by a horizontal rule."""
+    """Print a GFM table, then a column legend and data-derived interpretation."""
     text_headers = [str(header) for header in headers]
     text_rows = [[str(value) for value in row] for row in rows]
     widths = [
@@ -2371,12 +2633,18 @@ def print_table(headers, rows):
             f"{value:<{widths[index]}}"
             for index, value in enumerate(row)) + " |")
     print("---")
+    legend = "; ".join(
+        f"{header} = {TABLE_HEADER_LEGEND.get(header, 'literal column: ' + header)}"
+        for header in text_headers)
+    _print_table_note("Legend", legend)
+    _print_table_note("Interpretation",
+                      _table_interpretation(text_headers, text_rows))
 
 
 def print_bench(result):
     predictor = result.get("evidence", {}).get("predictor")
     if isinstance(predictor, dict):
-        print("\n  ID67 OFFLINE PREDICTOR EVIDENCE — native controls; not kernel policy")
+        print("\n  Predictive-compression screening — native controls; not kernel policy")
         print_table(
             ("transform", "adopt", "RAW+", "<=2024", "blocks", "extents",
              "xform ns", "inv ns", "LZ4-2 ns"),
@@ -2445,7 +2713,7 @@ def print_bench(result):
 
     gc_scale = result.get("evidence", {}).get("gc_scan_scale")
     if isinstance(gc_scale, dict):
-        print("\n  ID61 GC MAP-SCAN SCALE — native CPU evidence; no lower I/O")
+        print("\n  Garbage-collection map-scan scaling — native CPU only; no lower I/O")
         print_table(
             ("pages", "segs", "old ms", "select ms", "map ms", "list ms"),
             [(
@@ -2455,7 +2723,7 @@ def print_bench(result):
                 f"{row['relocation_scan_ns'] / 1e6:.3f}",
                 f"{row['relocation_list_ns'] / 1e6:.3f}",
             ) for row in gc_scale["rows"]])
-        print("  ID71 DEAD-SEGMENT PROBE SCALE — native CPU evidence; no lower I/O")
+        print("  Dead-segment allocator-probe scaling — native CPU only; no lower I/O")
         print_table(
             ("logical pages", "segments", "old probe ms", "mapped probe ms"),
             [(
@@ -2466,7 +2734,7 @@ def print_bench(result):
 
     geometry = result.get("evidence", {}).get("extent_geometry")
     if isinstance(geometry, dict):
-        print("\n  ID73 OFFLINE EXTENT GEOMETRY — simulation only; no format policy")
+        print("\n  Simulated extent geometry — offline model; no format policy")
         print_table(
             ("geometry", "blocks", "waste", "W runs", "cold R blk", "seq req"),
             [(
@@ -2846,7 +3114,7 @@ def print_bench(result):
 
     coalesce_ab = result["benchmarks"].get("read_coalesce_ab", {})
     if coalesce_ab.get("overall") == "PASS_READ_COALESCE_AB_CONFIRMATION":
-        print("\n  ID63 ADJACENT READ COALESCE A/B — five matched rounds")
+        print("\n  Adjacent-range READ coalescing — five matched rounds")
         rows = []
         for enabled in ("0", "1"):
             seq = coalesce_ab["modes"][enabled]["sequential"]
@@ -2863,7 +3131,7 @@ def print_bench(result):
         print_table(("merge", "seq req", "seq p99", "rnd req", "rnd p99",
                      "seq saved", "rnd saved"), rows)
         active = coalesce_ab["modes"]["1"]
-        print("  ID63 active exact-range accounting")
+        print("  Merged-range accounting")
         print_table(
             ("read", "dist", "adj", "merged", "blocks", "extra"),
             [
@@ -2880,7 +3148,7 @@ def print_bench(result):
                  f"{active['seeded_random']['parallel_read_coalesced_blocks']:.1f}",
                  f"{active['seeded_random']['parallel_read_coalesce_extra_blocks']:.1f}"),
             ])
-        print("  ID63 active non-merge attribution")
+        print("  Reasons adjacent READs were not merged")
         print_table(
             ("read", "cached", "noncontig", "gap", "other"),
             [
@@ -2903,12 +3171,12 @@ def print_bench(result):
               f"p99 {p99_ci['mean'] * 100:+.1f}% "
               f"[{p99_ci['low'] * 100:+.1f},{p99_ci['high'] * 100:+.1f}]%")
     else:
-        print("\n  ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
+        print("\n  Adjacent-range READ coalescing: NOT QUALIFIED "
               f"({coalesce_ab.get('reason', coalesce_ab.get('overall', 'NOT_RUN'))})")
 
     sd_coalesce_ab = result["benchmarks"].get("sd_read_coalesce_ab", {})
     if sd_coalesce_ab.get("overall") == "PASS_SD_READ_COALESCE_AB_CONFIRMATION":
-        print("\n  SD ID63 ADJACENT READ COALESCE A/B — five matched rounds")
+        print("\n  Serial-depth adjacent-range READ coalescing — five matched rounds")
         rows = []
         for enabled in ("0", "1"):
             seq = sd_coalesce_ab["modes"][enabled]["sequential"]
@@ -2924,7 +3192,7 @@ def print_bench(result):
         print_table(("merge", "seq req", "seq p99", "rnd req", "rnd p99",
                      "seq saved"), rows)
         active = sd_coalesce_ab["modes"]["1"]
-        print("  SD ID63 exact-range attribution")
+        print("  Serial-depth merged-range attribution")
         print_table(
             ("read", "merged", "cached", "noncontig", "gap", "other"),
             [
@@ -2955,7 +3223,7 @@ def print_bench(result):
             ))
         print_table(("read", "metric", "mean", "low", "high"), ci_rows)
     else:
-        print("\n  SD ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
+        print("\n  Serial-depth adjacent-range READ coalescing: NOT QUALIFIED "
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
@@ -3023,8 +3291,8 @@ def print_bench(result):
         [
             ("media", "synthetic RAM only"),
             ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
-            ("read isolation", "ID63 slow+fast 5 matched pairs; standalone grouping retired"),
-            ("ID64", "retired; compatibility tokens fixed at zero"),
+            ("read isolation", "Adjacent-range READ coalescing: slow and fast, five matched pairs; standalone grouping retired"),
+            ("zero-tail burst adjustment", "Retired; compatibility fields stay fixed at zero"),
             ("write-only", "fast QD4/QD8/QD32: 5 matched pairs + paired CI; QD1 directional"),
             ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
             ("4MiB read", "RAM-backed; not cold physical swap-in"),

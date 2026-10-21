@@ -1047,9 +1047,9 @@ class ReportContract(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             runner.print_bench(report)
         rendered = output.getvalue()
-        self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
-        self.assertIn("ID61 GC MAP-SCAN SCALE", rendered)
-        self.assertIn("ID73 OFFLINE EXTENT GEOMETRY", rendered)
+        self.assertIn("Predictive-compression screening", rendered)
+        self.assertIn("Garbage-collection map-scan scaling", rendered)
+        self.assertIn("Simulated extent geometry", rendered)
         self.assertNotIn("ID69 PACKED PLACEMENT A/B", rendered)
         self.assertIn("placement waste", rendered)
         self.assertIn("packed smoke", rendered)
@@ -1094,14 +1094,14 @@ class ReportContract(unittest.TestCase):
         self.assertIn("skip-I0", rendered)
         self.assertIn("after-I0", rendered)
         self.assertIn("segment TRIM", rendered)
-        self.assertIn("ID63 ADJACENT READ COALESCE A/B", rendered)
+        self.assertIn("Adjacent-range READ coalescing", rendered)
         self.assertNotIn("ID39 SAME-CACHE PARALLEL READ", rendered)
         self.assertNotIn("SD ID60 SAME-EXTENT GROUPING", rendered)
-        self.assertIn("ID63 active exact-range accounting", rendered)
-        self.assertIn("ID63 active non-merge attribution", rendered)
+        self.assertIn("Merged-range accounting", rendered)
+        self.assertIn("Reasons adjacent READs were not merged", rendered)
         self.assertIn("noncontig", rendered)
-        self.assertIn("SD ID63 ADJACENT READ COALESCE A/B", rendered)
-        self.assertIn("SD ID63 exact-range attribution", rendered)
+        self.assertIn("Serial-depth adjacent-range READ coalescing", rendered)
+        self.assertIn("Serial-depth merged-range attribution", rendered)
         self.assertIn("saved", rendered)
         self.assertIn("K=1 ready wait win/records/ms", rendered)
         self.assertIn("K=1 ready wait P/F/D/X/O", rendered)
@@ -1134,6 +1134,12 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)
         self.assertIn("test_results.json.xz", rendered)
+        self.assertIn("Async useful WRITE throughput is", rendered)
+        self.assertIn("95% intervals", rendered)
+        self.assertIn("overlap zero for", rendered)
+        self.assertIn("Merge-on means versus merge-off", rendered)
+        self.assertNotRegex(rendered, r"(?m)^\s*(?:SD\s+)?ID\d+\b")
+        self.assertNotIn("ID63 active", rendered)
         self.assertNotIn("All-window close reasons per-pair mean", rendered)
         self.assertNotIn("Timed 4MiB", rendered)
         self.assertNotIn("QD4 sync windows:", rendered)
@@ -1149,12 +1155,23 @@ class ReportContract(unittest.TestCase):
                 for cell in lines[index + 1].strip("|").split("|"))
         ]
         self.assertGreater(len(table_starts), 10)
+        self.assertEqual(rendered.count("  Legend:"), len(table_starts))
+        self.assertEqual(rendered.count("  Interpretation:"), len(table_starts))
         for start in table_starts:
             index = start + 2
             while index < len(lines) and lines[index].startswith("| "):
                 index += 1
             self.assertLess(index, len(lines))
             self.assertEqual(lines[index], "---")
+            index += 1
+            self.assertLess(index, len(lines))
+            self.assertTrue(lines[index].startswith("  Legend:"))
+            index += 1
+            while (index < len(lines) and lines[index].startswith("    ") and
+                   not lines[index].startswith("  Interpretation:")):
+                index += 1
+            self.assertLess(index, len(lines))
+            self.assertTrue(lines[index].startswith("  Interpretation:"))
         self.assertNotRegex(rendered, r"(?m)^  \|")
         self.assertLess(max(map(len, lines)), 96)
 

@@ -23,17 +23,24 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
-The latest owner persistent-worker result is source
-`79c6bd9400ae7f95a2881634c0cb459167d486a3` (report-only commit
-`013893fa3edb5267bc288439379aa3d2498761ff`). Fast-model async/sync throughput
-was neutral at QD4 (-0.07%, paired 95% CI [-0.44%,+0.30%]) and higher at QD8
-(+26.80%, [+22.01%,+31.59%]) and QD32 (+23.12%, [+16.92%,+29.32%]). The
-existing four-tail/five-descriptor wake gates and lower-WRITE overlap behavior
-remain unchanged. Fast mixed async/sync throughput (+0.51%, CI
-[-2.20%,+3.22%]) and lower WRITE requests (+4.24%, CI [-2.17%,+10.66%]) remain
-inconclusive. This supports enabling the bounded policy by default, but does
-not establish a universal useful-throughput win over raw storage; the alpha.24
-default change requires a full owner run.
+The standard owner matrix tested source
+`faaf9f9371b85193ae61949ce25140c054539266` (report-only commit
+`0e0683e58f5f997f9f0ac66fd249300a28df8aec`) and passed all five stages on
+positively owned RAM-backed devices. Fast-model async/sync WRITE throughput
+was +0.52% at QD4 (paired 95% CI [-6.90%,+7.95%]), +30.21% at QD8
+([+26.03%,+34.39%]) and +20.75% at QD32 ([+15.66%,+25.84%]). The existing
+activation gates and K=1 ownership remain unchanged. Fast mixed async/sync
+throughput (+0.01%, CI [-2.40%,+2.43%]) and lower WRITE requests (+35.2 per
+run, CI [-6.1,+76.5]) remain inconclusive. In the fast mixed raw comparison,
+async lowered backing WRITE throughput from 24.28 to 15.26 MB/s and requests
+from 12301 to 804.6, while useful WRITE throughput fell from 24.28 to
+22.20 MB/s. Thus lower physical traffic is measured in this synthetic case,
+but a universal useful-throughput gain over raw is not established.
+
+The default-on path passed the standard loaded lifecycle matrix. ID36
+heavy-CPU/low-RAM qualification remains a separate release gate; the standard
+matrix does not measure target creation or sustained operation under memory
+pressure and CPU oversubscription.
 
 The write-only sweep uses QD1/4/8/32, 0% reads and exact final verification with pre-created persistent lane workers. Warmup completes before a common measured start gate; during measurement each lane issues its next write directly after its prior completion, with no per-I/O Future/main-thread hop and no full-QD wave barrier. Lanes own disjoint logical-page stripes, so cross-lane completion order cannot change the final image. Fast QD4, QD8 and QD32 each receive ten sessions/five matched rounds with paired 95% confidence intervals; slow QDs and fast QD1 remain directional controls.
 
@@ -72,24 +79,25 @@ CRC so ID 12 can be judged from measured cost rather than estimated hash bytes.
 
 ## Current directional result
 
-Owner qualification of source
-`79c6bd9400ae7f95a2881634c0cb459167d486a3` (report-only
-`013893fa3edb5267bc288439379aa3d2498761ff`) passed all five stages on owned
+The standard owner matrix of source
+`faaf9f9371b85193ae61949ce25140c054539266` (report-only
+`0e0683e58f5f997f9f0ac66fd249300a28df8aec`) passed all five stages on owned
 RAM-backed `null_blk`. Its packed-placement segment-edge repair passed loaded
 byte-exact verification with zero internal holes and zero hole-induced run
 splits.
 
-The five matched fast sustained-write pairs support async preparation at QD8
-and QD32 while showing QD4 neutrality; they are async-versus-sync comparisons,
-not proof that swapz always outperforms raw. On the fast mixed workload, async
-reduced lower WRITE bytes about 31.2% and requests about 93.5% versus raw, but
-useful mixed throughput was about 12.6% lower. Async-versus-sync mixed changes
-remain inconclusive, so report their paired intervals in every owner run.
+Five matched fast sustained-write pairs support async preparation at QD8 and
+QD32 while QD4 is neutral, but they compare async with sync rather than raw.
+The fast mixed raw comparison reduced backing WRITE MB/s and requests while
+useful WRITE throughput also fell. Async-versus-sync mixed changes remain
+inconclusive, so report their paired intervals in every owner run. ID36
+heavy-CPU/low-RAM qualification remains open before release qualification of
+the default-on policy.
 
-ID63 retains a fast sequential request-efficiency result but its fast p99 is
-unresolved: SSD_EMULATED sequential lower READ requests fell 24.15% (paired
-95% CI [-29.39%,-18.92%]) while p99 rose 8.68% (CI [+0.008%,+17.34%]). Do not
-describe the latency repair as qualified. ID39 helper concurrency is retired;
+Fast sequential adjacent-range READ requests fell 28.5% (paired 95% CI
+[-34.3%,-22.7%]); p99 changed -1.3% (CI [-29.3%,+26.6%]), so no latency
+effect is established. Do not describe a latency improvement as qualified.
+Helper concurrency is retired;
 `parallel_reads_enabled` and `read_worker_cpu_ns` remain zero compatibility
 fields. Physical media, active system swap and endurance remain unqualified.
 

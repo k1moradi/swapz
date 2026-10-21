@@ -2022,6 +2022,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         freeing = body("swapz_free")
         status = body("swapz_status")
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
+        deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         runner = (ROOT / "tests/tools/run-tests.py").read_text()
 
         self.assertRegex(DM, r"static\s+bool\s+swapz_async_prepare\s*=\s*true\s*;")
@@ -2181,7 +2182,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("prep_lower_write_overlap_starts=%llu", status)
         self.assertIn("insmod \"$MODULE\" \"async_prepare=$ASYNC_PREPARE\"",
                       benchmark)
+        self.assertRegex(benchmark, r"(?m)^ASYNC_PREPARE=0$")
         self.assertIn("--async-prepare", benchmark)
+        self.assertIn("async_prepare=1([[:space:]]|$)", deploy)
+        self.assertIn('status_u64 "$packed_before" async_prepare', deploy)
+        self.assertGreaterEqual(deploy.count('insmod "$MODULE"'), 2)
         self.assertIn("RATE_MODE != unpaced", benchmark)
         # The mandatory run now has exactly TWO delay-modeled owned-RAM
         # environments, not the historical bandwidth/uncapped controls.
