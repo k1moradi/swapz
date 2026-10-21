@@ -1865,8 +1865,12 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("WINDOW_INTERVAL_FIELDS", replay)
         self.assertIn("KERNEL_WRITE_COUNTER_FIELDS", replay)
         self.assertIn(
-            'KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target",)', replay)
+            'KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target", "delta64_rescue")',
+            replay)
         self.assertIn("counters[key] = after[key]", replay)
+        self.assertIn('before["delta64_rescue"] != after["delta64_rescue"]', replay)
+        self.assertIn('after["delta64_rescue"] not in (0, 1)', replay)
+        self.assertIn('if not after["delta64_rescue"] and any(', replay)
         self.assertIn("TIMED_WINDOW_COUNTER_FIELDS", runner)
         self.assertIn("def timed_window_error", runner)
         self.assertIn("PACK_CLOSE_PRIMARY_FIELDS", runner)

@@ -1153,7 +1153,10 @@ total/split payload-byte savings must match. Reject resets and impossible
 per-rescue savings.
 
 The replay records `delta64_rescue` as a required policy gauge, not a counter
-delta. Reject changed/nonboolean policy or any disabled-target rescue activity.
+delta. The snapshot source contract must require both this gauge and the retained
+burst target, plus the unchanged-policy, boolean-value and disabled-activity
+guards; it must not pin the retired one-gauge tuple.
+Reject changed/nonboolean policy or any disabled-target rescue activity.
 Rootless fixtures distinguish enabled-positive, enabled-negative and
 disabled-zero cases. Print the policy with a legend and interpretation so a
 bypass cannot be presented as evidence of classifier selectivity. Payload-byte
