@@ -1018,7 +1018,7 @@ static int test_mixed_819_205_distribution_economy(void)
 /*
  * The 819/205 loaded fixture compresses its 819 pages to just ~57 bytes.
  * This test instead exercises the actual production C engine with 1-3KiB+
- * compressed records and 25% raw pages, including SWZ3 4/8/16KiB extents.
+ * compressed records and 25% raw pages, including SWZ 4/8/16KiB extents.
  * Request-call savings are not backing queue request counts.
  */
 static int test_mixed_realistic_payloads_keep_zero_padding(void)

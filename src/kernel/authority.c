@@ -1269,6 +1269,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 	const swapz_u8 *image = extent;
 	swapz_u16 payload_lengths[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u16 payload_offsets[SWAPZ_MAX_RECORDS] = { 0 };
+	swapz_u8 payload_encodings[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u32 old_segments[SWAPZ_MAX_RECORDS] = { 0 };
 	swapz_u32 new_segment, new_additions = 0;
 	swapz_u8 index;
@@ -1323,6 +1324,7 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 		}
 		payload_lengths[index] = decoded.payload_length;
 		payload_offsets[index] = decoded.payload_offset;
+		payload_encodings[index] = decoded.encoding;
 		if (!payload_lengths[index] ||
 		    payload_lengths[index] > SWAPZ_MAX_COMPRESSED) {
 			error = -EUCLEAN;
@@ -1430,7 +1432,8 @@ int swapz_finish(struct swapz_authority *a, const struct swapz_tx *tx,
 			.payload_length = payload_lengths[index],
 			.payload_offset = payload_offsets[index],
 			.extent_blocks = tx->extent_blocks,
-			.record_index = index,
+			.record_index = swapz_map_pack_record_index(
+				index, payload_encodings[index]),
 			.valid = 1,
 		};
 
@@ -1515,6 +1518,7 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 	 */
 	if (peeked->logical_page != logical_page ||
 	    peeked->generation != current_map->generation ||
+	    peeked->encoding != swapz_map_encoding(current_map) ||
 	    peeked->payload_length != current_map->payload_length ||
 	    peeked->payload_offset != current_map->payload_offset ||
 	    !peeked->payload_length ||

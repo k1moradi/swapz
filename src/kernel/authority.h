@@ -4,6 +4,8 @@
 #include "codec.h"
 
 #define SWAPZ_SEGMENT_BLOCKS 256U
+#define SWAPZ_MAP_RECORD_INDEX_MASK 0x3fU
+#define SWAPZ_MAP_DELTA64_FLAG 0x80U
 
 /*
  * Experimental worker-owned volatile mapping authority. Caller provisions
@@ -29,6 +31,25 @@ struct swapz_map {
 	swapz_u8 raw;
 	swapz_u8 valid;
 };
+
+static inline swapz_u8 swapz_map_record_index(const struct swapz_map *map)
+{
+	return map->record_index & SWAPZ_MAP_RECORD_INDEX_MASK;
+}
+
+static inline swapz_u8 swapz_map_encoding(const struct swapz_map *map)
+{
+	return (map->record_index & SWAPZ_MAP_DELTA64_FLAG) ?
+		SWAPZ_ENCODING_DELTA64 : SWAPZ_ENCODING_LZ4;
+}
+
+static inline swapz_u8 swapz_map_pack_record_index(swapz_u8 index,
+						   swapz_u8 encoding)
+{
+	return (index & SWAPZ_MAP_RECORD_INDEX_MASK) |
+		(encoding == SWAPZ_ENCODING_DELTA64 ?
+		 SWAPZ_MAP_DELTA64_FLAG : 0U);
+}
 
 struct swapz_tx_record {
 	swapz_u32 logical_page;
@@ -223,7 +244,7 @@ int swapz_batch_resume(struct swapz_authority *authority, const struct swapz_tx 
 int swapz_abort(struct swapz_authority *authority, const struct swapz_tx *tx);
 /*
  * Raw 4KiB page (LZ4 fallback) occupies a whole aligned block and has no
- * SWZ3 descriptor. The caller must stage exactly one record / one block and
+ * SWZ descriptor. The caller must stage exactly one record / one block and
  * only call finish_raw after the WHOLE lower write completes.
  */
 int swapz_finish_raw(struct swapz_authority *authority, const struct swapz_tx *tx,

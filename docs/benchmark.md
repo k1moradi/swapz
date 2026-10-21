@@ -1,6 +1,6 @@
 # Benchmark Standard
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ3` is reserved for the on-disk format identity.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -205,9 +205,14 @@ evidence shows it is material.
 **ID62 physical media.** No current benchmark may collect physical evidence.
 ID29/ID63 RAM qualification does not authorize physical storage or active swap.
 
-## ID67 offline predictor evidence
+## ID67 predictor evidence and production route
 
-ID67a makes no production-format or hot-path change. ID67a.3 uses
+The native ID67 evidence remains the measurement basis for the production
+page-local delta64 rescue. Production now keeps raw LZ4 as the first attempt,
+routes only baselines above 2024 bytes or RAW fallback through the threshold-24
+classifier, and adopts delta64+LZ4 only when the resulting stored payload is
+strictly smaller. The following historical/native controls continue to measure
+routing quality and backend cost. ID67a.3 uses
 `anon-page-fixture.py` SHAKE-generated entropy, mixed and medium pages plus
 generated zero/repeated-word controls. The sampled delta64 signpost runs only
 after raw LZ4 leaves a page above the rescue threshold and never treats an
@@ -231,10 +236,10 @@ sequence are fed through the production `swapz_engine_plan_bounded()`; routed
 physical 4KiB blocks/extents saved are the promotion metric. Compression ratio
 or ungated transform savings alone is not promotion evidence.
 
-The output is explicitly labeled
+The native output remains explicitly labeled
 `OFFLINE_NATIVE_ONLY_NOT_KERNEL_POLICY` and is sanitized into the official
-report. A later ID67b is permitted only after this evidence is reviewed; the
-native evaluator itself must not be cited as loaded-kernel performance.
+report because its timings are not loaded-kernel performance. Production policy
+is qualified separately by the loaded matrix and byte-exact lifecycle tests.
 
 Historical multi-model runs are retained only as decision evidence: delta64 was
 the winner and the alternatives are no longer maintained. ID67a.2 fixed the
@@ -258,9 +263,9 @@ Transform and inverse dispatch independently. Current AVX2 CI batch evidence
 selects AVX2 forward (96 ns/page versus 112 SSE2 and 221 scalar) but scalar
 inverse (190 ns/page versus 312 SSE2 and 452 AVX2); the AVX2 production inverse
 therefore remains scalar. SSE2-only owner policy still awaits the next batched
-owner run. Qualification reports routed CPU ns/page and ns/saved-block. Native
-timing still excludes kernel_fpu_begin/end overhead, so ID67b remains gated. No
-SWZ3 flag is promoted.
+owner run. Qualification reports routed CPU ns/page and ns/saved-block. Native timing still excludes kernel_fpu_begin/end overhead, so loaded results
+remain authoritative for end-to-end cost. SWZ now carries one explicit
+per-record delta64 encoding bit without enlarging the 16-byte record.
 
 ## Physical media
 

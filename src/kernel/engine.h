@@ -22,7 +22,7 @@ struct swapz_io {
 	int (*write_extent)(void *opaque, swapz_u32 start_block, swapz_u8 blocks,
 			    const swapz_u8 *bytes, swapz_u8 *completed_blocks);
 	/* Optional single synchronous lower write for a 1..64-block
-	 * concatenation of individually valid SWZ3 extents and raw blocks.
+	 * concatenation of individually valid SWZ extents and raw blocks.
 	 * The authority publishes NONE before this callback has returned
 	 * full confirmed completion. See swapz_batch_pause()/resume(). */
 	int (*write_run)(void *opaque, swapz_u32 start_block, swapz_u16 blocks,
@@ -36,6 +36,7 @@ struct swapz_compressed_page {
 	const swapz_u8 *payload;
 	swapz_u32 payload_crc32c;
 	swapz_u16 length;
+	swapz_u8 encoding;
 	/* When set, payload_crc32c was computed over exactly payload/length
 	 * before serialized packing. Final bulk_scratch is still CRC-verified
 	 * again by authority publication after lower I/O. */
@@ -142,7 +143,7 @@ struct swapz_engine {
 	swapz_u32 read_metadata_cache_hits;
 	/*
 	 * Owner-preallocated metadata-only cache. Each slot holds exactly the
-	 * immutable SWZ3 block zero for one extent; payload blocks are never
+	 * immutable SWZ block zero for one extent; payload blocks are never
 	 * cached here. The serialized reader scans a fixed bounded table and uses
 	 * an age stamp for exact LRU replacement without moving 4KiB data blocks.
 	 */

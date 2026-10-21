@@ -1,6 +1,6 @@
 # Coding Standards
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ3` is reserved for the on-disk format identity.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -12,7 +12,7 @@ More than half of ongoing development engineering time should concern production
 
 Active product C/C++ and headers live under `src/`; test-only code lives under `tests/`; maintained Markdown lives under `docs/`; packaging code lives under `packaging/`. Do not recreate parallel `kernel/`, `userspace/`, `tools/`, legacy source trees, alternate research modules or historical models.
 
-Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ3 may appear only when discussing the disk format.
+Use `swapz_` / `SWAPZ_` for implementation identifiers and `swapz` for the product/candidate. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`. SWZ may appear only when discussing the current unversioned disk format.
 
 ## Kernel C rules
 
@@ -499,7 +499,7 @@ Padding or gap reads are forbidden.
 
 One synchronous lower READ may fetch the combined span into preallocated
 scratch. Those bytes are seeded only into private slot residency and are marked
-unvalidated. Normal swapz_engine_read_page validation must still verify SWZ3
+unvalidated. Normal swapz_engine_read_page validation must still verify SWZ
 metadata, logical identity, generation, sequence and payload CRC for every
 constituent record before that seed becomes ordinary cache residency. A lower
 I/O, metadata, generation, CRC, decode or upper-copy failure prevents shared
@@ -566,12 +566,15 @@ path and must execute zero grouped/coalesced slot pairs. Dedicated ID39/ID60
 loaded controls are removed after owner qualification/refutation; do not retain
 dead benchmark sessions merely for historical telemetry.
 
-### Offline predictor qualification before any format change
+### Page-local delta64 production routing and qualification
 
-A reversible pre-LZ4 predictor is not production format policy until native/
-loaded evidence shows material physical benefit. Whole-page delta64 is now the
-only maintained candidate; the refuted CL-delta, byte-delta, delta32,
-reset-delta64 and xor64 experiments live only in Git history. Portable unsigned,
+Whole-page delta64 is the only maintained predictive transform; the refuted
+CL-delta, byte-delta, delta32, reset-delta64 and xor64 experiments live only in
+Git history. Production always tries raw LZ4 first. Only a baseline above 2024
+bytes or RAW fallback may reach the scalar sampled classifier, and threshold 24
+is the production routing point. The candidate must compress successfully and
+be strictly smaller than the baseline before it replaces the stored payload.
+Portable unsigned,
 memcpy-safe C delta64 is the mandatory correctness oracle and fallback.
 
 The current SHAKE-generated benchmark hard regions are negative controls, not a
@@ -615,12 +618,16 @@ inverse and optional second-LZ4 cost. Feed actual compressed-length sequences in
 rescues and packing-cliff crossings. For every router threshold, also feed the
 classifier-routed delta64 lengths through the same planner and report routed
 blocks/extents saved; ungated transform opportunity alone is not routing
-evidence. ID67a may place the portable, allocation-free
-candidate helpers in `src/kernel/predictor.h` so native tests exercise the
-exact C that a later kernel experiment could reuse, but no production
-translation unit may include that header yet. Do not modify SWZ3 metadata,
-authority, Device Mapper hot paths or retained-window policy as part of this
-offline phase.
+evidence. The production transform unit is exactly one independent 4KiB logical page.
+Never carry delta state across sibling records or an extent: doing so would
+couple authority and force unrelated blocks into selective reads. SWZ records
+encode LZ4 versus delta64+LZ4 explicitly without enlarging the 16-byte record.
+The volatile mapping may pack the encoding into unused record-index bits, but
+every metadata read must cross-check it. CRC covers the stored compressed
+payload. Reads LZ4-decompress first and apply the selected inverse only for a
+delta64 record. GC relocates the stored payload and preserves its encoding
+without decode/re-encode. Raw fallback and zero elision remain separate
+representations.
 
 ### Retired in-flight-zero shrink guard
 
@@ -731,7 +738,7 @@ perform its existing one copy afterwards. Direct mapping changes neither
 publication nor lower-I/O semantics.
 
 Engine write attribution separates planner, pack and publish phases. Pack
-includes SWZ3 begin/append/seal work, including payload memcpy and first CRC.
+includes SWZ begin/append/seal work, including payload memcpy and first CRC.
 Publish includes batch resume plus authoritative finish/revalidation after lower
 completion. These diagnostics must not be used to skip CRC, generation or
 transaction-snapshot validation without a separately qualified replacement.
@@ -977,7 +984,7 @@ mutation. `swapz_gc_choose_victim()` may scan segments but must not rescan
 logical-page list for relocation ownership: list unlink/append is O(1) in the
 same serialized publication/discard transition, list traversal is bounded by
 the exact mapped-page count, and any local link/map disagreement fails closed.
-The list is never serialized into SWZ3 and research callers may omit it and use
+The list is never serialized into SWZ and research callers may omit it and use
 the legacy full-map fallback.
 
 
@@ -988,7 +995,7 @@ start to its own size. Canonical packed placement must not do that. Placement
 telemetry keeps aggregate waste for continuity and separately counts segment
 tail waste so qualification can prove that no avoidable intra-segment gap was
 introduced while still recognizing a real segment-edge remainder.
-Preserve the current on-disk SWZ3 extent classes. ID69 packed placement is the
+Preserve the current on-disk SWZ extent classes. ID69 packed placement is the
 only production placement policy: existing 1/2/4-block extents are placed
 back-to-back at 4KiB granularity within a segment, with only real segment-tail
 waste permitted. Append-only authority users must skip a segment tail when a

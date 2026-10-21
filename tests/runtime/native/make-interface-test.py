@@ -145,16 +145,15 @@ class PublicMakeContract(unittest.TestCase):
             # Synthetic records mirror the modeled RAM-only session schemas;
             # mock Kbuild / loaded phase never touch actual host devices.
             import json
-            # This is STILL an unprivileged mock; use a real Git checkout
-            # commit identifier so the new source-provenance gate can
-            # distinguish a valid same-revision fixture from a forged SHA.
-            mocked_source_sha = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=ROOT,
-                text=True, timeout=5).strip()
+            # This is STILL an unprivileged mock. Resolve provenance exactly
+            # as the outer runner does: a report-only HEAD names its nearest
+            # non-report source revision rather than the generated report.
             runner_spec = importlib.util.spec_from_file_location(
                 "swapz_fixture_runner", ROOT / "tests/tools/run-tests.py")
             runner_contract = importlib.util.module_from_spec(runner_spec)
             runner_spec.loader.exec_module(runner_contract)
+            mocked_source_sha = runner_contract.git_sha()
+            self.assertRegex(mocked_source_sha, r"^[0-9a-f]{40}$")
 
             def mock_kernel_write(mode, target):
                 record = {field: 0 for field in runner_contract.KERNEL_WRITE_FIELDS}

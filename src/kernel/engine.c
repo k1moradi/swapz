@@ -33,11 +33,11 @@ static int swapz_append_page(struct swapz_engine *engine,
 	int error;
 
 	if (!page->payload_crc32c_valid)
-		return swapz_append(builder, page->logical_page, generation,
-				    page->payload, page->length);
-	error = swapz_append_prehashed(builder, page->logical_page, generation,
-				      page->payload, page->length,
-				      page->payload_crc32c);
+		return swapz_append_encoded(builder, page->logical_page, generation,
+				    page->payload, page->length, page->encoding);
+	error = swapz_append_prehashed_encoded(builder, page->logical_page,
+				      generation, page->payload, page->length,
+				      page->payload_crc32c, page->encoding);
 	if (!error)
 		engine->prehashed_records++;
 	return error;
@@ -46,7 +46,9 @@ static int swapz_append_page(struct swapz_engine *engine,
 static int swapz_page_valid(const struct swapz_compressed_page *page)
 {
 	return page && !page->raw && page->payload && page->length > 0 &&
-		page->length <= SWAPZ_MAX_COMPRESSED;
+		page->length <= SWAPZ_MAX_COMPRESSED &&
+		(page->encoding == SWAPZ_ENCODING_LZ4 ||
+		 page->encoding == SWAPZ_ENCODING_DELTA64);
 }
 
 /*
@@ -960,7 +962,7 @@ abort_transaction:
 
 /*
  * Bounded lower request aggregation (up to 64 adjacent physical 4KiB
- * blocks), WITHOUT changing the independent on-disk SWZ3 extents.
+ * blocks), WITHOUT changing the independent on-disk SWZ extents.
  *
  * Stage each extent and leave its mapping UNPUBLISHED. Consecutive
  * transaction snapshots are replayed through the original swapz_finish()
@@ -1479,7 +1481,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			engine->read_two_block_skips++;
 	}
 	error = swapz_peek(engine->read_scratch, bytes,
-			 observed.record_index, &peek);
+			 swapz_map_record_index(&observed), &peek);
 	if (error)
 		return error;
 	if (peek.logical_page != logical_page ||

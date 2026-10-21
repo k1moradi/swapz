@@ -1402,6 +1402,24 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_predictor_init()", qualification)
         self.assertIn("swapz_predictor_transform_backend_name()", qualification)
         self.assertIn("swapz_predictor_inverse_backend_name()", qualification)
+        rescue = body("swapz_delta64_rescue")
+        self.assertIn("swapz_predict_should_try_delta64", rescue)
+        self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD", rescue)
+        self.assertIn("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH", rescue)
+        self.assertIn("swapz_predict_delta64", rescue)
+        self.assertIn("candidate >= baseline_length", rescue)
+        self.assertIn("LZ4_compress_fast", rescue)
+        self.assertIn("swapz_unpredict_delta64", DM)
+        predictor_header = (ROOT / "src/kernel/predictor.h").read_text()
+        codec_header = (ROOT / "src/kernel/codec.h").read_text()
+        authority_header = (ROOT / "src/kernel/authority.h").read_text()
+        self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD 24U",
+                      predictor_header)
+        self.assertIn("SWAPZ_RECORD_DELTA64_FLAG 0x8000U", codec_header)
+        self.assertIn("SWAPZ_ENCODING_DELTA64 1U", codec_header)
+        self.assertNotIn("SWAPZ_VERSION", codec_header)
+        self.assertIn("swapz_map_pack_record_index", authority_header)
+        self.assertIn("swapz_map_encoding", authority_header)
         self.assertIn("swapz_predict_delta64_scalar(page, scalar_transform_page)",
                       qualification)
         self.assertIn("swapz_predict_delta64_sample_score_scalar(page)",
@@ -1431,7 +1449,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         init_end = DM.index("static void __exit swapz_dm_exit", init_start)
         init = DM[init_start:init_end]
         self.assertIn("swapz_predictor_init()", init)
-        self.assertNotIn("swapz_predict_delta64(", DM)
+        self.assertIn("swapz_predict_delta64(", DM)
         self.assertNotIn('#include "predictor.h"', authority)
         self.assertNotIn('#include "predictor.h"', codec)
         self.assertNotIn('#include "predictor.h"', engine)

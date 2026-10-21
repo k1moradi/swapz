@@ -97,7 +97,7 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 	builder->extent_blocks = (swapz_u8)(bytes_total / SWAPZ_BLOCK_BYTES);
 	builder->sequence = sequence;
 	header.magic_le = swapz_le32(SWAPZ_MAGIC);
-	header.version_le = swapz_le16(SWAPZ_VERSION);
+	header.flags_le = 0;
 	header.extent_blocks = builder->extent_blocks;
 	header.sequence_le = swapz_le32(sequence);
 	memcpy(bytes, &header, sizeof(header));
@@ -107,7 +107,7 @@ int swapz_begin(struct swapz_builder *builder, void *bytes,
 static int swapz_append_crc(struct swapz_builder *builder,
 			    swapz_u32 logical_page, swapz_u32 generation,
 			    const void *payload, swapz_u16 length,
-			    swapz_u32 payload_crc32c)
+			    swapz_u32 payload_crc32c, swapz_u8 encoding)
 {
 	struct swapz_record record = { 0 };
 	struct swapz_record previous;
@@ -117,7 +117,9 @@ static int swapz_append_crc(struct swapz_builder *builder,
 
 	if (!builder || !builder->bytes || builder->sealed ||
 	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
-	    !generation)
+	    !generation ||
+	    (encoding != SWAPZ_ENCODING_LZ4 &&
+	     encoding != SWAPZ_ENCODING_DELTA64))
 		return -EINVAL;
 	if (builder->count >= SWAPZ_MAX_RECORDS)
 		return -ENOSPC;
@@ -138,7 +140,9 @@ static int swapz_append_crc(struct swapz_builder *builder,
 	record.logical_page_le = swapz_le32(logical_page);
 	record.generation_le = swapz_le32(generation);
 	record.payload_offset_le = swapz_le16(offset);
-	record.payload_length_le = swapz_le16(length);
+	record.payload_length_le = swapz_le16(length |
+		(encoding == SWAPZ_ENCODING_DELTA64 ?
+		 SWAPZ_RECORD_DELTA64_FLAG : 0U));
 	record.payload_crc32c_le = swapz_le32(payload_crc32c);
 	memcpy(builder->bytes + offset, payload, length);
 	swapz_put_record(builder->bytes, builder->count, &record);
@@ -153,7 +157,32 @@ int swapz_append_prehashed(struct swapz_builder *builder,
 		       swapz_u32 payload_crc32c)
 {
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, payload_crc32c);
+				length, payload_crc32c, SWAPZ_ENCODING_LZ4);
+}
+
+int swapz_append_prehashed_encoded(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u32 payload_crc32c, swapz_u8 encoding)
+{
+	return swapz_append_crc(builder, logical_page, generation, payload,
+				length, payload_crc32c, encoding);
+}
+
+int swapz_append_encoded(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u8 encoding)
+{
+	if (!builder || !builder->bytes || builder->sealed ||
+	    !payload || !length || length > SWAPZ_MAX_COMPRESSED ||
+	    !generation ||
+	    (encoding != SWAPZ_ENCODING_LZ4 &&
+	     encoding != SWAPZ_ENCODING_DELTA64))
+		return -EINVAL;
+	return swapz_append_crc(builder, logical_page, generation, payload,
+				length, swapz_crc32c_bytes(payload, length),
+				encoding);
 }
 
 int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
@@ -172,7 +201,8 @@ int swapz_append(struct swapz_builder *builder, swapz_u32 logical_page,
 		return -EINVAL;
 
 	return swapz_append_crc(builder, logical_page, generation, payload,
-				length, swapz_crc32c_bytes(payload, length));
+				length, swapz_crc32c_bytes(payload, length),
+				SWAPZ_ENCODING_LZ4);
 }
 
 int swapz_seal(struct swapz_builder *builder)
@@ -227,7 +257,7 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 
 	swapz_get_header(bytes, &header);
 	if (swapz_le32(header.magic_le) != SWAPZ_MAGIC ||
-	    swapz_le16(header.version_le) != SWAPZ_VERSION ||
+	    swapz_le16(header.flags_le) != 0 ||
 	    header.extent_blocks != bytes_total / SWAPZ_BLOCK_BYTES ||
 	    !header.record_count || header.record_count > SWAPZ_MAX_RECORDS ||
 	    !swapz_le32(header.sequence_le))
@@ -253,7 +283,8 @@ int swapz_validate(const void *bytes, swapz_u32 bytes_total)
 
 		swapz_get_record(bytes, index, &record);
 		start = swapz_le16(record.payload_offset_le);
-		length = swapz_le16(record.payload_length_le);
+		length = swapz_le16(record.payload_length_le) &
+			SWAPZ_RECORD_LENGTH_MASK;
 		slot = swapz_le32(record.logical_page_le);
 		if (!swapz_le32(record.generation_le) ||
 		    !length || length > SWAPZ_MAX_COMPRESSED ||
@@ -293,7 +324,11 @@ int swapz_peek(const void *bytes, swapz_u32 bytes_total, swapz_u8 index,
 	out->logical_page = swapz_le32(record.logical_page_le);
 	out->generation = swapz_le32(record.generation_le);
 	out->payload_offset = swapz_le16(record.payload_offset_le);
-	out->payload_length = swapz_le16(record.payload_length_le);
+	out->payload_length = swapz_le16(record.payload_length_le) &
+		SWAPZ_RECORD_LENGTH_MASK;
+	out->encoding = (swapz_le16(record.payload_length_le) &
+			 SWAPZ_RECORD_DELTA64_FLAG) ?
+		SWAPZ_ENCODING_DELTA64 : SWAPZ_ENCODING_LZ4;
 	out->payload_crc32c = swapz_le32(record.payload_crc32c_le);
 	return 0;
 }
@@ -324,7 +359,11 @@ int swapz_lookup_validated_descriptor(const void *bytes,
 	out->logical_page = swapz_le32(record.logical_page_le);
 	out->generation = swapz_le32(record.generation_le);
 	out->payload_offset = swapz_le16(record.payload_offset_le);
-	out->payload_length = swapz_le16(record.payload_length_le);
+	out->payload_length = swapz_le16(record.payload_length_le) &
+		SWAPZ_RECORD_LENGTH_MASK;
+	out->encoding = (swapz_le16(record.payload_length_le) &
+			 SWAPZ_RECORD_DELTA64_FLAG) ?
+		SWAPZ_ENCODING_DELTA64 : SWAPZ_ENCODING_LZ4;
 	out->payload_crc32c = swapz_le32(record.payload_crc32c_le);
 	if (!out->payload_length || out->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    out->payload_offset >= bytes_total ||

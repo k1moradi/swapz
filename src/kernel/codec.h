@@ -3,9 +3,9 @@
 #define SWAPZ_EXTENT_CODEC_H
 
 /*
- * Experimental VERSIONED 4/8/16 KiB extent FORMAT ONLY.
+ * Experimental unversioned 4/8/16 KiB extent FORMAT ONLY.
  *
- * Existing mappings or records from other disk formats are not interpreted as SWZ3.
+ * Existing mappings or records from other disk formats are not interpreted as SWZ.
  * No extent is authoritative until its containing full-block write has
  * completed and the owning mapping transaction explicitly publishes it.
  * This is a codec, NOT an allocator, write path or GC implementation.
@@ -27,13 +27,16 @@ typedef uint32_t swapz_u32;
 #define SWAPZ_MAX_EXTENT_BYTES (SWAPZ_MAX_BLOCKS * SWAPZ_BLOCK_BYTES)
 #define SWAPZ_MAX_RECORDS 64U
 #define SWAPZ_MAX_COMPRESSED 3568U
-#define SWAPZ_MAGIC 0x335a5753U /* little endian "SWZ3" */
-#define SWAPZ_VERSION 3U
+#define SWAPZ_MAGIC 0x005a5753U /* little endian "SWZ\\0" */
+#define SWAPZ_ENCODING_LZ4 0U
+#define SWAPZ_ENCODING_DELTA64 1U
+#define SWAPZ_RECORD_DELTA64_FLAG 0x8000U
+#define SWAPZ_RECORD_LENGTH_MASK 0x7fffU
 
 /* Endian encoding is little-endian, independently of the host CPU. */
 struct swapz_header {
 	swapz_u32 magic_le;
-	swapz_u16 version_le;
+	swapz_u16 flags_le; /* reserved; zero until SWZ needs an extension */
 	swapz_u8 extent_blocks;
 	swapz_u8 record_count;
 	swapz_u32 sequence_le;
@@ -65,6 +68,7 @@ struct swapz_decoded {
 	swapz_u32 payload_crc32c;
 	swapz_u16 payload_offset;
 	swapz_u16 payload_length;
+	swapz_u8 encoding;
 };
 
 int swapz_begin(struct swapz_builder *builder, void *bytes,
@@ -75,6 +79,14 @@ int swapz_append_prehashed(struct swapz_builder *builder,
 		       swapz_u32 logical_page, swapz_u32 generation,
 		       const void *payload, swapz_u16 length,
 		       swapz_u32 payload_crc32c);
+int swapz_append_encoded(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u8 encoding);
+int swapz_append_prehashed_encoded(struct swapz_builder *builder,
+		       swapz_u32 logical_page, swapz_u32 generation,
+		       const void *payload, swapz_u16 length,
+		       swapz_u32 payload_crc32c, swapz_u8 encoding);
 int swapz_seal(struct swapz_builder *builder);
 int swapz_validate(const void *bytes, swapz_u32 bytes_total);
 /*

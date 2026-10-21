@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * ID73 offline geometry study. This is a deterministic simulator only:
- * it does not create new SWZ3 classes, change kernel policy, or touch media.
+ * it does not create new SWZ classes, change kernel policy, or touch media.
  */
 #include <inttypes.h>
 #include <stdint.h>

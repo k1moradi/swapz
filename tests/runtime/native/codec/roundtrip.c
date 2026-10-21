@@ -62,6 +62,7 @@ static int test_class(unsigned int bytes, unsigned int count)
 		CHECK(d.logical_page == 100 + index);
 		CHECK(d.generation == 200 + index);
 		CHECK(d.payload_length == 2072);
+		CHECK(d.encoding == SWAPZ_ENCODING_LZ4);
 		CHECK(memcmp(readable, inputs[index], 2072) == 0);
 	}
 	CHECK(swapz_lookup(extent, bytes, count, &d, &readable) == -ERANGE);
@@ -99,6 +100,28 @@ static int test_prehashed_and_validated_lookup(void)
 	return 0;
 }
 
+static int test_delta64_record_encoding(void)
+{
+	struct swapz_builder b;
+	struct swapz_decoded d;
+	const uint8_t *p;
+	swapz_u32 crc;
+
+	set_payload(1800, 73);
+	crc = swapz_crc32c_bytes(payload, 1800);
+	CHECK(swapz_begin(&b, extent, 4096, 93) == 0);
+	CHECK(swapz_append_prehashed_encoded(&b, 9, 5, payload, 1800, crc,
+					    SWAPZ_ENCODING_DELTA64) == 0);
+	CHECK(swapz_seal(&b) == 0);
+	CHECK(swapz_validate(extent, 4096) == 0);
+	CHECK(swapz_lookup(extent, 4096, 0, &d, &p) == 0);
+	CHECK(d.logical_page == 9 && d.generation == 5);
+	CHECK(d.payload_length == 1800 && d.payload_crc32c == crc);
+	CHECK(d.encoding == SWAPZ_ENCODING_DELTA64);
+	CHECK(!memcmp(p, payload, 1800));
+	return 0;
+}
+
 static int test_seal_clears_only_unwritten_gap(void)
 {
 	struct swapz_builder b;
@@ -133,6 +156,7 @@ static int test_bad_inputs(void)
 	CHECK(swapz_append(&b, 0, 1, NULL, 2072) == -EINVAL);
 	CHECK(swapz_append(&b, 0, 1, payload, 0) == -EINVAL);
 	CHECK(swapz_append(&b, 0, 1, payload, 3569) == -EINVAL);
+	CHECK(swapz_append_encoded(&b, 4, 1, payload, 2072, 2U) == -EINVAL);
 	CHECK(swapz_append(&b, 5, 1, payload, 2072) == 0);
 	CHECK(swapz_append(&b, 5, 2, payload, 2072) == -EEXIST);
 	CHECK(swapz_seal(&b) == 0);
@@ -228,6 +252,18 @@ static int test_metadata_and_format_guards(void)
 	CHECK(swapz_seal(&b) == 0);
 	memcpy(&header, extent, sizeof(header));
 	CHECK(header.record_count == 3);
+	CHECK(header.flags_le == 0);
+	header.flags_le = 1;
+	memcpy(extent, &header, sizeof(header));
+	CHECK(swapz_validate(extent, 8192) == -EUCLEAN);
+
+	CHECK(swapz_begin(&b, extent, 8192, 31) == 0);
+	for (index = 0; index < 3; ++index) {
+		set_payload(2072, index);
+		CHECK(swapz_append(&b, index, 10, payload, 2072) == 0);
+	}
+	CHECK(swapz_seal(&b) == 0);
+	memcpy(&header, extent, sizeof(header));
 	/* Give a malformed payload descriptor a VALID metadata CRC to ensure
 	 * that structural checks are independent of the checksum. */
 	memcpy(&first, extent + sizeof(header), sizeof(first));
@@ -271,6 +307,7 @@ int main(void)
 	CHECK(test_class(8192, 3) == 0); tests++;
 	CHECK(test_class(16384, 7) == 0); tests++;
 	CHECK(test_prehashed_and_validated_lookup() == 0); tests++;
+	CHECK(test_delta64_record_encoding() == 0); tests++;
 	CHECK(test_seal_clears_only_unwritten_gap() == 0); tests++;
 	CHECK(test_bad_inputs() == 0); tests++;
 	CHECK(test_integrity() == 0); tests++;

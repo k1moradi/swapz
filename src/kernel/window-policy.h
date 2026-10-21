@@ -13,6 +13,7 @@ struct swapz_pending_bio {
 	swapz_u32 payload_crc32c;
 	swapz_u16 length;
 	swapz_u8 payload_crc32c_valid;
+	swapz_u8 encoding;
 	/* True only for the complete 4KiB incompressible fallback. */
 	swapz_u8 raw;
 };

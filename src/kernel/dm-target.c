@@ -2,7 +2,7 @@
 /*
  * dm-swapz - EXPERIMENTAL swapz volatile Device Mapper swap target.
  *
- * Uses SWZ3 4/8/16KiB extents, 4KiB logical pages, LZ4 and bounded
+ * Uses SWZ 4/8/16KiB extents, 4KiB logical pages, LZ4 and bounded
  * size-aware write windows. Write publication stays on one serialized
  * WQ_MEM_RECLAIM | WQ_UNBOUND owner; safe READ pairs may use one bounded
  * helper so at most two independent lower READs execute concurrently.
@@ -90,6 +90,7 @@ struct swapz_prepared_page {
 	int length;
 	bool zero;
 	bool payload_crc32c_valid;
+	swapz_u8 encoding;
 	swapz_u32 payload_crc32c;
 	u8 bytes[SWAPZ_BLOCK_BYTES];
 };
@@ -120,6 +121,7 @@ struct swapz_read_slot {
 	swapz_u8 extent_blocks;
 	u8 *read_pages; /* one 4KiB output for each grouped BIO */
 	u8 *read_compressed;
+	u8 *predictor_page;
 	int error;
 	u64 lower_read_submitted_bytes;
 	u64 lower_read_submitted_reqs;
@@ -226,6 +228,7 @@ struct swapz_dm {
 	struct semaphore preparation_slots;
 	mempool_t *preparation_pool;
 	u8 *preparation_input_page;
+	u8 *preparation_predictor_page;
 	/* Producer and ordered worker may now compress concurrently. Never
 	 * share LZ4 work memory or a single-writer timing accumulator. */
 	void *preparation_lz4_workmem;
@@ -497,6 +500,7 @@ struct swapz_dm {
 	u64 window_bins[6]; /* 1,2,3-4,5-8,9-16,17-64 */
 	u8 *batch_bytes;       /* VMALLOC: 64 * 4KiB output slots */
 	u8 *input_page;        /* VMALLOC: 4KiB copy from upper bio */
+	u8 *predictor_page;    /* 4KiB delta64 transform/decode scratch */
 	u8 *read_page;         /* VMALLOC: 4KiB decompressed upper bio */
 	u8 *read_compressed;   /* VMALLOC: 4KiB compressed record buffer */
 	void *lz4_workmem;
@@ -1003,7 +1007,7 @@ static int swapz_lower_write(void *opaque, swapz_u32 block, swapz_u8 blocks,
 
 /*
  * A single synchronous dm_io submission covers many adjacent, individually
- * valid SWZ3 extents. The portable engine does NOT publish their logical
+ * valid SWZ extents. The portable engine does NOT publish their logical
  * maps until this WHOLE lower submission has completed successfully.
  * dm_io request count is NOT guaranteed to equal block-queue request
  * count after bio splitting/merging; independent null_blk stat is needed.
@@ -1241,6 +1245,40 @@ static void swapz_memcpy_accounted(void *destination, const void *source,
 	*copied_bytes += bytes;
 }
 
+static int swapz_delta64_rescue(const u8 *input, int baseline_length,
+				 u8 *baseline_output, u8 *transform_scratch,
+				 u8 *candidate_output, void *lz4_workmem,
+				 u64 *lz4_wall_ns, swapz_u8 *encoding)
+{
+	u64 section_start;
+	int candidate;
+
+	if (!input || !baseline_output || !transform_scratch ||
+	    !candidate_output || !lz4_workmem || !lz4_wall_ns || !encoding)
+		return baseline_length;
+	*encoding = SWAPZ_ENCODING_LZ4;
+	if (baseline_length > 0 &&
+	    baseline_length <= SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH)
+		return baseline_length;
+	if (!swapz_predict_should_try_delta64(
+			input, SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD))
+		return baseline_length;
+	if (swapz_predict_delta64(input, transform_scratch))
+		return baseline_length;
+	section_start = ktime_get_ns();
+	candidate = LZ4_compress_fast(transform_scratch, candidate_output,
+				      SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED,
+				      1, lz4_workmem);
+	*lz4_wall_ns += swapz_elapsed_ns(section_start, ktime_get_ns());
+	if (candidate <= 0 ||
+	    (baseline_length > 0 && candidate >= baseline_length))
+		return baseline_length;
+	if (candidate_output != baseline_output)
+		memcpy(baseline_output, candidate_output, (size_t)candidate);
+	*encoding = SWAPZ_ENCODING_DELTA64;
+	return candidate;
+}
+
 /*
  * Asynchronous compression is restricted to an independent, finite producer.
  * It neither acknowledges nor publishes any write. queue_lock transfers a
@@ -1411,6 +1449,14 @@ static void swapz_preparation_worker(struct work_struct *work)
 		if (lower_write_overlap &&
 		    atomic_read(&ctx->lower_write_active))
 			ctx->preparation_lz4_lower_write_overlap_ns += elapsed_ns;
+		prepared->encoding = SWAPZ_ENCODING_LZ4;
+		prepared->length = swapz_delta64_rescue(
+			input, prepared->length, prepared->bytes,
+			ctx->preparation_predictor_page,
+			prepared->length > 0 ? ctx->preparation_input_page :
+					      prepared->bytes,
+			ctx->preparation_lz4_workmem,
+			&ctx->preparation_lz4_wall_ns, &prepared->encoding);
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0) {
 			section_start = ktime_get_ns();
@@ -1421,7 +1467,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 				swapz_elapsed_ns(section_start, ktime_get_ns());
 			prepared->payload_crc32c_valid = true;
 		}
-		prepared->zero = prepared->length > 0 &&
+		prepared->zero = prepared->encoding == SWAPZ_ENCODING_LZ4 &&
+				 prepared->length > 0 &&
 				 prepared->length <= 64 &&
 				 swapz_page_is_zero(input);
 		if (prepared->length <= 0)
@@ -1483,7 +1530,7 @@ static void swapz_order_window_greedy(struct swapz_dm *ctx)
 		ctx->used[largest] = 1;
 		ctx->planned_to_batch[position++] = (u8)largest;
 
-		/* SWZ3 metadata: header(16) + two descriptors(32). */
+		/* SWZ metadata: header(16) + two descriptors(32). */
 		for (i = 0; i < ctx->batch_count; ++i) {
 			int remaining;
 
@@ -1537,6 +1584,7 @@ static void swapz_order_window(struct swapz_dm *ctx)
 			.length = ctx->batch[index].length,
 			.payload_crc32c_valid =
 				ctx->batch[index].payload_crc32c_valid,
+			.encoding = ctx->batch[index].encoding,
 			.raw = ctx->batch[index].raw,
 		};
 	}
@@ -1594,6 +1642,7 @@ static void swapz_gc_sort(struct swapz_dm *ctx)
 			.length = ctx->gc_pending[index].length,
 			.payload_crc32c_valid =
 				ctx->gc_pending[index].payload_crc32c_valid,
+			.encoding = ctx->gc_pending[index].encoding,
 		};
 	}
 }
@@ -1759,6 +1808,7 @@ static int swapz_gc_relocate_one(struct swapz_dm *ctx, swapz_u32 victim,
 				swapz_crc32c_bytes(ctx->read_compressed, length),
 			.length = length,
 			.payload_crc32c_valid = 1,
+			.encoding = swapz_map_encoding(&snapshot),
 		};
 	if (ctx->gc_count == SWAPZ_MAX_RECORDS)
 		return swapz_gc_flush(ctx);
@@ -2766,6 +2816,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 	u64 section_start;
 	swapz_u32 payload_crc32c = 0;
 	bool payload_crc32c_valid = false;
+	swapz_u8 encoding = SWAPZ_ENCODING_LZ4;
 	bool inline_zero = false;
 	bool raw_staged_in_batch = false;
 	bool bulk_raw_eligible = ctx->engine.bulk_enabled &&
@@ -2801,6 +2852,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		length = entry->prepared_page->length;
 		payload_crc32c = entry->prepared_page->payload_crc32c;
 		payload_crc32c_valid = entry->prepared_page->payload_crc32c_valid;
+		encoding = entry->prepared_page->encoding;
 		if (length > 0)
 			swapz_memcpy_accounted(
 				ctx->batch_bytes +
@@ -2829,6 +2881,15 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				ctx->lz4_workmem);
 		ctx->lz4_wall_ns += swapz_elapsed_ns(section_start,
 						   ktime_get_ns());
+		length = swapz_delta64_rescue(
+			input, length,
+			ctx->batch_bytes +
+				(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+			ctx->predictor_page,
+			length > 0 ? ctx->input_page :
+				ctx->batch_bytes +
+				(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
+			ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding);
 		if (length > 0) {
 			section_start = ktime_get_ns();
 			payload_crc32c = swapz_crc32c_bytes(
@@ -2839,7 +2900,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 				swapz_elapsed_ns(section_start, ktime_get_ns());
 			payload_crc32c_valid = true;
 		}
-		if (length > 0 && length <= 64)
+		if (encoding == SWAPZ_ENCODING_LZ4 &&
+		    length > 0 && length <= 64)
 			inline_zero = swapz_page_is_zero(input);
 		/*
 		 * If retained bulk RAW admission is available, copy the mapped
@@ -2969,6 +3031,7 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 		.payload_crc32c = payload_crc32c,
 		.length = (swapz_u16)length,
 		.payload_crc32c_valid = payload_crc32c_valid,
+		.encoding = encoding,
 	};
 	ctx->batch_count++;
 	swapz_resolve_single_tail_companion(ctx);
@@ -3063,10 +3126,20 @@ static int swapz_read(struct swapz_dm *ctx, struct bio *bio)
 		if (error)
 			return error;
 		section_start = ktime_get_ns();
-		decompressed = LZ4_decompress_safe(ctx->read_compressed,
+		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
+			decompressed = LZ4_decompress_safe(ctx->read_compressed,
+						  ctx->predictor_page,
+						  payload_bytes,
+						  SWAPZ_BLOCK_BYTES);
+			if (decompressed == SWAPZ_BLOCK_BYTES)
+				swapz_unpredict_delta64(ctx->predictor_page,
+						       ctx->read_page);
+		} else {
+			decompressed = LZ4_decompress_safe(ctx->read_compressed,
 						  ctx->read_page,
 						  payload_bytes,
 						  SWAPZ_BLOCK_BYTES);
+		}
 		ctx->decode_wall_ns +=
 			swapz_elapsed_ns(section_start, ktime_get_ns());
 		if (decompressed != SWAPZ_BLOCK_BYTES)
@@ -3133,9 +3206,19 @@ static int swapz_read_slot_run(struct swapz_read_slot *slot)
 		if (error)
 			return error;
 		section_start = ktime_get_ns();
-		decompressed = LZ4_decompress_safe(slot->read_compressed,
+		if (swapz_map_encoding(map) == SWAPZ_ENCODING_DELTA64) {
+			decompressed = LZ4_decompress_safe(slot->read_compressed,
+						 slot->predictor_page,
+						 payload_bytes,
+						 SWAPZ_BLOCK_BYTES);
+			if (decompressed == SWAPZ_BLOCK_BYTES)
+				swapz_unpredict_delta64(slot->predictor_page,
+						       read_page);
+		} else {
+			decompressed = LZ4_decompress_safe(slot->read_compressed,
 						 read_page, payload_bytes,
 						 SWAPZ_BLOCK_BYTES);
+		}
 		slot->decode_wall_ns +=
 			swapz_elapsed_ns(section_start, ktime_get_ns());
 		if (decompressed != SWAPZ_BLOCK_BYTES)
@@ -4358,6 +4441,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	if (ctx->preparation_pool)
 		mempool_destroy(ctx->preparation_pool);
 	kfree(ctx->preparation_lz4_workmem);
+	kfree(ctx->preparation_predictor_page);
 	vfree(ctx->preparation_input_page);
 	if (ctx->io_client)
 		dm_io_client_destroy(ctx->io_client);
@@ -4381,6 +4465,7 @@ static void swapz_free(struct swapz_dm *ctx)
 	kvfree(ctx->segment_trimmed);
 	kvfree(ctx->segment_roles);
 	vfree(ctx->input_page);
+	kfree(ctx->predictor_page);
 	vfree(ctx->read_page);
 	vfree(ctx->read_compressed);
 	vfree(ctx->engine.write_scratch);
@@ -4393,6 +4478,7 @@ static void swapz_free(struct swapz_dm *ctx)
 			vfree(ctx->read_slots[slot].engine.read_scratch);
 			vfree(ctx->read_slots[slot].read_pages);
 			vfree(ctx->read_slots[slot].read_compressed);
+			kfree(ctx->read_slots[slot].predictor_page);
 		}
 		kvfree(ctx->read_slots);
 	}
@@ -4633,6 +4719,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->batch_bytes = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->gc_bytes_store = vzalloc(SWAPZ_BATCH_BYTES);
 	ctx->input_page = vzalloc(SWAPZ_BLOCK_BYTES);
+	ctx->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 	ctx->read_page = vzalloc(SWAPZ_BLOCK_BYTES);
 	ctx->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
 	ctx->engine.write_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
@@ -4654,7 +4741,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ctx->lz4_workmem = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 	if (!ctx->batch_bytes || !ctx->gc_bytes_store ||
 	    !ctx->gc_scores || !ctx->gc_io_scores || !ctx->input_page ||
-	    !ctx->read_page || !ctx->read_compressed ||
+	    !ctx->predictor_page || !ctx->read_page || !ctx->read_compressed ||
 	    !ctx->engine.write_scratch || !ctx->engine.read_scratch ||
 	    !ctx->engine.read_metadata_cache || !ctx->engine.read_extent_cache ||
 	    (ctx->read_grouping_enabled &&
@@ -4681,8 +4768,9 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		slot->engine.read_scratch = vzalloc(SWAPZ_MAX_EXTENT_BYTES);
 		slot->read_pages = vzalloc((size_t)SWAPZ_MAX_RECORDS * SWAPZ_BLOCK_BYTES);
 		slot->read_compressed = vzalloc(SWAPZ_BLOCK_BYTES);
+		slot->predictor_page = kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 		if (!slot->engine.read_scratch || !slot->read_pages ||
-		    !slot->read_compressed) {
+		    !slot->read_compressed || !slot->predictor_page) {
 			error = -ENOMEM;
 			goto fail;
 		}
@@ -4706,12 +4794,15 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		/* 64 preallocated producer pages, a semaphore enforcing the
 		 * same hard bound, and no dynamic allocations in ->map. */
 		ctx->preparation_input_page = vzalloc(SWAPZ_BLOCK_BYTES);
+		ctx->preparation_predictor_page =
+			kmalloc(SWAPZ_BLOCK_BYTES, GFP_KERNEL);
 		ctx->preparation_lz4_workmem =
 			kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
 		ctx->preparation_pool = mempool_create_kmalloc_pool(
 					SWAPZ_MAX_RECORDS,
 					sizeof(struct swapz_prepared_page));
 		if (!ctx->preparation_input_page ||
+		    !ctx->preparation_predictor_page ||
 		    !ctx->preparation_lz4_workmem || !ctx->preparation_pool) {
 			error = -ENOMEM;
 			goto fail;

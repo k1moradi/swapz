@@ -1,6 +1,6 @@
 # Testing Standards
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ3` is reserved for the on-disk format identity.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -52,7 +52,7 @@ The write-only QD1/4/8/32 sweep is sustained offered-load evidence: workers are 
 
 ## Report contract
 
-Official human-readable and JSON reports use `swapz`, not implementation-generation labels. Schema keys are version-neutral. SWZ3 is reserved for on-disk format discussion.
+Official human-readable and JSON reports use `swapz`, not implementation-generation labels. Schema keys are version-neutral. SWZ is the current unversioned on-disk format identity.
 
 Reports distinguish useful logical throughput, backing WRITE throughput, lower READ/WRITE bytes and requests, p95/p99 where available, process CPU scope, kernel counters, GC, fixture/trace/source provenance, lifecycle result and cleanup. Never call synthetic RAM results physical SD/SSD evidence.
 
@@ -162,8 +162,10 @@ when these allocations cannot be satisfied.
 - **ID66 discard scratch cleanup:** owner-qualified. Source/native contracts
   continue proving the temporary live-reference decrement is exactly restored
   before return/commit, including an error after a validated shared-extent page.
-- **ID67 predictive rescue:** evidence-only format policy first. The official
-  rootless stage must build/run the native evaluator, emit exactly one sanitized
+- **ID67 predictive rescue:** production uses page-local delta64 only after raw
+  LZ4 is >2024 bytes or RAW and the threshold-24 classifier accepts the page;
+  the candidate is stored only when strictly smaller. The official rootless
+  stage must build/run the native evaluator, emit exactly one sanitized
   `SWAPZ_PREDICTOR_EVIDENCE` record, and fail if it is missing or malformed.
   SHAKE entropy/mixed/medium plus generated zero/repeat pages are negative
   controls; deterministic pointer/page-table/integer/float/struct and
@@ -193,11 +195,12 @@ when these allocations cannot be satisfied.
   vector syntax alone is insufficient acceleration evidence. Native evidence
   must report selected-backend and scalar-C timings on the same host for the
   classifier, forward transform and inverse transform before changing dispatch
-  policy. The unprivileged Make-interface
-  fixture must emit the same valid evidence schema. Production module init may
-  select the backend, but DM data-path/codec/authority/engine code still has no
-  predictor transform call and no filter metadata/policy-length surface exists
-  before ID67b.
+  policy. The unprivileged Make-interface fixture must emit the same valid
+  evidence schema and must resolve the nearest non-report source SHA exactly as
+  the outer runner does. Production qualification additionally requires an
+  explicit SWZ per-record delta64 flag, byte-exact LZ4+inverse reconstruction,
+  strict candidate-smaller-than-baseline admission, map/metadata encoding
+  cross-checks, and GC relocation that preserves the stored encoding.
 - **ID58/59:** representative-content evidence only.
 - **ID61:** the owned-RAM lifecycle phase now collects foreground-GC pressure
   evidence before any background worker. Exactly five pressure rounds must emit
@@ -1031,7 +1034,7 @@ must remain zero; and the separate byte-exact packed-placement smoke must report
 zero holes, zero splits and no failure. Segment-tail waste at a real 1MiB
 boundary remains valid and continues to be counted in the aggregate hole
 counters. The fixed `packed_placement=1` status token is compatibility
-telemetry, not a runtime policy. None of this changes SWZ3.
+telemetry, not a runtime policy. None of this changes SWZ.
 
 Exact production-C authority coverage also exercises append-only packed
 placement at segment edges: two blocks at cursor 254 and four blocks at cursor
@@ -1065,7 +1068,7 @@ ID73 is native simulation evidence only. The deterministic study must compare
 aligned 1/2/4, packed 1/2/4, packed exact 1/2/3/4, packed up-to-32KiB and
 packed up-to-64KiB geometries and report blocks, placement waste, write runs,
 cold-read blocks and sequential 4MiB request estimates. Candidate 3/8/16-block
-classes in this table do not exist in kernel policy or SWZ3.
+classes in this table do not exist in kernel policy or SWZ.
 
 ### Delta64 SIMD qualification
 
@@ -1087,3 +1090,16 @@ scan on collision, and complete invalidation before any authority mutation.
 No lower-I/O, cache-capacity, generation or CRC rule changes with the front
 index. Predictor qualification continues to require SSE2 transformed bytes and
 inverse reconstruction to match scalar exactly after cache-local loop changes.
+
+### Production delta64 qualification
+
+The delta64 transform unit is one 4KiB logical page, never a whole packed
+extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
+share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,
+reject reserved header flags, and preserve payload CRC validation. Source
+contracts must prove the Device Mapper write path invokes the scalar classifier
+before the full transform, uses threshold 24 only for >2024-byte or RAW LZ4
+baselines, and rejects a delta64 candidate that is not smaller. The read path
+must LZ4-decompress a delta64 record into separate scratch and apply the selected
+inverse before upper copy. Full owner qualification is required because this
+changes default production representation and CPU work.

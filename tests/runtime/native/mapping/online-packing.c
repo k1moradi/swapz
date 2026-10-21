@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Exercise the EXACT kernel SWZ3 codec + authority + bounded I/O engine C
+ * Exercise the EXACT kernel SWZ codec + authority + bounded I/O engine C
  * against a deterministic fault-injectable RAM lower device. No /dev access.
  */
 #include <errno.h>
@@ -180,7 +180,7 @@ static int test_finite_window_planner(void)
 	CHECK(plan_default(pages, 16, classes, takes, &groups) ==
 	      -EOPNOTSUPP);
 	pages[0].payload = originals[0];
-	pages[0].length = 4096; /* raw cannot masquerade as SWZ3 compressed */
+	pages[0].length = 4096; /* raw cannot masquerade as SWZ compressed */
 	CHECK(plan_default(pages, 16, classes, takes, &groups) ==
 	      -EOPNOTSUPP);
 	return 0;

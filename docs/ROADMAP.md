@@ -1,6 +1,6 @@
 # Roadmap
 
-**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ3` is reserved for the on-disk format identity.
+**Immutable naming policy (read before every prompt):** The project is `swapz`; the kernel module is `dm-swapz.ko` (loaded as `dm_swapz`); the Device Mapper target is exactly `swapz`; and the module alias is `dm-swapz`. Never put implementation-generation numbers in product, module, target, source-path, report, workflow, helper, or schema names. `SWZ` is the current unversioned on-disk format identity; do not assign a format version until an incompatible format boundary is justified.
 
 **Single official test command (read before every prompt):** Run `make test` at the repository root for every supported swapz test and benchmark. A complete run must report BLOCKED (nonzero) if safe noninteractive privileged qualification cannot run. Do not create, publish, recommend, or document alternative test commands. Private scripts and CI jobs are implementation details, not operator interfaces.
 
@@ -74,13 +74,16 @@ and report placement/capacity pressure that actually exercises live victims.
 Only then decide whether asynchronous TRIM merits the added state machine.
 Fast and serial adjacent READ coalescing retain five matched rounds.
 
-The highest-value new compression question is ID67, but it starts as offline
-native-C evidence only. The existing synthetic fixture intentionally contains
-cryptographic-noise regions and only 128 repeated payloads, so it is a useful
-negative/control corpus rather than representative evidence for predictive
-compression. ID67 now maintains only delta64 across scalar/SIMD backends on deterministic
-structured binary/numeric archetypes and pass resulting lengths through the
-real bounded planner before any SWZ3 format or hot-path change.
+ID67 is now a production page-local rescue path. Raw LZ4 remains the first
+attempt; only a result above 2024 bytes or RAW fallback reaches the scalar
+8->32-pair classifier at threshold 24. A selected page is transformed with the
+runtime SIMD/scalar delta64 backend, compressed a second time, and adopted only
+when the stored payload is strictly smaller than the raw-LZ4 baseline. SWZ
+records carry the encoding explicitly and reads invert delta64 after LZ4.
+Transforms never span logical pages or packed extents, preserving independent
+authority, selective reads, GC relocation and random-read units. The existing
+native corpus remains useful evidence, but owner loaded qualification now gates
+this production change.
 
 ID61 remains an evidence problem: timed mixed I/O observed zero GC victims, so
 background GC is unjustified. First measure useful-I/O wall/p99 while foreground
@@ -169,13 +172,13 @@ changes.
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
-| 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
+| 67 | Page-local delta64 rescue around LZ4 | **2 production implementation / owner qualification pending** | Raw LZ4 runs first. Baselines >2024 bytes or RAW fallback are sampled at threshold 24; delta64+LZ4 is adopted only when strictly smaller. SWZ stores an explicit per-record encoding bit; read/GC preserve independent 4KiB authority. Transform/inverse dispatch independently by CPU capability/evidence. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
-| 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ3. |
+| 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
 | 72 | Physical wear / logical allocator fairness | **4 logical-open balancing A/B implemented / physical wear still gated** | Optional `logical_open_balance=1` prefers the least-opened eligible dead destination and uses logical-open count only as an exact-score/count GC victim tie-break. It is default-off and is allocator-fairness evidence only; logical LBA opens do not measure NAND P/E cycles and cannot authorize cold relocation or physical wear claims. |
-| 73 | Flexible/larger extent study | **5 larger/irregular classes deprioritized** | Report 711ceaad shows packed 1/2/4 captures the dominant geometry gain. A 3-block class saves only 2/2,089 blocks; 32/64KiB maxima save 14/22 more blocks while cold-read cost rises 1.47->1.53/1.55. Keep SWZ3 1/2/4 classes unchanged unless a broader representative corpus materially overturns this result. |
+| 73 | Flexible/larger extent study | **5 larger/irregular classes deprioritized** | Report 711ceaad shows packed 1/2/4 captures the dominant geometry gain. A 3-block class saves only 2/2,089 blocks; 32/64KiB maxima save 14/22 more blocks while cold-read cost rises 1.47->1.53/1.55. Keep SWZ 1/2/4 classes unchanged unless a broader representative corpus materially overturns this result. |
 
 
 ## What the pinned queue experiment establishes
@@ -207,7 +210,7 @@ swapz must not permanently assume that useful RAM input arrives as one ordinary
 including transparent huge pages and hugetlb-backed memory where the block path
 can expose them.
 
-The first implementation should **not** silently change SWZ3 format semantics:
+The first implementation should **not** silently change SWZ format semantics:
 retain 4KiB logical records, generations, CRC boundaries and random-read units,
 but walk/map 4KiB slices of a larger folio directly and avoid bounce copies.
 Qualification must cover nonzero bio_vec offsets, boundaries crossing a base
@@ -253,10 +256,12 @@ exact-source owner run before another kernel or resource-pressure experiment.
    asynchronous-TRIM implementation. The design below is a review proposal.
 4. Keep `logical_open_balance=0` until the churn A/B establishes allocator
    spread and probe/GC cost. Logical opens remain distinct from NAND wear.
-5. Keep SWZ3 1/2/4 classes, K=1 scheduling and ID63 completion semantics
+5. Keep SWZ 1/2/4 classes, K=1 scheduling and ID63 completion semantics
    unchanged. Do not implement the currently weak 3/8/16-block class ideas.
-6. Continue representative ID67 content/CPU evidence independently. Map RAM
-   compaction remains an isolated later experiment with measured bytes/page.
+6. Fully qualify the production ID67 route, including byte-exact delta64 reads,
+   GC preservation and fast/slow CPU-throughput effects; continue representative
+   content evidence. Map RAM compaction remains an isolated later experiment
+   with measured bytes/page.
 7. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
 
@@ -318,7 +323,7 @@ The [Linux 7.0 discard helper](https://github.com/torvalds/linux/blob/v7.0/block
 builds chained BIOs and its synchronous wrapper waits for their completion.
 The implementation review must check split-range completion and memory-pressure
 behavior against the running kernel headers before selecting the async adapter.
-This step changes neither SWZ3 nor physical-device admission. Heavy-CPU/low-RAM,
+This step changes neither SWZ nor physical-device admission. Heavy-CPU/low-RAM,
 real swap semantics, representative churn and disposable-VM qualification remain
 separate release gates.
 

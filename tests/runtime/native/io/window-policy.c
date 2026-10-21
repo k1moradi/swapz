@@ -140,7 +140,7 @@ static int test_pack_ready_small_and_medium_exact_geometry(void)
 	batch[3].length = 2029;
 	CHECK(!swapz_window_pack_ready(batch, 4, 2, 0));
 
-	/* Six records have 112 bytes of SWZ3 header/descriptor overhead:
+	/* Six records have 112 bytes of SWZ header/descriptor overhead:
 	 * 6 * 2712 + 112 == 16384 exactly. */
 	for (i = 0; i < 6; ++i)
 		batch[i].length = 2712;
