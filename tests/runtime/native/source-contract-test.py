@@ -53,6 +53,27 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_swz_format_identity_remains_unversioned(self):
+        legacy_format_name = "SWZ" + "3"
+        text_suffixes = {".c", ".h", ".md", ".py", ".sh", ".yml", ".yaml"}
+        paths = [ROOT / "Makefile", ROOT / "dkms.conf"]
+
+        for source_root in (ROOT / "docs", ROOT / "src", ROOT / "tests",
+                            ROOT / "packaging", ROOT / ".github"):
+            paths.extend(
+                path for path in source_root.rglob("*")
+                if path.is_file() and
+                (path.suffix in text_suffixes or path.name == "Makefile"))
+
+        for path in paths:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertNotIn(legacy_format_name, path.read_text())
+
+        codec_header = (ROOT / "src/kernel/codec.h").read_text()
+        self.assertIn("#define SWAPZ_MAGIC 0x005a5753U", codec_header)
+        self.assertIn("swapz_u16 flags_le;", codec_header)
+        self.assertNotIn("SWAPZ_VERSION", codec_header)
+
     def test_publish_crc_probe_times_only_final_payload_crc(self):
         descriptor = source_body("swapz_lookup_validated_descriptor", CODEC)
         validated = source_body("swapz_lookup_validated", CODEC)
