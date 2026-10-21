@@ -36,6 +36,8 @@ swapz_u32 swapz_predict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64_sse2(const swapz_u8 *input, swapz_u8 *output);
 swapz_u32 swapz_predict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output);
 void swapz_unpredict_delta64_avx2(const swapz_u8 *input, swapz_u8 *output);
+swapz_u32 swapz_predict_delta64_avx512(const swapz_u8 *input, swapz_u8 *output);
+void swapz_unpredict_delta64_avx512(const swapz_u8 *input, swapz_u8 *output);
 #endif
 #if (defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)) || defined(__aarch64__)
 swapz_u32 swapz_predict_delta64_neon(const swapz_u8 *input, swapz_u8 *output);

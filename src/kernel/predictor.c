@@ -67,6 +67,7 @@ void swapz_unpredict_delta64_scalar(const swapz_u8 *input, swapz_u8 *output)
 #define SWAPZ_X86_INVERSE_WRAPPER(suffix) static void swapz_unpredict_##suffix(const swapz_u8 *input, swapz_u8 *output) { if (!in_task()) { swapz_unpredict_delta64_scalar(input, output); return; } kernel_fpu_begin(); swapz_unpredict_delta64_##suffix(input, output); kernel_fpu_end(); }
 SWAPZ_X86_TRANSFORM_WRAPPER(sse2)
 SWAPZ_X86_TRANSFORM_WRAPPER(avx2)
+SWAPZ_X86_TRANSFORM_WRAPPER(avx512)
 SWAPZ_X86_INVERSE_WRAPPER(sse2)
 SWAPZ_X86_INVERSE_WRAPPER(avx2)
 #undef SWAPZ_X86_TRANSFORM_WRAPPER
@@ -93,8 +94,17 @@ int swapz_predictor_init(void)
 	swapz_transform_backend = "scalar";
 	swapz_inverse_backend = "scalar";
 #if defined(CONFIG_X86_64)
-	if (kernel_fpu_available() && boot_cpu_has(X86_FEATURE_AVX2) &&
-	    cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM, NULL)) {
+	if (kernel_fpu_available() && boot_cpu_has(X86_FEATURE_AVX512F) &&
+	    cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM |
+			      XFEATURE_MASK_AVX512, NULL)) {
+		static_call_update(swapz_predictor_transform_call, swapz_predict_avx512);
+		/*
+		 * Keep the inverse scalar until same-host qualification proves the
+		 * dependency-heavy eight-lane prefix scan wins end-to-end.
+		 */
+		swapz_transform_backend = "avx512"; swapz_inverse_backend = "scalar";
+	} else if (kernel_fpu_available() && boot_cpu_has(X86_FEATURE_AVX2) &&
+		   cpu_has_xfeatures(XFEATURE_MASK_SSE | XFEATURE_MASK_YMM, NULL)) {
 		static_call_update(swapz_predictor_transform_call, swapz_predict_avx2);
 		/*
 		 * Same-host batched evidence on AVX2 x86 shows the dependency-heavy
@@ -138,7 +148,11 @@ int swapz_predictor_init(void)
 	swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 	__builtin_cpu_init();
-	if (__builtin_cpu_supports("avx2")) {
+	if (__builtin_cpu_supports("avx512f")) {
+		swapz_predict_impl = swapz_predict_delta64_avx512;
+		swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
+		swapz_transform_backend = "avx512"; swapz_inverse_backend = "scalar";
+	} else if (__builtin_cpu_supports("avx2")) {
 		swapz_predict_impl = swapz_predict_delta64_avx2;
 		swapz_unpredict_impl = swapz_unpredict_delta64_scalar;
 		swapz_transform_backend = "avx2"; swapz_inverse_backend = "scalar";

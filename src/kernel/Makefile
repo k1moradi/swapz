@@ -4,11 +4,13 @@ obj-m += dm-swapz.o
 dm-swapz-y := dm-target.o codec.o authority.o engine.o predictor.o
 
 ifeq ($(CONFIG_X86_64),y)
-dm-swapz-y += predictor-sse2.o predictor-avx2.o
+dm-swapz-y += predictor-sse2.o predictor-avx2.o predictor-avx512.o
 CFLAGS_predictor-sse2.o += $(CC_FLAGS_FPU)
 CFLAGS_REMOVE_predictor-sse2.o += -mno-sse -mno-sse2
 CFLAGS_predictor-avx2.o += $(CC_FLAGS_FPU) -mavx2
 CFLAGS_REMOVE_predictor-avx2.o += -mno-sse -mno-sse2 -mno-avx
+CFLAGS_predictor-avx512.o += $(CC_FLAGS_FPU) -mavx512f
+CFLAGS_REMOVE_predictor-avx512.o += -mno-sse -mno-sse2 -mno-avx -mno-avx2 -mno-avx512f
 endif
 
 ifeq ($(CONFIG_ARM64),y)

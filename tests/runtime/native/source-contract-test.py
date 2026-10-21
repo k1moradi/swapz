@@ -1315,6 +1315,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         dispatch = (ROOT / "src/kernel/predictor.c").read_text()
         sse2 = (ROOT / "src/kernel/predictor-sse2.c").read_text()
         avx2 = (ROOT / "src/kernel/predictor-avx2.c").read_text()
+        avx512 = (ROOT / "src/kernel/predictor-avx512.c").read_text()
         neon = (ROOT / "src/kernel/predictor-neon.c").read_text()
         qualification = (
             ROOT / "tests/runtime/native/codec/predictor-qualification.c").read_text()
@@ -1350,17 +1351,23 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("return swapz_predict_delta64_sample_score_scalar(input);",
                       dispatch)
         self.assertIn("kernel_fpu_end()", dispatch)
+        self.assertIn("X86_FEATURE_AVX512F", dispatch)
+        self.assertIn("XFEATURE_MASK_AVX512", dispatch)
         self.assertIn("X86_FEATURE_AVX2", dispatch)
         self.assertIn("XFEATURE_MASK_YMM", dispatch)
         self.assertIn("X86_FEATURE_XMM2", dispatch)
         self.assertIn("kernel_fpu_available()", dispatch)
+        self.assertIn('"avx512"', dispatch)
         self.assertIn('"avx2"', dispatch)
         self.assertIn('"sse2"', dispatch)
         self.assertIn('"neon"', dispatch)
+        self.assertIn("__builtin_cpu_supports(\"avx512f\")", dispatch)
         self.assertIn("__builtin_cpu_supports(\"avx2\")", dispatch)
 
         self.assertIn("__attribute__((vector_size(16)))", sse2)
         self.assertIn("__attribute__((vector_size(32)))", avx2)
+        self.assertIn("__attribute__((vector_size(64)))", avx512)
+        self.assertIn("valignq", avx512)
         self.assertIn("vpslldq", avx2)
         self.assertIn("vpermq", avx2)
         self.assertIn("Advanced SIMD/NEON", neon)
@@ -1368,15 +1375,20 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         for retired_score in (
                 "swapz_predict_delta64_sample_score_sse2",
                 "swapz_predict_delta64_sample_score_avx2",
+                "swapz_predict_delta64_sample_score_avx512",
                 "swapz_predict_delta64_sample_score_neon"):
             self.assertNotIn(retired_score, internal)
-            self.assertNotIn(retired_score, sse2 + avx2 + neon)
+            self.assertNotIn(retired_score, sse2 + avx2 + avx512 + neon)
 
         self.assertIn("predictor.o", kbuild)
-        self.assertIn("predictor-sse2.o predictor-avx2.o", kbuild)
+        self.assertIn("predictor-sse2.o predictor-avx2.o predictor-avx512.o",
+                      kbuild)
         self.assertIn("CFLAGS_predictor-avx2.o += $(CC_FLAGS_FPU) -mavx2",
                       kbuild)
         self.assertIn("CFLAGS_REMOVE_predictor-avx2.o", kbuild)
+        self.assertIn("CFLAGS_predictor-avx512.o += $(CC_FLAGS_FPU) -mavx512f",
+                      kbuild)
+        self.assertIn("CFLAGS_REMOVE_predictor-avx512.o", kbuild)
         self.assertIn("predictor-neon.o", kbuild)
         self.assertIn("CFLAGS_REMOVE_predictor-neon.o += $(CC_FLAGS_NO_FPU)",
                       kbuild)
@@ -1401,9 +1413,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("TRANSFORM_BENCH_REPEATS 64U", qualification)
         self.assertIn("-msse2 -c $(KERNEL)/predictor-sse2.c", suites)
         self.assertIn("-mavx2 -c $(KERNEL)/predictor-avx2.c", suites)
+        self.assertIn("-mavx512f -c $(KERNEL)/predictor-avx512.c", suites)
         rootless = (ROOT / "tests/tools/test-rootless.sh").read_text()
         self.assertIn("predictor-sse2.disasm", rootless)
         self.assertIn("predictor-avx2.disasm", rootless)
+        self.assertIn("predictor-avx512.disasm", rootless)
         self.assertNotIn("objdump -d build/tests/native/predictor-sse2.o |",
                          rootless)
         self.assertIn("liblz4-dev", workflow)

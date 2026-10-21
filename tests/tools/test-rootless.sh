@@ -23,9 +23,13 @@ bash tests/runtime/native/swap-inventory-test.sh
 if [[ "$(uname -m)" == "x86_64" ]]; then
   objdump -d build/tests/native/predictor-sse2.o > build/tests/native/predictor-sse2.disasm
   objdump -d build/tests/native/predictor-avx2.o > build/tests/native/predictor-avx2.disasm
+  objdump -d build/tests/native/predictor-avx512.o > build/tests/native/predictor-avx512.disasm
   grep -Eq 'psubq|paddq' build/tests/native/predictor-sse2.disasm
   grep -Eq 'vpsubq|vpaddq' build/tests/native/predictor-avx2.disasm
-  rm -f build/tests/native/predictor-sse2.disasm build/tests/native/predictor-avx2.disasm
+  grep -Eq 'vpsubq|vpaddq' build/tests/native/predictor-avx512.disasm
+  grep -Eq 'valignq' build/tests/native/predictor-avx512.disasm
+  rm -f build/tests/native/predictor-sse2.disasm build/tests/native/predictor-avx2.disasm \
+    build/tests/native/predictor-avx512.disasm
 fi
 grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tests/tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tests/tools/deploy-nullblk.sh

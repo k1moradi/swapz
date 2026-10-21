@@ -23,7 +23,8 @@ PREDICTOR_CORE_OBJ := $(OUT)/predictor-core.o
 PREDICTOR_ARCH_OBJS :=
 UNAME_M := $(shell uname -m)
 ifeq ($(UNAME_M),x86_64)
-PREDICTOR_ARCH_OBJS += $(OUT)/predictor-sse2.o $(OUT)/predictor-avx2.o
+PREDICTOR_ARCH_OBJS += $(OUT)/predictor-sse2.o $(OUT)/predictor-avx2.o \
+	$(OUT)/predictor-avx512.o
 endif
 ifeq ($(UNAME_M),aarch64)
 PREDICTOR_ARCH_OBJS += $(OUT)/predictor-neon.o
@@ -66,6 +67,9 @@ $(OUT)/predictor-sse2.o: $(KERNEL)/predictor-sse2.c $(KERNEL)/predictor.h $(KERN
 $(OUT)/predictor-avx2.o: $(KERNEL)/predictor-avx2.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx2 -c $(KERNEL)/predictor-avx2.c -o "$@"
 
+$(OUT)/predictor-avx512.o: $(KERNEL)/predictor-avx512.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -mavx512f -c $(KERNEL)/predictor-avx512.c -o "$@"
+
 $(OUT)/predictor-neon.o: $(KERNEL)/predictor-neon.c $(KERNEL)/predictor.h $(KERNEL)/predictor-internal.h | $(OUT)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $(KERNEL)/predictor-neon.c -o "$@"
 
@@ -105,7 +109,8 @@ test-all: test-codec test-predictor test-mapping test-gc test-lower-io
 clean:
 	@rm -f $(addprefix $(OUT)/,$(PROGRAMS)) $(OUT)/predictor-qualification \
 		$(PREDICTOR_CORE_OBJ) $(OUT)/predictor-sse2.o \
-		$(OUT)/predictor-avx2.o $(OUT)/predictor-neon.o \
+		$(OUT)/predictor-avx2.o $(OUT)/predictor-avx512.o \
+		$(OUT)/predictor-neon.o \
 		$(OUT)/predictor-entropy.bin $(OUT)/predictor-entropy.json \
 		$(OUT)/predictor-mixed.bin $(OUT)/predictor-mixed.json \
 		$(OUT)/predictor-medium.bin $(OUT)/predictor-medium.json

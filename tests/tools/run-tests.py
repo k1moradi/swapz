@@ -235,7 +235,7 @@ WORKLOAD_OPPORTUNITY_FIELDS = (
 
 
 PREDICTOR_TRANSFORM_NAMES = ("delta64",)
-PREDICTOR_BACKENDS = ("scalar", "sse2", "avx2", "neon")
+PREDICTOR_BACKENDS = ("scalar", "sse2", "avx2", "avx512", "neon")
 PREDICTOR_THRESHOLDS = (4, 8, 16, 24, 32)
 PREDICTOR_NEGATIVE_PROFILES = ("zero", "repeat", "entropy", "mixed", "medium")
 PREDICTOR_TRANSFORM_FIELDS = (

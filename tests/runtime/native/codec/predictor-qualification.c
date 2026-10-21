@@ -25,7 +25,7 @@
 #define CLASSIFIER_BENCH_REPEATS 256U
 #define TRANSFORM_BENCH_REPEATS 64U
 #define LZ4_BENCH_REPEATS 32U
-#define MAX_BACKEND_BENCHMARKS 3U
+#define MAX_BACKEND_BENCHMARKS 4U
 #define SD_EMULATED_BLOCK_NS 390625ULL
 #define SSD_EMULATED_BLOCK_NS 48828ULL
 
@@ -569,6 +569,8 @@ static int collect_backend_benchmarks(struct backend_benchmark *backends,
 	__builtin_cpu_init();
 	if (__builtin_cpu_supports("avx2"))
 		backends[count++] = (struct backend_benchmark){ "avx2", swapz_predict_delta64_avx2, swapz_unpredict_delta64_avx2, 0, 0 };
+	if (__builtin_cpu_supports("avx512f"))
+		backends[count++] = (struct backend_benchmark){ "avx512", swapz_predict_delta64_avx512, swapz_unpredict_delta64_avx512, 0, 0 };
 #elif defined(__aarch64__)
 	backends[count++] = (struct backend_benchmark){ "neon", swapz_predict_delta64_neon, swapz_unpredict_delta64_neon, 0, 0 };
 #endif

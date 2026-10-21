@@ -1066,3 +1066,15 @@ aligned 1/2/4, packed 1/2/4, packed exact 1/2/3/4, packed up-to-32KiB and
 packed up-to-64KiB geometries and report blocks, placement waste, write runs,
 cold-read blocks and sequential 4MiB request estimates. Candidate 3/8/16-block
 classes in this table do not exist in kernel policy or SWZ3.
+
+### Delta64 SIMD qualification
+
+Every compiled delta64 SIMD backend must round-trip and produce a transform
+byte-for-byte identical to scalar C before timing is reported. Rootless x86
+qualification disassembles the architecture objects to prove vector arithmetic
+is present without executing unsupported instructions. Runtime benchmarking
+executes AVX2 or AVX-512 only when the host CPU advertises the corresponding
+feature. Backend timings are evidence, not an automatic policy gate: a new
+wider backend requires same-host results before any inverse-policy promotion,
+and official qualification on a host lacking that ISA does not qualify its
+runtime path.

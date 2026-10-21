@@ -1023,3 +1023,15 @@ or choose the least-opened eligible destination without additional I/O. They
 are not NAND wear measurements; neither that experiment nor a GC score tie
 break may be described as wear leveling or authorize cold-data relocation
 without separately approved physical-media evidence.
+
+### Delta64 SIMD backends
+
+The delta64 classifier remains scalar and sampled. Architecture SIMD backends
+must be byte-identical to scalar delta64 and may accelerate only the full-page
+transform/inverse after classification. x86 dispatch is capability- and
+xstate-gated; AVX-512 requires AVX-512F plus enabled SSE, YMM and AVX-512
+xfeatures. Transform and inverse selection are independent: a wider forward
+transform must not force a dependency-heavy inverse backend without same-host
+batched evidence. Keep each SIMD implementation in its own translation unit
+with explicit compiler flags so generic kernel C cannot acquire vector
+instructions accidentally.
