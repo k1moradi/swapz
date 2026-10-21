@@ -759,10 +759,10 @@ def parse_loaded_correctness(output):
      gc_choose_wall_ns, gc_choose_calls, gc_choose_map_entries,
      gc_choose_segment_entries, gc_relocation_map_entries,
      gc_no_headroom_skips, alignment_hole_fg, alignment_hole_gc,
-     run_splits_by_hole, alloc_probe_segments, alloc_probe_full_scans,
-     alloc_probe_wall_ns, trim_skipped, segment_program_min,
-     segment_program_sum, segment_program_max,
-     segment_program_segments) = found["gc_pressure"]
+     tail_waste_fg, tail_waste_gc, run_splits_by_hole,
+     alloc_probe_segments, alloc_probe_full_scans, alloc_probe_wall_ns,
+     trim_skipped, segment_program_min, segment_program_sum,
+     segment_program_max, segment_program_segments) = found["gc_pressure"]
     (discard_trim_pages, discard_trim_immediate, discard_trim_sectors,
      discard_trim_reuse_skips, discard_trim_verified) = found["discard_trim"]
     (packed_enabled, packed_verified_pages, packed_holes,
