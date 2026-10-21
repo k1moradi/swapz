@@ -978,17 +978,9 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 if value:
                     nested_reason = value[:155]
         reason = f"Unit test failed: {unittest_failure}"
-        if unittest_failure == "test_packed_placement_ab_is_strict_and_sanitized":
-            for line in output.splitlines():
-                match = re.search(
-                    r"ID69_UNIT_DIAG=(positive|negative):"
-                    r"(INCOMPLETE|REGRESSION|NO_GAIN|PASS_PACKED_PLACEMENT_AB):"
-                    r"([A-Za-z0-9 _-]{1,110})", line)
-                if match:
-                    reason += ("; ID69 {} got {}: {}".format(
-                        match.group(1), match.group(2), match.group(3)))
-                    break
-        if incremental_phase:
+        if unittest_failure == (
+                "test_parallel_build_is_incremental_and_test_stages_stay_ordered"
+        ) and incremental_phase:
             reason += f" [{incremental_phase}]"
         if nested_phase and nested_reason:
             reason += f"; nested {nested_phase}: {nested_reason}"

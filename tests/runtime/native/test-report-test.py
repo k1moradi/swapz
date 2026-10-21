@@ -479,6 +479,7 @@ def placement_arm(packed):
     record = write_arm("swapz", qd=32, regime="ssd_emulated", mode=0)
     record["fixture_sha256"] = "c" * 64
     record["trace_sha256"] = "d" * 64
+    record["qd"] = 32
     record["measure_ops"] = 2048
     record["write_ops"] = 2048
     record["read_ops"] = 0
@@ -693,10 +694,6 @@ class ReportContract(unittest.TestCase):
         self.assertEqual([row["packed_placement"] for row in rows],
                          [0, 1, 1, 0])
         verdict = runner.packed_placement_ab_verdict(rows)
-        if verdict["overall"] != "PASS_PACKED_PLACEMENT_AB":
-            print("ID69_UNIT_DIAG=positive:{}:{}".format(
-                verdict["overall"],
-                verdict.get("reason", "unexpected")), flush=True)
         self.assertEqual(verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
         self.assertLess(verdict["mean_request_change_pct"], 0)
         self.assertEqual(verdict["mean_byte_change_pct"], 0)
@@ -705,13 +702,10 @@ class ReportContract(unittest.TestCase):
             "alignment_hole_blocks_foreground=0",
             "packed_placement=1 logical_open_balance=0 "
             "alignment_hole_blocks_foreground=1", 1)
-        bad_verdict = runner.packed_placement_ab_verdict(
-            runner.parse_packed_placement_ab(broken))
-        if bad_verdict["overall"] != "REGRESSION":
-            print("ID69_UNIT_DIAG=negative:{}:{}".format(
-                bad_verdict["overall"],
-                bad_verdict.get("reason", "unexpected")), flush=True)
-        self.assertEqual(bad_verdict["overall"], "REGRESSION")
+        self.assertEqual(
+            runner.packed_placement_ab_verdict(
+                runner.parse_packed_placement_ab(broken))["overall"],
+            "REGRESSION")
 
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
