@@ -1165,8 +1165,8 @@ integration created no loaded packing evidence. Nonzero packing adoptions prove
 that adopted sub-2024 candidates crossed a uniform SWZ geometry boundary, but
 actual lower-I/O savings still require loaded physical WRITE bytes/requests or
 packing geometry to improve. Native planner coverage must include the exact
-1803 -> 1802-byte nine-record case: five blocks/two extents before the crossing
-and four blocks/one extent after it. Native corpus tables stay separately
+1803 -> 1802-byte nine-record case: five blocks/five one-block extents before the crossing (the existing
+lower-read tie-break) and four blocks/one extent after it. Native corpus tables stay separately
 labeled and cannot substitute for production counters.
 
 Counter attribution does not by itself establish a causal A/B for delta64 or

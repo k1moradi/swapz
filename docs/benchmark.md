@@ -68,8 +68,8 @@ the cliff. Production status additionally reports pack eligible/attempt/cliff/
 adopted counts and score bands 0-7, 8-15, 16-23 and 24+.
 
 Rootless planner acceptance includes a deliberately one-byte boundary: nine
-1803-byte records require five physical 4KiB blocks in two extents, while nine
-1802-byte records fit in one 16KiB extent. The owner run must still demonstrate
+1803-byte records require five physical 4KiB blocks in five one-block extents under the existing
+lower-read tie-break, while nine 1802-byte records fit in one 16KiB extent. The owner run must still demonstrate
 whether real windows see that opportunity and whether lower WRITE bytes/requests
 fall; cliff crossings alone are not a physical-I/O claim.
 

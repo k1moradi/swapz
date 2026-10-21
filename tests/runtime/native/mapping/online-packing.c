@@ -206,7 +206,9 @@ static int test_uniform_pack_cliff_reduces_physical_blocks(void)
 	CHECK(plan_default(pages, 9, classes, takes, &groups) == 0);
 	for (index = 0; index < groups; ++index)
 		blocks += classes[index];
-	CHECK(blocks == 5 && groups == 2);
+	/* Five blocks are byte-minimal at 1803. The existing read-cost
+	 * tie-breaker correctly prefers five one-block extents here. */
+	CHECK(blocks == 5 && groups == 5);
 
 	blocks = 0;
 	for (index = 0; index < 9; ++index)
