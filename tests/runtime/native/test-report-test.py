@@ -182,6 +182,14 @@ def timed_kernel_write(*, mode, target=8):
         "delta64_adopted": 3,
         "delta64_raw_rescues": 1,
         "delta64_lz4_rescues": 2,
+        "delta64_pack_eligible": 4,
+        "delta64_pack_attempts": 1,
+        "delta64_pack_cliff_crossings": 1,
+        "delta64_pack_adopted": 1,
+        "delta64_score_0_7": 2,
+        "delta64_score_8_15": 2,
+        "delta64_score_16_23": 2,
+        "delta64_score_ge24": 4,
         "delta64_raw_payload_bytes_saved": 1000,
         "delta64_lz4_payload_bytes_saved": 200,
         "delta64_payload_bytes_saved": 1200,
@@ -1074,6 +1082,10 @@ class ReportContract(unittest.TestCase):
             {"delta64_payload_bytes_saved": 1201},
             {"delta64_raw_payload_bytes_saved": 527, "delta64_payload_bytes_saved": 727},
             {"delta64_lz4_payload_bytes_saved": 7135, "delta64_payload_bytes_saved": 8135},
+            {"delta64_pack_attempts": 5}, {"delta64_pack_adopted": 2},
+            {"delta64_pack_cliff_crossings": 6},
+            {"delta64_score_0_7": 3},
+            {"delta64_score_ge24": 6},
             {"delta64_wall_ns": -1}, {"delta64_eligible": True},
         ]
         for invalid in invalid_records:
@@ -1130,6 +1142,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Sampled delta64 classifier", rendered)
         self.assertIn("Negative classifier profile breakdown", rendered)
         self.assertIn("delta64", rendered)
+        self.assertIn("pack eligible", rendered)
+        self.assertIn("score 0-7", rendered)
         self.assertIn("classifier=scalar", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)

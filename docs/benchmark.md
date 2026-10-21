@@ -58,6 +58,21 @@ cached-block payload-copy bytes. A source-level reduction in probes or memcpy
 traffic is not itself a performance claim: retain lower bytes/requests, useful
 throughput, p99, read-engine attribution and host-load evidence in the verdict.
 
+The Core-2/delta64 packing successor keeps that owner baseline and changes two
+measured mechanisms together. Metadata directory tags become 16-byte entries in
+aligned 64-byte four-way sets, with epoch invalidation instead of clearing 512
+valid bytes on normal mutations. Delta64 keeps threshold 24 for RAW/>2024-byte
+rescue, while <=2024-byte LZ4 pages may use threshold 16 only when the engine can
+name a lower 4/8/16KiB SWZ packing cliff; adoption on that path requires crossing
+the cliff. Production status additionally reports pack eligible/attempt/cliff/
+adopted counts and score bands 0-7, 8-15, 16-23 and 24+.
+
+Rootless planner acceptance includes a deliberately one-byte boundary: nine
+1803-byte records require five physical 4KiB blocks in two extents, while nine
+1802-byte records fit in one 16KiB extent. The owner run must still demonstrate
+whether real windows see that opportunity and whether lower WRITE bytes/requests
+fall; cliff crossings alone are not a physical-I/O claim.
+
 ### Maintained device settings
 
 Mandatory loaded benchmarking uses newly owned RAM-backed `null_blk` only:

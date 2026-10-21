@@ -186,6 +186,38 @@ static int test_finite_window_planner(void)
 	return 0;
 }
 
+static int test_uniform_pack_cliff_reduces_physical_blocks(void)
+{
+	struct swapz_compressed_page pages[9];
+	swapz_u8 classes[SWAPZ_MAX_RECORDS], takes[SWAPZ_MAX_RECORDS];
+	swapz_u8 groups = 0, index;
+	swapz_u32 blocks = 0;
+
+	prepare(pages, 9, 0, 0);
+	CHECK(swapz_engine_next_uniform_pack_limit(2072) == 2030);
+	CHECK(swapz_engine_next_uniform_pack_limit(2024) == 1802);
+	CHECK(swapz_engine_next_uniform_pack_limit(1500) == 1472);
+	CHECK(swapz_engine_next_uniform_pack_limit(568) == 566);
+	CHECK(swapz_engine_next_uniform_pack_limit(1) == 0);
+	CHECK(swapz_engine_next_uniform_pack_limit(3569) == 0);
+
+	for (index = 0; index < 9; ++index)
+		pages[index].length = 1803;
+	CHECK(plan_default(pages, 9, classes, takes, &groups) == 0);
+	for (index = 0; index < groups; ++index)
+		blocks += classes[index];
+	CHECK(blocks == 5 && groups == 2);
+
+	blocks = 0;
+	for (index = 0; index < 9; ++index)
+		pages[index].length = 1802;
+	CHECK(plan_default(pages, 9, classes, takes, &groups) == 0);
+	for (index = 0; index < groups; ++index)
+		blocks += classes[index];
+	CHECK(blocks == 4 && groups == 1 && classes[0] == 4 && takes[0] == 9);
+	return 0;
+}
+
 static int test_full_window_and_selective_reads(void)
 {
 	struct swapz_compressed_page pages[16];
@@ -253,8 +285,13 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	swapz_u16 length = 0;
 	swapz_u32 i;
 	swapz_u32 reads_before;
+	swapz_u32 epoch_before, epoch_after;
 
 	CHECK(setup() == 0);
+	CHECK(sizeof(struct swapz_read_metadata_tag) == 16);
+	CHECK(((uintptr_t)&engine.read_metadata_tags[0] & 63U) == 0);
+	CHECK((uintptr_t)&engine.read_metadata_tags[4] -
+	      (uintptr_t)&engine.read_metadata_tags[0] == 64);
 	memset(scratch_metadata_cache, 0, sizeof(scratch_metadata_cache));
 	engine.read_metadata_cache = scratch_metadata_cache;
 	engine.max_read_blocks_per_record = 1;
@@ -280,12 +317,17 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	      4U * engine.read_metadata_set_lookups);
 	CHECK(engine.read_metadata_copy_bytes == 2072);
 
-	/* The ordinary mutation fence clears residency. Re-reading after an
-	 * explicit invalidation must hit the lower device again. */
+	/* The ordinary mutation fence invalidates by epoch. Re-reading after it
+	 * must hit the lower device again without clearing the 512-tag directory. */
+	epoch_before = engine.read_metadata_epoch;
 	swapz_engine_invalidate_read_cache(&engine);
+	epoch_after = engine.read_metadata_epoch;
+	CHECK(epoch_before != 0 && epoch_after != epoch_before);
+	CHECK(engine.read_metadata_lru_clock == 0);
 	/* Repeated mutation fences on an already-empty metadata LRU are a
-	 * semantic no-op; the optimized invalidation skips redundant clearing. */
+	 * semantic no-op and must not churn the epoch. */
 	swapz_engine_invalidate_read_cache(&engine);
+	CHECK(engine.read_metadata_epoch == epoch_after);
 	reads_before = disk.read_blocks;
 	CHECK(swapz_engine_read_page(&engine, 0, output,
 				   sizeof(output), &length) == 0);
@@ -850,6 +892,7 @@ int main(void)
 	disk.storage = calloc(PHYSICAL_BLOCKS, SWAPZ_BLOCK_BYTES);
 	CHECK(disk.storage != NULL);
 	CHECK(test_finite_window_planner() == 0); completed++;
+	CHECK(test_uniform_pack_cliff_reduces_physical_blocks() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_metadata_set_cache_reuses_validated_block_zero() == 0); completed++;
 	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;

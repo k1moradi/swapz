@@ -1092,11 +1092,15 @@ runtime path.
 ### Core-2 metadata set cache and copy avoidance
 
 The metadata cache keeps exactly 512 immutable SWZ block-zero images, but its
-directory is 128 sets by four ways. Lookup and replacement may inspect at most
-four compact directory entries; a 512-entry fallback scan or separate direct
-front is not permitted. Replacement is local to the selected set and may trade
-global-LRU precision for bounded Core-2 L1/L2 work. Complete invalidation before
-authority mutation remains mandatory.
+directory is 128 sets by four ways. Each tag is exactly 16 bytes and each
+four-way set starts on a 64-byte boundary, so lookup and replacement touch one
+aligned tag cache line rather than independent start/age/extent/valid arrays.
+A 512-entry fallback scan or separate direct front is not permitted. Replacement
+is local to the selected set and may trade global-LRU precision for bounded
+Core-2 L1/L2 work. Complete invalidation before authority mutation remains
+mandatory, but normal mutation invalidation advances a directory epoch rather
+than clearing 512 validity entries. Epoch wrap may clear the directory before
+starting a new nonzero epoch.
 
 An ordinary metadata-cache hit parses and sequence-checks the cached block
 directly. It must not copy all 4096 bytes into read scratch merely to decode one
@@ -1108,14 +1112,17 @@ read-scratch residency unless all 4096 bytes are actually present there.
 
 Loaded qualification must report metadata set lookups, hits, probes,
 replacements and cached-block payload-copy bytes. Require hits <= lookups and
-lookups <= probes <= four * lookups. Compare the owner run against source
-5bdd040334ee's baseline rather than inferring a win from source structure alone.
-The unprivileged Make-interface fixture must emit the same five locality fields
-with internally consistent bounds so rootless qualification cannot bypass the
-loaded telemetry schema.
-Native replay fixtures must initialize these counters by field name rather than
-positional tuple order; adding telemetry must not silently shift unrelated
-coalescing or worker counters.
+lookups <= probes <= four * lookups. Native coverage must additionally prove
+sizeof(tag)==16, four adjacent ways occupy exactly 64 bytes, the tag directory
+starts on a 64-byte boundary, mutation advances the metadata epoch, and a second
+already-empty invalidation does not churn the epoch. Compare the owner run
+against source 5bdd040334ee's baseline rather than inferring a win from source
+structure alone. The unprivileged Make-interface fixture must emit the same five
+locality fields with internally consistent bounds so rootless qualification
+cannot bypass the loaded telemetry schema. Native replay fixtures must initialize
+these counters by field name rather than positional tuple order; adding telemetry
+must not silently shift unrelated coalescing or worker counters.
+
 No lower-I/O, cache-capacity, generation, CRC, selective-read or coalescing rule
 changes in this round. Predictor qualification continues to require SSE2
 transformed bytes and inverse reconstruction to match scalar exactly.
@@ -1125,33 +1132,50 @@ transformed bytes and inverse reconstruction to match scalar exactly.
 The delta64 transform unit is one 4KiB logical page, never a whole packed
 extent. Direct production-C coverage must prove ordinary LZ4 and delta64 records
 share the unchanged 16-byte SWZ record size, decode the encoding bit exactly,
-reject reserved header flags, and preserve payload CRC validation. Source
-contracts must prove the Device Mapper write path invokes the scalar classifier
-before the full transform, uses threshold 24 only for >2024-byte or RAW LZ4
-baselines, and rejects a delta64 candidate that is not smaller. The read path
-must LZ4-decompress a delta64 record into separate scratch and apply the selected
-inverse before upper copy. Full owner qualification is required because this
-changes default production representation and CPU work.
+reject reserved header flags, and preserve payload CRC validation.
 
-The next attribution increment is unqualified until the owner runs the sole
-official command. Capture every production `delta64_*` counter in drained,
-timed mixed and sustained-write snapshots. Missing fields are unavailable
-evidence, not zero activity. Require adopted <= attempts <= classifier passes
-<= eligible, adopted = RAW rescues + LZ4 rescues, and matching total/split
-payload-byte savings. Reject resets and impossible per-rescue savings.
-The console prints mixed-arm mean counts and payload savings with a legend and
-interpretation. Zero adoptions explicitly mean this interval offers no loaded
-delta64 savings evidence. Nonzero adoptions demonstrate use, not physical I/O
-savings or a speedup. Native corpus tables stay separately labeled and cannot
-substitute for these production counters.
+The production classifier now has two explicit paths. RAW or >2024-byte LZ4
+baselines keep threshold 24 and still require a strictly smaller delta64
+candidate. For an already-compressed baseline at or below 2024 bytes, the engine
+computes the next exact uniform-payload packing limit across 4/8/16KiB SWZ
+extents. Only pages with such a lower limit are packing-eligible; they may use
+threshold 16, and their candidate is adopted only when it is strictly smaller
+AND at or below that packing limit. The lower threshold therefore cannot adopt a
+candidate that merely saves bytes without crossing a records-per-extent
+geometry boundary. The read path must LZ4-decompress a delta64 record into
+separate scratch and apply the selected inverse before upper copy. Full owner
+qualification is required because this changes default production representation
+and CPU work.
 
-Counter attribution does not establish a causal A/B for delta64 or the metadata
-front index. That requires identical source/workload with one controlled toggle
-and comparable host load, plus independent lower I/O, useful throughput, p99 and
-worker CPU. Do not add an unreviewed toggle or change routing to manufacture a
-positive result. This telemetry increment preserves the existing production
-threshold, dispatch, K=1 and representation policy.
+Capture every production `delta64_*` counter in drained, timed mixed and
+sustained-write snapshots. Missing fields are unavailable evidence, not zero
+activity. Require adopted <= attempts <= classifier passes <= eligible; the four
+score bins 0-7, 8-15, 16-23 and 24+ must sum exactly to eligible; 24+ scores are
+a subset of classifier passes; packing-adopted <= packing-cliff-crossings <=
+attempts; packing-adopted <= packing-attempts <= packing-eligible <= eligible;
+packing-adopted <= LZ4 rescues; adopted = RAW rescues + LZ4 rescues; and
+total/split payload-byte savings must match. Reject resets and impossible
+per-rescue savings.
 
+The console prints mixed-arm general attempts, packing-path activity, score
+distribution and payload savings. Zero packing adoptions mean the new
+integration created no loaded packing evidence. Nonzero packing adoptions prove
+that adopted sub-2024 candidates crossed a uniform SWZ geometry boundary, but
+actual lower-I/O savings still require loaded physical WRITE bytes/requests or
+packing geometry to improve. Native planner coverage must include the exact
+1803 -> 1802-byte nine-record case: five blocks/two extents before the crossing
+and four blocks/one extent after it. Native corpus tables stay separately
+labeled and cannot substitute for production counters.
+
+Counter attribution does not by itself establish a causal A/B for delta64 or
+the metadata directory. The owner comparison must retain independent lower I/O,
+useful throughput, p99 and worker CPU evidence. For this round the explicit
+acceptance goal is narrower: preserve correctness and read tails, reduce
+metadata-directory/copy work on the Core-2 host, and show either actual lower
+WRITE bytes/requests or stronger packed-extent geometry when packing-path
+delta64 adoptions occur. If packing-adopted remains zero, use the score bands to
+choose the next classifier experiment rather than lowering the threshold
+blindly.
 
 ### Unversioned SWZ format identity
 

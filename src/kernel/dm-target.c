@@ -59,6 +59,9 @@
 #define SWAPZ_PREPARATION_STARTER_WAKE_MIN \
 	(SWAPZ_PREPARATION_TAIL_WAKE_MIN + 1U)
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
+/* Legacy 2024-byte two-record/4KiB boundary remains the split between the
+ * original rescue policy and the new packing-cliff path. */
+#define SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH 2024U
 
 /*
  * A separate bounded LZ4 producer may prepare future writes while the
@@ -94,6 +97,14 @@ struct swapz_delta64_stats {
 	u64 adopted;
 	u64 raw_rescues;
 	u64 lz4_rescues;
+	u64 pack_eligible;
+	u64 pack_attempts;
+	u64 pack_cliff_crossings;
+	u64 pack_adopted;
+	u64 score_0_7;
+	u64 score_8_15;
+	u64 score_16_23;
+	u64 score_ge24;
 	u64 payload_bytes_saved;
 	u64 raw_payload_bytes_saved;
 	u64 lz4_payload_bytes_saved;
@@ -1271,23 +1282,53 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 				 struct swapz_delta64_stats *stats)
 {
 	u64 section_start, rescue_start, saved;
+	swapz_u32 score, threshold = SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD;
+	swapz_u16 pack_target = 0;
 	int candidate, result = baseline_length;
+	bool pack_path = false;
 
 	if (!input || !baseline_output || !transform_scratch ||
 	    !candidate_output || !lz4_workmem || !lz4_wall_ns || !encoding ||
 	    !stats)
 		return baseline_length;
 	*encoding = SWAPZ_ENCODING_LZ4;
-	if (baseline_length > 0 &&
-	    baseline_length <= SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH)
-		return baseline_length;
+
+	/*
+	 * The old production gate ignored every already-compressed payload at
+	 * or below 2024 bytes. That protects CPU but also hides the smaller SWZ
+	 * packing cliffs in 8/16KiB extents. For those pages, compute the exact
+	 * next uniform-payload limit; if none exists within SWZ_MAX_RECORDS,
+	 * delta64 cannot improve this geometry and remains skipped.
+	 */
+	if (baseline_length > 0) {
+		pack_target = swapz_engine_next_uniform_pack_limit(
+			(swapz_u16)baseline_length);
+		if (baseline_length <= SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH) {
+			if (!pack_target)
+				return baseline_length;
+			pack_path = true;
+			threshold = SWAPZ_PREDICTOR_PACK_THRESHOLD;
+		}
+	}
 	stats->eligible++;
+	if (pack_path)
+		stats->pack_eligible++;
 	rescue_start = ktime_get_ns();
-	if (!swapz_predict_should_try_delta64(
-			input, SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD))
+	score = swapz_predict_delta64_sample_score(input);
+	if (score < 8U)
+		stats->score_0_7++;
+	else if (score < 16U)
+		stats->score_8_15++;
+	else if (score < SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD)
+		stats->score_16_23++;
+	else
+		stats->score_ge24++;
+	if (score < threshold)
 		goto out;
 	stats->classifier_pass++;
 	stats->attempts++;
+	if (pack_path)
+		stats->pack_attempts++;
 	if (swapz_predict_delta64(input, transform_scratch))
 		goto out;
 	section_start = ktime_get_ns();
@@ -1298,6 +1339,16 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	if (candidate <= 0 ||
 	    (baseline_length > 0 && candidate >= baseline_length))
 		goto out;
+	if (baseline_length > 0 && pack_target &&
+	    candidate <= (int)pack_target)
+		stats->pack_cliff_crossings++;
+	/*
+	 * For the new sub-2024 path, byte savings alone are not enough. Require
+	 * crossing the next exact SWZ packing cliff so any adopted candidate can
+	 * increase uniform records-per-extent in at least one 4/8/16KiB class.
+	 */
+	if (pack_path && candidate > (int)pack_target)
+		goto out;
 	if (candidate_output != baseline_output)
 		memcpy(baseline_output, candidate_output, (size_t)candidate);
 	*encoding = SWAPZ_ENCODING_DELTA64;
@@ -1305,6 +1356,8 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	saved = baseline_length > 0 ? (u64)baseline_length : SWAPZ_BLOCK_BYTES;
 	saved -= (u64)candidate;
 	stats->adopted++;
+	if (pack_path)
+		stats->pack_adopted++;
 	stats->payload_bytes_saved += saved;
 	if (baseline_length > 0) {
 		stats->lz4_rescues++;
@@ -5412,6 +5465,10 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		DMEMIT(" delta64_eligible=%llu delta64_classifier_pass=%llu "
 		       "delta64_attempts=%llu delta64_adopted=%llu "
 		       "delta64_raw_rescues=%llu delta64_lz4_rescues=%llu "
+		       "delta64_pack_eligible=%llu delta64_pack_attempts=%llu "
+		       "delta64_pack_cliff_crossings=%llu delta64_pack_adopted=%llu "
+		       "delta64_score_0_7=%llu delta64_score_8_15=%llu "
+		       "delta64_score_16_23=%llu delta64_score_ge24=%llu "
 		       "delta64_payload_bytes_saved=%llu "
 		       "delta64_raw_payload_bytes_saved=%llu "
 		       "delta64_lz4_payload_bytes_saved=%llu delta64_wall_ns=%llu",
@@ -5427,6 +5484,22 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 			READ_ONCE(ctx->preparation_delta64.raw_rescues),
 		       READ_ONCE(ctx->ordered_delta64.lz4_rescues) +
 			READ_ONCE(ctx->preparation_delta64.lz4_rescues),
+		       READ_ONCE(ctx->ordered_delta64.pack_eligible) +
+			READ_ONCE(ctx->preparation_delta64.pack_eligible),
+		       READ_ONCE(ctx->ordered_delta64.pack_attempts) +
+			READ_ONCE(ctx->preparation_delta64.pack_attempts),
+		       READ_ONCE(ctx->ordered_delta64.pack_cliff_crossings) +
+			READ_ONCE(ctx->preparation_delta64.pack_cliff_crossings),
+		       READ_ONCE(ctx->ordered_delta64.pack_adopted) +
+			READ_ONCE(ctx->preparation_delta64.pack_adopted),
+		       READ_ONCE(ctx->ordered_delta64.score_0_7) +
+			READ_ONCE(ctx->preparation_delta64.score_0_7),
+		       READ_ONCE(ctx->ordered_delta64.score_8_15) +
+			READ_ONCE(ctx->preparation_delta64.score_8_15),
+		       READ_ONCE(ctx->ordered_delta64.score_16_23) +
+			READ_ONCE(ctx->preparation_delta64.score_16_23),
+		       READ_ONCE(ctx->ordered_delta64.score_ge24) +
+			READ_ONCE(ctx->preparation_delta64.score_ge24),
 		       READ_ONCE(ctx->ordered_delta64.payload_bytes_saved) +
 			READ_ONCE(ctx->preparation_delta64.payload_bytes_saved),
 		       READ_ONCE(ctx->ordered_delta64.raw_payload_bytes_saved) +

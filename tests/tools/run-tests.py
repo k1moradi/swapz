@@ -203,6 +203,10 @@ SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
     "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues",
+    "delta64_pack_eligible", "delta64_pack_attempts",
+    "delta64_pack_cliff_crossings", "delta64_pack_adopted",
+    "delta64_score_0_7", "delta64_score_8_15",
+    "delta64_score_16_23", "delta64_score_ge24",
     "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
     "delta64_lz4_payload_bytes_saved", "delta64_wall_ns",
 )
@@ -527,6 +531,22 @@ def timed_window_error(record):
     if not (record["delta64_adopted"] <= record["delta64_attempts"] <=
             record["delta64_classifier_pass"] <= record["delta64_eligible"]):
         return "inconsistent timed delta64 attempt accounting"
+    if (sum(record[field] for field in (
+            "delta64_score_0_7", "delta64_score_8_15",
+            "delta64_score_16_23", "delta64_score_ge24")) !=
+            record["delta64_eligible"] or
+            record["delta64_score_ge24"] > record["delta64_classifier_pass"] or
+            record["delta64_classifier_pass"] >
+            record["delta64_score_ge24"] + record["delta64_score_16_23"]):
+        return "inconsistent timed delta64 score accounting"
+    if not (record["delta64_pack_adopted"] <=
+            record["delta64_pack_cliff_crossings"] <=
+            record["delta64_attempts"] and
+            record["delta64_pack_adopted"] <=
+            record["delta64_pack_attempts"] <=
+            record["delta64_pack_eligible"] <= record["delta64_eligible"] and
+            record["delta64_pack_adopted"] <= record["delta64_lz4_rescues"]):
+        return "inconsistent timed delta64 packing accounting"
     if (record["delta64_raw_rescues"] + record["delta64_lz4_rescues"] !=
             record["delta64_adopted"] or
             record["delta64_raw_payload_bytes_saved"] +
@@ -2936,6 +2956,18 @@ def print_bench(result):
             [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
                 "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
                 "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues")))
+             for mode in ("sync", "async")])
+        print_table(
+            ("mode", "pack eligible", "pack try", "cliff", "pack+"),
+            [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
+                "delta64_pack_eligible", "delta64_pack_attempts",
+                "delta64_pack_cliff_crossings", "delta64_pack_adopted")))
+             for mode in ("sync", "async")])
+        print_table(
+            ("mode", "score 0-7", "8-15", "16-23", "24+"),
+            [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
+                "delta64_score_0_7", "delta64_score_8_15",
+                "delta64_score_16_23", "delta64_score_ge24")))
              for mode in ("sync", "async")])
         print_table(
             ("mode", "payload KiB", "RAW+ KiB", "LZ4+ KiB", "rescue ms"),

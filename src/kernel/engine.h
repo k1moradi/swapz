@@ -33,6 +33,14 @@ struct swapz_io {
 			   swapz_u8 *destination);
 };
 
+struct swapz_read_metadata_tag {
+	swapz_u32 start_block;
+	swapz_u32 age;
+	swapz_u32 epoch;
+	swapz_u8 extent_blocks;
+	swapz_u8 reserved[3];
+};
+
 struct swapz_compressed_page {
 	swapz_u32 logical_page;
 	const swapz_u8 *payload;
@@ -151,10 +159,15 @@ struct swapz_engine {
 	 * global LRU ordering for bounded Core-2-friendly L1/L2 work.
 	 */
 	swapz_u8 *read_metadata_cache; /* entries * 4096 bytes */
-	swapz_u32 read_metadata_lru_start_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];
-	swapz_u32 read_metadata_lru_ages[SWAPZ_READ_METADATA_CACHE_ENTRIES];
-	swapz_u8 read_metadata_lru_extent_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];
-	swapz_u8 read_metadata_lru_valid[SWAPZ_READ_METADATA_CACHE_ENTRIES];
+	/*
+	 * Four 16-byte tags make one 64-byte set. Align the directory so one
+	 * four-way lookup/replacement is contained in one Core-2 cache line.
+	 * epoch makes normal mutation invalidation O(1); stale tags are ignored.
+	 */
+	struct swapz_read_metadata_tag
+		read_metadata_tags[SWAPZ_READ_METADATA_CACHE_ENTRIES]
+		__attribute__((aligned(64)));
+	swapz_u32 read_metadata_epoch;
 	swapz_u32 read_metadata_lru_clock;
 	swapz_u32 read_metadata_lru_hits;
 	unsigned long long read_metadata_set_lookups;
@@ -187,6 +200,9 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 			    swapz_u8 count, swapz_u8 max_read_blocks,
 			    swapz_u8 *classes, swapz_u8 *records_per_extent,
 			    swapz_u8 *extent_count);
+/* Largest lower uniform-payload threshold that can add one more record to a
+ * 4/8/16KiB SWZ extent. Zero means no useful lower cliff within 64 records. */
+swapz_u16 swapz_engine_next_uniform_pack_limit(swapz_u16 length);
 /*
  * Optional batched physically adjacent extent/raw writer. Stages multiple
  * logically independent records but publishes no mapping until ONE

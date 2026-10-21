@@ -12,7 +12,9 @@
 #define SWAPZ_PREDICTOR_SAMPLE_STRIDE_BYTES 128U
 #define SWAPZ_PREDICTOR_SAMPLE_PAIRS 32U
 #define SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD 24U
-#define SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH 2024U
+/* A lower score is allowed only for already-compressed pages when the
+ * candidate must cross the next exact SWZ packing cliff before adoption. */
+#define SWAPZ_PREDICTOR_PACK_THRESHOLD 16U
 
 #if __SIZEOF_LONG_LONG__ != 8
 #error "swapz delta64 predictor requires an exact 64-bit unsigned long long"

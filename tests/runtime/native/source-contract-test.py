@@ -254,12 +254,16 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertNotIn("&ctx->preparation_delta64", ordered)
         self.assertNotIn("atomic_", rescue)
         self.assertNotIn("spin_lock", rescue)
-        self.assertLess(rescue.index("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH"),
+        self.assertLess(rescue.index("swapz_engine_next_uniform_pack_limit"),
                         rescue.index("stats->eligible++"))
-        self.assertLess(rescue.index("swapz_predict_should_try_delta64"),
+        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", rescue)
+        self.assertLess(rescue.index("swapz_predict_delta64_sample_score"),
                         rescue.index("stats->classifier_pass++"))
         self.assertLess(rescue.index("stats->attempts++"),
                         rescue.index("swapz_predict_delta64(input"))
+        self.assertIn("candidate > (int)pack_target", rescue)
+        self.assertLess(rescue.index("candidate > (int)pack_target"),
+                        rescue.index("stats->adopted++"))
         self.assertLess(rescue.index("candidate >= baseline_length"),
                         rescue.index("stats->adopted++"))
         self.assertIn("(u64)baseline_length : SWAPZ_BLOCK_BYTES", rescue)
@@ -267,8 +271,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("stats->lz4_payload_bytes_saved += saved", rescue)
         self.assertIn("swapz_elapsed_ns(rescue_start, ktime_get_ns())", rescue)
         for field in ("eligible", "classifier_pass", "attempts", "adopted",
-                      "raw_rescues", "lz4_rescues", "payload_bytes_saved",
-                      "raw_payload_bytes_saved", "lz4_payload_bytes_saved", "wall_ns"):
+                      "raw_rescues", "lz4_rescues", "pack_eligible",
+                      "pack_attempts", "pack_cliff_crossings", "pack_adopted",
+                      "score_0_7", "score_8_15", "score_16_23", "score_ge24",
+                      "payload_bytes_saved", "raw_payload_bytes_saved",
+                      "lz4_payload_bytes_saved", "wall_ns"):
             self.assertIn(f"delta64_{field}=%llu", status)
             self.assertIn(f"READ_ONCE(ctx->ordered_delta64.{field})", status)
             self.assertIn(f"READ_ONCE(ctx->preparation_delta64.{field})", status)
@@ -359,13 +366,17 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("way < SWAPZ_READ_METADATA_CACHE_WAYS", lru_commit)
         self.assertNotIn("index < SWAPZ_READ_METADATA_CACHE_ENTRIES", lru_commit)
         self.assertIn("engine->read_metadata_set_replacements++", lru_commit)
-        self.assertIn("engine->read_metadata_lru_valid", engine)
+        self.assertIn("struct swapz_read_metadata_tag", header)
+        self.assertIn("read_metadata_tags[SWAPZ_READ_METADATA_CACHE_ENTRIES]", header)
+        self.assertIn("__attribute__((aligned(64)))", header)
+        self.assertIn("tag->epoch == engine->read_metadata_epoch", set_lookup)
+        self.assertIn("tag->age < oldest_age", lru_commit)
         self.assertIn("engine->read_metadata_cache +", engine)
-        self.assertIn("memset(engine->read_metadata_lru_valid, 0", engine)
+        self.assertNotIn("read_metadata_lru_valid", engine)
         invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
         self.assertIn("if (engine->read_metadata_lru_clock)", invalidate)
-        self.assertLess(invalidate.index("if (engine->read_metadata_lru_clock)"),
-                        invalidate.index("memset(engine->read_metadata_lru_valid, 0"))
+        self.assertIn("swapz_read_metadata_advance_epoch(engine)", invalidate)
+        self.assertNotIn("memset(", invalidate)
         self.assertIn("engine->read_cache_valid = 0", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(engine)", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(e)", engine)
@@ -1469,8 +1480,10 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_predictor_transform_backend_name()", qualification)
         self.assertIn("swapz_predictor_inverse_backend_name()", qualification)
         rescue = body("swapz_delta64_rescue")
-        self.assertIn("swapz_predict_should_try_delta64", rescue)
+        self.assertIn("swapz_predict_delta64_sample_score", rescue)
+        self.assertIn("swapz_engine_next_uniform_pack_limit", rescue)
         self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD", rescue)
+        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD", rescue)
         self.assertIn("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH", rescue)
         self.assertIn("swapz_predict_delta64", rescue)
         self.assertIn("candidate >= baseline_length", rescue)
@@ -1480,6 +1493,8 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         codec_header = (ROOT / "src/kernel/codec.h").read_text()
         authority_header = (ROOT / "src/kernel/authority.h").read_text()
         self.assertIn("SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD 24U",
+                      predictor_header)
+        self.assertIn("SWAPZ_PREDICTOR_PACK_THRESHOLD 16U",
                       predictor_header)
         self.assertIn("SWAPZ_RECORD_DELTA64_FLAG 0x8000U", codec_header)
         self.assertIn("SWAPZ_ENCODING_DELTA64 1U", codec_header)

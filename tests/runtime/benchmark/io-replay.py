@@ -946,6 +946,10 @@ WINDOW_INTERVAL_FIELDS = (
 DELTA64_FIELDS = (
     "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
     "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues",
+    "delta64_pack_eligible", "delta64_pack_attempts",
+    "delta64_pack_cliff_crossings", "delta64_pack_adopted",
+    "delta64_score_0_7", "delta64_score_8_15",
+    "delta64_score_16_23", "delta64_score_ge24",
     "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
     "delta64_lz4_payload_bytes_saved", "delta64_wall_ns",
 )
@@ -1007,6 +1011,22 @@ def kernel_write_delta(before, after):
     if not (counters["delta64_adopted"] <= counters["delta64_attempts"] <=
             counters["delta64_classifier_pass"] <= counters["delta64_eligible"]):
         raise ValueError("inconsistent swapz delta64 attempt accounting")
+    if (sum(counters[field] for field in (
+            "delta64_score_0_7", "delta64_score_8_15",
+            "delta64_score_16_23", "delta64_score_ge24")) !=
+            counters["delta64_eligible"] or
+            counters["delta64_score_ge24"] > counters["delta64_classifier_pass"] or
+            counters["delta64_classifier_pass"] >
+            counters["delta64_score_ge24"] + counters["delta64_score_16_23"]):
+        raise ValueError("inconsistent swapz delta64 score accounting")
+    if not (counters["delta64_pack_adopted"] <=
+            counters["delta64_pack_cliff_crossings"] <=
+            counters["delta64_attempts"] and
+            counters["delta64_pack_adopted"] <=
+            counters["delta64_pack_attempts"] <=
+            counters["delta64_pack_eligible"] <= counters["delta64_eligible"] and
+            counters["delta64_pack_adopted"] <= counters["delta64_lz4_rescues"]):
+        raise ValueError("inconsistent swapz delta64 packing accounting")
     if (counters["delta64_raw_rescues"] + counters["delta64_lz4_rescues"] !=
             counters["delta64_adopted"] or
             counters["delta64_raw_payload_bytes_saved"] +

@@ -428,12 +428,19 @@ class PairReplayContract(unittest.TestCase):
             "delta64_eligible": 10, "delta64_classifier_pass": 5,
             "delta64_attempts": 5, "delta64_adopted": 3,
             "delta64_raw_rescues": 1, "delta64_lz4_rescues": 2,
+            "delta64_pack_eligible": 4, "delta64_pack_attempts": 1,
+            "delta64_pack_cliff_crossings": 1, "delta64_pack_adopted": 1,
+            "delta64_score_0_7": 2, "delta64_score_8_15": 2,
+            "delta64_score_16_23": 2, "delta64_score_ge24": 4,
             "delta64_raw_payload_bytes_saved": 1000,
             "delta64_lz4_payload_bytes_saved": 200,
             "delta64_payload_bytes_saved": 1200, "delta64_wall_ns": 50000,
         })
         delta = module.kernel_write_delta(before, after)
         self.assertEqual(delta["delta64_adopted"], 3)
+        self.assertEqual(delta["delta64_pack_adopted"], 1)
+        self.assertEqual(delta["delta64_pack_cliff_crossings"], 1)
+        self.assertEqual(delta["delta64_score_16_23"], 2)
         self.assertEqual(delta["delta64_payload_bytes_saved"], 1200)
         for invalid in (
                 {"delta64_classifier_pass": 11},
@@ -448,7 +455,12 @@ class PairReplayContract(unittest.TestCase):
                 {"delta64_lz4_payload_bytes_saved": 1,
                  "delta64_payload_bytes_saved": 1001},
                 {"delta64_lz4_payload_bytes_saved": 7135,
-                 "delta64_payload_bytes_saved": 8135}):
+                 "delta64_payload_bytes_saved": 8135},
+                {"delta64_pack_attempts": 5},
+                {"delta64_pack_adopted": 2},
+                {"delta64_pack_cliff_crossings": 6},
+                {"delta64_score_0_7": 3},
+                {"delta64_score_ge24": 6}):
             with self.subTest(delta64=invalid), self.assertRaisesRegex(ValueError, "delta64"):
                 module.kernel_write_delta(before, dict(after, **invalid))
         # Missing fields must not silently become zero-use evidence.
