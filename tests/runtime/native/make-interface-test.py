@@ -30,14 +30,14 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("@+python3 -B tests/tools/run-tests.py --kdir", MAKE)
         reporter = (ROOT / "tests/tools/run-tests.py").read_text()
         for required in ("tests/tools/test-rootless.sh", "tests/tools/test-loaded.sh",
-                         "W=1", "W=2", "test_results.json.xz",
+                         "W=1", "W=2", "test_results.json",
                          "tested_commit_sha", "commit-tree", "mktree",
                          "GIT_TERMINAL_PROMPT", "SYNCED_GIT"):
             self.assertIn(required, reporter)
         self.assertNotIn("code_commit_sha", reporter)
         self.assertNotIn('"ls-remote"', reporter)
         self.assertNotIn('env["GIT_ASKPASS"] = "false"', reporter)
-        self.assertNotIn('REPORT = ROOT / "build/test_results.json.xz"', reporter)
+        self.assertNotIn('REPORT = ROOT / "build/test_results.json"', reporter)
         self.assertIn("build/tests/device-roundtrip: tests/tools/device-roundtrip.c", MAKE)
         self.assertIn("build/userspace/swapzctl: src/userspace/swapzctl.c "
                       "src/kernel/VERSION", MAKE)

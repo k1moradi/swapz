@@ -22,7 +22,8 @@ Normal artifacts live only under `build/`:
 - `build/tests/native/`: native production-C test executables.
 
 The one generated qualification artifact outside `build/` is the root
-`test_results.json.xz`. It is intentionally overwriteable and versioned so
+`test_results.json`. This is indented UTF-8 JSON, without compression. It is
+intentionally overwriteable and versioned so
 the latest completed PASS/FAIL/BLOCKED result is directly readable from
 GitHub; no second report copy is generated.
 
@@ -60,7 +61,7 @@ DKMS uses `AUTOINSTALL="no"`. Installation does not load the module, create a ma
 The standalone memory-only kernel smoke module and retired C++ model are intentionally absent. They were not shipped or part of the official qualification. Historical reproduction belongs in Git history, not a second current build path.
 
 
-The test runner keeps `test_results.json.xz` unchanged until all qualification
+The test runner keeps `test_results.json` unchanged until all qualification
 work has stopped. It then replaces that one file and publishes a report-only,
 nonforce, lease-checked commit directly to `main`. The parent is the exact
 tested revision; publication is refused if origin/main moved or unrelated
@@ -69,7 +70,7 @@ is advanced to the same report commit, so the operator does not accumulate a
 dirty report file or need a separate pull solely for generated evidence.
 
 
-Because the root `test_results.json.xz` is generated evidence, its local
+Because the root `test_results.json` is generated evidence, its local
 working-tree/index state is excluded from the privileged loaded-source
 cleanliness gate. No other tracked path is exempt. The report is atomically
 replaced only after qualification stops and publication then reconciles the

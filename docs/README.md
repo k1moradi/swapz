@@ -34,14 +34,20 @@ No legacy, recall, NBD, pressure, alternate-module, or historical-model subsyste
 The root Make interface is exactly `make`, `make install`, `make uninstall`, and `make test`. Installation never activates swap. The module remains limited to positively owned RAM-backed `null_blk` for current loaded qualification. Physical media, active system swap, reboot, `swapon`, `swapoff`, force removal, or unrelated block devices are not authorized.
 
 Every completed `make test` run replaces exactly one generated evidence file,
-root `test_results.json.xz`, with the latest sanitized PASS/FAIL/BLOCKED test
+root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
 and benchmark result and automatically publishes that file directly to
-`main`. Generated report-only commits are not new source revisions: the next
+`main`. The artifact is indented UTF-8 JSON, directly readable by GitHub and
+connected readers without decompression. Historical reports remain in Git
+history. Generated report-only commits are not new source revisions: the next
 run records the nearest non-report code ancestor as `tested_commit_sha` even
 when a report commit is at `HEAD`. Publication retries bounded transient
 push/fetch failures with backoff. A concurrent main advance is accepted only
 when it still descends from the exact tested source; report commits are always
 normal nonforce fast-forwards and never revert newer source bytes.
+
+Loaded reports include host CPU activity and waiting pressure alongside replay
+CPU use. These counters include Codex and other background work; they do not
+establish an idle host or make an idle historical run directly comparable.
 
 ## Current evidence
 
@@ -58,7 +64,12 @@ matrix with K=1 and the existing activation gates. Five matched fast-model
 sustained-write pairs measured async versus sync at QD4 +0.31% (95% CI
 [-5.12%,+5.73%]), QD8 +23.88% ([+16.67%,+31.09%]), and QD32 +22.04%
 ([+13.28%,+30.81%]). QD4's interval overlaps zero; QD8 and QD32 intervals
-exclude zero. In the fast mixed raw comparison, swapz delivered 22.48 versus
+exclude zero. QD32 also increased lower WRITE requests by 28.44% (CI
+[+17.12%,+39.76%]) and bytes by 0.59% ([+0.28%,+0.90%]); these are measured
+aggregation costs of the throughput gain. At QD8, requests fell 21.77% (CI
+[-23.99%,-19.56%]) while bytes rose 0.39% ([+0.26%,+0.53%]). Keep the current
+K=1 policy while collecting resource-pressure and QD32 attribution evidence.
+In the fast mixed raw comparison, swapz delivered 22.48 versus
 24.90 MB/s useful WRITE throughput, while lower WRITE bytes fell from 50.38
 to 34.62 MB and lower WRITE requests fell from 12,301 to about 781. This is a
 large physical-I/O reduction with about 9.7% lower useful throughput on this

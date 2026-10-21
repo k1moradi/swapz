@@ -10,6 +10,29 @@ Benchmark the one product, `swapz`, against an uncompressed `off` control using 
 
 A performance result is useful only when the final logical image is byte-exact and source/fixture/trace provenance matches. The north-star metrics are independent lower READ and WRITE bytes **and** requests for completed useful work, including GC and flush effects, with acceptable useful throughput, read p95/p99, CPU and RAM.
 
+## CPU and host-load context
+
+Codex, editors and other applications compete with the benchmark. Each timed
+mixed/write-only arm and each separate READ pass records boundary snapshots
+of host CPU ticks and CPU PSI waiting time, plus online/affinity CPU counts.
+The console shows host activity, CPU waiting, steal time and replay CPU cores
+for the mixed arms; individual write-QD and READ observations remain in the
+JSON. Sampling runs outside the throughput stopwatch, without an extra polling
+thread. Its boundary span is reported separately, and short or unsupported
+observations are explicitly unavailable.
+
+Host activity includes both useful benchmark/kernel work and background work.
+CPU PSI indicates that runnable work waited for CPU, without attributing the
+delay to an application. Neither metric establishes an idle host. Use the
+paired results with these limits; background load can still vary within a
+pair. Comparing an earlier idle run with a Codex-active run cannot establish
+a code speedup/regression. Native/offline CPU timings have the same background
+load caveat. No numerical correction is applied to throughput.
+
+The kernel documents [CPU ticks](https://docs.kernel.org/filesystems/proc.html)
+and [PSI waiting totals](https://docs.kernel.org/accounting/psi.html); the
+report uses interval deltas, rather than the PSI rolling averages.
+
 ## Current synthetic models
 
 Mandatory loaded benchmarking uses newly owned RAM-backed `null_blk` only:
@@ -30,7 +53,14 @@ positively owned RAM-backed devices. Fast-model async/sync WRITE throughput
 was +0.31% at QD4 (paired 95% CI [-5.12%,+5.73%]), +23.88% at QD8
 ([+16.67%,+31.09%]) and +22.04% at QD32 ([+13.28%,+30.81%]). The existing
 activation gates and K=1 ownership remain unchanged. QD4 is inconclusive;
-QD8 and QD32 intervals exclude zero.
+QD8 and QD32 throughput intervals exclude zero. QD32 also increased lower WRITE
+requests by 28.44% (CI [+17.12%,+39.76%]) and bytes by 0.59%
+([+0.28%,+0.90%]); this is a measured throughput/aggregation tradeoff. QD8
+reduced requests by 21.77% (CI [-23.99%,-19.56%]) while bytes rose 0.39%
+([+0.26%,+0.53%]). Preserve the current K=1 scheduling policy; use the existing
+matched per-session window and close-cause data to attribute QD32 request
+inflation before proposing an active repair. Low-RAM/heavy-CPU qualification
+and realistic churn evidence precede a decision on asynchronous TRIM.
 
 In the fast mixed raw comparison, useful WRITE throughput was 22.48 versus
 24.90 MB/s. Lower WRITE bytes fell from 50.38 to 34.62 MB, and lower WRITE
@@ -578,7 +608,7 @@ retention rule, mapping publication rule, read policy or GC policy is added.
 New attribution measures producer LZ4 time wholly contained in lower-WRITE
 waits, actual ordered completion-wait time, and accepted-wave kicks. The dead
 `ordered_worker_busy` state is removed. Human output is condensed into narrow
-tables while the complete telemetry remains in `build/test_results.json.xz`;
+tables while the complete telemetry remains in root `test_results.json`;
 sync remains a compact scheduling control rather than a verbose report arm.
 
 Acceptance requires QD1 to retain zero producer claims, QD4/QD8 producer

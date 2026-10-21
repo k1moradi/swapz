@@ -60,7 +60,7 @@ The console report is a compact operator summary. It keeps raw and synchronous
 throughput controls because they isolate compression and asynchronous scheduling
 effects, but suppresses repetitive per-control diagnostics. Detailed cache,
 window and counter evidence remains in the single replace-in-place
-root `test_results.json.xz` report.
+root `test_results.json` report.
 
 Every console table printed by the official `make test` reporter must be an
 unindented GitHub-Flavored Markdown pipe table. Header-separator cells contain
@@ -75,6 +75,23 @@ under 96 columns so captured stdout stays copy/pasteable and readable.
 Legends must distinguish a ratio from its percentage change. READ rates and
 latencies from the mixed interval must be labeled as mixed-load observations;
 only the separately measured `packed_read` passes describe the 4MiB read phase.
+
+Background work, including Codex and editors, is part of the host's load.
+Collect `/proc/stat` and CPU PSI `some total` snapshots around each mixed,
+write-only and fixed-volume READ phase. Report online/affinity CPU counts,
+active and steal fractions, PSI waiting fraction and replay-process CPU usage.
+Snapshot reads occur outside the throughput stopwatch; their own boundary span
+is recorded. No additional polling worker is required. Missing, reset or
+unavailable counters must appear as unavailable, never zero. Whole-host active
+time includes benchmark/kernel work and does not attribute cost to Codex.
+
+No report from this matrix establishes an idle-host control. Counterbalanced
+pairs limit ordering bias but cannot remove time-varying background load.
+Earlier idle-host runs and runs with Codex active are different conditions;
+do not pool them or attribute their differences to code without equivalent
+resource conditions. Do not subtract estimated application CPU from measured
+throughput. Host metrics also do not replace the independent low-RAM/heavy-CPU
+release gate.
 
 Loaded qualification of the default-on preparation path must read the target's
 status after every bare module load and fail unless `async_prepare=1`, including
@@ -99,7 +116,11 @@ behavior or endurance.
 Five matched fast sustained-write pairs showed async/sync QD4 +0.31% (95% CI
 [-5.12%,+5.73%]), QD8 +23.88% ([+16.67%,+31.09%]), and QD32 +22.04%
 ([+13.28%,+30.81%]). The QD4 interval overlaps zero; QD8 and QD32 intervals
-exclude zero. In the fast mixed raw comparison, useful WRITE throughput was
+exclude zero. QD32 also increased lower WRITE requests by 28.44% (CI
+[+17.12%,+39.76%]) and bytes by 0.59% ([+0.28%,+0.90%]); the throughput gain
+does not qualify request efficiency. At QD8, requests fell 21.77% (CI
+[-23.99%,-19.56%]) while bytes rose 0.39% ([+0.26%,+0.53%]).
+In the fast mixed raw comparison, useful WRITE throughput was
 22.48 versus 24.90 MB/s, while lower WRITE bytes fell from 50.38 to 34.62 MB
 and requests fell from 12,301 to about 781. This shows much lower physical
 WRITE traffic with about 9.7% lower useful throughput on this synthetic fast
@@ -228,8 +249,9 @@ worker immediately, while retention-off ordinary writes retain zero-delay
 single-instance queueing.
 
 
-The canonical report is the single root file `test_results.json.xz`. The
-runner keeps it unchanged while qualification is executing so loaded safety
+The canonical report is the single root file `test_results.json`, written as
+indented UTF-8 JSON so GitHub and connected readers can inspect it directly.
+The runner keeps it unchanged while qualification is executing so loaded safety
 checks still see a clean tested tree. At the end of every completed PASS, FAIL,
 or BLOCKED run it atomically replaces that file with the sanitized stage,
 failure-phase/diagnostic, lifecycle and benchmark result for the exact
@@ -238,7 +260,7 @@ failure-phase/diagnostic, lifecycle and benchmark result for the exact
 After writing the file, `make test` automatically publishes only that report
 to `main` using Git plumbing. `tested_commit_sha` names the nearest
 non-report code revision; generated report-only ancestors modify only
-`test_results.json.xz` and do not become new code revisions. Source revision
+`test_results.json` and do not become new code revisions. Source revision
 normalization has no fixed report-chain depth, so repeated qualifications of
 unchanged code cannot eventually turn a report-only commit into tested source.
 The report is built on the actual current main head so report-on-report updates
@@ -612,7 +634,7 @@ is attempted. Rewritten/diverged history or exhausted retries fail closed.
 
 ### Generated report versus tracked source cleanliness
 
-`test_results.json.xz` is the one generated overwriteable evidence file and is
+`test_results.json` is the one generated overwriteable evidence file and is
 not tested source. Privileged loaded qualification therefore excludes only that
 exact root path from its tracked/staged source-cleanliness check. This permits a
 previous local report to remain until the current run finishes, including after

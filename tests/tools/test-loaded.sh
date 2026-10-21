@@ -25,7 +25,7 @@ tested_source="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
 [[ "$tested_source" =~ ^[0-9a-f]{40}$ ]] ||
     { printf '%s\n' 'BLOCKED: invalid tested source revision' >&2; exit 2; }
 git merge-base --is-ancestor "$tested_source" HEAD >/dev/null 2>&1 &&
-    git diff --quiet "$tested_source..HEAD" -- . ':(exclude)test_results.json.xz' ||
+    git diff --quiet "$tested_source..HEAD" -- . ':(exclude)test_results.json' ||
     { printf '%s\n' 'BLOCKED: tested source does not match checkout code' >&2; exit 2; }
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'

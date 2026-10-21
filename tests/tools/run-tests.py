@@ -2,7 +2,6 @@
 """Private make test runner: one bounded, replace-in-place, sanitized report."""
 import argparse
 import json
-import lzma
 import math
 import os
 import re
@@ -14,8 +13,11 @@ import textwrap
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-GIT_RESULT = "test_results.json.xz"
+GIT_RESULT = "test_results.json"
 REPORT = ROOT / GIT_RESULT
+HOST_CPU_INT_FIELDS = ("wall_ns", "online_cpus", "affinity_cpus", "tick_hz")
+HOST_CPU_FLOAT_FIELDS = ("busy_fraction", "steal_fraction", "pressure_some_fraction")
+HOST_CPU_FIELDS = HOST_CPU_INT_FIELDS + HOST_CPU_FLOAT_FIELDS
 REPO = "k1moradi/swapz"
 COLUMNS = ("off", "sync", "async")
 # Cap values are kernel null_blk MiB/s units; request delay is nanoseconds.
@@ -603,6 +605,28 @@ def timed_window_error(record):
     return None
 
 
+def host_cpu_record(obj):
+    """Keep only aggregate host CPU telemetry, never process names or paths."""
+    raw = obj.get("host_cpu")
+    if not isinstance(raw, dict):
+        return {"status": "NOT_COLLECTED"}
+    if raw.get("status") in ("UNAVAILABLE", "NOT_COLLECTED"):
+        return {"status": raw["status"]}
+    if raw.get("status") not in ("AVAILABLE", "PARTIAL"):
+        return {"status": "INVALID"}
+    if any(type(raw.get(key)) is not int or raw[key] <= 0
+           for key in HOST_CPU_INT_FIELDS):
+        return {"status": "INVALID"}
+    for key in HOST_CPU_FLOAT_FIELDS:
+        value = raw.get(key)
+        if value is None and key == "pressure_some_fraction" and raw["status"] == "PARTIAL":
+            continue
+        if (type(value) not in (int, float) or not math.isfinite(value) or
+                not 0 <= value <= 1):
+            return {"status": "INVALID"}
+    return {"status": raw["status"], **{key: raw.get(key) for key in HOST_CPU_FIELDS}}
+
+
 def lower_inflight_error(record):
     if not isinstance(record, dict):
         return "missing lower in-flight telemetry"
@@ -889,9 +913,9 @@ def write_report(result):
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(result, sort_keys=True, indent=2,
                          allow_nan=False).encode("utf-8") + b"\n"
-    temporary = REPORT.with_name(".test_results.json.xz.tmp")
+    temporary = REPORT.with_name(".test_results.json.tmp")
     try:
-        with lzma.open(temporary, "wb", preset=6) as out:
+        with temporary.open("wb") as out:
             out.write(payload)
         os.replace(temporary, REPORT)
     finally:
@@ -1241,6 +1265,7 @@ def parse_sessions(output):
                     "mixed_replay_cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                     "mixed_replay_peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
                     "lower_inflight": lower_inflight_record(obj),
+                    "host_cpu": host_cpu_record(obj),
                     "workload_opportunity": workload_opportunity_record(obj),
                     "kernel_write_path": obj.get("kernel_write_path"),
                     "packed_read": None,
@@ -1258,6 +1283,7 @@ def parse_sessions(output):
                             "seconds": phase.get("seconds"),
                             "useful_read_mbps": phase.get("useful_read_mbps"),
                             "read_p99_ms": phase.get("read_p99_ms"),
+                            "host_cpu": host_cpu_record(phase),
                             "lower_read_bytes": lower_read.get("lower_read_bytes"),
                             "lower_read_requests": lower_read.get("lower_read_requests"),
                             "kernel_read_path": phase.get("kernel_read_path"),
@@ -1329,6 +1355,7 @@ def parse_read_coalesce_ab(output):
                     "verified_image_sha256": phase.get("verified_image_sha256"),
                     "useful_read_mbps": phase.get("useful_read_mbps"),
                     "read_p99_ms": phase.get("read_p99_ms"),
+                    "host_cpu": host_cpu_record(phase),
                     "lower_read_bytes": lower.get("lower_read_bytes"),
                     "lower_read_requests": lower.get("lower_read_requests"),
                     "kernel_read_path": phase.get("kernel_read_path"),
@@ -1545,6 +1572,7 @@ def _parse_sd_read_toggle_ab(output, start_marker, pass_marker, field):
                     "verified_image_sha256": phase.get("verified_image_sha256"),
                     "useful_read_mbps": phase.get("useful_read_mbps"),
                     "read_p99_ms": phase.get("read_p99_ms"),
+                    "host_cpu": host_cpu_record(phase),
                     "lower_read_bytes": lower.get("lower_read_bytes"),
                     "lower_read_requests": lower.get("lower_read_requests"),
                     "kernel_read_path": phase.get("kernel_read_path"),
@@ -1779,6 +1807,7 @@ def parse_write_saturation(output):
                 "cpu_system_s": obj.get("mixed_replay_cpu_system_s"),
                 "peak_rss_kb": obj.get("mixed_replay_peak_rss_kb"),
                 "lower_inflight": lower_inflight_record(obj),
+                "host_cpu": host_cpu_record(obj),
                 "kernel_write_path": obj.get("kernel_write_path"),
             }
             for field in ("source_sha", "fixture_sha256", "trace_sha256"):
@@ -2091,6 +2120,15 @@ def benchmark_verdicts(sessions):
                 "mixed_replay_peak_rss_kb", "seconds")
         for name, rows_for_arm in arms.items():
             columns[name] = {key: mean(rows_for_arm, key) for key in keys}
+            host_records = [host_cpu_record(arm) for arm in rows_for_arm]
+            columns[name]["host_cpu"] = {
+                **{key: mean(host_records, key) for key in HOST_CPU_FIELDS},
+                "observations": sum(record.get("status") in ("AVAILABLE", "PARTIAL")
+                                    for record in host_records),
+                "expected_observations": len(rows_for_arm),
+                "pressure_observations": sum(record.get("pressure_some_fraction") is not None
+                                             for record in host_records),
+            }
             input_bytes = mean(rows_for_arm, "logical_write_bytes")
             backing_bytes = columns[name]["lower_write_bytes"]
             columns[name]["write_input_per_lower_byte"] = (
@@ -2346,6 +2384,9 @@ def benchmark_verdicts(sessions):
             "bound that can miss short current slices; separately reported "
             "non-sleeping phase floors are the trusted in-callback evidence",
         "physical_media": "NOT_TESTED",
+        "host_load_scope": "WHOLE_HOST_INCLUDING_BENCHMARK_AND_BACKGROUND",
+        "idle_host_control": "NOT_ESTABLISHED",
+        "cross_report_cpu_comparability": "REQUIRES_EQUIVALENT_HOST_LOAD",
         "workload_opportunity": workload_opportunity,
         "statistical_confidence":
             "FAST_MIXED_FIVE_MATCHED_PAIRS_WITH_PAIRED_95PCT_CI; "
@@ -2405,6 +2446,12 @@ TABLE_HEADER_LEGEND = {
     "W req": "backing-device WRITE request count",
     "R": "useful logical READ throughput in decimal MB/s",
     "R p99": "READ 99th-percentile latency in milliseconds",
+    "host busy %": "active CPU ticks as a percentage of all online-CPU ticks",
+    "CPU wait %": "wall-time percentage with CPU-waiting tasks from PSI some",
+    "steal %": "online-CPU time unavailable to a virtual guest",
+    "replay cores": "replay user plus system CPU seconds per measured second",
+    "CPUs": "online CPUs / replay affinity CPUs",
+    "CPU n": "phases with CPU counters / phases expected; missing values are N/A",
     "read": "READ workload or access pattern",
     "lower KiB": "backing-device READ data in KiB",
     "lower": "lower-device I/O wall time in milliseconds",
@@ -2503,6 +2550,10 @@ def _print_table_note(label, message):
 def _table_interpretation(headers, rows):
     """Summarize table data without turning descriptive rows into a verdict."""
     header_index = {str(header): index for index, header in enumerate(headers)}
+    if "host busy %" in header_index:
+        return ("Host activity includes the benchmark, kernel workers and background apps. "
+                "PSI measures CPU waiting, not its owner. These observations do not prove "
+                "an idle host or equivalent load across reports; no throughput correction is applied.")
 
     # Paired confidence-interval tables can make a directional statement only
     # when the full interval excludes zero.
@@ -2796,6 +2847,29 @@ def print_bench(result):
                  f"{columns[mode]['swap_in_read_p99_ms']:.2f}")
                 for mode in COLUMNS
             ])
+
+        print("  Host CPU during mixed I/O — phase-boundary counters; background load included")
+        cpu_rows = []
+        def cpu_number(value, scale=1):
+            return "N/A" if value is None else f"{value * scale:.1f}"
+        for mode in COLUMNS:
+            arm = columns[mode]
+            host = arm["host_cpu"]
+            replay_user = arm["mixed_replay_cpu_user_s"]
+            replay_system = arm["mixed_replay_cpu_system_s"]
+            replay_cores = ((replay_user + replay_system) / arm["seconds"]
+                            if replay_user is not None and replay_system is not None
+                            and arm["seconds"] else None)
+            cpus = (f"{host['online_cpus']:g}/{host['affinity_cpus']:g}"
+                    if host["online_cpus"] is not None and host["affinity_cpus"] is not None
+                    else "N/A")
+            cpu_rows.append((mode, cpu_number(host["busy_fraction"], 100),
+                             cpu_number(host["pressure_some_fraction"], 100),
+                             cpu_number(host["steal_fraction"], 100),
+                             cpu_number(replay_cores), cpus,
+                             f"{host['observations']}/{host['expected_observations']}"))
+        print_table(("mode", "host busy %", "CPU wait %", "steal %",
+                     "replay cores", "CPUs", "CPU n"), cpu_rows)
 
         print("  Verified 4MiB packed reads — detailed cache counters remain in JSON.")
         read_rows = []
@@ -3301,9 +3375,10 @@ def print_bench(result):
             ("zero-tail shrink", "retired; compatibility fields stay fixed at zero"),
             ("write-only QD", "five pairs at fast QD4/8/32; QD1 is directional"),
             ("CPU", "scheduler time is a lower bound; phase floors are separate"),
+            ("host load", "background apps included; idle-host control not established"),
             ("4MiB READ", "RAM-backed; not a cold physical swap-in"),
             ("GC", "RAM exercise only; physical wear is unproven"),
-            ("Full telemetry", "test_results.json.xz"),
+            ("Full telemetry", "test_results.json"),
         ])
 
     saturation = result["benchmarks"].get("write_saturation", {})
@@ -3422,13 +3497,14 @@ def publish(source_sha):
         return "SKIPPED_GIT_SYNC: canonical report missing"
 
     try:
-        with lzma.open(REPORT, "rt", encoding="utf-8") as stream:
+        with REPORT.open("rt", encoding="utf-8") as stream:
             contents = json.load(stream)
-        if contents.get("tested_commit_sha") != source_sha or \
+        if not isinstance(contents, dict) or \
+                contents.get("tested_commit_sha") != source_sha or \
                 contents.get("source_sha") != source_sha:
             return "SKIPPED_GIT_SYNC: report does not match tested Git commit"
-    except (OSError, ValueError, lzma.LZMAError):
-        return "SKIPPED_GIT_SYNC: compressed report is unreadable"
+    except (OSError, ValueError):
+        return "SKIPPED_GIT_SYNC: JSON report is unreadable"
 
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"

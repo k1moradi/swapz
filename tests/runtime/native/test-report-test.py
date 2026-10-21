@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Rootless contract tests for the sole make test JSON/XZ reporting pipeline."""
+"""Rootless contract tests for the sole make test plain JSON reporting pipeline."""
 import contextlib
 import importlib.util
 import io
 import json
-import lzma
 from pathlib import Path
 import tempfile
 import unittest
@@ -572,6 +571,22 @@ def synthetic_log():
 
 
 class ReportContract(unittest.TestCase):
+    def test_host_cpu_record_keeps_aggregate_counters_and_missing_status(self):
+        raw = {"status": "AVAILABLE", "wall_ns": 1000000000,
+               "online_cpus": 4, "affinity_cpus": 2, "tick_hz": 100,
+               "busy_fraction": .7, "steal_fraction": 0.,
+               "pressure_some_fraction": .25, "processes": "SECRET"}
+        observed = runner.host_cpu_record({"host_cpu": raw})
+        self.assertNotIn("SECRET", json.dumps(observed))
+        self.assertEqual(observed["busy_fraction"], .7)
+        self.assertEqual(runner.host_cpu_record({}), {"status": "NOT_COLLECTED"})
+        self.assertEqual(runner.host_cpu_record({"host_cpu": {
+            **raw, "busy_fraction": float("nan")}}), {"status": "INVALID"})
+        partial = runner.host_cpu_record({"host_cpu": {
+            **raw, "status": "PARTIAL", "pressure_some_fraction": None}})
+        self.assertEqual(partial["status"], "PARTIAL")
+        self.assertIsNone(partial["pressure_some_fraction"])
+
     def test_unsupported_owned_storage_delay_tuples_fail_before_privilege(self):
         """Reject arbitrary timer or cap input BEFORE touching host devices."""
         import subprocess
@@ -1133,7 +1148,7 @@ class ReportContract(unittest.TestCase):
         self.assertIn("Async preparation", rendered)
         self.assertIn("Async windows; close=P/D/I", rendered)
         self.assertIn("Full telemetry", rendered)
-        self.assertIn("test_results.json.xz", rendered)
+        self.assertIn("test_results.json", rendered)
         self.assertIn("Async useful WRITE throughput is", rendered)
         self.assertIn("95% intervals", rendered)
         self.assertIn("overlap zero for", rendered)
@@ -1285,7 +1300,7 @@ class ReportContract(unittest.TestCase):
             original_root, original_report = runner.ROOT, runner.REPORT
             try:
                 runner.ROOT = Path(name)
-                runner.REPORT = runner.ROOT / "test_results.json.xz"
+                runner.REPORT = runner.ROOT / "test_results.json"
                 report = {"schema": "swapz-test-results-v1", "stages": [],
                           "benchmarks": {"sessions": [], "verdicts": {}}}
                 fake = ["python3", "-c",
@@ -1298,14 +1313,15 @@ class ReportContract(unittest.TestCase):
                 path = runner.REPORT
                 self.assertFalse(path.exists())
                 runner.write_report(report)
-                first = lzma.open(path, "rt").read()
+                first = path.read_text(encoding="utf-8")
                 self.assertNotIn("SECRET", first)
                 report["overall"] = "FAIL"
                 runner.write_report(report)
-                second = json.loads(lzma.open(path, "rt").read())
+                second = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(second["overall"], "FAIL")
-                self.assertEqual(len(list(runner.ROOT.glob("*.xz"))), 1)
-                self.assertEqual(path.name, "test_results.json.xz")
+                self.assertEqual({item.name for item in runner.ROOT.iterdir()},
+                                 {runner.GIT_RESULT})
+                self.assertEqual(path.name, "test_results.json")
             finally:
                 runner.ROOT, runner.REPORT = original_root, original_report
 
@@ -1348,7 +1364,7 @@ class ReportContract(unittest.TestCase):
             original_root, original_report = runner.ROOT, runner.REPORT
             try:
                 runner.ROOT = Path(name)
-                runner.REPORT = runner.ROOT / "test_results.json.xz"
+                runner.REPORT = runner.ROOT / "test_results.json"
                 report = {"schema": "swapz-test-results-v1", "stages": [],
                           "benchmarks": {"sessions": [], "verdicts": {}}}
                 rootless = [
@@ -1522,8 +1538,8 @@ class ReportContract(unittest.TestCase):
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
             (checkout / "source.c").write_text("int source(void){return 7;}\n")
-            (checkout / runner.GIT_RESULT).write_bytes(
-                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            (checkout / runner.GIT_RESULT).write_text(
+                '{"overall":"NOT_RUN"}\n', encoding="utf-8")
             git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
             git("commit", "-m", "Testable source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
@@ -1566,8 +1582,8 @@ class ReportContract(unittest.TestCase):
                     self.assertEqual(git("status", "--porcelain",
                                          cwd=checkout).stdout, "")
                     self.assertEqual(
-                        json.loads(lzma.decompress(
-                            (checkout / runner.GIT_RESULT).read_bytes())),
+                        json.loads((checkout / runner.GIT_RESULT).read_text(
+                            encoding="utf-8")),
                         original)
 
                     self.assertEqual(runner.git_sha(), source_sha)
@@ -1583,10 +1599,10 @@ class ReportContract(unittest.TestCase):
                             "refs/heads/main", cwd=sandbox).stdout.strip(),
                         second_head)
                     self.assertEqual(
-                        json.loads(lzma.decompress(
-                            (checkout / runner.GIT_RESULT).read_bytes())),
+                        json.loads((checkout / runner.GIT_RESULT).read_text(
+                            encoding="utf-8")),
                         updated)
-                    self.assertEqual(len(list(checkout.glob("*.xz"))), 1)
+                    self.assertEqual(len(list(checkout.glob("*.json"))), 1)
 
                     (checkout / "source.c").write_text("unsaved owner change\n")
                     blocked = dict(updated, overall="FAIL")
@@ -1618,15 +1634,15 @@ class ReportContract(unittest.TestCase):
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
             (checkout / "source.c").write_text("source\n")
-            (checkout / runner.GIT_RESULT).write_bytes(
-                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            (checkout / runner.GIT_RESULT).write_text(
+                '{"overall":"NOT_RUN"}\n', encoding="utf-8")
             git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
             git("commit", "-m", "Tested source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
 
             for index in range(40):
-                (checkout / runner.GIT_RESULT).write_bytes(lzma.compress(
-                    json.dumps({"run": index}).encode("utf-8")))
+                (checkout / runner.GIT_RESULT).write_text(
+                    json.dumps({"run": index}), encoding="utf-8")
                 git("add", runner.GIT_RESULT, cwd=checkout)
                 git("commit", "-m",
                     f"test: latest run for {source_sha[:12]} [skip ci]",
@@ -1660,8 +1676,8 @@ class ReportContract(unittest.TestCase):
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
             (checkout / "source.c").write_text("old source\n")
-            (checkout / runner.GIT_RESULT).write_bytes(
-                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            (checkout / runner.GIT_RESULT).write_text(
+                '{"overall":"NOT_RUN"}\n', encoding="utf-8")
             git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
             git("commit", "-m", "Tested source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
@@ -1716,8 +1732,8 @@ class ReportContract(unittest.TestCase):
                     self.assertEqual((checkout / "source.c").read_text(),
                                      "newer source\n")
                     self.assertEqual(
-                        json.loads(lzma.decompress(
-                            (checkout / runner.GIT_RESULT).read_bytes())),
+                        json.loads((checkout / runner.GIT_RESULT).read_text(
+                            encoding="utf-8")),
                         failed)
                     self.assertEqual(git("status", "--porcelain",
                                          cwd=checkout).stdout, "")
@@ -1744,8 +1760,8 @@ class ReportContract(unittest.TestCase):
             git("config", "user.name", "test-report CI", cwd=checkout)
             git("config", "user.email", "test@example.invalid", cwd=checkout)
             (checkout / "source.c").write_text("source\n")
-            (checkout / runner.GIT_RESULT).write_bytes(
-                lzma.compress(b'{"overall":"NOT_RUN"}\n'))
+            (checkout / runner.GIT_RESULT).write_text(
+                '{"overall":"NOT_RUN"}\n', encoding="utf-8")
             git("add", "source.c", runner.GIT_RESULT, cwd=checkout)
             git("commit", "-m", "Tested source", cwd=checkout)
             source_sha = git("rev-parse", "HEAD", cwd=checkout).stdout.strip()
@@ -1812,6 +1828,32 @@ class ReportContract(unittest.TestCase):
                 runner.write_report({"source_sha": "unknown",
                                      "overall": "BLOCKED"})
                 self.assertIn("unavailable", runner.publish("unknown"))
+            finally:
+                runner.ROOT, runner.REPORT = previous_root, previous_report
+
+    def test_git_sync_rejects_invalid_json_before_git_access(self):
+        from unittest import mock
+
+        source_sha = "a" * 40
+        invalid_reports = (
+            (b"{broken", "JSON report is unreadable"),
+            (b"\xff", "JSON report is unreadable"),
+            (b"[]", "does not match tested Git commit"),
+            (b"null", "does not match tested Git commit"),
+            (b'{"source_sha":"wrong"}', "does not match tested Git commit"),
+        )
+        with tempfile.TemporaryDirectory(
+                prefix="publish-json-", dir=ROOT / "build/tests") as name:
+            previous_root, previous_report = runner.ROOT, runner.REPORT
+            try:
+                runner.ROOT = Path(name)
+                runner.REPORT = runner.ROOT / runner.GIT_RESULT
+                with mock.patch.object(runner, "git_result") as git:
+                    for payload, reason in invalid_reports:
+                        with self.subTest(payload=payload):
+                            runner.REPORT.write_bytes(payload)
+                            self.assertIn(reason, runner.publish(source_sha))
+                    git.assert_not_called()
             finally:
                 runner.ROOT, runner.REPORT = previous_root, previous_report
 

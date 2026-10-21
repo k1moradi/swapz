@@ -2216,7 +2216,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
     def test_loaded_dirty_source_gate_ignores_only_canonical_report(self):
         deploy = (ROOT / "tests/tools/deploy-nullblk.sh").read_text()
         benchmark = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
-        pathspec = "' :(exclude)test_results.json.xz'".replace("' :", "':")
+        pathspec = "' :(exclude)test_results.json'".replace("' :", "':")
         for script in (deploy, benchmark):
             self.assertIn("export GIT_OPTIONAL_LOCKS=0", script)
             self.assertLess(script.index("export GIT_OPTIONAL_LOCKS=0"),

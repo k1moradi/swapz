@@ -448,6 +448,71 @@ def lower_stat(name):
     return values
 
 
+def host_cpu_snapshot():
+    """Read host counters at a phase boundary, without a polling worker.
+
+    These counters include replay, kernel workers and all background work.
+    They cannot identify the CPU cost of an individual application.
+    """
+    try:
+        fields = Path("/proc/stat").read_text(encoding="ascii").splitlines()[0].split()
+        if len(fields) < 9 or fields[0] != "cpu":
+            return None
+        # guest/guest_nice are already included in user/nice: use only the
+        # first eight counters, including idle, iowait and steal once.
+        ticks = tuple(int(value) for value in fields[1:9])
+        if any(value < 0 for value in ticks):
+            return None
+        online = os.sysconf("SC_NPROCESSORS_ONLN")
+        affinity = len(os.sched_getaffinity(0))
+        tick_hz = os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError):
+        return None
+    pressure = None
+    try:
+        text = Path("/proc/pressure/cpu").read_text(encoding="ascii")
+        match = re.search(r"^some .*\btotal=(\d+)(?:\s|$)", text, re.MULTILINE)
+        if match:
+            pressure = int(match.group(1))
+    except (OSError, ValueError):
+        pass
+    return {"ticks": ticks, "pressure_us": pressure,
+            "online_cpus": online, "affinity_cpus": affinity,
+            "tick_hz": tick_hz, "time_ns": time.monotonic_ns()}
+
+
+def host_cpu_delta(before, after):
+    """Describe the host around measurement, never infer an idle host."""
+    if not before or not after:
+        return {"status": "UNAVAILABLE"}
+    if any(before[key] != after[key] for key in
+           ("online_cpus", "affinity_cpus", "tick_hz")):
+        return {"status": "UNAVAILABLE"}
+    wall_ns = after["time_ns"] - before["time_ns"]
+    ticks = [end - start for start, end in zip(before["ticks"], after["ticks"])]
+    total = sum(ticks)
+    # Counter resets, CPU hotplug and decreasing iowait must not become
+    # invented zero utilization. Short phases may have no CPU clock tick.
+    if wall_ns <= 0 or total <= 0 or any(value < 0 for value in ticks):
+        return {"status": "UNAVAILABLE"}
+    pressure_fraction = None
+    if before["pressure_us"] is not None and after["pressure_us"] is not None:
+        fraction = ((after["pressure_us"] - before["pressure_us"]) *
+                    1000 / wall_ns)
+        if 0 <= fraction <= 1:
+            pressure_fraction = fraction
+    return {
+        "status": "AVAILABLE" if pressure_fraction is not None else "PARTIAL",
+        "wall_ns": wall_ns,
+        "online_cpus": after["online_cpus"],
+        "affinity_cpus": after["affinity_cpus"],
+        "tick_hz": after["tick_hz"],
+        "busy_fraction": sum(ticks[i] for i in (0, 1, 2, 5, 6)) / total,
+        "steal_fraction": ticks[7] / total,
+        "pressure_some_fraction": pressure_fraction,
+    }
+
+
 class LowerInflightSampler:
     """Sample the exact owned lower block device during the timed interval.
 
@@ -1090,6 +1155,7 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
             for mode, pages in orders.items():
                 kernel_before = kernel_read_snapshot(path, identity)
                 lower_before = lower_stat(identity.get("owned_disk"))
+                host_before = host_cpu_snapshot()
                 cpu_before = process_cpu()
                 start_ns = time.monotonic_ns()
                 durations = []
@@ -1102,6 +1168,7 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                 # and the digest/report calculation.
                 duration = (time.monotonic_ns() - start_ns) / 1e9
                 cpu_after = process_cpu()
+                host_after = host_cpu_snapshot()
                 lower_after = lower_stat(identity.get("owned_disk"))
                 kernel_after = kernel_read_snapshot(path, identity)
                 if duration <= 0 or len(durations) != logical_pages:
@@ -1119,6 +1186,7 @@ def measure_packed_swapin(fd, path, identity, chunks, logical_pages, qd):
                     "replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
                     "replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
                     "replay_peak_rss_kb": cpu_after[2],
+                    "host_cpu": host_cpu_delta(host_before, host_after),
                     "timed_scope": "QD32 read submission and completion; buffers and worker setup excluded",
                 }
     finally:
@@ -1211,6 +1279,8 @@ def replay(args):
             measured_end_ns = None
             cpu_before = None
             cpu_after = None
+            host_before = None
+            host_after = None
             before = None
             after = None
             kernel_write_before = None
@@ -1282,6 +1352,7 @@ def replay(args):
                         lower_inflight_sampler.start()
                         before = lower_stat(identity.get("owned_disk"))
                         kernel_write_before = kernel_write_snapshot(path, identity)
+                        host_before = host_cpu_snapshot()
                         cpu_before = process_cpu()
                         measured_start_ns = lower_inflight_sampler.begin()
                         try:
@@ -1298,6 +1369,7 @@ def replay(args):
                                 lower_inflight_sampler.start()
                                 before = lower_stat(identity.get("owned_disk"))
                                 kernel_write_before = kernel_write_snapshot(path, identity)
+                                host_before = host_cpu_snapshot()
                                 cpu_before = process_cpu()
                                 measured_start_ns = lower_inflight_sampler.begin()
                             if mf["iops"] and wave[0]["phase"] == "measure":
@@ -1318,6 +1390,7 @@ def replay(args):
                     os.fsync(fd)
                     measured_end_ns, lower_inflight = lower_inflight_sampler.finish()
                     cpu_after = process_cpu()
+                    host_after = host_cpu_snapshot()
                     after = lower_stat(identity.get("owned_disk"))
                     kernel_write_after = kernel_write_snapshot(path, identity)
             finally:
@@ -1376,6 +1449,7 @@ def replay(args):
         "mixed_replay_cpu_user_s": max(0., cpu_after[0] - cpu_before[0]),
         "mixed_replay_cpu_system_s": max(0., cpu_after[1] - cpu_before[1]),
         "mixed_replay_peak_rss_kb": cpu_after[2],
+        "host_cpu": host_cpu_delta(host_before, host_after),
         "cpu_scope": "replay process+threads only; kernel DM workers excluded",
         "mixed_timed_scope": (
             "persistent lane-owned write workers and required final fsync; "

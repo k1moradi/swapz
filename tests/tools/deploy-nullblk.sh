@@ -36,10 +36,10 @@ for cmd in git insmod rmmod modprobe dmsetup modinfo blockdev readlink \
 done
 [[ $(id -u) == 0 ]] || fail "sudo is required for isolated module loading"
 [[ $(git branch --show-current) == main ]] || fail "work only on main"
-# test_results.json.xz is the one generated, overwriteable evidence file.
+# test_results.json is the one generated, overwriteable evidence file.
 # It is not source and may contain the previous run until this run finishes.
-git diff --quiet -- . ':(exclude)test_results.json.xz' &&
-	git diff --cached --quiet -- . ':(exclude)test_results.json.xz' ||
+git diff --quiet -- . ':(exclude)test_results.json' &&
+	git diff --cached --quiet -- . ':(exclude)test_results.json' ||
 	fail "dirty tracked source: preserve and commit changes first"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
@@ -65,7 +65,7 @@ exec > >(tee -a "$SESSION/session.log") 2>&1
 SOURCE_HEAD="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
 [[ "$SOURCE_HEAD" =~ ^[0-9a-f]{40}$ ]] || fail "invalid tested source revision"
 git merge-base --is-ancestor "$SOURCE_HEAD" HEAD >/dev/null 2>&1 &&
-    git diff --quiet "$SOURCE_HEAD..HEAD" -- . ':(exclude)test_results.json.xz' ||
+    git diff --quiet "$SOURCE_HEAD..HEAD" -- . ':(exclude)test_results.json' ||
     fail "tested source does not match checkout code"
 note "SOURCE_HEAD=$SOURCE_HEAD"
 note "RUNNING_KERNEL=$(uname -r)"

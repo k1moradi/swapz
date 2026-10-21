@@ -168,8 +168,8 @@ done
 [[ $(git branch --show-current) == main ]] || fail "main only"
 # The canonical report is generated evidence, not tested source. Ignore only
 # that path; every other tracked/staged change still blocks loaded qualification.
-git diff --quiet -- . ':(exclude)test_results.json.xz' &&
-    git diff --cached --quiet -- . ':(exclude)test_results.json.xz' ||
+git diff --quiet -- . ':(exclude)test_results.json' &&
+    git diff --cached --quiet -- . ':(exclude)test_results.json' ||
     fail "dirty tracked sources"
 version="$(cat src/kernel/VERSION)"
 [[ "$version" =~ ^3[.]0[.]0-alpha[.][0-9]+$ ]] ||
@@ -198,7 +198,7 @@ SWAPS_ID="$(printf '%s
 SOURCE="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
 [[ "$SOURCE" =~ ^[0-9a-f]{40}$ ]] || fail "invalid tested source revision"
 git merge-base --is-ancestor "$SOURCE" HEAD >/dev/null 2>&1 &&
-    git diff --quiet "$SOURCE..HEAD" -- . ':(exclude)test_results.json.xz' ||
+    git diff --quiet "$SOURCE..HEAD" -- . ':(exclude)test_results.json' ||
     fail "tested source does not match checkout code"
 note "SOURCE_HEAD=$SOURCE MODULE_SHA256=$(sha256sum "$MODULE")"
 note "BENCH_PROFILE=$PROFILE RETAIN_MS=$RETAIN_MS ASYNC_PREPARE=$ASYNC_PREPARE PARALLEL_READS=$PARALLEL_READS READ_COALESCE=$READ_COALESCE LOWER_MBPS=$LOWER_MBPS RATE_MODE=$RATE_MODE COMPLETION_NSEC=$COMPLETION_NSEC IRQMODE=$IRQMODE QD=$QD WARMUP_OPS=$WARMUP_OPS MEASURE_OPS=$MEASURE_OPS OFFERED_IOPS=$IOPS READ_PCT=$READ_PCT WRITE_ONLY=$(( WRITE_ONLY_QD != 0 ))"

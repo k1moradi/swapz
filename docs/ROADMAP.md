@@ -20,7 +20,12 @@ heavy-CPU release gate remains open.
 
 Across five fast-model sustained-write pairs, async versus sync was +0.31% at
 QD4 (95% CI [-5.12%,+5.73%], interval overlaps zero), +23.88% at QD8
-([+16.67%,+31.09%]), and +22.04% at QD32 ([+13.28%,+30.81%]). In the fast
+([+16.67%,+31.09%]), and +22.04% at QD32 ([+13.28%,+30.81%]). QD32 also
+increased lower WRITE requests by 28.44% (CI [+17.12%,+39.76%]) and bytes by
+0.59% ([+0.28%,+0.90%]). QD8 reduced requests by 21.77% (CI
+[-23.99%,-19.56%]) while bytes rose 0.39% ([+0.26%,+0.53%]). Preserve the
+current K=1 scheduling policy while attributing this QD32 aggregation cost.
+In the fast
 mixed raw comparison, useful WRITE throughput was 22.48 versus 24.90 MB/s,
 while lower WRITE bytes fell from 50.38 to 34.62 MB and requests fell from
 12,301 to about 781. This is substantially less backing I/O with about 9.7%
@@ -44,10 +49,31 @@ Physical endurance and real-device behavior remain unproven.
 
 ## Current bottleneck ranking
 
-The immediate read-path work is cleanup, not another performance search:
-reject non-ID63 pairs before slot preparation/priming and remove the now-dead
-ID39/ID60 directional benchmark sessions. Fast and serial ID63 retain five
-matched rounds because they remain promoted request-efficiency mechanisms.
+The next step is ID36 low-RAM/heavy-CPU qualification of explicit sync versus
+default async, including target-creation failure cleanup, sustained QD1/4/8/32,
+suspend/drain, faults and teardown. Constrain the whole disposable guest's RAM
+and oversubscribe its CPUs; limiting the replay process alone does not establish
+the target's kernel-allocation behavior. Record preparation-pool high-water,
+waits, throughput, p99 and byte-exact verification. Keep the release gate open
+until this evidence exists.
+Ordinary benchmark reports now observe host CPU activity and PSI at phase
+boundaries. These observations expose contention but do not supply an idle
+control or qualify deliberate resource pressure. Keep Codex-active and earlier
+idle-host evidence distinct when drawing performance conclusions.
+
+Next, attribute QD32 request inflation using the existing matched per-session
+burst target, window bins, PACK_READY causes and producer counters. A correlation
+is a hypothesis for one controlled experiment, not permission to discard the
+measured deep-QD throughput gain. Retain the current K=1 activation thresholds.
+
+Realistic churn/GC/TRIM evidence follows: about 70% logical occupancy, an explicit
+cold/hot split, and at least ten logical capacities of hot rewrites. Verify all
+live pages, report foreground plus GC write amplification, victim live ratios,
+TRIM wall/latency, useful throughput/p99 and segment-open distribution. A run
+with zero GC victims cannot qualify GC amplification or stall behavior; specify
+and report placement/capacity pressure that actually exercises live victims.
+Only then decide whether asynchronous TRIM merits the added state machine.
+Fast and serial adjacent READ coalescing retain five matched rounds.
 
 The highest-value new compression question is ID67, but it starts as offline
 native-C evidence only. The existing synthetic fixture intentionally contains
@@ -220,19 +246,24 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
    `async_prepare=0` as the sync control, and preserve the fast-mixed paired
    intervals. The ID36 low-RAM/heavy-CPU gate still blocks release
    qualification of the default-on path.
-3. Keep `logical_open_balance=0`. Promote it only if fresh RAM evidence shows
-   useful allocator-spread behavior without probe/GC regressions; even then it
-   remains logical fairness, not NAND wear leveling.
-4. Keep SWZ3 1/2/4 classes, K=1 scheduling and ID63 completion semantics
+3. Implement the low-RAM/heavy-CPU evidence step first. Attribute QD32 requests
+   next, then collect realistic churn/GC/TRIM evidence before choosing the
+   asynchronous-TRIM implementation. The design below is a review proposal.
+4. Keep `logical_open_balance=0` until the churn A/B establishes allocator
+   spread and probe/GC cost. Logical opens remain distinct from NAND wear.
+5. Keep SWZ3 1/2/4 classes, K=1 scheduling and ID63 completion semantics
    unchanged. Do not implement the currently weak 3/8/16-block class ideas.
-5. Continue representative ID67 content/CPU evidence independently.
-6. Keep ID62 blocked. Physical-device testing remains separately unauthorized
+6. Continue representative ID67 content/CPU evidence independently. Map RAM
+   compaction remains an isolated later experiment with measured bytes/page.
+7. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
 
-## Next kernel step: asynchronous segment TRIM review
+## Deferred asynchronous segment TRIM design for review
 
-Step 3 of the owner's plan is ready for independent design review, before a
-kernel implementation. The current `swapz_discard_dead_segment()` still calls
+Step 3 of the owner's original plan is deferred behind resource-pressure and
+churn evidence following the external review of source `1888781`. This is a
+proposal for independent review before any kernel implementation. The current
+`swapz_discard_dead_segment()` still calls
 `blkdev_issue_discard()` synchronously. It runs during allocator reuse, after
 GC role rotation, and when upper DISCARD removes a closed segment's last map.
 Overwrite-created deaths have no early notification. The latest passing owner

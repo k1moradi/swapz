@@ -18,6 +18,42 @@ SCRIPT = Path(__file__).with_name("io-replay.py")
 
 
 class PairReplayContract(unittest.TestCase):
+    def test_host_cpu_boundaries_expose_contention_without_idle_inference(self):
+        import importlib.util
+        from unittest.mock import patch
+
+        spec = importlib.util.spec_from_file_location("swapz_host_cpu", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def read_proc(path, **kwargs):
+            if str(path) == "/proc/stat":
+                return "cpu 100 0 30 100 0 3 2 0 90 0\ncpu0 0\n"
+            return "some avg10=0.00 avg60=0.00 avg300=0.00 total=10000\n"
+
+        with patch.object(module.Path, "read_text", read_proc), \
+                patch.object(module.os, "sysconf", side_effect=lambda name:
+                             {"SC_NPROCESSORS_ONLN": 4, "SC_CLK_TCK": 100}[name]), \
+                patch.object(module.os, "sched_getaffinity", return_value={0, 1}), \
+                patch.object(module.time, "monotonic_ns", return_value=1000000000):
+            before = module.host_cpu_snapshot()
+        self.assertEqual(before["ticks"], (100, 0, 30, 100, 0, 3, 2, 0))
+        after = {**before, "ticks": (110, 0, 35, 150, 5, 3, 2, 5),
+                 "time_ns": 2000000000, "pressure_us": 110000}
+        observed = module.host_cpu_delta(before, after)
+        self.assertEqual(observed["status"], "AVAILABLE")
+        self.assertAlmostEqual(observed["busy_fraction"], 15 / 75)
+        self.assertAlmostEqual(observed["steal_fraction"], 5 / 75)
+        self.assertAlmostEqual(observed["pressure_some_fraction"], .1)
+        self.assertEqual(observed["affinity_cpus"], 2)
+        missing_psi = module.host_cpu_delta(before, {**after, "pressure_us": None})
+        self.assertEqual(missing_psi["status"], "PARTIAL")
+        self.assertIsNone(missing_psi["pressure_some_fraction"])
+        for invalid in (None, before, {**after, "online_cpus": 8},
+                        {**after, "ticks": (99, 0, 30, 100, 0, 3, 2, 0)}):
+            self.assertEqual(module.host_cpu_delta(before, invalid)["status"],
+                             "UNAVAILABLE")
+
     def run_cmd(self, *args, success=True):
         run = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
                              capture_output=True, text=True, timeout=30)
@@ -59,6 +95,8 @@ class PairReplayContract(unittest.TestCase):
                     self.assertIn(f"BENCH_IO_PHASE={candidate}:{subphase}",
                                   run.stderr)
                 record = json.loads(result.read_text())
+                self.assertIn(record["host_cpu"]["status"],
+                              ("AVAILABLE", "PARTIAL", "UNAVAILABLE"))
                 read = record["packed_read"]
                 self.assertIn("executor startup", record["mixed_timed_scope"])
                 self.assertEqual(read["qualification"], "ROOTLESS_NO_PACK_PROOF")
@@ -75,6 +113,8 @@ class PairReplayContract(unittest.TestCase):
                     self.assertIn("buffers and worker setup excluded", phase["timed_scope"])
                     self.assertGreater(phase["useful_read_mbps"], 0)
                     self.assertGreaterEqual(phase["replay_cpu_user_s"], 0)
+                    self.assertIn(phase["host_cpu"]["status"],
+                                  ("AVAILABLE", "PARTIAL", "UNAVAILABLE"))
                 reports.append(result)
             self.run_cmd("compare", "--reports", *reports)
             wrong = json.loads(reports[0].read_text())
