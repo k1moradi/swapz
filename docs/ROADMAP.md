@@ -9,43 +9,41 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest standard owner matrix tested source
-`1888781027f38b8d22b4a0d9cb8b2829d9468f9e`, passed all five stages, and
+`6b71b85c57c92e064413ea11b5b9f1aac110f0f2`, passed all five stages, and
 published report-only commit
-`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`. Loaded evidence remains limited to
-newly-created, positively owned RAM-backed `null_blk`. Packed-placement
-segment-edge repair passed byte-exact verification with zero internal holes
-and zero hole-induced run splits. The default-on asynchronous-preparation
-path passed the standard lifecycle matrix; the separate ID36 low-RAM and
-heavy-CPU release gate remains open.
+`21d50135e6fcfa4a6a84e07e92006b1515139ba5`. Loaded evidence is limited to
+positively owned RAM-backed `null_blk`. The production kernel tree is unchanged
+from the prior reviewed source `1888781`; this increment changes reporting and
+host-load observation. Cross-report timing differences do not establish a new
+kernel optimization or regression.
 
-Across five fast-model sustained-write pairs, async versus sync was +0.31% at
-QD4 (95% CI [-5.12%,+5.73%], interval overlaps zero), +23.88% at QD8
-([+16.67%,+31.09%]), and +22.04% at QD32 ([+13.28%,+30.81%]). QD32 also
-increased lower WRITE requests by 28.44% (CI [+17.12%,+39.76%]) and bytes by
-0.59% ([+0.28%,+0.90%]). QD8 reduced requests by 21.77% (CI
-[-23.99%,-19.56%]) while bytes rose 0.39% ([+0.26%,+0.53%]). Preserve the
-current K=1 scheduling policy while attributing this QD32 aggregation cost.
-In the fast
-mixed raw comparison, useful WRITE throughput was 22.48 versus 24.90 MB/s,
-while lower WRITE bytes fell from 50.38 to 34.62 MB and requests fell from
-12,301 to about 781. This is substantially less backing I/O with about 9.7%
-lower useful throughput on this synthetic fast model; it does not establish a
-universal throughput win over raw storage.
+Concurrent commit `548fcf37effa75a180a2c350eccd8274060c9553` adds an
+AVX-512 predictor backend after this run. That addition is outside this
+qualification; current main must receive its own exact-source qualification.
 
-Fast mixed-load READ throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
-versus 2.84 ms. On the slower RAM model, it was 2.36 versus 0.89 MB/s with
-p99 of 11.95 versus 33.67 ms. These synthetic results show model-dependent
-swap-in throughput and latency tradeoffs. Fast sequential adjacent-range READ
-coalescing reduced lower requests by 28.4% (paired 95% CI
-[-32.97%,-23.83%]); its p99 interval overlaps zero. Physical endurance and
-real-device behavior remain unproven.
+Five matched fast-model sustained-write pairs measured async versus sync at
+QD4 -0.57% (95% CI [-4.26%,+3.11%]), QD8 +26.59%
+([+17.21%,+35.97%]), and QD32 +24.80% ([+17.76%,+31.85%]). QD4 has no
+confirmed change. QD8 lower WRITE requests fell 21.90% (CI
+[-26.21%,-17.59%]) while bytes rose 0.49% ([+0.23%,+0.75%]). QD32 requests
+rose 38.11% ([+18.85%,+57.36%]) and bytes rose 0.85% ([+0.57%,+1.13%]).
+Keep the throughput gain and its aggregation cost visible together.
 
-ID60 standalone same-extent slot grouping is retired. Ordinary `swapz_read()`
-already receives the shared metadata/extent-cache benefit without private-slot
-prime/absorb copies. Current source keeps slot execution only for an exact ID63
-adjacent coalescing candidate.
+All 204 individual host CPU observations were available. The fast mixed
+arms averaged about 39.8-40.9% host CPU activity and 4.8-7.9% CPU PSI waiting
+across four online/affinity CPUs. This includes benchmark, kernel and background
+work and does not isolate Codex. The report explicitly records
+`idle_host_control=NOT_ESTABLISHED`; do not pool these data with earlier idle
+runs or infer code causality across unlike resource conditions.
 
-Physical endurance and real-device behavior remain unproven.
+Loaded packed placement retained zero internal holes and zero hole-induced
+run splits; live GC exercised 20 victims/rotations and verified 4096 pages.
+The separate low-RAM/heavy-CPU release gate remains open. Next collect that
+resource-pressure evidence, attribute QD32 and fast-read costs, then measure
+realistic churn/GC/TRIM before deciding on asynchronous TRIM. Physical media,
+real swap semantics and endurance remain unqualified.
+
+The complete mixed/read means and intervals are summarized in [README.md](README.md#current-evidence) and retained in `test_results.json`.
 
 ## Current bottleneck ranking
 
@@ -56,6 +54,7 @@ and oversubscribe its CPUs; limiting the replay process alone does not establish
 the target's kernel-allocation behavior. Record preparation-pool high-water,
 waits, throughput, p99 and byte-exact verification. Keep the release gate open
 until this evidence exists.
+
 Ordinary benchmark reports now observe host CPU activity and PSI at phase
 boundaries. These observations expose contention but do not supply an idle
 control or qualify deliberate resource pressure. Keep Codex-active and earlier
@@ -166,7 +165,7 @@ changes.
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
 | 61 | Foreground GC scaling / background-GC question | **4 ID61b exact segment-membership sidecar implemented / owner evidence pending** | Report 711ceaad keeps victim selection at 0.013ms at 4GiB-equivalent scale but shows a 4.560ms full logical-map relocation scan and 81,920 map visits for 20 relocated pages. Production DM now provisions volatile per-segment intrusive logical-page lists so relocation is survivor-scaled; the full-map path remains a compatibility fallback. This does not add a background worker. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
-| 63 | Physically adjacent distinct-extent READ coalescing | **4 fast p99 question open** | Owner report `013893fa` shows SSD_EMULATED sequential requests -24.15% CI [-29.39%,-18.92%] while p99 rises +8.68% CI [+0.008%,+17.34%]. Keep the request benefit; do not call the fast-latency repair qualified. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **1 request benefit; fast throughput cost under investigation** | Report `21d50135` shows fast sequential requests -27.33% CI [-32.01%,-22.64%], useful throughput -5.87% CI [-9.92%,-1.83%], and p99 unresolved. Serial requests/throughput/p99 improve. Preserve the mechanism while attributing the fast cost under observed CPU conditions. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
@@ -237,6 +236,9 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 - **ID62:** physical devices remain outside the current development safety scope.
 
 ## Immediate work queue
+
+The concurrent AVX-512 addition named above needs independent review and an
+exact-source owner run before another kernel or resource-pressure experiment.
 
 1. Packed-placement retirement is owner-qualified and remains covered by the
    loaded zero-hole/zero-split invariant.

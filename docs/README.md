@@ -52,39 +52,58 @@ establish an idle host or make an idle historical run directly comparable.
 ## Current evidence
 
 The latest standard owner matrix tested source
-`1888781027f38b8d22b4a0d9cb8b2829d9468f9e`, passed all five stages, and
+`6b71b85c57c92e064413ea11b5b9f1aac110f0f2`, passed all five stages, and
 published report-only commit
-`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`. Loaded qualification is limited to
-positively owned RAM-backed `null_blk`; the run does not qualify physical
-media or endurance. The packed-placement segment-edge fix passed byte-exact
-loaded verification with zero internal holes and zero hole-induced run splits.
+`21d50135e6fcfa4a6a84e07e92006b1515139ba5`. Loaded evidence is limited to
+positively owned RAM-backed `null_blk`. The production kernel tree is unchanged
+from the prior reviewed source `1888781`; this increment changes reporting and
+host-load observation. Cross-report timing differences do not establish a new
+kernel optimization or regression.
 
-The default-on bounded async-preparation path passed the standard lifecycle
-matrix with K=1 and the existing activation gates. Five matched fast-model
-sustained-write pairs measured async versus sync at QD4 +0.31% (95% CI
-[-5.12%,+5.73%]), QD8 +23.88% ([+16.67%,+31.09%]), and QD32 +22.04%
-([+13.28%,+30.81%]). QD4's interval overlaps zero; QD8 and QD32 intervals
-exclude zero. QD32 also increased lower WRITE requests by 28.44% (CI
-[+17.12%,+39.76%]) and bytes by 0.59% ([+0.28%,+0.90%]); these are measured
-aggregation costs of the throughput gain. At QD8, requests fell 21.77% (CI
-[-23.99%,-19.56%]) while bytes rose 0.39% ([+0.26%,+0.53%]). Keep the current
-K=1 policy while collecting resource-pressure and QD32 attribution evidence.
-In the fast mixed raw comparison, swapz delivered 22.48 versus
-24.90 MB/s useful WRITE throughput, while lower WRITE bytes fell from 50.38
-to 34.62 MB and lower WRITE requests fell from 12,301 to about 781. This is a
-large physical-I/O reduction with about 9.7% lower useful throughput on this
-synthetic fast model, not a universal throughput win over raw storage.
+Concurrent commit `548fcf37effa75a180a2c350eccd8274060c9553` adds an
+AVX-512 predictor backend after this run. That addition is outside this
+qualification; current main must receive its own exact-source qualification.
 
-During the fast mixed workload, swapz reported 7.46 versus 8.27 MB/s read
-throughput and 1.90 versus 2.84 ms p99 against raw. The slower RAM model
-reported 2.36 versus 0.89 MB/s and 11.95 versus 33.67 ms p99. These are
-synthetic RAM-backed results: they show model-dependent throughput and latency
-tradeoffs, not real-device swap-in time. Sequential adjacent-range READ
-coalescing reduced lower requests by 28.4% on the fast model (paired 95% CI
-[-32.97%,-23.83%]); its p99 interval overlaps zero. The separate
-heavy-CPU/low-RAM qualification remains open before release qualification of
-the async default. Physical media, active system swap and endurance remain
-outside the authorized qualification scope.
+Five matched fast-model sustained-write pairs measured async versus sync at
+QD4 -0.57% (95% CI [-4.26%,+3.11%]), QD8 +26.59%
+([+17.21%,+35.97%]), and QD32 +24.80% ([+17.76%,+31.85%]). QD4 has no
+confirmed change. QD8 lower WRITE requests fell 21.90% (CI
+[-26.21%,-17.59%]) while bytes rose 0.49% ([+0.23%,+0.75%]). QD32 requests
+rose 38.11% ([+18.85%,+57.36%]) and bytes rose 0.85% ([+0.57%,+1.13%]).
+Keep the throughput gain and its aggregation cost visible together.
+
+Fast mixed async/sync throughput changed -0.23% (paired 95% CI
+[-2.09%,+1.62%]), while lower WRITE requests rose 4.56%
+([+2.31%,+6.81%]). Against raw, async delivered 22.46 versus 25.17 MB/s
+useful WRITE throughput, with 34.64 versus 50.38 MB lower WRITE data and 789
+versus 12,301 lower WRITE requests. The mixed-load logical READ rates were
+7.45 versus 8.36 MB/s, with p99 of 1.93 versus 2.75 ms. These are lower I/O
+costs with a useful-throughput loss on this fast synthetic model; the READ
+rates are mixed-load observations, not fixed-volume swap-in times.
+
+Fast sequential adjacent-range READ coalescing reduced lower requests by
+27.33% (paired 95% CI [-32.01%,-22.64%]), but useful read throughput fell
+5.87% ([-9.92%,-1.83%]). Its p99 change of +7.25%
+([-5.20%,+19.69%]) remains unresolved. On the serial model, sequential
+requests fell 37.82%, throughput rose 47.26%, and p99 fell 21.93%; their
+respective intervals exclude zero. The fast random-read request change was
+-0.12% ([-1.96%,+1.72%]), so the prior small random-read cost did not repeat
+significantly here. These observations warrant attribution before an active
+read-path change.
+
+All 204 individual host CPU observations were available. The fast mixed
+arms averaged about 39.8-40.9% host CPU activity and 4.8-7.9% CPU PSI waiting
+across four online/affinity CPUs. This includes benchmark, kernel and background
+work and does not isolate Codex. The report explicitly records
+`idle_host_control=NOT_ESTABLISHED`; do not pool these data with earlier idle
+runs or infer code causality across unlike resource conditions.
+
+Loaded packed placement retained zero internal holes and zero hole-induced
+run splits; live GC exercised 20 victims/rotations and verified 4096 pages.
+The separate low-RAM/heavy-CPU release gate remains open. Next collect that
+resource-pressure evidence, attribute QD32 and fast-read costs, then measure
+realistic churn/GC/TRIM before deciding on asynchronous TRIM. Physical media,
+real swap semantics and endurance remain unqualified.
 
 ## Documentation
 

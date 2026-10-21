@@ -107,38 +107,38 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest standard owner matrix tested source
-`1888781027f38b8d22b4a0d9cb8b2829d9468f9e`, passed all five stages, and
+`6b71b85c57c92e064413ea11b5b9f1aac110f0f2`, passed all five stages, and
 published report-only commit
-`847e96dd4033a39febc4c8abb189bd9b7ffdb7e6`. This qualification used only
-positively owned RAM-backed `null_blk`; it does not establish physical-media
-behavior or endurance.
+`21d50135e6fcfa4a6a84e07e92006b1515139ba5`. Loaded evidence is limited to
+positively owned RAM-backed `null_blk`. The production kernel tree is unchanged
+from the prior reviewed source `1888781`; this increment changes reporting and
+host-load observation. Cross-report timing differences do not establish a new
+kernel optimization or regression.
 
-Five matched fast sustained-write pairs showed async/sync QD4 +0.31% (95% CI
-[-5.12%,+5.73%]), QD8 +23.88% ([+16.67%,+31.09%]), and QD32 +22.04%
-([+13.28%,+30.81%]). The QD4 interval overlaps zero; QD8 and QD32 intervals
-exclude zero. QD32 also increased lower WRITE requests by 28.44% (CI
-[+17.12%,+39.76%]) and bytes by 0.59% ([+0.28%,+0.90%]); the throughput gain
-does not qualify request efficiency. At QD8, requests fell 21.77% (CI
-[-23.99%,-19.56%]) while bytes rose 0.39% ([+0.26%,+0.53%]).
-In the fast mixed raw comparison, useful WRITE throughput was
-22.48 versus 24.90 MB/s, while lower WRITE bytes fell from 50.38 to 34.62 MB
-and requests fell from 12,301 to about 781. This shows much lower physical
-WRITE traffic with about 9.7% lower useful throughput on this synthetic fast
-model, so it is not a universal useful-throughput win.
+Concurrent commit `548fcf37effa75a180a2c350eccd8274060c9553` adds an
+AVX-512 predictor backend after this run. That addition is outside this
+qualification; current main must receive its own exact-source qualification.
 
-Fast mixed-load READ throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
-versus 2.84 ms. The slow RAM model was 2.36 versus 0.89 MB/s, with p99 of
-11.95 versus 33.67 ms. Fast sequential adjacent-range READ coalescing reduced
-lower requests by 28.4% (paired 95% CI [-32.97%,-23.83%]); its p99 interval
-overlaps zero. The default-on path passed standard loaded lifecycle
-qualification. The separate low-RAM and heavy-CPU gate remains open before
-release qualification: async target setup allocates 64 prepared-page buffers
-of 4KiB each (256 KiB, plus scratch, LZ4 workspace and queue metadata), and
-target creation can fail when these allocations cannot be satisfied. Do not
-describe the standard matrix as low-memory qualification or real-device
-swap-in evidence.
+All 204 individual host CPU observations were available. The fast mixed
+arms averaged about 39.8-40.9% host CPU activity and 4.8-7.9% CPU PSI waiting
+across four online/affinity CPUs. This includes benchmark, kernel and background
+work and does not isolate Codex. The report explicitly records
+`idle_host_control=NOT_ESTABLISHED`; do not pool these data with earlier idle
+runs or infer code causality across unlike resource conditions.
 
-## Deferred optimization evidence gates
+Loaded packed placement retained zero internal holes and zero hole-induced
+run splits; live GC exercised 20 victims/rotations and verified 4096 pages.
+The separate low-RAM/heavy-CPU release gate remains open. Next collect that
+resource-pressure evidence, attribute QD32 and fast-read costs, then measure
+realistic churn/GC/TRIM before deciding on asynchronous TRIM. Physical media,
+real swap semantics and endurance remain unqualified.
+
+See [README.md](README.md#current-evidence) for current performance effects and
+costs. Normal owned-RAM success does not close the resource-pressure gate:
+default async setup allocates 64 prepared-page buffers of 4KiB each (256 KiB,
+plus scratch, LZ4 workspace and queue metadata), and target creation can fail
+when these allocations cannot be satisfied.
+
 ## Deferred optimization evidence gates
 
 - **ID38 K>1:** keep passive counters. No second write slot is justified.
