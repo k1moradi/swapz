@@ -22,7 +22,7 @@ Normal artifacts live only under `build/`:
 - `build/tests/native/`: native production-C test executables.
 
 The one generated qualification artifact outside `build/` is the root
-`test_results.json`. This is indented UTF-8 JSON, without compression. It is
+`test_results.json`. This is UTF-8 JSON with newlines, without compression or indentation. It is
 intentionally overwriteable and versioned so
 the latest completed PASS/FAIL/BLOCKED result is directly readable from
 GitHub; no second report copy is generated.

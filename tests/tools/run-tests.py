@@ -911,7 +911,9 @@ def parse_loaded_correctness(output):
 
 def write_report(result):
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(result, sort_keys=True, indent=2,
+    # Newlines allow ranged reader requests. Omitting indentation keeps the
+    # complete fixed matrix small enough for GitHub's contents reader.
+    payload = json.dumps(result, sort_keys=True, indent=0,
                          allow_nan=False).encode("utf-8") + b"\n"
     temporary = REPORT.with_name(".test_results.json.tmp")
     try:

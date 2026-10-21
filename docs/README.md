@@ -36,7 +36,7 @@ The root Make interface is exactly `make`, `make install`, `make uninstall`, and
 Every completed `make test` run replaces exactly one generated evidence file,
 root `test_results.json`, with the latest sanitized PASS/FAIL/BLOCKED test
 and benchmark result and automatically publishes that file directly to
-`main`. The artifact is indented UTF-8 JSON, directly readable by GitHub and
+`main`. The artifact is UTF-8 JSON with newlines and no indentation, directly readable by GitHub and
 connected readers without decompression. Historical reports remain in Git
 history. Generated report-only commits are not new source revisions: the next
 run records the nearest non-report code ancestor as `tested_commit_sha` even

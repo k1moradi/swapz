@@ -250,7 +250,9 @@ single-instance queueing.
 
 
 The canonical report is the single root file `test_results.json`, written as
-indented UTF-8 JSON so GitHub and connected readers can inspect it directly.
+UTF-8 JSON with newlines and no indentation so connected readers can inspect it
+directly. Formatting keeps the complete current matrix below the reader's
+size limit without dropping any telemetry.
 The runner keeps it unchanged while qualification is executing so loaded safety
 checks still see a clean tested tree. At the end of every completed PASS, FAIL,
 or BLOCKED run it atomically replaces that file with the sanitized stage,
