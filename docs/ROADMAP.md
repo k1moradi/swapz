@@ -148,7 +148,7 @@ changes.
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
 | 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
-| 69 | Hole-free 4KiB-aligned extent placement | **4 loaded performance A/B implemented / default off** | Offline geometry shows packed 1/2/4 keeps 2,089 payload blocks while removing 236 waste blocks and modeling 209->80 write runs with unchanged read cost. A new same-plan mixed-class owned-RAM A/B must prove fewer physical WRITE requests and logical segment opens with no lower-byte increase before any default promotion. |
+| 69 | Hole-free 4KiB-aligned extent placement | **4 loaded performance A/B implemented / default off** | Offline geometry shows packed 1/2/4 keeps 2,089 payload blocks while removing 236 waste blocks and modeling 209->80 write runs with unchanged read cost. The same-plan mixed-class owned-RAM A/B requires aligned arms to exercise internal holes/splits, packed arms to eliminate them, strictly fewer physical WRITE requests and consumed physical blocks, and non-increasing WRITE bytes and logical segment opens before any default promotion. Independent lower-device request count remains observational because block-layer merging may vary. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
 | 72 | Physical wear / logical allocator fairness | **4 logical-open balancing A/B implemented / physical wear still gated** | Optional `logical_open_balance=1` prefers the least-opened eligible dead destination and uses logical-open count only as an exact-score/count GC victim tie-break. It is default-off and is allocator-fairness evidence only; logical LBA opens do not measure NAND P/E cycles and cannot authorize cold relocation or physical wear claims. |
@@ -217,8 +217,9 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
    performance A/B, the ID68 tail-waste split and the default-off logical-open
    allocator-fairness A/B with the existing full `make test` matrix.
 2. Keep `packed_placement=0` in this evidence commit. If both matched ID69
-   pairs pass the structural request/open/byte gates, make the default flip a
-   small follow-up commit and rerun the entire qualification matrix.
+   pairs pass the structural hole/split, physical-request, consumed-block,
+   byte and non-increasing-open gates, make the default flip a small follow-up
+   commit and rerun the entire qualification matrix.
 3. Keep `logical_open_balance=0`. Promote it only if fresh RAM evidence shows
    useful allocator-spread behavior without probe/GC regressions; even then it
    remains logical fairness, not NAND wear leveling.

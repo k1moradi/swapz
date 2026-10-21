@@ -1354,11 +1354,6 @@ def packed_placement_ab_verdict(sessions):
                 "NO_GAIN",
                 "ID69 packed placement did not reduce physical WRITE requests",
                 paired)
-        if p["lower_write_requests"] >= a["lower_write_requests"]:
-            return completed(
-                "NO_GAIN",
-                "ID69 packed placement did not reduce lower WRITE requests",
-                paired)
         if p["lower_write_bytes"] > a["lower_write_bytes"]:
             return completed(
                 "REGRESSION",

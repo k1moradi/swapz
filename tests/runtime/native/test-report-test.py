@@ -720,12 +720,18 @@ class ReportContract(unittest.TestCase):
             runner.packed_placement_ab_verdict(
                 runner.parse_packed_placement_ab(more_opens))["overall"],
             "REGRESSION")
-        no_lower_req_gain = runner.parse_packed_placement_ab(synthetic_log())
-        no_lower_req_gain[1]["swapz"]["lower_write_requests"] = \
-            no_lower_req_gain[0]["swapz"]["lower_write_requests"]
+        equal_lower_requests = runner.parse_packed_placement_ab(synthetic_log())
+        equal_lower_requests[1]["swapz"]["lower_write_requests"] = \
+            equal_lower_requests[0]["swapz"]["lower_write_requests"]
+        equal_lower_requests[2]["swapz"]["lower_write_requests"] = \
+            equal_lower_requests[3]["swapz"]["lower_write_requests"]
+        equal_lower_request_verdict = runner.packed_placement_ab_verdict(
+            equal_lower_requests)
         self.assertEqual(
-            runner.packed_placement_ab_verdict(no_lower_req_gain)["overall"],
-            "NO_GAIN")
+            equal_lower_request_verdict["overall"],
+            "PASS_PACKED_PLACEMENT_AB")
+        self.assertEqual(
+            equal_lower_request_verdict["mean_lower_request_change_pct"], 0)
 
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())

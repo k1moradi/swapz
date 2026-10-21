@@ -964,12 +964,15 @@ successful-DISCARD skips, and logical segment-open min/mean/max. Native ID69
 A/B must prove identical lower bytes with fewer requests and zero internal
 holes on mixed 1/2/4-block sequences. Loaded qualification adds four fresh
 fast-null_blk QD32 persistent-write sessions over one immutable mixed+entropy
-fixture in counterbalanced modes 0/1/1/0. Both packed arms must have zero
-internal gaps/splits, fewer timed physical WRITE requests and fewer logical
-segment opens than their aligned partner, with no increase in lower WRITE
-bytes. Throughput and p99 are reported directionally. The source default stays
-aligned until a separate post-evidence promotion commit. None of this changes
-SWZ3.
+fixture in counterbalanced modes 0/1/1/0. Each aligned arm must exercise nonzero internal gaps and hole-induced splits.
+Both packed arms must have zero internal gaps/splits, strictly fewer timed
+physical WRITE requests, and strictly fewer consumed foreground physical blocks
+(`physical_write / 4096 + alignment_hole_blocks_foreground`) than their aligned
+partner. Physical/lower WRITE bytes and logical segment opens must not increase.
+Independent lower-device WRITE requests remain reported as observational
+block-layer evidence rather than a strict gate because merging may vary.
+Throughput and p99 are reported directionally. The source default stays aligned
+until a separate post-evidence promotion commit. None of this changes SWZ3.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
