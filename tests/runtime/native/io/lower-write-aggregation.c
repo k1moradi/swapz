@@ -11,7 +11,8 @@
 #include <errno.h>
 #include "engine.h"
 #define CHECK(x) do { if (!(x)) { \
-	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #x); \
+	fprintf(stderr, "FAIL: lower-write-aggregation.c:%d expression=%s\n", \
+		__LINE__, #x); \
 	return 1; \
 } } while (0)
 
@@ -460,7 +461,7 @@ static int test_segment_tail_waste_is_accounted_before_rotation(void)
 	return 0;
 }
 
-static int test_alignment_tie_uses_current_cursor_without_padding(void)
+static int test_packed_tie_uses_larger_extent_without_padding(void)
 {
 	const swapz_u16 uniform[4] = { 2073, 2073, 2073, 2073 };
 	swapz_u8 raw[SWAPZ_BLOCK_BYTES];
@@ -486,9 +487,14 @@ static int test_alignment_tie_uses_current_cursor_without_padding(void)
 	CHECK(lower_written_bytes == 3U * SWAPZ_BLOCK_BYTES);
 	CHECK(e.bulk_padding_blocks == 0);
 	CHECK(a.next_block == 4);
-	CHECK(maps[0].valid && maps[0].start_block == 1);
-	CHECK(maps[1].valid && maps[1].start_block == 2);
-	CHECK(maps[2].start_block == 2 && maps[3].start_block == 2);
+	CHECK(maps[0].valid && maps[0].start_block == 1 &&
+	      maps[0].extent_blocks == 2 && maps[0].record_index == 0);
+	CHECK(maps[1].valid && maps[1].start_block == 1 &&
+	      maps[1].extent_blocks == 2 && maps[1].record_index == 1);
+	CHECK(maps[2].valid && maps[2].start_block == 1 &&
+	      maps[2].extent_blocks == 2 && maps[2].record_index == 2);
+	CHECK(maps[3].valid && maps[3].start_block == 3 &&
+	      maps[3].extent_blocks == 1 && maps[3].record_index == 0);
 	CHECK(validate_prefix(4) == 0);
 	CHECK(maps[80].valid && maps[80].raw_crc32c ==
 	      swapz_crc32c_bytes(raw, sizeof(raw)));
@@ -1234,7 +1240,7 @@ int main(void)
 	CHECK(test_padding_option_measures_exact_request_byte_tradeoff() == 0); passed++;
 	CHECK(test_packed_placement_removes_internal_hole() == 0); passed++;
 	CHECK(test_segment_tail_waste_is_accounted_before_rotation() == 0); passed++;
-	CHECK(test_alignment_tie_uses_current_cursor_without_padding() == 0); passed++;
+	CHECK(test_packed_tie_uses_larger_extent_without_padding() == 0); passed++;
 	CHECK(test_forged_deferred_snapshot_is_rejected() == 0); passed++;
 	CHECK(test_error_after_completed_prefix_at_segment_boundary() == 0); passed++;
 	CHECK(test_mixed_and_raw_only_share_lower_runs() == 0); passed++;

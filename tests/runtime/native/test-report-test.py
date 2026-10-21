@@ -1316,6 +1316,15 @@ class ReportContract(unittest.TestCase):
             reason,
             "FAIL: randomized-authority.c:188 expression=result == 0")
 
+    def test_lower_write_aggregation_failure_reports_fixed_source_and_line(self):
+        phase, reason = runner.failure_context(
+            "FAIL: lower-write-aggregation.c:490 expression=maps[0].extent_blocks == 2\n",
+            loaded=False, default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertEqual(
+            reason,
+            "FAIL: lower-write-aggregation.c:490 expression=maps[0].extent_blocks == 2")
+
     def test_exit_two_is_fail_before_loaded_stage_and_blocked_only_when_marked(self):
         with tempfile.TemporaryDirectory(prefix="report-", dir=ROOT / "build/tests") as name:
             original_root, original_report = runner.ROOT, runner.REPORT
