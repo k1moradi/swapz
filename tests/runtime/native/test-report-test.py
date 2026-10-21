@@ -591,12 +591,13 @@ def synthetic_log():
         out.append("REPLAY_ORDER=swapz-first" if index % 2 else
                    "REPLAY_ORDER=off-first")
         out.append(
-            "SWAPZ_STATUS_AFTER=packed_placement={} logical_open_balance=0 "
+            "SWAPZ_STATUS_AFTER=physical_write=4096000 cursor={} gc_victims=0 "
+            "packed_placement={} logical_open_balance=0 "
             "alignment_hole_blocks_foreground={} "
             "segment_tail_waste_blocks_foreground={} "
-            "run_splits_by_hole={} segment_program_sum={}".format(
-                packed, 0 if packed else 24, 0,
-                0 if packed else 8, 70 if packed else 80))
+            "run_splits_by_hole={} segment_program_sum=80".format(
+                1000 if packed else 1024, packed, 0 if packed else 24, 0,
+                0 if packed else 8))
         out.append(json.dumps(placement_arm(packed)))
         out.append(f"PASS_PACKED_PLACEMENT_AB={packed}")
     return "\n".join(out) + "\n"
@@ -706,6 +707,25 @@ class ReportContract(unittest.TestCase):
             runner.packed_placement_ab_verdict(
                 runner.parse_packed_placement_ab(broken))["overall"],
             "REGRESSION")
+        more_opens = synthetic_log().replace(
+            "packed_placement=1 logical_open_balance=0 "
+            "alignment_hole_blocks_foreground=0 "
+            "segment_tail_waste_blocks_foreground=0 "
+            "run_splits_by_hole=0 segment_program_sum=80",
+            "packed_placement=1 logical_open_balance=0 "
+            "alignment_hole_blocks_foreground=0 "
+            "segment_tail_waste_blocks_foreground=0 "
+            "run_splits_by_hole=0 segment_program_sum=81", 1)
+        self.assertEqual(
+            runner.packed_placement_ab_verdict(
+                runner.parse_packed_placement_ab(more_opens))["overall"],
+            "REGRESSION")
+        no_lower_req_gain = runner.parse_packed_placement_ab(synthetic_log())
+        no_lower_req_gain[1]["swapz"]["lower_write_requests"] = \
+            no_lower_req_gain[0]["swapz"]["lower_write_requests"]
+        self.assertEqual(
+            runner.packed_placement_ab_verdict(no_lower_req_gain)["overall"],
+            "NO_GAIN")
 
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
@@ -1070,6 +1090,19 @@ class ReportContract(unittest.TestCase):
         self.assertIn("ID73 OFFLINE EXTENT GEOMETRY", rendered)
         self.assertIn("ID69 PACKED PLACEMENT A/B", rendered)
         self.assertIn("physical WRITE req", rendered)
+        self.assertIn("int holes", rendered)
+        self.assertIn("consumed", rendered)
+        no_gain_rows = runner.parse_packed_placement_ab(synthetic_log())
+        no_gain_rows[1]["swapz"]["physical_write_reqs"] = \
+            no_gain_rows[0]["swapz"]["physical_write_reqs"]
+        report["benchmarks"]["packed_placement_ab"] = \
+            runner.packed_placement_ab_verdict(no_gain_rows)
+        with contextlib.redirect_stdout(io.StringIO()) as failed_output:
+            runner.print_bench(report)
+        failed_rendered = failed_output.getvalue()
+        self.assertIn("verdict: NO_GAIN", failed_rendered)
+        self.assertIn("int holes", failed_rendered)
+        self.assertIn("consumed", failed_rendered)
         self.assertIn("packed_1_2_4_8_16", rendered)
         self.assertIn("upper DISCARD TRIM", rendered)
         self.assertIn("packed smoke", rendered)
