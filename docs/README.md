@@ -45,6 +45,21 @@ normal nonforce fast-forwards and never revert newer source bytes.
 
 ## Current evidence
 
+The latest attempted full run tested source
+`3893bc2e7d015a6ea30ba543bfe8c2416b223129` and failed in Native and rootless
+contracts after the module/helper build. Its report-only commit is
+`1c33ea826f7151c544ab82463b3c5a21df952f72`; no loaded correctness or
+performance stage ran. The sanitized report does not name the failing native
+assertion. Source review found a packed append-only segment-edge path that can
+return `-ENOSPC` despite free later segments; the fix and direct-C regression
+are awaiting owner qualification. The last successful all-stage loaded run
+before that failure tested source
+`607678cfd5c3a362b2f71f32d33fb81929ec8eda` (report-only commit
+`b0623ae0db7bf1dcfde040bb6b64197f370eec72`). Its bounded RAM qualification
+passed all five stages, but it does not qualify the failed source or this
+unrun fix. The older detailed owner evidence below remains useful historical
+context, not the newest successful run.
+
 Owner-loaded qualification of source `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`
 (report-only `92d6aa08b44ab7dd827636680584f8c9a313a89b`) passed all five
 stages on positively owned RAM-backed `null_blk`.

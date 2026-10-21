@@ -213,8 +213,14 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 
 ## Immediate work queue
 
-1. Owner-requalify the aligned-mode retirement with the full `make test`
-   matrix; ID69 now gates on canonical zero-internal-hole/zero-split invariants.
+1. Repair and owner-requalify the packed-placement retirement before any
+   performance-default change. The report for source `3893bc2e7d015a6ea30ba543bfe8c2416b223129`
+   failed at the native/rootless stage and never reached loaded benchmarks.
+   Source review found that append-only authority staging can return `-ENOSPC`
+   at a segment edge although later segments remain free; the direct-C boundary
+   regression covers packed 2/4-block extents and reserve failure atomicity.
+   The report does not identify the exact first failing assertion, so owner
+   qualification of the corrected source remains required.
 2. After that passes, promote `async_prepare=1` in a separate commit. Keep K=1
    and the existing activation gate, retain sync as the qualification control,
    and continue reporting fast-mixed async-sync lower-WRITE-request paired CI.

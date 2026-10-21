@@ -985,6 +985,15 @@ boundary remains valid and continues to be counted in the aggregate hole
 counters. The fixed `packed_placement=1` status token is compatibility
 telemetry, not a runtime policy. None of this changes SWZ3.
 
+Exact production-C authority coverage also exercises append-only packed
+placement at segment edges: two blocks at cursor 254 and four blocks at cursor
+252 fit with no waste; two blocks at 255 and four blocks at 254 skip only the
+unusable tail and increment aggregate and tail counters equally. If the skipped
+extent would enter the reserve, staging returns `-ENOSPC` without changing the
+cursor, in-flight state or counters. Randomized native assertion markers must
+retain the safe test source and line so the sanitized report identifies the
+failing check without publishing host paths.
+
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576
 logical pages. Loaded qualification still requires the full zero-mapped

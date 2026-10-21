@@ -989,7 +989,10 @@ introduced while still recognizing a real segment-edge remainder.
 Preserve the current on-disk SWZ3 extent classes. ID69 packed placement is the
 only production placement policy: existing 1/2/4-block extents are placed
 back-to-back at 4KiB granularity within a segment, with only real segment-tail
-waste permitted. Report b0623ae0 qualified the promoted default on both
+waste permitted. Append-only authority users must skip a segment tail when a
+packed extent would cross the boundary, while checking the exclusive reserve
+limit before committing the cursor or charging tail-waste counters. Report
+b0623ae0 qualified the promoted default on both
 maintained RAM models, so no aligned-placement module parameter, authority
 field, planner branch or A/B harness may be reintroduced without new owner
 evidence. Keep aggregate-hole, segment-tail and hole-split telemetry as

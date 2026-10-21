@@ -297,6 +297,121 @@ static int test_allocator_reserve_exhaustion(void)
 	return 0;
 }
 
+static int advance_append_only_cursor(struct swapz_authority *a,
+				      swapz_u32 blocks)
+{
+	const swapz_u32 pages[] = {0};
+	struct swapz_tx tx;
+	swapz_u32 cursor;
+
+	for (cursor = 0; cursor < blocks; ++cursor) {
+		if (swapz_stage(a, pages, 1, 1, &tx) ||
+		    tx.start_block != cursor || swapz_abort(a, &tx))
+			return -1;
+	}
+	return 0;
+}
+
+static int init_append_only_authority(struct swapz_authority *a,
+				     swapz_u32 physical_blocks)
+{
+	return swapz_authority_init(a, maps, live, classes, 64, physical_blocks);
+}
+
+static int verify_append_only_page(struct swapz_authority *a,
+				   const struct swapz_tx *tx)
+{
+	struct swapz_decoded decoded;
+	struct swapz_map observed = maps[0];
+	const swapz_u8 *payload = NULL;
+	swapz_u32 bytes_total = (swapz_u32)tx->extent_blocks *
+		SWAPZ_BLOCK_BYTES;
+
+	if (!observed.valid || observed.start_block != tx->start_block ||
+	    observed.extent_blocks != tx->extent_blocks ||
+	    observed.record_index || observed.payload_length != sizeof(content) ||
+	    swapz_peek(extent, bytes_total, observed.record_index, &decoded) ||
+	    swapz_read_authoritative_peeked(a, 0, &observed, extent, bytes_total,
+					    &decoded, &payload) ||
+	    !payload || memcmp(payload, content, sizeof(content)))
+		return -1;
+	return 0;
+}
+
+static int test_packed_append_only_segment_edges(void)
+{
+	const swapz_u32 pages[] = {0};
+	struct swapz_authority a;
+	struct swapz_tx tx;
+	swapz_u32 next_sequence;
+
+	/* Two blocks exactly fill the segment tail without waste. */
+	CHECK(init_append_only_authority(&a, 2048) == 0);
+	CHECK(advance_append_only_cursor(&a, 254) == 0);
+	CHECK(swapz_stage(&a, pages, 1, 2, &tx) == 0);
+	CHECK(tx.start_block == 254 && a.next_block == 256);
+	CHECK(!a.alignment_hole_blocks_foreground &&
+	      !a.segment_tail_waste_blocks_foreground);
+	CHECK(swapz_abort(&a, &tx) == 0);
+
+	/* Two blocks at 255 skip one block and publish byte-exactly. */
+	CHECK(init_append_only_authority(&a, 2048) == 0);
+	CHECK(advance_append_only_cursor(&a, 255) == 0);
+	CHECK(swapz_stage(&a, pages, 1, 2, &tx) == 0);
+	CHECK(tx.start_block == 256 && a.next_block == 258);
+	CHECK(a.alignment_hole_blocks_foreground == 1 &&
+	      a.segment_tail_waste_blocks_foreground == 1);
+	CHECK(!a.alignment_hole_blocks_gc && !a.segment_tail_waste_blocks_gc);
+	CHECK(encode(&tx) == 0);
+	CHECK(swapz_finish(&a, &tx, extent, 2U * SWAPZ_BLOCK_BYTES, 2, 0) == 0);
+	CHECK(maps[0].valid && maps[0].start_block == 256 &&
+	      maps[0].generation == 1 && live[256] == 1);
+	CHECK(verify_append_only_page(&a, &tx) == 0);
+
+	/* Four blocks exactly fill a segment without waste. */
+	CHECK(init_append_only_authority(&a, 2048) == 0);
+	CHECK(advance_append_only_cursor(&a, 252) == 0);
+	CHECK(swapz_stage(&a, pages, 1, 4, &tx) == 0);
+	CHECK(tx.start_block == 252 && a.next_block == 256);
+	CHECK(!a.alignment_hole_blocks_foreground &&
+	      !a.segment_tail_waste_blocks_foreground);
+	CHECK(swapz_abort(&a, &tx) == 0);
+
+	/* Four blocks at 254 skip two tail blocks and publish byte-exactly. */
+	CHECK(init_append_only_authority(&a, 2048) == 0);
+	CHECK(advance_append_only_cursor(&a, 254) == 0);
+	CHECK(swapz_stage(&a, pages, 1, 4, &tx) == 0);
+	CHECK(tx.start_block == 256 && a.next_block == 260);
+	CHECK(a.alignment_hole_blocks_foreground == 2 &&
+	      a.segment_tail_waste_blocks_foreground == 2);
+	CHECK(encode(&tx) == 0);
+	CHECK(swapz_finish(&a, &tx, extent, 4U * SWAPZ_BLOCK_BYTES, 4, 0) == 0);
+	CHECK(maps[0].valid && maps[0].start_block == 256 &&
+	      maps[0].generation == 1 && live[256] == 1);
+	CHECK(verify_append_only_page(&a, &tx) == 0);
+
+	/* An extent exactly filling the foreground area may end at the reserve. */
+	CHECK(init_append_only_authority(&a, 768) == 0);
+	CHECK(advance_append_only_cursor(&a, 252) == 0);
+	CHECK(swapz_stage(&a, pages, 1, 4, &tx) == 0);
+	CHECK(tx.start_block == 252 && a.next_block == 256);
+	CHECK(!a.alignment_hole_blocks_foreground &&
+	      !a.segment_tail_waste_blocks_foreground);
+	CHECK(swapz_abort(&a, &tx) == 0);
+
+	/* A skipped extent may not enter the reserved suffix or mutate state. */
+	CHECK(init_append_only_authority(&a, 768) == 0);
+	CHECK(advance_append_only_cursor(&a, 255) == 0);
+	next_sequence = a.next_sequence;
+	CHECK(swapz_stage(&a, pages, 1, 2, &tx) == -ENOSPC);
+	CHECK(a.next_block == 255 && a.next_sequence == next_sequence &&
+	      !a.in_flight &&
+	      !a.alignment_hole_blocks_foreground &&
+	      !a.segment_tail_waste_blocks_foreground &&
+	      !a.alignment_hole_blocks_gc && !a.segment_tail_waste_blocks_gc);
+	return 0;
+}
+
 static int test_short_write_always_quarantines(void)
 {
 	const swapz_u32 pages[] = {9};
@@ -347,6 +462,7 @@ int main(void)
 	CHECK(test_header_corruption_and_wrong_sequence() == 0); passed++;
 	CHECK(test_generation_overflow_and_duplicate_rejections() == 0); passed++;
 	CHECK(test_allocator_reserve_exhaustion() == 0); passed++;
+	CHECK(test_packed_append_only_segment_edges() == 0); passed++;
 	CHECK(test_short_write_always_quarantines() == 0); passed++;
 	CHECK(test_old_liveness_corruption_fail_closed() == 0); passed++;
 	printf("SWAPZ_EXACT_AUTHORITY_TESTS_PASS=%d\n", passed);

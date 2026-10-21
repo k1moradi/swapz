@@ -13,7 +13,8 @@
 #define ITERATIONS_PER_CAP 100U
 #define CHECK(condition) do { \
 	if (!(condition)) { \
-		fprintf(stderr, "FAIL line=%d expression=%s\n", __LINE__, \
+		fprintf(stderr, "FAIL: randomized-authority.c:%d expression=%s\n", \
+			__LINE__, \
 			#condition); \
 		return 1; \
 	} \

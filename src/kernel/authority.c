@@ -801,13 +801,36 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	if (!a->reuse_dead_segments) {
 		/* Frozen append-only behavior used by the original extent model. */
 		limit = a->physical_blocks - a->reserve_blocks;
-		if (a->next_block > limit ||
-		    blocks - 1U > limit - a->next_block)
+		if (a->next_block > limit)
 			return -ENOSPC;
 		start = a->next_block;
+		/*
+		 * Packed extents may start at any block, but one extent must stay
+		 * inside its 1MiB segment. In append-only mode there is no dead
+		 * segment picker to move the cursor, so skip only the unusable tail
+		 * of this segment. Keep the candidate local until the complete
+		 * extent has also passed the exclusive reserve-bound check below.
+		 */
+		if (start % SWAPZ_SEGMENT_BLOCKS + blocks >
+		    SWAPZ_SEGMENT_BLOCKS) {
+			tail_waste = SWAPZ_SEGMENT_BLOCKS -
+				(start % SWAPZ_SEGMENT_BLOCKS);
+			if (tail_waste > limit - start)
+				return -ENOSPC;
+			start += tail_waste;
+		}
 		if (start > limit || blocks > limit - start ||
 		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -ENOSPC;
+		if (tail_waste) {
+			if (a->gc_allocation) {
+				a->alignment_hole_blocks_gc += tail_waste;
+				a->segment_tail_waste_blocks_gc += tail_waste;
+			} else {
+				a->alignment_hole_blocks_foreground += tail_waste;
+				a->segment_tail_waste_blocks_foreground += tail_waste;
+			}
+		}
 	} else {
 		limit = a->segment_foreground ? a->physical_blocks :
 			((a->gc_allocation ?
