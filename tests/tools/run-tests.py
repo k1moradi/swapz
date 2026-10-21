@@ -1178,7 +1178,7 @@ def run_stage(title, command, result, *, parse_bench=False):
 
 
 def _status_u64(status, key):
-    match = re.search(r"(?:^|\\s)" + re.escape(key) + r"=(\\d+)(?:\\s|$)",
+    match = re.search(r"(?:^|\s)" + re.escape(key) + r"=(\d+)(?:\s|$)",
                       status)
     return int(match.group(1)) if match else None
 
