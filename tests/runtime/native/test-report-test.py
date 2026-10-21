@@ -698,6 +698,7 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
         self.assertLess(verdict["mean_request_change_pct"], 0)
         self.assertEqual(verdict["mean_byte_change_pct"], 0)
+        self.assertEqual(verdict["mean_physical_byte_change_pct"], 0)
         broken = synthetic_log().replace(
             "packed_placement=1 logical_open_balance=0 "
             "alignment_hole_blocks_foreground=0",
@@ -732,6 +733,38 @@ class ReportContract(unittest.TestCase):
             "PASS_PACKED_PLACEMENT_AB")
         self.assertEqual(
             equal_lower_request_verdict["mean_lower_request_change_pct"], 0)
+
+        byte_variance = runner.parse_packed_placement_ab(synthetic_log())
+        for index in (1, 2):
+            byte_variance[index]["swapz"]["lower_write_bytes"] += 4096
+            byte_variance[index]["status_after"] = (
+                byte_variance[index]["status_after"]
+                .replace("physical_write=4096000 cursor=1000",
+                         "physical_write=4136960 cursor=1010"))
+        byte_variance_verdict = runner.packed_placement_ab_verdict(byte_variance)
+        self.assertEqual(
+            byte_variance_verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
+        self.assertGreater(byte_variance_verdict["mean_byte_change_pct"], 0)
+        self.assertGreater(
+            byte_variance_verdict["mean_physical_byte_change_pct"], 0)
+        self.assertLess(
+            byte_variance_verdict["mean_consumed_block_change"], 0)
+
+        gc_contaminated = runner.parse_packed_placement_ab(synthetic_log())
+        gc_contaminated[1]["status_after"] = (
+            gc_contaminated[1]["status_after"]
+            .replace("gc_victims=0", "gc_victims=1"))
+        self.assertEqual(
+            runner.packed_placement_ab_verdict(gc_contaminated)["overall"],
+            "INCOMPLETE")
+
+        cursor_mismatch = runner.parse_packed_placement_ab(synthetic_log())
+        cursor_mismatch[1]["status_after"] = (
+            cursor_mismatch[1]["status_after"]
+            .replace("cursor=1000", "cursor=1001"))
+        self.assertEqual(
+            runner.packed_placement_ab_verdict(cursor_mismatch)["overall"],
+            "INCOMPLETE")
 
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())

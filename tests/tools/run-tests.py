@@ -1305,6 +1305,13 @@ def packed_placement_ab_verdict(sessions):
                     "reason": "ID69 placement telemetry has tail waste above aggregate holes"}
         physical_write_blocks = (
             status_values["physical_write"] // LOGICAL_BLOCK_BYTES)
+        consumed_blocks = physical_write_blocks + aggregate_holes
+        if status_values["gc_victims"] != 0:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B was contaminated by GC"}
+        if status_values["cursor"] != consumed_blocks:
+            return {"overall": "INCOMPLETE",
+                    "reason": "ID69 placement A/B allocator accounting mismatch"}
         clean.append({
             **row,
             "holes": aggregate_holes,
@@ -1313,7 +1320,7 @@ def packed_placement_ab_verdict(sessions):
             "run_splits": status_values["run_splits_by_hole"],
             "physical_write_bytes": status_values["physical_write"],
             "physical_write_blocks": physical_write_blocks,
-            "consumed_blocks": physical_write_blocks + aggregate_holes,
+            "consumed_blocks": consumed_blocks,
             "cursor": status_values["cursor"],
             "gc_victims": status_values["gc_victims"],
             "segment_program_sum": status_values["segment_program_sum"],
@@ -1354,16 +1361,6 @@ def packed_placement_ab_verdict(sessions):
                 "NO_GAIN",
                 "ID69 packed placement did not reduce physical WRITE requests",
                 paired)
-        if p["lower_write_bytes"] > a["lower_write_bytes"]:
-            return completed(
-                "REGRESSION",
-                "ID69 packed placement increased lower WRITE bytes",
-                paired)
-        if packed["physical_write_bytes"] > aligned["physical_write_bytes"]:
-            return completed(
-                "REGRESSION",
-                "ID69 packed placement increased physical WRITE bytes",
-                paired)
         if packed["consumed_blocks"] >= aligned["consumed_blocks"]:
             return completed(
                 "NO_GAIN",
@@ -1384,6 +1381,11 @@ def packed_placement_ab_verdict(sessions):
             "byte_change_pct":
                 (p["lower_write_bytes"] - a["lower_write_bytes"]) * 100.0 /
                 a["lower_write_bytes"] if a["lower_write_bytes"] else 0.0,
+            "physical_byte_change_pct":
+                (packed["physical_write_bytes"] -
+                 aligned["physical_write_bytes"]) * 100.0 /
+                aligned["physical_write_bytes"]
+                if aligned["physical_write_bytes"] else 0.0,
             "consumed_block_change":
                 packed["consumed_blocks"] - aligned["consumed_blocks"],
             "throughput_change_pct":
@@ -1405,6 +1407,8 @@ def packed_placement_ab_verdict(sessions):
             statistics.mean(row["lower_request_change_pct"] for row in paired),
         "mean_byte_change_pct":
             statistics.mean(row["byte_change_pct"] for row in paired),
+        "mean_physical_byte_change_pct":
+            statistics.mean(row["physical_byte_change_pct"] for row in paired),
         "mean_consumed_block_change":
             statistics.mean(row["consumed_block_change"] for row in paired),
         "mean_throughput_change_pct":
@@ -3251,6 +3255,8 @@ def print_bench(result):
                      f"{packed_ab['mean_lower_request_change_pct']:+.1f}%"),
                     ("lower WRITE bytes",
                      f"{packed_ab['mean_byte_change_pct']:+.1f}%"),
+                    ("physical WRITE bytes",
+                     f"{packed_ab['mean_physical_byte_change_pct']:+.1f}%"),
                     ("consumed blocks",
                      f"{packed_ab['mean_consumed_block_change']:+.1f}"),
                     ("logical W throughput",

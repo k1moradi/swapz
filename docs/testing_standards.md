@@ -971,9 +971,15 @@ fixture in counterbalanced modes 0/1/1/0. Each aligned arm must exercise nonzero
 Both packed arms must have zero internal gaps/splits, strictly fewer timed
 physical WRITE requests, and strictly fewer consumed foreground physical blocks
 (`physical_write / 4096 + alignment_hole_blocks_foreground`) than their aligned
-partner. Physical/lower WRITE bytes and logical segment opens must not increase.
-Independent lower-device WRITE requests remain reported as observational
-block-layer evidence rather than a strict gate because merging may vary.
+partner. Every placement arm must remain GC-free, and its allocator cursor must
+equal that consumed-block total so the structural comparison cannot be polluted
+by reclaim or accounting drift. Logical segment opens must not increase.
+Whole-session physical WRITE bytes and timed lower-device WRITE bytes remain
+directional evidence rather than strict gates: persistent-QD lane interleaving
+can change extent composition even for the same immutable per-lane streams, and
+the strict consumed-block reduction already bounds any whole-session payload
+growth by a larger reduction in placement holes. Independent lower-device WRITE
+requests likewise remain observational because block-layer merging may vary.
 The ID69 console summary must keep the timed-I/O and placement-geometry rows in
 separate compact Markdown tables so the official reporter preserves its
 less-than-96-column output contract without dropping qualification evidence.
