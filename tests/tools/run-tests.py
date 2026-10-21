@@ -197,6 +197,12 @@ TIMED_WINDOW_COUNTER_FIELDS = (
     BURST_COUNTER_FIELDS + ("gc_victims",))
 SATURATION_WINDOW_FIELDS = WINDOW_SIZE_FIELDS + (
     "close_idle", "close_deadline", "close_pack_ready")
+DELTA64_FIELDS = (
+    "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
+    "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues",
+    "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
+    "delta64_lz4_payload_bytes_saved", "delta64_wall_ns",
+)
 KERNEL_WRITE_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -219,7 +225,7 @@ KERNEL_WRITE_FIELDS = (
     "pipeline_active_wall_ns", "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms",
     "write_wait_gt4ms", "retained_burst_target"
-) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS
+) + TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 BENCHMARK_PROVENANCE_FIELDS = ("source_sha", "fixture_sha256", "trace_sha256")
 LOWER_INFLIGHT_INT_FIELDS = (
     "target_interval_ns", "samples", "read_start", "write_start",
@@ -513,8 +519,22 @@ def timed_window_error(record):
     if not isinstance(record, dict):
         return "missing timed swapz window telemetry"
     if any(type(record.get(field)) is not int or record[field] < 0
-           for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS):
+           for field in TIMED_WINDOW_COUNTER_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS):
         return "invalid timed swapz window telemetry"
+    if not (record["delta64_adopted"] <= record["delta64_attempts"] <=
+            record["delta64_classifier_pass"] <= record["delta64_eligible"]):
+        return "inconsistent timed delta64 attempt accounting"
+    if (record["delta64_raw_rescues"] + record["delta64_lz4_rescues"] !=
+            record["delta64_adopted"] or
+            record["delta64_raw_payload_bytes_saved"] +
+            record["delta64_lz4_payload_bytes_saved"] !=
+            record["delta64_payload_bytes_saved"]):
+        return "inconsistent timed delta64 rescue accounting"
+    for kind, minimum, maximum in (("raw", 528, 4095), ("lz4", 1, 3567)):
+        if not (record[f"delta64_{kind}_rescues"] * minimum <=
+                record[f"delta64_{kind}_payload_bytes_saved"] <=
+                record[f"delta64_{kind}_rescues"] * maximum):
+            return "inconsistent timed delta64 payload accounting"
     if type(record.get("retained_burst_target")) is not int or not (
             1 <= record["retained_burst_target"] <= 64):
         return "invalid timed retained burst target"
@@ -2389,6 +2409,8 @@ def benchmark_verdicts(sessions):
         "host_load_scope": "WHOLE_HOST_INCLUDING_BENCHMARK_AND_BACKGROUND",
         "idle_host_control": "NOT_ESTABLISHED",
         "cross_report_cpu_comparability": "REQUIRES_EQUIVALENT_HOST_LOAD",
+        "delta64_scope": "FOREGROUND_PREPARATION_ATTEMPTS_NOT_COMMITTED_OR_LOWER_IO",
+        "delta64_timing_scope": "WALL_INCLUDING_PREEMPTION_AND_SECOND_LZ4_OVERLAP",
         "workload_opportunity": workload_opportunity,
         "statistical_confidence":
             "FAST_MIXED_FIVE_MATCHED_PAIRS_WITH_PAIRED_95PCT_CI; "
@@ -2406,19 +2428,19 @@ TABLE_HEADER_LEGEND = {
     "<=2024": "payloads at or below 2024 bytes",
     "blocks": "physical 4KiB blocks",
     "extents": "physical extents",
-    "xform ns": "transform time per page in nanoseconds",
-    "inv ns": "inverse-transform time per page in nanoseconds",
-    "LZ4-2 ns": "second LZ4 pass time per page in nanoseconds",
+    "xform ns": "native elapsed transform nanoseconds per page",
+    "inv ns": "native elapsed inverse-transform nanoseconds per page",
+    "LZ4-2 ns": "native elapsed second-LZ4 nanoseconds per page",
     "backend": "implementation backend",
     "score": "candidate threshold or score",
     "neg call/eligible": "negative calls / eligible pages",
     "neg useful": "useful negative classifications",
     "struct call/eligible": "structured calls / eligible pages",
     "struct useful": "useful structured classifications",
-    "cpu/page ns": "CPU time per page in nanoseconds",
-    "ns/saved block": "CPU nanoseconds per physical block saved",
-    "SD x": "modeled SD I/O-time / CPU-cost ratio",
-    "SSD x": "modeled SSD I/O-time / CPU-cost ratio",
+    "cpu/page ns": "modeled write CPU cost from native elapsed ns per page",
+    "ns/saved block": "modeled cost per planner block saved; not measured worker CPU",
+    "SD x": "modeled SD I/O-time / modeled write CPU-cost ratio",
+    "SSD x": "modeled SSD I/O-time / modeled write CPU-cost ratio",
     "profile": "input-content profile",
     "call/eligible": "classifier calls / eligible pages",
     "useful": "useful classifier outcomes",
@@ -2531,6 +2553,15 @@ TABLE_HEADER_LEGEND = {
     "inline": "ordered-worker inline preparations",
     "hand/wait": "preparation handoffs / blocking waits",
     "target": "retained burst target in records",
+    "eligible": "foreground pages with ordinary LZ4 >2024 bytes or RAW fallback",
+    "passed": "eligible pages passing the threshold-24 classifier",
+    "attempts": "full-page delta64 transform attempts",
+    "adopted": "attempts selecting a strictly smaller delta64 payload",
+    "LZ4+": "adoptions replacing a >2024-byte ordinary LZ4 payload",
+    "payload KiB": "encoded bytes avoided versus ordinary LZ4 or 4KiB RAW; not lower I/O",
+    "RAW+ KiB": "encoded bytes avoided by RAW rescues, in KiB",
+    "LZ4+ KiB": "encoded bytes avoided by ordinary LZ4 rescues, in KiB",
+    "rescue ms": "classifier, transform, second LZ4 and copy wall ms; not CPU time",
 }
 
 
@@ -2552,6 +2583,29 @@ def _print_table_note(label, message):
 def _table_interpretation(headers, rows):
     """Summarize table data without turning descriptive rows into a verdict."""
     header_index = {str(header): index for index, header in enumerate(headers)}
+    if "cpu/page ns" in header_index:
+        return ("This model combines separate native elapsed-time measurements, "
+                "which include scheduling effects. It does not measure worker CPU, "
+                "inverse-read cost or loaded throughput; a ratio above one is "
+                "modeled opportunity, not a demonstrated speedup.")
+    if "eligible" in header_index and "adopted" in header_index:
+        adopted = [_table_number(row[header_index["adopted"]]) or 0 for row in rows]
+        if not any(adopted):
+            return ("No delta64 payload was adopted in these measured intervals. "
+                    "This workload supplies no loaded delta64 savings evidence; "
+                    "native corpus opportunity does not establish a speedup.")
+        summary = ", ".join(f"{row[0]}={count:g}" for row, count in zip(rows, adopted))
+        return (f"Observed mean adoptions: {summary}. "
+                "These are preparation attempts, including later-aborted writes, "
+                "not committed mappings. Adoption proves use, not a throughput benefit.")
+    if "payload KiB" in header_index:
+        summary = ", ".join(
+            f"{row[0]}={_table_number(row[header_index['payload KiB']]) or 0:g} KiB"
+            for row in rows)
+        return (f"Mean encoded payload avoided: {summary}. "
+                "Extent packing, padding, reads and GC determine actual lower I/O. "
+                "Rescue wall time includes preemption and overlaps other timing rows; "
+                "do not add it to LZ4 time or call it CPU cost.")
     if "host busy %" in header_index:
         return ("Host activity includes the benchmark, kernel workers and background apps. "
                 "PSI measures CPU waiting, not its owner. These observations do not prove "
@@ -2703,7 +2757,7 @@ def print_table(headers, rows):
 def print_bench(result):
     predictor = result.get("evidence", {}).get("predictor")
     if isinstance(predictor, dict):
-        print("\n  Predictive-compression screening — native controls; not kernel policy")
+        print("\n  Predictive-compression screening — native corpus; not loaded attribution")
         print_table(
             ("transform", "adopt", "RAW+", "<=2024", "blocks", "extents",
              "xform ns", "inv ns", "LZ4-2 ns"),
@@ -2751,7 +2805,7 @@ def print_bench(result):
               f"{row['routed_extents_saved']:+d}")
              for row in predictor["thresholds"]])
         io_ns = predictor["io_model_block_ns"]
-        print("  Routed delta64 CPU economics")
+        print("  Routed delta64 CPU economics — elapsed-time model")
         print_table(
             ("score", "cpu/page ns", "ns/saved block", "SD x", "SSD x"),
             [(row["threshold"], row["routed_cpu_ns_per_page"],
@@ -2872,6 +2926,21 @@ def print_bench(result):
                              f"{host['observations']}/{host['expected_observations']}"))
         print_table(("mode", "host busy %", "CPU wait %", "steal %",
                      "replay cores", "CPUs", "CPU n"), cpu_rows)
+
+        print("  Production delta64 during mixed I/O — mean foreground attempt counters")
+        print_table(
+            ("mode", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+"),
+            [(mode, *(f"{columns[mode]['mixed_' + field]:.1f}" for field in (
+                "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
+                "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues")))
+             for mode in ("sync", "async")])
+        print_table(
+            ("mode", "payload KiB", "RAW+ KiB", "LZ4+ KiB", "rescue ms"),
+            [(mode, *(f"{columns[mode]['mixed_' + field] / 1024:.3f}" for field in (
+                "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
+                "delta64_lz4_payload_bytes_saved")),
+              f"{columns[mode]['mixed_delta64_wall_ns'] / 1e6:.3f}")
+             for mode in ("sync", "async")])
 
         print("  Verified 4MiB packed reads — detailed cache counters remain in JSON.")
         read_rows = []

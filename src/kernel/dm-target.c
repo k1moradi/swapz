@@ -14,6 +14,7 @@
 #define DM_MSG_PREFIX "swapz"
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <linux/cache.h>
 #include <linux/device-mapper.h>
 #include <linux/dm-io.h>
 #include <linux/highmem.h>
@@ -85,6 +86,19 @@ static bool swapz_logical_open_balance;
 module_param_named(logical_open_balance, swapz_logical_open_balance, bool, 0444);
 MODULE_PARM_DESC(logical_open_balance,
 		 "A/B least-opened logical segment selection; not NAND-wear policy");
+
+struct swapz_delta64_stats {
+	u64 eligible;
+	u64 classifier_pass;
+	u64 attempts;
+	u64 adopted;
+	u64 raw_rescues;
+	u64 lz4_rescues;
+	u64 payload_bytes_saved;
+	u64 raw_payload_bytes_saved;
+	u64 lz4_payload_bytes_saved;
+	u64 wall_ns;
+} ____cacheline_aligned_in_smp;
 
 struct swapz_prepared_page {
 	int length;
@@ -537,6 +551,11 @@ struct swapz_dm {
 	 * index 5: LZ4 did not fit SWAPZ_MAX_COMPRESSED -> raw fallback.
 	 */
 	u64 lz4_attempts;
+	/* Foreground attempt-side diagnostics, including speculative preparation
+	 * later aborted before publication. Each worker owns its accumulator;
+	 * only status sums them. Payload savings are not lower-device savings. */
+	struct swapz_delta64_stats ordered_delta64;
+	struct swapz_delta64_stats preparation_delta64;
 	/* Cumulative monotonic wall-time diagnostics; includes warmup and
 	 * oracle, NOT CPU cycles and NOT a measurement-interval delta. */
 	u64 lz4_wall_ns;
@@ -1248,23 +1267,29 @@ static void swapz_memcpy_accounted(void *destination, const void *source,
 static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 				 u8 *baseline_output, u8 *transform_scratch,
 				 u8 *candidate_output, void *lz4_workmem,
-				 u64 *lz4_wall_ns, swapz_u8 *encoding)
+				 u64 *lz4_wall_ns, swapz_u8 *encoding,
+				 struct swapz_delta64_stats *stats)
 {
-	u64 section_start;
-	int candidate;
+	u64 section_start, rescue_start, saved;
+	int candidate, result = baseline_length;
 
 	if (!input || !baseline_output || !transform_scratch ||
-	    !candidate_output || !lz4_workmem || !lz4_wall_ns || !encoding)
+	    !candidate_output || !lz4_workmem || !lz4_wall_ns || !encoding ||
+	    !stats)
 		return baseline_length;
 	*encoding = SWAPZ_ENCODING_LZ4;
 	if (baseline_length > 0 &&
 	    baseline_length <= SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH)
 		return baseline_length;
+	stats->eligible++;
+	rescue_start = ktime_get_ns();
 	if (!swapz_predict_should_try_delta64(
 			input, SWAPZ_PREDICTOR_PRODUCTION_THRESHOLD))
-		return baseline_length;
+		goto out;
+	stats->classifier_pass++;
+	stats->attempts++;
 	if (swapz_predict_delta64(input, transform_scratch))
-		return baseline_length;
+		goto out;
 	section_start = ktime_get_ns();
 	candidate = LZ4_compress_fast(transform_scratch, candidate_output,
 				      SWAPZ_BLOCK_BYTES, SWAPZ_MAX_COMPRESSED,
@@ -1272,11 +1297,27 @@ static int swapz_delta64_rescue(const u8 *input, int baseline_length,
 	*lz4_wall_ns += swapz_elapsed_ns(section_start, ktime_get_ns());
 	if (candidate <= 0 ||
 	    (baseline_length > 0 && candidate >= baseline_length))
-		return baseline_length;
+		goto out;
 	if (candidate_output != baseline_output)
 		memcpy(baseline_output, candidate_output, (size_t)candidate);
 	*encoding = SWAPZ_ENCODING_DELTA64;
-	return candidate;
+	result = candidate;
+	saved = baseline_length > 0 ? (u64)baseline_length : SWAPZ_BLOCK_BYTES;
+	saved -= (u64)candidate;
+	stats->adopted++;
+	stats->payload_bytes_saved += saved;
+	if (baseline_length > 0) {
+		stats->lz4_rescues++;
+		stats->lz4_payload_bytes_saved += saved;
+	} else {
+		stats->raw_rescues++;
+		stats->raw_payload_bytes_saved += saved;
+	}
+out:
+	/* Includes classifier, transform, second LZ4 and candidate copy. This is
+	 * wall time (possibly preempted), not worker CPU or additional I/O. */
+	stats->wall_ns += swapz_elapsed_ns(rescue_start, ktime_get_ns());
+	return result;
 }
 
 /*
@@ -1456,7 +1497,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 			prepared->length > 0 ? ctx->preparation_input_page :
 					      prepared->bytes,
 			ctx->preparation_lz4_workmem,
-			&ctx->preparation_lz4_wall_ns, &prepared->encoding);
+			&ctx->preparation_lz4_wall_ns, &prepared->encoding,
+			&ctx->preparation_delta64);
 		prepared->payload_crc32c_valid = false;
 		if (prepared->length > 0) {
 			section_start = ktime_get_ns();
@@ -2889,7 +2931,8 @@ static int swapz_accept_write(struct swapz_dm *ctx, struct bio *bio)
 			length > 0 ? ctx->input_page :
 				ctx->batch_bytes +
 				(size_t)ctx->batch_count * SWAPZ_BLOCK_BYTES,
-			ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding);
+			ctx->lz4_workmem, &ctx->lz4_wall_ns, &encoding,
+			&ctx->ordered_delta64);
 		if (length > 0) {
 			section_start = ktime_get_ns();
 			payload_crc32c = swapz_crc32c_bytes(
@@ -5356,6 +5399,34 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->parallel_read_coalesce_skip_gap,
 		       ctx->parallel_read_coalesce_skip_other,
 		       ctx->failed, ctx->last_error);
+		/* These independent single-writer values are diagnostic while busy;
+		 * qualification snapshots only at drained measurement boundaries. */
+		DMEMIT(" delta64_eligible=%llu delta64_classifier_pass=%llu "
+		       "delta64_attempts=%llu delta64_adopted=%llu "
+		       "delta64_raw_rescues=%llu delta64_lz4_rescues=%llu "
+		       "delta64_payload_bytes_saved=%llu "
+		       "delta64_raw_payload_bytes_saved=%llu "
+		       "delta64_lz4_payload_bytes_saved=%llu delta64_wall_ns=%llu",
+		       READ_ONCE(ctx->ordered_delta64.eligible) +
+			READ_ONCE(ctx->preparation_delta64.eligible),
+		       READ_ONCE(ctx->ordered_delta64.classifier_pass) +
+			READ_ONCE(ctx->preparation_delta64.classifier_pass),
+		       READ_ONCE(ctx->ordered_delta64.attempts) +
+			READ_ONCE(ctx->preparation_delta64.attempts),
+		       READ_ONCE(ctx->ordered_delta64.adopted) +
+			READ_ONCE(ctx->preparation_delta64.adopted),
+		       READ_ONCE(ctx->ordered_delta64.raw_rescues) +
+			READ_ONCE(ctx->preparation_delta64.raw_rescues),
+		       READ_ONCE(ctx->ordered_delta64.lz4_rescues) +
+			READ_ONCE(ctx->preparation_delta64.lz4_rescues),
+		       READ_ONCE(ctx->ordered_delta64.payload_bytes_saved) +
+			READ_ONCE(ctx->preparation_delta64.payload_bytes_saved),
+		       READ_ONCE(ctx->ordered_delta64.raw_payload_bytes_saved) +
+			READ_ONCE(ctx->preparation_delta64.raw_payload_bytes_saved),
+		       READ_ONCE(ctx->ordered_delta64.lz4_payload_bytes_saved) +
+			READ_ONCE(ctx->preparation_delta64.lz4_payload_bytes_saved),
+		       READ_ONCE(ctx->ordered_delta64.wall_ns) +
+			READ_ONCE(ctx->preparation_delta64.wall_ns));
 		break;
 	case STATUSTYPE_TABLE:
 		DMEMIT("%s %u %u %u %u %u %u %u %u", ctx->backing->name,

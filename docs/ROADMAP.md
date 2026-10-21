@@ -9,41 +9,44 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest standard owner matrix tested source
-`6b71b85c57c92e064413ea11b5b9f1aac110f0f2`, passed all five stages, and
+`4d73b13fa66f63b24b5edf099fcb2b7f3cab756f`, passed all five stages, and
 published report-only commit
-`21d50135e6fcfa4a6a84e07e92006b1515139ba5`. Loaded evidence is limited to
-positively owned RAM-backed `null_blk`. The production kernel tree is unchanged
-from the prior reviewed source `1888781`; this increment changes reporting and
-host-load observation. Cross-report timing differences do not establish a new
-kernel optimization or regression.
+`e80d8544a311130f5c81eff9b3b2fce98225cd77`. It covers owned RAM-backed
+`null_blk`, including the metadata front index and page-local delta64. The
+pending production-attribution increment has not been compiled or tested.
+The report demonstrates functional qualification, not a causal performance win
+for either the cache change or delta64. AVX-512 runtime remains unqualified on
+this SSE2-only host.
 
-Concurrent commit `548fcf37effa75a180a2c350eccd8274060c9553` adds an
-AVX-512 predictor backend after this run. That addition is outside this
-qualification; current main must receive its own exact-source qualification.
+Five matched fast-model write pairs measured async versus sync throughput:
+QD4 +0.64% (95% CI [-1.02%,+2.31%]), QD8 +23.63%
+([+17.84%,+29.43%]), QD32 +26.15% ([+19.24%,+33.06%]). QD8 lower WRITE
+requests fell 17.97% ([-20.13%,-15.81%]) while bytes rose 0.47%
+([+0.34%,+0.60%]). QD32 requests rose 25.04% ([+3.98%,+46.10%]) and
+bytes rose 0.68% ([+0.27%,+1.08%]). Keep the K=1 throughput benefit and its
+aggregation cost visible together; QD4 has no confirmed change.
 
-Five matched fast-model sustained-write pairs measured async versus sync at
-QD4 -0.57% (95% CI [-4.26%,+3.11%]), QD8 +26.59%
-([+17.21%,+35.97%]), and QD32 +24.80% ([+17.76%,+31.85%]). QD4 has no
-confirmed change. QD8 lower WRITE requests fell 21.90% (CI
-[-26.21%,-17.59%]) while bytes rose 0.49% ([+0.23%,+0.75%]). QD32 requests
-rose 38.11% ([+18.85%,+57.36%]) and bytes rose 0.85% ([+0.57%,+1.13%]).
-Keep the throughput gain and its aggregation cost visible together.
+Fast mixed async/sync throughput changed +1.36% (95% CI [-3.44%,+6.16%]);
+WRITE requests changed +4.43% ([-4.86%,+13.72%]). Neither interval establishes
+a change in that workload. Async versus raw means were 20.77 versus 19.89 MB/s
+useful WRITE input, 34.83 versus 50.38 MB lower WRITE data, and 930.2 versus
+12,301 lower WRITE requests. The means describe this synthetic run only.
 
-All 204 individual host CPU observations were available. The fast mixed
-arms averaged about 39.8-40.9% host CPU activity and 4.8-7.9% CPU PSI waiting
-across four online/affinity CPUs. This includes benchmark, kernel and background
-work and does not isolate Codex. The report explicitly records
-`idle_host_control=NOT_ESTABLISHED`; do not pool these data with earlier idle
-runs or infer code causality across unlike resource conditions.
+Fast mixed arms observed about 35.1-36.0% whole-host CPU activity and
+3.5-6.1% CPU PSI waiting. Background work includes Codex; these observations
+neither isolate its cost nor establish an idle host. Do not pool unlike host
+conditions or attribute cross-report differences to a single source change.
+Packed-read engine attribution is wall time excluding lower READ waits, not
+CPU consumption. Native threshold-24 delta64 routing saved 52 modeled blocks
+and 49 extents on the structured corpus; absent production counters, it cannot
+establish loaded adoption, lower-I/O savings or throughput benefit.
 
-Loaded packed placement retained zero internal holes and zero hole-induced
-run splits; live GC exercised 20 victims/rotations and verified 4096 pages.
-The separate low-RAM/heavy-CPU release gate remains open. Next collect that
-resource-pressure evidence, attribute QD32 and fast-read costs, then measure
-realistic churn/GC/TRIM before deciding on asynchronous TRIM. Physical media,
-real swap semantics and endurance remain unqualified.
-
-The complete mixed/read means and intervals are summarized in [README.md](README.md#current-evidence) and retained in `test_results.json`.
+Packed placement, byte-exact readback, GC and lifecycle qualification passed.
+Resource-pressure qualification, realistic churn/GC/TRIM cost, real kernel swap
+semantics and physical endurance remain open. The next report will capture
+production delta64 attempts, adoptions, split payload savings and rescue wall
+time without changing routing or K=1. See [benchmark.md](benchmark.md) for the
+measurement scope and [ROADMAP.md](ROADMAP.md) for release gates.
 
 ## Current bottleneck ranking
 
@@ -82,8 +85,10 @@ when the stored payload is strictly smaller than the raw-LZ4 baseline. SWZ
 records carry the encoding explicitly and reads invert delta64 after LZ4.
 Transforms never span logical pages or packed extents, preserving independent
 authority, selective reads, GC relocation and random-read units. The existing
-native corpus remains useful evidence, but owner loaded qualification now gates
-this production change.
+native corpus remains opportunity evidence. Source `4d73b13` passed the standard
+owner lifecycle matrix, but it does not attribute delta64 use or benefit in the
+loaded workload. Production usage counters are the next unqualified increment;
+keep routing, dispatch and K=1 unchanged while collecting that evidence.
 
 ID61 remains an evidence problem: timed mixed I/O observed zero GC victims, so
 background GC is unjustified. First measure useful-I/O wall/p99 while foreground

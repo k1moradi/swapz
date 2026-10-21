@@ -243,6 +243,36 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("ctx->lz4_size_bins[5]", status)
         self.assertNotIn("LZ4_compress_fast(", body("swapz_gc_compact_one_inner"))
 
+    def test_production_delta64_telemetry_has_separate_worker_owners(self):
+        rescue = body("swapz_delta64_rescue")
+        producer = body("swapz_preparation_worker")
+        ordered = body("swapz_accept_write")
+        status = body("swapz_status")
+        self.assertIn("&ctx->preparation_delta64", producer)
+        self.assertNotIn("&ctx->ordered_delta64", producer)
+        self.assertIn("&ctx->ordered_delta64", ordered)
+        self.assertNotIn("&ctx->preparation_delta64", ordered)
+        self.assertNotIn("atomic_", rescue)
+        self.assertNotIn("spin_lock", rescue)
+        self.assertLess(rescue.index("SWAPZ_PREDICTOR_RESCUE_MIN_LENGTH"),
+                        rescue.index("stats->eligible++"))
+        self.assertLess(rescue.index("swapz_predict_should_try_delta64"),
+                        rescue.index("stats->classifier_pass++"))
+        self.assertLess(rescue.index("stats->attempts++"),
+                        rescue.index("swapz_predict_delta64(input"))
+        self.assertLess(rescue.index("candidate >= baseline_length"),
+                        rescue.index("stats->adopted++"))
+        self.assertIn("(u64)baseline_length : SWAPZ_BLOCK_BYTES", rescue)
+        self.assertIn("stats->raw_payload_bytes_saved += saved", rescue)
+        self.assertIn("stats->lz4_payload_bytes_saved += saved", rescue)
+        self.assertIn("swapz_elapsed_ns(rescue_start, ktime_get_ns())", rescue)
+        for field in ("eligible", "classifier_pass", "attempts", "adopted",
+                      "raw_rescues", "lz4_rescues", "payload_bytes_saved",
+                      "raw_payload_bytes_saved", "lz4_payload_bytes_saved", "wall_ns"):
+            self.assertIn(f"delta64_{field}=%llu", status)
+            self.assertIn(f"READ_ONCE(ctx->ordered_delta64.{field})", status)
+            self.assertIn(f"READ_ONCE(ctx->preparation_delta64.{field})", status)
+
     def test_exact_zero_write_elides_lower_io_without_losing_ordering(self):
         accept = body("swapz_accept_write")
         read = body("swapz_read")

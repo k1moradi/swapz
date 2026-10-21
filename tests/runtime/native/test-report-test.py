@@ -176,6 +176,16 @@ def timed_kernel_write(*, mode, target=8):
     record = {field: 0 for field in runner.KERNEL_WRITE_FIELDS}
     record.update({
         "physical_write_reqs": 5,
+        "delta64_eligible": 10,
+        "delta64_classifier_pass": 5,
+        "delta64_attempts": 5,
+        "delta64_adopted": 3,
+        "delta64_raw_rescues": 1,
+        "delta64_lz4_rescues": 2,
+        "delta64_raw_payload_bytes_saved": 1000,
+        "delta64_lz4_payload_bytes_saved": 200,
+        "delta64_payload_bytes_saved": 1200,
+        "delta64_wall_ns": 50000,
         "lz4_wall_ns": 20000000,
         "ordered_lz4_wall_ns": 15000000,
         "prep_lz4_wall_ns": 5000000,
@@ -1043,6 +1053,34 @@ class ReportContract(unittest.TestCase):
         self.assertIn("scheduler-accounted", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
 
+    def test_delta64_accounting_and_interpretation_are_fail_closed(self):
+        record = timed_kernel_write(mode=1)
+        self.assertIsNone(runner.timed_window_error(record))
+        zero = {**record, **dict.fromkeys(runner.DELTA64_FIELDS, 0)}
+        self.assertIsNone(runner.timed_window_error(zero))
+        invalid_records = [
+            {"delta64_classifier_pass": 11}, {"delta64_attempts": 6},
+            {"delta64_adopted": 6}, {"delta64_raw_rescues": 2},
+            {"delta64_payload_bytes_saved": 1201},
+            {"delta64_raw_payload_bytes_saved": 527, "delta64_payload_bytes_saved": 727},
+            {"delta64_lz4_payload_bytes_saved": 7135, "delta64_payload_bytes_saved": 8135},
+            {"delta64_wall_ns": -1}, {"delta64_eligible": True},
+        ]
+        for invalid in invalid_records:
+            with self.subTest(invalid=invalid):
+                self.assertIsNotNone(runner.timed_window_error({**record, **invalid}))
+        for field in runner.DELTA64_FIELDS:
+            missing = dict(record)
+            del missing[field]
+            self.assertIsNotNone(runner.timed_window_error(missing))
+        headers = ("mode", "eligible", "passed", "attempts", "adopted", "RAW+", "LZ4+")
+        interpretation = runner._table_interpretation(
+            headers, [("async", "10", "0", "0", "0", "0", "0")])
+        self.assertIn("No delta64 payload was adopted", interpretation)
+        self.assertIn("no loaded delta64 savings evidence", interpretation)
+        self.assertIn("not committed mappings", runner._table_interpretation(
+            headers, [("async", "10", "5", "5", "3", "1", "2")]))
+
     def test_benchmark_console_is_compact_and_keeps_sync_control(self):
         verdicts = runner.benchmark_verdicts(runner.parse_sessions(synthetic_log()))
         saturation = runner.write_saturation_verdict(
@@ -1063,6 +1101,13 @@ class ReportContract(unittest.TestCase):
             runner.print_bench(report)
         rendered = output.getvalue()
         self.assertIn("Predictive-compression screening", rendered)
+        self.assertIn("native corpus; not loaded attribution", rendered)
+        self.assertIn("Production delta64 during mixed I/O", rendered)
+        self.assertIn("payload KiB", rendered)
+        self.assertIn("RAW+ KiB", rendered)
+        self.assertIn("rescue ms", rendered)
+        self.assertIn("not committed mappings", rendered)
+        self.assertNotIn("not kernel policy", rendered)
         self.assertIn("Garbage-collection map-scan scaling", rendered)
         self.assertIn("Simulated extent geometry", rendered)
         self.assertNotIn("ID69 PACKED PLACEMENT A/B", rendered)
@@ -1131,6 +1176,8 @@ class ReportContract(unittest.TestCase):
         self.assertIn("deferred DL service L/R/B", rendered)
         self.assertIn("Mixed window bins; close=P/D/I", rendered)
         self.assertIn("Routed delta64 CPU economics", rendered)
+        self.assertIn("elapsed-time model", rendered)
+        self.assertIn("not a demonstrated speedup", rendered)
         self.assertIn("Delta64 selected backends", rendered)
         self.assertNotIn("dry-close followups", rendered)
         self.assertIn("direct LZ4 input", rendered)

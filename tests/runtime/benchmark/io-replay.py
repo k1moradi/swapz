@@ -935,6 +935,12 @@ WINDOW_INTERVAL_FIELDS = (
     "single_pack_deferrals", "accepted_burst_extensions",
     "accepted_burst_tail_flushes", "accepted_burst_read_caps", "gc_victims"
 ) + CLOSE_REASON_FIELDS + ONE_PAGE_CLOSE_FIELDS + WIN1_PACK_CAUSE_FIELDS + SINGLE_TAIL_FIELDS + ID52_FIELDS + PACK_CLOSE_FIELDS + BURST_CLOSE_DETAIL_FIELDS + TAIL_SAMPLE_FIELDS + K1_READY_WAIT_FIELDS + DEADLINE_CONTEXT_FIELDS
+DELTA64_FIELDS = (
+    "delta64_eligible", "delta64_classifier_pass", "delta64_attempts",
+    "delta64_adopted", "delta64_raw_rescues", "delta64_lz4_rescues",
+    "delta64_payload_bytes_saved", "delta64_raw_payload_bytes_saved",
+    "delta64_lz4_payload_bytes_saved", "delta64_wall_ns",
+)
 KERNEL_WRITE_COUNTER_FIELDS = (
     "physical_write_reqs", "lz4_wall_ns",
     "ordered_lz4_wall_ns", "prep_lz4_wall_ns",
@@ -957,7 +963,7 @@ KERNEL_WRITE_COUNTER_FIELDS = (
     "pipeline_async_runs", "pipeline_active_wall_ns",
     "pipeline_finalize_wait_wall_ns",
     "write_wait_le1ms", "write_wait_1to4ms", "write_wait_gt4ms"
-) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS
+) + WINDOW_INTERVAL_FIELDS + PREPARATION_FIELDS + DELTA64_FIELDS
 KERNEL_WRITE_GAUGE_FIELDS = ("retained_burst_target",)
 KERNEL_WRITE_FIELDS = KERNEL_WRITE_COUNTER_FIELDS + KERNEL_WRITE_GAUGE_FIELDS
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
@@ -990,6 +996,22 @@ def kernel_write_delta(before, after):
                 for key in KERNEL_WRITE_COUNTER_FIELDS}
     if any(value < 0 for value in counters.values()):
         raise ValueError("swapz write telemetry reset during measurement")
+    if not (counters["delta64_adopted"] <= counters["delta64_attempts"] <=
+            counters["delta64_classifier_pass"] <= counters["delta64_eligible"]):
+        raise ValueError("inconsistent swapz delta64 attempt accounting")
+    if (counters["delta64_raw_rescues"] + counters["delta64_lz4_rescues"] !=
+            counters["delta64_adopted"] or
+            counters["delta64_raw_payload_bytes_saved"] +
+            counters["delta64_lz4_payload_bytes_saved"] !=
+            counters["delta64_payload_bytes_saved"]):
+        raise ValueError("inconsistent swapz delta64 rescue accounting")
+    # RAW baseline is 4096 bytes, accepted LZ4 baseline <=3568. Savings
+    # count encoded payload bytes, before extent metadata/padding or GC.
+    for kind, minimum, maximum in (("raw", 528, 4095), ("lz4", 1, 3567)):
+        if not (counters[f"delta64_{kind}_rescues"] * minimum <=
+                counters[f"delta64_{kind}_payload_bytes_saved"] <=
+                counters[f"delta64_{kind}_rescues"] * maximum):
+            raise ValueError("inconsistent swapz delta64 payload accounting")
     for key in KERNEL_WRITE_GAUGE_FIELDS:
         counters[key] = after[key]
     if not 1 <= counters["retained_burst_target"] <= 64:

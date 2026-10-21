@@ -364,7 +364,42 @@ class PairReplayContract(unittest.TestCase):
         with patch.object(module.subprocess, "run", return_value=fake):
             self.assertEqual(module.kernel_write_snapshot(
                 Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"}), before)
+        after.update({
+            "delta64_eligible": 10, "delta64_classifier_pass": 5,
+            "delta64_attempts": 5, "delta64_adopted": 3,
+            "delta64_raw_rescues": 1, "delta64_lz4_rescues": 2,
+            "delta64_raw_payload_bytes_saved": 1000,
+            "delta64_lz4_payload_bytes_saved": 200,
+            "delta64_payload_bytes_saved": 1200, "delta64_wall_ns": 50000,
+        })
         delta = module.kernel_write_delta(before, after)
+        self.assertEqual(delta["delta64_adopted"], 3)
+        self.assertEqual(delta["delta64_payload_bytes_saved"], 1200)
+        for invalid in (
+                {"delta64_classifier_pass": 11},
+                {"delta64_attempts": 6},
+                {"delta64_adopted": 6},
+                {"delta64_raw_rescues": 2},
+                {"delta64_payload_bytes_saved": 1201},
+                {"delta64_raw_payload_bytes_saved": 527,
+                 "delta64_payload_bytes_saved": 727},
+                {"delta64_raw_payload_bytes_saved": 4096,
+                 "delta64_payload_bytes_saved": 4296},
+                {"delta64_lz4_payload_bytes_saved": 1,
+                 "delta64_payload_bytes_saved": 1001},
+                {"delta64_lz4_payload_bytes_saved": 7135,
+                 "delta64_payload_bytes_saved": 8135}):
+            with self.subTest(delta64=invalid), self.assertRaisesRegex(ValueError, "delta64"):
+                module.kernel_write_delta(before, dict(after, **invalid))
+        # Missing fields must not silently become zero-use evidence.
+        missing = dict(before)
+        del missing["delta64_adopted"]
+        fake.stdout = "0 8192 swapz " + " ".join(
+            f"{key}={value}" for key, value in missing.items())
+        with patch.object(module.subprocess, "run", return_value=fake), \
+                self.assertRaisesRegex(ValueError, "missing delta64_adopted"):
+            module.kernel_write_snapshot(
+                Path("/dev/mapper/owned"), {"dm_uuid": "SWAPZ-TEST"})
         self.assertEqual(delta["physical_write_reqs"], 5)
         self.assertEqual([delta[key] for key in module.WRITE_WAIT_BINS],
                          [2, 2, 1])

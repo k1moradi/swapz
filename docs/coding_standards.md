@@ -577,6 +577,19 @@ be strictly smaller than the baseline before it replaces the stored payload.
 Portable unsigned,
 memcpy-safe C delta64 is the mandatory correctness oracle and fallback.
 
+Production attribution uses separate cacheline-aligned single-writer preparation
+and ordered worker accumulators. Count eligible baselines, classifier passes, transform
+attempts and smaller-payload adoptions; split adoptions and encoded-byte savings
+between RAW and ordinary-LZ4 rescues. Only status sums the accumulators with
+`READ_ONCE`; no counter lock or atomic update belongs on the page path. These
+are foreground preparation attempts, including speculative work later aborted,
+not committed mappings. GC relocation must not count a fresh rescue attempt.
+RAW savings use 4096 bytes as baseline; ordinary-LZ4 savings use its actual
+payload length. Neither is a claim of avoided physical blocks or endurance.
+Rescue wall time includes classifier, transform, second LZ4 and candidate copy;
+it can include preemption and overlaps existing LZ4/worker timings. Do not add
+it to those timings or label it CPU consumption.
+
 The current SHAKE-generated benchmark hard regions are negative controls, not a
 positive predictor corpus. Native evidence must also construct deterministic
 pointer/page-table, integer counter/timestamp, float/double, fixed-layout
