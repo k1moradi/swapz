@@ -4,6 +4,7 @@
 #include "authority.h"
 #define SWAPZ_BULK_BLOCKS 64U
 #define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U
+#define SWAPZ_READ_METADATA_FRONT_ENTRIES 128U
 #define SWAPZ_READ_EXTENT_CACHE_ENTRIES 16U
 #define SWAPZ_PARALLEL_READ_SLOTS 2U
 
@@ -150,6 +151,11 @@ struct swapz_engine {
 	swapz_u32 read_metadata_lru_ages[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u8 read_metadata_lru_extent_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u8 read_metadata_lru_valid[SWAPZ_READ_METADATA_CACHE_ENTRIES];
+	/*
+	 * L1-sized direct front for the 512-slot exact LRU. Entries encode
+	 * slot+1; collisions merely fall back to the exact bounded scan.
+	 */
+	swapz_u16 read_metadata_front_slots[SWAPZ_READ_METADATA_FRONT_ENTRIES];
 	swapz_u32 read_metadata_lru_clock;
 	swapz_u32 read_metadata_lru_hits;
 	/* Ordered-owner shared extent residency. Each fixed slot stores only

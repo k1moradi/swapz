@@ -1078,3 +1078,12 @@ feature. Backend timings are evidence, not an automatic policy gate: a new
 wider backend requires same-host results before any inverse-policy promotion,
 and official qualification on a host lacking that ISA does not qualify its
 runtime path.
+
+### Cache-local metadata front index
+
+The metadata front index is an accelerator only. Qualification must retain the
+512-slot exact cache, exact key validation after a front hit, bounded fallback
+scan on collision, and complete invalidation before any authority mutation.
+No lower-I/O, cache-capacity, generation or CRC rule changes with the front
+index. Predictor qualification continues to require SSE2 transformed bytes and
+inverse reconstruction to match scalar exactly after cache-local loop changes.

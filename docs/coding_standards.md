@@ -1035,3 +1035,17 @@ transform must not force a dependency-heavy inverse backend without same-host
 batched evidence. Keep each SIMD implementation in its own translation unit
 with explicit compiler flags so generic kernel C cannot acquire vector
 instructions accidentally.
+
+### Core-2-class cache locality
+
+Optimize hot metadata lookup for a 32KiB private L1D and shared L2 without
+assuming an LLC. The 512-entry metadata cache retains its qualified capacity
+and exact LRU replacement, but common hits first consult a fixed 128-entry
+direct front index. A front collision is only a hint miss and must fall back to
+the exact LRU scan; it may never authorize stale metadata. Mutation fences clear
+the front index with the LRU validity state.
+
+SSE2 delta64 keeps its full-page semantics byte-identical to scalar C but starts
+vector work after the first 16 bytes so pair-sized output stores and inverse
+loads/stores do not begin at byte offset 8. This targets older x86 split-access
+costs without assuming a wider ISA or changing predictor policy.

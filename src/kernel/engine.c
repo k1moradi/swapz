@@ -276,14 +276,33 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 					      extent_count, 0, 0);
 }
 
+static swapz_u16 swapz_read_metadata_front_bucket(swapz_u32 start_block,
+						 swapz_u8 extent_blocks)
+{
+	swapz_u32 mixed = start_block ^ (start_block >> 9) ^
+		((swapz_u32)extent_blocks * 0x9e3779b9U);
+
+	return (swapz_u16)(mixed & (SWAPZ_READ_METADATA_FRONT_ENTRIES - 1U));
+}
+
 static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
 					swapz_u32 start_block,
 					swapz_u8 extent_blocks)
 {
-	swapz_u16 index;
+	swapz_u16 bucket, encoded, index, slot;
 
 	if (!engine->read_metadata_cache)
 		return -1;
+	bucket = swapz_read_metadata_front_bucket(start_block, extent_blocks);
+	encoded = engine->read_metadata_front_slots[bucket];
+	if (encoded) {
+		slot = encoded - 1U;
+		if (slot < SWAPZ_READ_METADATA_CACHE_ENTRIES &&
+		    engine->read_metadata_lru_valid[slot] &&
+		    engine->read_metadata_lru_start_blocks[slot] == start_block &&
+		    engine->read_metadata_lru_extent_blocks[slot] == extent_blocks)
+			return slot;
+	}
 	for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index)
 		if (engine->read_metadata_lru_valid[index] &&
 		    engine->read_metadata_lru_start_blocks[index] == start_block &&
@@ -310,6 +329,8 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 		 * Current validated metadata is inserted below. */
 		memset(engine->read_metadata_lru_valid, 0,
 		       sizeof(engine->read_metadata_lru_valid));
+		memset(engine->read_metadata_front_slots, 0,
+		       sizeof(engine->read_metadata_front_slots));
 		engine->read_metadata_lru_clock = 1;
 		hit_slot = -1;
 	}
@@ -340,6 +361,9 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 	engine->read_metadata_lru_extent_blocks[slot] = extent_blocks;
 	engine->read_metadata_lru_ages[slot] = engine->read_metadata_lru_clock;
 	engine->read_metadata_lru_valid[slot] = 1;
+	engine->read_metadata_front_slots[
+		swapz_read_metadata_front_bucket(start_block, extent_blocks)] =
+		slot + 1U;
 }
 
 static int swapz_read_extent_lru_lookup(const struct swapz_engine *engine,
@@ -431,6 +455,8 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 		if (engine->read_metadata_lru_clock) {
 			memset(engine->read_metadata_lru_valid, 0,
 			       sizeof(engine->read_metadata_lru_valid));
+			memset(engine->read_metadata_front_slots, 0,
+			       sizeof(engine->read_metadata_front_slots));
 			engine->read_metadata_lru_clock = 0;
 		}
 		if (engine->read_extent_lru_clock) {
