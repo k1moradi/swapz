@@ -391,9 +391,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
             self.assertIn(snippet, DM)
 
     def test_allocation_has_gc_reserve_and_fail_closed_reuse(self):
+        compact = body("swapz_gc_compact_one_inner")
+        relocate = body("swapz_gc_relocate_one")
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_flush_window"))
         self.assertIn("swapz_gc_compact_one(ctx)", body("swapz_raw_write"))
-        self.assertIn("swapz_gc_choose_victim(ctx,", body("swapz_gc_compact_one_inner"))
+        self.assertIn("swapz_gc_choose_victim(ctx,", compact)
         self.assertIn("live_total += a->live_records[start + off]", AUTH)
         self.assertIn("a->segment_mapped_pages[segment]", AUTH)
         self.assertIn("if (live_total)", AUTH)
@@ -401,10 +403,11 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         self.assertIn("swapz_gc_live_byte_cost(m)", AUTH)
         self.assertIn("a->segment_gc_live_bytes[segment] += bytes", AUTH)
         self.assertIn("swapz_gc_prefer(score, count, best, best_count)", DM)
-        self.assertIn("swapz_engine_read_page(&ctx->engine", body("swapz_gc_compact_one_inner"))
-        self.assertIn("swapz_gc_flush(ctx)", body("swapz_gc_compact_one_inner"))
+        self.assertIn("swapz_gc_relocate_one(ctx, victim, logical)", compact)
+        self.assertIn("swapz_engine_read_page(&ctx->engine", relocate)
+        self.assertIn("swapz_gc_flush(ctx)", compact)
         self.assertIn("swapz_finish_raw(&ctx->authority", body("swapz_gc_move_raw"))
-        self.assertIn("if (a->live_records[block])", body("swapz_gc_compact_one_inner"))
+        self.assertIn("if (a->live_records[block])", compact)
 
     def test_discard_validates_entire_range_before_mutating(self):
         discard = body("swapz_discard")
