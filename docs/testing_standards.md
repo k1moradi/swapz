@@ -72,6 +72,9 @@ overlap zero; descriptive tables must not imply that the largest value is
 automatically best. Operator-facing headings and scope names use plain,
 human-readable descriptions rather than roadmap IDs. Keep every printed line
 under 96 columns so captured stdout stays copy/pasteable and readable.
+Legends must distinguish a ratio from its percentage change. READ rates and
+latencies from the mixed interval must be labeled as mixed-load observations;
+only the separately measured `packed_read` passes describe the 4MiB read phase.
 
 Loaded qualification of the default-on preparation path must read the target's
 status after every bare module load and fail unless `async_prepare=1`, including
@@ -102,7 +105,7 @@ and requests fell from 12,301 to about 781. This shows much lower physical
 WRITE traffic with about 9.7% lower useful throughput on this synthetic fast
 model, so it is not a universal useful-throughput win.
 
-Fast packed-read throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
+Fast mixed-load READ throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
 versus 2.84 ms. The slow RAM model was 2.36 versus 0.89 MB/s, with p99 of
 11.95 versus 33.67 ms. Fast sequential adjacent-range READ coalescing reduced
 lower requests by 28.4% (paired 95% CI [-32.97%,-23.83%]); its p99 interval

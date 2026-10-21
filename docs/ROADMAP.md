@@ -27,7 +27,7 @@ while lower WRITE bytes fell from 50.38 to 34.62 MB and requests fell from
 lower useful throughput on this synthetic fast model; it does not establish a
 universal throughput win over raw storage.
 
-Fast packed-read throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
+Fast mixed-load READ throughput was 7.46 versus 8.27 MB/s raw, with p99 of 1.90
 versus 2.84 ms. On the slower RAM model, it was 2.36 versus 0.89 MB/s with
 p99 of 11.95 versus 33.67 ms. These synthetic results show model-dependent
 swap-in throughput and latency tradeoffs. Fast sequential adjacent-range READ
@@ -228,6 +228,66 @@ ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 5. Continue representative ID67 content/CPU evidence independently.
 6. Keep ID62 blocked. Physical-device testing remains separately unauthorized
    and requires its own owner approval and safety review.
+
+## Next kernel step: asynchronous segment TRIM review
+
+Step 3 of the owner's plan is ready for independent design review, before a
+kernel implementation. The current `swapz_discard_dead_segment()` still calls
+`blkdev_issue_discard()` synchronously. It runs during allocator reuse, after
+GC role rotation, and when upper DISCARD removes a closed segment's last map.
+Overwrite-created deaths have no early notification. The latest passing owner
+report therefore qualifies the existing synchronous mechanism only.
+
+The proposed implementation is bounded to one outstanding whole-segment TRIM
+per target and a preallocated pending bitmap indexed by physical segment.
+Authority transitions would record candidates only after successful RAW,
+compressed or zero/discard publication has settled all mapping counts and
+survivor lists. Notification must not allocate, submit I/O or fail a committed
+mapping transition. A GC victim becomes eligible only after its role exchange
+commits. Zero maps alone are insufficient: immediately before reservation,
+the ordered owner must revalidate all live refs, OPEN/reserve roles, staged
+transactions and the immutable lower-WRITE run.
+
+The state transition to review is queued -> reserved -> submitted -> completed
+-> reaped. A dedicated reclaim-safe submission context would keep BIO allocation
+and block-layer submission off the ordered upper-I/O worker. Completion would
+record status and wake the ordered owner; that owner would publish successful
+`segment_trimmed` state and retire the reservation. Every allocator path,
+including the balancing selector and GC reserve destination, must respect this
+reservation. Queued but unsubmitted work may be cancelled for reuse. A submitted
+discard cannot be cancelled by clearing a flag or skipping a helper call.
+
+The unresolved design decision is reuse under capacity pressure. If the sole
+usable destination has a submitted TRIM, simply skipping that segment can turn
+temporary I/O into false ENOSPC, while waiting on the ordered worker can stall
+unrelated upper I/O. The preferred review candidate is completion-driven retry
+that retains the exact accepted BIO/window ownership and committed prefix,
+without repeating successful writes or spinning. A bounded wait at that exact
+reuse fence is a simpler alternative that requires an explicit exception to
+the plan's no-upper-path-wait requirement. Resolve this choice before coding.
+
+Suspend/destruction must stop new TRIM dispatch, cancel pending candidates,
+drain submission and outstanding callbacks, reap completion, and only then free
+the target, queues and backing reference. Device TRIM errors remain advisory;
+ownership disagreement remains fatal. Failed or unsupported TRIM must not set
+`segment_trimmed`. The callback must never publish maps or complete upper BIOs.
+
+The official qualification will need deterministic coverage of overwritten
+closed-segment death, same-segment replacement, a delayed discard racing reuse,
+the last eligible destination, GC reserve rotation, duplicate suppression,
+submission/allocation/device failures, and suspend/destruction with a discard
+outstanding. Byte-exact readback and independent lower DISCARD counters are
+required. Report death/reuse dispatch counts, maximum discard latency,
+submission wall time, deferred-reuse pressure and exact completion accounting.
+The normal throughput matrix alone cannot prove this ownership protocol.
+
+The [Linux 7.0 discard helper](https://github.com/torvalds/linux/blob/v7.0/block/blk-lib.c)
+builds chained BIOs and its synchronous wrapper waits for their completion.
+The implementation review must check split-range completion and memory-pressure
+behavior against the running kernel headers before selecting the async adapter.
+This step changes neither SWZ3 nor physical-device admission. Heavy-CPU/low-RAM,
+real swap semantics, representative churn and disposable-VM qualification remain
+separate release gates.
 
 ## NUMA / deployment topology
 

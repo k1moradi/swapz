@@ -37,7 +37,7 @@ In the fast mixed raw comparison, useful WRITE throughput was 22.48 versus
 requests fell from 12,301 to about 781. Therefore this synthetic workload
 shows a substantial physical-I/O reduction with about 9.7% lower useful
 throughput on the fast model; it does not establish a universal throughput
-gain over raw. Fast packed-read throughput was 7.46 versus 8.27 MB/s raw,
+gain over raw. Fast mixed-load READ throughput was 7.46 versus 8.27 MB/s raw,
 with p99 of 1.90 versus 2.84 ms. The slower RAM model was 2.36 versus 0.89
 MB/s, with p99 of 11.95 versus 33.67 ms. These are model-specific RAM results,
 not physical-media measurements.

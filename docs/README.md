@@ -64,7 +64,7 @@ to 34.62 MB and lower WRITE requests fell from 12,301 to about 781. This is a
 large physical-I/O reduction with about 9.7% lower useful throughput on this
 synthetic fast model, not a universal throughput win over raw storage.
 
-For the fast packed-read phase, swapz reported 7.46 versus 8.27 MB/s read
+During the fast mixed workload, swapz reported 7.46 versus 8.27 MB/s read
 throughput and 1.90 versus 2.84 ms p99 against raw. The slower RAM model
 reported 2.36 versus 0.89 MB/s and 11.95 versus 33.67 ms p99. These are
 synthetic RAM-backed results: they show model-dependent throughput and latency
