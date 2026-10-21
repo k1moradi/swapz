@@ -988,6 +988,8 @@ requests likewise remain observational because block-layer merging may vary.
 The ID69 console summary must keep the timed-I/O and placement-geometry rows in
 separate compact Markdown tables so the official reporter preserves its
 less-than-96-column output contract without dropping qualification evidence.
+Fail-closed summaries retain the same `int holes` label for avoidable internal
+placement gaps so PASS and failure output do not silently change semantics.
 Throughput and p99 are reported with five-pair per-model confidence intervals.
 Owner report a88b328 qualified the default-off evidence gate, so the separate
 promotion commit defaults packed placement on while retaining the read-only

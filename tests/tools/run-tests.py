@@ -3389,7 +3389,7 @@ def print_bench(result):
                 ))
             if placement_rows:
                 print_table(
-                    ("model", "pack", "order", "phys req", "holes", "consumed"),
+                    ("model", "pack", "order", "phys req", "int holes", "consumed"),
                     placement_rows)
             print(f"  verdict: {packed_ab.get('overall')} — "
                   f"{packed_ab.get('reason', 'incomplete')}")
