@@ -148,7 +148,7 @@ changes.
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
 | 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
-| 69 | Hole-free 4KiB-aligned extent placement | **4 default-on promotion / owner requalification pending** | Report a88b328 passed the default-off gate: packed arms eliminated internal holes/splits, physical WRITE requests fell 11.2%, consumed blocks fell by 24 on average, logical opens stayed flat, and throughput/p99 were directionally favorable. The promotion defaults packed placement on and expands qualification to five matched pairs on both maintained RAM models. The aligned override remains for this one requalification cycle only; a passing cycle permits deleting aligned mode without changing SWZ3. |
+| 69 | Hole-free 4KiB-aligned extent placement | **4 promotion owner-qualified / aligned retirement implemented, requalification pending** | Report b0623ae0 passed 5/5 with five matched pairs per RAM model: physical WRITE requests fell 15.0% CI [-19.4,-10.6] on SD_EMULATED and 13.3% [-18.8,-7.8] on SSD_EMULATED; consumed blocks fell 24.4 and 29.8; every packed arm had zero internal holes/splits, zero GC and unchanged logical opens. Aligned placement and its A/B harness are now retired; qualification keeps tail-only waste and zero-split invariants without changing SWZ3. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
 | 72 | Physical wear / logical allocator fairness | **4 logical-open balancing A/B implemented / physical wear still gated** | Optional `logical_open_balance=1` prefers the least-opened eligible dead destination and uses logical-open count only as an exact-score/count GC victim tie-break. It is default-off and is allocator-fairness evidence only; logical LBA opens do not measure NAND P/E cycles and cannot authorize cold relocation or physical wear claims. |
@@ -213,11 +213,11 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 
 ## Immediate work queue
 
-1. Requalify the default-on ID69 promotion with the full `make test` matrix,
-   including five matched placement pairs on both maintained RAM models.
-2. Keep the aligned `packed_placement=0` override for this one qualification
-   cycle. If the expanded ID69 gates pass, retire aligned mode and its A/B
-   harness in a small follow-up while retaining zero-internal-hole invariants.
+1. Owner-requalify the aligned-mode retirement with the full `make test`
+   matrix; ID69 now gates on canonical zero-internal-hole/zero-split invariants.
+2. After that passes, promote `async_prepare=1` in a separate commit. Keep K=1
+   and the existing activation gate, retain sync as the qualification control,
+   and continue reporting fast-mixed async-sync lower-WRITE-request paired CI.
 3. Keep `logical_open_balance=0`. Promote it only if fresh RAM evidence shows
    useful allocator-spread behavior without probe/GC regressions; even then it
    remains logical fairness, not NAND wear leveling.

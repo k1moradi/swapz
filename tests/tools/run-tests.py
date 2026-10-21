@@ -795,8 +795,9 @@ def parse_loaded_correctness(output):
             gc_relocation_map_entries != gc_pages or
             alloc_probe_segments <= 0 or alloc_probe_full_scans <= 0 or
             alloc_probe_full_scans > alloc_probe_segments or
-            tail_waste_fg > alignment_hole_fg or
-            tail_waste_gc > alignment_hole_gc or
+            tail_waste_fg != alignment_hole_fg or
+            tail_waste_gc != alignment_hole_gc or
+            run_splits_by_hole != 0 or
             segment_program_segments <= 0 or
             segment_program_min > segment_program_max or
             segment_program_sum < segment_program_max or
@@ -809,9 +810,10 @@ def parse_loaded_correctness(output):
             discard_trim_verified != 4096):
         return {"overall": "INCOMPLETE",
                 "reason": "loaded discard-time TRIM evidence is incomplete"}
-    if (packed_enabled != 1 or packed_verified_pages != 128 or packed_failed != 0):
+    if (packed_enabled != 1 or packed_verified_pages != 128 or
+            packed_holes != 0 or packed_run_splits != 0 or packed_failed != 0):
         return {"overall": "INCOMPLETE",
-                "reason": "loaded packed-placement smoke evidence is incomplete"}
+                "reason": "loaded packed-placement structural invariant failed"}
     if suspend_retain != 4 or observed_open != 1 or verified_pages != 128:
         return {"overall": "INCOMPLETE",
                 "reason": "loaded suspend/drain evidence is incomplete"}
@@ -1079,19 +1081,12 @@ def run_stage(title, command, result, *, parse_bench=False):
     sd_coalesce_diagnostic = (
         sd_read_coalesce_ab_verdict(sd_coalesce_sessions)
         if parse_bench else None)
-    packed_placement_sessions = (
-        parse_packed_placement_ab(output) if parse_bench else [])
-    packed_placement_diagnostic = (
-        packed_placement_ab_verdict(packed_placement_sessions)
-        if parse_bench else None)
     marker_failure = (parse_bench and rc == 0 and
                       (loaded_correctness.get("overall") != "PASS" or
                        read_coalesce_diagnostic.get("overall") !=
                        "PASS_READ_COALESCE_AB_CONFIRMATION" or
                        sd_coalesce_diagnostic.get("overall") !=
-                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION" or
-                       packed_placement_diagnostic.get("overall") !=
-                       "PASS_PACKED_PLACEMENT_AB"))
+                       "PASS_SD_READ_COALESCE_AB_CONFIRMATION"))
     if marker_failure:
         rc = 1
     blocked_marker = parse_bench and any(
@@ -1132,15 +1127,6 @@ def run_stage(title, command, result, *, parse_bench=False):
                 record["failed_phase"] = "SD adjacent READ coalescing A/B evidence"
                 record["diagnostic"] = sd_coalesce_diagnostic.get(
                     "reason", "SD ID63 diagnostic evidence is incomplete")
-            elif packed_placement_diagnostic.get("overall") != (
-                    "PASS_PACKED_PLACEMENT_AB"):
-                record["failed_phase"] = "ID69 packed placement A/B evidence"
-                record["diagnostic"] = packed_placement_diagnostic.get(
-                    "reason", "ID69 placement evidence is incomplete")
-            else:
-                record["failed_phase"] = "ID69 packed placement A/B evidence"
-                record["diagnostic"] = packed_placement_diagnostic.get(
-                    "reason", "ID69 placement evidence is incomplete")
         else:
             record["failed_phase"], record["diagnostic"] = failure_context(
                 output, loaded=parse_bench,
@@ -1166,8 +1152,6 @@ def run_stage(title, command, result, *, parse_bench=False):
         result["benchmarks"]["read_coalesce_ab"] = read_coalesce_diagnostic
         result["benchmarks"]["sd_read_coalesce_ab_sessions"] = sd_coalesce_sessions
         result["benchmarks"]["sd_read_coalesce_ab"] = sd_coalesce_diagnostic
-        result["benchmarks"]["packed_placement_ab_sessions"] = packed_placement_sessions
-        result["benchmarks"]["packed_placement_ab"] = packed_placement_diagnostic
         result["benchmarks"]["write_saturation_sessions"] = parse_write_saturation(output)
         result["benchmarks"]["write_saturation"] = write_saturation_verdict(
             result["benchmarks"]["write_saturation_sessions"])
@@ -1179,344 +1163,6 @@ def run_stage(title, command, result, *, parse_bench=False):
     return rc
 
 
-def _status_u64(status, key):
-    match = re.search(r"(?:^|\s)" + re.escape(key) + r"=(\d+)(?:\s|$)",
-                      status)
-    return int(match.group(1)) if match else None
-
-
-def parse_packed_placement_ab(output):
-    sessions, current, regime = [], None, None
-    for raw in output.splitlines():
-        line = raw.strip()
-        if line.startswith("START_PACKED_PLACEMENT_REGIME="):
-            label = line.partition("=")[2].strip()
-            if label not in MODEL_ORDER or current is not None:
-                return []
-            regime = label
-        elif line.startswith("START_PACKED_PLACEMENT_AB="):
-            if regime not in MODEL_ORDER or current is not None:
-                return []
-            try:
-                mode = int(line.rsplit("=", 1)[-1])
-            except ValueError:
-                return []
-            if mode not in (0, 1):
-                return []
-            current = {"packed_placement": mode, "status": "INCOMPLETE",
-                       "regime": regime, "order": "unknown",
-                       "device_model": None, "swapz": None,
-                       "status_after": None}
-            sessions.append(current)
-        elif current is not None and line.startswith("REPLAY_ORDER="):
-            current["order"] = line.partition("=")[2].strip()
-        elif current is not None and line.startswith("PASS_RAM_MODEL_LOWER_MBPS="):
-            model = re.fullmatch(
-                r"PASS_RAM_MODEL_LOWER_MBPS=(\d+) COMPLETION_NSEC=(\d+) IRQMODE=(\d+) QUEUE_MODE=(\d+) SUBMIT_QUEUES=(\d+) HW_QUEUE_DEPTH=(\d+)",
-                line)
-            if model:
-                current["device_model"] = {
-                    "cap_mib_s": int(model.group(1)),
-                    "completion_nsec": int(model.group(2)),
-                    "irqmode": int(model.group(3)),
-                    "queue_mode": int(model.group(4)),
-                    "submit_queues": int(model.group(5)),
-                    "hw_queue_depth": int(model.group(6)),
-                }
-        elif current is not None and line.startswith("SWAPZ_STATUS_AFTER="):
-            current["status_after"] = line.partition("=")[2].strip()
-        elif current is not None and line.startswith("{"):
-            try:
-                obj = json.loads(line)
-            except (TypeError, ValueError):
-                continue
-            if obj.get("candidate") != "swapz" or obj.get("verdict") != "PASS":
-                continue
-            rates = obj.get("throughput_mbps") or {}
-            lower = obj.get("lower_io") or {}
-            kernel = obj.get("kernel_write_path") or {}
-            current["swapz"] = {
-                "source_sha": obj.get("source_sha"),
-                "fixture_sha256": obj.get("fixture_sha256"),
-                "trace_sha256": obj.get("trace_sha256"),
-                "replay_mode": obj.get("replay_mode"),
-                "qd": obj.get("qd"), "write_ops": obj.get("write_ops"),
-                "read_ops": obj.get("read_ops"),
-                "verified_pages": obj.get("verified_pages"),
-                "logical_write_mbps": rates.get("logical_write_mbps"),
-                "write_p99_ns": obj.get("write_p99_ns"),
-                "lower_write_bytes": lower.get("lower_write_bytes"),
-                "lower_write_requests": lower.get("lower_write_requests"),
-                "physical_write_reqs": kernel.get("physical_write_reqs"),
-            }
-        elif current is not None and line.startswith("PASS_PACKED_PLACEMENT_AB="):
-            try:
-                mode = int(line.rsplit("=", 1)[-1])
-            except ValueError:
-                return []
-            if mode != current["packed_placement"]:
-                return []
-            current["status"] = "PASS"
-            current = None
-        elif line.startswith("PASS_PACKED_PLACEMENT_REGIME="):
-            label = line.partition("=")[2].strip()
-            if current is not None or label != regime:
-                return []
-            regime = None
-    if current is not None or regime is not None:
-        return []
-    return sessions
-
-
-def packed_placement_ab_verdict(sessions):
-    expected_total = len(MODEL_ORDER) * len(CONFIRMATION_SEQUENCE)
-    if len(sessions) != expected_total:
-        return {"overall": "INCOMPLETE",
-                "reason": "ID69 placement A/B session count is incomplete"}
-    clean = []
-    for row in sessions:
-        arm = row.get("swapz")
-        status = row.get("status_after")
-        regime = row.get("regime")
-        if regime not in MODEL_ORDER or row.get("status") != "PASS" or \
-                not isinstance(arm, dict) or not isinstance(status, str):
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B arm did not complete"}
-        integer_fields = (
-            "qd", "write_ops", "read_ops", "verified_pages", "write_p99_ns",
-            "lower_write_bytes", "lower_write_requests", "physical_write_reqs")
-        if any(type(arm.get(field)) is not int or arm[field] < 0
-               for field in integer_fields):
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B I/O evidence is malformed"}
-        if (arm["qd"] != 32 or arm["write_ops"] != 2048 or arm["read_ops"] != 0 or
-                arm["verified_pages"] != 1024 or
-                arm["replay_mode"] != "persistent-write" or
-                not isinstance(arm.get("source_sha"), str) or
-                not re.fullmatch(r"[0-9a-f]{40}", arm["source_sha"]) or
-                not isinstance(arm.get("fixture_sha256"), str) or
-                not re.fullmatch(r"[0-9a-f]{64}", arm["fixture_sha256"]) or
-                not isinstance(arm.get("trace_sha256"), str) or
-                not re.fullmatch(r"[0-9a-f]{64}", arm["trace_sha256"]) or
-                not isinstance(arm.get("logical_write_mbps"), (int, float)) or
-                not math.isfinite(arm["logical_write_mbps"]) or
-                arm["logical_write_mbps"] <= 0):
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B workload identity is invalid"}
-        expected_model = MODEL_SPECS[regime]
-        model = row.get("device_model")
-        if not isinstance(model, dict) or any(
-                model.get(key) != expected_model[key]
-                for key in ("cap_mib_s", "completion_nsec", "irqmode",
-                            "queue_mode", "submit_queues", "hw_queue_depth")):
-            return {"overall": "INCOMPLETE",
-                    "reason": f"{regime}: ID69 device model mismatch"}
-        mode = row["packed_placement"]
-        status_values = {
-            key: _status_u64(status, key) for key in (
-                "packed_placement", "logical_open_balance",
-                "alignment_hole_blocks_foreground",
-                "segment_tail_waste_blocks_foreground",
-                "run_splits_by_hole", "segment_program_sum",
-                "physical_write", "cursor", "gc_victims")
-        }
-        if any(value is None for value in status_values.values()) or \
-                status_values["packed_placement"] != mode or \
-                status_values["logical_open_balance"] != 0:
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B status policy mismatch"}
-        if (arm["physical_write_reqs"] <= 0 or
-                arm["lower_write_requests"] <= 0 or arm["lower_write_bytes"] <= 0 or
-                arm["write_p99_ns"] <= 0 or
-                status_values["physical_write"] <= 0 or
-                status_values["physical_write"] % LOGICAL_BLOCK_BYTES or
-                status_values["cursor"] <= 0 or
-                status_values["segment_program_sum"] <= 0):
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B measured write evidence is empty"}
-        aggregate_holes = status_values["alignment_hole_blocks_foreground"]
-        tail_waste = status_values["segment_tail_waste_blocks_foreground"]
-        if tail_waste > aggregate_holes:
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement telemetry has tail waste above aggregate holes"}
-        physical_write_blocks = (
-            status_values["physical_write"] // LOGICAL_BLOCK_BYTES)
-        consumed_blocks = physical_write_blocks + aggregate_holes
-        if status_values["gc_victims"] != 0:
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B was contaminated by GC"}
-        if status_values["cursor"] != consumed_blocks:
-            return {"overall": "INCOMPLETE",
-                    "reason": "ID69 placement A/B allocator accounting mismatch"}
-        clean.append({
-            **row,
-            "holes": aggregate_holes,
-            "tail_waste": tail_waste,
-            "internal_holes": aggregate_holes - tail_waste,
-            "run_splits": status_values["run_splits_by_hole"],
-            "physical_write_bytes": status_values["physical_write"],
-            "physical_write_blocks": physical_write_blocks,
-            "consumed_blocks": consumed_blocks,
-            "cursor": status_values["cursor"],
-            "gc_victims": status_values["gc_victims"],
-            "segment_program_sum": status_values["segment_program_sum"],
-        })
-
-    def completed(overall, reason, paired=None):
-        return {
-            "overall": overall,
-            "reason": reason,
-            "scope": "OWNED_RAM_MIXED_CLASS_PLACEMENT_ONLY",
-            "sessions": clean,
-            "paired": paired or [],
-        }
-
-    if len({row["swapz"]["source_sha"] for row in clean}) != 1 or \
-            len({row["swapz"]["fixture_sha256"] for row in clean}) != 1 or \
-            len({row["swapz"]["trace_sha256"] for row in clean}) != 1:
-        return completed(
-            "INCOMPLETE",
-            "ID69 placement A/B did not reuse one immutable workload")
-
-    all_paired = []
-    regime_results = {}
-    for regime in MODEL_ORDER:
-        rows = [row for row in clean if row["regime"] == regime]
-        if len(rows) != len(CONFIRMATION_SEQUENCE) or \
-                [row["packed_placement"] for row in rows] != \
-                list(CONFIRMATION_SEQUENCE):
-            return completed(
-                "INCOMPLETE",
-                f"{regime}: ID69 counterbalanced placement sequence is incomplete",
-                all_paired)
-        if any(row.get("order") !=
-               ("swapz-first" if index % 2 else "off-first")
-               for index, row in enumerate(rows)):
-            return completed(
-                "INCOMPLETE",
-                f"{regime}: ID69 replay order mismatch",
-                all_paired)
-        try:
-            pairs = matched_binary_pairs(rows, "packed_placement")
-        except ValueError:
-            return completed(
-                "INCOMPLETE",
-                f"{regime}: ID69 matched pairing is invalid",
-                all_paired)
-        regime_paired = []
-        for pair in pairs:
-            aligned, packed = pair[0], pair[1]
-            if aligned["internal_holes"] <= 0 or aligned["run_splits"] <= 0:
-                return completed(
-                    "INCOMPLETE",
-                    f"{regime}: ID69 control did not exercise holes and splits",
-                    all_paired + regime_paired)
-            if packed["internal_holes"] != 0 or packed["run_splits"] != 0:
-                return completed(
-                    "REGRESSION",
-                    f"{regime}: ID69 packed placement retained internal holes",
-                    all_paired + regime_paired)
-            a, p = aligned["swapz"], packed["swapz"]
-            if p["physical_write_reqs"] >= a["physical_write_reqs"]:
-                return completed(
-                    "NO_GAIN",
-                    f"{regime}: ID69 packed placement did not reduce physical WRITE requests",
-                    all_paired + regime_paired)
-            if packed["consumed_blocks"] >= aligned["consumed_blocks"]:
-                return completed(
-                    "NO_GAIN",
-                    f"{regime}: ID69 packed placement did not reduce consumed physical blocks",
-                    all_paired + regime_paired)
-            if packed["segment_program_sum"] > aligned["segment_program_sum"]:
-                return completed(
-                    "REGRESSION",
-                    f"{regime}: ID69 packed placement increased logical segment opens",
-                    all_paired + regime_paired)
-            regime_paired.append({
-                "request_change_pct":
-                    (p["physical_write_reqs"] - a["physical_write_reqs"]) *
-                    100.0 / a["physical_write_reqs"],
-                "lower_request_change_pct":
-                    (p["lower_write_requests"] - a["lower_write_requests"]) *
-                    100.0 / a["lower_write_requests"],
-                "byte_change_pct":
-                    (p["lower_write_bytes"] - a["lower_write_bytes"]) * 100.0 /
-                    a["lower_write_bytes"] if a["lower_write_bytes"] else 0.0,
-                "physical_byte_change_pct":
-                    (packed["physical_write_bytes"] -
-                     aligned["physical_write_bytes"]) * 100.0 /
-                    aligned["physical_write_bytes"]
-                    if aligned["physical_write_bytes"] else 0.0,
-                "consumed_block_change":
-                    packed["consumed_blocks"] - aligned["consumed_blocks"],
-                "throughput_change_pct":
-                    (p["logical_write_mbps"] - a["logical_write_mbps"]) *
-                    100.0 / a["logical_write_mbps"],
-                "p99_change_pct":
-                    (p["write_p99_ns"] - a["write_p99_ns"]) * 100.0 /
-                    a["write_p99_ns"] if a["write_p99_ns"] else 0.0,
-                "program_change":
-                    packed["segment_program_sum"] -
-                    aligned["segment_program_sum"],
-            })
-        def ci(field):
-            return paired_ci95([row[field] for row in regime_paired])
-        regime_results[regime] = {
-            "sessions": rows,
-            "paired": regime_paired,
-            "mean_request_change_pct":
-                statistics.mean(row["request_change_pct"]
-                                for row in regime_paired),
-            "mean_lower_request_change_pct":
-                statistics.mean(row["lower_request_change_pct"]
-                                for row in regime_paired),
-            "mean_byte_change_pct":
-                statistics.mean(row["byte_change_pct"]
-                                for row in regime_paired),
-            "mean_physical_byte_change_pct":
-                statistics.mean(row["physical_byte_change_pct"]
-                                for row in regime_paired),
-            "mean_consumed_block_change":
-                statistics.mean(row["consumed_block_change"]
-                                for row in regime_paired),
-            "mean_throughput_change_pct":
-                statistics.mean(row["throughput_change_pct"]
-                                for row in regime_paired),
-            "mean_p99_change_pct":
-                statistics.mean(row["p99_change_pct"]
-                                for row in regime_paired),
-            "ci95": {
-                "request_change_pct": ci("request_change_pct"),
-                "lower_request_change_pct": ci("lower_request_change_pct"),
-                "byte_change_pct": ci("byte_change_pct"),
-                "physical_byte_change_pct": ci("physical_byte_change_pct"),
-                "consumed_block_change": ci("consumed_block_change"),
-                "throughput_change_pct": ci("throughput_change_pct"),
-                "p99_change_pct": ci("p99_change_pct"),
-            },
-        }
-        all_paired.extend(regime_paired)
-
-    return {
-        "overall": "PASS_PACKED_PLACEMENT_AB",
-        "scope": "OWNED_RAM_MIXED_CLASS_PLACEMENT_ONLY",
-        "sessions": clean, "paired": all_paired, "regimes": regime_results,
-        "mean_request_change_pct":
-            statistics.mean(row["request_change_pct"] for row in all_paired),
-        "mean_lower_request_change_pct":
-            statistics.mean(row["lower_request_change_pct"] for row in all_paired),
-        "mean_byte_change_pct":
-            statistics.mean(row["byte_change_pct"] for row in all_paired),
-        "mean_physical_byte_change_pct":
-            statistics.mean(row["physical_byte_change_pct"] for row in all_paired),
-        "mean_consumed_block_change":
-            statistics.mean(row["consumed_block_change"] for row in all_paired),
-        "mean_throughput_change_pct":
-            statistics.mean(row["throughput_change_pct"] for row in all_paired),
-        "mean_p99_change_pct":
-            statistics.mean(row["p99_change_pct"] for row in all_paired),
-    }
-
 def parse_sessions(output):
     sessions, current, regime = [], None, None
     for line in output.splitlines():
@@ -1525,8 +1171,6 @@ def parse_sessions(output):
             regime = line.partition("=")[2]
         elif line.startswith(("START_READ_COALESCE_AB=",
                               "START_SD_READ_COALESCE_AB=",
-                              "START_PACKED_PLACEMENT_REGIME=",
-                              "START_PACKED_PLACEMENT_AB=",
                               "START_BURST_GUARD_AB=",
                               "START_WRITE_SATURATION_REGIME=")):
             current = None
@@ -3313,86 +2957,6 @@ def print_bench(result):
     else:
         print("\n  SD ID63 adjacent READ coalescing A/B: NOT QUALIFIED "
               f"({sd_coalesce_ab.get('reason', sd_coalesce_ab.get('overall', 'NOT_RUN'))})")
-
-    packed_ab = result["benchmarks"].get("packed_placement_ab")
-    if isinstance(packed_ab, dict):
-        regimes = packed_ab.get("regimes") or {}
-        if packed_ab.get("overall") == "PASS_PACKED_PLACEMENT_AB":
-            for regime in MODEL_ORDER:
-                data = regimes.get(regime) or {}
-                print(f"\n  ID69 PACKED PLACEMENT A/B — {regime.upper()} mixed-class owned RAM")
-                placement_rows = []
-                for row in data.get("sessions", []):
-                    arm = row.get("swapz") or {}
-                    placement_rows.append((
-                        row.get("packed_placement"),
-                        row.get("order", "unknown"),
-                        f"{arm.get('logical_write_mbps', 0):.2f}",
-                        f"{arm.get('write_p99_ns', 0) / 1e6:.2f}",
-                        f"{arm.get('lower_write_bytes', 0) / 1024:.0f}",
-                        arm.get("physical_write_reqs", 0),
-                        arm.get("lower_write_requests", 0),
-                        row.get("internal_holes", 0),
-                        row.get("tail_waste", 0),
-                        row.get("run_splits", 0),
-                        row.get("physical_write_blocks", 0),
-                        row.get("consumed_blocks", 0),
-                        row.get("cursor", 0),
-                        row.get("gc_victims", 0),
-                        row.get("segment_program_sum", 0),
-                    ))
-                if placement_rows:
-                    print_table(
-                        ("pack", "order", "W MB/s", "W p99", "lower W KiB",
-                         "phys req", "lower req"),
-                        [row[:7] for row in placement_rows])
-                    print_table(
-                        ("pack", "int holes", "tail", "splits", "phys blk",
-                         "consumed", "cursor", "GC", "seg opens"),
-                        [(row[0], *row[7:]) for row in placement_rows])
-                ci = data.get("ci95") or {}
-                metric_rows = []
-                for label, key, suffix in (
-                        ("physical WRITE req", "request_change_pct", "%"),
-                        ("lower WRITE req", "lower_request_change_pct", "%"),
-                        ("lower WRITE bytes", "byte_change_pct", "%"),
-                        ("physical WRITE bytes", "physical_byte_change_pct", "%"),
-                        ("consumed blocks", "consumed_block_change", ""),
-                        ("logical W throughput", "throughput_change_pct", "%"),
-                        ("write p99", "p99_change_pct", "%")):
-                    stats = ci.get(key) or {}
-                    if suffix:
-                        metric_rows.append((
-                            label,
-                            f"{stats.get('mean', 0):+.1f}{suffix}",
-                            f"{stats.get('low', 0):+.1f}{suffix}",
-                            f"{stats.get('high', 0):+.1f}{suffix}"))
-                    else:
-                        metric_rows.append((
-                            label,
-                            f"{stats.get('mean', 0):+.1f}",
-                            f"{stats.get('low', 0):+.1f}",
-                            f"{stats.get('high', 0):+.1f}"))
-                print_table(("metric", "mean", "low", "high"), metric_rows)
-        else:
-            print("\n  ID69 PACKED PLACEMENT A/B — mixed-class owned RAM")
-            placement_rows = []
-            for row in packed_ab.get("sessions", []):
-                arm = row.get("swapz") or {}
-                placement_rows.append((
-                    row.get("regime", "unknown"),
-                    row.get("packed_placement"),
-                    row.get("order", "unknown"),
-                    arm.get("physical_write_reqs", 0),
-                    row.get("internal_holes", 0),
-                    row.get("consumed_blocks", 0),
-                ))
-            if placement_rows:
-                print_table(
-                    ("model", "pack", "order", "phys req", "int holes", "consumed"),
-                    placement_rows)
-            print(f"  verdict: {packed_ab.get('overall')} — "
-                  f"{packed_ab.get('reason', 'incomplete')}")
 
     loaded = result["benchmarks"].get("loaded_correctness", {})
     if loaded.get("overall") == "PASS":

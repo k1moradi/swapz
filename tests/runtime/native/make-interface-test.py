@@ -448,29 +448,10 @@ class PublicMakeContract(unittest.TestCase):
                     },
                 }, sort_keys=True)
 
-            def mock_placement_arm(packed):
-                record = json.loads(mock_write_arm("swapz", 32, 0))
-                record.update({
-                    "fixture_sha256": "c" * 64,
-                    "trace_sha256": "d" * 64,
-                    "qd": 32, "measure_ops": 2048, "write_ops": 2048,
-                    "read_ops": 0, "verified_pages": 1024,
-                    "replay_mode": "persistent-write",
-                    "write_p99_ns": 2400000 if packed else 2500000,
-                })
-                record["throughput_mbps"]["logical_write_mbps"] = (
-                    61.0 if packed else 60.0)
-                record["throughput_mbps"]["logical_write_bytes"] = 2048 * 4096
-                record["lower_io"]["lower_write_bytes"] = 6000000
-                record["lower_io"]["lower_write_requests"] = 80 if packed else 130
-                record["kernel_write_path"]["physical_write_reqs"] = (
-                    80 if packed else 130)
-                return json.dumps(record, sort_keys=True)
-
             records = [
                 "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
                 "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
-                "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:12 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
+                "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:12 no_headroom_skips:3 alignment_hole_fg:4 alignment_hole_gc:1 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:0 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
                 "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:1 verified_pages:4096",
                 "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:0 run_splits:0 failed:0",
                 "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
@@ -551,28 +532,6 @@ class PublicMakeContract(unittest.TestCase):
                         ))
                         index += 1
                 records.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
-            for regime, cap, ns, irq, queue_mode, submit_queues, hw_depth in specs:
-                records.append(f"START_PACKED_PLACEMENT_REGIME={regime}")
-                for index, packed in enumerate(confirmation):
-                    records.extend((
-                        f"START_PACKED_PLACEMENT_AB={packed}",
-                        "REPLAY_ORDER=swapz-first" if index % 2 else
-                        "REPLAY_ORDER=off-first",
-                        f"PASS_RAM_MODEL_LOWER_MBPS={cap} COMPLETION_NSEC={ns} "
-                        f"IRQMODE={irq} QUEUE_MODE={queue_mode} "
-                        f"SUBMIT_QUEUES={submit_queues} HW_QUEUE_DEPTH={hw_depth}",
-                        "SWAPZ_STATUS_AFTER=physical_write=4096000 "
-                        "cursor={} gc_victims=0 packed_placement={} "
-                        "logical_open_balance=0 "
-                        "alignment_hole_blocks_foreground={} "
-                        "segment_tail_waste_blocks_foreground={} "
-                        "run_splits_by_hole={} segment_program_sum=80".format(
-                            1000 if packed else 1024, packed,
-                            0 if packed else 24, 0, 0 if packed else 8),
-                        mock_placement_arm(packed),
-                        f"PASS_PACKED_PLACEMENT_AB={packed}",
-                    ))
-                records.append(f"PASS_PACKED_PLACEMENT_REGIME={regime}")
             script = ("#!/bin/bash\nset -eu\n"
                       "test \"$(tail -n 1 build/order.log)\" = 'kbuild:2'\n"
                       "printf 'loaded\\n' >> build/order.log\n"

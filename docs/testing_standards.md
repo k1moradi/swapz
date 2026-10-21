@@ -699,11 +699,11 @@ lower queue geometry is part of the model contract, fake
 submission-queue count and hardware queue depth for each regime. A parser
 schema change must update this fixture in the same change so rootless
 qualification cannot pass evidence that a real loaded run would reject.
-ID69 fixture rows must likewise carry every status field consumed by the
-placement verdict, including physical-write bytes, allocator cursor, GC-victim
-count, placement waste/splits and logical segment-open telemetry. Post-promotion
-fixtures also carry the exact owned-RAM device-model identity and the complete
-five-pair counterbalanced sequence for both maintained synthetic models.
+ID69 is no longer a dual-mode benchmark policy. Native/Make-interface loaded
+fixtures must instead mirror the canonical packed-placement invariants consumed
+by the lifecycle parser: aggregate placement waste equals segment-tail waste,
+hole-induced run splits are zero, and the byte-exact placement smoke reports
+zero holes and zero splits. Retired aligned-mode A/B markers must not reappear.
 
 
 The write-only saturation parser consumes the same exact owned-RAM device-model
@@ -964,38 +964,26 @@ merely timing a native surrogate.
 Owner qualification records foreground and GC placement-waste blocks,
 including aggregate holes and separately reported segment-tail waste,
 lower-run splits attributable to intra-segment holes, dead-segment probe
-segments/full scans and probe wall time, duplicate
-successful-DISCARD skips, and logical segment-open min/mean/max. Native ID69
-A/B must prove identical lower bytes with fewer requests and zero internal
-holes on mixed 1/2/4-block sequences. Post-promotion loaded qualification adds ten fresh QD32 persistent-write
-sessions on each maintained owned-RAM model (20 sessions total) over one
-immutable mixed+entropy fixture. Each model uses five adjacent matched rounds
-in `CONFIRMATION_SEQUENCE`, counterbalancing placement mode and OFF/swapz
-replay order. Every aligned arm must exercise nonzero internal gaps and
-hole-induced splits. Every packed arm must have zero internal gaps/splits,
-strictly fewer timed physical WRITE requests, and strictly fewer consumed
-foreground physical blocks
-(`physical_write / 4096 + alignment_hole_blocks_foreground`) than its matched
-aligned partner. Every placement arm must remain GC-free, and its allocator cursor must
-equal that consumed-block total so the structural comparison cannot be polluted
-by reclaim or accounting drift. Logical segment opens must not increase.
-Whole-session physical WRITE bytes and timed lower-device WRITE bytes remain
-directional evidence rather than strict gates: persistent-QD lane interleaving
-can change extent composition even for the same immutable per-lane streams, and
-the strict consumed-block reduction already bounds any whole-session payload
-growth by a larger reduction in placement holes. Independent lower-device WRITE
-requests likewise remain observational because block-layer merging may vary.
-The ID69 console summary must keep the timed-I/O and placement-geometry rows in
-separate compact Markdown tables so the official reporter preserves its
-less-than-96-column output contract without dropping qualification evidence.
-Fail-closed summaries retain the same `int holes` label for avoidable internal
-placement gaps so PASS and failure output do not silently change semantics.
-Throughput and p99 are reported with five-pair per-model confidence intervals.
-Owner report a88b328 qualified the default-off evidence gate, so the separate
-promotion commit defaults packed placement on while retaining the read-only
-module parameter for exactly one full post-promotion qualification cycle. A
-successful cycle permits retiring aligned mode in a follow-up change. None of
-this changes SWZ3.
+segments/full scans and probe wall time, duplicate successful-DISCARD skips,
+and logical segment-open min/mean/max.
+
+Owner report b0623ae0 qualified the post-promotion ID69 matrix with five matched
+pairs on each maintained owned-RAM model. Packed placement reduced physical
+WRITE requests by 15.0% (paired CI [-19.4%,-10.6%]) on the serial
+model and 13.3% ([-18.8%,-7.8%]) on the fast model, while consumed blocks fell by 24.4 and 29.8
+respectively; every packed arm had zero internal holes/splits, zero GC
+contamination and unchanged logical segment opens. That evidence retires the
+aligned policy and its A/B harness.
+
+The production qualification is now structural and fail-closed: the canonical
+1/2/4-block allocator must place extents back-to-back within a segment;
+`alignment_hole_blocks_foreground == segment_tail_waste_blocks_foreground`
+and the corresponding GC counters must also be equal; `run_splits_by_hole`
+must remain zero; and the separate byte-exact packed-placement smoke must report
+zero holes, zero splits and no failure. Segment-tail waste at a real 1MiB
+boundary remains valid and continues to be counted in the aggregate hole
+counters. The fixed `packed_placement=1` status token is compatibility
+telemetry, not a runtime policy. None of this changes SWZ3.
 
 Native GC scale evidence compares the previous per-probed-segment 256-entry
 dead-segment scan with mapped-page fast rejection at 262,144 and 1,048,576

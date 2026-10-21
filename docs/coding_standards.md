@@ -981,17 +981,20 @@ the legacy full-map fallback.
 
 ### Physical placement and reclaim evidence
 
-The current 4/8/16KiB allocator may align an extent start to its own size.
-Placement telemetry keeps aggregate waste for continuity but must also count
-segment-tail waste separately so experiments can derive avoidable internal
-alignment gaps without misclassifying a segment-edge remainder.
-Preserve the current on-disk SWZ3 extent classes. The ID69 packed-placement
-policy may place those existing 1/2/4-block extents back-to-back at 4KiB
-granularity. Owner report a88b328 qualified the promotion gate, so packed
-placement is now the source default; the read-only module parameter retains
-aligned mode only for one post-promotion full qualification cycle. After that
-cycle passes, retire the aligned policy rather than carrying a permanent dual
-mode. No packed placement change may introduce a new serialized extent class.
+The historical aligned 4/8/16KiB placement policy could advance an extent
+start to its own size. Canonical packed placement must not do that. Placement
+telemetry keeps aggregate waste for continuity and separately counts segment
+tail waste so qualification can prove that no avoidable intra-segment gap was
+introduced while still recognizing a real segment-edge remainder.
+Preserve the current on-disk SWZ3 extent classes. ID69 packed placement is the
+only production placement policy: existing 1/2/4-block extents are placed
+back-to-back at 4KiB granularity within a segment, with only real segment-tail
+waste permitted. Report b0623ae0 qualified the promoted default on both
+maintained RAM models, so no aligned-placement module parameter, authority
+field, planner branch or A/B harness may be reintroduced without new owner
+evidence. Keep aggregate-hole, segment-tail and hole-split telemetry as
+fail-closed structural invariants. No placement change may introduce a new
+serialized extent class.
 
 When exact per-segment mapped-page counts are available, dead-segment probing
 must reject a nonzero mapped segment before scanning its 256 physical block

@@ -350,15 +350,13 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	const swapz_u16 uniform[4] = { 2073, 2073, 2073, 2073 };
 	const swapz_u16 lengths[4] = { 2000, 2073, 2073, 2000 };
 	swapz_u8 committed = 0;
-	unsigned int adjacent_calls;
-	unsigned long long adjacent_bytes;
+	unsigned int canonical_calls;
+	unsigned long long canonical_bytes;
 	unsigned int i;
 
 	/*
-	 * Four representative medium pages have two byte/read/extent-count
-	 * equivalent plans: [1,2] and [2,1]. Prefer [2,1] so the same 12KiB
-	 * is one adjacent lower run instead of two requests around an internal
-	 * alignment hole. No padding bytes are written.
+	 * Exact planner ties still prefer the larger existing class, so the
+	 * canonical packed allocator emits one adjacent 12KiB lower run.
 	 */
 	CHECK(setup() == 0);
 	for (i = 0; i < 4; ++i) {
@@ -372,9 +370,10 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	CHECK(e.bulk_padding_blocks == 0 && validate_prefix(4) == 0);
 
 	/*
-	 * Preserve a non-tied geometry where [1,2] is genuinely required.
-	 * Mode1 skips the internal hole; mode2 may explicitly write it to
-	 * trade one extra 4KiB block for one lower request.
+	 * The former aligned policy made this non-tied [1,2] geometry split
+	 * around an internal hole, and bulk mode 2 could explicitly write that
+	 * padding. Canonical packed placement removes the hole, so both modes
+	 * must now produce the same one-request, no-padding result.
 	 */
 	CHECK(setup() == 0);
 	committed = 0;
@@ -384,11 +383,15 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	}
 	CHECK(swapz_engine_write_window_batched(&e, pages, 4,
 					     &committed) == 0);
-	CHECK(committed == 4 && e.bulk_padding_blocks == 0);
-	CHECK(validate_prefix(4) == 0);
-	adjacent_calls = run_calls;
-	adjacent_bytes = lower_written_bytes;
-	CHECK(adjacent_calls == 2 && adjacent_bytes == 3U * SWAPZ_BLOCK_BYTES);
+	CHECK(committed == 4 && validate_prefix(4) == 0);
+	canonical_calls = run_calls;
+	canonical_bytes = lower_written_bytes;
+	CHECK(canonical_calls == 1 &&
+	      canonical_bytes == 3U * SWAPZ_BLOCK_BYTES);
+	CHECK(e.bulk_padding_blocks == 0);
+	CHECK(a.alignment_hole_blocks_foreground == 0);
+	CHECK(e.run_splits_by_hole == 0);
+
 	CHECK(setup() == 0);
 	for (i = 0; i < 4; ++i) {
 		memset(payloads[i], (int)i + 1, lengths[i]);
@@ -399,12 +402,11 @@ static int test_padding_option_measures_exact_request_byte_tradeoff(void)
 	CHECK(swapz_engine_write_window_batched(&e, pages, 4,
 					     &committed) == 0);
 	CHECK(committed == 4 && validate_prefix(4) == 0);
-	CHECK(e.bulk_padding_blocks == 1 && run_calls == 1);
-	CHECK(lower_written_bytes == adjacent_bytes + SWAPZ_BLOCK_BYTES);
-	/* The explicit alignment hole is real lower-media padding and must
-	 * be zero even when bulk_scratch contains bytes from an earlier run. */
-	for (i = 0; i < SWAPZ_BLOCK_BYTES; ++i)
-		CHECK(media[SWAPZ_BLOCK_BYTES + i] == 0);
+	CHECK(run_calls == canonical_calls);
+	CHECK(lower_written_bytes == canonical_bytes);
+	CHECK(e.bulk_padding_blocks == 0);
+	CHECK(a.alignment_hole_blocks_foreground == 0);
+	CHECK(e.run_splits_by_hole == 0);
 	return 0;
 }
 
@@ -412,8 +414,7 @@ static int test_packed_placement_removes_internal_hole(void)
 {
 	const swapz_u16 lengths[4] = { 2000, 2073, 2073, 2000 };
 	swapz_u8 committed = 0;
-	unsigned int aligned_calls, aligned_splits, i;
-	unsigned long long aligned_bytes, aligned_holes;
+	unsigned int i;
 
 	CHECK(setup() == 0);
 	for (i = 0; i < 4; ++i) {
@@ -422,26 +423,11 @@ static int test_packed_placement_removes_internal_hole(void)
 	}
 	CHECK(swapz_engine_write_window_batched(&e, pages, 4, &committed) == 0);
 	CHECK(committed == 4 && validate_prefix(4) == 0);
-	aligned_calls = run_calls;
-	aligned_bytes = lower_written_bytes;
-	aligned_holes = a.alignment_hole_blocks_foreground;
-	aligned_splits = e.run_splits_by_hole;
-	CHECK(aligned_calls == 2 && aligned_bytes == 3U * SWAPZ_BLOCK_BYTES);
-	CHECK(aligned_holes == 1 && aligned_splits == 1);
-
-	CHECK(setup() == 0);
-	a.packed_placement = 1;
-	for (i = 0; i < 4; ++i) {
-		memset(payloads[i], (int)i + 1, lengths[i]);
-		pages[i].length = lengths[i];
-	}
-	committed = 0;
-	CHECK(swapz_engine_write_window_batched(&e, pages, 4, &committed) == 0);
-	CHECK(committed == 4 && validate_prefix(4) == 0);
-	CHECK(run_calls == 1 && run_calls < aligned_calls);
-	CHECK(lower_written_bytes == aligned_bytes);
+	CHECK(run_calls == 1);
+	CHECK(lower_written_bytes == 3U * SWAPZ_BLOCK_BYTES);
 	CHECK(a.alignment_hole_blocks_foreground == 0);
-	CHECK(e.run_splits_by_hole == 0 && aligned_splits == 1);
+	CHECK(a.segment_tail_waste_blocks_foreground == 0);
+	CHECK(e.run_splits_by_hole == 0);
 	CHECK(maps[0].start_block == 0);
 	CHECK(maps[1].start_block == 1);
 	CHECK(maps[2].start_block == 1);
@@ -466,20 +452,6 @@ static int test_segment_tail_waste_is_accounted_before_rotation(void)
 	}
 	CHECK(a.next_block == SWAPZ_SEGMENT_BLOCKS - 3U);
 	CHECK(a.alignment_hole_blocks_foreground == 0);
-	CHECK(swapz_stage(&a, &logical, 1, 4, &tx) == 0);
-	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS);
-	CHECK(a.alignment_hole_blocks_foreground == 3);
-	CHECK(a.segment_tail_waste_blocks_foreground == 3);
-	CHECK(swapz_abort(&a, &tx) == 0);
-
-	CHECK(setup() == 0);
-	a.packed_placement = 1;
-	for (i = 0; i < SWAPZ_SEGMENT_BLOCKS - 3U; ++i) {
-		completed = 0;
-		CHECK(swapz_stage(&a, &page, 1, 1, &tx) == 0);
-		CHECK(write_extent(NULL, tx.start_block, 1, raw, &completed) == 0);
-		CHECK(swapz_finish_raw(&a, &tx, raw, completed, 0) == 0);
-	}
 	CHECK(swapz_stage(&a, &logical, 1, 4, &tx) == 0);
 	CHECK(tx.start_block == SWAPZ_SEGMENT_BLOCKS);
 	CHECK(a.alignment_hole_blocks_foreground == 3);

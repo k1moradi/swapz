@@ -64,14 +64,6 @@ static int swapz_legal_class(swapz_u8 blocks)
 	return blocks == 1U || blocks == 2U || blocks == 4U;
 }
 
-static swapz_u32 swapz_placement_start(const struct swapz_authority *a,
-				      swapz_u32 cursor, swapz_u8 blocks)
-{
-	if (a->packed_placement)
-		return cursor;
-	return (cursor + blocks - 1U) & ~(swapz_u32)(blocks - 1U);
-}
-
 static int swapz_segment_page_lists_enabled(const struct swapz_authority *a)
 {
 	return a->segment_first_page || a->segment_last_page ||
@@ -782,8 +774,7 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	 * the combined IO; the engine flushes the group on -EAGAIN and retries.
 	 */
 	if (a->batch_pending) {
-		swapz_u32 placed =
-			swapz_placement_start(a, a->next_block, blocks);
+		swapz_u32 placed = a->next_block;
 
 		if (!a->reuse_dead_segments ||
 		    a->open_segment != a->batch_segment ||
@@ -813,7 +804,7 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 		if (a->next_block > limit ||
 		    blocks - 1U > limit - a->next_block)
 			return -ENOSPC;
-		start = swapz_placement_start(a, a->next_block, blocks);
+		start = a->next_block;
 		if (start > limit || blocks > limit - start ||
 		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -ENOSPC;
@@ -831,8 +822,7 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 		 */
 		start = a->next_block;
 		{
-			swapz_u32 placed =
-				swapz_placement_start(a, start, blocks);
+			swapz_u32 placed = start;
 
 			if (a->open_segment == ~(swapz_u32)0 ||
 			    start >= limit || blocks - 1U > limit - start ||
@@ -875,20 +865,11 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 				start = a->next_block;
 			}
 		}
-		start = swapz_placement_start(a, start, blocks);
 		if (start >= limit || blocks > limit - start ||
 		    start / SWAPZ_SEGMENT_BLOCKS != a->open_segment ||
 		    start % SWAPZ_SEGMENT_BLOCKS + blocks > SWAPZ_SEGMENT_BLOCKS)
 			return -EUCLEAN;
 
-	}
-	if (start > a->next_block) {
-		unsigned long long holes = start - a->next_block;
-
-		if (a->gc_allocation)
-			a->alignment_hole_blocks_gc += holes;
-		else
-			a->alignment_hole_blocks_foreground += holes;
 	}
 	memset(out, 0, sizeof(*out));
 	out->start_block = start;
@@ -1013,8 +994,6 @@ int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 	    (tx->extent_blocks != 1 && tx->extent_blocks != 2 &&
 	     tx->extent_blocks != 4) ||
 	    !tx->count || tx->count > SWAPZ_MAX_RECORDS ||
-	    (!a->packed_placement &&
-	     tx->start_block % tx->extent_blocks) ||
 	    tx->start_block >= a->physical_blocks ||
 	    tx->extent_blocks > a->physical_blocks - tx->start_block ||
 	    tx->start_block + tx->extent_blocks > a->next_block ||

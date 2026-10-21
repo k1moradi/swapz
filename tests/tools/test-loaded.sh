@@ -32,8 +32,9 @@ printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 "${privileged[@]}" tests/tools/deploy-nullblk.sh
 printf '%s\n' 'PASS_LOADED_OWNED_NULLBLK_SMOKE'
 
-# One deterministic, measured-LZ4 immutable fixture/trace for all four
-# comparisons. Safe user-space preparation happens before any new device.
+# One deterministic, measured-LZ4 immutable fixture/trace for the paired
+# mixed/read/write benchmark families. Safe user-space preparation happens
+# before any new device.
 # Children copy this verified plan into their own owned-device session.
 umask 077
 # The benchmark session directory is root-owned (umask 077) from older
@@ -43,16 +44,12 @@ umask 077
 # there, and let each privileged child COPY it to its own private session.
 mkdir -p "$ROOT/build/tests"
 shared_plan="$(mktemp -d "$ROOT/build/tests/benchmark-plan.XXXXXXXX")"
-placement_plan="$shared_plan/placement"
 cleanup_shared_plan() {
     # Remove only exactly named files from this freshly allocated directory.
     [[ $shared_plan == "$ROOT/build/tests/benchmark-plan."* &&
        -d $shared_plan && ! -L $shared_plan ]] || return
     rm -f -- "$shared_plan/fixture.bin" "$shared_plan/fixture.json" \
-        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json" \
-        "$placement_plan/fixture.bin" "$placement_plan/fixture.json" \
-        "$placement_plan/plan/trace.jsonl" "$placement_plan/plan/manifest.json"
-    rmdir -- "$placement_plan/plan" "$placement_plan" 2>/dev/null || true
+        "$shared_plan/plan/trace.jsonl" "$shared_plan/plan/manifest.json"
     for qd in 1 4 8 32; do
         rm -f -- "$shared_plan/plan-write-qd$qd/trace.jsonl" \
             "$shared_plan/plan-write-qd$qd/manifest.json"
@@ -93,32 +90,6 @@ assert fixture["lz4_size_buckets"] == {"2049_3072": 128}
 assert fixture["raw_pages"] == 0
 assert 2049 <= fixture["lz4_min_accepted_payload_bytes"] <= fixture["lz4_max_accepted_payload_bytes"] <= 2200
 PY
-
-# ID69 placement fixture: deterministic compressed-size diversity plus RAW
-# fallback, separate from the medium fixture used by the qualified baseline.
-mkdir -p "$placement_plan"
-python3 -B tests/runtime/benchmark/anon-page-fixture.py \
-    --output-prefix "$placement_plan/fixture" --pages 128 \
-    --seed 0x69a11c --weights mixed=80,entropy=20
-python3 -B - "$placement_plan/fixture.json" <<'PY'
-import json
-import sys
-with open(sys.argv[1], encoding="utf-8") as inp:
-    fixture = json.load(inp)
-assert fixture["pages"] == 128
-assert fixture["profile_pages"] == {"entropy": 26, "mixed": 102}
-assert fixture["raw_pages"] >= 26
-accepted = {k: v for k, v in fixture["lz4_size_buckets"].items()
-            if k != "raw" and v}
-assert len(accepted) >= 3
-assert sum(accepted.values()) + fixture["raw_pages"] == 128
-PY
-python3 -B tests/runtime/benchmark/io-replay.py prepare \
-    --fixture "$placement_plan/fixture.bin" \
-    --output-dir "$placement_plan/plan" \
-    --logical-pages 1024 --writer-pages 256 --reader-start 512 \
-    --reader-pages 256 --qd 32 --read-pct 0 \
-    --warmup-ops 256 --measure-ops 2048 --iops 0 --sustained-write
 
 # Two representative delay-modeled RAM-backed environments provide paired
 # write/read evidence. Slow remains a bounded directional control. Fast runs
@@ -231,48 +202,6 @@ for regime in sd_emulated ssd_emulated; do
     printf 'PASS_WRITE_SATURATION_REGIME=%s\n' "$regime"
 done
 
-# ID69 post-promotion A/B. Ten fresh sessions per synthetic model use the
-# same immutable mixed-class QD32 write plan. Five adjacent matched rounds
-# counterbalance packed/aligned mode and OFF/swapz replay order.
-placement_modes=(0 1 1 0 0 1 1 0 0 1)
-for regime in sd_emulated ssd_emulated; do
-    case "$regime" in
-        sd_emulated)
-            lower_mbps=10
-            hw_queue_depth=1
-            completion_nsec=1000000
-            ;;
-        ssd_emulated)
-            lower_mbps=80
-            hw_queue_depth=64
-            completion_nsec=150000
-            ;;
-        *)
-            printf 'BLOCKED: unsupported ID69 model %s\n' "$regime" >&2
-            exit 1
-            ;;
-    esac
-    printf 'START_PACKED_PLACEMENT_REGIME=%s\n' "$regime"
-    index=0
-    for packed_placement in "${placement_modes[@]}"; do
-        arguments=(--run-owned-ram-pair --profile placement
-                   --retain-ms 2 --unpaced
-                   --lower-mbps "$lower_mbps"
-                   --hw-queue-depth "$hw_queue_depth"
-                   --completion-nsec "$completion_nsec"
-                   --packed-placement "$packed_placement"
-                   --shared-plan "$placement_plan")
-        if (( index % 2 )); then
-            arguments+=(--swapz-first)
-        fi
-        printf 'START_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
-        "${privileged[@]}" tests/tools/benchmark-owned-pair.sh "${arguments[@]}"
-        printf 'PASS_PACKED_PLACEMENT_AB=%s\n' "$packed_placement"
-        (( index += 1 ))
-    done
-    printf 'PASS_PACKED_PLACEMENT_REGIME=%s\n' "$regime"
-done
-
 printf '%s\n' \
-    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, 40 write-only sessions, and 20 ID69 placement sessions completed.' \
-    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, fast QD4/QD8/QD32, and ID69 carry bounded matched evidence; QD1 is directional.'
+    'PASS_LOADED_TEST_EXECUTION: smoke, 14 mixed sessions, 20 ID63 sessions, and 40 write-only sessions completed.' \
+    'PERFORMANCE_WIN=EVIDENCE_ONLY: fast mixed, ID63, and fast QD4/QD8/QD32 carry bounded matched evidence; ID69 is now a loaded structural invariant.'

@@ -552,8 +552,9 @@ note "LIVE_GC_PRESSURE=rounds:$gc_round_count write_wall_ns:$gc_write_wall_ns ba
    gc_choose_map_entries == 0 &&
    gc_choose_segment_entries > 0 &&
    gc_relocation_map_entries == gc_pages &&
-   tail_waste_fg <= alignment_hole_fg &&
-   tail_waste_gc <= alignment_hole_gc &&
+   tail_waste_fg == alignment_hole_fg &&
+   tail_waste_gc == alignment_hole_gc &&
+   run_splits_by_hole == 0 &&
    alloc_probe_segments > 0 &&
    alloc_probe_full_scans > 0 &&
    alloc_probe_full_scans <= alloc_probe_segments &&
@@ -773,13 +774,13 @@ note "PASS_RETAINED_SYNTHETIC_FLUSH_FAULT=retain_ms:2 injected:1 data_write_reac
 dmsetup remove "$DMNAME" || fail "cannot remove retained FLUSH-fault mapping"
 OWN_DM=0
 
-# ID69 remains an opt-in evidence arm. Reload only the already-owned module
-# with packed placement enabled, then run the byte-exact mixed smoke on the
-# same owned RAM lower. The full benchmark matrix continues to use default=0.
+# ID69 packed placement is canonical. Reload the already-owned module without
+# any placement override, then prove the default path remains byte-exact and
+# generates no avoidable internal holes or hole-induced lower-run splits.
 rmmod dm_swapz || fail "cannot reload swapz for packed-placement smoke"
 OWN_MODULE=0
-insmod "$MODULE" packed_placement=1 ||
-    fail "swapz packed-placement module arm rejected"
+insmod "$MODULE" ||
+    fail "swapz packed-placement module reload rejected"
 OWN_MODULE=1
 note "START_LOADED_PACKED_PLACEMENT"
 UUID="SWAPZ-TEST-$TOKEN-packed"
@@ -792,7 +793,7 @@ OWN_DM=1
 packed_before="$(dmsetup status "$DMNAME")"
 (( $(status_u64 "$packed_before" packed_placement) == 1 &&
    $(status_u64 "$packed_before" failed) == 0 )) ||
-    fail "packed-placement module policy mismatch"
+    fail "packed-placement canonical status invariant mismatch"
 timeout --signal=TERM --kill-after=5s 30s "$ORACLE" "/dev/mapper/$DMNAME" ||
     fail "packed-placement byte-exact smoke failed"
 packed_after="$(dmsetup status "$DMNAME")"
@@ -803,8 +804,8 @@ packed_splits="$(status_u64 "$packed_after" run_splits_by_hole)" ||
 packed_failed="$(status_u64 "$packed_after" failed)" ||
     fail "packed-placement status lacks failure state"
 (( $(status_u64 "$packed_after" packed_placement) == 1 &&
-   packed_failed == 0 )) ||
-    fail "packed-placement smoke did not remain healthy"
+   packed_holes == 0 && packed_splits == 0 && packed_failed == 0 )) ||
+    fail "packed-placement smoke violated the zero-internal-hole invariant"
 note "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:$packed_holes run_splits:$packed_splits failed:$packed_failed"
 dmsetup remove "$DMNAME" || fail "cannot remove packed-placement mapping"
 OWN_DM=0

@@ -475,32 +475,12 @@ def write_arm(candidate, *, qd, regime, mode):
             mode=mode, target=max(4, qd)) if swapz else None),
     }
 
-def placement_arm(packed, regime):
-    record = write_arm("swapz", qd=32, regime=regime, mode=0)
-    record["fixture_sha256"] = "c" * 64
-    record["trace_sha256"] = "d" * 64
-    record["qd"] = 32
-    record["measure_ops"] = 2048
-    record["write_ops"] = 2048
-    record["read_ops"] = 0
-    record["verified_pages"] = 1024
-    record["throughput_mbps"]["logical_write_bytes"] = 2048 * 4096
-    base_rate = 12.0 if regime == "sd_emulated" else 60.0
-    record["throughput_mbps"]["logical_write_mbps"] = (
-        base_rate + 1.0 if packed else base_rate)
-    record["lower_io"]["lower_write_bytes"] = 6000000
-    record["lower_io"]["lower_write_requests"] = 80 if packed else 130
-    record["write_p99_ns"] = 2400000 if packed else 2500000
-    record["kernel_write_path"]["physical_write_reqs"] = 80 if packed else 130
-    return record
-
-
 def synthetic_log():
     out = ["HOST_SWAPS_BEFORE:", "/private/system/swapfile",
            "SOURCE_HEAD=a" + "a" * 39,
            "PASS_LOADED_ORACLE_PROFILE=raw_pages:64 zero_pages:9 flush_calls:2",
            "PASS_LOADED_LIVE_GC=victims:12 rotations:12 pages:12 read_bytes:49152 write_bytes:49152 read_reqs:12 write_reqs:12 distinct:6 victim_min:1 victim_max:3 last:11->29 discards:12 discard_sectors:24576 discard_unsupported:0 discard_failed:0 verified_pages:4096",
-           "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:12 no_headroom_skips:3 alignment_hole_fg:24 alignment_hole_gc:2 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:8 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
+           "PASS_LOADED_GC_PRESSURE=rounds:5 write_wall_ns:1000000000 baseline_p99_ns:1000000 pressure_p99_ns:5000000 gc_wall_ns:200000000 gc_fraction_ppm:200000 choose_wall_ns:20000000 choose_calls:12 choose_map_entries:0 choose_segment_entries:768 relocation_map_entries:12 no_headroom_skips:3 alignment_hole_fg:4 alignment_hole_gc:1 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:0 alloc_probe_segments:1024 alloc_probe_full_scans:16 alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 segment_program_sum:80 segment_program_max:4 segment_program_segments:32",
            "PASS_LOADED_DISCARD_TRIM=pages:256 immediate_discards:1 immediate_sectors:2048 reuse_skips:2 verified_pages:4096",
            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 holes:0 run_splits:0 failed:0",
            "PASS_LOADED_SUSPEND_DRAIN=retain_ms:4 observed_open:1 verified_pages:128",
@@ -588,29 +568,6 @@ def synthetic_log():
                     f"PASS_WRITE_SATURATION_PAIR_QD={qd} ASYNC_PREPARE={mode}")
                 index += 1
         out.append(f"PASS_WRITE_SATURATION_REGIME={regime}")
-    for regime in runner.MODEL_ORDER:
-        spec = runner.MODEL_SPECS[regime]
-        out.append(f"START_PACKED_PLACEMENT_REGIME={regime}")
-        for index, packed in enumerate(runner.CONFIRMATION_SEQUENCE):
-            out.append(f"START_PACKED_PLACEMENT_AB={packed}")
-            out.append("REPLAY_ORDER=swapz-first" if index % 2 else
-                       "REPLAY_ORDER=off-first")
-            out.append(
-                "PASS_RAM_MODEL_LOWER_MBPS={cap_mib_s} "
-                "COMPLETION_NSEC={completion_nsec} IRQMODE={irqmode} "
-                "QUEUE_MODE={queue_mode} SUBMIT_QUEUES={submit_queues} "
-                "HW_QUEUE_DEPTH={hw_queue_depth}".format(**spec))
-            out.append(
-                "SWAPZ_STATUS_AFTER=physical_write=4096000 cursor={} gc_victims=0 "
-                "packed_placement={} logical_open_balance=0 "
-                "alignment_hole_blocks_foreground={} "
-                "segment_tail_waste_blocks_foreground={} "
-                "run_splits_by_hole={} segment_program_sum=80".format(
-                    1000 if packed else 1024, packed,
-                    0 if packed else 24, 0, 0 if packed else 8))
-            out.append(json.dumps(placement_arm(packed, regime)))
-            out.append(f"PASS_PACKED_PLACEMENT_AB={packed}")
-        out.append(f"PASS_PACKED_PLACEMENT_REGIME={regime}")
     return "\n".join(out) + "\n"
 
 
@@ -701,97 +658,6 @@ class ReportContract(unittest.TestCase):
         self.assertIsNone(runner.parse_extent_geometry_evidence(
             "SWAPZ_EXTENT_GEOMETRY_EVIDENCE=" + json.dumps(broken) + "\n"))
 
-    def test_packed_placement_ab_is_strict_and_sanitized(self):
-        rows = runner.parse_packed_placement_ab(synthetic_log())
-        self.assertEqual(len(rows),
-                         len(runner.MODEL_ORDER) *
-                         len(runner.CONFIRMATION_SEQUENCE))
-        for regime in runner.MODEL_ORDER:
-            regime_rows = [row for row in rows if row["regime"] == regime]
-            self.assertEqual(
-                [row["packed_placement"] for row in regime_rows],
-                list(runner.CONFIRMATION_SEQUENCE))
-        verdict = runner.packed_placement_ab_verdict(rows)
-        self.assertEqual(verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
-        self.assertLess(verdict["mean_request_change_pct"], 0)
-        self.assertEqual(verdict["mean_byte_change_pct"], 0)
-        self.assertEqual(verdict["mean_physical_byte_change_pct"], 0)
-        for regime in runner.MODEL_ORDER:
-            self.assertEqual(len(verdict["regimes"][regime]["paired"]), 5)
-            self.assertEqual(
-                verdict["regimes"][regime]["ci95"]["request_change_pct"]["n"], 5)
-        broken = runner.parse_packed_placement_ab(synthetic_log())
-        broken[1]["status_after"] = (
-            broken[1]["status_after"]
-            .replace("cursor=1000", "cursor=1001")
-            .replace("alignment_hole_blocks_foreground=0",
-                     "alignment_hole_blocks_foreground=1"))
-        self.assertEqual(
-            runner.packed_placement_ab_verdict(broken)["overall"],
-            "REGRESSION")
-        more_opens = synthetic_log().replace(
-            "packed_placement=1 logical_open_balance=0 "
-            "alignment_hole_blocks_foreground=0 "
-            "segment_tail_waste_blocks_foreground=0 "
-            "run_splits_by_hole=0 segment_program_sum=80",
-            "packed_placement=1 logical_open_balance=0 "
-            "alignment_hole_blocks_foreground=0 "
-            "segment_tail_waste_blocks_foreground=0 "
-            "run_splits_by_hole=0 segment_program_sum=81", 1)
-        self.assertEqual(
-            runner.packed_placement_ab_verdict(
-                runner.parse_packed_placement_ab(more_opens))["overall"],
-            "REGRESSION")
-        equal_lower_requests = runner.parse_packed_placement_ab(synthetic_log())
-        for regime in runner.MODEL_ORDER:
-            regime_rows = [
-                row for row in equal_lower_requests
-                if row["regime"] == regime
-            ]
-            for pair in runner.matched_binary_pairs(
-                    regime_rows, "packed_placement"):
-                pair[1]["swapz"]["lower_write_requests"] = \
-                    pair[0]["swapz"]["lower_write_requests"]
-        equal_lower_request_verdict = runner.packed_placement_ab_verdict(
-            equal_lower_requests)
-        self.assertEqual(
-            equal_lower_request_verdict["overall"],
-            "PASS_PACKED_PLACEMENT_AB")
-        self.assertEqual(
-            equal_lower_request_verdict["mean_lower_request_change_pct"], 0)
-
-        byte_variance = runner.parse_packed_placement_ab(synthetic_log())
-        for index in (1, 2):
-            byte_variance[index]["swapz"]["lower_write_bytes"] += 4096
-            byte_variance[index]["status_after"] = (
-                byte_variance[index]["status_after"]
-                .replace("physical_write=4096000 cursor=1000",
-                         "physical_write=4136960 cursor=1010"))
-        byte_variance_verdict = runner.packed_placement_ab_verdict(byte_variance)
-        self.assertEqual(
-            byte_variance_verdict["overall"], "PASS_PACKED_PLACEMENT_AB")
-        self.assertGreater(byte_variance_verdict["mean_byte_change_pct"], 0)
-        self.assertGreater(
-            byte_variance_verdict["mean_physical_byte_change_pct"], 0)
-        self.assertLess(
-            byte_variance_verdict["mean_consumed_block_change"], 0)
-
-        gc_contaminated = runner.parse_packed_placement_ab(synthetic_log())
-        gc_contaminated[1]["status_after"] = (
-            gc_contaminated[1]["status_after"]
-            .replace("gc_victims=0", "gc_victims=1"))
-        self.assertEqual(
-            runner.packed_placement_ab_verdict(gc_contaminated)["overall"],
-            "INCOMPLETE")
-
-        cursor_mismatch = runner.parse_packed_placement_ab(synthetic_log())
-        cursor_mismatch[1]["status_after"] = (
-            cursor_mismatch[1]["status_after"]
-            .replace("cursor=1000", "cursor=1001"))
-        self.assertEqual(
-            runner.packed_placement_ab_verdict(cursor_mismatch)["overall"],
-            "INCOMPLETE")
-
     def test_loaded_lifecycle_markers_are_strict_and_sanitized(self):
         loaded = runner.parse_loaded_correctness(synthetic_log())
         self.assertEqual(loaded["overall"], "PASS")
@@ -811,16 +677,22 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(loaded["gc_choose_map_entries"], 0)
         self.assertEqual(loaded["gc_relocation_map_entries"], 12)
         self.assertEqual(loaded["gc_no_headroom_skips"], 3)
-        self.assertEqual(loaded["alignment_hole_blocks_foreground"], 24)
+        self.assertEqual(loaded["alignment_hole_blocks_foreground"], 4)
         self.assertEqual(loaded["segment_tail_waste_blocks_foreground"], 4)
         self.assertEqual(loaded["segment_tail_waste_blocks_gc"], 1)
-        self.assertEqual(loaded["run_splits_by_hole"], 8)
+        self.assertEqual(loaded["run_splits_by_hole"], 0)
         self.assertEqual(loaded["segment_discards_skipped_already_trimmed"], 6)
         self.assertEqual(loaded["segment_program_max"], 4)
         self.assertEqual(loaded["discard_trim_immediate"], 1)
         self.assertEqual(loaded["discard_trim_reuse_skips"], 2)
         self.assertEqual(loaded["packed_placement_enabled"], 1)
         self.assertEqual(loaded["packed_placement_holes"], 0)
+        self.assertEqual(loaded["packed_placement_run_splits"], 0)
+        self.assertEqual(loaded["alignment_hole_blocks_foreground"],
+                         loaded["segment_tail_waste_blocks_foreground"])
+        self.assertEqual(loaded["alignment_hole_blocks_gc"],
+                         loaded["segment_tail_waste_blocks_gc"])
+        self.assertEqual(loaded["run_splits_by_hole"], 0)
         self.assertEqual(loaded["suspend_retain_ms"], 4)
         self.assertEqual(loaded["suspend_observed_open"], 1)
         self.assertEqual(loaded["suspend_verified_pages"], 128)
@@ -842,7 +714,7 @@ class ReportContract(unittest.TestCase):
             "choose_wall_ns:20000000 choose_calls:12 "
             "choose_map_entries:0 choose_segment_entries:768 "
             "relocation_map_entries:12 no_headroom_skips:3 "
-            "alignment_hole_fg:24 alignment_hole_gc:2 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:8 "
+            "alignment_hole_fg:4 alignment_hole_gc:1 tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:0 "
             "alloc_probe_segments:1024 alloc_probe_full_scans:16 "
             "alloc_probe_wall_ns:50000 trim_skipped:6 segment_program_min:0 "
             "segment_program_sum:80 segment_program_max:4 "
@@ -856,6 +728,33 @@ class ReportContract(unittest.TestCase):
             "immediate_sectors:2048 reuse_skips:2 verified_pages:4096\n", "")
         self.assertEqual(
             runner.parse_loaded_correctness(missing_trim)["overall"],
+            "INCOMPLETE")
+
+        bad_packed_hole = synthetic_log().replace(
+            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 "
+            "holes:0 run_splits:0 failed:0",
+            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 "
+            "holes:1 run_splits:0 failed:0")
+        self.assertEqual(
+            runner.parse_loaded_correctness(bad_packed_hole)["overall"],
+            "INCOMPLETE")
+
+        bad_packed_split = synthetic_log().replace(
+            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 "
+            "holes:0 run_splits:0 failed:0",
+            "PASS_LOADED_PACKED_PLACEMENT=enabled:1 verified_pages:128 "
+            "holes:0 run_splits:1 failed:0")
+        self.assertEqual(
+            runner.parse_loaded_correctness(bad_packed_split)["overall"],
+            "INCOMPLETE")
+
+        bad_gc_internal_hole = synthetic_log().replace(
+            "alignment_hole_fg:4 alignment_hole_gc:1 "
+            "tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:0",
+            "alignment_hole_fg:5 alignment_hole_gc:1 "
+            "tail_waste_fg:4 tail_waste_gc:1 run_splits_by_hole:0", 1)
+        self.assertEqual(
+            runner.parse_loaded_correctness(bad_gc_internal_hole)["overall"],
             "INCOMPLETE")
 
         missing = synthetic_log().replace(
@@ -1142,8 +1041,6 @@ class ReportContract(unittest.TestCase):
                 runner.parse_read_coalesce_ab(synthetic_log())),
             "sd_read_coalesce_ab": runner.sd_read_coalesce_ab_verdict(
                 runner.parse_sd_read_coalesce_ab(synthetic_log())),
-            "packed_placement_ab": runner.packed_placement_ab_verdict(
-                runner.parse_packed_placement_ab(synthetic_log())),
             "write_saturation": saturation,
             "loaded_correctness": runner.parse_loaded_correctness(synthetic_log()),
         }}
@@ -1153,21 +1050,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("ID67 OFFLINE PREDICTOR EVIDENCE", rendered)
         self.assertIn("ID61 GC MAP-SCAN SCALE", rendered)
         self.assertIn("ID73 OFFLINE EXTENT GEOMETRY", rendered)
-        self.assertIn("ID69 PACKED PLACEMENT A/B", rendered)
-        self.assertIn("physical WRITE req", rendered)
-        self.assertIn("int holes", rendered)
-        self.assertIn("consumed", rendered)
-        no_gain_rows = runner.parse_packed_placement_ab(synthetic_log())
-        no_gain_rows[1]["swapz"]["physical_write_reqs"] = \
-            no_gain_rows[0]["swapz"]["physical_write_reqs"]
-        report["benchmarks"]["packed_placement_ab"] = \
-            runner.packed_placement_ab_verdict(no_gain_rows)
-        with contextlib.redirect_stdout(io.StringIO()) as failed_output:
-            runner.print_bench(report)
-        failed_rendered = failed_output.getvalue()
-        self.assertIn("verdict: NO_GAIN", failed_rendered)
-        self.assertIn("int holes", failed_rendered)
-        self.assertIn("consumed", failed_rendered)
+        self.assertNotIn("ID69 PACKED PLACEMENT A/B", rendered)
+        self.assertIn("placement waste", rendered)
+        self.assertIn("packed smoke", rendered)
         self.assertIn("packed_1_2_4_8_16", rendered)
         self.assertIn("upper DISCARD TRIM", rendered)
         self.assertIn("packed smoke", rendered)

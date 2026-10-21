@@ -80,11 +80,6 @@ module_param_named(read_coalesce, swapz_read_coalesce, bool, 0444);
 MODULE_PARM_DESC(read_coalesce,
 		 "Enable zero-extra adjacent distinct-extent READ coalescing");
 
-static bool swapz_packed_placement = true;
-module_param_named(packed_placement, swapz_packed_placement, bool, 0444);
-MODULE_PARM_DESC(packed_placement,
-		 "Qualification override for packed existing 1/2/4-block extents");
-
 static bool swapz_logical_open_balance;
 module_param_named(logical_open_balance, swapz_logical_open_balance, bool, 0444);
 MODULE_PARM_DESC(logical_open_balance,
@@ -4591,7 +4586,6 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/* Production allocator exchanges ownership of one GC reserve segment
 	 * and one fully evacuated foreground victim every completed cycle. */
 	ctx->authority.reuse_dead_segments = 1;
-	ctx->authority.packed_placement = swapz_packed_placement;
 	error = swapz_enable_segment_rotation(&ctx->authority,
 					  ctx->segment_roles, ctx->segment_count);
 	if (error) {
@@ -5070,7 +5064,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->flush_meter.attempts, ctx->flush_meter.successes,
 		       ctx->flush_meter.failures, ctx->flush_meter.injected,
 		       ctx->flush_meter.fail_nth,
-		       ctx->authority.packed_placement,
+		       1U,
 		       ctx->authority.balance_segment_opens,
 		       ctx->engine.bulk_enabled,
 		       ctx->engine.bulk_writes, ctx->engine.bulk_extents,
