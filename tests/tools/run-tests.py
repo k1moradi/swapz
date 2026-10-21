@@ -959,7 +959,29 @@ def failure_context(output, *, loaded=True, default_phase=None):
                 unittest_failure = match.group(1)
 
     if unittest_failure is not None:
+        nested_phase = None
+        nested_reason = None
+        incremental_phase = None
+        for line in output.splitlines():
+            candidate = line.strip()
+            if candidate.startswith("MAKE_INCREMENTAL_PHASE="):
+                value = candidate.partition("=")[2]
+                if re.fullmatch(r"[a-z0-9_-]{1,32}", value):
+                    incremental_phase = value
+            elif candidate.startswith("Failed during: "):
+                value = candidate.partition(": ")[2]
+                if re.fullmatch(r"[A-Za-z0-9 ._+/-]{1,96}", value):
+                    nested_phase = value
+            elif candidate.startswith("Reason: "):
+                value = candidate.partition(": ")[2]
+                value = re.sub(r"[^A-Za-z0-9 .,:;()_+=/\-\[\]%]", "?", value)
+                if value:
+                    nested_reason = value[:155]
         reason = f"Unit test failed: {unittest_failure}"
+        if incremental_phase:
+            reason += f" [{incremental_phase}]"
+        if nested_phase and nested_reason:
+            reason += f"; nested {nested_phase}: {nested_reason}"
     elif loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
     elif loaded and "QUARANTINED:" in output:

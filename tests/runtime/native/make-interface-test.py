@@ -578,7 +578,8 @@ class PublicMakeContract(unittest.TestCase):
             env.pop("MFLAGS", None)
             env.pop("W", None)
 
-            def execute():
+            def execute(phase):
+                print(f"MAKE_INCREMENTAL_PHASE={phase}", flush=True)
                 proc = subprocess.run(
                     ["make", "-j2", "test",
                      f"KDIR={fixture / 'fake-headers'}"],
@@ -600,11 +601,11 @@ class PublicMakeContract(unittest.TestCase):
             w2_staged = fixture / "build/kernel/w2/dm-target.c"
             device = fixture / "build/tests/device-roundtrip"
             cli_out = fixture / "build/userspace/swapzctl"
-            execute()
+            execute("initial")
             tracked = (module, w1_module, w2_module, staged,
                        w1_staged, w2_staged, staged_make, device, cli_out)
             first = {p: p.stat().st_mtime_ns for p in tracked}
-            execute()
+            execute("unchanged")
             self.assertEqual(first,
                              {p: p.stat().st_mtime_ns for p in tracked},
                              "An unchanged make test -j2 must reuse binaries "
@@ -612,8 +613,9 @@ class PublicMakeContract(unittest.TestCase):
 
             time.sleep(0.03)
             cli.write_text("int main(void) { return 1; }\n")
-            execute()
-            self.assertGreater(cli_out.stat().st_mtime_ns, first[cli_out])
+            execute("cli-source")
+            self.assertGreater(cli_out.stat().st_mtime_ns, first[cli_out],
+                               "MAKE_INCREMENTAL_PHASE=cli-source")
             for p in (module, w1_module, w2_module, staged,
                       w1_staged, w2_staged, staged_make, device):
                 self.assertEqual(first[p], p.stat().st_mtime_ns, str(p))
@@ -621,8 +623,9 @@ class PublicMakeContract(unittest.TestCase):
             second = {p: p.stat().st_mtime_ns for p in tracked}
             time.sleep(0.03)
             kernel_source.write_text("int fake_kernel_source = 2;\n")
-            execute()
-            self.assertEqual(staged.read_text(), kernel_source.read_text())
+            execute("kernel-source")
+            self.assertEqual(staged.read_text(), kernel_source.read_text(),
+                             "MAKE_INCREMENTAL_PHASE=kernel-source")
             self.assertGreater(staged.stat().st_mtime_ns, second[staged])
             for p in (module, w1_module, w2_module, w1_staged, w2_staged):
                 self.assertGreater(p.stat().st_mtime_ns, second[p])
@@ -642,7 +645,7 @@ class PublicMakeContract(unittest.TestCase):
                              for p in (module, w1_module, w2_module)]
             time.sleep(0.03)
             from_version.write_text(to_version)
-            execute()
+            execute("version")
             for p, old_mtime in zip(headers, before_version):
                 self.assertGreater(p.stat().st_mtime_ns, old_mtime)
                 self.assertIn(to_version.strip(), p.read_text())
