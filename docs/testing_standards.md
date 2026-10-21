@@ -699,6 +699,9 @@ lower queue geometry is part of the model contract, fake
 submission-queue count and hardware queue depth for each regime. A parser
 schema change must update this fixture in the same change so rootless
 qualification cannot pass evidence that a real loaded run would reject.
+ID69 fixture rows must likewise carry every status field consumed by the
+placement verdict, including physical-write bytes, allocator cursor, GC-victim
+count, placement waste/splits and logical segment-open telemetry.
 
 
 The write-only saturation parser consumes the same exact owned-RAM device-model

@@ -556,13 +556,14 @@ class PublicMakeContract(unittest.TestCase):
                     f"START_PACKED_PLACEMENT_AB={packed}",
                     "REPLAY_ORDER=swapz-first" if index % 2 else
                     "REPLAY_ORDER=off-first",
-                    "SWAPZ_STATUS_AFTER=packed_placement={} "
+                    "SWAPZ_STATUS_AFTER=physical_write=4096000 "
+                    "cursor={} gc_victims=0 packed_placement={} "
                     "logical_open_balance=0 "
                     "alignment_hole_blocks_foreground={} "
                     "segment_tail_waste_blocks_foreground={} "
-                    "run_splits_by_hole={} segment_program_sum={}".format(
-                        packed, 0 if packed else 24, 0,
-                        0 if packed else 8, 70 if packed else 80),
+                    "run_splits_by_hole={} segment_program_sum=80".format(
+                        1000 if packed else 1024, packed,
+                        0 if packed else 24, 0, 0 if packed else 8),
                     mock_placement_arm(packed),
                     f"PASS_PACKED_PLACEMENT_AB={packed}",
                 ))
