@@ -163,6 +163,9 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "decode_wall_ns", "read_copy_wall_ns",
                       "read_copy_bytes", "read_engine_nonio_wall_ns",
                       "read_meta_cache_hits", "read_meta_lru_hits",
+                      "read_meta_set_lookups", "read_meta_set_hits",
+                      "read_meta_set_probes", "read_meta_set_replacements",
+                      "read_meta_copy_bytes",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
                       "parallel_read_same_extent_pairs",
@@ -2966,6 +2969,23 @@ def print_bench(result):
                 for label, mode in (("seq", "sequential"),
                                     ("rnd", "seeded_random"))
             ])
+
+        print("  Metadata-cache locality — async arm; 128 sets x 4 ways.")
+        locality_rows = []
+        for label, mode in (("seq", "sequential"), ("rnd", "seeded_random")):
+            lookups = asynchronous[f"{mode}_read_meta_set_lookups"]
+            hits = asynchronous[f"{mode}_read_meta_set_hits"]
+            probes = asynchronous[f"{mode}_read_meta_set_probes"]
+            locality_rows.append((
+                label,
+                f"{lookups:.1f}",
+                f"{(100.0 * hits / lookups) if lookups else 0.0:.1f}",
+                f"{(probes / lookups) if lookups else 0.0:.2f}",
+                f"{asynchronous[f'{mode}_read_meta_set_replacements']:.1f}",
+                f"{asynchronous[f'{mode}_read_meta_copy_bytes'] / 1024:.1f}",
+            ))
+        print_table(("read", "lookups", "set hit %", "probes/lookup",
+                     "repl", "meta copy KiB"), locality_rows)
 
         print("  Lower queue — sampled time-weighted mean / peak during mixed I/O.")
         print_table(

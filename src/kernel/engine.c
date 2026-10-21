@@ -278,39 +278,47 @@ int swapz_engine_plan_bounded(const struct swapz_compressed_page *pages,
 					      extent_count, 0, 0);
 }
 
-static swapz_u16 swapz_read_metadata_front_bucket(swapz_u32 start_block,
-						 swapz_u8 extent_blocks)
+static swapz_u16 swapz_read_metadata_set(swapz_u32 start_block,
+					 swapz_u8 extent_blocks)
 {
 	swapz_u32 mixed = start_block ^ (start_block >> 9) ^
 		((swapz_u32)extent_blocks * 0x9e3779b9U);
-
-	return (swapz_u16)(mixed & (SWAPZ_READ_METADATA_FRONT_ENTRIES - 1U));
+	return (swapz_u16)(mixed & (SWAPZ_READ_METADATA_CACHE_SETS - 1U));
 }
 
-static int swapz_read_metadata_lru_lookup(const struct swapz_engine *engine,
-					swapz_u32 start_block,
-					swapz_u8 extent_blocks)
+static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
+					 swapz_u32 start_block,
+					 swapz_u8 extent_blocks,
+					 swapz_u8 *probes)
 {
-	swapz_u16 bucket, encoded, index, slot;
-
-	if (!engine->read_metadata_cache)
-		return -1;
-	bucket = swapz_read_metadata_front_bucket(start_block, extent_blocks);
-	encoded = engine->read_metadata_front_slots[bucket];
-	if (encoded) {
-		slot = encoded - 1U;
-		if (slot < SWAPZ_READ_METADATA_CACHE_ENTRIES &&
-		    engine->read_metadata_lru_valid[slot] &&
+	swapz_u16 set, base, way, slot;
+	if (probes) *probes = 0;
+	if (!engine || !engine->read_metadata_cache) return -1;
+	set = swapz_read_metadata_set(start_block, extent_blocks);
+	base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
+	for (way = 0; way < SWAPZ_READ_METADATA_CACHE_WAYS; ++way) {
+		slot = base + way;
+		if (probes) (*probes)++;
+		if (engine->read_metadata_lru_valid[slot] &&
 		    engine->read_metadata_lru_start_blocks[slot] == start_block &&
 		    engine->read_metadata_lru_extent_blocks[slot] == extent_blocks)
 			return slot;
 	}
-	for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index)
-		if (engine->read_metadata_lru_valid[index] &&
-		    engine->read_metadata_lru_start_blocks[index] == start_block &&
-		    engine->read_metadata_lru_extent_blocks[index] == extent_blocks)
-			return index;
 	return -1;
+}
+
+static int swapz_read_metadata_lru_lookup(struct swapz_engine *engine,
+					swapz_u32 start_block,
+					swapz_u8 extent_blocks)
+{
+	swapz_u8 probes = 0;
+	int slot;
+	if (!engine || !engine->read_metadata_cache) return -1;
+	engine->read_metadata_set_lookups++;
+	slot = swapz_read_metadata_set_lookup(engine, start_block, extent_blocks, &probes);
+	engine->read_metadata_set_probes += probes;
+	if (slot >= 0) engine->read_metadata_set_hits++;
+	return slot;
 }
 
 static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
@@ -320,19 +328,13 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 					const swapz_u8 *metadata)
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
-	swapz_u16 index, slot = 0;
+	swapz_u16 set, base, way, slot = 0;
 	int have_slot = 0;
-
-	if (!engine->read_metadata_cache || !metadata)
-		return;
+	if (!engine->read_metadata_cache || !metadata) return;
 	engine->read_metadata_lru_clock++;
 	if (!engine->read_metadata_lru_clock) {
-		/* Preserve exact age ordering across wrap by starting a fresh epoch.
-		 * Current validated metadata is inserted below. */
 		memset(engine->read_metadata_lru_valid, 0,
 		       sizeof(engine->read_metadata_lru_valid));
-		memset(engine->read_metadata_front_slots, 0,
-		       sizeof(engine->read_metadata_front_slots));
 		engine->read_metadata_lru_clock = 1;
 		hit_slot = -1;
 	}
@@ -340,32 +342,29 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 		slot = (swapz_u16)hit_slot;
 		have_slot = 1;
 	} else {
-		for (index = 0; index < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++index) {
-			if (!engine->read_metadata_lru_valid[index]) {
-				slot = index;
-				have_slot = 1;
-				break;
+		set = swapz_read_metadata_set(start_block, extent_blocks);
+		base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
+		for (way = 0; way < SWAPZ_READ_METADATA_CACHE_WAYS; ++way) {
+			swapz_u16 candidate = base + way;
+			if (!engine->read_metadata_lru_valid[candidate]) {
+				slot = candidate; have_slot = 1; break;
 			}
-			if (engine->read_metadata_lru_ages[index] < oldest_age) {
-				oldest_age = engine->read_metadata_lru_ages[index];
-				slot = index;
-				have_slot = 1;
+			if (!have_slot || engine->read_metadata_lru_ages[candidate] < oldest_age) {
+				oldest_age = engine->read_metadata_lru_ages[candidate];
+				slot = candidate; have_slot = 1;
 			}
 		}
+		if (have_slot && engine->read_metadata_lru_valid[slot])
+			engine->read_metadata_set_replacements++;
 	}
-	if (!have_slot)
-		return;
+	if (!have_slot) return;
 	if (hit_slot < 0)
-		memcpy(engine->read_metadata_cache +
-		       (size_t)slot * SWAPZ_BLOCK_BYTES,
+		memcpy(engine->read_metadata_cache + (size_t)slot * SWAPZ_BLOCK_BYTES,
 		       metadata, SWAPZ_BLOCK_BYTES);
 	engine->read_metadata_lru_start_blocks[slot] = start_block;
 	engine->read_metadata_lru_extent_blocks[slot] = extent_blocks;
 	engine->read_metadata_lru_ages[slot] = engine->read_metadata_lru_clock;
 	engine->read_metadata_lru_valid[slot] = 1;
-	engine->read_metadata_front_slots[
-		swapz_read_metadata_front_bucket(start_block, extent_blocks)] =
-		slot + 1U;
 }
 
 static int swapz_read_extent_lru_lookup(const struct swapz_engine *engine,
@@ -457,8 +456,6 @@ void swapz_engine_invalidate_read_cache(struct swapz_engine *engine)
 		if (engine->read_metadata_lru_clock) {
 			memset(engine->read_metadata_lru_valid, 0,
 			       sizeof(engine->read_metadata_lru_valid));
-			memset(engine->read_metadata_front_slots, 0,
-			       sizeof(engine->read_metadata_front_slots));
 			engine->read_metadata_lru_clock = 0;
 		}
 		if (engine->read_extent_lru_clock) {
@@ -484,6 +481,11 @@ void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
 	SWAPZ_MERGE_READ_COUNTER(read_payload_blocks);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_cache_hits);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_lru_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_lookups);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_probes);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_replacements);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_copy_bytes);
 	SWAPZ_MERGE_READ_COUNTER(read_full_extent_requests);
 	SWAPZ_MERGE_READ_COUNTER(read_full_extent_cache_hits);
 	SWAPZ_MERGE_READ_COUNTER(read_two_block_skips);
@@ -495,7 +497,7 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 				  swapz_u32 start_block,
 				  swapz_u8 extent_blocks)
 {
-	swapz_u8 mask = 0, block;
+	swapz_u8 mask = 0, block, metadata_probes = 0;
 	int cache_slot, metadata_slot;
 
 	if (!master || !slot || !slot->read_scratch || !extent_blocks ||
@@ -539,8 +541,9 @@ void swapz_engine_prime_read_slot(const struct swapz_engine *master,
 	}
 	if (!(mask & 1U)) {
 		metadata_slot = master->read_metadata_lru_clock ?
-			swapz_read_metadata_lru_lookup(master, start_block,
-						       extent_blocks) : -1;
+			swapz_read_metadata_set_lookup(master, start_block,
+						       extent_blocks,
+						       &metadata_probes) : -1;
 		if (metadata_slot >= 0) {
 			memcpy(slot->read_scratch,
 			       master->read_metadata_cache +
@@ -703,9 +706,11 @@ int swapz_engine_required_read_range_cached(
 			engine, start_block, extent_blocks);
 	if (cache_slot >= 0)
 		resident |= engine->read_extent_lru_block_masks[cache_slot];
-	if (!(resident & 1U) && engine->read_metadata_lru_clock)
-		metadata_slot = swapz_read_metadata_lru_lookup(
-			engine, start_block, extent_blocks);
+	if (!(resident & 1U) && engine->read_metadata_lru_clock) {
+		swapz_u8 metadata_probes = 0;
+		metadata_slot = swapz_read_metadata_set_lookup(
+			engine, start_block, extent_blocks, &metadata_probes);
+	}
 	if (metadata_slot >= 0)
 		resident |= 1U;
 	return swapz_engine_required_read_range_resident(
@@ -1381,12 +1386,13 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 {
 	struct swapz_decoded peek;
 	struct swapz_map observed;
-	const swapz_u8 *stored;
+	const swapz_u8 *stored, *metadata;
 	swapz_u32 bytes, first, last, start, count, block;
 	swapz_u32 payload_first, payload_last;
 	swapz_u8 initial_blocks = 1, cached_mask, coalesced_mask = 0;
+	swapz_u8 reusable_mask;
 	int error;
-	int cached_metadata, cached_full, lru_cached_metadata;
+	int cached_extent, cached_metadata, cached_full, lru_cached_metadata;
 	int extent_lru_slot, metadata_lru_slot;
 
 	if (!engine || !engine->authority || !engine->read_scratch ||
@@ -1419,13 +1425,13 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	 * can reuse its block-zero metadata or complete two-block contents;
 	 * payload/generation/CRC validation still runs for EVERY logical read.
 	 */
-	cached_metadata = engine->read_cache_valid &&
+	cached_extent = engine->read_cache_valid &&
 		engine->read_cached_start_block == observed.start_block &&
 		engine->read_cached_extent_blocks == observed.extent_blocks;
-	cached_full = cached_metadata && engine->read_cached_full;
-	cached_mask = cached_metadata ? engine->read_cached_block_mask : 0;
-	coalesced_mask = cached_metadata ?
-		engine->read_coalesced_block_mask : 0;
+	cached_mask = cached_extent ? engine->read_cached_block_mask : 0;
+	cached_metadata = cached_extent && !!(cached_mask & 1U);
+	cached_full = cached_extent && engine->read_cached_full;
+	coalesced_mask = cached_extent ? engine->read_coalesced_block_mask : 0;
 	extent_lru_slot = engine->max_read_blocks_per_record != 1 ?
 		swapz_read_extent_lru_lookup(engine, observed.start_block,
 					     observed.extent_blocks) : -1;
@@ -1446,19 +1452,19 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		cached_full = cached_mask ==
 			(swapz_u8)((1U << observed.extent_blocks) - 1U);
 	}
-	metadata_lru_slot = swapz_read_metadata_lru_lookup(engine,
-						 observed.start_block,
-						 observed.extent_blocks);
+	metadata = engine->read_scratch;
+	metadata_lru_slot = -1;
+	if (!cached_metadata)
+		metadata_lru_slot = swapz_read_metadata_lru_lookup(
+			engine, observed.start_block, observed.extent_blocks);
 	lru_cached_metadata = !cached_metadata && metadata_lru_slot >= 0;
 	engine->read_cache_valid = 0;
 	engine->read_cached_full = 0;
 	engine->read_cached_block_mask = 0;
 	engine->read_coalesced_block_mask = 0;
 	if (lru_cached_metadata) {
-		memcpy(engine->read_scratch,
-		       engine->read_metadata_cache +
-		       (size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES,
-		       SWAPZ_BLOCK_BYTES);
+		metadata = engine->read_metadata_cache +
+			(size_t)metadata_lru_slot * SWAPZ_BLOCK_BYTES;
 		cached_mask |= 1U;
 	} else if (!cached_metadata) {
 		if (observed.extent_blocks == 2 &&
@@ -1480,7 +1486,7 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			 engine->max_read_blocks_per_record != 1)
 			engine->read_two_block_skips++;
 	}
-	error = swapz_peek(engine->read_scratch, bytes,
+	error = swapz_peek(metadata, bytes,
 			 swapz_map_record_index(&observed), &peek);
 	if (error)
 		return error;
@@ -1492,6 +1498,14 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	payload_first = peek.payload_offset / SWAPZ_BLOCK_BYTES;
 	payload_last = ((swapz_u32)peek.payload_offset +
 		peek.payload_length - 1U) / SWAPZ_BLOCK_BYTES;
+	if (metadata != engine->read_scratch && payload_first == 0) {
+		swapz_u32 metadata_payload_bytes = SWAPZ_BLOCK_BYTES - peek.payload_offset;
+		if (metadata_payload_bytes > peek.payload_length)
+			metadata_payload_bytes = peek.payload_length;
+		memcpy(engine->read_scratch + peek.payload_offset,
+		       metadata + peek.payload_offset, metadata_payload_bytes);
+		engine->read_metadata_copy_bytes += metadata_payload_bytes;
+	}
 	first = payload_first;
 	last = payload_last;
 	/*
@@ -1526,9 +1540,10 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 			for (block = start; block < start + count; ++block)
 				cached_mask |= (swapz_u8)(1U << block);
 	}
-	error = swapz_read_authoritative_peeked(engine->authority, logical_page,
-					      &observed, engine->read_scratch,
-					      bytes, &peek, &stored);
+	stored = engine->read_scratch + peek.payload_offset;
+	error = swapz_read_authoritative_peeked_payload(
+		engine->authority, logical_page, &observed, metadata,
+		bytes, &peek, stored, &stored);
 	if (error)
 		return error;
 	if (peek.payload_length > payload_capacity)
@@ -1537,6 +1552,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	*payload_length = peek.payload_length;
 	/* Publish reusable bytes only after successful authority, generation
 	 * and payload-CRC validation. Any error path leaves the cache invalid. */
+	reusable_mask = cached_mask;
+	if (metadata != engine->read_scratch)
+		reusable_mask &= (swapz_u8)~1U;
 	engine->read_cached_start_block = observed.start_block;
 	engine->read_cached_extent_blocks = observed.extent_blocks;
 	/* Preserve the qualified one-block/selective-read contract: "full" is
@@ -1544,9 +1562,9 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 	 * metadata block. The exact block mask remains authoritative either way. */
 	engine->read_cached_full = observed.extent_blocks > 1 &&
 		engine->max_read_blocks_per_record != 1 &&
-		cached_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
-	engine->read_cached_block_mask = cached_mask;
-	engine->read_cache_valid = 1;
+		reusable_mask == (swapz_u8)((1U << observed.extent_blocks) - 1U);
+	engine->read_cached_block_mask = reusable_mask;
+	engine->read_cache_valid = reusable_mask != 0;
 	/* Seeded combined-read blocks become reusable cache only after this
 	 * record validates its immutable metadata/generation/payload CRC. */
 	{
@@ -1567,12 +1585,12 @@ int swapz_engine_read_page(struct swapz_engine *engine, swapz_u32 logical_page,
 		engine->read_metadata_lru_hits++;
 	swapz_read_metadata_lru_commit(engine, observed.start_block,
 				     observed.extent_blocks,
-				     metadata_lru_slot, engine->read_scratch);
+				     metadata_lru_slot, metadata);
 	if (engine->read_extent_cache &&
 	    engine->max_read_blocks_per_record != 1 &&
-	    observed.extent_blocks > 1)
+	    observed.extent_blocks > 1 && reusable_mask)
 		swapz_read_extent_lru_commit(engine, observed.start_block,
 					     observed.extent_blocks,
-					     cached_mask, engine->read_scratch);
+					     reusable_mask, engine->read_scratch);
 	return 0;
 }

@@ -259,6 +259,14 @@ int swapz_discard_page(struct swapz_authority *authority, swapz_u32 logical_page
  * Rechecks current authority/sequence and verifies the payload CRC without
  * re-running the metadata parser over the same block-zero bytes.
  */
+int swapz_read_authoritative_peeked_payload(
+				  const struct swapz_authority *authority,
+				  swapz_u32 logical_page,
+				  const struct swapz_map *observed,
+				  const void *metadata, swapz_u32 bytes_total,
+				  const struct swapz_decoded *peeked,
+				  const swapz_u8 *stored,
+				  const swapz_u8 **payload);
 int swapz_read_authoritative_peeked(const struct swapz_authority *authority,
 				  swapz_u32 logical_page,
 				  const struct swapz_map *observed,

@@ -327,6 +327,11 @@ def arm(candidate, *, mode, regime):
                     "read_engine_nonio_wall_ns": 6000000,
                     "read_meta_cache_hits": 128,
                     "read_meta_lru_hits": 100,
+                    "read_meta_set_lookups": 1024,
+                    "read_meta_set_hits": 100,
+                    "read_meta_set_probes": 1800,
+                    "read_meta_set_replacements": 12,
+                    "read_meta_copy_bytes": 207200,
                     "read_full_extent_reqs": 200,
                     "read_full_cache_hits": 64,
                     "read_two_block_skips": 128,
@@ -966,6 +971,11 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_engine_nonio_wall_ns"], 6000000)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_cache_hits"], 128)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_lru_hits"], 100)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_lookups"], 1024)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_hits"], 100)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_probes"], 1800)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_replacements"], 12)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_copy_bytes"], 207200)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
         self.assertEqual(slow["columns"]["async"]["seeded_random_read_full_cache_hits"], 64)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_two_block_skips"], 128)
@@ -1130,6 +1140,9 @@ class ReportContract(unittest.TestCase):
         self.assertIn("scheduling", rendered)
         self.assertIn("Verified 4MiB packed reads", rendered)
         self.assertIn("Packed-read C attribution", rendered)
+        self.assertIn("Metadata-cache locality", rendered)
+        self.assertIn("probes/lookup", rendered)
+        self.assertIn("meta copy KiB", rendered)
         self.assertIn("RAM copies", rendered)
         self.assertIn("commit non-I/O", rendered)
         self.assertIn("engine plan", rendered)

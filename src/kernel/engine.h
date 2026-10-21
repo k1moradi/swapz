@@ -4,7 +4,9 @@
 #include "authority.h"
 #define SWAPZ_BULK_BLOCKS 64U
 #define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U
-#define SWAPZ_READ_METADATA_FRONT_ENTRIES 128U
+#define SWAPZ_READ_METADATA_CACHE_WAYS 4U
+#define SWAPZ_READ_METADATA_CACHE_SETS \
+	(SWAPZ_READ_METADATA_CACHE_ENTRIES / SWAPZ_READ_METADATA_CACHE_WAYS)
 #define SWAPZ_READ_EXTENT_CACHE_ENTRIES 16U
 #define SWAPZ_PARALLEL_READ_SLOTS 2U
 
@@ -142,23 +144,26 @@ struct swapz_engine {
 	swapz_u8 read_coalesced_block_mask;
 	swapz_u32 read_metadata_cache_hits;
 	/*
-	 * Owner-preallocated metadata-only cache. Each slot holds exactly the
-	 * immutable SWZ block zero for one extent; payload blocks are never
-	 * cached here. The serialized reader scans a fixed bounded table and uses
-	 * an age stamp for exact LRU replacement without moving 4KiB data blocks.
+	 * Owner-preallocated metadata-only cache. Capacity remains 512 immutable
+	 * SWZ block-zero images, but the directory is 128 sets x 4 ways so lookup
+	 * and replacement touch at most four compact directory entries. Payload
+	 * blocks are never cached here. Per-set age replacement trades exact
+	 * global LRU ordering for bounded Core-2-friendly L1/L2 work.
 	 */
 	swapz_u8 *read_metadata_cache; /* entries * 4096 bytes */
 	swapz_u32 read_metadata_lru_start_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u32 read_metadata_lru_ages[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u8 read_metadata_lru_extent_blocks[SWAPZ_READ_METADATA_CACHE_ENTRIES];
 	swapz_u8 read_metadata_lru_valid[SWAPZ_READ_METADATA_CACHE_ENTRIES];
-	/*
-	 * L1-sized direct front for the 512-slot exact LRU. Entries encode
-	 * slot+1; collisions merely fall back to the exact bounded scan.
-	 */
-	swapz_u16 read_metadata_front_slots[SWAPZ_READ_METADATA_FRONT_ENTRIES];
 	swapz_u32 read_metadata_lru_clock;
 	swapz_u32 read_metadata_lru_hits;
+	unsigned long long read_metadata_set_lookups;
+	unsigned long long read_metadata_set_hits;
+	unsigned long long read_metadata_set_probes;
+	unsigned long long read_metadata_set_replacements;
+	/* Bytes copied from cached block zero into read_scratch solely because
+	 * the selected payload overlaps block zero; never count lower-I/O copies. */
+	unsigned long long read_metadata_copy_bytes;
 	/* Ordered-owner shared extent residency. Each fixed slot stores only
 	 * blocks proven fetched for one immutable 4/8/16KiB extent. Helpers are
 	 * primed from this cache before dispatch and absorbed only after join. */

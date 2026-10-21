@@ -1491,31 +1491,22 @@ static int swapz_read_observed_authority(
 	return 0;
 }
 
-int swapz_read_authoritative_peeked(const struct swapz_authority *a,
+int swapz_read_authoritative_peeked_payload(
+				  const struct swapz_authority *a,
 				  swapz_u32 logical_page,
 				  const struct swapz_map *observed,
-				  const void *extent, swapz_u32 bytes_total,
+				  const void *metadata, swapz_u32 bytes_total,
 				  const struct swapz_decoded *peeked,
+				  const swapz_u8 *stored,
 				  const swapz_u8 **payload)
 {
 	const struct swapz_map *current_map;
-	const swapz_u8 *stored;
 	int error;
-
-	if (!peeked || !payload)
-		return -EINVAL;
+	if (!peeked || !stored || !payload) return -EINVAL;
 	*payload = NULL;
 	error = swapz_read_observed_authority(a, logical_page, observed,
-					   extent, bytes_total, &current_map);
-	if (error)
-		return error;
-	/*
-	 * swapz_peek() already validated the complete metadata block before the
-	 * engine fetched any missing payload blocks. read_scratch is owned by
-	 * the serialized worker, so only those payload bytes can change before
-	 * this call. Recheck volatile authority and on-media sequence, then
-	 * validate the payload CRC exactly once without reparsing metadata.
-	 */
+					   metadata, bytes_total, &current_map);
+	if (error) return error;
 	if (peeked->logical_page != logical_page ||
 	    peeked->generation != current_map->generation ||
 	    peeked->encoding != swapz_map_encoding(current_map) ||
@@ -1525,12 +1516,23 @@ int swapz_read_authoritative_peeked(const struct swapz_authority *a,
 	    peeked->payload_length > SWAPZ_MAX_COMPRESSED ||
 	    peeked->payload_offset >= bytes_total ||
 	    peeked->payload_length > bytes_total - peeked->payload_offset ||
-	    swapz_disk_sequence(extent) != current_map->sequence)
+	    swapz_disk_sequence(metadata) != current_map->sequence)
 		return -EUCLEAN;
-	stored = (const swapz_u8 *)extent + peeked->payload_offset;
-	if (swapz_crc32c_bytes(stored, peeked->payload_length) !=
-	    peeked->payload_crc32c)
+	if (swapz_crc32c_bytes(stored, peeked->payload_length) != peeked->payload_crc32c)
 		return -EBADMSG;
 	*payload = stored;
 	return 0;
+}
+
+int swapz_read_authoritative_peeked(const struct swapz_authority *a,
+				  swapz_u32 logical_page,
+				  const struct swapz_map *observed,
+				  const void *extent, swapz_u32 bytes_total,
+				  const struct swapz_decoded *peeked,
+				  const swapz_u8 **payload)
+{
+	if (!extent || !peeked || peeked->payload_offset >= bytes_total) return -EINVAL;
+	return swapz_read_authoritative_peeked_payload(
+		a, logical_page, observed, extent, bytes_total, peeked,
+		(const swapz_u8 *)extent + peeked->payload_offset, payload);
 }

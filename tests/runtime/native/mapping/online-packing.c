@@ -246,7 +246,7 @@ static int test_full_window_and_selective_reads(void)
 	return 0;
 }
 
-static int test_metadata_lru64_reuses_validated_block_zero(void)
+static int test_metadata_set_cache_reuses_validated_block_zero(void)
 {
 	struct swapz_compressed_page pages[64];
 	swapz_u8 committed = 0, output[3568];
@@ -263,7 +263,7 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	CHECK(committed == 64);
 
 	/* Five distinct one-block extents evict the real one-entry cache but not
-	 * the bounded 64-entry metadata cache. A successful LRU hit must return
+	 * the 512-entry four-way metadata cache. A successful set hit must return
 	 * exact data without issuing another lower read. */
 	for (i = 0; i < 5; ++i)
 		CHECK(swapz_engine_read_page(&engine, i, output,
@@ -275,6 +275,10 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 	CHECK(disk.read_blocks == reads_before);
 	CHECK(engine.read_metadata_cache_hits == 0);
 	CHECK(engine.read_metadata_lru_hits == 1);
+	CHECK(engine.read_metadata_set_hits >= 1);
+	CHECK(engine.read_metadata_set_probes <=
+	      4U * engine.read_metadata_set_lookups);
+	CHECK(engine.read_metadata_copy_bytes == 2072);
 
 	/* The ordinary mutation fence clears residency. Re-reading after an
 	 * explicit invalidation must hit the lower device again. */
@@ -313,6 +317,7 @@ static int test_metadata_lru64_reuses_validated_block_zero(void)
 				   sizeof(output), &length) == 0);
 	CHECK(disk.read_blocks == reads_before);
 	CHECK(engine.read_metadata_lru_hits == 2);
+	CHECK(engine.read_metadata_copy_bytes == 4144);
 	return 0;
 }
 
@@ -846,7 +851,7 @@ int main(void)
 	CHECK(disk.storage != NULL);
 	CHECK(test_finite_window_planner() == 0); completed++;
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
-	CHECK(test_metadata_lru64_reuses_validated_block_zero() == 0); completed++;
+	CHECK(test_metadata_set_cache_reuses_validated_block_zero() == 0); completed++;
 	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;
 	CHECK(test_extent_lru_reuses_eight_interleaved_extents() == 0); completed++;
 	CHECK(test_prime_absorb_preserves_shared_read_residency() == 0); completed++;

@@ -35,37 +35,28 @@ report uses interval deltas, rather than the PSI rolling averages.
 
 ## Current synthetic models
 
-### Pending production delta64 attribution
+### Production delta64 attribution and Core-2 cache baseline
 
-The latest published report (`e80d8544a311130f5c81eff9b3b2fce98225cd77`)
-tested `4d73b13fa66f63b24b5edf099fcb2b7f3cab756f` and passed all five
-stages on owned RAM-backed `null_blk`. It includes the metadata front index and
-production page-local delta64, but has no production rescue counters. Native
-structured-corpus savings and modeled service-time economics do not establish
-that delta64 reduced this loaded workload's I/O or increased its throughput.
-Packed-read engine attribution is wall time excluding lower READ waits, not
-scheduler-accounted CPU. Cross-report differences also include other source
-changes and background load, so they cannot isolate the cache change.
-The native routed-cost calculation is also a model constructed from elapsed
-timings (`CLOCK_MONOTONIC`), not measured kernel worker CPU. It excludes inverse
-READ cost and can include scheduling delay. Its SD/SSD benefit/cost ratios are
-opportunity estimates, not proof that either device class becomes faster.
+Report `1df2e5a6d7c52682c2ac048310b0ed2f932a2791` tested source
+`5bdd040334ee0739e1663e98eef4c875a1c4629a` and passed all five stages
+on owned RAM-backed `null_blk`. Production delta64 telemetry is decisive for
+this workload: every mixed arm observed 12,301 eligible pages but zero
+classifier passes, attempts or adoptions, with zero encoded payload bytes
+saved. Delta64 therefore changed neither extent packing nor lower I/O in this
+loaded run. The native structured corpus remains separate opportunity evidence:
+threshold 24 models 257 -> 205 physical blocks and 182 -> 133 extents.
 
-Pending code adds `delta64_eligible`, `delta64_classifier_pass`,
-`delta64_attempts`, `delta64_adopted`, `delta64_raw_rescues`,
-`delta64_lz4_rescues`, `delta64_payload_bytes_saved`, the matching
-`delta64_raw_payload_bytes_saved` / `delta64_lz4_payload_bytes_saved` split,
-and `delta64_wall_ns`. Reports use timed interval deltas, with preparation and
-ordered workers accounted separately in C and summed for status. Counts can
-include later-aborted preparation work. Payload savings exclude extent
-rounding, metadata, reads and GC; they are not physical I/O or NAND wear saved.
-Rescue wall time includes classifier, transform, second LZ4 and copy, includes
-scheduler delay and overlaps existing timing rows. Use worker CPU and host CPU
-pressure alongside it rather than subtracting it from throughput.
+The same report is the pre-change Core-2 cache baseline. Fast packed reads show
+sequential lower READ 2830 KiB / 308.2 requests / 5.54 ms p99 and seeded-random
+2493 KiB / 623.2 requests / 5.63 ms p99. Read-engine wall time excluding lower
+I/O is 6.0 ms sequential and 9.4 ms random. These are the comparison points for
+the pending 128-set x four-way metadata directory and block-zero copy-avoidance
+round; host-load and lower-I/O caveats still apply.
 
-No compile or test run accompanies this attribution increment. Its first owner
-report must verify counter conservation and usage; a controlled same-source
-comparison is still needed before claiming an end-to-end performance benefit.
+The next report adds metadata set lookup/hit/probe/replacement counters and
+cached-block payload-copy bytes. A source-level reduction in probes or memcpy
+traffic is not itself a performance claim: retain lower bytes/requests, useful
+throughput, p99, read-engine attribution and host-load evidence in the verdict.
 
 ### Maintained device settings
 

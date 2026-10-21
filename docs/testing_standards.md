@@ -1089,14 +1089,30 @@ wider backend requires same-host results before any inverse-policy promotion,
 and official qualification on a host lacking that ISA does not qualify its
 runtime path.
 
-### Cache-local metadata front index
+### Core-2 metadata set cache and copy avoidance
 
-The metadata front index is an accelerator only. Qualification must retain the
-512-slot exact cache, exact key validation after a front hit, bounded fallback
-scan on collision, and complete invalidation before any authority mutation.
-No lower-I/O, cache-capacity, generation or CRC rule changes with the front
-index. Predictor qualification continues to require SSE2 transformed bytes and
-inverse reconstruction to match scalar exactly after cache-local loop changes.
+The metadata cache keeps exactly 512 immutable SWZ block-zero images, but its
+directory is 128 sets by four ways. Lookup and replacement may inspect at most
+four compact directory entries; a 512-entry fallback scan or separate direct
+front is not permitted. Replacement is local to the selected set and may trade
+global-LRU precision for bounded Core-2 L1/L2 work. Complete invalidation before
+authority mutation remains mandatory.
+
+An ordinary metadata-cache hit parses and sequence-checks the cached block
+directly. It must not copy all 4096 bytes into read scratch merely to decode one
+record. If the selected payload overlaps block zero, copy only that exact
+payload fragment; CRC validation must cover the reconstructed contiguous payload
+and remain bound to the separately validated metadata/authority identity.
+A separately cached block zero must never be advertised as direct/extent
+read-scratch residency unless all 4096 bytes are actually present there.
+
+Loaded qualification must report metadata set lookups, hits, probes,
+replacements and cached-block payload-copy bytes. Require hits <= lookups and
+lookups <= probes <= four * lookups. Compare the owner run against source
+5bdd040334ee's baseline rather than inferring a win from source structure alone.
+No lower-I/O, cache-capacity, generation, CRC, selective-read or coalescing rule
+changes in this round. Predictor qualification continues to require SSE2
+transformed bytes and inverse reconstruction to match scalar exactly.
 
 ### Production delta64 qualification
 
