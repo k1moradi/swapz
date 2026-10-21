@@ -3289,15 +3289,15 @@ def print_bench(result):
     print_table(
         ("scope", "value"),
         [
-            ("media", "synthetic RAM only"),
-            ("mixed statistics", "fast: 5 matched pairs + paired CI; slow: 2/mode"),
-            ("read isolation", "Adjacent-range READ coalescing: slow and fast, five matched pairs; standalone grouping retired"),
-            ("zero-tail burst adjustment", "Retired; compatibility fields stay fixed at zero"),
-            ("write-only", "fast QD4/QD8/QD32: 5 matched pairs + paired CI; QD1 directional"),
-            ("CPU", "sum_exec_runtime is a lower bound; measured phase floors are separate"),
-            ("4MiB read", "RAM-backed; not cold physical swap-in"),
-            ("GC", "live victims exercised on synthetic RAM; physical wear unproven"),
-            ("Full telemetry", "test_results.json.xz"),
+            ("media", "synthetic RAM only; no physical-device evidence"),
+            ("mixed CI", "fast: five matched pairs; slow: two observations per mode"),
+            ("READ coalescing", "five matched pairs per model; p99 effect unresolved"),
+            ("zero-tail shrink", "retired; compatibility fields stay fixed at zero"),
+            ("write-only QD", "five pairs at fast QD4/8/32; QD1 is directional"),
+            ("CPU", "scheduler time is a lower bound; phase floors are separate"),
+            ("4MiB READ", "RAM-backed; not a cold physical swap-in"),
+            ("GC", "RAM exercise only; physical wear is unproven"),
+            ("full detail", "test_results.json.xz"),
         ])
 
     saturation = result["benchmarks"].get("write_saturation", {})
