@@ -60,15 +60,16 @@
 #define SWAPZ_PREPARATION_TAIL_CLAIM_MIN 2U
 
 /*
- * Experimental opt-in: a separate bounded LZ4 producer may prepare future
- * writes while the existing ordered commit worker waits on lower dm_io.
- * WRITE physical I/O and all mapping authority remain single-thread owned;
- * bounded READ helpers never publish or mutate authority.
+ * A separate bounded LZ4 producer may prepare future writes while the
+ * existing ordered commit worker waits on lower dm_io. WRITE physical I/O
+ * and all mapping authority remain single-thread owned; bounded READ helpers
+ * never publish or mutate authority.
  */
-static bool swapz_async_prepare;
+static bool swapz_async_prepare = true;
 module_param_named(async_prepare, swapz_async_prepare, bool, 0444);
 MODULE_PARM_DESC(async_prepare,
-		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O");
+		 "Prepare bounded LZ4 writes concurrently with ordered lower I/O; "
+		 "set async_prepare=0 for synchronous qualification");
 
 static bool swapz_parallel_reads = true;
 module_param_named(parallel_reads, swapz_parallel_reads, bool, 0444);

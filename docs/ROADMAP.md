@@ -9,33 +9,28 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 Owner qualification of source
-`2fabd0dc4b3fe09b8e52e9a624e9452647229e09` passed all five stages and
+`79c6bd9400ae7f95a2881634c0cb459167d486a3` passed all five stages and
 published report-only commit
-`92d6aa08b44ab7dd827636680584f8c9a313a89b`. Evidence remains newly-created,
-positively owned RAM-backed `null_blk` only.
+`013893fa3edb5267bc288439379aa3d2498761ff`. Evidence remains newly-created,
+positively owned RAM-backed `null_blk` only. Packed placement's segment-edge
+repair passed loaded byte-exact verification with zero internal holes and
+zero hole-induced run splits.
 
-The latest owner run preserves ID63's request benefit but shows its fast-latency
-question is not closed. SSD_EMULATED sequential requests improved 403.0 ->
-322.6 (-20.0%, paired 95% CI [-24.4%,-15.5%]) while p99 regressed 5.13 ->
-5.60 ms (+9.5%, CI [+1.7%,+17.4%]). Serial ID63 improved 399.4 -> 235.2
-requests (-41.1%) and 14.32 -> 8.89 ms p99 (-37.8%) with decisive intervals.
-The next source removes cache-copy work from rejected pairs and puts shared-LRU
-absorption after successful BIO completion; it does not disable ID63 by queue
-depth.
+The same report supports promoting the existing bounded async-preparation
+policy. Across five fast-model sustained-write pairs, async versus sync was
+neutral at QD4 (-0.07%, 95% CI [-0.44%,+0.30%]), and improved throughput at
+QD8 (+26.80%, [+22.01%,+31.59%]) and QD32 (+23.12%, [+16.92%,+29.32%]). Fast
+mixed async versus sync remains inconclusive: useful write throughput +0.51%
+(CI [-2.20%,+3.22%]) and lower WRITE requests +4.24% (CI [-2.17%,+10.66%]).
+The mixed fast-model async arm reduced lower WRITE bytes about 31.2% and
+requests about 93.5% versus raw, while useful mixed throughput was about 12.6%
+lower. These results support the narrow async default change; they do not
+establish a universal throughput win over raw storage.
 
-ID66 is qualified. The discard epoch/count sidecars are gone; the serialized
-precheck temporarily decrements and exactly restores live refs before commit.
-The full owner run preserved loaded GC/TRIM, suspend/resume and fail-closed
-fault-injection evidence.
-
-ID64 is retired. Completion-aware zero-tail sampling removed the triggering condition; the latest five matched owner rounds observed zero after-I0 shrinks and zero guard skips.
-
-The prior fast write-only QD8 +8.1% paired result used the retired per-QD wave
-dispatcher. Keep it only as historical burst evidence; it no longer qualifies
-sustained-QD throughput. The corrected persistent-worker sweep must be
-owner-qualified before using write-only throughput to promote K=1 scheduling.
-Fast mixed remains inconclusive at +4.9%, CI [-0.3%,+10.2%]. ID38 remains on
-hold.
+ID63 keeps its fast sequential request benefit but has an unresolved p99 cost:
+SSD_EMULATED requests fell 24.15% (paired 95% CI [-29.39%,-18.92%]) while p99
+rose 8.68% (CI [+0.008%,+17.34%]). ID66 and ID69 remain owner-qualified.
+Physical endurance and real-device behavior remain unproven.
 
 ID60 standalone same-extent slot grouping is retired. Ordinary `swapz_read()`
 already receives the shared metadata/extent-cache benefit without private-slot
@@ -116,7 +111,7 @@ changes.
 | 34 | Hand-selected SIMD/instructions beyond kernel/LZ4 | **6** | CRC is measurable, but verify active backend/on-CPU cost before bypassing kernel primitives. |
 | 35 | Firmware/device/upper/lower compute offload | **6** | Hardware/interface dependent. |
 | 36 | Heavy-CPU plus low-RAM qualification | **6** | Mandatory before multi-worker/pipeline promotion. |
-| 37 | K=1 ping-pong WRITE pipeline | **4 shallow-detach candidate implemented / owner requalification pending** | Owner evidence proves deep sustained gains (+16.3% QD8, +34.6% QD32) but fast QD4 regresses -6.9% and fast mixed adds requests without throughput gain. Detach only when count>4 or confirmed preparation backlog exists; fast QD4/QD8/QD32 now use five matched pairs. |
+| 37 | K=1 ping-pong WRITE pipeline | **1 alpha.24 default-on change; owner qualification pending** | Five matched fast sustained-write pairs show async/sync QD4 -0.07% CI [-0.44%,+0.30%], QD8 +26.80% [+22.01%,+31.59%], and QD32 +23.12% [+16.92%,+29.32%]. Keep K=1 and the existing count/backlog gates; fast mixed remains inconclusive. |
 | 38 | Shared accumulator with K>1 lower-write slots | **5 current opportunity too small** | Fast mixed measures 29.6 ready windows / 87.1 records / 3.58 ms total K=1 completion wait. Keep passive counters; do not add K=2 authority state. |
 | 39 | Latency-first bounded parallel READ service | **5 refuted; helper removed from current source** | Owner evidence showed no standalone benefit. ID65 removes the `swapz-read` helper; the legacy `parallel_reads_enabled`/read-worker CPU status tokens remain zero for schema compatibility. |
 | 40 | Freeze first, then start LZ4/CRC | **5** | Rejected; compression belongs during collection. |
@@ -142,13 +137,13 @@ changes.
 | 60 | Queued READ grouping within the same immutable extent | **5 refuted / retired** | Five matched hwq=1 rounds showed no request win and an unfavorable p99 direction; the qualified post-ID65 fast directional sample was also worse. Remove standalone slot grouping and its dedicated benchmark controls; ordinary reads keep the shared caches. |
 | 61 | Foreground GC scaling / background-GC question | **4 ID61b exact segment-membership sidecar implemented / owner evidence pending** | Report 711ceaad keeps victim selection at 0.013ms at 4GiB-equivalent scale but shows a 4.560ms full logical-map relocation scan and 81,920 map visits for 20 relocated pages. Production DM now provisions volatile per-segment intrusive logical-page lists so relocation is survivor-scaled; the full-map path remains a compatibility fallback. This does not add a background worker. |
 | 62 | Real-device / physical-media qualification | **6 safety/deployment gate** | Still blocked. ID29 RAM qualification does not authorize physical storage, active swap, or a bypass module parameter. Real-device work requires separate owner authorization, device-loss acceptance, identity/alias checks, endurance/error metrics and independent safety review. |
-| 63 | Physically adjacent distinct-extent READ coalescing | **4 fast-latency repair implemented / owner requalification pending** | Latest owner evidence keeps the request win but exposes fast p99: SSD_EMULATED seq req -20.0% CI [-24.4%,-15.5%] with p99 +9.5% CI [+1.7%,+17.4%]; serial seq req -41.1% and p99 -37.8%. Current source rejects from shared-cache metadata before private cache copies and absorbs shared LRU state after upper BIO completion. |
+| 63 | Physically adjacent distinct-extent READ coalescing | **4 fast p99 question open** | Owner report `013893fa` shows SSD_EMULATED sequential requests -24.15% CI [-29.39%,-18.92%] while p99 rises +8.68% CI [+0.008%,+17.34%]. Keep the request benefit; do not call the fast-latency repair qualified. |
 | 64 | One-shot in-flight-zero burst-target shrink guard | **5 retired** | Completion-aware zero-tail sampling made the trigger disappear: latest five matched rounds report after-I0=0 and skip-I0=0. Remove the branch/module parameter/A-B; retain only fixed-zero compatibility status tokens. |
 | 65 | Retire ID39 `swapz-read` helper | **1 owner-qualified / keep** | The helper remains correctly retired and legacy helper status/CPU tokens stay zero. The latest owner run shows a separate ID63 fast-p99 regression even without that helper, so current cleanup targets private cache-copy/completion ordering rather than restoring read concurrency. |
 | 66 | Zero-allocation multi-page DISCARD liveness prevalidation | **1 owner-qualified / keep** | Saves 6 bytes/physical 4KiB block (~1.5 MiB/GiB) while preserving all-or-nothing shared-extent liveness validation. Full loaded lifecycle/GC/TRIM/fault evidence passed. |
 | 67 | Predictive rescue before LZ4 | **4 ID67a.5 operation-specific SIMD + routed CPU evidence implemented** | The classifier is scalar-only; transform/inverse dispatch independently. Native qualification batch-times available backends and reports routed CPU ns/page and ns/saved-block. SWZ3/data-path integration remains gated. |
 | 68 | Placement/reclaim telemetry | **1 owner-qualified / tail split added for ID69 evidence** | Report 711ceaad qualified aggregate placement/reclaim telemetry and ID70c. Aggregate hole counters continue to include segment-tail waste for continuity; separate tail-waste counters now let ID69 distinguish avoidable internal gaps from unavoidable segment-edge waste. |
-| 69 | Hole-free 4KiB-aligned extent placement | **4 promotion owner-qualified / aligned retirement implemented, requalification pending** | Report b0623ae0 passed 5/5 with five matched pairs per RAM model: physical WRITE requests fell 15.0% CI [-19.4,-10.6] on SD_EMULATED and 13.3% [-18.8,-7.8] on SSD_EMULATED; consumed blocks fell 24.4 and 29.8; every packed arm had zero internal holes/splits, zero GC and unchanged logical opens. Aligned placement and its A/B harness are now retired; qualification keeps tail-only waste and zero-split invariants without changing SWZ3. |
+| 69 | Hole-free 4KiB-aligned extent placement | **1 packed placement owner-qualified; aligned policy retired** | Report `013893fa` passed the repaired append-only segment-edge cases and loaded packed placement with 128 byte-exact pages, zero internal holes and zero hole-induced run splits. Aligned placement and its A/B harness remain retired; preserve tail-only waste and zero-split invariants without changing SWZ3. |
 | 70 | Segment DISCARD lifecycle | **1 ID70a + ID70c owner-qualified / keep** | Report 711ceaad shows 20 completed 1MiB GC TRIMs, 16 duplicate skips, plus one immediate upper-DISCARD TRIM followed by one reuse skip. Early/background async TRIM remains deferred. |
 | 71 | Dead-segment allocation probe scaling | **1 owner-qualified / keep** | Report 712b98e0 shows 0.430->0.002ms at 1024 segments and 1.688->0.007ms at 4096 segments; loaded probing scanned 80/2497 candidates fully. Keep the mapped-count fast reject plus full zero-candidate scan. |
 | 72 | Physical wear / logical allocator fairness | **4 logical-open balancing A/B implemented / physical wear still gated** | Optional `logical_open_balance=1` prefers the least-opened eligible dead destination and uses logical-open count only as an exact-score/count GC victim tie-break. It is default-off and is allocator-fairness evidence only; logical LBA opens do not measure NAND P/E cycles and cannot authorize cold relocation or physical wear claims. |
@@ -201,8 +196,9 @@ before any on-disk-format change.
 
 ## Deferred content/concurrency evidence backlog
 
-The current turn is evidence-only: no scheduling, storage-format or I/O-policy
-behavior changes. ID63 stays enabled; ID38 remains passive.
+The alpha.24 policy change only enables the already implemented bounded
+`async_prepare` path by default. Do not change its scheduling gates, K=1
+ownership, storage format, or ID63 behavior in this step. ID38 remains passive.
 
 - **ID38:** retain ready-wait windows/records/wall/cause; do not implement K=2.
 - **ID65:** owner-qualify the synchronous read-path cleanup; do not restore or
@@ -213,17 +209,14 @@ behavior changes. ID63 stays enabled; ID38 remains passive.
 
 ## Immediate work queue
 
-1. Repair and owner-requalify the packed-placement retirement before any
-   performance-default change. The report for source `3893bc2e7d015a6ea30ba543bfe8c2416b223129`
-   failed at the native/rootless stage and never reached loaded benchmarks.
-   Source review found that append-only authority staging can return `-ENOSPC`
-   at a segment edge although later segments remain free; the direct-C boundary
-   regression covers packed 2/4-block extents and reserve failure atomicity.
-   The report does not identify the exact first failing assertion, so owner
-   qualification of the corrected source remains required.
-2. After that passes, promote `async_prepare=1` in a separate commit. Keep K=1
-   and the existing activation gate, retain sync as the qualification control,
-   and continue reporting fast-mixed async-sync lower-WRITE-request paired CI.
+1. Packed-placement retirement is owner-qualified on source
+   `79c6bd9400ae7f95a2881634c0cb459167d486a3`, report
+   `013893fa3edb5267bc288439379aa3d2498761ff`.
+2. The alpha.24 production-C change promotes `async_prepare=1` as the default.
+   Keep K=1 and its existing activation gates, retain `async_prepare=0` as the
+   sync qualification control, and continue reporting fast-mixed async-sync
+   lower-WRITE-request paired CI. Run full owner qualification before this
+   default is considered qualified.
 3. Keep `logical_open_balance=0`. Promote it only if fresh RAM evidence shows
    useful allocator-spread behavior without probe/GC regressions; even then it
    remains logical fairness, not NAND wear leveling.

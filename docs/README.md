@@ -45,45 +45,32 @@ normal nonforce fast-forwards and never revert newer source bytes.
 
 ## Current evidence
 
-The latest attempted full run tested source
-`3893bc2e7d015a6ea30ba543bfe8c2416b223129` and failed in Native and rootless
-contracts after the module/helper build. Its report-only commit is
-`1c33ea826f7151c544ab82463b3c5a21df952f72`; no loaded correctness or
-performance stage ran. The sanitized report does not name the failing native
-assertion. Source review found a packed append-only segment-edge path that can
-return `-ENOSPC` despite free later segments; the fix and direct-C regression
-are awaiting owner qualification. The last successful all-stage loaded run
-before that failure tested source
-`607678cfd5c3a362b2f71f32d33fb81929ec8eda` (report-only commit
-`b0623ae0db7bf1dcfde040bb6b64197f370eec72`). Its bounded RAM qualification
-passed all five stages, but it does not qualify the failed source or this
-unrun fix. The older detailed owner evidence below remains useful historical
-context, not the newest successful run.
+The latest full run tested source
+`79c6bd9400ae7f95a2881634c0cb459167d486a3` and passed all five stages. Its
+report-only commit is
+`013893fa3edb5267bc288439379aa3d2498761ff`; qualification is limited to
+positively owned RAM-backed `null_blk`. The packed-placement segment-edge fix
+passed byte-exact loaded verification with zero internal holes and zero
+hole-induced run splits.
 
-Owner-loaded qualification of source `2fabd0dc4b3fe09b8e52e9a624e9452647229e09`
-(report-only `92d6aa08b44ab7dd827636680584f8c9a313a89b`) passed all five
-stages on positively owned RAM-backed `null_blk`.
+The report supports enabling bounded asynchronous LZ4 preparation by default
+while keeping K=1 and the current depth/backlog activation gate. In five
+matched fast-model sustained-write pairs, async versus sync was neutral at QD4
+(-0.07%, paired 95% CI [-0.44%,+0.30%]), and improved throughput at QD8
+(+26.80%, [+22.01%,+31.59%]) and QD32 (+23.12%, [+16.92%,+29.32%]). Fast
+mixed async versus sync was inconclusive: useful write throughput +0.51%
+(CI [-2.20%,+3.22%]) and lower WRITE requests +4.24% (CI [-2.17%,+10.66%]).
+On that fast mixed workload, async reduced lower WRITE bytes about 31.2% and
+requests about 93.5% versus raw, while useful throughput was about 12.6% lower.
+The result supports the narrow async/sync policy comparison; it does not show
+a universal throughput win over raw storage.
 
-The latest owner run keeps ID63's request-efficiency result but reopens its
-fast-latency question. On SSD_EMULATED, adjacent exact-range coalescing reduced
-sequential lower READ requests 20.0% with paired 95% CI [-24.4%,-15.5%] while
-p99 increased 9.5% [1.7%,17.4%]. On SD_EMULATED it reduced sequential requests
-41.1% and p99 37.8%, both decisively. Current source therefore removes rejected
-pair cache-copy work and moves shared-cache absorption after upper completion;
-ID63 remains enabled pending owner confirmation.
-
-ID66 is also qualified. Multi-page DISCARD now performs zero-allocation
-shared-extent liveness prevalidation by temporarily consuming and restoring the
-exact validated `live_records` prefix before any mapping/generation commit.
-Loaded GC/TRIM, suspend/resume and injected lower-WRITE/FLUSH failure evidence
-remained byte-exact and fail-closed.
-
-ID64 remains qualified with only a directional regression control. The prior
-fast write-only QD8 +8.1% paired result was collected by the retired per-QD
-wave dispatcher; it remains historical burst evidence only and no longer
-qualifies sustained-QD throughput. Current source uses persistent lane-owned
-write workers for that evidence. Physical media and active system swap remain
-outside the authorized safety scope.
+ID63 retains its fast sequential request reduction (-24.15%, CI
+[-29.39%,-18.92%]) but has an unresolved p99 regression (+8.68%, CI
+[+0.008%,+17.34%]). Loaded GC/TRIM, suspend/resume and injected lower-WRITE/
+FLUSH failure evidence passed byte-exact and fail-closed. Physical media,
+active system swap and endurance remain outside the authorized qualification
+scope. The alpha.24 async-default change requires its own full owner run.
 
 ## Documentation
 

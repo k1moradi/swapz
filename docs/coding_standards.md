@@ -846,10 +846,12 @@ When a lower WRITE is actually active, any nonempty preparation queue remains
 eligible for immediate head-first overlap. These gates add no timer, wait,
 status token or mapping/publication owner.
 
-The first asynchronous Device Mapper experiment is enabled only on the existing
-`async_prepare` candidate. A complete multi-record non-FUA window may be
-packed into the immutable `bulk_scratch`/`bulk_txs` run and submitted with
-an asynchronous dm-io completion callback. The callback owns no mapping or
+`async_prepare` defaults on after matched owner evidence showed sustained fast
+QD8/QD32 gains and QD4 neutrality. Loading with `async_prepare=0` retains the
+synchronous qualification control. This policy change does not alter K=1 or
+the existing depth/backlog activation gates. A complete multi-record non-FUA
+window may be packed into the immutable `bulk_scratch`/`bulk_txs` run and
+submitted with an asynchronous dm-io completion callback. The callback owns no mapping or
 upper BIO completion: it records the definitive lower result, ends the lower
 overlap interval, and wakes the single ordered worker. Only that worker calls
 `swapz_engine_complete_batched_run()` and completes the original upper BIOs.
