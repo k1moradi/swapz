@@ -1101,6 +1101,8 @@ Core-2 L1/L2 work. Complete invalidation before authority mutation remains
 mandatory, but normal mutation invalidation advances a directory epoch rather
 than clearing 512 validity entries. Epoch wrap may clear the directory before
 starting a new nonzero epoch.
+A cold zero-epoch lookup still performs the bounded four-way probe for stable
+telemetry, but zero epoch can never validate a tag as a hit.
 
 An ordinary metadata-cache hit parses and sequence-checks the cached block
 directly. It must not copy all 4096 bytes into read scratch merely to decode one

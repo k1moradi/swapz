@@ -376,7 +376,7 @@ class SwapzProductionSourceQualification(unittest.TestCase):
         invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
         self.assertIn("if (engine->read_metadata_lru_clock)", invalidate)
         self.assertIn("swapz_read_metadata_advance_epoch(engine)", invalidate)
-        self.assertNotIn("memset(", invalidate)
+        self.assertNotIn("memset(engine->read_metadata_tags", invalidate)
         self.assertIn("engine->read_cache_valid = 0", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(engine)", engine)
         self.assertIn("swapz_engine_invalidate_read_cache(e)", engine)

@@ -333,7 +333,7 @@ static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 	swapz_u16 set, base, way, slot;
 	if (probes)
 		*probes = 0;
-	if (!engine || !engine->read_metadata_cache || !engine->read_metadata_epoch)
+	if (!engine || !engine->read_metadata_cache)
 		return -1;
 	set = swapz_read_metadata_set(start_block, extent_blocks);
 	base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
@@ -344,7 +344,8 @@ static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 		tag = &engine->read_metadata_tags[slot];
 		if (probes)
 			(*probes)++;
-		if (tag->epoch == engine->read_metadata_epoch &&
+		if (engine->read_metadata_epoch &&
+		    tag->epoch == engine->read_metadata_epoch &&
 		    tag->start_block == start_block &&
 		    tag->extent_blocks == extent_blocks)
 			return slot;
