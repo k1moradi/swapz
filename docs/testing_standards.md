@@ -1107,9 +1107,12 @@ an invalid/oldest slot; a hole before a match must not hide that match.
 Refresh age without inserting, copying the block, or counting replacement.
 Exact production-C coverage creates four distinct colliding extents, repeats
 their sibling reads, and requires one tag per key, no replacements, exact
-payloads and each payload block fetched only once. Test a hole before a match
-as well. These checks prevent duplicate self-eviction; they do not establish
-that four-way conflicts among more than four distinct keys are harmless.
+payloads and each physical extent block fetched only once. The seven-record,
+2072-byte fixture appends payloads backward: the initial record-zero read warms
+metadata block 0 plus payload block 3, so the sibling sweep must fetch only
+blocks 1 and 2 for each extent. Test a hole before a match as well. These checks
+prevent duplicate self-eviction; they do not establish that four-way conflicts
+among more than four distinct keys are harmless.
 
 An ordinary metadata-cache hit parses and sequence-checks the cached block
 directly. It must not copy all 4096 bytes into read scratch merely to decode one

@@ -415,6 +415,17 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 	CHECK(engine.read_metadata_tags[last_slot].start_block == 384U);
 	engine.read_metadata_tags[first_slot].epoch = epoch;
 
+	/* Payloads are appended from the end of the extent. With seven
+	 * 2072-byte records, record zero occupies block 3, so the four cold
+	 * reads above have already fetched blocks 0 and 3 for every extent. */
+	for (extent = 0; extent < 4; ++extent) {
+		swapz_u32 start = extent * 128U;
+
+		CHECK(disk.read_block_hits[start] == 1);
+		CHECK(disk.read_block_hits[start + 1U] == 0);
+		CHECK(disk.read_block_hits[start + 2U] == 0);
+		CHECK(disk.read_block_hits[start + 3U] == 1);
+	}
 	reads_before = disk.read_blocks;
 	for (record = 0; record < 7; ++record)
 		for (extent = 0; extent < 4; ++extent) {
@@ -425,9 +436,17 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 			CHECK(length == 2072);
 			CHECK(!memcmp(output, originals[logical], length));
 		}
-	/* The first record warmed only block zero of each four-block extent;
-	 * its siblings must fetch exactly the remaining three blocks once. */
-	CHECK(disk.read_blocks == reads_before + 12U);
+	/* The sibling sweep needs only blocks 1 and 2: two additional blocks
+	 * per extent, with each physical block fetched exactly once overall. */
+	CHECK(disk.read_blocks == reads_before + 8U);
+	for (extent = 0; extent < 4; ++extent) {
+		swapz_u32 start = extent * 128U;
+
+		CHECK(disk.read_block_hits[start] == 1);
+		CHECK(disk.read_block_hits[start + 1U] == 1);
+		CHECK(disk.read_block_hits[start + 2U] == 1);
+		CHECK(disk.read_block_hits[start + 3U] == 1);
+	}
 	reads_before = disk.read_blocks;
 	for (extent = 0; extent < 4; ++extent)
 		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
