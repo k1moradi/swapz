@@ -5,14 +5,21 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "$ROOT"
 export PYTHONPYCACHEPREFIX="$ROOT/build/python-cache"
 mkdir -p build/python-cache
-make -C tests test
+make_args=(make)
+if [[ -n ${SWAPZ_TEST_JOBS:-} ]]; then
+  [[ $SWAPZ_TEST_JOBS =~ ^[1-9][0-9]*$ ]] && (( SWAPZ_TEST_JOBS <= 16 )) ||
+    { printf '%s\n' 'BLOCKED: invalid automatic build job count' >&2; exit 2; }
+  make_args+=("-j$SWAPZ_TEST_JOBS")
+fi
+"${make_args[@]}" -C tests test
 python3 -B tests/runtime/native/source-contract-test.py -v
 python3 -B tests/runtime/benchmark/io-replay-test.py -v
 python3 -B tests/runtime/native/make-interface-test.py -v
 python3 -B tests/runtime/native/test-report-test.py -v
 python3 -B tests/runtime/native/package-dkms-test.py -v
 bash -n tests/tools/test-rootless.sh tests/tools/test-loaded.sh packaging/package-dkms.sh \
-  tests/tools/deploy-nullblk.sh tests/tools/swap-inventory.sh tests/tools/quiet-lower-io.sh \
+  tests/tools/deploy-nullblk.sh tests/tools/loaded-preflight.sh tests/tools/swap-inventory.sh \
+  tests/tools/quiet-lower-io.sh \
   tests/tools/benchmark-owned-pair.sh tests/tools/nullblk-identity.sh \
   tests/runtime/native/nullblk-identity-test.sh \
   tests/runtime/native/quiet-lower-io-test.sh \
@@ -35,6 +42,11 @@ grep -Fq 'dmsetup create "$DMNAME" --uuid "$UUID"' tests/tools/deploy-nullblk.sh
 grep -Fq 'memory_backed' tests/tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID_BEFORE' tests/tools/deploy-nullblk.sh
 grep -Fq 'SWAPS_ID' tests/tools/benchmark-owned-pair.sh
+grep -Fq 'cat /sys/module/dm_swapz/refcnt' tests/tools/loaded-preflight.sh
+grep -Fq '(( refcount == 0 ))' tests/tools/loaded-preflight.sh
+grep -Fq 'rmmod dm_swapz' tests/tools/loaded-preflight.sh
+grep -Fq 'AUTO_REMOVED_IDLE_DM_SWAPZ=1' tests/tools/loaded-preflight.sh
+! grep -Fq 'rmmod -f' tests/tools/loaded-preflight.sh
 grep -Fq 'QUARANTINED: host swap identity changed' tests/tools/deploy-nullblk.sh
 grep -Fq 'PASS_ZERO_WRITE_LOWER_IO=' tests/tools/deploy-nullblk.sh
 grep -Fq 'zero_writes == 9' tests/tools/deploy-nullblk.sh

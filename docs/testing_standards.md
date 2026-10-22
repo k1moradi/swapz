@@ -12,6 +12,13 @@ The root checkout has one supported testing interface:
 make test
 ~~~
 
+When the caller does not provide a GNU Make jobserver, the private reporter
+automatically chooses a bounded build width from the CPUs available to the
+process (maximum 16) and creates jobservers only for independent compilation.
+An inherited jobserver takes precedence. Operators do not need to choose a
+manual `-j` value; qualification stages and privileged device sessions remain
+strictly sequential.
+
 It must execute the supported qualification in order and fail closed. Rootless/CI-only success is partial evidence and cannot substitute for the loaded owned-RAM phase. The Device Mapper target is exactly `swapz`; the module alias is `dm-swapz`.
 
 ## Required stages
@@ -39,6 +46,15 @@ Loaded tests use only newly created, positively owned, RAM-backed `null_blk`. Be
 The deterministic lifecycle oracle must preserve exact readback, RAW fallback, zero elision and explicit flush behavior. The loaded qualification must also recreate a fresh target on the same positively identified RAM lower and force repeated live-GC evacuation under bounded capacity pressure. Passing GC evidence requires at least two nonzero victims/role rotations, nonzero GC lower READ and WRITE traffic, distinct victim/destination identities, and byte-exact verification of all 4096 logical pages after pressure. This proves loaded GC correctness/cost only on synthetic RAM; it is not physical-wear evidence.
 
 Retained-window suspend/resume must drain accepted ownership and verify all pages. Synthetic pre-submission WRITE and FLUSH injection must fail closed. These synthetic failures are not evidence for torn/device-originated errors.
+
+Before any owned RAM device is provisioned, loaded qualification may ordinarily
+unload a pre-existing `dm_swapz` module only when
+`/sys/module/dm_swapz/refcnt` is readable, numeric and exactly zero. This
+preflight never removes a Device Mapper mapping, never changes swap and never
+uses forced module removal. A positive, unreadable or changing reference count
+is BLOCKED. The final ordinary `rmmod` is still authoritative against races:
+if a user appears after the zero-refcount observation, removal fails and
+qualification stops.
 
 Cleanup never force-removes uncertain resources. If identity or teardown is ambiguous, quarantine and fail.
 

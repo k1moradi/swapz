@@ -3,6 +3,7 @@
 # No installation, swap activation, physical media, or interactive sudo.
 # Each owned-device child enforces exact source, module and host-ownership
 # checks and quarantines unexpectedly busy resources instead of forcing removal.
+# A private root preflight may ordinarily unload only an already-idle dm_swapz.
 set -Eeuo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -27,6 +28,7 @@ tested_source="${SWAPZ_TESTED_SOURCE_SHA:-$(git rev-parse HEAD)}"
 git merge-base --is-ancestor "$tested_source" HEAD >/dev/null 2>&1 &&
     git diff --quiet "$tested_source..HEAD" -- . ':(exclude)test_results.json' ||
     { printf '%s\n' 'BLOCKED: tested source does not match checkout code' >&2; exit 2; }
+"${privileged[@]}" tests/tools/loaded-preflight.sh
 printf 'LOADED_QUALIFICATION_SOURCE=%s\n' "$tested_source"
 printf '%s\n' 'START_LOADED_OWNED_NULLBLK_SMOKE'
 "${privileged[@]}" tests/tools/deploy-nullblk.sh

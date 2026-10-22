@@ -17,7 +17,9 @@ CC ?= cc
 
 .PHONY: all install uninstall test
 .PHONY: build/kernel/experimental/dm-swapz.ko
-# Make can compile independent outputs concurrently (make test -j2).
+# Make can compile independent outputs concurrently. The private test reporter
+# chooses a bounded CPU-aware job count automatically when no parent jobserver
+# exists; an explicit inherited GNU Make jobserver still takes precedence.
 # The module recipe always checks running-kernel Kbuild; Kbuild's own
 # incremental dependency logic avoids unchanged .o recompilation.
 all: build/kernel/experimental/dm-swapz.ko build/tests/device-roundtrip build/userspace/swapzctl

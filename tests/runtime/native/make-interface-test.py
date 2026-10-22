@@ -22,6 +22,7 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn(".DEFAULT_GOAL := all", MAKE)
         self.assertIn("Only make, make install, make uninstall, make test", MAKE)
         self.assertNotIn("Only make -j2,", MAKE)
+        self.assertNotIn("make test -j", MAKE)
         self.assertIn(".PHONY: all install uninstall test", MAKE)
         self.assertNotIn(".NOTPARALLEL: test", MAKE)
         self.assertIn(".PHONY: build/kernel/experimental/dm-swapz.ko", MAKE)
@@ -553,12 +554,15 @@ class PublicMakeContract(unittest.TestCase):
             def execute(phase):
                 print(f"MAKE_INCREMENTAL_PHASE={phase}", flush=True)
                 proc = subprocess.run(
-                    ["make", "-j2", "test",
-                     f"KDIR={fixture / 'fake-headers'}"],
+                    ["make", "test", f"KDIR={fixture / 'fake-headers'}"],
                     cwd=fixture, env=env, capture_output=True, text=True,
                     timeout=30)
                 self.assertEqual(proc.returncode, 0,
                                  proc.stdout + "\n" + proc.stderr)
+                self.assertRegex(
+                    proc.stdout,
+                    r"independent compilation uses automatic -j[1-9][0-9]*[.]",
+                )
                 order = (fixture / "build/order.log").read_text().splitlines()
                 self.assertEqual(order[-5:],
                                  ["kbuild:", "rootless", "kbuild:1",
@@ -580,7 +584,7 @@ class PublicMakeContract(unittest.TestCase):
             execute("unchanged")
             self.assertEqual(first,
                              {p: p.stat().st_mtime_ns for p in tracked},
-                             "An unchanged make test -j2 must reuse binaries "
+                             "An unchanged make test must reuse binaries "
                              "and staged kernel sources")
 
             time.sleep(0.03)
@@ -647,7 +651,14 @@ class PublicMakeContract(unittest.TestCase):
         self.assertIn("sudo -n bash", loaded)
         self.assertIn("BLOCKED_LOADED_QUALIFICATION", loaded)
         self.assertIn("tests/tools/deploy-nullblk.sh", loaded)
+        self.assertIn("tests/tools/loaded-preflight.sh", loaded)
         self.assertIn("tests/tools/benchmark-owned-pair.sh", loaded)
+        preflight = (ROOT / "tests/tools/loaded-preflight.sh").read_text()
+        self.assertIn("/sys/module/dm_swapz/refcnt", preflight)
+        self.assertIn("(( refcount == 0 ))", preflight)
+        self.assertIn("rmmod dm_swapz", preflight)
+        self.assertIn("AUTO_REMOVED_IDLE_DM_SWAPZ=1", preflight)
+        self.assertNotIn("rmmod -f", preflight)
         self.assertIn("--lower-mbps 10 --hw-queue-depth 1 --completion-nsec 1000000", loaded)
         self.assertIn("--lower-mbps 80 --hw-queue-depth 64 --completion-nsec 150000", loaded)
         self.assertIn("for regime in sd_emulated ssd_emulated", loaded)

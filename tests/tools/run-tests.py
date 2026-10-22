@@ -1084,6 +1084,27 @@ def jobserver_fds():
     return fds
 
 
+def automatic_build_jobs():
+    """Choose bounded compilation parallelism when no parent jobserver exists."""
+    try:
+        available = len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        available = os.cpu_count() or 1
+    return max(1, min(available, 16))
+
+
+def make_invocation():
+    """Use the caller's jobserver, otherwise create a bounded private one."""
+    if jobserver_fds():
+        os.environ.pop("SWAPZ_TEST_JOBS", None)
+        return ["make"], "independent compilation uses inherited Make jobserver."
+    jobs = automatic_build_jobs()
+    os.environ["SWAPZ_TEST_JOBS"] = str(jobs)
+    return ["make", f"-j{jobs}"], (
+        f"independent compilation uses automatic -j{jobs}."
+    )
+
+
 def failure_context(output, *, loaded=True, default_phase=None):
     """Return a sanitized failure phase/reason without leaking host details.
 
@@ -4129,21 +4150,20 @@ def main():
                        "write_saturation": {"overall": "NOT_RUN"}},
         "overall": "INCOMPLETE"
     }
+    make_cmd, parallelism = make_invocation()
     print("swapz: full test and benchmark qualification")
-    print("  Tests are sequential; independent compilation uses Make jobserver.")
+    print(f"  Tests are sequential; {parallelism}")
     stages = [
-        ("Build module and helpers", ["make"]),
+        ("Build module and helpers", [*make_cmd, f"KDIR={args.kdir}"]),
         ("Native and rootless contracts", ["bash", "tests/tools/test-rootless.sh"]),
-        ("Kernel warnings W=1", ["make", "-C", "src/kernel",
+        ("Kernel warnings W=1", [*make_cmd, "-C", "src/kernel",
                                  f"KDIR={args.kdir}", "W=1", "all"]),
-        ("Kernel warnings W=2", ["make", "-C", "src/kernel",
+        ("Kernel warnings W=2", [*make_cmd, "-C", "src/kernel",
                                  f"KDIR={args.kdir}", "W=2", "all"]),
         ("Owned RAM smoke + mixed/QD pilot", ["bash", "tests/tools/test-loaded.sh"])
     ]
     exit_code = 0
     for i, (title, command) in enumerate(stages):
-        if i == 0:
-            command = ["make", f"KDIR={args.kdir}"]
         code = run_stage(title, command, result, parse_bench=(i == 4))
         if code:
             exit_code = code
