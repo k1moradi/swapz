@@ -1143,7 +1143,12 @@ evidence. The replay and report validators both reject impossible accounting.
 Native coverage must additionally prove
 sizeof(tag)==16, four adjacent ways occupy exactly 64 bytes, the tag directory
 starts on a 64-byte boundary, mutation advances the metadata epoch, and a second
-already-empty invalidation does not churn the epoch. Compare the owner run
+already-empty invalidation does not churn the epoch. Source-contract extraction
+must recognize the secondary hash's actual `swapz_u16` return type. A narrow
+parser regression extracts a multiline definition after its prototype, so an
+unsupported return type cannot be mistaken for a missing production helper.
+Retain the assertions on the real hash body and distinct secondary set.
+Compare the owner run
 against source 5bdd040334ee's baseline rather than inferring a win from source
 structure alone. The unprivileged Make-interface fixture must emit all seven
 locality fields with internally consistent bounds so rootless qualification

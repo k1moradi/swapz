@@ -53,6 +53,18 @@ def source_body(symbol: str, source: str) -> str:
 
 
 class SwapzProductionSourceQualification(unittest.TestCase):
+    def test_source_body_extracts_u16_definition_after_prototype(self):
+        source = """
+static swapz_u16 swapz_probe_set(swapz_u32 block);
+static swapz_u16 swapz_probe_set(
+        swapz_u32 block)
+{
+    return (swapz_u16)(block & 127U);
+}
+"""
+        self.assertEqual(source_body("swapz_probe_set", source).strip(),
+                         "return (swapz_u16)(block & 127U);")
+
     def test_swz_format_identity_remains_unversioned(self):
         legacy_format_name = "SWZ" + "3"
         text_suffixes = {".c", ".h", ".md", ".py", ".sh", ".yml", ".yaml"}
