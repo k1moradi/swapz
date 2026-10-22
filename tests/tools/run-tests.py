@@ -1953,6 +1953,11 @@ def delta64_prepare_verdict(sessions):
                 not kernel["delta64_prepare_pages"]):
             return {"overall": "INCOMPLETE",
                     "reason": "delta64 K=1/K=2 A/B did not exercise rescue and producer lanes"}
+        if any(kernel[field] <= 0 for field in (
+                "delta64_transform_wall_ns", "delta64_wall_ns",
+                "prep_lz4_wall_ns", "prep_worker_cpu_ns")):
+            return {"overall": "INCOMPLETE",
+                    "reason": "delta64 K=1/K=2 timing or worker CPU evidence is missing"}
         if workers == 1 and (
                 kernel["delta64_prepare_active_max"] > 1 or
                 kernel["delta64_prepare_parallel_starts"]):
@@ -2090,9 +2095,8 @@ def delta64_prepare_verdict(sessions):
             w1["delta64_transform_wall_ns"] - 1.0)
         changes["prep_lz4_wall_change_fraction"].append(
             w2["prep_lz4_wall_ns"] / w1["prep_lz4_wall_ns"] - 1.0)
-        if w1["prep_worker_cpu_ns"] and w2["prep_worker_cpu_ns"]:
-            changes["prep_worker_cpu_change_fraction"].append(
-                w2["prep_worker_cpu_ns"] / w1["prep_worker_cpu_ns"] - 1.0)
+        changes["prep_worker_cpu_change_fraction"].append(
+            w2["prep_worker_cpu_ns"] / w1["prep_worker_cpu_ns"] - 1.0)
         changes["off_throughput_change_fraction"].append(
             r2["arms"]["off"]["write_mbps"] /
             r1["arms"]["off"]["write_mbps"] - 1.0)
@@ -2102,10 +2106,6 @@ def delta64_prepare_verdict(sessions):
         changes["host_pressure_some_delta"].append(
             k2["host_cpu"]["pressure_some_fraction"] -
             k1["host_cpu"]["pressure_some_fraction"])
-
-    if len(changes["prep_worker_cpu_change_fraction"]) != 5:
-        return {"overall": "INCOMPLETE",
-                "reason": "delta64 K=1/K=2 worker CPU samples are incomplete"}
 
     return {
         "overall": "PASS_DELTA64_PREPARE_AB",
