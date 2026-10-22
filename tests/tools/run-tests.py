@@ -165,6 +165,7 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_meta_set_lookups", "read_meta_set_hits",
                       "read_meta_set_probes", "read_meta_set_replacements",
+                      "read_meta_primary_hits", "read_meta_secondary_hits",
                       "read_meta_copy_bytes",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
@@ -181,6 +182,22 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "parallel_read_coalesce_skip_gap",
                       "parallel_read_coalesce_skip_other",
                       "read_worker_cpu_ns")
+
+
+def read_metadata_counters_consistent(record):
+    fields = ("read_meta_set_lookups", "read_meta_set_hits", "read_meta_set_probes",
+              "read_meta_primary_hits", "read_meta_secondary_hits")
+    if not isinstance(record, dict) or any(
+            type(record.get(field)) is not int or record[field] < 0 for field in fields):
+        return False
+    lookups, hits, probes, primary, secondary = (record[field] for field in fields)
+    if hits > lookups or primary + secondary != hits:
+        return False
+    misses = lookups - hits
+    return (primary + 5 * secondary + 8 * misses <= probes <=
+            4 * primary + 8 * secondary + 8 * misses)
+
+
 WRITE_WAIT_BINS = ("write_wait_le1ms", "write_wait_1to4ms",
                    "write_wait_gt4ms")
 PREPARATION_FIELDS = (
@@ -1468,7 +1485,7 @@ def read_coalesce_ab_verdict(sessions):
             kernel = phase.get("kernel_read_path")
             if not isinstance(kernel, dict) or any(
                     type(kernel.get(name)) is not int or kernel[name] < 0
-                    for name in KERNEL_READ_FIELDS):
+                    for name in KERNEL_READ_FIELDS) or not read_metadata_counters_consistent(kernel):
                 return {"overall": "INCOMPLETE",
                         "reason": "adjacent-range READ kernel telemetry missing"}
             if not row["read_coalesce"] and kernel["parallel_read_pairs"]:
@@ -1691,7 +1708,7 @@ def _sd_read_ab_verdict(sessions, field, kind):
             kernel = phase.get("kernel_read_path")
             if not isinstance(kernel, dict) or any(
                     type(kernel.get(name)) is not int or kernel[name] < 0
-                    for name in KERNEL_READ_FIELDS):
+                    for name in KERNEL_READ_FIELDS) or not read_metadata_counters_consistent(kernel):
                 return {"overall": "INCOMPLETE",
                         "reason": f"SD {kind} C telemetry missing"}
             if kernel["read_worker_cpu_ns"]:
@@ -2264,6 +2281,7 @@ def benchmark_verdicts(sessions):
                     if any(not isinstance(record, dict) or
                            any(type(record.get(field)) is not int or
                                record[field] < 0 for field in KERNEL_READ_FIELDS) or
+                           not read_metadata_counters_consistent(record) or
                            record["parallel_read_same_extent_pairs"] >
                                record["parallel_read_pairs"] or
                            record["parallel_read_distinct_extent_pairs"] >
@@ -2595,9 +2613,11 @@ TABLE_HEADER_LEGEND = {
     "16-23": "eligible pages with classifier scores from sixteen through twenty-three",
     "24+": "eligible pages with classifier scores of at least twenty-four",
     "lookups": "metadata-directory lookups; scratch/extent-cache hits bypass this lookup",
-    "set hit %": "percentage of directory lookups finding the exact extent key in its set",
-    "probes/lookup": "mean directory tags inspected per lookup; at most four",
-    "repl": "metadata insertions evicting a valid tag in the same directory set",
+    "set hit %": "percentage of directory lookups finding the exact key in either candidate set",
+    "primary %": "percentage of directory lookups hitting the primary four-way set",
+    "secondary %": "percentage of directory lookups hitting the secondary set after a primary miss",
+    "probes/lookup": "mean directory tags inspected per lookup; at most eight across two sets",
+    "repl": "insertions evicting the oldest eligible tag when both candidate sets are full",
     "meta copy KiB": "cached block-zero payload fragments copied to read scratch; excludes cache insertion copies",
     "payload KiB": "encoded bytes avoided versus ordinary LZ4 or 4KiB RAW; not lower I/O",
     "RAW+ KiB": "encoded bytes avoided by RAW rescues, in KiB",
@@ -2628,10 +2648,10 @@ def _table_interpretation(headers, rows):
         summary = ", ".join(
             f"{row[0]} {row[header_index['set hit %']]}% hits / "
             f"{row[header_index['repl']]} replacements" for row in rows)
-        return (f"Directory observations: {summary}. Scratch/extent hits bypass "
-                "directory lookup. Replacements can increase lower reads; compare "
-                "lower bytes/requests as well as engine wall time. These counts alone "
-                "cannot distinguish set conflicts from duplicate-insertion defects.")
+        return (f"Directory observations: {summary}. Primary plus secondary hits equal "
+                "total hits; percentages are rounded. Misses inspect eight tags. Scratch/extent hits "
+                "bypass lookup. Secondary hits show use of the second choice, not proved "
+                "I/O savings; compare lower bytes/requests, engine wall time and host CPU.")
     if "pack eligible" in header_index:
         return ("Packing-path attempts concern already-compressed pages at most 2024 bytes. "
                 "A cliff crossing is uniform-page geometry opportunity; the actual mixed "
@@ -3041,21 +3061,25 @@ def print_bench(result):
                                     ("rnd", "seeded_random"))
             ])
 
-        print("  Metadata-cache locality — async arm; 128 sets x 4 ways.")
+        print("  Metadata-cache locality — async arm; two choices in 128 sets x 4 ways.")
         locality_rows = []
         for label, mode in (("seq", "sequential"), ("rnd", "seeded_random")):
             lookups = asynchronous[f"{mode}_read_meta_set_lookups"]
             hits = asynchronous[f"{mode}_read_meta_set_hits"]
             probes = asynchronous[f"{mode}_read_meta_set_probes"]
+            primary = asynchronous[f"{mode}_read_meta_primary_hits"]
+            secondary = asynchronous[f"{mode}_read_meta_secondary_hits"]
             locality_rows.append((
                 label,
                 f"{lookups:.1f}",
                 f"{(100.0 * hits / lookups) if lookups else 0.0:.1f}",
+                f"{(100.0 * primary / lookups) if lookups else 0.0:.1f}",
+                f"{(100.0 * secondary / lookups) if lookups else 0.0:.1f}",
                 f"{(probes / lookups) if lookups else 0.0:.2f}",
                 f"{asynchronous[f'{mode}_read_meta_set_replacements']:.1f}",
                 f"{asynchronous[f'{mode}_read_meta_copy_bytes'] / 1024:.1f}",
             ))
-        print_table(("read", "lookups", "set hit %", "probes/lookup",
+        print_table(("read", "lookups", "set hit %", "primary %", "secondary %", "probes/lookup",
                      "repl", "meta copy KiB"), locality_rows)
 
         print("  Lower queue — sampled time-weighted mean / peak during mixed I/O.")

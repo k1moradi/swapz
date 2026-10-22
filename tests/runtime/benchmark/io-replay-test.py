@@ -146,7 +146,9 @@ class PairReplayContract(unittest.TestCase):
             "read_meta_lru_hits": 1,
             "read_meta_set_lookups": 10,
             "read_meta_set_hits": 2,
-            "read_meta_set_probes": 20,
+            "read_meta_primary_hits": 1,
+            "read_meta_secondary_hits": 1,
+            "read_meta_set_probes": 72,
             "read_meta_set_replacements": 0,
             "read_meta_copy_bytes": 0,
             "read_full_extent_reqs": 1,
@@ -167,7 +169,9 @@ class PairReplayContract(unittest.TestCase):
             "read_meta_lru_hits": 102,
             "read_meta_set_lookups": 1034,
             "read_meta_set_hits": 202,
-            "read_meta_set_probes": 2068,
+            "read_meta_primary_hits": 151,
+            "read_meta_secondary_hits": 51,
+            "read_meta_set_probes": 7272,
             "read_meta_set_replacements": 50,
             "read_meta_copy_bytes": 207200,
             "read_full_extent_reqs": 321,
@@ -205,7 +209,9 @@ class PairReplayContract(unittest.TestCase):
         self.assertEqual(measured["read_meta_lru_hits"], 101)
         self.assertEqual(measured["read_meta_set_lookups"], 1024)
         self.assertEqual(measured["read_meta_set_hits"], 200)
-        self.assertEqual(measured["read_meta_set_probes"], 2048)
+        self.assertEqual(measured["read_meta_primary_hits"], 150)
+        self.assertEqual(measured["read_meta_secondary_hits"], 50)
+        self.assertEqual(measured["read_meta_set_probes"], 7200)
         self.assertEqual(measured["read_meta_set_replacements"], 50)
         self.assertEqual(measured["read_meta_copy_bytes"], 207200)
         self.assertEqual(measured["read_full_extent_reqs"], 320)
@@ -246,6 +252,10 @@ class PairReplayContract(unittest.TestCase):
             module.kernel_read_delta(before, dict(after, read_meta_set_hits=2000))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_meta_set_probes=9000))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_meta_secondary_hits=52))
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            module.kernel_read_delta(before, dict(after, read_meta_set_probes=700))
         with self.assertRaisesRegex(ValueError, "inconsistent"):
             module.kernel_read_delta(before, dict(after, read_meta_set_hits=50))
         with self.assertRaisesRegex(ValueError, "inconsistent"):

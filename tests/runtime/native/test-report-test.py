@@ -338,7 +338,9 @@ def arm(candidate, *, mode, regime):
                     "read_meta_lru_hits": 100,
                     "read_meta_set_lookups": 1024,
                     "read_meta_set_hits": 100,
-                    "read_meta_set_probes": 1800,
+                    "read_meta_primary_hits": 80,
+                    "read_meta_secondary_hits": 20,
+                    "read_meta_set_probes": 7700,
                     "read_meta_set_replacements": 12,
                     "read_meta_copy_bytes": 207200,
                     "read_full_extent_reqs": 200,
@@ -982,7 +984,9 @@ class ReportContract(unittest.TestCase):
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_lru_hits"], 100)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_lookups"], 1024)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_hits"], 100)
-        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_probes"], 1800)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_primary_hits"], 80)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_secondary_hits"], 20)
+        self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_probes"], 7700)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_set_replacements"], 12)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_meta_copy_bytes"], 207200)
         self.assertEqual(slow["columns"]["sync"]["sequential_read_full_extent_reqs"], 200)
@@ -1072,6 +1076,18 @@ class ReportContract(unittest.TestCase):
         self.assertIn("scheduler-accounted", data["cpu_scope"])
         self.assertIn("PROXY_ONLY", data["endurance"])
 
+    def test_two_choice_metadata_accounting_is_fail_closed(self):
+        record = {"read_meta_set_lookups": 1024, "read_meta_set_hits": 100,
+                  "read_meta_set_probes": 7700, "read_meta_primary_hits": 80,
+                  "read_meta_secondary_hits": 20}
+        self.assertTrue(runner.read_metadata_counters_consistent(record))
+        for change in ({"read_meta_secondary_hits": 21}, {"read_meta_primary_hits": -1},
+                       {"read_meta_set_hits": 1025}, {"read_meta_set_probes": 1800},
+                       {"read_meta_set_probes": 8200}):
+            self.assertFalse(runner.read_metadata_counters_consistent(dict(record, **change)))
+        del record["read_meta_secondary_hits"]
+        self.assertFalse(runner.read_metadata_counters_consistent(record))
+
     def test_delta64_accounting_and_interpretation_are_fail_closed(self):
         record = timed_kernel_write(mode=1)
         self.assertIsNone(runner.timed_window_error(record))
@@ -1157,11 +1173,11 @@ class ReportContract(unittest.TestCase):
         readable = " ".join(rendered.split())
         for column in ("pack eligible", "pack try", "cliff", "pack+", "score 0-7",
                        "8-15", "16-23", "24+", "lookups", "set hit %",
-                       "probes/lookup", "repl", "meta copy KiB"):
+                       "probes/lookup", "repl", "meta copy KiB", "primary %", "secondary %"):
             self.assertNotIn(f"literal column: {column}", readable)
         self.assertIn("excludes cache insertion copies", readable)
         self.assertIn("threshold 16", readable)
-        self.assertIn("cannot distinguish set conflicts", readable)
+        self.assertIn("Secondary hits show use of the second choice", readable)
         self.assertIn("classifier=scalar", rendered)
         self.assertRegex(rendered, r"\|\s*mode\s*\|\s*W\s*\|")
         self.assertIn("| sync", rendered)

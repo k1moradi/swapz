@@ -9,46 +9,46 @@ This file contains only active work. Completed experiments and detailed historic
 ## Current baseline
 
 The latest standard owner matrix tested source
-`9a802eff7d9d832a6b26c855042c9b1f71e9c62c`, passed all five stages, and
+`5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
 published report-only commit
-`6f5c6e56e6d84090384279742ffa936f2b4a0f5e`. This qualifies the default
-fixed-array preparation and default-off rescue on the standard owned-RAM
-matrix. Rescue-on routing, deliberate low-RAM/heavy-CPU operation, realistic
-churn, actual kernel swap and physical endurance remain unqualified.
+`85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
+metadata-key deduplication, final producer drain and aligned preparation array
+on owned RAM-backed `null_blk`. It does not qualify the new alpha.27 cache.
 
-Five matched fast-model async/sync write pairs measured QD4 -0.88% (95% CI
-[-7.91%,+6.16%]), QD8 +25.64% ([+19.91%,+31.37%]), and QD32 +32.87%
-([+24.44%,+41.30%]). QD8 requests fell 19.90% ([-23.39%,-16.41%]); QD32
-requests rose 26.93% ([+0.32%,+53.54%]). QD32 bytes rose 0.61%
-([-0.04%,+1.25%]), an inconclusive change. Fast mixed throughput +4.2%
-([-1.5%,+9.9%]) also remains inconclusive versus sync. All default mixed and
-sustained-write rescue counters and wall time are zero because rescue is off.
+Against the preceding `9a802eff` report, fast random backing reads fell from
+3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
+to 86.8%; random replacements fell from 309.4 to 134.4, sequential from 441 to
+43. These cross-run observations support the duplicate-key repair, while the
+remaining I/O difference from the older `5bdd040` baseline motivates a bounded
+two-choice cache experiment. Host load and post-write geometry prevent a clean
+causal attribution of the entire remaining difference to set conflicts.
 
-Fast random packed reads consumed 3592 KiB / 734.6 requests, versus 2493 KiB /
-623.2 requests in the prior `5bdd040` report. The tested source can insert
-duplicate metadata keys on scratch/extent-cache hits; fix this defect before
-attributing all extra reads to four-way set conflicts or replacing the cache.
-The alpha.26 duplicate-insertion and final-producer-drain fixes await owner
-qualification; the stored report still identifies the tested alpha.25 source.
+Five matched fast-model async/sync write pairs measured QD4 -0.4% (95% CI
+[-4.4%,+3.6%]), QD8 +28.7% ([+21.9%,+35.5%]), and QD32 +27.1%
+([+21.8%,+32.5%]). QD8 requests fell 23.7% and bytes rose 0.55%; QD32
+requests rose 17.7% and bytes 0.72%; all four intervals exclude zero.
+Fast mixed throughput +3.2% ([-1.9%,+8.4%]) is inconclusive versus sync.
+Rescue remains off with zero classifier/transform activity.
 
-Fast QD32 whole-host CPU activity averaged 39.4% sync versus 56.1% async;
-CPU PSI averaged 19.5% versus 26.8%. These include benchmark, kernel and
+Fast QD32 whole-host CPU activity averaged 42.2% sync versus 55.0% async;
+CPU PSI averaged 20.5% versus 27.0%. These include benchmark, kernel and
 background work such as Codex. They do not isolate swapz CPU or establish an
-idle-host control. Keep K=1 and its activation policy fixed for this repair;
-compare useful throughput, lower I/O, read tails and CPU/load context together.
+idle-host control. Low-RAM/heavy-CPU, sustained churn, real kernel swap and
+physical-media qualification remain open. Steps 1/2 have their standard RAM
+qualification; Steps 3/4/5 (asynchronous TRIM, churn/WAF, map compaction) remain
+outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 
 ## Current bottleneck ranking
 
-The next owner run must qualify alpha.26's metadata-key uniqueness, cache-line
-slot alignment and final producer drain without changing K=1 scheduling.
-Require full readback and suspend/fault lifecycle success, and inspect random
-lower READ bytes/requests alongside metadata replacements and engine wall time.
-No local compilation or tests were run for this increment. After qualification,
-perform ID36 low-RAM/heavy-CPU comparison of explicit sync versus default async,
-including allocation failure cleanup, sustained QD1/4/8/32, suspend/drain, faults
-and teardown. Constrain the disposable guest's RAM and oversubscribe its CPUs;
-limiting the replay process alone does not establish kernel-allocation behavior.
-Keep that release gate open until the evidence exists.
+The next owner run must qualify alpha.27's two-choice metadata directory.
+The hypothesis is fewer distinct-key conflict evictions at fixed 512-slot RAM,
+with one-line primary hits and an eight-tag worst case. Keep write scheduling,
+K=1, delta64 and extent geometry fixed. Require exact readback and lifecycle
+success, and compare lower READ bytes/requests, primary/secondary hits,
+replacements, engine wall time, throughput/p99 and CPU/load context. No local
+compilation or tests were run. After this isolated cycle, return to Step 3's
+early asynchronous TRIM design review; no further pipeline policy is promoted.
+ID36 resource-pressure qualification remains a separate release requirement.
 
 Ordinary benchmark reports now observe host CPU activity and PSI at phase
 boundaries. These observations expose contention but do not supply an idle

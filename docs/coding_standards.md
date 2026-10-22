@@ -1093,14 +1093,23 @@ instructions accidentally.
 
 Optimize hot metadata lookup for a 32KiB private L1D and shared L2 without
 assuming an LLC. The current directory has 128 aligned four-way sets and 512
-block-zero storage slots; replacement is local LRU within a set. Mutation fences
-advance its epoch. Commit must find an existing epoch/start/class key before
-selecting an invalid or oldest way, including when scratch/extent residency
-bypassed directory lookup and when an invalid way precedes a matching key.
-Refresh an existing key's age without copying 4KiB or charging replacement.
-One immutable extent must occupy at most one way per set. Fix duplicate-key
-self-eviction before evaluating whether distinct-key conflicts justify a cache
-redesign; allocated slot count does not establish effective cache capacity.
+block-zero storage slots. Alpha.27 assigns each key a primary and a distinct
+secondary set, using a different high-bit-mixing hash for the latter. Lookup
+must finish the primary set before inspecting the secondary; primary hits touch
+at most one 64-byte tag line and every lookup inspects at most eight tags.
+No global directory scan, victim relocation chain or new payload allocation
+belongs on this path. Mutation fences advance the existing epoch.
+
+Commit must search both candidate sets for an existing epoch/start/class key
+before selecting an invalid way or the oldest of the eight candidates. An
+invalid primary way cannot hide a matching secondary tag. Refresh an existing
+key's age without copying 4KiB or charging replacement. One immutable extent
+must occupy at most one slot across both choices. Counters distinguish primary
+and secondary lookup hits; commit deduplication and passive residency probes
+must not inflate those hit counts. Preserve generation/CRC validation and
+block-zero payload copy avoidance. Qualification must compare actual lower
+reads, useful throughput, tails, engine wall time and host CPU; more hits alone
+do not establish an end-to-end win.
 
 SSE2 delta64 keeps its full-page semantics byte-identical to scalar C but starts
 vector work after the first 16 bytes so pair-sized output stores and inverse

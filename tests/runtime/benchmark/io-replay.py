@@ -787,6 +787,7 @@ KERNEL_READ_FIELDS = ("read_meta_reqs", "read_payload_reqs",
                       "read_meta_cache_hits", "read_meta_lru_hits",
                       "read_meta_set_lookups", "read_meta_set_hits",
                       "read_meta_set_probes", "read_meta_set_replacements",
+                      "read_meta_primary_hits", "read_meta_secondary_hits",
                       "read_meta_copy_bytes",
                       "read_full_extent_reqs", "read_full_cache_hits",
                       "read_two_block_skips", "parallel_read_pairs",
@@ -840,9 +841,19 @@ def kernel_read_delta(before, after):
             counters["read_meta_set_hits"] > counters["read_meta_set_lookups"] or
             counters["read_meta_set_probes"] < counters["read_meta_set_lookups"] or
             counters["read_meta_set_probes"] >
-            4 * counters["read_meta_set_lookups"] or
+            8 * counters["read_meta_set_lookups"] or
+            counters["read_meta_primary_hits"] + counters["read_meta_secondary_hits"] !=
+            counters["read_meta_set_hits"] or
             counters["read_meta_lru_hits"] > counters["read_meta_set_hits"]):
         raise ValueError("inconsistent swapz read request accounting")
+    # Primary hits inspect 1..4 tags, secondary hits 5..8, misses exactly 8.
+    primary = counters["read_meta_primary_hits"]
+    secondary = counters["read_meta_secondary_hits"]
+    misses = counters["read_meta_set_lookups"] - counters["read_meta_set_hits"]
+    if not (primary + 5 * secondary + 8 * misses <=
+            counters["read_meta_set_probes"] <=
+            4 * primary + 8 * secondary + 8 * misses):
+        raise ValueError("inconsistent swapz read probe accounting")
     if (counters["parallel_read_same_extent_pairs"] > counters["parallel_read_pairs"] or
             counters["parallel_read_distinct_extent_pairs"] >
             counters["parallel_read_pairs"] or

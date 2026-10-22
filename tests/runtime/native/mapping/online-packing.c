@@ -316,7 +316,7 @@ static int test_metadata_set_cache_reuses_validated_block_zero(void)
 	CHECK(engine.read_metadata_lru_hits == 1);
 	CHECK(engine.read_metadata_set_hits >= 1);
 	CHECK(engine.read_metadata_set_probes <=
-	      4U * engine.read_metadata_set_lookups);
+	      8U * engine.read_metadata_set_lookups);
 	CHECK(engine.read_metadata_copy_bytes == 2072);
 
 	/* The ordinary mutation fence invalidates by epoch. Re-reading after it
@@ -462,6 +462,140 @@ static int test_metadata_siblings_keep_unique_tags_in_a_full_set(void)
 				matches++;
 		CHECK(matches == 1);
 	}
+	return 0;
+}
+
+static int test_metadata_secondary_choice_retains_primary_collisions(void)
+{
+	struct swapz_compressed_page pages[63];
+	swapz_u8 output[3568], committed;
+	swapz_u16 length = 0, primary_base = SWAPZ_READ_METADATA_CACHE_ENTRIES;
+	swapz_u16 secondary_slot = SWAPZ_READ_METADATA_CACHE_ENTRIES, outside_slot;
+	swapz_u32 extent, slot, valid = 0, matches;
+	swapz_u32 epoch, reads_before, hits_before;
+	unsigned long long primary_before, secondary_before, probes_before;
+
+	CHECK(setup() == 0);
+	engine.read_metadata_cache = scratch_metadata_cache;
+	/* Leave the optional full-extent cache off. Interleaving distinct
+	 * extents then exercises the metadata directory rather than scratch. */
+	prepare(pages, 63, 0, 0);
+	for (extent = 0; extent < 9; ++extent) {
+		/* The primary hash folds start>>9 into its low seven bits.
+		 * These nine starts all collide there, across five segments. */
+		authority.next_block = extent * 128U + extent / 4U;
+		committed = 0;
+		CHECK(write_window_sequential(pages + extent * 7U, 7,
+					      &committed) == 0);
+		CHECK(committed == 7);
+		CHECK(maps[extent * 7U].start_block == extent * 128U + extent / 4U);
+		CHECK(maps[extent * 7U].extent_blocks == 4);
+	}
+	for (extent = 0; extent < 9; ++extent)
+		CHECK(swapz_engine_read_page(&engine, extent * 7U, output,
+					   sizeof(output), &length) == 0);
+	epoch = engine.read_metadata_epoch;
+	CHECK(engine.read_metadata_set_replacements == 0);
+	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot) {
+		if (engine.read_metadata_tags[slot].epoch != epoch)
+			continue;
+		valid++;
+		if (engine.read_metadata_tags[slot].start_block == maps[0].start_block)
+			primary_base = slot - slot % SWAPZ_READ_METADATA_CACHE_WAYS;
+		if (engine.read_metadata_tags[slot].start_block == maps[28].start_block)
+			secondary_slot = slot;
+	}
+	/* Five secondary residents require at least two different secondary
+	 * sets; a fixed second set would already have evicted one of nine. */
+	CHECK(valid == 9);
+	CHECK(primary_base < SWAPZ_READ_METADATA_CACHE_ENTRIES);
+	CHECK(secondary_slot < SWAPZ_READ_METADATA_CACHE_ENTRIES);
+	CHECK(secondary_slot / SWAPZ_READ_METADATA_CACHE_WAYS !=
+	      primary_base / SWAPZ_READ_METADATA_CACHE_WAYS);
+	reads_before = engine.read_metadata_requests;
+	hits_before = engine.read_metadata_lru_hits;
+	primary_before = engine.read_metadata_primary_hits;
+	secondary_before = engine.read_metadata_secondary_hits;
+	probes_before = engine.read_metadata_set_probes;
+	for (extent = 0; extent < 9; ++extent) {
+		swapz_u32 logical = extent * 7U;
+
+		CHECK(swapz_engine_read_page(&engine, logical, output,
+					   sizeof(output), &length) == 0);
+		CHECK(length == 2072 && !memcmp(output, originals[logical], length));
+	}
+	CHECK(engine.read_metadata_requests == reads_before);
+	CHECK(engine.read_metadata_lru_hits == hits_before + 9U);
+	CHECK(engine.read_metadata_primary_hits == primary_before + 4U);
+	CHECK(engine.read_metadata_secondary_hits == secondary_before + 5U);
+	CHECK(engine.read_metadata_set_probes - probes_before <= 9U * 8U);
+	CHECK(engine.read_metadata_set_hits == engine.read_metadata_primary_hits +
+	      engine.read_metadata_secondary_hits);
+
+	/* A scratch hit must find its secondary tag even if a primary way is
+	 * now invalid. Refill scratch through real lower I/O with the optional
+	 * directory temporarily bypassed, then restore the existing tags. */
+	engine.read_metadata_cache = NULL;
+	engine.read_cache_valid = 0;
+	CHECK(swapz_engine_read_page(&engine, 28, output,
+				   sizeof(output), &length) == 0);
+	engine.read_metadata_cache = scratch_metadata_cache;
+	engine.read_metadata_tags[primary_base].epoch = 0;
+	CHECK(swapz_engine_read_page(&engine, 28, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_metadata_tags[primary_base].epoch == 0);
+	CHECK(engine.read_metadata_tags[secondary_slot].epoch == epoch);
+	matches = 0;
+	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot)
+		if (engine.read_metadata_tags[slot].epoch == epoch &&
+		    engine.read_metadata_tags[slot].start_block == maps[28].start_block)
+			matches++;
+	CHECK(matches == 1 && engine.read_metadata_set_replacements == 0);
+
+	/* Fill both candidate sets (and all other ways) with distinct dummy
+	 * keys. Only the two candidate lines may supply the victim. Make a
+	 * secondary way oldest and a noncandidate way even older. */
+	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot) {
+		engine.read_metadata_tags[slot].start_block = PHYSICAL_BLOCKS + slot;
+		engine.read_metadata_tags[slot].extent_blocks = 4;
+		engine.read_metadata_tags[slot].epoch = epoch;
+		engine.read_metadata_tags[slot].age = 50;
+	}
+	engine.read_metadata_tags[secondary_slot].age = 2;
+	engine.read_metadata_tags[primary_base].age = 3;
+	outside_slot = (primary_base + SWAPZ_READ_METADATA_CACHE_WAYS) %
+		SWAPZ_READ_METADATA_CACHE_ENTRIES;
+	if (outside_slot / SWAPZ_READ_METADATA_CACHE_WAYS ==
+	    secondary_slot / SWAPZ_READ_METADATA_CACHE_WAYS)
+		outside_slot = (outside_slot + SWAPZ_READ_METADATA_CACHE_WAYS) %
+			SWAPZ_READ_METADATA_CACHE_ENTRIES;
+	engine.read_metadata_tags[outside_slot].age = 1;
+	engine.read_metadata_lru_clock = 100;
+	engine.read_cache_valid = 0;
+	probes_before = engine.read_metadata_set_probes;
+	CHECK(swapz_engine_read_page(&engine, 28, output,
+				   sizeof(output), &length) == 0);
+	CHECK(length == 2072 && !memcmp(output, originals[28], length));
+	CHECK(engine.read_metadata_set_probes == probes_before + 8U);
+	CHECK(engine.read_metadata_set_replacements == 1);
+	CHECK(engine.read_metadata_tags[secondary_slot].start_block == maps[28].start_block);
+	CHECK(engine.read_metadata_tags[primary_base].start_block == PHYSICAL_BLOCKS + primary_base);
+	CHECK(engine.read_metadata_tags[outside_slot].start_block == PHYSICAL_BLOCKS + outside_slot);
+
+	/* Both mutation-epoch wrap and age-clock wrap must invalidate both
+	 * choices before accepting any tag in a new epoch. */
+	engine.read_metadata_epoch = ~(swapz_u32)0;
+	swapz_engine_invalidate_read_cache(&engine);
+	CHECK(engine.read_metadata_epoch == 1);
+	for (slot = 0; slot < SWAPZ_READ_METADATA_CACHE_ENTRIES; ++slot)
+		CHECK(engine.read_metadata_tags[slot].epoch == 0);
+	CHECK(swapz_engine_read_page(&engine, 28, output,
+				   sizeof(output), &length) == 0);
+	engine.read_metadata_lru_clock = ~(swapz_u32)0;
+	CHECK(swapz_engine_read_page(&engine, 28, output,
+				   sizeof(output), &length) == 0);
+	CHECK(engine.read_metadata_epoch == 2 && engine.read_metadata_lru_clock == 1);
+	CHECK(length == 2072 && !memcmp(output, originals[28], length));
 	return 0;
 }
 
@@ -935,6 +1069,11 @@ static int test_private_read_telemetry_merge_preserves_cache_state(void)
 	source.read_payload_requests = 4;
 	source.read_payload_blocks = 6;
 	source.read_metadata_cache_hits = 1;
+	source.read_metadata_set_lookups = 4;
+	source.read_metadata_set_hits = 3;
+	source.read_metadata_primary_hits = 1;
+	source.read_metadata_secondary_hits = 2;
+	source.read_metadata_set_probes = 21;
 	source.read_full_extent_cache_hits = 2;
 	source.read_cache_valid = 1;
 	source.read_cached_start_block = 123;
@@ -947,11 +1086,18 @@ static int test_private_read_telemetry_merge_preserves_cache_state(void)
 	CHECK(engine.read_payload_requests == 7);
 	CHECK(engine.read_payload_blocks == 6);
 	CHECK(engine.read_metadata_cache_hits == 1);
+	CHECK(engine.read_metadata_set_hits == 3);
+	CHECK(engine.read_metadata_primary_hits == 1);
+	CHECK(engine.read_metadata_secondary_hits == 2);
+	CHECK(engine.read_metadata_set_probes == 21);
 	CHECK(engine.read_full_extent_cache_hits == 2);
 	CHECK(source.physical_read_blocks == 0);
 	CHECK(source.read_metadata_requests == 0);
 	CHECK(source.read_payload_requests == 0);
 	CHECK(source.read_payload_blocks == 0);
+	CHECK(source.read_metadata_set_hits == 0);
+	CHECK(source.read_metadata_primary_hits == 0);
+	CHECK(source.read_metadata_secondary_hits == 0);
 	/* Telemetry transfer must not steal or invalidate private residency. */
 	CHECK(source.read_cache_valid == 1);
 	CHECK(source.read_cached_start_block == 123);
@@ -998,6 +1144,7 @@ int main(void)
 	CHECK(test_full_window_and_selective_reads() == 0); completed++;
 	CHECK(test_metadata_set_cache_reuses_validated_block_zero() == 0); completed++;
 	CHECK(test_metadata_siblings_keep_unique_tags_in_a_full_set() == 0); completed++;
+	CHECK(test_metadata_secondary_choice_retains_primary_collisions() == 0); completed++;
 	CHECK(test_four_block_extent_reuses_each_payload_block_once() == 0); completed++;
 	CHECK(test_extent_lru_reuses_eight_interleaved_extents() == 0); completed++;
 	CHECK(test_prime_absorb_preserves_shared_read_residency() == 0); completed++;

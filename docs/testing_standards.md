@@ -107,33 +107,34 @@ Source contracts show structure, not loaded semantics. Native C shows portable p
 ## Current qualified baseline
 
 The latest standard owner matrix tested source
-`9a802eff7d9d832a6b26c855042c9b1f71e9c62c`, passed all five stages, and
+`5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
 published report-only commit
-`6f5c6e56e6d84090384279742ffa936f2b4a0f5e`. This qualifies the default
-fixed-array preparation and default-off rescue on the standard owned-RAM
-matrix. Rescue-on routing, deliberate low-RAM/heavy-CPU operation, realistic
-churn, actual kernel swap and physical endurance remain unqualified.
+`85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
+metadata-key deduplication, final producer drain and aligned preparation array
+on owned RAM-backed `null_blk`. It does not qualify the new alpha.27 cache.
 
-Five matched fast-model async/sync write pairs measured QD4 -0.88% (95% CI
-[-7.91%,+6.16%]), QD8 +25.64% ([+19.91%,+31.37%]), and QD32 +32.87%
-([+24.44%,+41.30%]). QD8 requests fell 19.90% ([-23.39%,-16.41%]); QD32
-requests rose 26.93% ([+0.32%,+53.54%]). QD32 bytes rose 0.61%
-([-0.04%,+1.25%]), an inconclusive change. Fast mixed throughput +4.2%
-([-1.5%,+9.9%]) also remains inconclusive versus sync. All default mixed and
-sustained-write rescue counters and wall time are zero because rescue is off.
+Against the preceding `9a802eff` report, fast random backing reads fell from
+3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
+to 86.8%; random replacements fell from 309.4 to 134.4, sequential from 441 to
+43. These cross-run observations support the duplicate-key repair, while the
+remaining I/O difference from the older `5bdd040` baseline motivates a bounded
+two-choice cache experiment. Host load and post-write geometry prevent a clean
+causal attribution of the entire remaining difference to set conflicts.
 
-Fast random packed reads consumed 3592 KiB / 734.6 requests, versus 2493 KiB /
-623.2 requests in the prior `5bdd040` report. The tested source can insert
-duplicate metadata keys on scratch/extent-cache hits; fix this defect before
-attributing all extra reads to four-way set conflicts or replacing the cache.
-The alpha.26 duplicate-insertion and final-producer-drain fixes await owner
-qualification; the stored report still identifies the tested alpha.25 source.
+Five matched fast-model async/sync write pairs measured QD4 -0.4% (95% CI
+[-4.4%,+3.6%]), QD8 +28.7% ([+21.9%,+35.5%]), and QD32 +27.1%
+([+21.8%,+32.5%]). QD8 requests fell 23.7% and bytes rose 0.55%; QD32
+requests rose 17.7% and bytes 0.72%; all four intervals exclude zero.
+Fast mixed throughput +3.2% ([-1.9%,+8.4%]) is inconclusive versus sync.
+Rescue remains off with zero classifier/transform activity.
 
-Fast QD32 whole-host CPU activity averaged 39.4% sync versus 56.1% async;
-CPU PSI averaged 19.5% versus 26.8%. These include benchmark, kernel and
+Fast QD32 whole-host CPU activity averaged 42.2% sync versus 55.0% async;
+CPU PSI averaged 20.5% versus 27.0%. These include benchmark, kernel and
 background work such as Codex. They do not isolate swapz CPU or establish an
-idle-host control. Keep K=1 and its activation policy fixed for this repair;
-compare useful throughput, lower I/O, read tails and CPU/load context together.
+idle-host control. Low-RAM/heavy-CPU, sustained churn, real kernel swap and
+physical-media qualification remain open. Steps 1/2 have their standard RAM
+qualification; Steps 3/4/5 (asynchronous TRIM, churn/WAF, map compaction) remain
+outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 
 ## Deferred optimization evidence gates
 
@@ -1086,23 +1087,23 @@ wider backend requires same-host results before any inverse-policy promotion,
 and official qualification on a host lacking that ISA does not qualify its
 runtime path.
 
-### Core-2 metadata set cache and copy avoidance
+### Core-2 two-choice metadata cache and copy avoidance
 
 The metadata cache keeps exactly 512 immutable SWZ block-zero images, but its
 directory is 128 sets by four ways. Each tag is exactly 16 bytes and each
-four-way set starts on a 64-byte boundary, so lookup and replacement touch one
-aligned tag cache line rather than independent start/age/extent/valid arrays.
-A 512-entry fallback scan or separate direct front is not permitted. Replacement
-is local to the selected set and may trade global-LRU precision for bounded
-Core-2 L1/L2 work. Complete invalidation before authority mutation remains
+four-way set starts on a 64-byte boundary. Each key has two distinct hashed
+set choices. Search primary first and inspect secondary only after a primary
+miss: at most two tag lines/eight tags. A 512-entry fallback scan or separate
+direct front is not permitted. Replacement chooses an invalid way before the
+oldest tag across the two candidate sets. Complete invalidation before authority mutation remains
 mandatory, but normal mutation invalidation advances a directory epoch rather
 than clearing 512 validity entries. Epoch wrap may clear the directory before
 starting a new nonzero epoch.
-A cold zero-epoch lookup still performs the bounded four-way probe for stable
+A cold zero-epoch lookup still performs the bounded eight-tag probe for stable
 telemetry, but zero epoch can never validate a tag as a hit.
 
 Directory commit must deduplicate keys even when scratch/extent-cache hits
-skip directory lookup. Scan all four ways for an existing key before using
+skip directory lookup. Scan both sets for an existing key before using
 an invalid/oldest slot; a hole before a match must not hide that match.
 Refresh age without inserting, copying the block, or counting replacement.
 Exact production-C coverage creates four distinct colliding extents, repeats
@@ -1111,8 +1112,14 @@ payloads and each physical extent block fetched only once. The seven-record,
 2072-byte fixture appends payloads backward: the initial record-zero read warms
 metadata block 0 plus payload block 3, so the sibling sweep must fetch only
 blocks 1 and 2 for each extent. Test a hole before a match as well. These checks
-prevent duplicate self-eviction; they do not establish that four-way conflicts
-among more than four distinct keys are harmless.
+prevent duplicate self-eviction. Additional native coverage places nine keys
+that collide under the primary hash across primary and secondary ways, revisits
+them with exact payload checks and no extra metadata reads, and verifies four
+primary plus five secondary hits. A scratch hit with an invalid primary way
+must retain its existing secondary tag. Fill all candidate ways and prove the
+oldest secondary candidate wins over a newer primary candidate; an even older
+noncandidate must remain untouched. Exercise epoch and age-clock wrap, as well
+as transfer/reset of both hit counters from private engines.
 
 An ordinary metadata-cache hit parses and sequence-checks the cached block
 directly. It must not copy all 4096 bytes into read scratch merely to decode one
@@ -1122,14 +1129,18 @@ and remain bound to the separately validated metadata/authority identity.
 A separately cached block zero must never be advertised as direct/extent
 read-scratch residency unless all 4096 bytes are actually present there.
 
-Loaded qualification must report metadata set lookups, hits, probes,
-replacements and cached-block payload-copy bytes. Require hits <= lookups and
-lookups <= probes <= four * lookups. Native coverage must additionally prove
+Loaded qualification must report metadata lookups, total/primary/secondary hits,
+probes, two-choice replacements and cached-block payload-copy bytes. Require
+primary + secondary = hits <= lookups, at most eight probes per lookup, and
+the tighter total-probe bounds implied by 1..4 for a primary hit, 5..8 for a
+secondary hit and exactly eight for a miss. Missing counters are unavailable
+evidence. The replay and report validators both reject impossible accounting.
+Native coverage must additionally prove
 sizeof(tag)==16, four adjacent ways occupy exactly 64 bytes, the tag directory
 starts on a 64-byte boundary, mutation advances the metadata epoch, and a second
 already-empty invalidation does not churn the epoch. Compare the owner run
 against source 5bdd040334ee's baseline rather than inferring a win from source
-structure alone. The unprivileged Make-interface fixture must emit the same five
+structure alone. The unprivileged Make-interface fixture must emit all seven
 locality fields with internally consistent bounds so rootless qualification
 cannot bypass the loaded telemetry schema. Native replay fixtures must initialize
 these counters by field name rather than positional tuple order; adding telemetry

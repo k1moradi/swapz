@@ -67,17 +67,34 @@ name a lower 4/8/16KiB SWZ packing cliff; adoption on that path requires crossin
 the cliff. Production status additionally reports pack eligible/attempt/cliff/
 adopted counts and score bands 0-7, 8-15, 16-23 and 24+.
 
-Report `6f5c6e56e6d8` now qualifies source `9a802eff7d9d` with rescue off.
+Report `6f5c6e56e6d8` qualified source `9a802eff7d9d` with rescue off.
 Its fast random reads use 3592 KiB and 734.6 lower requests, with 71.2%
 directory hits and 309.4 replacements. Source inspection confirms that sibling
 reads can duplicate a metadata key across ways; this is a defect before any
 remaining distinct-key conflict question. Alpha.26 deduplicates commit, drains
 late producer work before suspend invariants, and aligns preparation elements.
-The next owner run must evaluate this repair; the existing report cannot
-qualify it. Keep the mixed read-bypass async gate and classifier policy fixed
+Report `85aeac4cbb36` then qualified this repair at source `5bf2c0a6f038`.
+Keep the mixed read-bypass async gate and classifier policy fixed
 for attribution. PACK_READY service-dry counts alone do not establish how many
 windows that gate excluded, and a rounded 0.00 run-slot mean is not zero usage.
 Consider a separate same-source gate A/B after this repair is qualified.
+
+Alpha.27 is a separate, externally reviewed metadata-cache experiment. Each
+key may reside in either of two distinct four-way sets within the same
+512-slot store. Primary hits keep a one-line lookup; secondary hits and misses
+inspect at most eight tags. Replacement uses an invalid candidate before the
+oldest of the two sets, after checking both for an existing key. New primary
+and secondary hit counters must sum to total directory hits, and the console
+prints their percentages with the common lookup denominator.
+
+The current qualified comparison is fast random 2993 KiB / 678 requests and
+about 6.6 ms engine non-I/O wall time. The older 2493 KiB / 623.2-request
+result is a historical target, not an acceptance oracle: write placement and
+host load differ between reports. Acceptance requires fewer lower READ bytes
+and requests with exact data and preserved useful throughput/read tails, while
+retaining most of the engine-time advantage and inspecting CPU/PSI context.
+Secondary hits alone do not prove saved I/O. This experiment is uncompiled and
+untested locally and does not implement Step 3 asynchronous TRIM.
 
 Rootless planner acceptance includes a deliberately one-byte boundary: nine
 1803-byte records require five physical 4KiB blocks in five one-block extents under the existing
@@ -99,33 +116,34 @@ These model latency/bandwidth behavior; they are not measurements of real SD car
 The mixed QD32 matrix keeps four sessions on the slow model as a bounded directional control and uses ten fast-model sessions arranged as five adjacent counterbalanced sync/async matched rounds. It includes identical useful work, independent lower counters, full-image verification and bounded packed-read checks. The fast matched deltas carry two-sided Student-t 95% confidence intervals.
 
 The latest standard owner matrix tested source
-`9a802eff7d9d832a6b26c855042c9b1f71e9c62c`, passed all five stages, and
+`5bf2c0a6f0384ccf3829dc02dc0e9b737c857e40`, passed all five stages, and
 published report-only commit
-`6f5c6e56e6d84090384279742ffa936f2b4a0f5e`. This qualifies the default
-fixed-array preparation and default-off rescue on the standard owned-RAM
-matrix. Rescue-on routing, deliberate low-RAM/heavy-CPU operation, realistic
-churn, actual kernel swap and physical endurance remain unqualified.
+`85aeac4cbb368bb4900cd94c9c73f46d952520ef`. This qualifies alpha.26's
+metadata-key deduplication, final producer drain and aligned preparation array
+on owned RAM-backed `null_blk`. It does not qualify the new alpha.27 cache.
 
-Five matched fast-model async/sync write pairs measured QD4 -0.88% (95% CI
-[-7.91%,+6.16%]), QD8 +25.64% ([+19.91%,+31.37%]), and QD32 +32.87%
-([+24.44%,+41.30%]). QD8 requests fell 19.90% ([-23.39%,-16.41%]); QD32
-requests rose 26.93% ([+0.32%,+53.54%]). QD32 bytes rose 0.61%
-([-0.04%,+1.25%]), an inconclusive change. Fast mixed throughput +4.2%
-([-1.5%,+9.9%]) also remains inconclusive versus sync. All default mixed and
-sustained-write rescue counters and wall time are zero because rescue is off.
+Against the preceding `9a802eff` report, fast random backing reads fell from
+3592 to 2993 KiB and 734.6 to 678 requests. Directory hit rate rose from 71.2%
+to 86.8%; random replacements fell from 309.4 to 134.4, sequential from 441 to
+43. These cross-run observations support the duplicate-key repair, while the
+remaining I/O difference from the older `5bdd040` baseline motivates a bounded
+two-choice cache experiment. Host load and post-write geometry prevent a clean
+causal attribution of the entire remaining difference to set conflicts.
 
-Fast random packed reads consumed 3592 KiB / 734.6 requests, versus 2493 KiB /
-623.2 requests in the prior `5bdd040` report. The tested source can insert
-duplicate metadata keys on scratch/extent-cache hits; fix this defect before
-attributing all extra reads to four-way set conflicts or replacing the cache.
-The alpha.26 duplicate-insertion and final-producer-drain fixes await owner
-qualification; the stored report still identifies the tested alpha.25 source.
+Five matched fast-model async/sync write pairs measured QD4 -0.4% (95% CI
+[-4.4%,+3.6%]), QD8 +28.7% ([+21.9%,+35.5%]), and QD32 +27.1%
+([+21.8%,+32.5%]). QD8 requests fell 23.7% and bytes rose 0.55%; QD32
+requests rose 17.7% and bytes 0.72%; all four intervals exclude zero.
+Fast mixed throughput +3.2% ([-1.9%,+8.4%]) is inconclusive versus sync.
+Rescue remains off with zero classifier/transform activity.
 
-Fast QD32 whole-host CPU activity averaged 39.4% sync versus 56.1% async;
-CPU PSI averaged 19.5% versus 26.8%. These include benchmark, kernel and
+Fast QD32 whole-host CPU activity averaged 42.2% sync versus 55.0% async;
+CPU PSI averaged 20.5% versus 27.0%. These include benchmark, kernel and
 background work such as Codex. They do not isolate swapz CPU or establish an
-idle-host control. Keep K=1 and its activation policy fixed for this repair;
-compare useful throughput, lower I/O, read tails and CPU/load context together.
+idle-host control. Low-RAM/heavy-CPU, sustained churn, real kernel swap and
+physical-media qualification remain open. Steps 1/2 have their standard RAM
+qualification; Steps 3/4/5 (asynchronous TRIM, churn/WAF, map compaction) remain
+outstanding. Alpha.27 is one reviewed cache follow-up before Step 3.
 
 ## Timed boundaries
 

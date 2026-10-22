@@ -5204,6 +5204,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "read_meta_lru_hits=%u "
 		       "read_meta_set_lookups=%llu read_meta_set_hits=%llu "
 		       "read_meta_set_probes=%llu read_meta_set_replacements=%llu "
+		       "read_meta_primary_hits=%llu read_meta_secondary_hits=%llu "
 		       "read_meta_copy_bytes=%llu "
 		       "read_full_extent_reqs=%u read_full_cache_hits=%u "
 		       "read_two_block_skips=%u "
@@ -5461,6 +5462,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->engine.read_metadata_set_hits,
 		       ctx->engine.read_metadata_set_probes,
 		       ctx->engine.read_metadata_set_replacements,
+		       ctx->engine.read_metadata_primary_hits,
+		       ctx->engine.read_metadata_secondary_hits,
 		       ctx->engine.read_metadata_copy_bytes,
 		       ctx->engine.read_full_extent_requests,
 		       ctx->engine.read_full_extent_cache_hits,

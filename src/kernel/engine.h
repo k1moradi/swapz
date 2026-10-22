@@ -5,6 +5,7 @@
 #define SWAPZ_BULK_BLOCKS 64U
 #define SWAPZ_READ_METADATA_CACHE_ENTRIES 512U
 #define SWAPZ_READ_METADATA_CACHE_WAYS 4U
+#define SWAPZ_READ_METADATA_CACHE_CHOICES 2U
 #define SWAPZ_READ_METADATA_CACHE_SETS \
 	(SWAPZ_READ_METADATA_CACHE_ENTRIES / SWAPZ_READ_METADATA_CACHE_WAYS)
 #define SWAPZ_READ_EXTENT_CACHE_ENTRIES 16U
@@ -153,10 +154,10 @@ struct swapz_engine {
 	swapz_u32 read_metadata_cache_hits;
 	/*
 	 * Owner-preallocated metadata-only cache. Capacity remains 512 immutable
-	 * SWZ block-zero images, but the directory is 128 sets x 4 ways so lookup
-	 * and replacement touch at most four compact directory entries. Payload
-	 * blocks are never cached here. Per-set age replacement trades exact
-	 * global LRU ordering for bounded Core-2-friendly L1/L2 work.
+	 * SWZ block-zero images in 128 sets x 4 ways. Each key has two distinct
+	 * set choices: primary hits touch four tags at most; secondary lookup
+	 * and replacement inspect at most eight. Payload blocks are never cached
+	 * here. Replacement uses the oldest of the two sets' eligible ways.
 	 */
 	swapz_u8 *read_metadata_cache; /* entries * 4096 bytes */
 	/*
@@ -172,6 +173,8 @@ struct swapz_engine {
 	swapz_u32 read_metadata_lru_hits;
 	unsigned long long read_metadata_set_lookups;
 	unsigned long long read_metadata_set_hits;
+	unsigned long long read_metadata_primary_hits;
+	unsigned long long read_metadata_secondary_hits;
 	unsigned long long read_metadata_set_probes;
 	unsigned long long read_metadata_set_replacements;
 	/* Bytes copied from cached block zero into read_scratch solely because

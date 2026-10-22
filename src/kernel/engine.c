@@ -325,30 +325,53 @@ static swapz_u16 swapz_read_metadata_set(swapz_u32 start_block,
 	return (swapz_u16)(mixed & (SWAPZ_READ_METADATA_CACHE_SETS - 1U));
 }
 
+static swapz_u16 swapz_read_metadata_secondary_set(swapz_u32 start_block,
+						 swapz_u8 extent_blocks,
+						 swapz_u16 primary)
+{
+	swapz_u32 mixed = start_block ^
+		((swapz_u32)extent_blocks * 0x85ebca6bU);
+	swapz_u16 secondary;
+
+	/* Fold high block bits before selecting the second cache line. The
+	 * primary's linear hash must not give both choices the same collisions. */
+	mixed ^= mixed >> 16;
+	mixed *= 0x7feb352dU;
+	mixed ^= mixed >> 15;
+	secondary = (swapz_u16)(mixed & (SWAPZ_READ_METADATA_CACHE_SETS - 1U));
+	if (secondary == primary)
+		secondary = (secondary + 1U) & (SWAPZ_READ_METADATA_CACHE_SETS - 1U);
+	return secondary;
+}
+
 static int swapz_read_metadata_set_lookup(const struct swapz_engine *engine,
 					 swapz_u32 start_block,
 					 swapz_u8 extent_blocks,
 					 swapz_u8 *probes)
 {
-	swapz_u16 set, base, way, slot;
+	swapz_u16 primary, set, base, way, slot, choice;
 	if (probes)
 		*probes = 0;
 	if (!engine || !engine->read_metadata_cache)
 		return -1;
-	set = swapz_read_metadata_set(start_block, extent_blocks);
-	base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
-	for (way = 0; way < SWAPZ_READ_METADATA_CACHE_WAYS; ++way) {
-		const struct swapz_read_metadata_tag *tag;
+	primary = swapz_read_metadata_set(start_block, extent_blocks);
+	for (choice = 0; choice < SWAPZ_READ_METADATA_CACHE_CHOICES; ++choice) {
+		set = choice ? swapz_read_metadata_secondary_set(
+			start_block, extent_blocks, primary) : primary;
+		base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
+		for (way = 0; way < SWAPZ_READ_METADATA_CACHE_WAYS; ++way) {
+			const struct swapz_read_metadata_tag *tag;
 
-		slot = base + way;
-		tag = &engine->read_metadata_tags[slot];
-		if (probes)
-			(*probes)++;
-		if (engine->read_metadata_epoch &&
-		    tag->epoch == engine->read_metadata_epoch &&
-		    tag->start_block == start_block &&
-		    tag->extent_blocks == extent_blocks)
-			return slot;
+			slot = base + way;
+			tag = &engine->read_metadata_tags[slot];
+			if (probes)
+				(*probes)++;
+			if (engine->read_metadata_epoch &&
+			    tag->epoch == engine->read_metadata_epoch &&
+			    tag->start_block == start_block &&
+			    tag->extent_blocks == extent_blocks)
+				return slot;
+		}
 	}
 	return -1;
 }
@@ -363,7 +386,13 @@ static int swapz_read_metadata_lru_lookup(struct swapz_engine *engine,
 	engine->read_metadata_set_lookups++;
 	slot = swapz_read_metadata_set_lookup(engine, start_block, extent_blocks, &probes);
 	engine->read_metadata_set_probes += probes;
-	if (slot >= 0) engine->read_metadata_set_hits++;
+	if (slot >= 0) {
+		engine->read_metadata_set_hits++;
+		if (probes <= SWAPZ_READ_METADATA_CACHE_WAYS)
+			engine->read_metadata_primary_hits++;
+		else
+			engine->read_metadata_secondary_hits++;
+	}
 	return slot;
 }
 
@@ -374,7 +403,7 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 					const swapz_u8 *metadata)
 {
 	swapz_u32 oldest_age = ~(swapz_u32)0;
-	swapz_u16 set, base, way, slot = 0;
+	swapz_u16 primary, set, base, way, choice, slot = 0;
 	int have_slot = 0, have_invalid = 0;
 
 	if (!engine->read_metadata_cache || !metadata)
@@ -391,37 +420,42 @@ static void swapz_read_metadata_lru_commit(struct swapz_engine *engine,
 		slot = (swapz_u16)hit_slot;
 		have_slot = 1;
 	} else {
-		set = swapz_read_metadata_set(start_block, extent_blocks);
-		base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
-		for (way = 0; way < SWAPZ_READ_METADATA_CACHE_WAYS; ++way) {
-			struct swapz_read_metadata_tag *tag;
-			swapz_u16 candidate = base + way;
+		primary = swapz_read_metadata_set(start_block, extent_blocks);
+		for (choice = 0; choice < SWAPZ_READ_METADATA_CACHE_CHOICES; ++choice) {
+			set = choice ? swapz_read_metadata_secondary_set(
+				start_block, extent_blocks, primary) : primary;
+			base = set * SWAPZ_READ_METADATA_CACHE_WAYS;
+			for (way = 0; way < SWAPZ_READ_METADATA_CACHE_WAYS; ++way) {
+				struct swapz_read_metadata_tag *tag;
+				swapz_u16 candidate = base + way;
 
-			tag = &engine->read_metadata_tags[candidate];
-			/* Scratch/extent-cache hits skip the directory lookup. They
-			 * must refresh an existing tag, not insert another copy. Scan
-			 * past invalid ways too: a matching tag may follow a hole. */
-			if (tag->epoch == engine->read_metadata_epoch &&
-			    tag->start_block == start_block &&
-			    tag->extent_blocks == extent_blocks) {
-				hit_slot = candidate;
-				slot = candidate;
-				have_slot = 1;
-				break;
-			}
-			if (tag->epoch != engine->read_metadata_epoch) {
-				if (!have_invalid) {
+				tag = &engine->read_metadata_tags[candidate];
+				/* Scratch/extent hits skip lookup. Deduplicate across
+				 * both sets before using even an invalid primary way. */
+				if (tag->epoch == engine->read_metadata_epoch &&
+				    tag->start_block == start_block &&
+				    tag->extent_blocks == extent_blocks) {
+					hit_slot = candidate;
 					slot = candidate;
 					have_slot = 1;
-					have_invalid = 1;
+					break;
 				}
-				continue;
+				if (tag->epoch != engine->read_metadata_epoch) {
+					if (!have_invalid) {
+						slot = candidate;
+						have_slot = 1;
+						have_invalid = 1;
+					}
+					continue;
+				}
+				if (!have_invalid && (!have_slot || tag->age < oldest_age)) {
+					oldest_age = tag->age;
+					slot = candidate;
+					have_slot = 1;
+				}
 			}
-			if (!have_invalid && (!have_slot || tag->age < oldest_age)) {
-				oldest_age = tag->age;
-				slot = candidate;
-				have_slot = 1;
-			}
+			if (hit_slot >= 0)
+				break;
 		}
 		if (hit_slot < 0 && have_slot &&
 		    engine->read_metadata_tags[slot].epoch ==
@@ -553,6 +587,8 @@ void swapz_engine_merge_read_telemetry(struct swapz_engine *destination,
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_lru_hits);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_lookups);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_primary_hits);
+	SWAPZ_MERGE_READ_COUNTER(read_metadata_secondary_hits);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_probes);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_set_replacements);
 	SWAPZ_MERGE_READ_COUNTER(read_metadata_copy_bytes);
