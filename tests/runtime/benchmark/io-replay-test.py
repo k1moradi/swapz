@@ -290,6 +290,7 @@ class PairReplayContract(unittest.TestCase):
         before = {key: 0 for key in module.KERNEL_WRITE_FIELDS}
         before.update({
             "physical_write_reqs": 2,
+            "lz4_acceleration": 1,
             "lz4_wall_ns": 100,
             "ordered_lz4_wall_ns": 60,
             "prep_lz4_wall_ns": 40,

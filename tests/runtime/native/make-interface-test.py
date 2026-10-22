@@ -160,6 +160,7 @@ class PublicMakeContract(unittest.TestCase):
                 record = {field: 0 for field in runner_contract.KERNEL_WRITE_FIELDS}
                 record.update({
                     "physical_write_reqs": 5,
+                    "lz4_acceleration": 1,
                     "lz4_wall_ns": 20000000,
                     "ordered_lz4_wall_ns": 15000000,
                     "prep_lz4_wall_ns": 5000000,

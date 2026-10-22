@@ -205,6 +205,7 @@ def timed_kernel_write(*, mode, target=8):
     record = {field: 0 for field in runner.KERNEL_WRITE_FIELDS}
     record.update({
         "physical_write_reqs": 5,
+        "lz4_acceleration": 1,
         "delta64_rescue": 1,
         "delta64_eligible": 10,
         "delta64_classifier_pass": 5,
