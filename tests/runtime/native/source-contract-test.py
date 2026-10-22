@@ -724,6 +724,8 @@ static swapz_u16 swapz_probe_set(
         read = source_body("swapz_engine_read_page", engine)
         invalidate = source_body("swapz_engine_invalidate_read_cache", engine)
         process = body("swapz_process")
+        lower = body("swapz_lower")
+        submit = body("swapz_submit_inflight_write")
         self.assertIn("read_cached_block_mask", engine_h)
         self.assertIn("read_extent_cache", engine_h)
         self.assertIn("engine->read_cached_block_mask = 0", invalidate)
@@ -753,7 +755,38 @@ static swapz_u16 swapz_probe_set(
         self.assertIn("engine->max_read_blocks_per_record != 1",
                       read[read.index("engine->read_cached_full ="):])
         self.assertIn("swapz_read_extent_lru_commit(engine", read)
-        self.assertIn("swapz_invalidate_read_caches(ctx)", process)
+        # RAM-only WRITE admission must not throw away validated residency.
+        # Physical WRITE submission remains the mutation boundary.
+        self.assertNotIn("op != REQ_OP_READ", process)
+        self.assertIn("op == REQ_OP_DISCARD", process)
+        self.assertIn("REQ_PREFLUSH | REQ_FUA", process)
+        self.assertIn("swapz_invalidate_read_caches(ctx)", lower)
+        self.assertIn("swapz_invalidate_read_caches(ctx)", submit)
+
+    def test_authority_snapshot_copies_only_active_transaction_prefix(self):
+        authority = (ROOT / "src/kernel/authority.c").read_text()
+        stage = source_body("swapz_stage", authority)
+        pause = source_body("swapz_batch_pause", authority)
+        resume = source_body("swapz_batch_resume", authority)
+        forget = source_body("swapz_forget_active", authority)
+
+        self.assertIn("swapz_tx_active_bytes", authority)
+        # Keep the caller-visible handle fully initialized; only the private
+        # authoritative snapshot is copied and cleared by active prefix.
+        self.assertIn("memset(out, 0, sizeof(*out))", stage)
+        self.assertIn("memcpy(&a->active_tx, out, swapz_tx_active_bytes(count))",
+                      stage)
+        self.assertNotIn("a->active_tx = *out", stage)
+        self.assertIn(
+            "memset(&a->active_tx, 0, swapz_tx_active_bytes(a->active_count))",
+            pause)
+        self.assertIn(
+            "memcpy(&a->active_tx, tx, swapz_tx_active_bytes(tx->count))",
+            resume)
+        self.assertNotIn("a->active_tx = *tx", resume)
+        self.assertIn(
+            "memset(&a->active_tx, 0, swapz_tx_active_bytes(a->active_count))",
+            forget)
 
 
     def test_mixed_raw_lower_run_preserves_authority_and_barriers(self):

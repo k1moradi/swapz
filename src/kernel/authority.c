@@ -44,14 +44,26 @@ static swapz_u32 swapz_publish_crc32c(struct swapz_authority *a,
 	return crc;
 }
 
+/*
+ * Only the fixed header plus count authoritative record identities participate
+ * in staged-transaction ownership. Keep caller-visible transactions fully
+ * initialized in swapz_stage(), but avoid repeatedly copying/clearing the
+ * unused record tail in the authority-owned immutable snapshot.
+ */
+static size_t swapz_tx_active_bytes(swapz_u8 count)
+{
+	if (count > SWAPZ_MAX_RECORDS)
+		count = SWAPZ_MAX_RECORDS;
+	return offsetof(struct swapz_tx, records) +
+		(size_t)count * sizeof(((struct swapz_tx *)0)->records[0]);
+}
+
 static swapz_u32 swapz_batch_snapshot_crc32c(struct swapz_authority *a,
 					     const struct swapz_tx *tx,
 					     unsigned long long *phase_wall_ns)
 {
 	unsigned long long start = swapz_authority_now_ns();
-	swapz_u32 active_bytes =
-		(swapz_u32)offsetof(struct swapz_tx, records) +
-		(swapz_u32)tx->count * (swapz_u32)sizeof(tx->records[0]);
+	swapz_u32 active_bytes = (swapz_u32)swapz_tx_active_bytes(tx->count);
 	swapz_u32 crc = swapz_crc32c_bytes(tx, active_bytes);
 	unsigned long long end = swapz_authority_now_ns();
 
@@ -871,7 +883,7 @@ int swapz_stage(struct swapz_authority *a, const swapz_u32 *pages,
 	a->active_blocks = blocks;
 	a->active_count = count;
 	/* All original record identities and generations are now authoritative. */
-	a->active_tx = *out;
+	memcpy(&a->active_tx, out, swapz_tx_active_bytes(count));
 	a->in_flight = 1;
 	return 0;
 }
@@ -953,11 +965,11 @@ int swapz_batch_pause(struct swapz_authority *a, const struct swapz_tx *tx)
 		swapz_batch_snapshot_crc32c(a, tx,
 					    &a->batch_pause_crc_wall_ns);
 	a->batch_pending++;
+	memset(&a->active_tx, 0, swapz_tx_active_bytes(a->active_count));
 	a->in_flight = 0;
 	a->active_sequence = 0;
 	a->active_blocks = 0;
 	a->active_count = 0;
-	memset(&a->active_tx, 0, sizeof(a->active_tx));
 	return 0;
 }
 
@@ -987,7 +999,7 @@ int swapz_batch_resume(struct swapz_authority *a, const struct swapz_tx *tx)
 		    tx->records[i].generation !=
 		    a->maps[tx->records[i].logical_page].generation + 1U)
 			return -ESTALE;
-	a->active_tx = *tx;
+	memcpy(&a->active_tx, tx, swapz_tx_active_bytes(tx->count));
 	a->active_start = tx->start_block;
 	a->active_sequence = tx->sequence;
 	a->active_blocks = tx->extent_blocks;
@@ -1013,11 +1025,11 @@ static void swapz_forget_active(struct swapz_authority *a, int published)
 		a->abandoned_blocks += a->active_blocks;
 	else
 		a->committed_blocks += a->active_blocks;
+	memset(&a->active_tx, 0, swapz_tx_active_bytes(a->active_count));
 	a->in_flight = 0;
 	a->active_sequence = 0;
 	a->active_blocks = 0;
 	a->active_count = 0;
-	memset(&a->active_tx, 0, sizeof(a->active_tx));
 }
 
 int swapz_abort(struct swapz_authority *a, const struct swapz_tx *tx)

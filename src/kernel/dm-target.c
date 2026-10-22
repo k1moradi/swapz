@@ -4020,9 +4020,16 @@ static void swapz_process(struct swapz_dm *ctx, struct bio *bio)
 	int error = 0;
 	const enum req_op op = bio_op(bio);
 
-	/* Invalidate even when a discard/flush changes authority without
-	 * writing any lower blocks. READ-only runs may reuse one metadata page. */
-	if (op != REQ_OP_READ || (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
+	/*
+	 * Ordinary WRITE admission only stages immutable upper data in RAM.
+	 * Do not discard validated read residency until a path can actually
+	 * change media: synchronous/asynchronous lower WRITE submission already
+	 * invalidates immediately before that mutation. Keep DISCARD conservative
+	 * in this first A/B because it changes mapping authority even without
+	 * lower media I/O, and keep hard ordering barriers as explicit resets.
+	 */
+	if (op == REQ_OP_DISCARD ||
+	    (bio->bi_opf & (REQ_PREFLUSH | REQ_FUA)))
 		swapz_invalidate_read_caches(ctx);
 	if (ctx->failed) {
 		swapz_complete(bio, ctx->last_error ? ctx->last_error : -EIO);
