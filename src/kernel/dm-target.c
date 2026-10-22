@@ -299,7 +299,7 @@ struct swapz_dm {
 	u64 parallel_read_coalesce_skip_noncontig_slot;
 	u64 parallel_read_coalesce_skip_gap;
 	u64 parallel_read_coalesce_skip_other;
-	/* One bounded LZ4 producer, separate from the ordered I/O worker.
+	/* Bounded preparation lanes, separate from the ordered I/O worker.
 	 * No producer ever changes maps, stages extents or completes BIOs. */
 	bool async_prepare;
 	bool delta64_rescue_enabled;
@@ -317,6 +317,7 @@ struct swapz_dm {
 	atomic_t lower_write_active;
 	atomic_t preparation_workers_active;
 	atomic_t preparation_workers_active_max;
+	atomic64_t preparation_parallel_starts;
 	/*
 	 * One opposite-end preparation token earned by ordered inline WRITE work.
 	 * For a retained window the token may outlive swapz_process() and bridge
@@ -1515,6 +1516,8 @@ static void swapz_preparation_worker(struct work_struct *work)
 	int active, peak, observed;
 
 	active = atomic_inc_return(&ctx->preparation_workers_active);
+	if (active > 1)
+		atomic64_inc(&ctx->preparation_parallel_starts);
 	peak = atomic_read(&ctx->preparation_workers_active_max);
 	while (active > peak) {
 		observed = atomic_cmpxchg(&ctx->preparation_workers_active_max,
@@ -4682,6 +4685,7 @@ static void swapz_drain(struct dm_target *ti)
 	    !list_empty(&ctx->preparation_incoming) || ctx->preparation_queued ||
 	    (u64)atomic64_read(&ctx->preparation_free_mask) !=
 					SWAPZ_PREPARATION_FREE_MASK ||
+	    atomic_read(&ctx->preparation_workers_active) ||
 	    ctx->batch_count || READ_ONCE(ctx->inflight_write.active) ||
 	    ctx->authority.batch_pending || ctx->authority.in_flight) {
 		spin_unlock_irqrestore(&ctx->queue_lock, flags);
@@ -4878,6 +4882,7 @@ static int swapz_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	atomic_set(&ctx->lower_write_active, 0);
 	atomic_set(&ctx->preparation_workers_active, 0);
 	atomic_set(&ctx->preparation_workers_active_max, 0);
+	atomic64_set(&ctx->preparation_parallel_starts, 0);
 	atomic_set(&ctx->preparation_tail_credit, 0);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
 	hrtimer_setup(&ctx->retention_timer, swapz_retention_wake,
@@ -5348,6 +5353,7 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       "retain_timer_arm_skips=%llu "
 		       "async_prepare=%u delta64_prepare_workers=%u "
 		       "delta64_prepare_active_max=%u delta64_prepare_pages=%llu "
+		       "delta64_prepare_parallel_starts=%llu "
 		       "guard_inflight_zero_shrink=%u "
 		       "prep_lower_write_overlap_starts=%llu "
 		       "prep_lower_write_overlap_ns=%llu prep_wave_kicks=%llu "
@@ -5581,7 +5587,8 @@ static void swapz_status(struct dm_target *ti, status_type_t type,
 		       ctx->retain_timer_arms, ctx->retain_timer_arm_skips,
 		       ctx->async_prepare, ctx->preparation_worker_count,
 		       (unsigned int)atomic_read(&ctx->preparation_workers_active_max),
-		       prep.prepared_pages, 0U,
+		       prep.prepared_pages,
+		       (u64)atomic64_read(&ctx->preparation_parallel_starts), 0U,
 		       prep.prepared_during_lower_write,
 		       prep.lower_write_overlap_ns,
 		       ctx->preparation_wave_kicks,
