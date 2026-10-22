@@ -1132,6 +1132,34 @@ def failure_context(output, *, loaded=True, default_phase=None):
             if match:
                 unittest_failure = match.group(1)
 
+    native_diagnostic = None
+    if not loaded:
+        for line in output.splitlines():
+            candidate = line.strip()
+            helper = re.match(
+                r"^((?:predictor|routed production planner) .+?\b"
+                r"(?:failed|rejected)):\s*(.*)$", candidate, re.I)
+            compiler = re.search(
+                r"\b(?:fatal )?error:\s*(.+)$", candidate, re.I)
+            if helper:
+                detail = f"{helper.group(1)}: {helper.group(2)}"
+                native_diagnostic = "Native helper: " + detail
+            elif compiler:
+                native_diagnostic = "Native build error: " + compiler.group(1)
+            elif "undefined reference to" in candidate:
+                native_diagnostic = "Native link error: undefined reference"
+            if native_diagnostic:
+                native_diagnostic = re.sub(
+                    r"(?<![A-Za-z0-9])/(?:[^\s'\"<>]+)",
+                    "[path]", native_diagnostic)
+                native_diagnostic = re.sub(
+                    r"\b(?:[a-f0-9]{16,}|[0-9a-f]{8}-[0-9a-f-]{18,})\b",
+                    "[id]", native_diagnostic, flags=re.I)
+                native_diagnostic = re.sub(
+                    r"[^A-Za-z0-9 .,:;()_+=/\-\[\]]", "?",
+                    native_diagnostic)[:155]
+                break
+
     if unittest_failure is not None:
         nested_phase = None
         nested_reason = None
@@ -1158,6 +1186,8 @@ def failure_context(output, *, loaded=True, default_phase=None):
             reason += f" [{incremental_phase}]"
         if nested_phase and nested_reason:
             reason += f"; nested {nested_phase}: {nested_reason}"
+    elif native_diagnostic is not None:
+        reason = native_diagnostic
     elif loaded and "BLOCKED_LOADED_QUALIFICATION" in output:
         reason = "Noninteractive root/sudo authorization is unavailable"
     elif loaded and "QUARANTINED:" in output:

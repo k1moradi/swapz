@@ -1658,6 +1658,19 @@ class ReportContract(unittest.TestCase):
         self.assertIn("[swapz packed_read]", phase)
         self.assertEqual(reason, "FAIL: short or mismatched packed swap-in page")
 
+    def test_native_failure_identifies_sanitized_helper_error(self):
+        log = "predictor sampling/route control failed: -117\n"
+        phase, reason = runner.failure_context(
+            log, loaded=False, default_phase="Native and rootless contracts")
+        self.assertEqual(phase, "Native and rootless contracts")
+        self.assertEqual(reason,
+                         "Native helper: predictor sampling/route control failed: -117")
+
+        compiler = "/home/private/build/predictor.c:10: error: signedness mismatch\n"
+        _, reason = runner.failure_context(
+            compiler, loaded=False, default_phase="Native and rootless contracts")
+        self.assertEqual(reason, "Native build error: signedness mismatch")
+
     def test_non_root_fixture_never_uses_privileged_evidence_directory(self):
         loaded = (ROOT / "tests/tools/test-loaded.sh").read_text()
         private = (ROOT / "tests/tools/benchmark-owned-pair.sh").read_text()
